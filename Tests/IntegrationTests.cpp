@@ -116,6 +116,17 @@ namespace Manifold::Tests
             }
         }
 
+        std::uint64_t PlaceStill(Engine& engine, std::int32_t value)
+        {
+            Status status;
+            const std::uint64_t page = engine.Process()->Allocate(4096, PAGE_READWRITE, 0, status);
+            CHECK_MSG(page != 0, status.Text);
+            if (!page)
+                return 0;
+            CHECK(engine.Process()->Write(page + 0x40, &value, sizeof(value)).Ok());
+            return page + 0x40;
+        }
+
         bool ContainsTyped(Engine& engine, std::uint64_t address, Scan::ValueType type)
         {
             const std::uint64_t count = std::min<std::uint64_t>(engine.Scanner().Count(), 5'000'000);
@@ -149,18 +160,23 @@ namespace Manifold::Tests
 
             options = {};
             options.Kind = Scan::ScanKind::All;
-            options.Value = std::to_string(process.ReadValue<std::int32_t>(health).value_or(0));
+            const std::int32_t healthValue = process.ReadValue<std::int32_t>(health).value_or(0);
+            const std::uint64_t still = PlaceStill(engine, healthValue);
+            options.Value = std::to_string(healthValue);
             options.Alignment = 4;
             CHECK(RunScan(engine, options, true));
             CHECK_MSG(ContainsTyped(engine, health, Scan::ValueType::FourBytes) && ContainsTyped(engine, health, Scan::ValueType::TwoBytes), options.Value);
+            CHECK(ContainsTyped(engine, still, Scan::ValueType::FourBytes));
             const std::uint64_t allCount = engine.Scanner().Count();
             Pause(engine, 1300);
             options.Mode = Scan::Compare::Decreased;
             CHECK(RunScan(engine, options, false));
             CHECK(ContainsTyped(engine, health, Scan::ValueType::FourBytes));
-            CHECK(engine.Scanner().Count() <= allCount);
+            CHECK(!ContainsTyped(engine, still, Scan::ValueType::FourBytes));
+            CHECK(engine.Scanner().Count() < allCount);
             CHECK(engine.Scanner().Kind() == Scan::ScanKind::All);
             engine.Scanner().Reset();
+            engine.Process()->Free(still & ~0xFFFull);
 
             options = {};
             options.Value = std::to_string(process.ReadValue<std::int32_t>(health).value_or(0));
@@ -338,6 +354,7 @@ namespace Manifold::Tests
 
         const auto healthNow = process.ReadValue<std::int32_t>(health);
         CHECK(healthNow.has_value());
+        const std::uint64_t still = PlaceStill(engine, healthNow.value_or(0));
         Scan::ScanOptions options;
         options.Type = Scan::ValueType::FourBytes;
         options.Mode = Scan::Compare::Exact;
@@ -346,16 +363,19 @@ namespace Manifold::Tests
         CHECK(engine.Scanner().Start(engine.Process(), options, true).Ok());
         CHECK(WaitScan(engine));
         CHECK_MSG(Contains(engine, health), "exact scan for " + options.Value + " found " + std::to_string(engine.Scanner().Count()));
+        CHECK(Contains(engine, still));
         const std::uint64_t firstCount = engine.Scanner().Count();
         Pause(engine, 1300);
         options.Mode = Scan::Compare::Decreased;
         CHECK(engine.Scanner().Start(engine.Process(), options, false).Ok());
         CHECK(WaitScan(engine));
         CHECK(Contains(engine, health));
+        CHECK(!Contains(engine, still));
         CHECK(engine.Scanner().Count() < firstCount);
         engine.Scanner().Undo();
         CHECK_EQ(engine.Scanner().Count(), firstCount);
         engine.Scanner().Reset();
+        engine.Process()->Free(still & ~0xFFFull);
 
         options = {};
         options.Type = Scan::ValueType::Float;
