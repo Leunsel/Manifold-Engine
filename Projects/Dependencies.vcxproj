@@ -17,11 +17,12 @@
     <RootNamespace>Dependencies</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <ProjectName>Dependencies</ProjectName>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>ClangCL</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
@@ -48,7 +49,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\Source;$(ProjectDir)..\Dependencies\ImGui;$(ProjectDir)..\Dependencies\ImGui\backends;$(ProjectDir)..\Dependencies\Zydis;$(ProjectDir)..\Dependencies\Lua;$(ProjectDir)..\Dependencies\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Dependencies\ImGui;$(ProjectDir)..\Dependencies\ImGui\backends;$(ProjectDir)..\Dependencies\Zydis;$(ProjectDir)..\Dependencies\Lua;$(ProjectDir)..\Dependencies\stb;$(ProjectDir)..\Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_WINDOWS;WIN32_LEAN_AND_MEAN;NOMINMAX;ZYDIS_STATIC_BUILD;ZYCORE_STATIC_BUILD;IMGUI_IMPL_WIN32_DISABLE_GAMEPAD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>

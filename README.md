@@ -20,7 +20,10 @@ It reads and writes Cheat Engine tables (`.CT`): records, groups, pointers, scri
 
 ## Building
 
-Visual Studio 2022 with the C++ desktop workload (v143, C++20).
+Visual Studio 2022 with the C++ desktop workload and clang-cl (C++20). In the Visual Studio Installer, under individual components, add:
+
+- C++ Clang Compiler for Windows
+- MSBuild support for LLVM (clang-cl) toolset
 
 1. Open `Manifold-Engine.sln`.
 2. Build `Release|x64`.
@@ -32,6 +35,14 @@ msbuild Manifold-Engine.sln /p:Configuration=Release /p:Platform=x64 /m
 ```
 
 Everything lands in `Build\Release`. All dependencies are in `Dependencies` and build with the solution: Dear ImGui 1.92 (docking), Zydis 5 (amalgamated), Lua 5.4. New source files are picked up by running `python Tools/gen_projects.py`, which writes the projects in `Projects` and the solution.
+
+Without clang-cl, build with the MSVC compiler instead; inline assembly then does not compile:
+
+```bash
+msbuild Manifold-Engine.sln /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /m
+```
+
+`python Tools/gen_projects.py --msvc` writes projects that use MSVC by default.
 
 ## Tests
 

@@ -113,7 +113,7 @@ namespace
     {
         for (;;)
         {
-            FILETIME created{}, exited{}, kernel{}, user{};
+            FILETIME created{}, exited{}, kernel{};
             ::GetThreadTimes(::GetCurrentThread(), &created, &exited, &kernel, reinterpret_cast<FILETIME*>(const_cast<long long*>(&g_stress[0])));
             ::Sleep(1);
         }
@@ -220,7 +220,7 @@ int main(int argc, char** argv)
         {
             ::Sleep(500);
         }
-        ++g_ticks;
+        g_ticks = g_ticks + 1;
         if (g_ticks % 2 == 0)
             Damage(g_world->Hero, 1);
         Shoot(g_world->Hero);

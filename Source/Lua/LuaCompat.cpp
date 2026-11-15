@@ -119,12 +119,6 @@ namespace Manifold::Lua
             return **holder;
         }
 
-        StreamState* TestStream(lua_State* state, int index)
-        {
-            auto* holder = static_cast<std::shared_ptr<StreamState>*>(luaL_testudata(state, index, kStreamType));
-            return holder ? holder->get() : nullptr;
-        }
-
         void PushStream(lua_State* state, std::shared_ptr<StreamState> stream)
         {
             void* memory = lua_newuserdatauv(state, sizeof(std::shared_ptr<StreamState>), 0);

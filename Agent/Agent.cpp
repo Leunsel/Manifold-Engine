@@ -294,7 +294,7 @@ namespace
             context.Dr7 = dr7;
             if (::SetThreadContext(thread, &context))
             {
-                ++g_block->AppliedThreads;
+                g_block->AppliedThreads = g_block->AppliedThreads + 1;
                 if (dr7 != 0)
                     MarkActive(threadId);
             }

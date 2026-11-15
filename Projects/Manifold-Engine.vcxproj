@@ -17,11 +17,12 @@
     <RootNamespace>ManifoldEngine</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <ProjectName>Manifold-Engine</ProjectName>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>ClangCL</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
@@ -39,30 +40,33 @@
     <OutDir>$(ProjectDir)..\Build\$(Configuration)\</OutDir>
     <IntDir>$(ProjectDir)..\Build\obj\$(Configuration)\App\</IntDir>
     <TargetName>Manifold-Engine</TargetName>
+    <GenerateManifest>false</GenerateManifest>
+    <EmbedManifest>false</EmbedManifest>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ExternalIncludePath>$(ProjectDir)..\Dependencies\ImGui;$(ProjectDir)..\Dependencies\ImGui\backends;$(ProjectDir)..\Dependencies\Zydis;$(ProjectDir)..\Dependencies\Lua;$(ProjectDir)..\Dependencies\stb;$(ExternalIncludePath)</ExternalIncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
       <SDLCheck>true</SDLCheck>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\Source;$(ProjectDir)..\Dependencies\ImGui;$(ProjectDir)..\Dependencies\ImGui\backends;$(ProjectDir)..\Dependencies\Zydis;$(ProjectDir)..\Dependencies\Lua;$(ProjectDir)..\Dependencies\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_WINDOWS;WIN32_LEAN_AND_MEAN;NOMINMAX;ZYDIS_STATIC_BUILD;ZYCORE_STATIC_BUILD;IMGUI_IMPL_WIN32_DISABLE_GAMEPAD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateManifest>false</GenerateManifest>
       <AdditionalOptions>/PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;dwmapi.lib;comdlg32.lib;shell32.lib;ole32.lib;advapi32.lib;user32.lib;gdi32.lib;dbghelp.lib;bcrypt.lib;version.lib;wininet.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <Manifest>
-      <EnableDpiAwareness>false</EnableDpiAwareness>
-      <AdditionalManifestFiles>$(ProjectDir)..\Source\Resources\App.manifest</AdditionalManifestFiles>
-    </Manifest>
     <PreBuildEvent>
       <Command>where python &gt;nul 2&gt;nul || exit /b 0
 python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
@@ -87,6 +91,11 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(PlatformToolset)'=='ClangCL'">
+    <ClCompile>
+      <AdditionalOptions>-Wno-missing-field-initializers %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\Source\Main.cpp" />
@@ -192,7 +201,7 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
     <ResourceCompile Include="..\Source\Resources\App.rc" />
   </ItemGroup>
   <ItemGroup>
-    <Manifest Include="..\Source\Resources\App.manifest" />
+    <None Include="..\Source\Resources\App.manifest" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="..\Source\Resources\icon.ico" />

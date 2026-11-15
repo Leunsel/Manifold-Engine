@@ -56,11 +56,12 @@ def common_head(name, kind, target):
     <RootNamespace>{name.replace('-', '').replace('.', '')}</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <ProjectName>{name}</ProjectName>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
     <ConfigurationType>{kind}</ConfigurationType>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>{TOOLSET}</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
@@ -82,13 +83,26 @@ def common_head(name, kind, target):
 """
 
 
-INCLUDES = "$(ProjectDir)..\\Source;$(ProjectDir)..\\Dependencies\\ImGui;$(ProjectDir)..\\Dependencies\\ImGui\\backends;$(ProjectDir)..\\Dependencies\\Zydis;$(ProjectDir)..\\Dependencies\\Lua;$(ProjectDir)..\\Dependencies\\stb;%(AdditionalIncludeDirectories)"
+TOOLSET = "ClangCL"
+DEPENDENCY_INCLUDES = "$(ProjectDir)..\\Dependencies\\ImGui;$(ProjectDir)..\\Dependencies\\ImGui\\backends;$(ProjectDir)..\\Dependencies\\Zydis;$(ProjectDir)..\\Dependencies\\Lua;$(ProjectDir)..\\Dependencies\\stb"
+INCLUDES = "$(ProjectDir)..\\Source;%(AdditionalIncludeDirectories)"
+CLANG_OPTIONS = """  <ItemDefinitionGroup Condition="'$(PlatformToolset)'=='ClangCL'">
+    <ClCompile>
+      <AdditionalOptions>-Wno-missing-field-initializers %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+"""
 DEFINES = "_WINDOWS;WIN32_LEAN_AND_MEAN;NOMINMAX;ZYDIS_STATIC_BUILD;ZYCORE_STATIC_BUILD;IMGUI_IMPL_WIN32_DISABLE_GAMEPAD;%(PreprocessorDefinitions)"
 LIBS = "d3d11.lib;dxgi.lib;dwmapi.lib;comdlg32.lib;shell32.lib;ole32.lib;advapi32.lib;user32.lib;gdi32.lib;dbghelp.lib;bcrypt.lib;version.lib;wininet.lib;%(AdditionalDependencies)"
 
 
 def config_groups(strict, subsystem, link):
-    warning = "<WarningLevel>Level4</WarningLevel>\n      <TreatWarningAsError>true</TreatWarningAsError>\n      <SDLCheck>true</SDLCheck>" if strict else "<WarningLevel>TurnOffAllWarnings</WarningLevel>\n      <TreatWarningAsError>false</TreatWarningAsError>"
+    warning = "<WarningLevel>Level4</WarningLevel>\n      <TreatWarningAsError>true</TreatWarningAsError>\n      <SDLCheck>true</SDLCheck>\n      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>" if strict else "<WarningLevel>TurnOffAllWarnings</WarningLevel>\n      <TreatWarningAsError>false</TreatWarningAsError>"
+    external = f"""  <PropertyGroup>
+    <ExternalIncludePath>{DEPENDENCY_INCLUDES};$(ExternalIncludePath)</ExternalIncludePath>
+  </PropertyGroup>
+""" if strict else ""
+    includes = INCLUDES if strict else DEPENDENCY_INCLUDES + ";" + INCLUDES
     link_block = ""
     if link:
         link_block = f"""    <Link>
@@ -98,14 +112,14 @@ def config_groups(strict, subsystem, link):
       <AdditionalDependencies>{LIBS}</AdditionalDependencies>
     </Link>
 """
-    return f"""  <ItemDefinitionGroup>
+    return external + f"""  <ItemDefinitionGroup>
     <ClCompile>
       {warning}
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>{INCLUDES}</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>{includes}</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>{DEFINES}</PreprocessorDefinitions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
@@ -129,7 +143,7 @@ def config_groups(strict, subsystem, link):
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
 """ if link else "") + """  </ItemDefinitionGroup>
-"""
+""" + (CLANG_OPTIONS if strict else "")
 
 
 def items(tag, paths):
@@ -206,6 +220,9 @@ def with_prebuild(project):
 
 
 def main():
+    global TOOLSET
+    if "--msvc" in sys.argv[1:]:
+        TOOLSET = "v143"
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import embed_lua
     embed_lua.main()
@@ -222,12 +239,14 @@ def main():
 
     app = common_head("Manifold-Engine", "Application", "App")
     app += config_groups(True, "Windows", True)
-    app = app.replace("  </ItemDefinitionGroup>\n  <ItemDefinitionGroup Condition=\"'$(Configuration)'=='Debug'\">",
-                      "    <Manifest>\n      <EnableDpiAwareness>false</EnableDpiAwareness>\n      <AdditionalManifestFiles>$(ProjectDir)..\\Source\\Resources\\App.manifest</AdditionalManifestFiles>\n    </Manifest>\n  </ItemDefinitionGroup>\n  <ItemDefinitionGroup Condition=\"'$(Configuration)'=='Debug'\">", 1)
+    app = app.replace("      <GenerateDebugInformation>true</GenerateDebugInformation>\n",
+                      "      <GenerateDebugInformation>true</GenerateDebugInformation>\n      <GenerateManifest>false</GenerateManifest>\n", 1)
+    app = app.replace("    <TargetName>Manifold-Engine</TargetName>\n",
+                      "    <TargetName>Manifold-Engine</TargetName>\n    <GenerateManifest>false</GenerateManifest>\n    <EmbedManifest>false</EmbedManifest>\n", 1)
     app += items("ClCompile", app_sources)
     app += items("ClInclude", app_headers)
     app += items("ResourceCompile", ["Source/Resources/App.rc"])
-    app += items("Manifest", ["Source/Resources/App.manifest"])
+    app += items("None", ["Source/Resources/App.manifest"])
     app += items("Image", ["Source/Resources/icon.ico"])
     app += reference("Dependencies")
     app += build_only_reference("ManifoldAgent")
@@ -307,7 +326,7 @@ def main():
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
-"""
+""" + CLANG_OPTIONS
     agent += items("ClCompile", agent_sources)
     agent += items("ClInclude", ["Source/Debug/VehProtocol.h"])
     agent += tail()

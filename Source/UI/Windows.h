@@ -373,8 +373,8 @@ namespace Manifold::UI
         bool m_open = true;
         int m_watchId = 0;
         Debug::WatchKind m_kind;
-        std::uint64_t m_address = 0;
-        int m_size = 4;
+        [[maybe_unused]] std::uint64_t m_address = 0;
+        [[maybe_unused]] int m_size = 4;
         Debug::Watch m_copy;
         int m_selected = -1;
         std::map<std::uint64_t, std::string> m_text;
@@ -536,7 +536,7 @@ namespace Manifold::UI
         std::string m_address;
         std::string m_error;
         std::string m_filter;
-        int m_tab = 0;
+        [[maybe_unused]] int m_tab = 0;
         std::string m_module;
     };
 
