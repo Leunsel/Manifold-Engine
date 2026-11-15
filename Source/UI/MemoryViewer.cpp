@@ -435,20 +435,24 @@ namespace Manifold::UI
         const float registersWidth = showRegisters ? m_registersWidth : 0.0f;
         const ImVec2 codeStart = ImGui::GetCursorPos();
         const ImVec2 codeScreen = ImGui::GetCursorScreenPos();
-        ImGui::BeginChild("##codearea", ImVec2(totalWidth - registersWidth - (showRegisters ? gap : 0.0f), code), ImGuiChildFlags_None,
-            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        const float leftWidth = totalWidth - registersWidth - (showRegisters ? gap : 0.0f);
+        const auto columnSplitter = [&](const char* id, ImVec2 top, float barHeight)
+            {
+                ImGuiWindow* window = ImGui::GetCurrentWindow();
+                float first = leftWidth;
+                float second = registersWidth;
+                const ImRect bar(ImVec2(top.x + first, top.y), ImVec2(top.x + first + gap, top.y + barHeight));
+                ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0, 0, 0, 0));
+                if (ImGui::SplitterBehavior(bar, window->GetID(id), ImGuiAxis_X, &first, &second, Px(300.0f), Px(220.0f), 4.0f, 0.04f))
+                    m_registersWidth = second;
+                ImGui::PopStyleColor();
+            };
+        ImGui::BeginChild("##codearea", ImVec2(leftWidth, code), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         Disassembly(code);
         ImGui::EndChild();
         if (showRegisters)
         {
-            ImGuiWindow* window = ImGui::GetCurrentWindow();
-            float codeWidth = totalWidth - registersWidth - gap;
-            float panelWidth = registersWidth;
-            const ImRect bar(ImVec2(codeScreen.x + codeWidth, codeScreen.y), ImVec2(codeScreen.x + codeWidth + gap, codeScreen.y + code));
-            ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0, 0, 0, 0));
-            if (ImGui::SplitterBehavior(bar, window->GetID("##registersplit"), ImGuiAxis_X, &codeWidth, &panelWidth, Px(300.0f), Px(220.0f), 4.0f, 0.04f))
-                m_registersWidth = panelWidth;
-            ImGui::PopStyleColor();
+            columnSplitter("##registersplit", codeScreen, code);
             ImGui::SetCursorPos(ImVec2(ImGui::GetWindowContentRegionMax().x - registersWidth, codeStart.y));
             Registers(registersWidth, code);
         }
@@ -456,7 +460,18 @@ namespace Manifold::UI
         if (Splitter("##viewsplit", false, Px(6.0f), &code, &hex, Px(120.0f), Px(90.0f)))
             m_codeShare = code / available;
         ImGui::SetCursorPos(ImVec2(start.x, start.y + code + Px(6.0f)));
+        const ImVec2 hexStart = ImGui::GetCursorPos();
+        const ImVec2 hexScreen = ImGui::GetCursorScreenPos();
+        const float hexHeight = ImGui::GetContentRegionAvail().y;
+        ImGui::BeginChild("##hexarea", ImVec2(leftWidth, hexHeight), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         HexView(ImGui::GetContentRegionAvail().y);
+        ImGui::EndChild();
+        if (showRegisters)
+        {
+            columnSplitter("##stacksplit", hexScreen, hexHeight);
+            ImGui::SetCursorPos(ImVec2(ImGui::GetWindowContentRegionMax().x - registersWidth, hexStart.y));
+            Stack(registersWidth, hexHeight);
+        }
         Shortcuts();
 
         GotoDialog();
@@ -1960,43 +1975,92 @@ namespace Manifold::UI
             ImGui::Dummy(ImVec2(0.0f, Px(6.0f)));
         }
 
-        SectionLabel("Stack");
-        ImGui::Dummy(ImVec2(0.0f, Px(2.0f)));
+        ImGui::PopStyleVar();
+        PopMono();
+        EndCard();
+    }
+
+    void MemoryViewer::Stack(float width, float height)
+    {
+        const Debug::BreakInfo info = m_engine.Debugger().Break();
+        const Disasm::RegisterValues& values = info.Registers;
         const int pointer = info.Is64Bit ? 8 : 4;
-        for (int i = 0; i < 24; ++i)
+        BeginCard("##stack", nullptr, ImVec2(width, height));
+        CardTitle(ICON_FA_LAYER_GROUP, "Stack", std::string(info.Is64Bit ? "RSP " : "ESP ") + Hex(values.Rsp, pointer * 2));
+        PushMono();
+        constexpr int kEntries = 512;
+        std::vector<std::uint8_t> data(static_cast<std::size_t>(kEntries * pointer));
+        const std::size_t got = m_engine.Process()->Read(values.Rsp, data.data(), data.size());
+        const int entries = static_cast<int>(got / static_cast<std::size_t>(pointer));
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const float line = ImGui::GetTextLineHeight();
+        const float rowHeight = std::round(line + Px(5.0f));
+        const float offsetWidth = ImGui::CalcTextSize("+0000").x + Px(14.0f);
+        const ImU32 textColor = ImGui::GetColorU32(ManifoldTheme::Text);
+        const ImU32 mutedColor = ImGui::GetColorU32(ManifoldTheme::Muted);
+        const ImU32 registerColor = ImGui::GetColorU32(ManifoldTheme::CodeRegister);
+        const ImU32 symbolColor = ImGui::GetColorU32(ManifoldTheme::AddressText);
+        if (entries == 0)
+            ImGui::TextColored(ManifoldTheme::Muted, "The stack at %s cannot be read.", Hex(values.Rsp).c_str());
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
+        ImGuiListClipper clipper;
+        clipper.Begin(entries, rowHeight);
+        while (clipper.Step())
         {
-            const std::uint64_t at = values.Rsp + static_cast<std::uint64_t>(i * pointer);
-            const auto value = m_engine.Process()->ReadPointer(at);
-            if (!value)
-                break;
-            ImGui::PushID(i);
-            const ImVec2 start = ImGui::GetCursorScreenPos();
-            if (ImGui::Selectable("##stack", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, rowHeight)) && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                Navigate(*value);
-            const float textY = std::round(start.y + (rowHeight - line) * 0.5f);
-            const std::string offset = Format("+%02X", i * pointer);
-            draw->AddText(ImVec2(start.x + Px(4.0f), textY), mutedColor, offset.c_str());
-            const std::string text = Hex(*value, pointer * 2);
-            draw->AddText(ImVec2(start.x + nameWidth, textY), textColor, text.c_str());
-            const std::string described = m_engine.Describe(*value);
-            const float used = nameWidth + ImGui::CalcTextSize(text.c_str()).x + Px(10.0f);
-            const float right = start.x + ImGui::GetContentRegionAvail().x;
-            if (described != Hex(*value) && right - (start.x + used) > Px(30.0f))
-                ClippedText(draw, ImVec2(start.x + used, textY), right - (start.x + used), ImGui::GetColorU32(ManifoldTheme::AddressText), described);
-            if (ImGui::BeginPopupContextItem("##stackmenu"))
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
             {
-                if (ImGui::MenuItem("Show in hex view"))
+                const std::uint64_t at = values.Rsp + static_cast<std::uint64_t>(i * pointer);
+                std::uint64_t value = 0;
+                std::memcpy(&value, data.data() + static_cast<std::size_t>(i * pointer), static_cast<std::size_t>(pointer));
+                ImGui::PushID(i);
+                const ImVec2 start = ImGui::GetCursorScreenPos();
+                const float right = start.x + ImGui::GetContentRegionAvail().x;
+                if (ImGui::Selectable("##slot", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, rowHeight)) && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    Navigate(value);
+                const float textY = std::round(start.y + (rowHeight - line) * 0.5f);
+                const bool frame = at == values.Rbp;
+                const std::string offset = frame ? std::string(info.Is64Bit ? "RBP" : "EBP") : Format("+%X", i * pointer);
+                draw->AddText(ImVec2(start.x + Px(4.0f), textY), frame ? registerColor : mutedColor, offset.c_str());
+                const std::string text = Hex(value, pointer * 2);
+                draw->AddText(ImVec2(start.x + offsetWidth, textY), textColor, text.c_str());
+                const std::string described = m_engine.Describe(value);
+                const bool named = described != Hex(value);
+                const float used = offsetWidth + ImGui::CalcTextSize(text.c_str()).x + Px(10.0f);
+                if (named && right - (start.x + used) > Px(30.0f))
+                    ClippedText(draw, ImVec2(start.x + used, textY), right - (start.x + used), symbolColor, described);
+                if (ImGui::IsItemHovered())
                 {
-                    m_hexTop = *value & ~0xFull;
-                    m_hexSelected = *value;
+                    ImGui::BeginTooltip();
+                    ImGui::TextColored(ManifoldTheme::Muted, "%s  (%s+%X)", Hex(at).c_str(), info.Is64Bit ? "RSP" : "ESP", i * pointer);
+                    ImGui::TextUnformatted(Hex(value).c_str());
+                    if (named)
+                        ImGui::TextColored(ManifoldTheme::AddressText, "%s", described.c_str());
+                    ImGui::TextColored(ManifoldTheme::Muted, "Double-click to show the value in the disassembler");
+                    ImGui::EndTooltip();
                 }
-                if (ImGui::MenuItem("Show in disassembler"))
-                    Navigate(*value);
-                if (ImGui::MenuItem("Copy"))
-                    ImGui::SetClipboardText(Hex(*value).c_str());
-                ImGui::EndPopup();
+                if (ImGui::BeginPopupContextItem("##stackmenu"))
+                {
+                    if (ImGui::MenuItem("Show value in disassembler"))
+                        Navigate(value);
+                    if (ImGui::MenuItem("Show value in hex view"))
+                    {
+                        m_hexTop = value & ~0xFull;
+                        m_hexSelected = value;
+                    }
+                    if (ImGui::MenuItem("Show this slot in hex view"))
+                    {
+                        m_hexTop = at & ~0xFull;
+                        m_hexSelected = at;
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Copy value"))
+                        ImGui::SetClipboardText(Hex(value).c_str());
+                    if (ImGui::MenuItem("Copy address"))
+                        ImGui::SetClipboardText(Hex(at).c_str());
+                    ImGui::EndPopup();
+                }
+                ImGui::PopID();
             }
-            ImGui::PopID();
         }
         ImGui::PopStyleVar();
         PopMono();

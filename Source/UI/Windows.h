@@ -235,6 +235,7 @@ namespace Manifold::UI
         void Disassembly(float height);
         void HexView(float height);
         void Registers(float width, float height);
+        void Stack(float width, float height);
         bool RegisterLine(const std::string& id, std::string_view name, const std::string& editText, float rowHeight, float nameWidth, std::string& edited, ImVec2& valueMin, ImVec2& valueMax);
         void CodeMenu(const Disasm::Instruction& instruction);
         void HexMenu(std::uint64_t address);
