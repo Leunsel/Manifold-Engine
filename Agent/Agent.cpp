@@ -236,7 +236,6 @@ namespace
         const std::uint64_t dr6 = context.Dr6;
         const DWORD tid = ::GetCurrentThreadId();
         MarkActive(tid);
-        bool anyActive = false;
         bool breakHit = false;
         std::uint64_t breakAddr = 0;
         for (int slot = 0; slot < kMaxWatches; ++slot)
@@ -244,7 +243,6 @@ namespace
             const Watch& watch = block->Watches[slot];
             if (!watch.Active)
                 continue;
-            anyActive = true;
             if (dr6 & (1ull << slot))
             {
                 if (watch.Mode == ModeBreak)
@@ -259,9 +257,6 @@ namespace
                 }
             }
         }
-        const bool hardware = (dr6 & 0xFull) != 0;
-        if (!breakHit && !anyActive && !hardware)
-            return EXCEPTION_CONTINUE_SEARCH;
         if (breakHit)
             EnterBreak(block, context, breakAddr);
         std::uint64_t addresses[4] = {};
@@ -391,9 +386,14 @@ namespace
         }
         if (block)
         {
+            for (int slot = 0; slot < kMaxWatches; ++slot)
+                block->Watches[slot].Active = 0;
             std::uint64_t none[4] = {};
-            Sweep(none, 0, true);
-            ::Sleep(30);
+            for (int pass = 0; pass < 6; ++pass)
+            {
+                Sweep(none, 0, true);
+                ::Sleep(15);
+            }
             if (g_handler)
             {
                 ::RemoveVectoredExceptionHandler(g_handler);
