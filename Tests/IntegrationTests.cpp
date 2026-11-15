@@ -644,7 +644,9 @@ namespace Manifold::Tests
                     vectors.Xmm[5][b] = static_cast<std::uint8_t>(0x11 + b);
                 engine.Debugger().SetVectors(vectors);
                 CHECK(engine.Debugger().Break().Vectors.Xmm[5] == vectors.Xmm[5]);
+                CHECK(!engine.Debugger().Stepping());
                 engine.Debugger().Resume(Debug::ResumeMode::StepInto);
+                CHECK(engine.Debugger().Stepping() || engine.Debugger().Broken());
                 bool stepped = false;
                 for (int i = 0; i < 100 && !stepped; ++i)
                 {
@@ -653,6 +655,7 @@ namespace Manifold::Tests
                     stepped = next.Broken && next.Serial != info.Serial;
                 }
                 CHECK(stepped);
+                CHECK(!engine.Debugger().Stepping());
                 CHECK_EQ(engine.Debugger().Break().Address, first.Next());
                 CHECK_MSG(engine.Debugger().Break().Vectors.Xmm[5] == vectors.Xmm[5], "XMM5 did not keep the value set at the breakpoint");
                 std::string xmmText;

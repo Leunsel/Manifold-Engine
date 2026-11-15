@@ -5,6 +5,7 @@
 #include "Core/Text.h"
 #include "Core/Xml.h"
 #include "Disasm/AssemblySearch.h"
+#include "Disasm/Disassembler.h"
 #include "Scan/Scanner.h"
 #include "Scan/ValueType.h"
 #include "Table/CheatTable.h"
@@ -334,6 +335,54 @@ data:
             std::memcpy(block.data() + offset, &value, sizeof(T));
         }
 
+        void Conditions()
+        {
+            Disasm::RegisterValues registers;
+            const auto flags = [&](std::initializer_list<int> bits)
+                {
+                    registers.Flags = 0x202;
+                    for (const int bit : bits)
+                        registers.Flags |= 1ull << bit;
+                };
+            flags({});
+            auto info = Disasm::EvaluateCondition("jnz", registers, true);
+            CHECK(info.Kind == Disasm::ConditionKind::Jump && info.Taken && info.FlagsRead == (1u << 6));
+            CHECK(!Disasm::EvaluateCondition("jz", registers, true).Taken);
+            CHECK(!Disasm::EvaluateCondition("je", registers, true).Taken);
+            flags({ 6 });
+            CHECK(Disasm::EvaluateCondition("JE", registers, true).Taken);
+            CHECK(!Disasm::EvaluateCondition("jne", registers, true).Taken);
+            CHECK(Disasm::EvaluateCondition("jbe", registers, true).Taken && Disasm::EvaluateCondition("jbe", registers, true).FlagsRead == ((1u << 0) | (1u << 6)));
+            CHECK(!Disasm::EvaluateCondition("ja", registers, true).Taken);
+            flags({ 7 });
+            CHECK(Disasm::EvaluateCondition("jl", registers, true).Taken);
+            CHECK(!Disasm::EvaluateCondition("jge", registers, true).Taken);
+            flags({ 7, 11 });
+            CHECK(!Disasm::EvaluateCondition("jl", registers, true).Taken);
+            CHECK(Disasm::EvaluateCondition("jnle", registers, true).Taken && Disasm::EvaluateCondition("jg", registers, true).FlagsRead == ((1u << 6) | (1u << 7) | (1u << 11)));
+            flags({ 0 });
+            CHECK(Disasm::EvaluateCondition("jb", registers, true).Taken && Disasm::EvaluateCondition("jc", registers, true).Taken && !Disasm::EvaluateCondition("jnb", registers, true).Taken);
+            info = Disasm::EvaluateCondition("cmovb", registers, true);
+            CHECK(info.Kind == Disasm::ConditionKind::Move && info.Taken);
+            info = Disasm::EvaluateCondition("setnc", registers, true);
+            CHECK(info.Kind == Disasm::ConditionKind::Set && !info.Taken);
+            flags({ 2 });
+            CHECK(Disasm::EvaluateCondition("jp", registers, true).Taken && !Disasm::EvaluateCondition("jpo", registers, true).Taken);
+            CHECK(Disasm::EvaluateCondition("jmp", registers, true).Kind == Disasm::ConditionKind::None);
+            CHECK(Disasm::EvaluateCondition("mov", registers, true).Kind == Disasm::ConditionKind::None);
+            CHECK(Disasm::EvaluateCondition("setssbsy", registers, true).Kind == Disasm::ConditionKind::None);
+            registers.Rcx = 0x100000000ull;
+            info = Disasm::EvaluateCondition("jrcxz", registers, true);
+            CHECK(info.UsesCounter && !info.Taken);
+            CHECK(Disasm::EvaluateCondition("jecxz", registers, true).Taken);
+            registers.Rcx = 1;
+            CHECK(!Disasm::EvaluateCondition("loop", registers, true).Taken);
+            registers.Rcx = 2;
+            flags({ 6 });
+            CHECK(Disasm::EvaluateCondition("loope", registers, true).Taken && !Disasm::EvaluateCondition("loopne", registers, true).Taken);
+            CHECK(Disasm::EvaluateCondition("bnd jnz", registers, true).Kind == Disasm::ConditionKind::Jump);
+        }
+
         void ScanKinds()
         {
             CHECK_EQ(Scan::AllTypeBit(Scan::ValueType::Byte), 1u);
@@ -416,6 +465,7 @@ data:
         AutoAssemblerOffline();
         CodeSearchHelpers();
         ScanKinds();
+        Conditions();
         return Totals().Failures - before;
     }
 }

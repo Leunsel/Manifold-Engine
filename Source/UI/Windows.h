@@ -234,8 +234,9 @@ namespace Manifold::UI
         void Toolbar();
         void Disassembly(float height);
         void HexView(float height);
-        void Registers(float width, float height);
-        void Stack(float width, float height);
+        void Registers(float width, float height, const Debug::BreakInfo& info, bool running);
+        void Stack(float width, float height, const Debug::BreakInfo& info, bool running);
+        Debug::BreakInfo ShownBreak() const;
         bool RegisterLine(const std::string& id, std::string_view name, const std::string& editText, float rowHeight, float nameWidth, std::string& edited, ImVec2& valueMin, ImVec2& valueMax);
         void CodeMenu(const Disasm::Instruction& instruction);
         void HexMenu(std::uint64_t address);
@@ -293,6 +294,11 @@ namespace Manifold::UI
         int m_visibleLines = 30;
         bool m_followBreaks = true;
         float m_registersWidth = 0.0f;
+        Debug::BreakInfo m_heldBreak;
+        bool m_registersRunning = false;
+        std::uint64_t m_conditionSerial = 0;
+        std::uint64_t m_conditionAddress = 0;
+        Disasm::Instruction m_conditionInstruction;
         int m_vectorFormat = 0;
         std::string m_registerEdit;
         std::string m_registerEditText;

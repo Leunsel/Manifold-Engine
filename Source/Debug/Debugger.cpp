@@ -384,6 +384,7 @@ namespace Manifold::Debug
 
     void Debugger::Detach()
     {
+        m_stepping = false;
         if (m_backend == Backend::Veh)
         {
             VehDetach();
@@ -877,6 +878,7 @@ namespace Manifold::Debug
                 return;
             m_resumeRequested = true;
             m_resumeMode = mode;
+            m_stepping = mode != ResumeMode::Continue;
         }
         m_wake.notify_all();
     }
@@ -1015,6 +1017,7 @@ namespace Manifold::Debug
         ContextHolder context(m_is64Bit);
         if (!context.Read(thread.Handle))
             return;
+        m_stepping = false;
         m_break.Broken = true;
         m_break.ThreadId = threadId;
         m_break.Address = context.Ip();
@@ -1336,6 +1339,8 @@ namespace Manifold::Debug
             }
             case EXIT_THREAD_DEBUG_EVENT:
                 m_threads.erase(event.dwThreadId);
+                if (event.dwThreadId == m_break.ThreadId)
+                    m_stepping = false;
                 break;
             case LOAD_DLL_DEBUG_EVENT:
                 if (event.u.LoadDll.hFile)
@@ -1372,6 +1377,7 @@ namespace Manifold::Debug
             case EXIT_PROCESS_DEBUG_EVENT:
                 exited = true;
                 m_stop = true;
+                m_stepping = false;
                 LOG_WARN("Debugger", ErrorMessage(ErrorCode::DebugTargetExited) + " Exit code " + Hex(event.u.ExitProcess.dwExitCode, 8) + ".");
                 break;
             default:
@@ -1650,6 +1656,7 @@ namespace Manifold::Debug
                 }
             }
         }
+        m_stepping = mode != ResumeMode::Continue;
         m_break.Broken = false;
         ++m_generation;
         const std::uint32_t cmd = Veh::ResumeContinue;
@@ -1702,6 +1709,7 @@ namespace Manifold::Debug
                 m_break.Vectors.Mxcsr = vectors.Mxcsr;
                 m_break.Vectors.Count = static_cast<int>(vectors.Count);
             }
+            m_stepping = false;
             m_break.Broken = true;
             m_break.ThreadId = head.BrokenThread;
             m_break.Address = head.BreakAddress;

@@ -97,6 +97,135 @@ namespace Manifold::Disasm
         return HexBytes(std::span<const std::uint8_t>(Bytes.data(), std::min<std::size_t>(Length, Bytes.size())));
     }
 
+    ConditionInfo EvaluateCondition(std::string_view mnemonic, const RegisterValues& registers, bool is64Bit)
+    {
+        constexpr int kCarry = 0;
+        constexpr int kParity = 2;
+        constexpr int kZero = 6;
+        constexpr int kSign = 7;
+        constexpr int kOverflow = 11;
+        ConditionInfo out;
+        std::string name = Lower(TrimView(mnemonic));
+        if (const std::size_t space = name.rfind(' '); space != std::string::npos)
+            name = name.substr(space + 1);
+        const auto flag = [&](int bit) { return ((registers.Flags >> bit) & 1) != 0; };
+        const std::uint64_t counter = is64Bit ? registers.Rcx : (registers.Rcx & 0xFFFFFFFFull);
+
+        if (name == "jcxz" || name == "jecxz" || name == "jrcxz")
+        {
+            const std::uint64_t value = name == "jcxz" ? (registers.Rcx & 0xFFFF) : name == "jecxz" ? (registers.Rcx & 0xFFFFFFFFull) : registers.Rcx;
+            out.Kind = ConditionKind::Jump;
+            out.UsesCounter = true;
+            out.Taken = value == 0;
+            return out;
+        }
+        if (name == "loop" || name == "loope" || name == "loopz" || name == "loopne" || name == "loopnz")
+        {
+            const bool left = counter - 1 != 0;
+            out.Kind = ConditionKind::Jump;
+            out.UsesCounter = true;
+            if (name == "loop")
+            {
+                out.Taken = left;
+            }
+            else
+            {
+                const bool wantZero = name == "loope" || name == "loopz";
+                out.FlagsRead = 1u << kZero;
+                out.Taken = left && flag(kZero) == wantZero;
+            }
+            return out;
+        }
+
+        std::string code;
+        ConditionKind kind = ConditionKind::None;
+        if (name.rfind("cmov", 0) == 0)
+        {
+            code = name.substr(4);
+            kind = ConditionKind::Move;
+        }
+        else if (name.rfind("set", 0) == 0)
+        {
+            code = name.substr(3);
+            kind = ConditionKind::Set;
+        }
+        else if (name.size() > 1 && name[0] == 'j' && name != "jmp")
+        {
+            code = name.substr(1);
+            kind = ConditionKind::Jump;
+        }
+        else
+        {
+            return out;
+        }
+        static const std::pair<const char*, const char*> kAliases[] = { { "c", "b" }, { "nae", "b" }, { "nc", "nb" }, { "ae", "nb" }, { "e", "z" }, { "ne", "nz" },
+            { "na", "be" }, { "a", "nbe" }, { "pe", "p" }, { "po", "np" }, { "nge", "l" }, { "ge", "nl" }, { "ng", "le" }, { "g", "nle" } };
+        for (const auto& [from, to] : kAliases)
+        {
+            if (code == from)
+            {
+                code = to;
+                break;
+            }
+        }
+        bool negate = false;
+        if (code.size() > 1 && code[0] == 'n')
+        {
+            negate = true;
+            code.erase(0, 1);
+        }
+        bool value = false;
+        std::uint32_t mask = 0;
+        if (code == "o")
+        {
+            value = flag(kOverflow);
+            mask = 1u << kOverflow;
+        }
+        else if (code == "b")
+        {
+            value = flag(kCarry);
+            mask = 1u << kCarry;
+        }
+        else if (code == "z")
+        {
+            value = flag(kZero);
+            mask = 1u << kZero;
+        }
+        else if (code == "be")
+        {
+            value = flag(kCarry) || flag(kZero);
+            mask = (1u << kCarry) | (1u << kZero);
+        }
+        else if (code == "s")
+        {
+            value = flag(kSign);
+            mask = 1u << kSign;
+        }
+        else if (code == "p")
+        {
+            value = flag(kParity);
+            mask = 1u << kParity;
+        }
+        else if (code == "l")
+        {
+            value = flag(kSign) != flag(kOverflow);
+            mask = (1u << kSign) | (1u << kOverflow);
+        }
+        else if (code == "le")
+        {
+            value = flag(kZero) || flag(kSign) != flag(kOverflow);
+            mask = (1u << kZero) | (1u << kSign) | (1u << kOverflow);
+        }
+        else
+        {
+            return out;
+        }
+        out.Kind = kind;
+        out.Taken = negate ? !value : value;
+        out.FlagsRead = mask;
+        return out;
+    }
+
     Disassembler::Disassembler(bool is64Bit) : m_state(new State()), m_is64Bit(is64Bit)
     {
         ZydisDecoderInit(&m_state->Decoder, is64Bit ? ZYDIS_MACHINE_MODE_LONG_64 : ZYDIS_MACHINE_MODE_LEGACY_32, is64Bit ? ZYDIS_STACK_WIDTH_64 : ZYDIS_STACK_WIDTH_32);

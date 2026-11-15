@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Manifold::Target
@@ -65,6 +66,24 @@ namespace Manifold::Disasm
         std::uint64_t Flags = 0;
         std::uint64_t FsBase = 0, GsBase = 0;
     };
+
+    enum class ConditionKind
+    {
+        None,
+        Jump,
+        Move,
+        Set
+    };
+
+    struct ConditionInfo
+    {
+        ConditionKind Kind = ConditionKind::None;
+        bool Taken = false;
+        std::uint32_t FlagsRead = 0;
+        bool UsesCounter = false;
+    };
+
+    ConditionInfo EvaluateCondition(std::string_view mnemonic, const RegisterValues& registers, bool is64Bit);
 
     class Disassembler
     {

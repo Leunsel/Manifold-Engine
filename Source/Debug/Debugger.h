@@ -150,6 +150,7 @@ namespace Manifold::Debug
         int FreeHardwareSlots() const;
 
         bool Broken() const;
+        bool Stepping() const { return m_stepping.load(); }
         BreakInfo Break() const;
         void Resume(ResumeMode mode);
         void SetRegisters(const Disasm::RegisterValues& registers);
@@ -228,6 +229,7 @@ namespace Manifold::Debug
         Disasm::RegisterValues m_newRegisters;
         bool m_vectorsChanged = false;
         VectorRegisters m_newVectors;
+        std::atomic<bool> m_stepping{ false };
         std::uint64_t m_breakSerial = 0;
         bool m_breakRequested = false;
         std::uint64_t m_lastHardwareTick = 0;
