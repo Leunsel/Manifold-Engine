@@ -36,7 +36,9 @@ Or from a developer prompt:
 msbuild Manifold-Engine.sln /p:Configuration=Release /p:Platform=x64 /m
 ```
 
-Everything lands in `Build\Release`. All dependencies are in `Dependencies` and build with the solution: Dear ImGui 1.92 (docking), Zydis 5 (amalgamated), Lua 5.4. New source files are picked up by running `python Tools/gen_projects.py`, which writes the projects in `Projects` and the solution.
+Everything lands in `Build\<Platform>\<Configuration>`, e.g. `Build\x64\Release`. All dependencies are in `Dependencies` and build with the solution: Dear ImGui 1.92 (docking), Zydis 5 (amalgamated), Lua 5.4. New source files are picked up by running `python Tools/gen_projects.py`, which writes the projects in `Projects` and the solution.
+
+The solution also carries a `Win32` platform, but only the dependencies and the stand-alone `SyscallTest` project build as 32-bit; the app and the injected agent are x64-only.
 
 Without clang-cl, build with the MSVC compiler instead; inline assembly then does not compile:
 
@@ -49,7 +51,7 @@ msbuild Manifold-Engine.sln /p:Configuration=Release /p:Platform=x64 /p:Platform
 ## Tests
 
 ```bash
-Build\Release\Manifold-Engine.Tests.exe
+Build\x64\Release\Manifold-Engine.Tests.exe
 ```
 
 The tests cover the assembler (557 cases), value parsing, XML and cheat table round trips, the error table, offline Auto Assembler runs, and an integration run against `TestTarget.exe` (built with the solution): scanning, pointers, freezing, a code injection script, the sample table `Tests/Target/TestTarget.CT`, Lua (records, timers, threads), all four "find out what" watches, breakpoints and stepping. `--errors-markdown` prints `Docs/ERRORS.md`, `--shortcuts-markdown` prints `Docs/SHORTCUTS.md`; the tests fail when either file is out of date, and when two commands of one window share a key.

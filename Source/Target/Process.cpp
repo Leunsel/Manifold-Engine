@@ -55,6 +55,30 @@ namespace Manifold::Target
             return PAGE_READWRITE;
         }
 
+        // Target memory access goes through direct NtReadVirtualMemory /
+        // NtWriteVirtualMemory system calls, matching the NtOpenProcess stub. If
+        // the service number was not resolved from ntdll (number stays 0) these
+        // fall back to the Win32 API. Both return the same "the call reported
+        // success" bool as the Read/WriteProcessMemory they replace, with the
+        // transferred count in `done`; callers still check `done == size`.
+        bool TryReadVm(HANDLE handle, std::uint64_t address, void* buffer, std::size_t size, SIZE_T& done)
+        {
+            if (ReadVmSysCall == 0)
+                return ::ReadProcessMemory(handle, reinterpret_cast<LPCVOID>(address), buffer, size, &done) != 0;
+            done = 0;
+            const NTSTATUS status = NtReadVirtualMemory_direct(handle, reinterpret_cast<PVOID>(address), buffer, size, &done);
+            return status >= 0;
+        }
+
+        bool TryWriteVm(HANDLE handle, std::uint64_t address, const void* data, std::size_t size, SIZE_T& done)
+        {
+            if (WriteVmSysCall == 0)
+                return ::WriteProcessMemory(handle, reinterpret_cast<LPVOID>(address), data, size, &done) != 0;
+            done = 0;
+            const NTSTATUS status = NtWriteVirtualMemory_direct(handle, reinterpret_cast<PVOID>(address), const_cast<PVOID>(data), size, &done);
+            return status >= 0;
+        }
+
         RegionInfo FromQuery(const MEMORY_BASIC_INFORMATION& info)
         {
             RegionInfo region;
@@ -306,7 +330,7 @@ namespace Manifold::Target
             return size;
         }
         SIZE_T done = 0;
-        if (::ReadProcessMemory(m_handle, reinterpret_cast<LPCVOID>(address), buffer, size, &done) && done == size)
+        if (TryReadVm(m_handle, address, buffer, size, done) && done == size)
         {
             if (DryRun())
                 DryOverlay(address, static_cast<std::uint8_t*>(buffer), size);
@@ -323,7 +347,7 @@ namespace Manifold::Target
             const std::uint64_t pageEnd = (at & ~0xFFFull) + 0x1000;
             const std::size_t chunk = static_cast<std::size_t>(std::min(pageEnd, end) - at);
             SIZE_T got = 0;
-            if (::ReadProcessMemory(m_handle, reinterpret_cast<LPCVOID>(at), out + (at - address), chunk, &got) && got == chunk)
+            if (TryReadVm(m_handle, at, out + (at - address), chunk, got) && got == chunk)
             {
                 anyRead = true;
                 total = static_cast<std::size_t>(at - address) + chunk;
@@ -351,7 +375,7 @@ namespace Manifold::Target
             return true;
         }
         SIZE_T done = 0;
-        const bool read = ::ReadProcessMemory(m_handle, reinterpret_cast<LPCVOID>(address), buffer, size, &done) && done == size;
+        const bool read = TryReadVm(m_handle, address, buffer, size, done) && done == size;
         if (read && DryRun())
             DryOverlay(address, static_cast<std::uint8_t*>(buffer), size);
         return read;
@@ -480,7 +504,7 @@ namespace Manifold::Target
         }
 
         SIZE_T done = 0;
-        const bool written = ::WriteProcessMemory(m_handle, reinterpret_cast<LPVOID>(address), data, size, &done) && done == size;
+        const bool written = TryWriteVm(m_handle, address, data, size, done) && done == size;
         const DWORD error = written ? 0 : ::GetLastError();
         for (const auto& [page, old] : changed)
         {

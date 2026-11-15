@@ -12,6 +12,7 @@ GUIDS = {
     "Manifold-Engine.Tests": "{3F4E5D6C-7B8A-4990-A1B2-C3D4E5F60718}",
     "TestTarget": "{7E8F9A0B-1C2D-4E3F-8A4B-5C6D7E8F9012}",
     "ManifoldAgent": "{2D3C4B5A-6978-4A1B-9C8D-0E1F2A3B4C5D}",
+    "SyscallTest": "{4A5B6C7D-8E9F-40A1-B2C3-D4E5F6071829}",
 }
 
 TEST_EXCLUDED_DIRS = ("UI",)
@@ -32,18 +33,20 @@ def rel(path):
     return "..\\" + path.replace("/", "\\")
 
 
+PLATFORMS = ("x64", "Win32")
+
+
 def configurations():
-    return """  <ItemGroup Label="ProjectConfigurations">
-    <ProjectConfiguration Include="Debug|x64">
-      <Configuration>Debug</Configuration>
-      <Platform>x64</Platform>
+    text = '  <ItemGroup Label="ProjectConfigurations">\n'
+    for config in ("Debug", "Release"):
+        for platform in PLATFORMS:
+            text += f"""    <ProjectConfiguration Include="{config}|{platform}">
+      <Configuration>{config}</Configuration>
+      <Platform>{platform}</Platform>
     </ProjectConfiguration>
-    <ProjectConfiguration Include="Release|x64">
-      <Configuration>Release</Configuration>
-      <Platform>x64</Platform>
-    </ProjectConfiguration>
-  </ItemGroup>
 """
+    text += "  </ItemGroup>\n"
+    return text
 
 
 def common_head(name, kind, target):
@@ -76,8 +79,8 @@ def common_head(name, kind, target):
     <Import Project="$(UserRootDir)\\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup>
-    <OutDir>$(ProjectDir)..\\Build\\$(Configuration)\\</OutDir>
-    <IntDir>$(ProjectDir)..\\Build\\obj\\$(Configuration)\\{target}\\</IntDir>
+    <OutDir>$(ProjectDir)..\\Build\\$(Platform)\\$(Configuration)\\</OutDir>
+    <IntDir>$(ProjectDir)..\\Build\\obj\\$(Platform)\\$(Configuration)\\{target}\\</IntDir>
     <TargetName>{name}</TargetName>
   </PropertyGroup>
 """
@@ -151,6 +154,19 @@ def items(tag, paths):
         return ""
     lines = "".join(f'    <{tag} Include="{rel(p)}" />\n' for p in paths)
     return f"  <ItemGroup>\n{lines}  </ItemGroup>\n"
+
+
+def disable_jmc_for(project, path):
+    # The direct-syscall stubs are naked functions; Just My Code would inject a
+    # call ahead of the first instruction and corrupt the argument registers and
+    # the return address, so it must be off for this translation unit.
+    needle = f'    <ClCompile Include="{rel(path)}" />\n'
+    replacement = (f'    <ClCompile Include="{rel(path)}">\n'
+                   f'      <SupportJustMyCode>false</SupportJustMyCode>\n'
+                   f'    </ClCompile>\n')
+    if needle not in project:
+        raise SystemExit(f"disable_jmc_for: {path} not found in project")
+    return project.replace(needle, replacement, 1)
 
 
 def reference(name):
@@ -254,6 +270,7 @@ def main():
     app += reference("Dependencies")
     app += build_only_reference("ManifoldAgent")
     app += tail()
+    app = disable_jmc_for(app, "Source/Syscalls/Syscall.cpp")
     app = with_prebuild(app)
     write("Manifold-Engine.vcxproj", app)
     write("Manifold-Engine.vcxproj.filters", filters(app_sources, app_headers, (("ResourceCompile", ["Source/Resources/App.rc"]), ("Image", ["Source/Resources/icon.ico"]))))
@@ -269,7 +286,7 @@ def main():
     test_sources = [p for p in app_sources
                     if not any(("Source\\" + d + "\\") in p.replace("/", "\\") for d in TEST_EXCLUDED_DIRS)
                     and os.path.basename(p) not in TEST_EXCLUDED_FILES]
-    test_sources += [p for p in collect(os.path.join(ROOT, "Tests"), {".cpp"}) if "Target" not in p]
+    test_sources += [p for p in collect(os.path.join(ROOT, "Tests"), {".cpp"}) if "Target" not in p and "Syscalls" not in p]
     test_headers = collect(os.path.join(ROOT, "Tests"), {".h"})
     tests = common_head("Manifold-Engine.Tests", "Application", "Tests")
     tests += config_groups(True, "Console", True)
@@ -280,6 +297,7 @@ def main():
     tests += reference("Dependencies")
     tests += build_only_reference("ManifoldAgent")
     tests += tail()
+    tests = disable_jmc_for(tests, "Source/Syscalls/Syscall.cpp")
     tests = with_prebuild(tests)
     write("Manifold-Engine.Tests.vcxproj", tests)
     write("Manifold-Engine.Tests.vcxproj.filters", filters(test_sources, test_headers, ()))
@@ -294,6 +312,22 @@ def main():
     target += items("ClCompile", target_sources)
     target += tail()
     write("TestTarget.vcxproj", target)
+
+    # Stand-alone console test for the direct-syscall stub. It compiles only the
+    # syscall unit plus a driver, so it builds for Win32 too (unlike the app and
+    # the injected agent, which are x64-only).
+    syscall_sources = ["Source/Syscalls/Syscall.cpp", "Tests/Syscalls/SyscallSelfTest.cpp"]
+    syscall_test = common_head("SyscallTest", "Application", "SyscallTest")
+    syscall_test += config_groups(False, "Console", True)
+    syscall_test = syscall_test.replace("_WINDOWS;", "_CONSOLE;")
+    # The naked syscall stubs must not be instrumented: Just My Code injects a
+    # call ahead of the first instruction, which clobbers the argument registers
+    # and the return address in a frameless function.
+    syscall_test = syscall_test.replace("<ConformanceMode>true</ConformanceMode>",
+                                        "<ConformanceMode>true</ConformanceMode>\n      <SupportJustMyCode>false</SupportJustMyCode>", 1)
+    syscall_test += items("ClCompile", syscall_sources)
+    syscall_test += tail()
+    write("SyscallTest.vcxproj", syscall_test)
 
     agent_sources = ["Agent/Agent.cpp"]
     agent = common_head("ManifoldAgent", "DynamicLibrary", "Agent")
@@ -336,14 +370,19 @@ def main():
     write("ManifoldAgent.vcxproj", agent)
 
     sln = "\r\nMicrosoft Visual Studio Solution File, Format Version 12.00\r\n# Visual Studio Version 17\r\nVisualStudioVersion = 17.0.31903.59\r\nMinimumVisualStudioVersion = 10.0.40219.1\r\n"
-    names = ("Manifold-Engine", "Dependencies", "Manifold-Engine.Tests", "TestTarget", "ManifoldAgent")
+    names = ("Manifold-Engine", "Dependencies", "Manifold-Engine.Tests", "TestTarget", "ManifoldAgent", "SyscallTest")
     for name in names:
         sln += f'Project("{{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}}") = "{name}", "Projects\\{name}.vcxproj", "{GUIDS[name]}"\r\nEndProject\r\n'
-    sln += "Global\r\n\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\r\n\t\tDebug|x64 = Debug|x64\r\n\t\tRelease|x64 = Release|x64\r\n\tEndGlobalSection\r\n"
+    sln += "Global\r\n\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\r\n"
+    for config in ("Debug", "Release"):
+        for platform in PLATFORMS:
+            sln += f"\t\t{config}|{platform} = {config}|{platform}\r\n"
+    sln += "\tEndGlobalSection\r\n"
     sln += "\tGlobalSection(ProjectConfigurationPlatforms) = postSolution\r\n"
     for name in names:
         for config in ("Debug", "Release"):
-            sln += f"\t\t{GUIDS[name]}.{config}|x64.ActiveCfg = {config}|x64\r\n\t\t{GUIDS[name]}.{config}|x64.Build.0 = {config}|x64\r\n"
+            for platform in PLATFORMS:
+                sln += f"\t\t{GUIDS[name]}.{config}|{platform}.ActiveCfg = {config}|{platform}\r\n\t\t{GUIDS[name]}.{config}|{platform}.Build.0 = {config}|{platform}\r\n"
     sln += "\tEndGlobalSection\r\n\tGlobalSection(SolutionProperties) = preSolution\r\n\t\tHideSolutionNode = FALSE\r\n\tEndGlobalSection\r\nEndGlobal\r\n"
     with open(os.path.join(ROOT, "Manifold-Engine.sln"), "w", encoding="utf-8-sig", newline="") as file:
         file.write(sln)

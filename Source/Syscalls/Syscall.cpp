@@ -67,11 +67,14 @@ int GetSysCalls()
 		DWORD funcOffset = RvaToOffset(funcRVA, nt, section);
 		BYTE* funcBytes = base + funcOffset;
 
-		// Expected pattern (x64):
+		// The service number lives in the "mov eax, imm32" that every ntdll
+		// stub starts with, but the leading bytes differ per architecture, so
+		// we have to read whichever ntdll this build actually maps.
+#ifdef _WIN64
+		// x64 stub:
 		// mov r10, rcx       4C 8B D1
-		// mov eax, XX XX XX XX
+		// mov eax, XX XX XX XX   B8 ..
 		// syscall            0F 05
-
 		if (funcBytes[0] == 0x4C &&
 			funcBytes[1] == 0x8B &&
 			funcBytes[2] == 0xD1 &&
@@ -81,6 +84,17 @@ int GetSysCalls()
 			//std::cout << name << " -> " << syscallNumber << std::endl;
 			SysCalls[name] = syscallNumber;
 		}
+#else
+		// x86 (WoW64) stub: the service number is the very first instruction.
+		// mov eax, XX XX XX XX   B8 ..
+		// (followed by the WoW64 transition; its exact shape varies by build)
+		if (funcBytes[0] == 0xB8)
+		{
+			DWORD syscallNumber = *(DWORD*)(funcBytes + 1);
+			//std::cout << name << " -> " << syscallNumber << std::endl;
+			SysCalls[name] = syscallNumber;
+		}
+#endif
 	}
 
 	UnmapViewOfFile(base);
@@ -99,16 +113,21 @@ void InitSysCalls()
 	}
 
 	OpenSysCall = SysCalls["NtOpenProcess"];
-	// if OpenSysCall == 0 then error bla bla
+	ReadVmSysCall = SysCalls["NtReadVirtualMemory"];
+	WriteVmSysCall = SysCalls["NtWriteVirtualMemory"];
+	// A number that stays 0 was not found in ntdll; callers fall back to the
+	// Win32 API for that one instead of firing a guessed service number.
 }
 
-__attribute__((naked)) NTSTATUS NtOpenProcess_direct(
+__attribute__((naked)) NTSTATUS NTAPI NtOpenProcess_direct(
 	_Out_ PHANDLE ProcessHandle,
 	_In_ ACCESS_MASK DesiredAccess,
 	_In_ OBJECT_ATTRIBUTES* ObjectAttributes,
 	_In_opt_ CLIENT_ID* ClientId
 )
 {
+#ifdef _WIN64
+	// x64: load the service number into eax and issue the syscall directly.
 	__asm
 	{
 		mov r10,rcx
@@ -120,4 +139,76 @@ __attribute__((naked)) NTSTATUS NtOpenProcess_direct(
 		syscall
 		ret
 	}
+#else
+	// x86 (WoW64): a 32-bit stub cannot issue `syscall`; it enters 64-bit mode
+	// through the WoW64 transition thunk whose address the loader stores in the
+	// TEB at fs:[0xC0]. eax carries the service number and the dispatcher reads
+	// the arguments from the 32-bit stack. NtOpenProcess is __stdcall (NTAPI),
+	// so the stub cleans its own four DWORD arguments with `ret 10h`.
+	// The 26h fallback is the x64 number and is only reached if InitSysCalls
+	// found nothing; on x86 the parser above supplies the correct number.
+	__asm
+	{
+		mov eax, 26h
+		cmp [OpenSysCall],0
+		je Skip
+		 mov eax,[OpenSysCall]
+		Skip:
+		call dword ptr fs:[0C0h]
+		ret 10h
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtReadVirtualMemory_direct(
+	_In_ HANDLE ProcessHandle,
+	_In_opt_ PVOID BaseAddress,
+	_Out_ PVOID Buffer,
+	_In_ SIZE_T NumberOfBytesToRead,
+	_Out_opt_ PSIZE_T NumberOfBytesRead
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[ReadVmSysCall]
+		syscall
+		ret
+	}
+#else
+	// Five __stdcall arguments of four bytes each -> ret 14h.
+	__asm
+	{
+		mov eax,[ReadVmSysCall]
+		call dword ptr fs:[0C0h]
+		ret 14h
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtWriteVirtualMemory_direct(
+	_In_ HANDLE ProcessHandle,
+	_In_opt_ PVOID BaseAddress,
+	_In_ PVOID Buffer,
+	_In_ SIZE_T NumberOfBytesToWrite,
+	_Out_opt_ PSIZE_T NumberOfBytesWritten
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[WriteVmSysCall]
+		syscall
+		ret
+	}
+#else
+	__asm
+	{
+		mov eax,[WriteVmSysCall]
+		call dword ptr fs:[0C0h]
+		ret 14h
+	}
+#endif
 }
