@@ -13,6 +13,9 @@
 
 namespace Manifold::UI
 {
+    inline constexpr int kNoRecord = -2;
+    inline constexpr int kTableLuaScript = -1;
+
     class Shell
     {
     public:
@@ -57,6 +60,8 @@ namespace Manifold::UI
     class PatchScanWindow;
     class CodeDissectWindow;
     class AsmSearchWindow;
+    class ShortcutsWindow;
+    class TemplateManager;
 
     struct FileFilter
     {
@@ -80,10 +85,10 @@ namespace Manifold::UI
 
         void OpenMemoryViewer(std::uint64_t address, bool hexView = false, bool newWindow = false);
         void OpenStructure(std::uint64_t address, const std::string& structure = {});
-        void OpenScript(std::string script, int recordId = 0, bool lua = false);
+        void OpenScript(std::string script, int recordId = kNoRecord, bool lua = false);
         void OpenLua();
         void OpenLog();
-        void OpenSettings();
+        void OpenSettings(int page = -1);
         void OpenProcessPicker();
         void OpenAbout();
         void OpenSymbols();
@@ -92,7 +97,12 @@ namespace Manifold::UI
         void OpenPatchScan();
         void OpenCodeDissect(int tab = -1, std::uint64_t address = 0);
         void OpenAsmSearch();
+        void OpenShortcuts();
+        void OpenTemplateManager(const std::string& id = {}, std::optional<std::string> script = std::nullopt);
         void OpenRecordEditor(int recordId);
+        void OpenTableDialog(bool merge);
+        void OpenLastProcess();
+        bool CanOpenLastProcess();
         void StartWatch(Debug::WatchKind kind, std::uint64_t address, int size);
         void AddAddress(std::uint64_t address, Scan::ValueType type, std::string description = {});
         void Confirm(std::string title, std::string text, std::function<void()> yes, std::string yesLabel = "Yes");
@@ -146,6 +156,8 @@ namespace Manifold::UI
         std::unique_ptr<PatchScanWindow> m_patchScan;
         std::unique_ptr<CodeDissectWindow> m_codeDissect;
         std::unique_ptr<AsmSearchWindow> m_asmSearch;
+        std::unique_ptr<ShortcutsWindow> m_shortcuts;
+        std::unique_ptr<TemplateManager> m_templateManager;
         int m_nextWindow = 1;
 
         struct ConfirmRequest

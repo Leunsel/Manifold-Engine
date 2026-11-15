@@ -7,6 +7,7 @@
 #include "Generated/IconsFontAwesome5.h"
 #include "Target/Process.h"
 #include "UI/Fonts.h"
+#include "UI/Shortcuts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
@@ -38,6 +39,7 @@ namespace Manifold::UI
             { ICON_FA_SEARCH, "Scanner", "The scan options start with these values each time the program opens." },
             { ICON_FA_SCROLL, "Scripts", "Lua at start, scripts inside tables and opening processes by name." },
             { ICON_FA_BUG, "Debugger", "Breakpoints, the in-process debugger and the log." },
+            { ICON_FA_KEYBOARD, "Keyboard", "The shortcuts of every window. Click keys to record new ones, right-click to remove them." },
         };
         constexpr int kPageCount = static_cast<int>(std::size(kPages));
 
@@ -397,7 +399,8 @@ namespace Manifold::UI
             case 1: themeEdited |= AppearancePage(list, settings); break;
             case 2: changed |= ScannerPage(list, settings); break;
             case 3: changed |= ScriptsPage(list, settings); break;
-            default: changed |= DebuggerPage(list, settings); break;
+            case 4: changed |= DebuggerPage(list, settings); break;
+            default: changed |= ShortcutsPage(list, settings); break;
             }
         };
         if (!list.Searching())
@@ -420,6 +423,14 @@ namespace Manifold::UI
             m_themeReset = false;
             settings.Theme = {};
             themeEdited = true;
+        }
+        if (m_shortcutsReset)
+        {
+            m_shortcutsReset = false;
+            m_captureCommand = -1;
+            ApplyShortcutSettings({});
+            settings.Shortcuts.clear();
+            changed = true;
         }
         if (themeEdited)
         {
@@ -598,7 +609,122 @@ namespace Manifold::UI
             ImGui::EndDisabled();
             ItemTooltip("Back to the default colors and sizes");
         }
+        if (m_page == KeyboardPage)
+        {
+            const char* label = ICON_FA_UNDO "  Reset all keys";
+            const float width = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+            ImGui::SetCursorScreenPos(ImVec2(right - width, std::round(pos.y + (badge - ImGui::GetFrameHeight()) * 0.5f)));
+            ImGui::BeginDisabled(settings.Shortcuts.empty());
+            if (ImGui::Button(label))
+                m_shortcutsReset = true;
+            ImGui::EndDisabled();
+            ItemTooltip("Back to the default shortcuts, the Cheat Engine keys and Manifold's own");
+        }
         ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + badge + Px(26.0f)));
+    }
+
+    bool SettingsWindow::ShortcutsPage(SettingsList& list, Settings& settings)
+    {
+        bool changed = false;
+        const bool wasCapturing = m_captureCommand >= 0;
+        if (m_captureCommand >= 0)
+        {
+            SetShortcutCapture(true);
+            const Command capturing = static_cast<Command>(m_captureCommand);
+            const CommandInfo& info = Describe(capturing);
+            const ImGuiKeyChord chord = CapturedChord();
+            if (chord == ImGuiKey_Escape)
+            {
+                m_captureCommand = -1;
+            }
+            else if (chord)
+            {
+                const ImGuiKey key = static_cast<ImGuiKey>(chord & ~ImGuiMod_Mask_);
+                if (!info.Digits || (key >= ImGuiKey_0 && key <= ImGuiKey_9))
+                {
+                    const ImGuiKeyChord stored = info.Digits ? (chord & ImGuiMod_Mask_) | ImGuiKey_0 : chord;
+                    Binding binding = CurrentBinding(capturing);
+                    (m_captureSlot == 0 ? binding.Chord : binding.Alternate) = stored;
+                    SetBinding(capturing, binding);
+                    m_captureCommand = -1;
+                    changed = true;
+                }
+            }
+        }
+
+        const float keyWidth = std::round(Px(150.0f));
+        const float frame = ImGui::GetFrameHeight();
+        const float control = keyWidth * 2.0f + frame + Px(12.0f);
+        for (int scope = 0; scope < static_cast<int>(CommandScope::Count); ++scope)
+        {
+            list.Section(ScopeName(static_cast<CommandScope>(scope)));
+            for (const CommandInfo& info : AllCommands())
+            {
+                if (static_cast<int>(info.Scope) != scope || FromTemplateSettings(info.Id))
+                    continue;
+                const Binding binding = CurrentBinding(info.Id);
+                std::string description;
+                for (const ImGuiKeyChord chord : { binding.Chord, binding.Alternate })
+                {
+                    for (const Command other : ConflictsWith(info.Id, chord))
+                        description += "Same keys as \"" + std::string(Describe(other).Name) + "\" here. ";
+                }
+                if (IsCustomized(info.Id))
+                    description += "Default: " + BindingText(info.Id, DefaultBinding(info.Id)) + (info.FromCheatEngine ? " (Cheat Engine)." : ".");
+                if (!list.Row(info.Name, description, control))
+                    continue;
+                ImGui::PushID(info.Key);
+                for (int slot = 0; slot < 2; ++slot)
+                {
+                    const ImGuiKeyChord chord = slot == 0 ? binding.Chord : binding.Alternate;
+                    const bool capturing = m_captureCommand == static_cast<int>(info.Id) && m_captureSlot == slot;
+                    std::string label = capturing ? "Press keys..." : chord ? ChordText(chord, info.Digits) : slot == 0 ? "none" : "+";
+                    label += "##key" + std::to_string(slot);
+                    if (slot == 1)
+                        ImGui::SameLine(0.0f, Px(6.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, capturing ? ManifoldTheme::Accent : chord ? ManifoldTheme::AddressText : ManifoldTheme::Muted);
+                    if (capturing)
+                        ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.18f));
+                    PushMono();
+                    if (ImGui::Button(label.c_str(), ImVec2(keyWidth, 0.0f)) && !(wasCapturing && m_captureCommand < 0))
+                    {
+                        m_captureCommand = static_cast<int>(info.Id);
+                        m_captureSlot = slot;
+                    }
+                    PopMono();
+                    ImGui::PopStyleColor(capturing ? 2 : 1);
+                    if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && chord)
+                    {
+                        Binding cleared = binding;
+                        (slot == 0 ? cleared.Chord : cleared.Alternate) = 0;
+                        SetBinding(info.Id, cleared);
+                        m_captureCommand = -1;
+                        changed = true;
+                    }
+                    if (capturing)
+                        ItemTooltip(info.Digits ? "Press the modifier keys with a digit, like Ctrl+Alt+1. Esc cancels." : "Press the new keys. Esc cancels.");
+                    else
+                        ItemTooltip(slot == 0 ? "Click and press the new keys. Right-click removes them." : "A second shortcut for the same command. Right-click removes it.");
+                }
+                ImGui::SameLine(0.0f, Px(6.0f));
+                if (ResetButton(IsCustomized(info.Id)))
+                {
+                    SetBinding(info.Id, DefaultBinding(info.Id));
+                    m_captureCommand = -1;
+                    changed = true;
+                }
+                ImGui::PopID();
+                list.EndRow();
+            }
+            if (scope == static_cast<int>(CommandScope::ScriptEditor) && list.Row("Template shortcuts", "Each template has its own Shortcut setting; the built-in ones use the Cheat Engine keys Ctrl+I, Ctrl+Shift+A, Ctrl+Shift+F, Ctrl+L and Ctrl+Alt+T.", control))
+            {
+                ImGui::Dummy(ImVec2(control, frame));
+                list.EndRow();
+            }
+        }
+        if (changed)
+            settings.Shortcuts = ShortcutSettings();
+        return changed;
     }
 
     bool SettingsWindow::GeneralPage(SettingsList& list, Settings& settings)

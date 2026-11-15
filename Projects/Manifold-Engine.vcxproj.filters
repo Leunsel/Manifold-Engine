@@ -31,11 +31,17 @@
     <Filter Include="Source\Scan">
       <UniqueIdentifier>{0F036376-D2E8-5DD5-8DC2-6D8E1FF89B4B}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Syscalls">
+      <UniqueIdentifier>{23E0D073-50CC-5169-821A-04C32F671AEC}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source\Table">
       <UniqueIdentifier>{BCBB4A0B-09B3-5523-8419-09DCDD32F877}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source\Target">
       <UniqueIdentifier>{FF59DD34-E865-52DD-BE8F-230722E791C0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Templates">
+      <UniqueIdentifier>{D2560125-9330-506A-806B-029D8F6DBB4F}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source\UI">
       <UniqueIdentifier>{041FB265-57A2-5EC0-B136-25B380A66EBC}</UniqueIdentifier>
@@ -46,6 +52,9 @@
       <Filter>Source</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\App\Application.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\App\Commands.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\App\CrashHandler.cpp">
@@ -96,6 +105,9 @@
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp">
+      <Filter>Source\Generated</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp">
       <Filter>Source\Generated</Filter>
     </ClCompile>
@@ -129,6 +141,9 @@
     <ClCompile Include="..\Source\Scan\ValueType.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Syscalls\Syscall.cpp">
+      <Filter>Source\Syscalls</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\AddressList.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
@@ -141,11 +156,29 @@
     <ClCompile Include="..\Source\Target\PatchScan.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\PdbSymbols.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\Process.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Symbols.cpp">
       <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Templates\TemplateCheck.cpp">
+      <Filter>Source\Templates</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Templates\TemplateEngine.cpp">
+      <Filter>Source\Templates</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Templates\TemplateFiles.cpp">
+      <Filter>Source\Templates</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Templates\TemplateGenerator.cpp">
+      <Filter>Source\Templates</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp">
+      <Filter>Source\Templates</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\CodeEditor.cpp">
       <Filter>Source\UI</Filter>
@@ -180,10 +213,16 @@
     <ClCompile Include="..\Source\UI\SettingsWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\Shortcuts.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\StructureWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\TableFilesWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\TemplateManager.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\Templates.cpp">
@@ -205,6 +244,9 @@
       <Filter>Source</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\Application.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\Commands.h">
       <Filter>Source\App</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\CrashHandler.h">
@@ -282,6 +324,9 @@
     <ClInclude Include="..\Source\Scan\ValueType.h">
       <Filter>Source\Scan</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Syscalls\Syscall.h">
+      <Filter>Source\Syscalls</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Table\AddressList.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
@@ -294,11 +339,32 @@
     <ClInclude Include="..\Source\Target\PatchScan.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Target\PdbSymbols.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Target\Process.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\Symbols.h">
       <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Templates\BuiltinTemplates.h">
+      <Filter>Source\Templates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Templates\TemplateCheck.h">
+      <Filter>Source\Templates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Templates\TemplateEngine.h">
+      <Filter>Source\Templates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Templates\TemplateFiles.h">
+      <Filter>Source\Templates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Templates\TemplateGenerator.h">
+      <Filter>Source\Templates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Templates\TemplateLibrary.h">
+      <Filter>Source\Templates</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\CodeEditor.h">
       <Filter>Source\UI</Filter>
@@ -310,6 +376,12 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\LuaDialogs.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\Shortcuts.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\TemplateManager.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Templates.h">

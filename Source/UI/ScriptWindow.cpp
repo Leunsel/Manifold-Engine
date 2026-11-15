@@ -3,11 +3,14 @@
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
+#include "UI/Shortcuts.h"
 #include "UI/Templates.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
+#include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 namespace Manifold::UI
@@ -24,13 +27,13 @@ namespace Manifold::UI
     }
 
     ScriptWindow::ScriptWindow(Workspace& workspace, int number, std::string script, int recordId, bool lua)
-        : m_workspace(workspace), m_engine(workspace.Core()), m_text(std::move(script)), m_recordId(recordId), m_lua(lua)
+        : m_workspace(workspace), m_engine(workspace.Core()), m_text(std::move(script)), m_recordId(recordId), m_lua(lua), m_templates(workspace)
     {
         m_saved = m_text;
         std::string name;
-        if (recordId == -1)
+        if (recordId == kTableLuaScript)
             name = "Table Lua script";
-        else if (recordId > 0)
+        else if (recordId >= 0)
         {
             const Table::MemoryRecord* record = m_engine.Table().FindById(recordId);
             name = record ? record->Description : "Script";
@@ -38,7 +41,6 @@ namespace Manifold::UI
         else
             name = lua ? "Lua script" : "Auto Assembler";
         m_title = std::string(lua ? ICON_FA_MOON "  " : ICON_FA_CODE "  ") + name + "###script" + std::to_string(number);
-        m_templateAddress = workspace.LastCodeAddress ? m_engine.Symbols().ModuleOffset(workspace.LastCodeAddress) : "";
     }
 
     void ScriptWindow::Check()
@@ -81,7 +83,7 @@ namespace Manifold::UI
         m_editor.ErrorLine = 0;
         if (m_lua)
         {
-            const Status status = m_engine.Lua().Run(m_text, m_recordId == -1 ? "table script" : "script");
+            const Status status = m_engine.Lua().Run(m_text, m_recordId == kTableLuaScript ? "table script" : "script");
             m_resultOk = status.Ok();
             m_result = status.Ok() ? "The script ran." : status.Text;
             return;
@@ -110,7 +112,7 @@ namespace Manifold::UI
 
     void ScriptWindow::SaveToRecord()
     {
-        if (m_recordId == -1)
+        if (m_recordId == kTableLuaScript)
         {
             m_engine.Table().TableLuaScript = m_text;
             m_engine.Table().Touch();
@@ -145,109 +147,123 @@ namespace Manifold::UI
         m_saved = m_text;
     }
 
+    void ScriptWindow::OpenFile()
+    {
+        const std::vector<FileFilter> filters = m_lua ? std::vector<FileFilter>{ { L"Lua scripts (*.lua)", L"*.lua" }, { L"All files", L"*.*" } }
+                                                      : std::vector<FileFilter>{ { L"Auto Assembler scripts (*.cea)", L"*.cea" }, { L"All files", L"*.*" } };
+        if (const auto path = m_workspace.OpenFileDialog(filters))
+        {
+            std::ifstream file(*path, std::ios::binary);
+            std::stringstream content;
+            content << file.rdbuf();
+            m_text = content.str();
+            m_path = *path;
+        }
+    }
+
+    void ScriptWindow::SaveFile(bool askName)
+    {
+        std::optional<std::filesystem::path> path;
+        if (!askName && !m_path.empty())
+            path = m_path;
+        else
+            path = m_lua ? m_workspace.SaveFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" } }, "script.lua", L"lua")
+                         : m_workspace.SaveFileDialog({ { L"Auto Assembler scripts (*.cea)", L"*.cea" } }, "script.cea", L"cea");
+        if (!path)
+            return;
+        std::ofstream file(*path, std::ios::binary | std::ios::trunc);
+        file.write(m_text.data(), static_cast<std::streamsize>(m_text.size()));
+        m_resultOk = static_cast<bool>(file);
+        m_result = file ? "Saved to " + WideToUtf8(path->filename().wstring()) + "." : "Could not write " + WideToUtf8(path->wstring()) + ".";
+        if (file)
+            m_path = *path;
+    }
+
+    void ScriptWindow::AssignToTable()
+    {
+        Table::MemoryRecord& record = m_engine.Table().AddScript("Auto Assemble script", m_text);
+        m_recordId = record.Id;
+        m_saved = m_text;
+        m_resultOk = true;
+        m_result = "Added to the address list.";
+    }
+
+    void ScriptWindow::RunCommand(Command command)
+    {
+        switch (command)
+        {
+        case Command::ScriptNewWindow: m_workspace.OpenScript(m_lua ? std::string() : Asm::CheatTableTemplate(), kNoRecord, m_lua); break;
+        case Command::ScriptOpen: OpenFile(); break;
+        case Command::ScriptSave:
+            if (m_recordId != kNoRecord)
+                SaveToRecord();
+            else
+                SaveFile(false);
+            break;
+        case Command::ScriptSaveAs: SaveFile(true); break;
+        case Command::ScriptCheck: Check(); break;
+        case Command::ScriptExecute: Run(false); break;
+        case Command::ScriptExecuteDisable:
+            if (!m_lua && Asm::HasSections(m_text))
+                Run(true);
+            break;
+        default: break;
+        }
+    }
+
+    void ScriptWindow::Shortcuts()
+    {
+        for (const CommandInfo& info : AllCommands())
+        {
+            if (info.Scope != CommandScope::ScriptEditor || FromTemplateSettings(info.Id))
+                continue;
+            if (Pressed(info.Id))
+                RunCommand(info.Id);
+        }
+        if (m_lua)
+            return;
+        for (const Templates::TemplateInfo& info : TemplateLibrary(m_engine).Templates())
+        {
+            const ImGuiKeyChord chord = info.Shortcut.empty() ? 0 : ParseChord(info.Shortcut);
+            if (chord && ImGui::Shortcut(chord, ImGuiInputFlags_RouteFocused) && !m_templates.Choose(info.Id, m_workspace.LastCodeAddress))
+                m_engine.Notify(LogLevel::Info, "The template \"" + info.Caption + "\" does not work for this process.");
+        }
+    }
+
     void ScriptWindow::Menu()
     {
         if (!ImGui::BeginMenuBar())
             return;
+        const auto item = [&](const char* label, Command command, bool enabled = true)
+            {
+                if (CommandItem(label, command, false, enabled))
+                    RunCommand(command);
+            };
         if (ImGui::BeginMenu("File"))
         {
-            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open..."))
-            {
-                const std::vector<FileFilter> filters = m_lua ? std::vector<FileFilter>{ { L"Lua scripts (*.lua)", L"*.lua" }, { L"All files", L"*.*" } }
-                                                              : std::vector<FileFilter>{ { L"Auto Assembler scripts (*.cea)", L"*.cea" }, { L"All files", L"*.*" } };
-                if (const auto path = m_workspace.OpenFileDialog(filters))
-                {
-                    std::ifstream file(*path, std::ios::binary);
-                    std::stringstream content;
-                    content << file.rdbuf();
-                    m_text = content.str();
-                }
-            }
-            if (ImGui::MenuItem(ICON_FA_SAVE "  Save as..."))
-            {
-                const auto path = m_lua ? m_workspace.SaveFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" } }, "script.lua", L"lua")
-                                        : m_workspace.SaveFileDialog({ { L"Auto Assembler scripts (*.cea)", L"*.cea" } }, "script.cea", L"cea");
-                if (path)
-                {
-                    std::ofstream file(*path, std::ios::binary | std::ios::trunc);
-                    file.write(m_text.data(), static_cast<std::streamsize>(m_text.size()));
-                }
-            }
-            if (m_recordId == 0 && !m_lua && ImGui::MenuItem(ICON_FA_TABLE "  Assign to the cheat table"))
-            {
-                Table::MemoryRecord& record = m_engine.Table().AddScript("Auto Assemble script", m_text);
-                m_recordId = record.Id;
-                m_saved = m_text;
-                m_resultOk = true;
-                m_result = "Added to the address list.";
-            }
+            item(m_lua ? ICON_FA_CLONE "  New script window" : ICON_FA_CLONE "  New Auto Assembler window", Command::ScriptNewWindow);
+            item(ICON_FA_FOLDER_OPEN "  Open...", Command::ScriptOpen);
+            item(m_recordId != kNoRecord ? ICON_FA_SAVE "  Save into the record" : ICON_FA_SAVE "  Save", Command::ScriptSave);
+            item(ICON_FA_SAVE "  Save to a file...", Command::ScriptSaveAs);
+            if (m_recordId == kNoRecord && !m_lua && ImGui::MenuItem(ICON_FA_TABLE "  Assign to the cheat table"))
+                AssignToTable();
             ImGui::EndMenu();
         }
         if (!m_lua && ImGui::BeginMenu("Template"))
         {
-            for (int kind = 0; kind < static_cast<int>(std::size(kTemplateNames)); ++kind)
-            {
-                if (ImGui::MenuItem(kTemplateNames[kind]))
-                {
-                    m_templateKind = kind;
-                    if (kind >= static_cast<int>(TemplateKind::CheatTable))
-                    {
-                        std::string error;
-                        if (const auto script = MakeTemplate(m_engine, static_cast<TemplateKind>(kind), 0, "", error))
-                            m_text = *script + (m_text.empty() ? "" : "\n" + m_text);
-                    }
-                    else
-                    {
-                        m_templateOpen = true;
-                        m_templateError.clear();
-                    }
-                }
-            }
+            m_templates.MenuItems(m_workspace.LastCodeAddress, &m_text);
             ImGui::EndMenu();
         }
-        if (ImGui::MenuItem(ICON_FA_CHECK "  Check"))
-            Check();
+        if (ImGui::BeginMenu("Run"))
+        {
+            const bool sections = !m_lua && Asm::HasSections(m_text);
+            item(m_lua ? ICON_FA_PLAY "  Run" : sections ? ICON_FA_PLAY "  Execute [ENABLE]" : ICON_FA_PLAY "  Execute", Command::ScriptExecute);
+            if (sections)
+                item(ICON_FA_STOP "  Execute [DISABLE]", Command::ScriptExecuteDisable);
+            item(ICON_FA_CHECK "  Check the syntax", Command::ScriptCheck);
+            ImGui::EndMenu();
+        }
         ImGui::EndMenuBar();
-    }
-
-    void ScriptWindow::TemplateDialog()
-    {
-        if (m_templateOpen)
-        {
-            ImGui::OpenPopup("##template");
-            m_templateOpen = false;
-        }
-        if (!ImGui::BeginPopup("##template"))
-            return;
-        ImGui::Text("%s template", kTemplateNames[m_templateKind]);
-        ImGui::TextUnformatted("Inject at");
-        ImGui::SetNextItemWidth(Px(300.0f));
-        if (ImGui::IsWindowAppearing())
-            ImGui::SetKeyboardFocusHere();
-        InputTextWithHint("##address", "game.exe+1234", m_templateAddress);
-        ImGui::TextUnformatted("Name");
-        ImGui::SetNextItemWidth(Px(300.0f));
-        InputText("##name", m_templateName);
-        if (!m_templateError.empty())
-            TextWithError(m_templateError, ManifoldTheme::Error);
-        if (AccentButton("Generate", Px(100.0f, 0.0f)))
-        {
-            Status error;
-            if (const auto address = m_engine.Evaluate(m_templateAddress, &error))
-            {
-                std::string message;
-                if (const auto script = MakeTemplate(m_engine, static_cast<TemplateKind>(m_templateKind), *address, m_templateName, message))
-                {
-                    m_text = *script;
-                    ImGui::CloseCurrentPopup();
-                }
-                else
-                    m_templateError = message;
-            }
-            else
-                m_templateError = error.Text;
-        }
-        ImGui::EndPopup();
     }
 
     void ScriptWindow::Draw()
@@ -259,7 +275,7 @@ namespace Manifold::UI
             ImGui::SetNextWindowFocus();
             m_bringToFront = false;
         }
-        const bool dirty = m_recordId != 0 && m_text != m_saved;
+        const bool dirty = m_recordId != kNoRecord && m_text != m_saved;
         std::string title = m_title;
         if (dirty)
         {
@@ -272,13 +288,15 @@ namespace Manifold::UI
             return;
         }
         Menu();
-        TemplateDialog();
-        const ImGuiIO& io = ImGui::GetIO();
-        const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-        if (focused && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false) && m_recordId != 0)
-            SaveToRecord();
-        if (focused && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Enter, false))
-            Run(false);
+        m_templates.Draw();
+        if (const auto generated = m_templates.TakeText())
+        {
+            if (Trim(m_text).empty())
+                m_text = *generated;
+            else
+                m_text += (m_text.back() == '\n' ? "\n" : "\n\n") + *generated;
+        }
+        Shortcuts();
 
         const float footer = ImGui::GetFrameHeightWithSpacing() * 2.0f + Px(4.0f);
         CodeEditor("##editor", m_text, m_lua ? Language::Lua : Language::AutoAssembler, ImVec2(0.0f, -footer), m_editor);
@@ -294,18 +312,24 @@ namespace Manifold::UI
             Muted("Line " + std::to_string(m_editor.CursorLine) + ", column " + std::to_string(m_editor.CursorColumn) + "  ·  " + std::to_string(m_editor.LineCount) + " lines");
         }
 
-        if (m_recordId != 0)
+        if (m_recordId != kNoRecord)
         {
             if (AccentButton(ICON_FA_SAVE "  Save", Px(100.0f, 0.0f)))
                 SaveToRecord();
+            ItemTooltip(WithKeys("Save into the record", Command::ScriptSave).c_str());
             ImGui::SameLine();
-            if (m_recordId > 0 && !m_lua)
+            if (m_recordId >= 0 && !m_lua)
             {
                 if (ImGui::Button(ICON_FA_CHECK "  Check", Px(100.0f, 0.0f)))
                     Check();
+                ItemTooltip(WithKeys("Check the syntax", Command::ScriptCheck).c_str());
             }
-            else if (m_lua && ImGui::Button(ICON_FA_PLAY "  Run", Px(100.0f, 0.0f)))
-                Run(false);
+            else if (m_lua)
+            {
+                if (ImGui::Button(ICON_FA_PLAY "  Run", Px(100.0f, 0.0f)))
+                    Run(false);
+                ItemTooltip(WithKeys("Run the script", Command::ScriptExecute).c_str());
+            }
             ImGui::SameLine();
             if (ImGui::Button("Close", Px(100.0f, 0.0f)))
             {
@@ -320,26 +344,23 @@ namespace Manifold::UI
             const bool sections = !m_lua && Asm::HasSections(m_text);
             if (AccentButton(m_lua ? ICON_FA_PLAY "  Run" : sections ? ICON_FA_PLAY "  Execute [ENABLE]" : ICON_FA_PLAY "  Execute", Px(150.0f, 0.0f)))
                 Run(false);
+            ItemTooltip(WithKeys(m_lua ? "Run the script" : "Assemble and write the script", Command::ScriptExecute).c_str());
             if (sections)
             {
                 ImGui::SameLine();
                 if (ImGui::Button(ICON_FA_STOP "  Execute [DISABLE]", Px(150.0f, 0.0f)))
                     Run(true);
+                ItemTooltip(WithKeys("Run the [DISABLE] section", Command::ScriptExecuteDisable).c_str());
             }
             ImGui::SameLine();
             if (ImGui::Button(ICON_FA_CHECK "  Check", Px(90.0f, 0.0f)))
                 Check();
+            ItemTooltip(WithKeys("Check the syntax", Command::ScriptCheck).c_str());
             if (!m_lua)
             {
                 ImGui::SameLine();
                 if (ImGui::Button(ICON_FA_TABLE "  Add to table", Px(120.0f, 0.0f)))
-                {
-                    Table::MemoryRecord& record = m_engine.Table().AddScript("Auto Assemble script", m_text);
-                    m_recordId = record.Id;
-                    m_saved = m_text;
-                    m_resultOk = true;
-                    m_result = "Added to the address list.";
-                }
+                    AssignToTable();
             }
         }
         EndToolWindow();

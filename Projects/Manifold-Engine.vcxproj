@@ -69,8 +69,9 @@
     </Link>
     <PreBuildEvent>
       <Command>where python &gt;nul 2&gt;nul || exit /b 0
-python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
-      <Message>Embedding the Lua compatibility scripts</Message>
+python "$(ProjectDir)..\Tools\embed_lua.py"
+python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
+      <Message>Embedding the Lua compatibility scripts and the built-in templates</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
@@ -100,6 +101,7 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
   <ItemGroup>
     <ClCompile Include="..\Source\Main.cpp" />
     <ClCompile Include="..\Source\App\Application.cpp" />
+    <ClCompile Include="..\Source\App\Commands.cpp" />
     <ClCompile Include="..\Source\App\CrashHandler.cpp" />
     <ClCompile Include="..\Source\App\Engine.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
@@ -116,6 +118,7 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
     <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp" />
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
+    <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp" />
     <ClCompile Include="..\Source\Lua\InputBox.cpp" />
@@ -127,12 +130,19 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
+    <ClCompile Include="..\Source\Syscalls\Syscall.cpp" />
     <ClCompile Include="..\Source\Table\AddressList.cpp" />
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Target\PatchScan.cpp" />
+    <ClCompile Include="..\Source\Target\PdbSymbols.cpp" />
     <ClCompile Include="..\Source\Target\Process.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
+    <ClCompile Include="..\Source\Templates\TemplateCheck.cpp" />
+    <ClCompile Include="..\Source\Templates\TemplateEngine.cpp" />
+    <ClCompile Include="..\Source\Templates\TemplateFiles.cpp" />
+    <ClCompile Include="..\Source\Templates\TemplateGenerator.cpp" />
+    <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp" />
     <ClCompile Include="..\Source\UI\CodeEditor.cpp" />
     <ClCompile Include="..\Source\UI\CodeTools.cpp" />
     <ClCompile Include="..\Source\UI\DialogHost.cpp" />
@@ -144,8 +154,10 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
     <ClCompile Include="..\Source\UI\RecordEditor.cpp" />
     <ClCompile Include="..\Source\UI\ScriptWindow.cpp" />
     <ClCompile Include="..\Source\UI\SettingsWindow.cpp" />
+    <ClCompile Include="..\Source\UI\Shortcuts.cpp" />
     <ClCompile Include="..\Source\UI\StructureWindow.cpp" />
     <ClCompile Include="..\Source\UI\TableFilesWindow.cpp" />
+    <ClCompile Include="..\Source\UI\TemplateManager.cpp" />
     <ClCompile Include="..\Source\UI\Templates.cpp" />
     <ClCompile Include="..\Source\UI\ToolWindows.cpp" />
     <ClCompile Include="..\Source\UI\WatchWindow.cpp" />
@@ -155,6 +167,7 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
   <ItemGroup>
     <ClInclude Include="..\Source\Resource.h" />
     <ClInclude Include="..\Source\App\Application.h" />
+    <ClInclude Include="..\Source\App\Commands.h" />
     <ClInclude Include="..\Source\App\CrashHandler.h" />
     <ClInclude Include="..\Source\App\Engine.h" />
     <ClInclude Include="..\Source\App\Settings.h" />
@@ -180,16 +193,26 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
     <ClInclude Include="..\Source\Lua\LuaEngine.h" />
     <ClInclude Include="..\Source\Scan\Scanner.h" />
     <ClInclude Include="..\Source\Scan\ValueType.h" />
+    <ClInclude Include="..\Source\Syscalls\Syscall.h" />
     <ClInclude Include="..\Source\Table\AddressList.h" />
     <ClInclude Include="..\Source\Table\CheatTable.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
     <ClInclude Include="..\Source\Target\PatchScan.h" />
+    <ClInclude Include="..\Source\Target\PdbSymbols.h" />
     <ClInclude Include="..\Source\Target\Process.h" />
     <ClInclude Include="..\Source\Target\Symbols.h" />
+    <ClInclude Include="..\Source\Templates\BuiltinTemplates.h" />
+    <ClInclude Include="..\Source\Templates\TemplateCheck.h" />
+    <ClInclude Include="..\Source\Templates\TemplateEngine.h" />
+    <ClInclude Include="..\Source\Templates\TemplateFiles.h" />
+    <ClInclude Include="..\Source\Templates\TemplateGenerator.h" />
+    <ClInclude Include="..\Source\Templates\TemplateLibrary.h" />
     <ClInclude Include="..\Source\UI\CodeEditor.h" />
     <ClInclude Include="..\Source\UI\DialogHost.h" />
     <ClInclude Include="..\Source\UI\Fonts.h" />
     <ClInclude Include="..\Source\UI\LuaDialogs.h" />
+    <ClInclude Include="..\Source\UI\Shortcuts.h" />
+    <ClInclude Include="..\Source\UI\TemplateManager.h" />
     <ClInclude Include="..\Source\UI\Templates.h" />
     <ClInclude Include="..\Source\UI\Theme.h" />
     <ClInclude Include="..\Source\UI\UiScale.h" />

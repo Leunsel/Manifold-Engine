@@ -1,11 +1,14 @@
 #pragma once
 
+#include "App/Commands.h"
 #include "Disasm/AssemblySearch.h"
 #include "Disasm/CodeDissect.h"
 #include "Target/PatchScan.h"
 #include "UI/CodeEditor.h"
+#include "UI/Templates.h"
 #include "UI/Workspace.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <future>
@@ -53,14 +56,38 @@ namespace Manifold::UI
         void HotkeyHandling();
         void DoFirstScan();
         void DoNextScan();
+        void NewScan();
         Scan::ScanOptions CurrentOptions() const;
         std::vector<Table::MemoryRecord*> SelectedRecords();
         void SaveOptions();
         void OpenValueDialog(Table::MemoryRecord& record);
+        void MainShortcuts();
+        void ToggleCompactMode();
+        void ToggleReleaseMode();
+        void OpenAddDialog();
+        void AddScriptRecord();
+        void ResultMenu(std::uint64_t index);
+        void RunResultCommand(Command command, std::uint64_t index);
+        void ResultValueDialog();
+        Table::MemoryRecord* FocusRecord();
+        void WriteValues(const std::vector<int>& ids, const std::string& text);
+        void UndoValueChange();
+        void DeleteSelectedRecords(bool ask);
+        void RunRecordCommand(Command command, Table::MemoryRecord* record);
+
+        struct ValueUndo
+        {
+            int Id = -1;
+            std::string Text;
+        };
 
         Workspace& m_workspace;
         Engine& m_engine;
         bool m_release = false;
+        std::vector<ValueUndo> m_valueUndo;
+        bool m_resultValueDialog = false;
+        std::string m_resultValueText;
+        std::vector<std::uint64_t> m_resultValueTargets;
 
         int m_typeIndex = 2;
         int m_compareIndex = 0;
@@ -168,25 +195,65 @@ namespace Manifold::UI
         int Number() const { return m_number; }
 
     private:
+        enum RegionMode
+        {
+            RegionSave,
+            RegionLoad,
+            RegionFill
+        };
+
+        struct MemoryEdit
+        {
+            std::uint32_t Process = 0;
+            std::uint64_t Address = 0;
+            std::vector<std::uint8_t> Original;
+        };
+
+        void MenuBar();
         void Toolbar();
         void Disassembly(float height);
         void HexView(float height);
         void Registers(float width, float height);
         void CodeMenu(const Disasm::Instruction& instruction);
         void HexMenu(std::uint64_t address);
+        void BookmarkItems();
         void GotoDialog();
         void AssembleDialog();
         void FindDialog();
         void AllocateDialog();
         void InjectDialog();
+        void RegionDialog();
+        void ThreadDialog();
+        void OpenRegionDialog(int mode);
         void Navigate(std::uint64_t address, bool remember = true);
         void HandleCodeKeys();
         void HandleHexKeys();
+        void Shortcuts();
+        void RunCommand(Command command);
+        void Bookmark(bool set, int slot);
+        Status WriteBytes(std::uint64_t address, std::span<const std::uint8_t> bytes);
+        void UndoEdit();
         void Nop(const Disasm::Instruction& instruction);
         int HexValueSize() const;
+        Scan::ValueType HexValueType() const;
+
+        std::vector<MemoryEdit> m_undo;
+        std::array<std::uint64_t, 10> m_bookmarks{};
+        std::vector<std::uint64_t> m_hexHistory;
+        int m_regionMode = RegionSave;
+        bool m_regionOpen = false;
+        std::string m_regionAddress;
+        std::string m_regionSize = "1000";
+        std::string m_regionFill = "90";
+        std::string m_regionError;
+        bool m_threadOpen = false;
+        std::string m_threadAddress;
+        std::string m_threadParameter = "0";
+        std::string m_threadError;
 
         Workspace& m_workspace;
         Engine& m_engine;
+        TemplateRunner m_templates;
         int m_number = 1;
         std::string m_title;
         bool m_open = true;
@@ -283,12 +350,17 @@ namespace Manifold::UI
         };
 
         void Toolbar();
+        void MenuBar();
+        static bool IsWindowCommand(Command command);
+        void RunCommand(Command command);
+        void FieldShortcuts(int pointerSize);
+        void RunFieldCommand(Command command, Table::StructDefinition& definition, Table::StructField& field, std::uint64_t address, const std::string& path, int pointerSize);
         void BuildRows(Table::StructDefinition& definition, std::vector<std::uint64_t> bases, const std::string& path, int depth);
         int FindEditRow() const;
         void ReadVisible(int first, int last);
         bool ReadField(int block, std::size_t column, std::uint64_t address, std::uint8_t* out, std::size_t size) const;
         void DrawRow(int index, int pointerSize);
-        void FieldMenu(Table::StructDefinition& definition, Table::StructField& field, const std::vector<std::uint64_t>& addresses);
+        void FieldMenu(Table::StructDefinition& definition, Table::StructField& field, const std::vector<std::uint64_t>& addresses, const std::string& path);
         Table::StructDefinition& Guess(const std::string& name, std::uint64_t address, int size);
         Table::StructDefinition& ChildFor(const Table::StructDefinition& parent, const Table::StructField& field, std::uint64_t target);
         void PrepareNew(std::uint64_t address);
@@ -316,6 +388,7 @@ namespace Manifold::UI
         std::string m_renameText;
         std::string m_editPath;
         std::string m_editText;
+        std::string m_selectedPath;
         bool m_editName = false;
         std::string m_addOffset;
         std::string m_pendingStructure;
@@ -337,13 +410,18 @@ namespace Manifold::UI
         void Run(bool disable);
         void Check();
         void SaveToRecord();
-        void TemplateDialog();
+        void OpenFile();
+        void SaveFile(bool askName);
+        void AssignToTable();
+        void RunCommand(Command command);
+        void Shortcuts();
 
         Workspace& m_workspace;
         Engine& m_engine;
         std::string m_title;
         std::string m_text;
         std::string m_saved;
+        std::filesystem::path m_path;
         int m_recordId = 0;
         bool m_lua = false;
         bool m_open = true;
@@ -351,11 +429,7 @@ namespace Manifold::UI
         CodeEditorState m_editor;
         std::string m_result;
         bool m_resultOk = true;
-        bool m_templateOpen = false;
-        int m_templateKind = 0;
-        std::string m_templateAddress;
-        std::string m_templateName = "INJECT";
-        std::string m_templateError;
+        TemplateRunner m_templates;
     };
 
     class WatchWindow : public ToolWindow
@@ -391,12 +465,14 @@ namespace Manifold::UI
     private:
         void Execute();
         void FunctionList();
+        void RunCommand(Command command);
 
         Workspace& m_workspace;
         Engine& m_engine;
         bool m_open = true;
         bool m_bringToFront = true;
         std::string m_text;
+        std::filesystem::path m_path;
         CodeEditorState m_editor;
         CodeAssist m_assist;
         float m_outputShare = 0.35f;
@@ -434,10 +510,22 @@ namespace Manifold::UI
     class SettingsWindow : public ToolWindow
     {
     public:
+        static constexpr int KeyboardPage = 5;
+
         explicit SettingsWindow(Workspace& workspace);
         void Draw() override;
         bool Closed() const override { return !m_open; }
-        void Show() { m_open = true; m_bringToFront = true; }
+        void Show(int page = -1)
+        {
+            m_open = true;
+            m_bringToFront = true;
+            if (page >= 0)
+            {
+                m_page = page;
+                m_search.clear();
+                m_scrollTop = true;
+            }
+        }
 
     private:
         void Navigation(float width, float height);
@@ -447,6 +535,7 @@ namespace Manifold::UI
         bool ScannerPage(SettingsList& list, Settings& settings);
         bool ScriptsPage(SettingsList& list, Settings& settings);
         bool DebuggerPage(SettingsList& list, Settings& settings);
+        bool ShortcutsPage(SettingsList& list, Settings& settings);
 
         Workspace& m_workspace;
         bool m_open = true;
@@ -455,6 +544,9 @@ namespace Manifold::UI
         bool m_scrollTop = false;
         bool m_allImGuiColors = false;
         bool m_themeReset = false;
+        bool m_shortcutsReset = false;
+        int m_captureCommand = -1;
+        int m_captureSlot = 0;
         std::string m_search;
         std::string m_autoAttach;
         std::string m_saveError;

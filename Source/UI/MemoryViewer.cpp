@@ -4,6 +4,7 @@
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "UI/Fonts.h"
+#include "UI/Shortcuts.h"
 #include "UI/Templates.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
@@ -13,6 +14,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 
 namespace Manifold::UI
 {
@@ -133,7 +136,7 @@ namespace Manifold::UI
         }
     }
 
-    MemoryViewer::MemoryViewer(Workspace& workspace, int number) : m_workspace(workspace), m_engine(workspace.Core()), m_number(number)
+    MemoryViewer::MemoryViewer(Workspace& workspace, int number) : m_workspace(workspace), m_engine(workspace.Core()), m_templates(workspace), m_number(number)
     {
         m_title = NextWindowTitle(ICON_FA_MEMORY "  Memory Viewer", number);
         m_followBreaks = number == 1;
@@ -209,11 +212,12 @@ namespace Manifold::UI
             Navigate(info.Address);
             ImGui::SetNextWindowFocus();
         }
-        if (!BeginToolWindow(m_title.c_str(), &m_open, ImVec2(980.0f, 680.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse, ImVec2(700.0f, 400.0f)))
+        if (!BeginToolWindow(m_title.c_str(), &m_open, ImVec2(980.0f, 680.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_MenuBar, ImVec2(700.0f, 400.0f)))
         {
             EndToolWindow();
             return;
         }
+        MenuBar();
         if (!m_engine.HasProcess())
         {
             const ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -252,92 +256,167 @@ namespace Manifold::UI
             m_codeShare = code / available;
         ImGui::SetCursorPos(ImVec2(start.x, start.y + code + Px(6.0f)));
         HexView(ImGui::GetContentRegionAvail().y);
+        Shortcuts();
 
         GotoDialog();
         AssembleDialog();
         FindDialog();
         AllocateDialog();
         InjectDialog();
+        RegionDialog();
+        ThreadDialog();
+        m_templates.Draw();
+        if (const auto generated = m_templates.TakeText())
+            m_workspace.OpenScript(*generated);
         EndToolWindow();
+    }
+
+    void MemoryViewer::MenuBar()
+    {
+        if (!ImGui::BeginMenuBar())
+            return;
+        const bool process = m_engine.HasProcess();
+        Debug::Debugger& debugger = m_engine.Debugger();
+        const bool broken = debugger.Broken();
+        const auto item = [&](const char* label, Command command, bool enabled = true, bool selected = false)
+            {
+                if (CommandItem(label, command, selected, enabled))
+                    RunCommand(command);
+            };
+        if (ImGui::BeginMenu("File"))
+        {
+            item(ICON_FA_CLONE "  New window", Command::NewViewerWindow);
+            ImGui::Separator();
+            item(ICON_FA_FILE_EXPORT "  Save memory region...", Command::SaveMemoryRegion, process);
+            item(ICON_FA_FILE_IMPORT "  Load a file into memory...", Command::LoadMemoryRegion, process);
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_DOWNLOAD "  Load symbols", nullptr, false, process))
+                m_engine.LoadSymbols(false);
+            if (ImGui::MenuItem(ICON_FA_GLOBE "  Load Windows symbols", nullptr, false, process))
+                m_engine.LoadSymbols(true);
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_TIMES "  Close"))
+                m_open = false;
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Search", process))
+        {
+            item(ICON_FA_LOCATION_ARROW "  Go to address...", Command::GotoAddress);
+            item(ICON_FA_SEARCH "  Find bytes...", Command::FindMemory);
+            item(ICON_FA_SEARCH_LOCATION "  Find assembly code...", Command::FindAssembly);
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("View", process))
+        {
+            item(ICON_FA_TH_LIST "  Memory regions", Command::MemoryRegions);
+            item(ICON_FA_TAGS "  Modules and symbols", Command::SymbolsAndModules);
+            item(ICON_FA_PROJECT_DIAGRAM "  Referenced functions", Command::ReferencedFunctions);
+            item(ICON_FA_QUOTE_LEFT "  Referenced strings", Command::ReferencedStrings);
+            ImGui::Separator();
+            if (ImGui::BeginMenu(ICON_FA_TH "  Hex view shows"))
+            {
+                const Command modes[] = { Command::HexBytes, Command::HexTwoBytes, Command::HexFourBytes, Command::HexEightBytes, Command::HexFourBytesDecimal, Command::HexFloat, Command::HexDouble };
+                for (int i = 0; i < static_cast<int>(std::size(modes)); ++i)
+                    item(kHexModes[i], modes[i], true, m_hexDisplay == i);
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu(ICON_FA_BOOKMARK "  Bookmarks"))
+            {
+                BookmarkItems();
+                ImGui::EndMenu();
+            }
+            ImGui::MenuItem(ICON_FA_CROSSHAIRS "  Follow breaks", nullptr, &m_followBreaks);
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Debug", process))
+        {
+            item(ICON_FA_PLAY "  Run", Command::DebugRun, broken);
+            item(ICON_FA_LEVEL_DOWN_ALT "  Step into", Command::DebugStepInto, broken);
+            item(ICON_FA_SHARE "  Step over", Command::DebugStepOver, broken);
+            item(ICON_FA_SIGN_OUT_ALT "  Run until return", Command::DebugRunToReturn, broken);
+            item(ICON_FA_PAUSE "  Break", Command::DebugBreak, !broken);
+            ImGui::Separator();
+            item(ICON_FA_CIRCLE "  Toggle breakpoint", Command::ToggleBreakpoint);
+            item(ICON_FA_MAP_MARKER_ALT "  Set the instruction pointer here", Command::SetInstructionPointer, broken);
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_BUG "  Attach debugger", nullptr, false, !debugger.Attached()))
+                m_workspace.Report(m_engine.EnsureDebugger());
+            if (ImGui::MenuItem(ICON_FA_UNLINK "  Detach debugger", nullptr, false, debugger.Attached()))
+                debugger.Detach();
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Tools", process))
+        {
+            const std::string undo = ICON_FA_UNDO_ALT "  Undo the last memory edit" + (m_undo.empty() ? std::string() : " (" + std::to_string(m_undo.size()) + ")");
+            item(undo.c_str(), Command::UndoMemoryEdit, !m_undo.empty());
+            ImGui::Separator();
+            item(ICON_FA_PLUS_SQUARE "  Allocate memory...", Command::AllocateMemory);
+            item(ICON_FA_FILL_DRIP "  Fill memory...", Command::FillMemory);
+            item(ICON_FA_RANDOM "  Create a thread...", Command::CreateThread);
+            item(ICON_FA_SYRINGE "  Inject a library...", Command::InjectLibrary);
+            ImGui::Separator();
+            item(ICON_FA_PROJECT_DIAGRAM "  Dissect code", Command::DissectCode);
+            item(ICON_FA_SITEMAP "  Dissect data", Command::DissectData);
+            item(ICON_FA_BAND_AID "  Scan for patches", Command::ScanForPatches);
+            ImGui::Separator();
+            item(ICON_FA_CODE "  Auto Assembler", Command::ViewerAutoAssemble);
+            item(ICON_FA_MOON "  Lua engine", Command::ViewerLuaEngine);
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
+
+    void MemoryViewer::BookmarkItems()
+    {
+        for (int slot = 0; slot < 10; ++slot)
+        {
+            const std::uint64_t bookmark = m_bookmarks[static_cast<std::size_t>(slot)];
+            const std::string label = std::to_string(slot) + "  " + (bookmark ? m_engine.Describe(bookmark) : std::string("not set"));
+            const std::string keys = ChordText((CurrentBinding(Command::GotoBookmark).Chord & ImGuiMod_Mask_) | (ImGuiKey_0 + slot));
+            if (ImGui::MenuItem(label.c_str(), keys.c_str(), false, bookmark != 0))
+                Bookmark(false, slot);
+        }
+        ImGui::Separator();
+        const std::string set = "Set a bookmark here with " + ChordText(CurrentBinding(Command::SetBookmark).Chord, true);
+        SectionLabel(set.c_str());
     }
 
     void MemoryViewer::Toolbar()
     {
         Debug::Debugger& debugger = m_engine.Debugger();
         const bool broken = debugger.Broken();
-        if (IconButton(ICON_FA_ARROW_LEFT, "Back (Backspace)") && !m_history.empty())
-        {
-            const std::uint64_t back = m_history.back();
-            m_history.pop_back();
-            Navigate(back, false);
-        }
+        const auto button = [&](const char* icon, const char* tooltip, Command command)
+            {
+                if (IconButton(icon, WithKeys(tooltip, command).c_str()))
+                    RunCommand(command);
+            };
+        ImGui::BeginDisabled(m_history.empty());
+        button(ICON_FA_ARROW_LEFT, "Back", Command::NavigateBack);
+        ImGui::EndDisabled();
         ImGui::SameLine();
-        if (IconButton(ICON_FA_LOCATION_ARROW, "Go to address (Ctrl+G)"))
-        {
-            m_gotoOpen = true;
-            m_gotoHex = false;
-            m_gotoText = Hex(m_selected);
-        }
+        button(ICON_FA_LOCATION_ARROW, "Go to address", Command::GotoAddress);
         ImGui::SameLine();
-        if (IconButton(ICON_FA_SEARCH, "Find bytes (Ctrl+F)"))
-            m_findOpen = true;
+        button(ICON_FA_SEARCH, "Find bytes", Command::FindMemory);
         ImGui::SameLine(0.0f, Px(14.0f));
         ImGui::BeginDisabled(!broken);
-        if (IconButton(ICON_FA_PLAY, "Run (F9)"))
-            debugger.Resume(Debug::ResumeMode::Continue);
+        button(ICON_FA_PLAY, "Run", Command::DebugRun);
         ImGui::SameLine();
-        if (IconButton(ICON_FA_LEVEL_DOWN_ALT, "Step into (F7)"))
-            debugger.Resume(Debug::ResumeMode::StepInto);
+        button(ICON_FA_LEVEL_DOWN_ALT, "Step into", Command::DebugStepInto);
         ImGui::SameLine();
-        if (IconButton(ICON_FA_SHARE, "Step over (F8)"))
-            debugger.Resume(Debug::ResumeMode::StepOver);
+        button(ICON_FA_SHARE, "Step over", Command::DebugStepOver);
         ImGui::SameLine();
-        if (IconButton(ICON_FA_SIGN_OUT_ALT, "Run until return (Shift+F8)"))
-            debugger.Resume(Debug::ResumeMode::RunToReturn);
+        button(ICON_FA_SIGN_OUT_ALT, "Run until return", Command::DebugRunToReturn);
         ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::BeginDisabled(!debugger.Attached() || broken);
-        if (IconButton(ICON_FA_PAUSE, "Break into the process"))
-            m_workspace.Report(debugger.BreakNow());
+        ImGui::BeginDisabled(broken);
+        button(ICON_FA_PAUSE, "Break into the process", Command::DebugBreak);
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (IconButton(ICON_FA_CIRCLE, "Toggle breakpoint on the selected instruction (F5)"))
-        {
-            Status status = m_engine.EnsureDebugger();
-            if (status)
-                status = debugger.ToggleBreakpoint(m_selected);
-            m_workspace.Report(status);
-        }
+        button(ICON_FA_CIRCLE, "Toggle breakpoint on the selected instruction", Command::ToggleBreakpoint);
         ImGui::SameLine(0.0f, Px(14.0f));
-        if (IconButton(ICON_FA_CODE, "Auto Assembler (Ctrl+A)"))
-            m_workspace.OpenScript(Asm::CheatTableTemplate());
+        button(ICON_FA_CODE, "Auto Assembler", Command::ViewerAutoAssemble);
         ImGui::SameLine();
-        if (IconButton(ICON_FA_SITEMAP, "Dissect data at the hex view address"))
-            m_workspace.OpenStructure(m_hexSelected ? m_hexSelected : m_hexTop);
-        ImGui::SameLine();
-        if (IconButton(ICON_FA_PUZZLE_PIECE, "Memory tools: allocate, inject a library, regions, patches"))
-            ImGui::OpenPopup("##toolsmenu");
-        if (ImGui::BeginPopup("##toolsmenu"))
-        {
-            if (ImGui::MenuItem(ICON_FA_PLUS_SQUARE "  Allocate memory..."))
-                m_allocateOpen = true;
-            if (ImGui::MenuItem(ICON_FA_SYRINGE "  Inject library..."))
-                m_injectOpen = true;
-            if (ImGui::MenuItem(ICON_FA_TH_LIST "  Memory regions"))
-                m_workspace.OpenRegions();
-            if (ImGui::MenuItem(ICON_FA_BAND_AID "  Scan for patches"))
-                m_workspace.OpenPatchScan();
-            ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_PROJECT_DIAGRAM "  Dissect code"))
-                m_workspace.OpenCodeDissect(CodeDissectWindow::Functions);
-            if (ImGui::MenuItem(ICON_FA_QUOTE_LEFT "  Referenced strings"))
-                m_workspace.OpenCodeDissect(CodeDissectWindow::Strings);
-            if (ImGui::MenuItem(ICON_FA_SEARCH_LOCATION "  Find assembly code"))
-                m_workspace.OpenAsmSearch();
-            if (ImGui::MenuItem(ICON_FA_CLONE "  New memory viewer window"))
-                m_workspace.OpenMemoryViewer(m_selected, false, true);
-            ImGui::EndPopup();
-        }
+        button(ICON_FA_SITEMAP, "Dissect data at the hex view address", Command::DissectData);
         ImGui::SameLine(0.0f, Px(14.0f));
         ImGui::Checkbox("Follow breaks", &m_followBreaks);
         ItemTooltip("Jump to the instruction when the process stops at a breakpoint");
@@ -384,7 +463,27 @@ namespace Manifold::UI
             }
             if (debugger.Attached())
                 debugger.Unpatch(m_top, buffer.data(), buffer.size());
-            m_lines = disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, &m_engine.Symbols());
+            if (m_selected > m_top && m_selected - m_top < buffer.size())
+            {
+                const std::size_t sel = static_cast<std::size_t>(m_selected - m_top);
+                m_lines.clear();
+                m_lines.reserve(static_cast<std::size_t>(m_visibleLines + 1));
+                for (const Disasm::Instruction& line : disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, &m_engine.Symbols()))
+                {
+                    if (line.Address + (line.Length ? line.Length : 1) > m_selected)
+                        break;
+                    m_lines.push_back(line);
+                }
+                const std::vector<std::uint8_t> sub(buffer.begin() + static_cast<std::ptrdiff_t>(sel), buffer.end());
+                const std::vector<bool> subReadable(readable.begin() + static_cast<std::ptrdiff_t>(sel), readable.end());
+                const int remaining = std::max(1, m_visibleLines + 1 - static_cast<int>(m_lines.size()));
+                for (const Disasm::Instruction& line : disassembler.DecodeMany(sub, subReadable, m_selected, remaining, &m_engine.Symbols()))
+                    m_lines.push_back(line);
+            }
+            else
+            {
+                m_lines = disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, &m_engine.Symbols());
+            }
         }
 
         const ImVec2 frame = ImGui::GetCursorScreenPos();
@@ -642,7 +741,6 @@ namespace Manifold::UI
             return;
         const Target::Process& process = *m_engine.Process();
         const Disasm::Disassembler& disassembler = m_engine.Disassembler();
-        Debug::Debugger& debugger = m_engine.Debugger();
         const auto ensureVisible = [&]()
             {
                 const bool visible = !m_lines.empty() && m_selected >= m_lines.front().Address && static_cast<int>(m_lines.size()) > 2 &&
@@ -675,7 +773,188 @@ namespace Manifold::UI
             m_top = disassembler.BackUp(process, m_top, std::max(1, m_visibleLines - 1));
             m_selected = m_selectionEnd = m_top;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_Space, false))
+    }
+
+    void MemoryViewer::Shortcuts()
+    {
+        const bool code = m_focusCode;
+        const bool hex = !m_focusCode && m_hexFocus;
+        std::vector<ImGuiKeyChord> claimed;
+        for (const CommandInfo& info : AllCommands())
+        {
+            if (!(info.Scope == CommandScope::Disassembler && code) && !(info.Scope == CommandScope::HexView && hex))
+                continue;
+            const Binding binding = CurrentBinding(info.Id);
+            claimed.push_back(binding.Chord);
+            if (binding.Alternate)
+                claimed.push_back(binding.Alternate);
+            if (info.Digits)
+            {
+                const int digit = PressedDigit(info.Id);
+                if (digit >= 0)
+                    Bookmark(info.Id == Command::SetBookmark, digit);
+                continue;
+            }
+            if (Pressed(info.Id))
+                RunCommand(info.Id);
+        }
+        for (const CommandInfo& info : AllCommands())
+        {
+            if (info.Scope != CommandScope::MemoryViewer || std::find(claimed.begin(), claimed.end(), CurrentBinding(info.Id).Chord) != claimed.end())
+                continue;
+            if (Pressed(info.Id))
+                RunCommand(info.Id);
+        }
+    }
+
+    void MemoryViewer::Bookmark(bool set, int slot)
+    {
+        std::uint64_t& bookmark = m_bookmarks[static_cast<std::size_t>(slot)];
+        if (set)
+        {
+            bookmark = m_selected;
+            m_engine.Notify(LogLevel::Info, "Bookmark " + std::to_string(slot) + ": " + m_engine.Describe(m_selected));
+        }
+        else if (bookmark)
+            Navigate(bookmark);
+        else
+            m_engine.Notify(LogLevel::Info, "Bookmark " + std::to_string(slot) + " is not set. Set it with " + ChordText((CurrentBinding(Command::SetBookmark).Chord & ImGuiMod_Mask_) | (ImGuiKey_0 + slot)) + ".");
+    }
+
+    Status MemoryViewer::WriteBytes(std::uint64_t address, std::span<const std::uint8_t> bytes)
+    {
+        const Target::Process& process = *m_engine.Process();
+        MemoryEdit edit{ process.Id(), address, std::vector<std::uint8_t>(bytes.size()) };
+        const bool saved = process.ReadExact(address, edit.Original.data(), edit.Original.size());
+        const Status status = process.Write(address, bytes);
+        if (status && saved)
+        {
+            m_undo.push_back(std::move(edit));
+            if (m_undo.size() > 256)
+                m_undo.erase(m_undo.begin());
+        }
+        return status;
+    }
+
+    void MemoryViewer::UndoEdit()
+    {
+        const std::uint32_t id = m_engine.Process()->Id();
+        while (!m_undo.empty() && m_undo.back().Process != id)
+            m_undo.pop_back();
+        if (m_undo.empty())
+        {
+            m_engine.Notify(LogLevel::Info, "There is no memory edit to undo in this window.");
+            return;
+        }
+        const MemoryEdit edit = std::move(m_undo.back());
+        m_undo.pop_back();
+        const Status status = m_engine.Process()->Write(edit.Address, edit.Original);
+        if (status)
+        {
+            m_nopped.erase(edit.Address);
+            m_engine.Notify(LogLevel::Info, "Restored " + std::to_string(edit.Original.size()) + (edit.Original.size() == 1 ? " byte at " : " bytes at ") + m_engine.Describe(edit.Address));
+        }
+        m_workspace.Report(status);
+    }
+
+    Scan::ValueType MemoryViewer::HexValueType() const
+    {
+        const int size = HexValueSize();
+        if (m_hexDisplay == 5)
+            return Scan::ValueType::Float;
+        if (m_hexDisplay == 6)
+            return Scan::ValueType::Double;
+        return size == 1 ? Scan::ValueType::Byte : size == 2 ? Scan::ValueType::TwoBytes : size == 8 ? Scan::ValueType::EightBytes : Scan::ValueType::FourBytes;
+    }
+
+    void MemoryViewer::RunCommand(Command command)
+    {
+        if (command == Command::NewViewerWindow)
+        {
+            m_workspace.OpenMemoryViewer(m_selected, false, true);
+            return;
+        }
+        if (!m_engine.HasProcess())
+            return;
+        const Target::Process& process = *m_engine.Process();
+        const Disasm::Disassembler& disassembler = m_engine.Disassembler();
+        Debug::Debugger& debugger = m_engine.Debugger();
+        const std::uint64_t hexAddress = m_hexSelected ? m_hexSelected : m_hexTop;
+        const int watchSize = HexValueSize() == 1 ? 4 : HexValueSize();
+        const auto resume = [&](Debug::ResumeMode mode)
+            {
+                if (debugger.Broken())
+                    debugger.Resume(mode);
+            };
+        const auto selectedRange = [&]()
+            {
+                std::vector<Disasm::Instruction> lines;
+                for (const Disasm::Instruction& instruction : disassembler.ReadMany(process, std::min(m_selected, m_selectionEnd), 512, &m_engine.Symbols()))
+                {
+                    if (instruction.Address > std::max(m_selected, m_selectionEnd))
+                        break;
+                    lines.push_back(instruction);
+                }
+                return lines;
+            };
+        switch (command)
+        {
+        case Command::SaveMemoryRegion: OpenRegionDialog(RegionSave); break;
+        case Command::LoadMemoryRegion: OpenRegionDialog(RegionLoad); break;
+        case Command::FillMemory: OpenRegionDialog(RegionFill); break;
+        case Command::GotoAddress:
+            m_gotoOpen = true;
+            m_gotoHex = !m_focusCode && m_hexFocus;
+            m_gotoText = Hex(m_gotoHex ? hexAddress : m_selected);
+            break;
+        case Command::FindMemory: m_findOpen = true; break;
+        case Command::FindAssembly: m_workspace.OpenAsmSearch(); break;
+        case Command::UndoMemoryEdit: UndoEdit(); break;
+        case Command::MemoryRegions: m_workspace.OpenRegions(); break;
+        case Command::ReferencedFunctions: m_workspace.OpenCodeDissect(CodeDissectWindow::Functions); break;
+        case Command::ReferencedStrings: m_workspace.OpenCodeDissect(CodeDissectWindow::Strings); break;
+        case Command::SymbolsAndModules: m_workspace.OpenSymbols(); break;
+        case Command::DissectCode: m_workspace.OpenCodeDissect(); break;
+        case Command::DissectData: m_workspace.OpenStructure(hexAddress); break;
+        case Command::ViewerAutoAssemble: m_workspace.OpenScript(Asm::CheatTableTemplate()); break;
+        case Command::ViewerLuaEngine: m_workspace.OpenLua(); break;
+        case Command::InjectLibrary: m_injectOpen = true; break;
+        case Command::AllocateMemory: m_allocateOpen = true; break;
+        case Command::CreateThread:
+            m_threadOpen = true;
+            m_threadAddress = Hex(m_selected);
+            break;
+        case Command::ScanForPatches: m_workspace.OpenPatchScan(); break;
+        case Command::DebugRun: resume(Debug::ResumeMode::Continue); break;
+        case Command::DebugStepInto: resume(Debug::ResumeMode::StepInto); break;
+        case Command::DebugStepOver: resume(Debug::ResumeMode::StepOver); break;
+        case Command::DebugRunToReturn: resume(Debug::ResumeMode::RunToReturn); break;
+        case Command::DebugBreak:
+            if (!debugger.Broken())
+            {
+                Status status = m_engine.EnsureDebugger();
+                if (status)
+                    status = debugger.BreakNow();
+                m_workspace.Report(status);
+            }
+            break;
+        case Command::ToggleBreakpoint:
+        {
+            Status status = m_engine.EnsureDebugger();
+            if (status)
+                status = debugger.ToggleBreakpoint(m_selected);
+            m_workspace.Report(status);
+            break;
+        }
+        case Command::SetInstructionPointer:
+            if (debugger.Broken())
+            {
+                Disasm::RegisterValues registers = debugger.Break().Registers;
+                registers.Rip = m_selected;
+                debugger.SetRegisters(registers);
+            }
+            break;
+        case Command::FollowInstruction:
         {
             const Disasm::Instruction instruction = disassembler.Read(process, m_selected, nullptr);
             if (instruction.Target)
@@ -685,58 +964,280 @@ namespace Manifold::UI
                 m_hexTop = *instruction.Memory.Absolute & ~0xFull;
                 m_hexSelected = *instruction.Memory.Absolute;
             }
+            break;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_Backspace, false) && !m_history.empty())
-        {
-            const std::uint64_t back = m_history.back();
-            m_history.pop_back();
-            Navigate(back, false);
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_Enter, false))
+        case Command::NavigateBack:
+            if (!m_history.empty())
+            {
+                const std::uint64_t back = m_history.back();
+                m_history.pop_back();
+                Navigate(back, false);
+            }
+            break;
+        case Command::AssembleInstruction:
         {
             const Disasm::Instruction instruction = disassembler.Read(process, m_selected, nullptr);
             m_assembleOpen = true;
             m_assembleAddress = m_selected;
             m_assembleText = instruction.Valid ? instruction.Text() : "";
             m_assembleError.clear();
+            break;
         }
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G, false))
-        {
-            m_gotoOpen = true;
-            m_gotoHex = false;
-            m_gotoText = Hex(m_selected);
-        }
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false))
-            m_findOpen = true;
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false))
-            m_workspace.OpenScript(Asm::CheatTableTemplate());
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false))
+        case Command::NopInstruction: Nop(disassembler.Read(process, m_selected, nullptr)); break;
+        case Command::CopyInstructions:
+        case Command::CopyInstructionBytes:
         {
             std::string text;
-            for (const Disasm::Instruction& instruction : disassembler.ReadMany(process, std::min(m_selected, m_selectionEnd), 512, &m_engine.Symbols()))
-            {
-                if (instruction.Address > std::max(m_selected, m_selectionEnd))
-                    break;
-                text += m_engine.Symbols().ModuleOffset(instruction.Address) + " - " + instruction.BytesText() + " - " + instruction.Text() + "\n";
-            }
+            for (const Disasm::Instruction& instruction : selectedRange())
+                text += command == Command::CopyInstructionBytes ? instruction.BytesText() + "\n"
+                                                                 : m_engine.Symbols().ModuleOffset(instruction.Address) + " - " + instruction.BytesText() + " - " + instruction.Text() + "\n";
             ImGui::SetClipboardText(text.c_str());
+            break;
         }
-        if (ImGui::IsKeyPressed(ImGuiKey_F5, false))
+        case Command::InstructionAccesses:
+            if (disassembler.Read(process, m_selected, nullptr).Memory.Present)
+                m_workspace.StartWatch(Debug::WatchKind::InstructionAccesses, m_selected, 1);
+            else
+                m_engine.Notify(LogLevel::Info, "The selected instruction does not access memory.");
+            break;
+        case Command::CodeReferences: m_workspace.OpenCodeDissect(CodeDissectWindow::References, m_selected); break;
+        case Command::AddInstructionToList:
+            m_workspace.AddAddress(m_selected, Scan::ValueType::ByteArray, disassembler.Read(process, m_selected, &m_engine.Symbols()).Text());
+            break;
+        case Command::HexFollow:
+            if (const auto target = process.ReadPointer(hexAddress); target && process.RegionAt(*target))
+            {
+                m_hexHistory.push_back(hexAddress);
+                m_hexTop = *target & ~0xFull;
+                m_hexSelected = *target;
+            }
+            else
+                m_engine.Notify(LogLevel::Info, "The value at " + Hex(hexAddress) + " does not point into readable memory.");
+            break;
+        case Command::HexBack:
+            if (!m_hexHistory.empty())
+            {
+                m_hexSelected = m_hexHistory.back();
+                m_hexTop = m_hexSelected & ~0xFull;
+                m_hexHistory.pop_back();
+            }
+            break;
+        case Command::HexEditValue:
+            if (m_hexDisplay != 0)
+                m_hexEditing = true;
+            break;
+        case Command::HexCopy:
         {
-            Status status = m_engine.EnsureDebugger();
-            if (status)
-                status = debugger.ToggleBreakpoint(m_selected);
-            m_workspace.Report(status);
+            std::uint8_t bytes[16]{};
+            if (process.ReadExact(hexAddress, bytes, sizeof(bytes)))
+                ImGui::SetClipboardText(HexBytes(bytes).c_str());
+            break;
         }
-        if (debugger.Broken())
+        case Command::HexPaste:
         {
-            if (ImGui::IsKeyPressed(ImGuiKey_F9, false))
-                debugger.Resume(Debug::ResumeMode::Continue);
-            if (ImGui::IsKeyPressed(ImGuiKey_F7, false))
-                debugger.Resume(Debug::ResumeMode::StepInto);
-            if (ImGui::IsKeyPressed(ImGuiKey_F8, false))
-                debugger.Resume(io.KeyShift ? Debug::ResumeMode::RunToReturn : Debug::ResumeMode::StepOver);
+            const char* clipboard = ImGui::GetClipboardText();
+            const auto bytes = clipboard ? ParseHexBytes(clipboard) : std::nullopt;
+            if (!bytes || bytes->empty())
+                m_engine.Notify(LogLevel::Warning, "The clipboard holds no hex bytes, like \"48 8B 05\".");
+            else
+                m_workspace.Report(WriteBytes(hexAddress, *bytes));
+            break;
         }
+        case Command::HexAccesses: m_workspace.StartWatch(Debug::WatchKind::Accesses, hexAddress, watchSize); break;
+        case Command::HexWrites: m_workspace.StartWatch(Debug::WatchKind::Writes, hexAddress, watchSize); break;
+        case Command::HexAddToList: m_workspace.AddAddress(hexAddress, HexValueType()); break;
+        case Command::HexBytes: m_hexDisplay = 0; break;
+        case Command::HexTwoBytes: m_hexDisplay = 1; break;
+        case Command::HexFourBytes: m_hexDisplay = 2; break;
+        case Command::HexEightBytes: m_hexDisplay = 3; break;
+        case Command::HexFourBytesDecimal: m_hexDisplay = 4; break;
+        case Command::HexFloat: m_hexDisplay = 5; break;
+        case Command::HexDouble: m_hexDisplay = 6; break;
+        default: break;
+        }
+    }
+
+    void MemoryViewer::OpenRegionDialog(int mode)
+    {
+        m_regionMode = mode;
+        m_regionOpen = true;
+        m_regionError.clear();
+        const std::uint64_t address = mode == RegionFill || m_hexFocus ? (m_hexSelected ? m_hexSelected : m_hexTop) : m_selected;
+        m_regionAddress = Hex(address);
+    }
+
+    void MemoryViewer::RegionDialog()
+    {
+        if (m_regionOpen)
+        {
+            ImGui::OpenPopup("##region");
+            m_regionOpen = false;
+        }
+        if (!ImGui::BeginPopup("##region"))
+            return;
+        const Target::Process& process = *m_engine.Process();
+        static const char* const kTitles[] = { "Save a memory region to a file", "Load a file into memory", "Fill memory" };
+        ImGui::TextUnformatted(kTitles[m_regionMode]);
+        const float label = Px(110.0f);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Address");
+        ImGui::SameLine(label);
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(Px(260.0f));
+        bool enter = InputText("##regionaddress", m_regionAddress, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+        if (m_regionMode != RegionLoad)
+        {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted("Size (hex)");
+            ImGui::SameLine(label);
+            ImGui::SetNextItemWidth(Px(260.0f));
+            enter = InputText("##regionsize", m_regionSize, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CharsHexadecimal) || enter;
+        }
+        if (m_regionMode == RegionFill)
+        {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted("Bytes");
+            ImGui::SameLine(label);
+            ImGui::SetNextItemWidth(Px(260.0f));
+            enter = InputTextWithHint("##regionfill", "90 or CC or 00 01 02", m_regionFill, ImGuiInputTextFlags_EnterReturnsTrue) || enter;
+            Muted("The bytes repeat until the size is filled.");
+        }
+        if (!m_regionError.empty())
+            TextWithError(m_regionError, ManifoldTheme::Error);
+        static const char* const kButtons[] = { ICON_FA_FILE_EXPORT "  Save...", ICON_FA_FILE_IMPORT "  Load...", ICON_FA_FILL_DRIP "  Fill" };
+        if (AccentButton(kButtons[m_regionMode], Px(110.0f, 0.0f)) || enter)
+        {
+            Status error;
+            const auto address = m_engine.Evaluate(m_regionAddress, &error);
+            const std::uint64_t size = ParseHex(m_regionSize).value_or(0);
+            constexpr std::uint64_t kLimit = 64ull << 20;
+            if (!address)
+                m_regionError = error.Text;
+            else if (m_regionMode != RegionLoad && (size == 0 || size > kLimit))
+                m_regionError = "The size must be between 1 and 4000000 (64 MB).";
+            else if (m_regionMode == RegionSave)
+            {
+                std::vector<std::uint8_t> data(static_cast<std::size_t>(size));
+                std::size_t missing = 0;
+                for (std::uint64_t at = 0; at < size;)
+                {
+                    const std::uint64_t chunk = std::min<std::uint64_t>(size - at, 0x1000 - ((*address + at) & 0xFFF));
+                    if (!process.ReadExact(*address + at, data.data() + at, static_cast<std::size_t>(chunk)))
+                        missing += static_cast<std::size_t>(chunk);
+                    at += chunk;
+                }
+                if (const auto path = m_workspace.SaveFileDialog({ { L"Binary files (*.bin)", L"*.bin" }, { L"All files", L"*.*" } }, "memory_" + Hex(*address) + ".bin", L"bin"))
+                {
+                    std::ofstream file(*path, std::ios::binary | std::ios::trunc);
+                    file.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+                    if (!file)
+                        m_regionError = "Could not write " + WideToUtf8(path->wstring()) + ".";
+                    else
+                    {
+                        m_engine.Notify(missing ? LogLevel::Warning : LogLevel::Success, "Saved " + ByteSize(size) + " from " + Hex(*address) + " to " + WideToUtf8(path->filename().wstring()) +
+                            (missing ? " (" + ByteSize(missing) + " could not be read and are zero)" : std::string()));
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+            }
+            else if (m_regionMode == RegionLoad)
+            {
+                if (const auto path = m_workspace.OpenFileDialog({ { L"Binary files (*.bin)", L"*.bin" }, { L"All files", L"*.*" } }))
+                {
+                    std::error_code ignored;
+                    const std::uint64_t length = std::filesystem::file_size(*path, ignored);
+                    std::ifstream file(*path, std::ios::binary);
+                    if (!file || length == 0 || length > kLimit)
+                        m_regionError = "The file must exist and hold between 1 byte and 64 MB.";
+                    else
+                    {
+                        std::vector<std::uint8_t> data(static_cast<std::size_t>(length));
+                        file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
+                        const Status status = WriteBytes(*address, data);
+                        m_workspace.Report(status);
+                        if (status)
+                        {
+                            m_engine.Notify(LogLevel::Success, "Loaded " + ByteSize(length) + " to " + m_engine.Describe(*address) + ". Undo with " + ShortcutText(Command::UndoMemoryEdit) + ".");
+                            ImGui::CloseCurrentPopup();
+                        }
+                    }
+                }
+            }
+            else
+            {
+                const auto pattern = ParseHexBytes(m_regionFill);
+                if (!pattern || pattern->empty())
+                    m_regionError = "Type the bytes as hex, like 90 or 00 FF.";
+                else
+                {
+                    std::vector<std::uint8_t> data(static_cast<std::size_t>(size));
+                    for (std::size_t i = 0; i < data.size(); ++i)
+                        data[i] = (*pattern)[i % pattern->size()];
+                    const Status status = WriteBytes(*address, data);
+                    m_workspace.Report(status);
+                    if (status)
+                    {
+                        m_engine.Notify(LogLevel::Success, "Filled " + ByteSize(size) + " at " + m_engine.Describe(*address) + ". Undo with " + ShortcutText(Command::UndoMemoryEdit) + ".");
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", Px(90.0f, 0.0f)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    void MemoryViewer::ThreadDialog()
+    {
+        if (m_threadOpen)
+        {
+            ImGui::OpenPopup("##thread");
+            m_threadOpen = false;
+            m_threadError.clear();
+        }
+        if (!ImGui::BeginPopup("##thread"))
+            return;
+        ImGui::TextUnformatted("Create a thread in the process");
+        const float label = Px(110.0f);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Start address");
+        ImGui::SameLine(label);
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(Px(260.0f));
+        bool enter = InputText("##threadaddress", m_threadAddress, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Parameter");
+        ImGui::SameLine(label);
+        ImGui::SetNextItemWidth(Px(260.0f));
+        enter = InputText("##threadparameter", m_threadParameter, ImGuiInputTextFlags_EnterReturnsTrue) || enter;
+        if (!m_threadError.empty())
+            TextWithError(m_threadError, ManifoldTheme::Error);
+        if (AccentButton(ICON_FA_PLAY "  Create", Px(110.0f, 0.0f)) || enter)
+        {
+            Status error;
+            const auto start = m_engine.Evaluate(m_threadAddress, &error);
+            const auto parameter = start ? m_engine.Evaluate(m_threadParameter.empty() ? "0" : m_threadParameter, &error) : std::nullopt;
+            if (!start || !parameter)
+                m_threadError = error.Text;
+            else
+            {
+                const Status status = m_engine.Process()->CreateThread(*start, *parameter, false);
+                m_workspace.Report(status);
+                if (status)
+                {
+                    m_engine.Notify(LogLevel::Success, "Started a thread at " + m_engine.Describe(*start) + ".");
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", Px(90.0f, 0.0f)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
     }
 
     void MemoryViewer::Nop(const Disasm::Instruction& instruction)
@@ -750,7 +1251,7 @@ namespace Manifold::UI
         }
         std::vector<std::uint8_t> original(instruction.Bytes.begin(), instruction.Bytes.begin() + instruction.Length);
         std::vector<std::uint8_t> nops(original.size(), 0x90);
-        const Status status = process.Write(instruction.Address, nops);
+        const Status status = WriteBytes(instruction.Address, nops);
         if (status)
             m_nopped[instruction.Address] = std::move(original);
         m_workspace.Report(status);
@@ -760,65 +1261,49 @@ namespace Manifold::UI
     {
         Debug::Debugger& debugger = m_engine.Debugger();
         const bool broken = debugger.Broken();
+        const auto item = [&](const char* label, Command command, bool enabled = true)
+            {
+                if (CommandItem(label, command, false, enabled))
+                    RunCommand(command);
+            };
         ImGui::TextDisabled("%s", m_engine.Describe(instruction.Address).c_str());
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_LOCATION_ARROW "  Go to address", "Ctrl+G"))
+        item(ICON_FA_LOCATION_ARROW "  Go to address", Command::GotoAddress);
+        if (instruction.Target)
+            item(ICON_FA_ARROW_RIGHT "  Follow", Command::FollowInstruction);
+        item(ICON_FA_ARROW_LEFT "  Back", Command::NavigateBack, !m_history.empty());
+        if (ImGui::BeginMenu(ICON_FA_BOOKMARK "  Bookmarks"))
         {
-            m_gotoOpen = true;
-            m_gotoHex = false;
-            m_gotoText = Hex(instruction.Address);
-        }
-        if (instruction.Target && ImGui::MenuItem(ICON_FA_ARROW_RIGHT "  Follow", "Space"))
-            Navigate(*instruction.Target);
-        if (ImGui::MenuItem(ICON_FA_ARROW_LEFT "  Back", "Backspace", false, !m_history.empty()))
-        {
-            const std::uint64_t back = m_history.back();
-            m_history.pop_back();
-            Navigate(back, false);
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_EDIT "  Assemble", "Enter"))
-        {
-            m_assembleOpen = true;
-            m_assembleAddress = instruction.Address;
-            m_assembleText = instruction.Valid ? instruction.Text() : "";
-            m_assembleError.clear();
-        }
-        if (ImGui::MenuItem(m_nopped.count(instruction.Address) ? ICON_FA_UNDO "  Restore original code" : ICON_FA_BAN "  Replace with code that does nothing"))
-            Nop(instruction);
-        if (ImGui::BeginMenu(ICON_FA_MAGIC "  Create script"))
-        {
-            for (int kind = 0; kind < 3; ++kind)
+            for (int slot = 0; slot < 10; ++slot)
             {
-                if (ImGui::MenuItem(kTemplateNames[kind]))
-                {
-                    std::string error;
-                    if (const auto script = MakeTemplate(m_engine, static_cast<TemplateKind>(kind), instruction.Address, "INJECT", error))
-                        m_workspace.OpenScript(*script);
-                    else
-                        m_workspace.Report(Status::Fail(ErrorCode::AsmSyntax, error));
-                }
+                const std::string label = "Set bookmark " + std::to_string(slot);
+                const std::string keys = ChordText((CurrentBinding(Command::SetBookmark).Chord & ImGuiMod_Mask_) | (ImGuiKey_0 + slot));
+                if (ImGui::MenuItem(label.c_str(), keys.c_str()))
+                    Bookmark(true, slot);
             }
+            ImGui::Separator();
+            BookmarkItems();
             ImGui::EndMenu();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_CIRCLE "  Toggle breakpoint", "F5"))
+        item(ICON_FA_EDIT "  Assemble", Command::AssembleInstruction);
+        item(m_nopped.count(instruction.Address) ? ICON_FA_UNDO "  Restore original code" : ICON_FA_BAN "  Replace with code that does nothing", Command::NopInstruction);
+        item(ICON_FA_UNDO_ALT "  Undo the last memory edit", Command::UndoMemoryEdit, !m_undo.empty());
+        if (ImGui::BeginMenu(ICON_FA_MAGIC "  Create script"))
         {
-            Status status = m_engine.EnsureDebugger();
-            if (status)
-                status = debugger.ToggleBreakpoint(instruction.Address);
-            m_workspace.Report(status);
+            m_templates.MenuItems(instruction.Address);
+            ImGui::EndMenu();
         }
-        if (ImGui::MenuItem(ICON_FA_LIST_UL "  Find out what addresses this instruction accesses", nullptr, false, instruction.Memory.Present))
-            m_workspace.StartWatch(Debug::WatchKind::InstructionAccesses, instruction.Address, 1);
+        ImGui::Separator();
+        item(ICON_FA_CIRCLE "  Toggle breakpoint", Command::ToggleBreakpoint);
+        item(ICON_FA_LIST_UL "  Find out what addresses this instruction accesses", Command::InstructionAccesses, instruction.Memory.Present);
         if (ImGui::MenuItem(ICON_FA_PHONE "  Find out what calls this address"))
             m_workspace.StartWatch(Debug::WatchKind::Calls, instruction.Address, 1);
         {
             const auto dissect = m_engine.CodeDissect();
             const std::size_t references = dissect ? dissect->To(instruction.Address).size() : 0;
             const std::string label = dissect ? ICON_FA_PROJECT_DIAGRAM "  Code that references this address (" + std::to_string(references) + ")" : ICON_FA_PROJECT_DIAGRAM "  Code that references this address...";
-            if (ImGui::MenuItem(label.c_str()))
-                m_workspace.OpenCodeDissect(CodeDissectWindow::References, instruction.Address);
+            item(label.c_str(), Command::CodeReferences);
             ItemTooltip(dissect ? "From the last code dissect" : "Needs a code dissect first; the window offers one");
             if (instruction.Memory.Absolute && dissect)
             {
@@ -828,22 +1313,20 @@ namespace Manifold::UI
                     m_workspace.OpenCodeDissect(CodeDissectWindow::References, operand);
             }
         }
-        if (broken && ImGui::MenuItem(ICON_FA_MAP_MARKER_ALT "  Set the instruction pointer here"))
-        {
-            Disasm::RegisterValues registers = debugger.Break().Registers;
-            registers.Rip = instruction.Address;
-            debugger.SetRegisters(registers);
-        }
+        if (broken)
+            item(ICON_FA_MAP_MARKER_ALT "  Set the instruction pointer here", Command::SetInstructionPointer);
         ImGui::Separator();
-        if (instruction.Memory.Absolute && ImGui::MenuItem(ICON_FA_TH "  Show the operand in the hex view"))
+        if (instruction.Memory.Absolute && ImGui::MenuItem(ICON_FA_TH "  Show the operand in the hex view", instruction.Target ? nullptr : ShortcutText(Command::FollowInstruction)))
         {
             m_hexTop = *instruction.Memory.Absolute & ~0xFull;
             m_hexSelected = *instruction.Memory.Absolute;
         }
-        if (ImGui::MenuItem(ICON_FA_PLUS "  Add this address to the address list"))
-            m_workspace.AddAddress(instruction.Address, Scan::ValueType::ByteArray, instruction.Text());
+        item(ICON_FA_PLUS "  Add this address to the address list", Command::AddInstructionToList);
         if (ImGui::BeginMenu(ICON_FA_COPY "  Copy"))
         {
+            item("Selected instructions", Command::CopyInstructions);
+            item("Bytes only", Command::CopyInstructionBytes);
+            ImGui::Separator();
             if (ImGui::MenuItem("Address"))
                 ImGui::SetClipboardText(Hex(instruction.Address).c_str());
             if (ImGui::MenuItem("Symbolic address"))
@@ -1135,7 +1618,7 @@ namespace Manifold::UI
                 Scan::ValueFormat format;
                 format.Hex = m_hexDisplay >= 1 && m_hexDisplay <= 3;
                 if (const auto bytes = Scan::ParseValue(type, m_valueBuffer, format))
-                    m_workspace.Report(process.Write(m_hexSelected, *bytes));
+                    m_workspace.Report(WriteBytes(m_hexSelected, *bytes));
                 else
                     m_workspace.Report(Status::Fail(ErrorCode::ScanBadValue, m_valueBuffer));
                 ImGui::CloseCurrentPopup();
@@ -1166,18 +1649,8 @@ namespace Manifold::UI
         if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) { m_hexSelected -= static_cast<std::uint64_t>(m_hexColumns); m_hexNibble = 0; keep(); }
         if (ImGui::IsKeyPressed(ImGuiKey_PageDown)) { m_hexTop += static_cast<std::uint64_t>(m_hexColumns * rows); m_hexSelected += static_cast<std::uint64_t>(m_hexColumns * rows); }
         if (ImGui::IsKeyPressed(ImGuiKey_PageUp)) { m_hexTop -= static_cast<std::uint64_t>(m_hexColumns * rows); m_hexSelected -= static_cast<std::uint64_t>(m_hexColumns * rows); }
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G, false))
-        {
-            m_gotoOpen = true;
-            m_gotoHex = true;
-            m_gotoText = Hex(m_hexSelected);
-        }
-        if (m_hexDisplay != 0 || io.KeyCtrl)
-        {
-            if (ImGui::IsKeyPressed(ImGuiKey_Enter, false))
-                m_hexEditing = true;
+        if (m_hexDisplay != 0 || io.KeyCtrl || io.KeyAlt)
             return;
-        }
         for (const ImWchar character : io.InputQueueCharacters)
         {
             const int digit = HexValue(static_cast<char>(character));
@@ -1187,7 +1660,7 @@ namespace Manifold::UI
             if (!m_engine.Process()->ReadExact(m_hexSelected, &byte, 1))
                 break;
             byte = m_hexNibble == 0 ? static_cast<std::uint8_t>((byte & 0x0F) | (digit << 4)) : static_cast<std::uint8_t>((byte & 0xF0) | digit);
-            const Status status = m_engine.Process()->Write(m_hexSelected, &byte, 1);
+            const Status status = m_hexNibble == 0 ? WriteBytes(m_hexSelected, std::span<const std::uint8_t>(&byte, 1)) : m_engine.Process()->Write(m_hexSelected, &byte, 1);
             if (!status)
             {
                 m_workspace.Report(status);
@@ -1207,23 +1680,24 @@ namespace Manifold::UI
     void MemoryViewer::HexMenu(std::uint64_t address)
     {
         const int size = HexValueSize();
+        const auto item = [&](const char* label, Command command, bool enabled = true)
+            {
+                if (CommandItem(label, command, false, enabled))
+                    RunCommand(command);
+            };
         ImGui::TextDisabled("%s", m_engine.Describe(address).c_str());
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_LOCATION_ARROW "  Go to address", "Ctrl+G"))
-        {
-            m_gotoOpen = true;
-            m_gotoHex = true;
-            m_gotoText = Hex(address);
-        }
+        item(ICON_FA_LOCATION_ARROW "  Go to address", Command::GotoAddress);
+        item(ICON_FA_ARROW_RIGHT "  Follow the pointer", Command::HexFollow);
+        item(ICON_FA_ARROW_LEFT "  Back", Command::HexBack, !m_hexHistory.empty());
+        if (m_hexDisplay != 0)
+            item(ICON_FA_EDIT "  Edit the value", Command::HexEditValue);
         if (ImGui::MenuItem(ICON_FA_CODE "  Disassemble this address"))
             Navigate(address);
-        if (ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect data at this address"))
-            m_workspace.OpenStructure(address);
+        item(ICON_FA_SITEMAP "  Dissect data at this address", Command::DissectData);
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_EYE "  Find out what accesses this address"))
-            m_workspace.StartWatch(Debug::WatchKind::Accesses, address, std::max(1, size == 1 ? 4 : size));
-        if (ImGui::MenuItem(ICON_FA_PEN "  Find out what writes to this address"))
-            m_workspace.StartWatch(Debug::WatchKind::Writes, address, std::max(1, size == 1 ? 4 : size));
+        item(ICON_FA_EYE "  Find out what accesses this address", Command::HexAccesses);
+        item(ICON_FA_PEN "  Find out what writes to this address", Command::HexWrites);
         if (ImGui::MenuItem(ICON_FA_CIRCLE "  Break when written"))
         {
             Status status = m_engine.EnsureDebugger();
@@ -1232,19 +1706,21 @@ namespace Manifold::UI
             m_workspace.Report(status);
         }
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_PLUS "  Add this address to the address list"))
-        {
-            const Scan::ValueType type = m_hexDisplay == 5 ? Scan::ValueType::Float : m_hexDisplay == 6 ? Scan::ValueType::Double :
-                                         size == 2 ? Scan::ValueType::TwoBytes : size == 8 ? Scan::ValueType::EightBytes : size == 1 ? Scan::ValueType::Byte : Scan::ValueType::FourBytes;
-            m_workspace.AddAddress(address, type);
-        }
+        item(ICON_FA_PLUS "  Add this address to the address list", Command::HexAddToList);
         if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
             ImGui::SetClipboardText(Hex(address).c_str());
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy 16 bytes"))
+        item(ICON_FA_COPY "  Copy 16 bytes", Command::HexCopy);
+        item(ICON_FA_PASTE "  Paste bytes", Command::HexPaste);
+        item(ICON_FA_UNDO_ALT "  Undo the last memory edit", Command::UndoMemoryEdit, !m_undo.empty());
+        if (ImGui::BeginMenu(ICON_FA_TH "  Show"))
         {
-            std::uint8_t bytes[16]{};
-            if (m_engine.Process()->ReadExact(address, bytes, sizeof(bytes)))
-                ImGui::SetClipboardText(HexBytes(bytes).c_str());
+            const Command modes[] = { Command::HexBytes, Command::HexTwoBytes, Command::HexFourBytes, Command::HexEightBytes, Command::HexFourBytesDecimal, Command::HexFloat, Command::HexDouble };
+            for (int i = 0; i < static_cast<int>(std::size(modes)); ++i)
+            {
+                if (CommandItem(kHexModes[i], modes[i], m_hexDisplay == i))
+                    RunCommand(modes[i]);
+            }
+            ImGui::EndMenu();
         }
     }
 
@@ -1340,7 +1816,7 @@ namespace Manifold::UI
                         covered = m_engine.Disassembler().Read(process, covered, nullptr).Next();
                     bytes.resize(static_cast<std::size_t>(covered - m_assembleAddress), 0x90);
                 }
-                const Status status = process.Write(m_assembleAddress, bytes);
+                const Status status = WriteBytes(m_assembleAddress, bytes);
                 m_workspace.Report(status);
                 if (status)
                 {

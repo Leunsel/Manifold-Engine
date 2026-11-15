@@ -4,6 +4,7 @@
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
 #include "UI/Fonts.h"
+#include "UI/Shortcuts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
@@ -296,11 +297,12 @@ namespace Manifold::UI
     {
         if (!m_open)
             return;
-        if (!BeginToolWindow(m_title.c_str(), &m_open, ImVec2(820.0f, 640.0f), 0, ImVec2(680.0f, 320.0f)))
+        if (!BeginToolWindow(m_title.c_str(), &m_open, ImVec2(820.0f, 640.0f), ImGuiWindowFlags_MenuBar, ImVec2(680.0f, 320.0f)))
         {
             EndToolWindow();
             return;
         }
+        MenuBar();
         if (!m_pendingStructure.empty())
         {
             if (Table::StructDefinition* target = m_engine.Structures().Find(m_pendingStructure))
@@ -372,8 +374,14 @@ namespace Manifold::UI
                     for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
                         DrawRow(i, pointerSize);
                 }
+                FieldShortcuts(pointerSize);
                 ImGui::EndTable();
             }
+        }
+        for (const CommandInfo& info : AllCommands())
+        {
+            if (info.Scope == CommandScope::Structure && IsWindowCommand(info.Id) && Pressed(info.Id))
+                RunCommand(info.Id);
         }
 
         if (m_newOpen)
@@ -446,6 +454,186 @@ namespace Manifold::UI
         EndToolWindow();
     }
 
+    bool StructureWindow::IsWindowCommand(Command command)
+    {
+        return command == Command::DefineStructure || command == Command::AddStructureColumn || command == Command::CollapseStructure;
+    }
+
+    void StructureWindow::RunCommand(Command command)
+    {
+        switch (command)
+        {
+        case Command::DefineStructure:
+            m_newOpen = true;
+            PrepareNew(!m_columns.empty() && m_columns.front().Valid ? m_columns.front().Value : 0);
+            break;
+        case Command::AddStructureColumn: m_columns.push_back({}); break;
+        case Command::CollapseStructure: m_expanded.clear(); break;
+        default: break;
+        }
+    }
+
+    void StructureWindow::MenuBar()
+    {
+        if (!ImGui::BeginMenuBar())
+            return;
+        const auto item = [&](const char* label, Command command, bool enabled = true)
+            {
+                if (CommandItem(label, command, false, enabled))
+                    RunCommand(command);
+            };
+        Table::StructDefinition* current = Current();
+        if (ImGui::BeginMenu("File"))
+        {
+            item(ICON_FA_PLUS "  Add an address to compare", Command::AddStructureColumn);
+            ImGui::BeginDisabled(m_columns.size() < 2);
+            if (ImGui::MenuItem(ICON_FA_TIMES "  Remove the last address"))
+                m_columns.pop_back();
+            ImGui::EndDisabled();
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_TIMES "  Close"))
+                m_open = false;
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Structures"))
+        {
+            item(ICON_FA_MAGIC "  Define a new structure...", Command::DefineStructure);
+            if (!m_engine.Structures().Items.empty())
+            {
+                ImGui::Separator();
+                for (const auto& structure : m_engine.Structures().Items)
+                {
+                    if (ImGui::MenuItem(structure->Name.c_str(), nullptr, structure->Name == m_structure))
+                    {
+                        m_structure = structure->Name;
+                        m_expanded.clear();
+                    }
+                }
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Rename the structure...", nullptr, false, current != nullptr))
+            {
+                m_renameOpen = true;
+                m_renameText = current->Name;
+            }
+            if (DangerMenuItem(ICON_FA_TRASH "  Delete the structure", nullptr, current != nullptr))
+            {
+                const std::string name = current->Name;
+                m_workspace.Confirm("Delete structure", "Delete the structure \"" + name + "\"?", [this, name]()
+                    {
+                        if (Table::StructDefinition* target = m_engine.Structures().Find(name))
+                            m_engine.Structures().Remove(*target);
+                        if (m_structure == name)
+                            m_structure.clear();
+                    }, "Delete");
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("View"))
+        {
+            item(ICON_FA_COMPRESS_ALT "  Collapse all pointers", Command::CollapseStructure, !m_expanded.empty());
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
+
+    void StructureWindow::FieldShortcuts(int pointerSize)
+    {
+        if (!m_editPath.empty())
+            return;
+        Table::StructDefinition* definition = nullptr;
+        Table::StructField* field = nullptr;
+        std::uint64_t address = 0;
+        for (const Row& row : m_rows)
+        {
+            Table::StructField& candidate = row.Definition->Fields[static_cast<std::size_t>(row.Field)];
+            const Block& block = m_blocks[static_cast<std::size_t>(row.Block)];
+            if (FieldKey(block.Path, candidate.Offset, row.Twin) != m_selectedPath)
+                continue;
+            definition = row.Definition;
+            field = &candidate;
+            address = block.Bases.empty() ? 0 : FieldAddress(block.Bases.front(), candidate.Offset);
+            break;
+        }
+        for (const CommandInfo& info : AllCommands())
+        {
+            if (info.Scope == CommandScope::Structure && !IsWindowCommand(info.Id) && Pressed(info.Id) && field)
+                RunFieldCommand(info.Id, *definition, *field, address, m_selectedPath, pointerSize);
+        }
+    }
+
+    void StructureWindow::RunFieldCommand(Command command, Table::StructDefinition& definition, Table::StructField& field, std::uint64_t address, const std::string& path, int pointerSize)
+    {
+        const bool readable = address != 0 && m_engine.HasProcess();
+        const int watchSize = std::min(8, std::max(1, field.Size));
+        switch (command)
+        {
+        case Command::ChangeFieldValue:
+            if (readable)
+            {
+                m_editPath = path;
+                m_editName = false;
+                m_editText.clear();
+                std::vector<std::uint8_t> bytes(static_cast<std::size_t>(std::max(1, field.Size)));
+                if (m_engine.Process()->ReadExact(address, bytes.data(), bytes.size()))
+                    m_editText = FieldText(field, bytes, address, pointerSize);
+            }
+            break;
+        case Command::RenameField:
+            m_editPath = path;
+            m_editName = true;
+            m_editText = field.Name;
+            break;
+        case Command::InsertField:
+            m_pendingStructure = definition.Name;
+            m_pendingOffset = field.Offset + field.Size;
+            m_pendingInsert = true;
+            break;
+        case Command::DeleteField:
+            m_pendingStructure = definition.Name;
+            m_pendingOffset = field.Offset;
+            m_pendingInsert = false;
+            break;
+        case Command::FieldToAddressList:
+            if (readable)
+            {
+                Table::MemoryRecord& record = m_engine.Table().AddValue(field.Name, m_engine.Symbols().ModuleOffset(address), field.Type);
+                record.Length = field.Size;
+                record.Unicode = field.Unicode;
+                record.ShowHex = field.Display == Table::FieldDisplay::Hex;
+                record.CustomTypeName = field.CustomType;
+                if (field.Type == Scan::ValueType::Binary)
+                {
+                    record.BitStart = field.BitStart;
+                    record.BitLength = field.BitLength;
+                }
+                m_engine.RefreshValues(true);
+            }
+            break;
+        case Command::BrowseField:
+            if (readable)
+                m_workspace.OpenMemoryViewer(address, true);
+            break;
+        case Command::BrowseFieldPointer:
+            if (readable && field.Type == Scan::ValueType::Pointer)
+            {
+                if (const auto target = m_engine.Process()->ReadPointer(address); target && *target)
+                    m_workspace.OpenMemoryViewer(*target, true);
+            }
+            break;
+        case Command::FieldAccesses:
+            if (readable)
+                m_workspace.StartWatch(Debug::WatchKind::Accesses, address, watchSize);
+            break;
+        case Command::FieldWrites:
+            if (readable)
+                m_workspace.StartWatch(Debug::WatchKind::Writes, address, watchSize);
+            break;
+        default:
+            break;
+        }
+    }
+
     void StructureWindow::Toolbar()
     {
         for (std::size_t i = 0; i < m_columns.size(); ++i)
@@ -476,7 +664,7 @@ namespace Manifold::UI
             ImGui::SameLine();
             ImGui::PopID();
         }
-        if (IconButton(ICON_FA_PLUS, "Add a column to compare another address"))
+        if (IconButton(ICON_FA_PLUS, WithKeys("Add a column to compare another address", Command::AddStructureColumn).c_str()))
             m_columns.push_back({});
         ImGui::SetNextItemWidth(Px(240.0f));
         if (ImGui::BeginCombo("##structure", m_structure.empty() ? "No structure" : m_structure.c_str()))
@@ -497,7 +685,7 @@ namespace Manifold::UI
             m_newOpen = true;
             PrepareNew(m_columns.front().Valid ? m_columns.front().Value : 0);
         }
-        ItemTooltip("Read the memory at the first address and guess pointers, floats, strings and integers");
+        ItemTooltip(WithKeys("Read the memory at the first address and guess pointers, floats, strings and integers", Command::DefineStructure).c_str());
         Table::StructDefinition* current = Current();
         ImGui::BeginDisabled(!current);
         ImGui::SameLine();
@@ -724,8 +912,10 @@ namespace Manifold::UI
         PushMono();
         const std::string offsetText = Hex(static_cast<std::uint64_t>(field.Offset), 4) +
             (field.Type == Scan::ValueType::Binary && field.CustomType.empty() ? ":" + std::to_string(field.BitStart) : std::string());
-        if (ImGui::Selectable(offsetText.c_str(), false, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap) &&
-            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+        const bool clicked = ImGui::Selectable(offsetText.c_str(), m_selectedPath == fieldPath, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap);
+        if (clicked || ImGui::IsItemClicked(ImGuiMouseButton_Right))
+            m_selectedPath = fieldPath;
+        if (clicked && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {
             m_editPath = fieldPath;
             m_editName = ImGui::TableGetHoveredColumn() == 1;
@@ -740,7 +930,7 @@ namespace Manifold::UI
         PopMono();
         if (ImGui::BeginPopupContextItem("##fieldmenu"))
         {
-            FieldMenu(definition, field, addresses);
+            FieldMenu(definition, field, addresses, fieldPath);
             ImGui::EndPopup();
         }
         if (indent > 0.0f)
@@ -830,10 +1020,19 @@ namespace Manifold::UI
         ImGui::PopID();
     }
 
-    void StructureWindow::FieldMenu(Table::StructDefinition& definition, Table::StructField& field, const std::vector<std::uint64_t>& addresses)
+    void StructureWindow::FieldMenu(Table::StructDefinition& definition, Table::StructField& field, const std::vector<std::uint64_t>& addresses, const std::string& path)
     {
         const int pointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8;
+        const std::uint64_t first = addresses.empty() ? 0 : addresses.front();
+        const auto item = [&](const char* label, Command command, bool enabled = true)
+            {
+                if (CommandItem(label, command, false, enabled))
+                    RunFieldCommand(command, definition, field, first, path, pointerSize);
+            };
         ImGui::TextDisabled("%s", field.Name.c_str());
+        ImGui::Separator();
+        item(ICON_FA_EDIT "  Change the value", Command::ChangeFieldValue, first != 0 && m_engine.HasProcess());
+        item(ICON_FA_I_CURSOR "  Rename", Command::RenameField);
         ImGui::Separator();
         if (ImGui::BeginMenu(ICON_FA_EXCHANGE_ALT "  Type"))
         {
@@ -933,41 +1132,17 @@ namespace Manifold::UI
             ImGui::EndMenu();
         }
         ImGui::Separator();
-        const std::uint64_t address = addresses.empty() ? 0 : addresses.front();
-        ImGui::BeginDisabled(address == 0);
-        if (ImGui::MenuItem(ICON_FA_PLUS "  Add to the address list"))
-        {
-            Table::MemoryRecord& record = m_engine.Table().AddValue(field.Name, m_engine.Symbols().ModuleOffset(address), field.Type);
-            record.Length = field.Size;
-            record.Unicode = field.Unicode;
-            record.ShowHex = field.Display == Table::FieldDisplay::Hex;
-            record.CustomTypeName = field.CustomType;
-            if (field.Type == Scan::ValueType::Binary)
-            {
-                record.BitStart = field.BitStart;
-                record.BitLength = field.BitLength;
-            }
-            m_engine.RefreshValues(true);
-        }
-        if (ImGui::MenuItem(ICON_FA_MEMORY "  Browse this memory"))
-            m_workspace.OpenMemoryViewer(address, true);
-        if (ImGui::MenuItem(ICON_FA_EYE "  Find out what accesses this field"))
-            m_workspace.StartWatch(Debug::WatchKind::Accesses, address, std::min(8, std::max(1, field.Size)));
-        if (ImGui::MenuItem(ICON_FA_PEN "  Find out what writes to this field"))
-            m_workspace.StartWatch(Debug::WatchKind::Writes, address, std::min(8, std::max(1, field.Size)));
+        ImGui::BeginDisabled(first == 0);
+        item(ICON_FA_PLUS "  Add to the address list", Command::FieldToAddressList);
+        item(ICON_FA_MEMORY "  Browse this memory", Command::BrowseField);
+        if (field.Type == Scan::ValueType::Pointer)
+            item(ICON_FA_ARROW_RIGHT "  Browse the memory it points to", Command::BrowseFieldPointer);
+        item(ICON_FA_EYE "  Find out what accesses this field", Command::FieldAccesses);
+        item(ICON_FA_PEN "  Find out what writes to this field", Command::FieldWrites);
         ImGui::EndDisabled();
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_PLUS "  Insert 4 bytes after"))
-        {
-            m_pendingStructure = definition.Name;
-            m_pendingOffset = field.Offset + field.Size;
-            m_pendingInsert = true;
-        }
-        if (DangerMenuItem(ICON_FA_TRASH "  Delete field"))
-        {
-            m_pendingStructure = definition.Name;
-            m_pendingOffset = field.Offset;
-            m_pendingInsert = false;
-        }
+        item(ICON_FA_PLUS "  Insert 4 bytes after", Command::InsertField);
+        if (DangerCommandItem(ICON_FA_TRASH "  Delete field", Command::DeleteField))
+            RunFieldCommand(Command::DeleteField, definition, field, first, path, pointerSize);
     }
 }

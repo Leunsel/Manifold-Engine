@@ -1,10 +1,12 @@
 #include "App/Application.h"
 
+#include "App/Commands.h"
 #include "App/CrashHandler.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
 #include "UI/LuaDialogs.h"
 #include "UI/Theme.h"
+#include "UI/Windows.h"
 
 #include "imgui.h"
 
@@ -38,6 +40,7 @@ namespace Manifold
             Settings settings;
             settings.Load(Paths::SettingsFile());
             ManifoldTheme::Configure(settings.Theme.Colors, settings.Theme.Sizes);
+            ApplyShortcutSettings(settings.Shortcuts);
             return settings;
         }
     }
@@ -133,6 +136,10 @@ namespace Manifold
                 m_workspace->OpenCodeDissect();
             else if (window == "asmsearch")
                 m_workspace->OpenAsmSearch();
+            else if (window == "shortcuts")
+                m_workspace->OpenShortcuts();
+            else if (window == "keyboard")
+                m_workspace->OpenSettings(UI::SettingsWindow::KeyboardPage);
             else if (window == "processes")
                 m_workspace->OpenProcessPicker();
             else if (window == "about")

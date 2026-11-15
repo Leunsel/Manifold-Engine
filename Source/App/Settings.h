@@ -68,6 +68,7 @@ namespace Manifold
         std::vector<std::string> RecentTables;
         std::string LastProcess;
         ThemeSettings Theme;
+        std::map<std::string, std::string> Shortcuts;
 
         bool Load(const std::filesystem::path& path);
         Status Save(const std::filesystem::path& path) const;

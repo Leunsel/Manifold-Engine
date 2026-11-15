@@ -28,17 +28,26 @@
     <Filter Include="Source\Scan">
       <UniqueIdentifier>{0F036376-D2E8-5DD5-8DC2-6D8E1FF89B4B}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Syscalls">
+      <UniqueIdentifier>{23E0D073-50CC-5169-821A-04C32F671AEC}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source\Table">
       <UniqueIdentifier>{BCBB4A0B-09B3-5523-8419-09DCDD32F877}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source\Target">
       <UniqueIdentifier>{FF59DD34-E865-52DD-BE8F-230722E791C0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Templates">
+      <UniqueIdentifier>{D2560125-9330-506A-806B-029D8F6DBB4F}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Tests">
       <UniqueIdentifier>{08C95972-B402-5B3A-A3B9-36F843A24550}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\Source\App\Commands.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Engine.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -81,6 +90,9 @@
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp">
+      <Filter>Source\Generated</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp">
       <Filter>Source\Generated</Filter>
     </ClCompile>
@@ -114,6 +126,9 @@
     <ClCompile Include="..\Source\Scan\ValueType.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Syscalls\Syscall.cpp">
+      <Filter>Source\Syscalls</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\AddressList.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
@@ -126,13 +141,34 @@
     <ClCompile Include="..\Source\Target\PatchScan.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\PdbSymbols.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\Process.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Symbols.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Templates\TemplateCheck.cpp">
+      <Filter>Source\Templates</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Templates\TemplateEngine.cpp">
+      <Filter>Source\Templates</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Templates\TemplateFiles.cpp">
+      <Filter>Source\Templates</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Templates\TemplateGenerator.cpp">
+      <Filter>Source\Templates</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp">
+      <Filter>Source\Templates</Filter>
+    </ClCompile>
     <ClCompile Include="..\Tests\AssemblerTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\CommandTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\CompatHarness.cpp">
@@ -148,6 +184,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\Main.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\TemplateTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\WatchStress.cpp">

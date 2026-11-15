@@ -4,6 +4,7 @@
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
 #include "UI/Fonts.h"
+#include "UI/Shortcuts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
@@ -180,11 +181,90 @@ namespace Manifold::UI
         ImGui::PopStyleVar();
         ImGui::EndGroup();
         StatusBar();
+        MainShortcuts();
 
         ValueDialog();
+        ResultValueDialog();
         AddAddressDialog();
         DescriptionDialog();
         ImGui::End();
+    }
+
+    void MainWindow::MainShortcuts()
+    {
+        Engine& engine = m_engine;
+        Scan::Scanner& scanner = engine.Scanner();
+        const bool scannerShown = !engine.Options().CompactMode;
+        if (Pressed(Command::NewTable))
+            m_workspace.NewTable();
+        if (Pressed(Command::OpenLastProcess))
+            m_workspace.OpenLastProcess();
+        if (Pressed(Command::DeactivateAll))
+            m_workspace.TurnOffEverything();
+        if (Pressed(Command::CompactMode))
+            ToggleCompactMode();
+        if (Pressed(Command::ReleaseMode))
+            ToggleReleaseMode();
+        if (Pressed(Command::FocusScanValue) && scannerShown)
+            m_focusValue = true;
+        if (Pressed(Command::FirstScan) && scannerShown && !scanner.Busy())
+        {
+            if (scanner.HasResults())
+                DoNextScan();
+            else
+                DoFirstScan();
+        }
+        if (Pressed(Command::NewScan) && scannerShown && !scanner.Busy() && scanner.HasResults())
+            NewScan();
+        if (Pressed(Command::UndoScan) && scannerShown && !scanner.Busy() && scanner.CanUndo())
+            scanner.Undo();
+        if (m_release)
+            return;
+        if (Pressed(Command::TableLuaScript))
+            m_workspace.OpenScript(engine.Table().TableLuaScript, kTableLuaScript, true);
+        if (Pressed(Command::TableFiles))
+            m_workspace.OpenTableFiles();
+        if (Pressed(Command::AddAddress))
+            OpenAddDialog();
+        if (Pressed(Command::AddGroup))
+            engine.Table().AddGroup("Group");
+        if (Pressed(Command::AddScript))
+            AddScriptRecord();
+    }
+
+    void MainWindow::ToggleCompactMode()
+    {
+        Settings& options = m_engine.Options();
+        options.CompactMode = !options.CompactMode;
+        SaveOptions();
+    }
+
+    void MainWindow::ToggleReleaseMode()
+    {
+        Settings& options = m_engine.Options();
+        options.ReleaseMode = !options.ReleaseMode;
+        SaveOptions();
+    }
+
+    void MainWindow::OpenAddDialog()
+    {
+        m_addDialog = true;
+        m_addAddress.clear();
+        m_addDescription = "No description";
+    }
+
+    void MainWindow::AddScriptRecord()
+    {
+        Table::MemoryRecord& record = m_engine.Table().AddScript("Auto Assemble script", Asm::CheatTableTemplate());
+        m_workspace.OpenScript(record.Script, record.Id);
+    }
+
+    void MainWindow::NewScan()
+    {
+        m_engine.Scanner().Reset();
+        m_selectedResults.clear();
+        if (!Scan::CompareAllowedFirst(kCompares[m_compareIndex]))
+            m_compareIndex = 0;
     }
 
     void MainWindow::TitleBar()
@@ -218,28 +298,23 @@ namespace Manifold::UI
         ImGui::PushStyleColor(ImGuiCol_Header, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.18f));
         ImGui::PushStyleColor(ImGuiCol_MenuBarBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         const float menusStart = ImGui::GetCursorPosX();
-        ImGui::BeginChild("##menus", ImVec2(Px(440.0f), menuHeight), ImGuiChildFlags_None, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
+        ImGui::BeginChild("##menus", ImVec2(Px(540.0f), menuHeight), ImGuiChildFlags_None, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
         ImGui::PopStyleVar();
         float menusEnd = origin.x + menusStart;
 
         Engine& engine = m_engine;
         Workspace& workspace = m_workspace;
         const bool hasProcess = engine.HasProcess();
+        Table::AddressList& list = engine.Table();
         ImGui::BeginMenuBar();
         if (ImGui::BeginMenu("File"))
         {
-            if (ImGui::MenuItem(ICON_FA_FILE "  New table", "Ctrl+N"))
+            if (CommandItem(ICON_FA_FILE "  New table", Command::NewTable))
                 workspace.NewTable();
-            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open table...", "Ctrl+O"))
-            {
-                if (const auto path = workspace.OpenFileDialog({ { L"Cheat tables (*.CT)", L"*.CT;*.ct" }, { L"All files", L"*.*" } }, Paths::TablesFolder()))
-                    workspace.OpenTable(*path, false);
-            }
+            if (CommandItem(ICON_FA_FOLDER_OPEN "  Open table...", Command::OpenTable))
+                workspace.OpenTableDialog(false);
             if (!m_release && ImGui::MenuItem(ICON_FA_OBJECT_GROUP "  Merge table..."))
-            {
-                if (const auto path = workspace.OpenFileDialog({ { L"Cheat tables (*.CT)", L"*.CT;*.ct" } }, Paths::TablesFolder()))
-                    workspace.OpenTable(*path, true);
-            }
+                workspace.OpenTableDialog(true);
             if (ImGui::BeginMenu(ICON_FA_HISTORY "  Recent tables", !engine.Options().RecentTables.empty()))
             {
                 const std::vector<std::string> recent = engine.Options().RecentTables;
@@ -250,108 +325,98 @@ namespace Manifold::UI
                 }
                 ImGui::EndMenu();
             }
-            if (ImGui::MenuItem(ICON_FA_SAVE "  Save", "Ctrl+S"))
+            if (CommandItem(ICON_FA_SAVE "  Save", Command::SaveTable))
                 workspace.SaveTable(false);
-            if (ImGui::MenuItem(ICON_FA_SAVE "  Save as...", "Ctrl+Shift+S"))
+            if (CommandItem(ICON_FA_SAVE "  Save as...", Command::SaveTableAs))
                 workspace.SaveTable(true);
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_DESKTOP "  Open process...", "Ctrl+P"))
-                workspace.OpenProcessPicker();
-            if (ImGui::MenuItem(ICON_FA_TIMES "  Close process", nullptr, false, hasProcess))
-                engine.CloseProcess();
-            ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_COG "  Settings"))
-                workspace.OpenSettings();
             if (ImGui::MenuItem(ICON_FA_SIGN_OUT_ALT "  Exit"))
                 workspace.RequestQuit();
             ImGui::EndMenu();
         }
-        if (!m_release && ImGui::BeginMenu("Edit"))
+        if (ImGui::BeginMenu("Edit"))
         {
-            if (ImGui::MenuItem(ICON_FA_UNDO "  Undo last scan", nullptr, false, engine.Scanner().CanUndo()))
-                engine.Scanner().Undo();
-            ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy records", "Ctrl+C", false, !engine.Table().Selection().empty()))
-                workspace.CopyRecords(engine.Table().Selection());
-            if (ImGui::MenuItem(ICON_FA_PASTE "  Paste records", "Ctrl+V"))
-                workspace.PasteRecords(0);
-            if (ImGui::MenuItem(ICON_FA_CHECK_DOUBLE "  Select all records", "Ctrl+A"))
+            if (!m_release)
             {
-                engine.Table().ClearSelection();
-                engine.Table().ForEach([&](Table::MemoryRecord& record) { engine.Table().Select(record.Id, true); });
+                if (CommandItem(ICON_FA_UNDO "  Undo last scan", Command::UndoScan, false, engine.Scanner().CanUndo() && !engine.Scanner().Busy()))
+                    engine.Scanner().Undo();
+                if (CommandItem(ICON_FA_UNDO_ALT "  Undo last value change", Command::UndoRecordValue, false, !m_valueUndo.empty()))
+                    UndoValueChange();
+                ImGui::Separator();
+                const bool selection = !list.Selection().empty();
+                if (CommandItem(ICON_FA_CUT "  Cut records", Command::CutRecords, false, selection))
+                    RunRecordCommand(Command::CutRecords, nullptr);
+                if (CommandItem(ICON_FA_COPY "  Copy records", Command::CopyRecords, false, selection))
+                    RunRecordCommand(Command::CopyRecords, nullptr);
+                if (CommandItem(ICON_FA_PASTE "  Paste records", Command::PasteRecords))
+                    RunRecordCommand(Command::PasteRecords, nullptr);
+                if (CommandItem(ICON_FA_CHECK_DOUBLE "  Select all records", Command::SelectAllRecords))
+                    RunRecordCommand(Command::SelectAllRecords, nullptr);
+                if (DangerCommandItem(ICON_FA_TRASH "  Delete records", Command::DeleteRecords, selection))
+                    RunRecordCommand(Command::DeleteRecords, nullptr);
+                ImGui::Separator();
             }
+            if (CommandItem(ICON_FA_COG "  Settings", Command::OpenSettings))
+                workspace.OpenSettings();
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Process"))
+        {
+            if (CommandItem(ICON_FA_DESKTOP "  Open process...", Command::OpenProcess))
+                workspace.OpenProcessPicker();
+            const std::string& last = engine.Options().LastProcess;
+            const std::string lastLabel = ICON_FA_HISTORY "  Open " + (last.empty() ? std::string("the last process") : last);
+            if (CommandItem(lastLabel.c_str(), Command::OpenLastProcess, false, workspace.CanOpenLastProcess()))
+                workspace.OpenLastProcess();
+            if (ImGui::MenuItem(ICON_FA_TIMES "  Close process", nullptr, false, hasProcess))
+                engine.CloseProcess();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Table"))
         {
             if (!m_release)
             {
-                if (ImGui::MenuItem(ICON_FA_PLUS "  Add address manually"))
-                {
-                    m_addDialog = true;
-                    m_addAddress.clear();
-                    m_addDescription = "No description";
-                }
-                if (ImGui::MenuItem(ICON_FA_FOLDER_PLUS "  Add group"))
-                    engine.Table().AddGroup("Group");
-                if (ImGui::MenuItem(ICON_FA_CODE "  Add Auto Assembler script"))
-                {
-                    Table::MemoryRecord& record = engine.Table().AddScript("Auto Assemble script", Asm::CheatTableTemplate());
-                    workspace.OpenScript(record.Script, record.Id);
-                }
+                if (CommandItem(ICON_FA_PLUS "  Add address manually", Command::AddAddress))
+                    OpenAddDialog();
+                if (CommandItem(ICON_FA_FOLDER_PLUS "  Add group", Command::AddGroup))
+                    list.AddGroup("Group");
+                if (CommandItem(ICON_FA_CODE "  Add Auto Assembler script", Command::AddScript))
+                    AddScriptRecord();
                 ImGui::Separator();
-                if (ImGui::MenuItem(ICON_FA_SCROLL "  Table Lua script"))
-                    workspace.OpenScript(engine.Table().TableLuaScript, -1, true);
-                if (ImGui::MenuItem(ICON_FA_FILE_ARCHIVE "  Table files", nullptr, false, true))
+                if (CommandItem(ICON_FA_SCROLL "  Table Lua script", Command::TableLuaScript))
+                    workspace.OpenScript(list.TableLuaScript, kTableLuaScript, true);
+                if (CommandItem(ICON_FA_FILE_ARCHIVE "  Table files", Command::TableFiles))
                     workspace.OpenTableFiles();
+                ImGui::Separator();
             }
-            if (ImGui::MenuItem(ICON_FA_TOGGLE_OFF "  Deactivate all records"))
+            if (CommandItem(ICON_FA_TOGGLE_OFF "  Deactivate all records", Command::DeactivateAll))
                 workspace.TurnOffEverything();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View"))
         {
             Settings& options = engine.Options();
-            if (ImGui::MenuItem(ICON_FA_COMPRESS_ALT "  Compact mode", nullptr, options.CompactMode))
-            {
-                options.CompactMode = !options.CompactMode;
-                SaveOptions();
-            }
+            if (CommandItem(ICON_FA_COMPRESS_ALT "  Compact mode", Command::CompactMode, options.CompactMode))
+                ToggleCompactMode();
             ItemTooltip("Only the address list, without the scanner");
-            if (ImGui::MenuItem(ICON_FA_GAMEPAD "  Release mode", nullptr, options.ReleaseMode))
-            {
-                options.ReleaseMode = !options.ReleaseMode;
-                SaveOptions();
-            }
+            if (CommandItem(ICON_FA_GAMEPAD "  Release mode", Command::ReleaseMode, options.ReleaseMode))
+                ToggleReleaseMode();
             ItemTooltip("Hides addresses, types and the developer tools, so a table is simple to use. Turn it off here again.");
             ImGui::EndMenu();
         }
         if (!m_release && ImGui::BeginMenu("Tools"))
         {
-            if (ImGui::MenuItem(ICON_FA_MEMORY "  Memory viewer", "Ctrl+M"))
+            if (CommandItem(ICON_FA_MEMORY "  Memory viewer", Command::OpenMemoryViewer))
                 workspace.OpenMemoryViewer(0);
             if (ImGui::MenuItem(ICON_FA_CLONE "  New memory viewer window"))
                 workspace.OpenMemoryViewer(0, false, true);
-            if (ImGui::MenuItem(ICON_FA_SITEMAP "  Structure dissect"))
+            if (CommandItem(ICON_FA_SITEMAP "  Structure dissect", Command::OpenStructureDissect))
                 workspace.OpenStructure(0);
-            if (ImGui::MenuItem(ICON_FA_CODE "  Auto Assembler"))
+            if (CommandItem(ICON_FA_CODE "  Auto Assembler", Command::OpenAutoAssembler))
                 workspace.OpenScript(Asm::CheatTableTemplate());
-            if (ImGui::MenuItem(ICON_FA_MOON "  Lua engine", "Ctrl+L"))
+            if (CommandItem(ICON_FA_MOON "  Lua engine", Command::OpenLuaEngine))
                 workspace.OpenLua();
-            ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_TAGS "  Symbols and modules"))
-                workspace.OpenSymbols();
-            if (ImGui::MenuItem(ICON_FA_TH_LIST "  Memory regions", nullptr, false, hasProcess))
-                workspace.OpenRegions();
-            if (ImGui::MenuItem(ICON_FA_BAND_AID "  Scan for patches", nullptr, false, hasProcess))
-                workspace.OpenPatchScan();
-            if (ImGui::MenuItem(ICON_FA_PROJECT_DIAGRAM "  Dissect code", nullptr, false, hasProcess))
-                workspace.OpenCodeDissect(CodeDissectWindow::Functions);
-            if (ImGui::MenuItem(ICON_FA_QUOTE_LEFT "  Referenced strings", nullptr, false, hasProcess))
-                workspace.OpenCodeDissect(CodeDissectWindow::Strings);
-            if (ImGui::MenuItem(ICON_FA_SEARCH_LOCATION "  Find assembly code", nullptr, false, hasProcess))
-                workspace.OpenAsmSearch();
-            if (ImGui::MenuItem(ICON_FA_STREAM "  Log"))
+            if (CommandItem(ICON_FA_STREAM "  Log", Command::OpenLog))
                 workspace.OpenLog();
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_PLAY "  Run autorun scripts again"))
@@ -362,30 +427,21 @@ namespace Manifold::UI
                 std::filesystem::create_directories(Paths::AutorunFolder(), ignored);
                 ::ShellExecuteW(nullptr, L"open", Paths::AutorunFolder().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             }
-            ImGui::EndMenu();
-        }
-        if (!m_release && ImGui::BeginMenu("Debug"))
-        {
-            Debug::Debugger& debugger = engine.Debugger();
-            if (ImGui::MenuItem(ICON_FA_BUG "  Attach debugger", nullptr, false, hasProcess && !debugger.Attached()))
-                workspace.Report(engine.EnsureDebugger());
-            if (ImGui::MenuItem(ICON_FA_UNLINK "  Detach debugger", nullptr, false, debugger.Attached()))
-                debugger.Detach();
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_PAUSE "  Break", nullptr, false, debugger.Attached() && !debugger.Broken()))
-                workspace.Report(debugger.BreakNow());
-            if (ImGui::MenuItem(ICON_FA_PLAY "  Run", "F9", false, debugger.Broken()))
-                debugger.Resume(Debug::ResumeMode::Continue);
+            SectionLabel("Code, memory and debugger tools are in the memory viewer's menus");
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Help"))
         {
-            if (ImGui::MenuItem(ICON_FA_INFO_CIRCLE "  About"))
-                workspace.OpenAbout();
+            if (CommandItem(ICON_FA_KEYBOARD "  Keyboard shortcuts", Command::OpenShortcuts))
+                workspace.OpenShortcuts();
             if (!m_release && ImGui::MenuItem(ICON_FA_LIST_OL "  Error codes"))
                 workspace.OpenLog();
             if (!Target::IsElevated() && ImGui::MenuItem(ICON_FA_SHIELD_ALT "  Restart as administrator"))
                 workspace.Window().RestartElevated();
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_INFO_CIRCLE "  About"))
+                workspace.OpenAbout();
             ImGui::EndMenu();
         }
         menusEnd = ImGui::GetItemRectMax().x;
@@ -418,7 +474,7 @@ namespace Manifold::UI
         const bool hasProcess = engine.HasProcess();
         if (hasProcess ? ImGui::Button(ICON_FA_DESKTOP "  Process") : AccentButton(ICON_FA_DESKTOP "  Open process"))
             m_workspace.OpenProcessPicker();
-        ItemTooltip("Pick the process to work on (Ctrl+P)");
+        ItemTooltip(WithKeys("Pick the process to work on", Command::OpenProcess).c_str());
         ImGui::SameLine(0.0f, Px(12.0f));
         if (hasProcess)
         {
@@ -451,7 +507,7 @@ namespace Manifold::UI
         ImGui::SetCursorPos(ImVec2(x, y));
         if (ImGui::Button(ICON_FA_MEMORY "  Memory view"))
             m_workspace.OpenMemoryViewer(0);
-        ItemTooltip("Disassembler and hex view of the process (Ctrl+M)");
+        ItemTooltip(WithKeys("Disassembler and hex view of the process", Command::OpenMemoryViewer).c_str());
         if (!debugText.empty())
         {
             const float textWidth = ImGui::CalcTextSize(debugText.c_str()).x;
@@ -594,28 +650,9 @@ namespace Manifold::UI
                             m_selectedResults.clear();
                             m_selectedResults.insert(static_cast<std::uint64_t>(row));
                         }
-                        if (ImGui::MenuItem(ICON_FA_ARROW_DOWN "  Add selected to the address list"))
-                        {
-                            for (std::uint64_t index : m_selectedResults)
-                            {
-                                Scan::ScanRecord selectedRecord;
-                                if (scanner.Record(index, selectedRecord))
-                                    m_workspace.AddAddress(selectedRecord.Address, type);
-                            }
-                        }
-                        if (ImGui::MenuItem(ICON_FA_MEMORY "  Browse this memory region"))
-                            m_workspace.OpenMemoryViewer(record.Address, true);
-                        if (ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect data at this address"))
-                            m_workspace.OpenStructure(record.Address);
-                        ImGui::Separator();
-                        const int size = Scan::ValueSize(type, format);
-                        if (ImGui::MenuItem(ICON_FA_EYE "  Find out what accesses this address"))
-                            m_workspace.StartWatch(Debug::WatchKind::Accesses, record.Address, size);
-                        if (ImGui::MenuItem(ICON_FA_PEN "  Find out what writes to this address"))
-                            m_workspace.StartWatch(Debug::WatchKind::Writes, record.Address, size);
-                        ImGui::Separator();
-                        if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
-                            ImGui::SetClipboardText(Hex(record.Address).c_str());
+                        PopMono();
+                        ResultMenu(static_cast<std::uint64_t>(row));
+                        PushMono();
                         ImGui::EndPopup();
                     }
                     ImGui::SameLine();
@@ -651,19 +688,143 @@ namespace Manifold::UI
                     ImGui::PopStyleColor();
                 }
             }
-            if (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(ImGuiKey_Enter, false) && !m_selectedResults.empty())
+            for (const CommandInfo& info : AllCommands())
             {
-                for (std::uint64_t index : m_selectedResults)
-                {
-                    Scan::ScanRecord record;
-                    if (scanner.Record(index, record))
-                        m_workspace.AddAddress(record.Address, type);
-                }
+                if (info.Scope == CommandScope::ScanResults && Pressed(info.Id) && !m_selectedResults.empty())
+                    RunResultCommand(info.Id, m_selectedResults.count(m_lastClickedResult) ? m_lastClickedResult : *m_selectedResults.begin());
             }
             ImGui::EndTable();
         }
         PopMono();
         EndCard();
+    }
+
+    void MainWindow::ResultMenu(std::uint64_t index)
+    {
+        if (CommandItem(ICON_FA_ARROW_DOWN "  Add selected to the address list", Command::AddResults))
+            RunResultCommand(Command::AddResults, index);
+        if (!m_release && CommandItem(ICON_FA_EDIT "  Change the value of the selected results", Command::ChangeResultValue))
+            RunResultCommand(Command::ChangeResultValue, index);
+        if (m_release)
+            return;
+        ImGui::Separator();
+        if (CommandItem(ICON_FA_MEMORY "  Browse this memory region", Command::BrowseResult))
+            RunResultCommand(Command::BrowseResult, index);
+        if (CommandItem(ICON_FA_CODE "  Disassemble this memory region", Command::DisassembleResult))
+            RunResultCommand(Command::DisassembleResult, index);
+        if (CommandItem(ICON_FA_SITEMAP "  Dissect data at this address", Command::DissectResult))
+            RunResultCommand(Command::DissectResult, index);
+        ImGui::Separator();
+        if (CommandItem(ICON_FA_EYE "  Find out what accesses this address", Command::ResultAccesses))
+            RunResultCommand(Command::ResultAccesses, index);
+        if (CommandItem(ICON_FA_PEN "  Find out what writes to this address", Command::ResultWrites))
+            RunResultCommand(Command::ResultWrites, index);
+        ImGui::Separator();
+        if (CommandItem(ICON_FA_COPY "  Copy the selected addresses", Command::CopyResults))
+            RunResultCommand(Command::CopyResults, index);
+        if (CommandItem(ICON_FA_CHECK_DOUBLE "  Select all results", Command::SelectAllResults))
+            RunResultCommand(Command::SelectAllResults, index);
+    }
+
+    void MainWindow::RunResultCommand(Command command, std::uint64_t index)
+    {
+        Scan::Scanner& scanner = m_engine.Scanner();
+        const Scan::ValueType type = scanner.Type();
+        Scan::ScanRecord focus;
+        if (!scanner.Record(index, focus))
+            return;
+        const auto addresses = [&]()
+            {
+                std::vector<std::uint64_t> found;
+                for (std::uint64_t selected : m_selectedResults)
+                {
+                    Scan::ScanRecord record;
+                    if (scanner.Record(selected, record))
+                        found.push_back(record.Address);
+                }
+                return found;
+            };
+        const int size = Scan::ValueSize(type, scanner.Format());
+        if (m_release && command != Command::AddResults && command != Command::SelectAllResults)
+            return;
+        switch (command)
+        {
+        case Command::AddResults:
+            for (std::uint64_t address : addresses())
+                m_workspace.AddAddress(address, type);
+            break;
+        case Command::ChangeResultValue:
+            m_resultValueTargets = addresses();
+            m_resultValueText = m_liveValues.count(index) && m_liveValues[index] != "??" ? m_liveValues[index] : "";
+            m_resultValueDialog = true;
+            break;
+        case Command::BrowseResult: m_workspace.OpenMemoryViewer(focus.Address, true); break;
+        case Command::DisassembleResult: m_workspace.OpenMemoryViewer(focus.Address, false); break;
+        case Command::DissectResult: m_workspace.OpenStructure(focus.Address); break;
+        case Command::ResultAccesses: m_workspace.StartWatch(Debug::WatchKind::Accesses, focus.Address, size); break;
+        case Command::ResultWrites: m_workspace.StartWatch(Debug::WatchKind::Writes, focus.Address, size); break;
+        case Command::CopyResults:
+        {
+            std::string text;
+            for (std::uint64_t address : addresses())
+                text += Hex(address) + "\n";
+            ImGui::SetClipboardText(text.c_str());
+            break;
+        }
+        case Command::SelectAllResults:
+        {
+            const std::uint64_t count = std::min<std::uint64_t>(scanner.Count(), 100000);
+            for (std::uint64_t i = 0; i < count; ++i)
+                m_selectedResults.insert(i);
+            if (scanner.Count() > count)
+                m_engine.Notify(LogLevel::Info, "Selected the first " + Grouped(count) + " results.");
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    void MainWindow::ResultValueDialog()
+    {
+        if (m_resultValueDialog)
+        {
+            ImGui::OpenPopup("Change value##results");
+            m_resultValueDialog = false;
+        }
+        if (!BeginModal("Change value##results", ICON_FA_EDIT, "Change value", ImVec2(380.0f, 0.0f)))
+            return;
+        Scan::Scanner& scanner = m_engine.Scanner();
+        Muted(std::to_string(m_resultValueTargets.size()) + (m_resultValueTargets.size() == 1 ? " result, " : " results, ") + Scan::TypeName(scanner.Type()));
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(-1.0f);
+        const bool apply = InputText("##resultvalue", m_resultValueText, ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::Spacing();
+        if (AccentButton("OK", Px(90.0f, 0.0f)) || apply)
+        {
+            const auto bytes = Scan::ParseValue(scanner.Type(), m_resultValueText, scanner.Format());
+            if (!bytes)
+                m_workspace.Report(Status::Fail(ErrorCode::ScanBadValue, m_resultValueText));
+            else if (m_engine.HasProcess())
+            {
+                for (std::uint64_t address : m_resultValueTargets)
+                {
+                    const Status status = m_engine.Process()->Write(address, *bytes);
+                    if (!status)
+                    {
+                        m_workspace.Report(status);
+                        break;
+                    }
+                }
+                m_liveValues.clear();
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", Px(90.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            ImGui::CloseCurrentPopup();
+        EndModal();
     }
 
     Scan::ScanOptions MainWindow::CurrentOptions() const
@@ -735,20 +896,22 @@ namespace Manifold::UI
         }
         else if (ImGui::Button(ICON_FA_REDO "  New scan", ImVec2(buttonWidth, 0.0f)))
         {
-            scanner.Reset();
-            m_selectedResults.clear();
-            if (!Scan::CompareAllowedFirst(kCompares[m_compareIndex]))
-                m_compareIndex = 0;
+            NewScan();
         }
+        ItemTooltip(scanned ? WithKeys("Forget the results and start over", Command::NewScan).c_str() : WithKeys("Scan the memory for the value", Command::FirstScan).c_str());
         ImGui::SameLine();
         ImGui::BeginDisabled(!scanned);
         if ((scanned ? AccentButton(ICON_FA_FILTER "  Next scan", ImVec2(buttonWidth, 0.0f)) : ImGui::Button(ICON_FA_FILTER "  Next scan", ImVec2(buttonWidth, 0.0f))))
             DoNextScan();
+        if (scanned)
+            ItemTooltip(WithKeys("Keep the results that match", Command::FirstScan).c_str());
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::BeginDisabled(!scanner.CanUndo());
         if (ImGui::Button(ICON_FA_UNDO "  Undo scan", ImVec2(buttonWidth, 0.0f)))
             scanner.Undo();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", WithKeys("Go back to the results before the last scan", Command::UndoScan).c_str());
         ImGui::EndDisabled();
         ImGui::EndDisabled();
 
@@ -938,23 +1101,16 @@ namespace Manifold::UI
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.16f));
             ImGui::SameLine(0.0f, Px(16.0f));
             if (ImGui::Button(ICON_FA_PLUS "  Address"))
-            {
-                m_addDialog = true;
-                m_addAddress.clear();
-                m_addDescription = "No description";
-            }
-            ItemTooltip("Add an address by hand");
+                OpenAddDialog();
+            ItemTooltip(WithKeys("Add an address by hand", Command::AddAddress).c_str());
             ImGui::SameLine(0.0f, Px(4.0f));
             if (ImGui::Button(ICON_FA_FOLDER_PLUS "  Group"))
                 list.AddGroup("Group");
-            ItemTooltip("Add an empty group");
+            ItemTooltip(WithKeys("Add an empty group", Command::AddGroup).c_str());
             ImGui::SameLine(0.0f, Px(4.0f));
             if (ImGui::Button(ICON_FA_CODE "  Script"))
-            {
-                Table::MemoryRecord& record = list.AddScript("Auto Assemble script", Asm::CheatTableTemplate());
-                m_workspace.OpenScript(record.Script, record.Id);
-            }
-            ItemTooltip("Add an Auto Assembler script");
+                AddScriptRecord();
+            ItemTooltip(WithKeys("Add an Auto Assembler script", Command::AddScript).c_str());
             ImGui::PopStyleColor(3);
         }
         const float filterWidth = Px(180.0f);
@@ -966,10 +1122,10 @@ namespace Manifold::UI
         ProgressLine(groupsX - Px(12.0f));
         ImGui::SameLine();
         ImGui::SetCursorPosX(groupsX);
-        if (IconButton(ICON_FA_EXPAND_ALT, "Expand every group"))
+        if (IconButton(ICON_FA_EXPAND_ALT, WithKeys("Expand every group", Command::ExpandGroups).c_str()))
             list.ForEach([](Table::MemoryRecord& record) { if (!record.Children.empty()) record.Expanded = true; });
         ImGui::SameLine(0.0f, gap);
-        if (IconButton(ICON_FA_COMPRESS_ALT, "Collapse every group"))
+        if (IconButton(ICON_FA_COMPRESS_ALT, WithKeys("Collapse every group", Command::CollapseGroups).c_str()))
             list.ForEach([](Table::MemoryRecord& record) { if (!record.Children.empty()) record.Expanded = false; });
         ImGui::SameLine();
         ImGui::SetCursorPosX(filterX);
@@ -1004,21 +1160,19 @@ namespace Manifold::UI
         const auto listMenu = [&](bool open) {
             if (!open)
                 return;
-            if (ImGui::MenuItem(ICON_FA_PLUS "  Add address manually"))
-            {
-                m_addDialog = true;
-                m_addAddress.clear();
-                m_addDescription = "No description";
-            }
-            if (ImGui::MenuItem(ICON_FA_FOLDER_PLUS "  Add group"))
+            if (CommandItem(ICON_FA_PLUS "  Add address manually", Command::AddAddress))
+                OpenAddDialog();
+            if (CommandItem(ICON_FA_FOLDER_PLUS "  Add group", Command::AddGroup))
                 list.AddGroup("Group");
-            if (ImGui::MenuItem(ICON_FA_PASTE "  Paste", "Ctrl+V"))
-                m_workspace.PasteRecords(0);
+            if (CommandItem(ICON_FA_CODE "  Add Auto Assembler script", Command::AddScript))
+                AddScriptRecord();
+            if (CommandItem(ICON_FA_PASTE "  Paste", Command::PasteRecords))
+                RunRecordCommand(Command::PasteRecords, nullptr);
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_EXPAND_ALT "  Expand every group"))
-                list.ForEach([](Table::MemoryRecord& record) { if (!record.Children.empty()) record.Expanded = true; });
-            if (ImGui::MenuItem(ICON_FA_COMPRESS_ALT "  Collapse every group"))
-                list.ForEach([](Table::MemoryRecord& record) { if (!record.Children.empty()) record.Expanded = false; });
+            if (CommandItem(ICON_FA_EXPAND_ALT "  Expand every group", Command::ExpandGroups))
+                RunRecordCommand(Command::ExpandGroups, nullptr);
+            if (CommandItem(ICON_FA_COMPRESS_ALT "  Collapse every group", Command::CollapseGroups))
+                RunRecordCommand(Command::CollapseGroups, nullptr);
             ImGui::EndPopup();
         };
 
@@ -1046,7 +1200,7 @@ namespace Manifold::UI
                 m_recentExists = !last.empty() && std::filesystem::exists(Utf8ToWide(last), error);
             }
             std::vector<EmptyAction> actions;
-            actions.push_back({ ICON_FA_FOLDER_OPEN "  Open table", "Ctrl+O" });
+            actions.push_back({ ICON_FA_FOLDER_OPEN "  Open table", ShortcutText(Command::OpenTable) });
             if (!m_release)
                 actions.push_back({ ICON_FA_PLUS "  Add address" });
             if (m_recentExists)
@@ -1064,9 +1218,7 @@ namespace Manifold::UI
             }
             else if (clicked == 1)
             {
-                m_addDialog = true;
-                m_addAddress.clear();
-                m_addDescription = "No description";
+                OpenAddDialog();
             }
             if (!m_release)
                 listMenu(ImGui::BeginPopupContextWindow("##listmenu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems));
@@ -1115,50 +1267,250 @@ namespace Manifold::UI
                 paintStickyHeader();
         }
 
-        const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && !ImGui::GetIO().WantTextInput;
-        if (focused)
-        {
-            auto selected = SelectedRecords();
-            if (ImGui::IsKeyPressed(ImGuiKey_Space, false) && !selected.empty())
-            {
-                const bool target = !selected.front()->Active;
-                for (Table::MemoryRecord* record : selected)
-                    engine.RequestActive(*record, target);
-            }
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && !ImGui::GetIO().WantTextInput)
             ListKeys();
-            if (!m_release && ImGui::IsKeyPressed(ImGuiKey_Delete, false) && !selected.empty())
-            {
-                std::vector<int> ids = list.Selection();
-                m_workspace.Confirm("Delete records", "Delete " + std::to_string(ids.size()) + (ids.size() == 1 ? " record" : " records") + " and their children?", [this, ids]()
-                    {
-                        for (int id : ids)
-                        {
-                            if (Table::MemoryRecord* record = m_engine.Table().FindById(id))
-                            {
-                                if (record->Active && record->Kind == Table::RecordKind::Script)
-                                    m_workspace.Report(m_engine.SetActive(*record, false));
-                                m_engine.Table().Remove(*record);
-                            }
-                        }
-                    }, "Delete");
-            }
-            if (!m_release && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false))
-                m_workspace.CopyRecords(list.Selection());
-            if (!m_release && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false))
-                m_workspace.PasteRecords(0);
-            if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false))
-            {
-                list.ClearSelection();
-                list.ForEach([&](Table::MemoryRecord& record) { list.Select(record.Id, true); });
-            }
-            if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && !selected.empty() && !engine.Lua().AddressListEvent("onvaluechange", selected.front()))
-            {
-                m_valueTargets = list.Selection();
-                m_valueText = selected.front()->ValueText;
-                m_valueDialog = true;
-            }
+        Table::MemoryRecord* focus = FocusRecord();
+        for (const CommandInfo& info : AllCommands())
+        {
+            if (info.Scope == CommandScope::AddressList && Pressed(info.Id))
+                RunRecordCommand(info.Id, focus);
         }
         EndCard();
+    }
+
+    Table::MemoryRecord* MainWindow::FocusRecord()
+    {
+        Table::AddressList& list = m_engine.Table();
+        if (m_lastClickedRecord >= 0 && list.Selected(m_lastClickedRecord))
+        {
+            if (Table::MemoryRecord* record = list.FindById(m_lastClickedRecord))
+                return record;
+        }
+        const std::vector<Table::MemoryRecord*> selected = SelectedRecords();
+        return selected.empty() ? nullptr : selected.front();
+    }
+
+    void MainWindow::WriteValues(const std::vector<int>& ids, const std::string& text)
+    {
+        Table::AddressList& list = m_engine.Table();
+        std::vector<ValueUndo> undo;
+        for (int id : ids)
+        {
+            Table::MemoryRecord* record = list.FindById(id);
+            if (!record || record->Kind != Table::RecordKind::Value)
+                continue;
+            const std::string before = record->ValueText;
+            const Status status = m_engine.WriteRecord(*record, text);
+            m_workspace.Report(status);
+            if (status && before != "??" && !before.empty())
+                undo.push_back({ id, before });
+        }
+        if (!undo.empty())
+            m_valueUndo = std::move(undo);
+        m_engine.RefreshValues(true);
+    }
+
+    void MainWindow::UndoValueChange()
+    {
+        if (m_valueUndo.empty())
+        {
+            m_engine.Notify(LogLevel::Info, "There is no value change to undo.");
+            return;
+        }
+        const std::vector<ValueUndo> undo = std::move(m_valueUndo);
+        m_valueUndo.clear();
+        for (const ValueUndo& entry : undo)
+        {
+            if (Table::MemoryRecord* record = m_engine.Table().FindById(entry.Id))
+                m_workspace.Report(m_engine.WriteRecord(*record, entry.Text));
+        }
+        m_engine.RefreshValues(true);
+    }
+
+    void MainWindow::DeleteSelectedRecords(bool ask)
+    {
+        const std::vector<int> ids = m_engine.Table().Selection();
+        if (ids.empty())
+            return;
+        const auto remove = [this, ids]()
+            {
+                for (int id : ids)
+                {
+                    if (Table::MemoryRecord* record = m_engine.Table().FindById(id))
+                    {
+                        if (record->Active && record->Kind == Table::RecordKind::Script)
+                            m_workspace.Report(m_engine.SetActive(*record, false));
+                        m_engine.Table().Remove(*record);
+                    }
+                }
+            };
+        if (!ask)
+        {
+            remove();
+            return;
+        }
+        m_workspace.Confirm("Delete records", "Delete " + std::to_string(ids.size()) + (ids.size() == 1 ? " record" : " records") + " and their children?", remove, "Delete");
+    }
+
+    void MainWindow::RunRecordCommand(Command command, Table::MemoryRecord* record)
+    {
+        Engine& engine = m_engine;
+        Table::AddressList& list = engine.Table();
+        const std::vector<Table::MemoryRecord*> selected = SelectedRecords();
+        const bool developer = !m_release;
+        const bool value = record && record->Kind == Table::RecordKind::Value;
+        const auto resolved = [&]() -> std::optional<std::uint64_t>
+            {
+                if (!value)
+                    return std::nullopt;
+                engine.ResolveRecord(*record);
+                if (!record->AddressOk)
+                    return std::nullopt;
+                return record->ResolvedAddress;
+            };
+        const auto freeze = [&](Table::FreezeMode mode)
+            {
+                for (Table::MemoryRecord* target : selected)
+                {
+                    if (target->Kind != Table::RecordKind::Value)
+                        continue;
+                    target->Freeze = mode;
+                    if (!target->Active)
+                        engine.RequestActive(*target, true);
+                }
+            };
+        switch (command)
+        {
+        case Command::ToggleRecords:
+            if (record)
+            {
+                const bool target = !record->Active;
+                for (Table::MemoryRecord* item : selected)
+                    engine.RequestActive(*item, target);
+            }
+            break;
+        case Command::ChangeRecordValue:
+            if (value && !engine.Lua().AddressListEvent("onvaluechange", record))
+            {
+                m_valueTargets = list.Selected(record->Id) ? list.Selection() : std::vector<int>{ record->Id };
+                m_valueText = record->ValueText == "??" ? "" : record->ValueText;
+                m_valueDialog = true;
+            }
+            break;
+        case Command::EditValueInline:
+            if (value)
+                StartInlineEdit(*record);
+            break;
+        case Command::FreezeAllowIncrease:
+            if (value)
+                freeze(Table::FreezeMode::AllowIncrease);
+            break;
+        case Command::FreezeAllowDecrease:
+            if (value)
+                freeze(Table::FreezeMode::AllowDecrease);
+            break;
+        case Command::UndoRecordValue:
+            if (developer)
+                UndoValueChange();
+            break;
+        case Command::SelectAllRecords:
+            list.ClearSelection();
+            list.ForEach([&](Table::MemoryRecord& item) { list.Select(item.Id, true); });
+            break;
+        default:
+            break;
+        }
+        if (!developer)
+            return;
+        switch (command)
+        {
+        case Command::ChangeDescription:
+            if (record && !engine.Lua().AddressListEvent("ondescriptionchange", record))
+            {
+                m_descriptionDialog = true;
+                m_descriptionTarget = record->Id;
+                m_descriptionText = record->Description;
+            }
+            break;
+        case Command::EditRecord:
+        case Command::AssignHotkey:
+            if (record)
+                m_workspace.OpenRecordEditor(record->Id);
+            break;
+        case Command::ShowAsHex:
+            if (value)
+            {
+                const bool target = !record->ShowHex;
+                for (Table::MemoryRecord* item : selected)
+                    item->ShowHex = target;
+                engine.RefreshValues(true);
+            }
+            break;
+        case Command::BrowseRecord:
+            if (const auto address = resolved())
+                m_workspace.OpenMemoryViewer(*address, true);
+            break;
+        case Command::DisassembleRecord:
+            if (const auto address = resolved())
+                m_workspace.OpenMemoryViewer(*address, false);
+            break;
+        case Command::DissectRecord:
+            if (const auto address = resolved())
+                m_workspace.OpenStructure(*address);
+            break;
+        case Command::RecordAccesses:
+        case Command::RecordWrites:
+            if (const auto address = resolved())
+                m_workspace.StartWatch(command == Command::RecordAccesses ? Debug::WatchKind::Accesses : Debug::WatchKind::Writes, *address,
+                    record->Size(engine.Process() ? engine.Process()->PointerSize() : 8));
+            break;
+        case Command::EditScript:
+            if (record && record->Kind == Table::RecordKind::Script && !TableHandlesScriptEdit(engine.Lua(), *record))
+                m_workspace.OpenScript(record->Script, record->Id);
+            break;
+        case Command::GroupRecords:
+            if (record)
+            {
+                Table::MemoryRecord* parent = record->Parent;
+                const int index = list.IndexOf(*record);
+                auto group = std::make_unique<Table::MemoryRecord>();
+                group->Kind = Table::RecordKind::Group;
+                group->Description = "Group";
+                Table::MemoryRecord& added = list.Add(std::move(group), parent, index);
+                for (Table::MemoryRecord* target : selected)
+                {
+                    if (target != &added && !added.IsDescendantOf(target))
+                        list.Move(*target, &added, -1);
+                }
+            }
+            break;
+        case Command::ExpandGroups:
+        case Command::CollapseGroups:
+        {
+            const bool expand = command == Command::ExpandGroups;
+            list.ForEach([expand](Table::MemoryRecord& item) { if (!item.Children.empty()) item.Expanded = expand; });
+            break;
+        }
+        case Command::CutRecords:
+            if (!list.Selection().empty())
+            {
+                m_workspace.CopyRecords(list.Selection());
+                DeleteSelectedRecords(false);
+            }
+            break;
+        case Command::CopyRecords:
+            if (!list.Selection().empty())
+                m_workspace.CopyRecords(list.Selection());
+            break;
+        case Command::PasteRecords:
+            m_workspace.PasteRecords(kNoRecord);
+            break;
+        case Command::DeleteRecords:
+            DeleteSelectedRecords(true);
+            break;
+        default:
+            break;
+        }
     }
 
     void MainWindow::RecordRow(Table::MemoryRecord& record, int depth, int& row, bool match)
@@ -1493,12 +1845,6 @@ namespace Manifold::UI
             target = 0;
         else if (ImGui::IsKeyPressed(ImGuiKey_End, false))
             target = last;
-        else if (current >= 0 && ImGui::IsKeyPressed(ImGuiKey_F2, false))
-        {
-            if (Table::MemoryRecord* record = list.FindById(m_rows[static_cast<std::size_t>(current)].Id))
-                StartInlineEdit(*record);
-            return;
-        }
         else if (current >= 0 && (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_RightArrow)))
         {
             Table::MemoryRecord* record = list.FindById(m_rows[static_cast<std::size_t>(current)].Id);
@@ -1561,14 +1907,7 @@ namespace Manifold::UI
         if (enter)
         {
             Table::AddressList& list = m_engine.Table();
-            const std::vector<int> targets = list.Selected(record.Id) ? list.Selection() : std::vector<int>{ record.Id };
-            for (int id : targets)
-            {
-                Table::MemoryRecord* target = list.FindById(id);
-                if (target && target->Kind == Table::RecordKind::Value)
-                    m_workspace.Report(m_engine.WriteRecord(*target, m_inlineText));
-            }
-            m_engine.RefreshValues(true);
+            WriteValues(list.Selected(record.Id) ? list.Selection() : std::vector<int>{ record.Id }, m_inlineText);
             m_inlineEdit = -1;
         }
         else if (deactivated)
@@ -1831,43 +2170,35 @@ namespace Manifold::UI
     void MainWindow::RecordMenu(Table::MemoryRecord& record)
     {
         Engine& engine = m_engine;
-        Table::AddressList& list = engine.Table();
         auto selected = SelectedRecords();
         ImGui::TextDisabled("%s", record.Description.c_str());
         ImGui::Separator();
-        if (ImGui::MenuItem(record.Active ? ICON_FA_TOGGLE_ON "  Deactivate" : ICON_FA_TOGGLE_OFF "  Activate", "Space"))
-        {
-            for (Table::MemoryRecord* target : selected)
-                engine.RequestActive(*target, !record.Active);
-        }
+        if (CommandItem(record.Active ? ICON_FA_TOGGLE_ON "  Deactivate" : ICON_FA_TOGGLE_OFF "  Activate", Command::ToggleRecords))
+            RunRecordCommand(Command::ToggleRecords, &record);
         if (m_release && record.Kind != Table::RecordKind::Value)
             return;
         if (record.Kind == Table::RecordKind::Value)
         {
-            if (ImGui::MenuItem(ICON_FA_EDIT "  Change value", "Enter") && !engine.Lua().AddressListEvent("onvaluechange", &record))
-            {
-                m_valueTargets = list.Selection();
-                m_valueText = record.ValueText == "??" ? "" : record.ValueText;
-                m_valueDialog = true;
-            }
+            if (CommandItem(ICON_FA_EDIT "  Change value", Command::ChangeRecordValue))
+                RunRecordCommand(Command::ChangeRecordValue, &record);
+            if (CommandItem(ICON_FA_I_CURSOR "  Edit the value in place", Command::EditValueInline))
+                RunRecordCommand(Command::EditValueInline, &record);
+            if (!m_release && CommandItem(ICON_FA_UNDO_ALT "  Undo last value change", Command::UndoRecordValue, false, !m_valueUndo.empty()))
+                RunRecordCommand(Command::UndoRecordValue, &record);
             if (ImGui::BeginMenu(ICON_FA_SNOWFLAKE "  Freeze mode"))
             {
                 if (ImGui::MenuItem("Normal", nullptr, record.Freeze == Table::FreezeMode::Normal))
                     for (auto* target : selected) target->Freeze = Table::FreezeMode::Normal;
-                if (ImGui::MenuItem("Allow increase", nullptr, record.Freeze == Table::FreezeMode::AllowIncrease))
+                if (CommandItem("Allow increase", Command::FreezeAllowIncrease, record.Freeze == Table::FreezeMode::AllowIncrease))
                     for (auto* target : selected) target->Freeze = Table::FreezeMode::AllowIncrease;
-                if (ImGui::MenuItem("Allow decrease", nullptr, record.Freeze == Table::FreezeMode::AllowDecrease))
+                if (CommandItem("Allow decrease", Command::FreezeAllowDecrease, record.Freeze == Table::FreezeMode::AllowDecrease))
                     for (auto* target : selected) target->Freeze = Table::FreezeMode::AllowDecrease;
                 ImGui::EndMenu();
             }
             if (m_release)
                 return;
-            if (ImGui::MenuItem(ICON_FA_HASHTAG "  Show as hexadecimal", nullptr, record.ShowHex))
-            {
-                for (auto* target : selected)
-                    target->ShowHex = !record.ShowHex;
-                engine.RefreshValues(true);
-            }
+            if (CommandItem(ICON_FA_HASHTAG "  Show as hexadecimal", Command::ShowAsHex, record.ShowHex))
+                RunRecordCommand(Command::ShowAsHex, &record);
             if (ImGui::MenuItem(ICON_FA_MINUS_CIRCLE "  Show as signed", nullptr, record.ShowSigned))
             {
                 for (auto* target : selected)
@@ -1888,16 +2219,14 @@ namespace Manifold::UI
                 ImGui::EndMenu();
             }
         }
-        if (record.Kind == Table::RecordKind::Script && ImGui::MenuItem(ICON_FA_CODE "  Edit script") && !TableHandlesScriptEdit(engine.Lua(), record))
-            m_workspace.OpenScript(record.Script, record.Id);
-        if (ImGui::MenuItem(ICON_FA_SLIDERS_H "  Edit record..."))
-            m_workspace.OpenRecordEditor(record.Id);
-        if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Change description") && !engine.Lua().AddressListEvent("ondescriptionchange", &record))
-        {
-            m_descriptionDialog = true;
-            m_descriptionTarget = record.Id;
-            m_descriptionText = record.Description;
-        }
+        if (record.Kind == Table::RecordKind::Script && CommandItem(ICON_FA_CODE "  Edit script", Command::EditScript))
+            RunRecordCommand(Command::EditScript, &record);
+        if (CommandItem(ICON_FA_SLIDERS_H "  Edit record...", Command::EditRecord))
+            RunRecordCommand(Command::EditRecord, &record);
+        if (CommandItem(ICON_FA_KEYBOARD "  Assign a hotkey...", Command::AssignHotkey))
+            RunRecordCommand(Command::AssignHotkey, &record);
+        if (CommandItem(ICON_FA_I_CURSOR "  Change description", Command::ChangeDescription))
+            RunRecordCommand(Command::ChangeDescription, &record);
         if (ImGui::BeginMenu(ICON_FA_SITEMAP "  Group options"))
         {
             ImGui::MenuItem("Hide children when deactivated", nullptr, &record.Options.HideChildren);
@@ -1908,59 +2237,38 @@ namespace Manifold::UI
             ImGui::MenuItem("Allow manual collapse and expand", nullptr, &record.Options.AllowManualExpand);
             ImGui::EndMenu();
         }
-        if (ImGui::MenuItem(ICON_FA_FOLDER_PLUS "  Put selected into a new group"))
-        {
-            Table::MemoryRecord* parent = record.Parent;
-            const int index = list.IndexOf(record);
-            auto group = std::make_unique<Table::MemoryRecord>();
-            group->Kind = Table::RecordKind::Group;
-            group->Description = "Group";
-            Table::MemoryRecord& added = list.Add(std::move(group), parent, index);
-            for (Table::MemoryRecord* target : selected)
-            {
-                if (target != &added && !added.IsDescendantOf(target))
-                    list.Move(*target, &added, -1);
-            }
-        }
+        if (CommandItem(ICON_FA_FOLDER_PLUS "  Put selected into a new group", Command::GroupRecords))
+            RunRecordCommand(Command::GroupRecords, &record);
         ImGui::Separator();
         if (record.Kind == Table::RecordKind::Value)
         {
             engine.ResolveRecord(record);
             ImGui::BeginDisabled(!record.AddressOk);
-            if (ImGui::MenuItem(ICON_FA_MEMORY "  Browse this memory region"))
-                m_workspace.OpenMemoryViewer(record.ResolvedAddress, true);
-            if (ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect data at this address"))
-                m_workspace.OpenStructure(record.ResolvedAddress);
-            const int size = record.Size(engine.Process() ? engine.Process()->PointerSize() : 8);
-            if (ImGui::MenuItem(ICON_FA_EYE "  Find out what accesses this address", "F5"))
-                m_workspace.StartWatch(Debug::WatchKind::Accesses, record.ResolvedAddress, size);
-            if (ImGui::MenuItem(ICON_FA_PEN "  Find out what writes to this address", "F6"))
-                m_workspace.StartWatch(Debug::WatchKind::Writes, record.ResolvedAddress, size);
+            if (CommandItem(ICON_FA_MEMORY "  Browse this memory region", Command::BrowseRecord))
+                RunRecordCommand(Command::BrowseRecord, &record);
+            if (CommandItem(ICON_FA_CODE "  Disassemble this memory region", Command::DisassembleRecord))
+                RunRecordCommand(Command::DisassembleRecord, &record);
+            if (CommandItem(ICON_FA_SITEMAP "  Dissect data at this address", Command::DissectRecord))
+                RunRecordCommand(Command::DissectRecord, &record);
+            if (CommandItem(ICON_FA_EYE "  Find out what accesses this address", Command::RecordAccesses))
+                RunRecordCommand(Command::RecordAccesses, &record);
+            if (CommandItem(ICON_FA_PEN "  Find out what writes to this address", Command::RecordWrites))
+                RunRecordCommand(Command::RecordWrites, &record);
             if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
                 ImGui::SetClipboardText(Hex(record.ResolvedAddress).c_str());
             ImGui::EndDisabled();
             ImGui::Separator();
         }
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy", "Ctrl+C"))
-            m_workspace.CopyRecords(list.Selection());
+        if (CommandItem(ICON_FA_CUT "  Cut", Command::CutRecords))
+            RunRecordCommand(Command::CutRecords, &record);
+        if (CommandItem(ICON_FA_COPY "  Copy", Command::CopyRecords))
+            RunRecordCommand(Command::CopyRecords, &record);
+        if (CommandItem(ICON_FA_PASTE "  Paste", Command::PasteRecords))
+            RunRecordCommand(Command::PasteRecords, &record);
         if (ImGui::MenuItem(ICON_FA_PASTE "  Paste into this record"))
             m_workspace.PasteRecords(record.Id);
-        if (DangerMenuItem(ICON_FA_TRASH "  Delete", "Del"))
-        {
-            std::vector<int> ids = list.Selection();
-            m_workspace.Confirm("Delete records", "Delete " + std::to_string(ids.size()) + (ids.size() == 1 ? " record" : " records") + " and their children?", [this, ids]()
-                {
-                    for (int id : ids)
-                    {
-                        if (Table::MemoryRecord* target = m_engine.Table().FindById(id))
-                        {
-                            if (target->Active && target->Kind == Table::RecordKind::Script)
-                                m_workspace.Report(m_engine.SetActive(*target, false));
-                            m_engine.Table().Remove(*target);
-                        }
-                    }
-                }, "Delete");
-        }
+        if (DangerCommandItem(ICON_FA_TRASH "  Delete", Command::DeleteRecords))
+            RunRecordCommand(Command::DeleteRecords, &record);
     }
 
     void MainWindow::ValueDialog()
@@ -2000,12 +2308,7 @@ namespace Manifold::UI
         ImGui::Spacing();
         if (AccentButton("OK", Px(90.0f, 0.0f)) || apply)
         {
-            for (int id : m_valueTargets)
-            {
-                if (Table::MemoryRecord* record = m_engine.Table().FindById(id))
-                    m_workspace.Report(m_engine.WriteRecord(*record, m_valueText));
-            }
-            m_engine.RefreshValues(true);
+            WriteValues(m_valueTargets, m_valueText);
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();

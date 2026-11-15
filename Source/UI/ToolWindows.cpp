@@ -4,13 +4,16 @@
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
 #include "UI/Fonts.h"
+#include "UI/Shortcuts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
 #include "imgui_internal.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 #include <windows.h>
@@ -237,6 +240,48 @@ namespace Manifold::UI
         }
     }
 
+    void LuaWindow::RunCommand(Command command)
+    {
+        switch (command)
+        {
+        case Command::LuaOpen:
+            if (const auto path = m_workspace.OpenFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" }, { L"All files", L"*.*" } }, Paths::AutorunFolder()))
+            {
+                std::ifstream file(*path, std::ios::binary);
+                std::stringstream content;
+                content << file.rdbuf();
+                m_text = content.str();
+                m_path = *path;
+            }
+            break;
+        case Command::LuaSave:
+        case Command::LuaSaveAs:
+        {
+            std::optional<std::filesystem::path> path;
+            if (command == Command::LuaSave && !m_path.empty())
+                path = m_path;
+            else
+                path = m_workspace.SaveFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" } }, m_path.empty() ? "script.lua" : WideToUtf8(m_path.filename().wstring()), L"lua");
+            if (!path)
+                break;
+            std::ofstream file(*path, std::ios::binary | std::ios::trunc);
+            file.write(m_text.data(), static_cast<std::streamsize>(m_text.size()));
+            if (file)
+            {
+                m_path = *path;
+                m_engine.Notify(LogLevel::Success, "Saved " + WideToUtf8(path->filename().wstring()));
+            }
+            else
+                m_engine.Notify(LogLevel::Error, "Could not write " + WideToUtf8(path->wstring()));
+            break;
+        }
+        case Command::LuaExecute: Execute(); break;
+        case Command::LuaClearOutput: m_engine.Lua().ClearOutput(); break;
+        case Command::LuaFunctions: m_showFunctions = !m_showFunctions; break;
+        default: break;
+        }
+    }
+
     void LuaWindow::Draw()
     {
         if (m_bringToFront)
@@ -251,38 +296,32 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenuBar())
         {
+            const auto item = [&](const char* label, Command command, bool selected = false)
+                {
+                    if (CommandItem(label, command, selected))
+                        RunCommand(command);
+                };
             if (ImGui::BeginMenu("File"))
             {
-                if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open script..."))
-                {
-                    if (const auto path = m_workspace.OpenFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" }, { L"All files", L"*.*" } }, Paths::AutorunFolder()))
-                    {
-                        std::ifstream file(*path, std::ios::binary);
-                        std::stringstream content;
-                        content << file.rdbuf();
-                        m_text = content.str();
-                    }
-                }
-                if (ImGui::MenuItem(ICON_FA_SAVE "  Save script as..."))
-                {
-                    if (const auto path = m_workspace.SaveFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" } }, "script.lua", L"lua"))
-                    {
-                        std::ofstream file(*path, std::ios::binary | std::ios::trunc);
-                        file.write(m_text.data(), static_cast<std::streamsize>(m_text.size()));
-                    }
-                }
+                item(ICON_FA_FOLDER_OPEN "  Open script...", Command::LuaOpen);
+                item(ICON_FA_SAVE "  Save script", Command::LuaSave);
+                item(ICON_FA_SAVE "  Save script as...", Command::LuaSaveAs);
                 ImGui::EndMenu();
             }
-            if (ImGui::MenuItem(ICON_FA_PLAY "  Execute"))
-                Execute();
-            if (ImGui::MenuItem(ICON_FA_ERASER "  Clear output"))
-                m_engine.Lua().ClearOutput();
-            if (ImGui::MenuItem(ICON_FA_BOOK "  Functions", nullptr, m_showFunctions))
-                m_showFunctions = !m_showFunctions;
+            if (ImGui::BeginMenu("View"))
+            {
+                item(ICON_FA_BOOK "  Functions", Command::LuaFunctions, m_showFunctions);
+                item(ICON_FA_ERASER "  Clear output", Command::LuaClearOutput);
+                ImGui::EndMenu();
+            }
+            item(ICON_FA_PLAY "  Execute", Command::LuaExecute);
             ImGui::EndMenuBar();
         }
-        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Enter, false))
-            Execute();
+        for (const CommandInfo& info : AllCommands())
+        {
+            if (info.Scope == CommandScope::LuaEngine && Pressed(info.Id))
+                RunCommand(info.Id);
+        }
 
         const float total = ImGui::GetContentRegionAvail().x;
         const float gap = Px(8.0f);
@@ -347,7 +386,7 @@ namespace Manifold::UI
         if (AccentButton(ICON_FA_PLAY "  Execute", Px(110.0f, 0.0f)))
             Execute();
         ImGui::SameLine();
-        Muted("Ctrl+Enter  ·  line " + std::to_string(m_editor.CursorLine) + ", column " + std::to_string(m_editor.CursorColumn));
+        Muted(std::string(ShortcutText(Command::LuaExecute)) + "  ·  line " + std::to_string(m_editor.CursorLine) + ", column " + std::to_string(m_editor.CursorColumn));
         ImGui::EndGroup();
 
         if (m_showFunctions)

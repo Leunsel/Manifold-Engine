@@ -38,6 +38,7 @@ namespace Manifold
         std::map<std::string, std::string> values;
         std::map<std::string, std::array<float, 4>> themeColors;
         std::map<std::string, float> themeSizes;
+        std::map<std::string, std::string> shortcuts;
         for (const std::string& raw : SplitLines(content.str()))
         {
             const std::string line = Trim(raw);
@@ -70,10 +71,16 @@ namespace Manifold
                     themeSizes[key.substr(5)] = static_cast<float>(*number);
                 continue;
             }
+            if (key.size() > 4 && EqualsNoCase(key.substr(0, 4), "Key."))
+            {
+                shortcuts[key.substr(4)] = value;
+                continue;
+            }
             values[Lower(key)] = value;
         }
         Theme.Colors = std::move(themeColors);
         Theme.Sizes = std::move(themeSizes);
+        Shortcuts = std::move(shortcuts);
         const auto text = [&](const char* key) -> const std::string*
             {
                 const auto found = values.find(key);
@@ -148,6 +155,12 @@ namespace Manifold
                 out << "Color." << name << "=" << rgba[0] << "," << rgba[1] << "," << rgba[2] << "," << rgba[3] << "\n";
             for (const auto& [name, value] : Theme.Sizes)
                 out << "Size." << name << "=" << value << "\n";
+        }
+        if (!Shortcuts.empty())
+        {
+            out << "\n[Shortcuts]\n";
+            for (const auto& [name, keys] : Shortcuts)
+                out << "Key." << name << "=" << keys << "\n";
         }
 
         std::filesystem::path temporary = path;

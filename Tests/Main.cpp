@@ -1,5 +1,6 @@
 #include "TestKit.h"
 
+#include "App/Commands.h"
 #include "Core/Errors.h"
 #include "Core/RuntimeLog.h"
 
@@ -15,9 +16,11 @@ namespace Manifold::Tests
 {
     int RunAssemblerTests();
     int RunCoreTests();
+    int RunCommandTests();
     int RunIntegrationTests(const std::filesystem::path& target);
     int RunCompatHarness(const std::vector<std::string>& arguments);
     int RunCompatTests();
+    int RunTemplateTests();
     int RunWatchStress(const std::vector<std::string>& arguments);
 
     Counter& Totals()
@@ -47,6 +50,11 @@ int main(int argc, char** argv)
             std::fputs(Manifold::ErrorsMarkdown().c_str(), stdout);
             return 0;
         }
+        if (argument == "--shortcuts-markdown")
+        {
+            std::fputs(Manifold::ShortcutsMarkdown().c_str(), stdout);
+            return 0;
+        }
         if (argument.rfind("--target=", 0) == 0)
             target = argument.substr(9);
         if (argument == "--assembler")
@@ -65,8 +73,12 @@ int main(int argc, char** argv)
         return assembler;
     std::printf("Core\n");
     Manifold::Tests::RunCoreTests();
+    std::printf("Commands and shortcuts\n");
+    Manifold::Tests::RunCommandTests();
     std::printf("Compatibility\n");
     Manifold::Tests::RunCompatTests();
+    std::printf("Templates\n");
+    Manifold::Tests::RunTemplateTests();
     std::printf("Integration (%ls)\n", target.c_str());
     Manifold::Tests::RunIntegrationTests(target);
     const auto& totals = Manifold::Tests::Totals();

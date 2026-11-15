@@ -52,16 +52,16 @@ msbuild Manifold-Engine.sln /p:Configuration=Release /p:Platform=x64 /p:Platform
 Build\Release\Manifold-Engine.Tests.exe
 ```
 
-The tests cover the assembler (557 cases), value parsing, XML and cheat table round trips, the error table, offline Auto Assembler runs, and an integration run against `TestTarget.exe` (built with the solution): scanning, pointers, freezing, a code injection script, the sample table `Tests/Target/TestTarget.CT`, Lua (records, timers, threads), all four "find out what" watches, breakpoints and stepping. `--errors-markdown` prints `Docs/ERRORS.md`.
+The tests cover the assembler (557 cases), value parsing, XML and cheat table round trips, the error table, offline Auto Assembler runs, and an integration run against `TestTarget.exe` (built with the solution): scanning, pointers, freezing, a code injection script, the sample table `Tests/Target/TestTarget.CT`, Lua (records, timers, threads), all four "find out what" watches, breakpoints and stepping. `--errors-markdown` prints `Docs/ERRORS.md`, `--shortcuts-markdown` prints `Docs/SHORTCUTS.md`; the tests fail when either file is out of date, and when two commands of one window share a key.
 
 ## Use
 
 - Many games run with administrator rights or protect their memory; start the program as administrator (Help → Restart as administrator) when a process cannot be opened. Protected processes and anti-cheat systems cannot be opened at all.
 - `Manifold-Engine.exe game.CT --process=game.exe` opens a table and a process at start.
-- Shortcuts: Ctrl+P process list, Ctrl+O open table, Ctrl+S save, Ctrl+M memory viewer, Ctrl+L Lua engine. In the address list: Space toggles, Enter changes the value, Del deletes, Ctrl+C/Ctrl+V copy and paste. In the memory viewer: Ctrl+G go to, Ctrl+F find, Enter assemble, Space follow, Backspace back, F5 breakpoint, F7 step into, F8 step over, Shift+F8 run until return, F9 run, Ctrl+A Auto Assembler.
+- Shortcuts: F1 lists all of them. The main window has the table, process and window menus (File, Edit, Process, Table, View, Tools, Help); code, memory and debugger tools sit in the memory viewer's own menus, as in Cheat Engine. Commands are defined once in `Source/App/Commands.cpp`; a window asks `Pressed(Command::…)` and shows the keys with `CommandItem`.
 - Settings, window layout and the log are kept next to the program (`Manifold-Engine.ini`, `.layout.ini`, `.log`).
 - View → Compact mode shows only the address list, without the scanner.
-- View → Release mode is for using a finished table: the address list shows only Active, Description and Value, the Edit, Tools and Debug menus and the technical menu entries are gone, a double click turns a script on or off, and messages leave out their error codes. The same menu switches it back.
+- View → Release mode is for using a finished table: the address list shows only Active, Description and Value, the Tools menu and the technical menu entries are gone (Edit keeps only Settings), a double click turns a script on or off, and messages leave out their error codes. The same menu switches it back.
 - Scripts that only run Lua, such as one that starts the game, work without an opened process. Scripts that need the game say so when they are turned on.
 - When the program closes while scripts are active in the game, it asks whether to turn them off first, so nothing stays behind in the game. Settings → Scripts can make that choice permanent.
 

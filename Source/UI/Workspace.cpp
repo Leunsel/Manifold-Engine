@@ -6,6 +6,8 @@
 #include "Lua/LuaEngine.h"
 #include "Table/CheatTable.h"
 #include "Target/Process.h"
+#include "UI/Shortcuts.h"
+#include "UI/TemplateManager.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 #include "UI/Windows.h"
@@ -110,6 +112,10 @@ namespace Manifold::UI
             m_codeDissect->Draw();
         if (m_asmSearch && !m_asmSearch->Closed())
             m_asmSearch->Draw();
+        if (m_shortcuts && !m_shortcuts->Closed())
+            m_shortcuts->Draw();
+        if (m_templateManager && !m_templateManager->Closed())
+            m_templateManager->Draw();
         Prune(m_memoryViewers);
         Prune(m_structures);
         Prune(m_scripts);
@@ -134,23 +140,85 @@ namespace Manifold::UI
 
     void Workspace::HandleShortcuts()
     {
-        const ImGuiIO& io = ImGui::GetIO();
-        if (io.WantTextInput)
-            return;
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_P, false))
-            OpenProcessPicker();
         const bool release = m_engine.Options().ReleaseMode;
-        if (!release && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_M, false))
+        if (Pressed(Command::OpenProcess))
+            OpenProcessPicker();
+        if (Pressed(Command::OpenTable))
+            OpenTableDialog(false);
+        if (Pressed(Command::SaveTable))
+            SaveTable(false);
+        if (Pressed(Command::SaveTableAs))
+            SaveTable(true);
+        if (Pressed(Command::OpenSettings))
+            OpenSettings();
+        if (Pressed(Command::OpenShortcuts))
+            OpenShortcuts();
+        if (Pressed(Command::OpenMemoryViewer) && !release)
             OpenMemoryViewer(0);
-        if (!release && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_L, false))
+        if (Pressed(Command::OpenStructureDissect) && !release)
+            OpenStructure(0);
+        if (Pressed(Command::OpenAutoAssembler) && !release)
+            OpenScript(Asm::CheatTableTemplate());
+        if (Pressed(Command::OpenLuaEngine) && !release)
             OpenLua();
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O, false))
+        if (Pressed(Command::OpenLog) && !release)
+            OpenLog();
+    }
+
+    void Workspace::OpenTableDialog(bool merge)
+    {
+        if (const auto path = OpenFileDialog(merge ? std::vector<FileFilter>{ { L"Cheat tables (*.CT)", L"*.CT;*.ct" } } : kTableFilters, Paths::TablesFolder()))
+            OpenTable(*path, merge);
+    }
+
+    bool Workspace::CanOpenLastProcess()
+    {
+        const std::string& last = m_engine.Options().LastProcess;
+        if (last.empty())
+            return false;
+        const double now = ImGui::GetTime();
+        if (now - m_lastProcessCheckedAt > 2.0)
         {
-            if (const auto path = OpenFileDialog(kTableFilters, Paths::TablesFolder()))
-                OpenTable(*path, false);
+            m_lastProcessCheckedAt = now;
+            m_lastProcessId = Target::FindProcessId(last).value_or(0);
         }
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false))
-            SaveTable(io.KeyShift);
+        return m_lastProcessId != 0 && (!m_engine.HasProcess() || m_engine.Process()->Id() != m_lastProcessId);
+    }
+
+    void Workspace::OpenLastProcess()
+    {
+        const std::string& last = m_engine.Options().LastProcess;
+        if (last.empty())
+        {
+            OpenProcessPicker();
+            return;
+        }
+        const std::uint32_t id = Target::FindProcessId(last).value_or(0);
+        m_lastProcessCheckedAt = -100.0;
+        if (!id)
+        {
+            Report(Status::Fail(ErrorCode::ProcessNotFound, last));
+            return;
+        }
+        Report(m_engine.OpenProcess(id));
+    }
+
+    void Workspace::OpenShortcuts()
+    {
+        if (!m_shortcuts)
+            m_shortcuts = std::make_unique<ShortcutsWindow>(*this);
+        m_shortcuts->Show();
+    }
+
+    void Workspace::OpenTemplateManager(const std::string& id, std::optional<std::string> script)
+    {
+        if (!m_templateManager)
+            m_templateManager = std::make_unique<TemplateManager>(*this);
+        m_templateManager->Show();
+        if (script)
+            m_templateManager->NewTemplate(*script);
+        else if (!id.empty())
+            m_templateManager->Select(id);
     }
 
     void Workspace::OpenMemoryViewer(std::uint64_t address, bool hexView, bool newWindow)
@@ -185,7 +253,7 @@ namespace Manifold::UI
 
     void Workspace::OpenScript(std::string script, int recordId, bool lua)
     {
-        if (recordId)
+        if (recordId != kNoRecord)
         {
             for (auto& window : m_scripts)
             {
@@ -213,11 +281,11 @@ namespace Manifold::UI
         m_log->Show();
     }
 
-    void Workspace::OpenSettings()
+    void Workspace::OpenSettings(int page)
     {
         if (!m_settings)
             m_settings = std::make_unique<SettingsWindow>(*this);
-        m_settings->Show();
+        m_settings->Show(page);
     }
 
     void Workspace::OpenProcessPicker()
@@ -239,7 +307,7 @@ namespace Manifold::UI
 
         const bool release = m_engine.Options().ReleaseMode;
         std::vector<EmptyAction> actions;
-        actions.push_back({ ICON_FA_DESKTOP "  Open process", "Ctrl+P", true });
+        actions.push_back({ ICON_FA_DESKTOP "  Open process", ShortcutText(Command::OpenProcess), true });
         std::string footer;
         if (!last.empty() && m_lastProcessId)
             actions.push_back({ ICON_FA_HISTORY "  Open " + last, nullptr, false, true, "The process you opened last time is running" });
@@ -644,7 +712,7 @@ namespace Manifold::UI
             m_engine.Notify(LogLevel::Warning, "The clipboard holds no records.");
             return;
         }
-        Table::MemoryRecord* parent = parentId ? m_engine.Table().FindById(parentId) : nullptr;
+        Table::MemoryRecord* parent = parentId >= 0 ? m_engine.Table().FindById(parentId) : nullptr;
         const std::function<void(Table::MemoryRecord&)> renumber = [&](Table::MemoryRecord& record)
             {
                 record.Id = m_engine.Table().NextId();
@@ -789,7 +857,7 @@ namespace Manifold::UI
             ImGui::SameLine();
             if (ImGui::Button("Show it"))
             {
-                OpenScript(m_engine.Table().TableLuaScript, -1, true);
+                OpenScript(m_engine.Table().TableLuaScript, kTableLuaScript, true);
             }
             EndModal();
         }
