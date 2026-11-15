@@ -104,6 +104,8 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
     <ClCompile Include="..\Source\Core\Text.cpp" />
     <ClCompile Include="..\Source\Core\Xml.cpp" />
     <ClCompile Include="..\Source\Debug\Debugger.cpp" />
+    <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp" />
+    <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp" />
@@ -119,14 +121,17 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
     <ClCompile Include="..\Source\Table\AddressList.cpp" />
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
+    <ClCompile Include="..\Source\Target\PatchScan.cpp" />
     <ClCompile Include="..\Source\Target\Process.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
     <ClCompile Include="..\Source\UI\CodeEditor.cpp" />
+    <ClCompile Include="..\Source\UI\CodeTools.cpp" />
     <ClCompile Include="..\Source\UI\DialogHost.cpp" />
     <ClCompile Include="..\Source\UI\Fonts.cpp" />
     <ClCompile Include="..\Source\UI\LuaDialogs.cpp" />
     <ClCompile Include="..\Source\UI\MainWindow.cpp" />
     <ClCompile Include="..\Source\UI\MemoryViewer.cpp" />
+    <ClCompile Include="..\Source\UI\PatchScanWindow.cpp" />
     <ClCompile Include="..\Source\UI\RecordEditor.cpp" />
     <ClCompile Include="..\Source\UI\ScriptWindow.cpp" />
     <ClCompile Include="..\Source\UI\SettingsWindow.cpp" />
@@ -155,6 +160,8 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
     <ClInclude Include="..\Source\Core\Xml.h" />
     <ClInclude Include="..\Source\Debug\Debugger.h" />
     <ClInclude Include="..\Source\Debug\VehProtocol.h" />
+    <ClInclude Include="..\Source\Disasm\AssemblySearch.h" />
+    <ClInclude Include="..\Source\Disasm\CodeDissect.h" />
     <ClInclude Include="..\Source\Disasm\Disassembler.h" />
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h" />
     <ClInclude Include="..\Source\Lua\InputBox.h" />
@@ -167,6 +174,7 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
     <ClInclude Include="..\Source\Table\AddressList.h" />
     <ClInclude Include="..\Source\Table\CheatTable.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
+    <ClInclude Include="..\Source\Target\PatchScan.h" />
     <ClInclude Include="..\Source\Target\Process.h" />
     <ClInclude Include="..\Source\Target\Symbols.h" />
     <ClInclude Include="..\Source\UI\CodeEditor.h" />

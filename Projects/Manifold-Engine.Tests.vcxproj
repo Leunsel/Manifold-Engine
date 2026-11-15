@@ -96,6 +96,8 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
     <ClCompile Include="..\Source\Core\Text.cpp" />
     <ClCompile Include="..\Source\Core\Xml.cpp" />
     <ClCompile Include="..\Source\Debug\Debugger.cpp" />
+    <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp" />
+    <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp" />
@@ -111,6 +113,7 @@ python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
     <ClCompile Include="..\Source\Table\AddressList.cpp" />
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
+    <ClCompile Include="..\Source\Target\PatchScan.cpp" />
     <ClCompile Include="..\Source\Target\Process.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
     <ClCompile Include="..\Tests\AssemblerTests.cpp" />

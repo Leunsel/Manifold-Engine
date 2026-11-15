@@ -315,7 +315,7 @@ namespace Manifold::UI
         if (IconButton(ICON_FA_SITEMAP, "Dissect data at the hex view address"))
             m_workspace.OpenStructure(m_hexSelected ? m_hexSelected : m_hexTop);
         ImGui::SameLine();
-        if (IconButton(ICON_FA_PUZZLE_PIECE, "Allocate memory or inject a library"))
+        if (IconButton(ICON_FA_PUZZLE_PIECE, "Memory tools: allocate, inject a library, regions, patches"))
             ImGui::OpenPopup("##toolsmenu");
         if (ImGui::BeginPopup("##toolsmenu"))
         {
@@ -325,6 +325,15 @@ namespace Manifold::UI
                 m_injectOpen = true;
             if (ImGui::MenuItem(ICON_FA_TH_LIST "  Memory regions"))
                 m_workspace.OpenRegions();
+            if (ImGui::MenuItem(ICON_FA_BAND_AID "  Scan for patches"))
+                m_workspace.OpenPatchScan();
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_PROJECT_DIAGRAM "  Dissect code"))
+                m_workspace.OpenCodeDissect(CodeDissectWindow::Functions);
+            if (ImGui::MenuItem(ICON_FA_QUOTE_LEFT "  Referenced strings"))
+                m_workspace.OpenCodeDissect(CodeDissectWindow::Strings);
+            if (ImGui::MenuItem(ICON_FA_SEARCH_LOCATION "  Find assembly code"))
+                m_workspace.OpenAsmSearch();
             if (ImGui::MenuItem(ICON_FA_CLONE "  New memory viewer window"))
                 m_workspace.OpenMemoryViewer(m_selected, false, true);
             ImGui::EndPopup();
@@ -804,6 +813,21 @@ namespace Manifold::UI
             m_workspace.StartWatch(Debug::WatchKind::InstructionAccesses, instruction.Address, 1);
         if (ImGui::MenuItem(ICON_FA_PHONE "  Find out what calls this address"))
             m_workspace.StartWatch(Debug::WatchKind::Calls, instruction.Address, 1);
+        {
+            const auto dissect = m_engine.CodeDissect();
+            const std::size_t references = dissect ? dissect->To(instruction.Address).size() : 0;
+            const std::string label = dissect ? ICON_FA_PROJECT_DIAGRAM "  Code that references this address (" + std::to_string(references) + ")" : ICON_FA_PROJECT_DIAGRAM "  Code that references this address...";
+            if (ImGui::MenuItem(label.c_str()))
+                m_workspace.OpenCodeDissect(CodeDissectWindow::References, instruction.Address);
+            ItemTooltip(dissect ? "From the last code dissect" : "Needs a code dissect first; the window offers one");
+            if (instruction.Memory.Absolute && dissect)
+            {
+                const std::uint64_t operand = *instruction.Memory.Absolute;
+                const std::string other = ICON_FA_PROJECT_DIAGRAM "  Code that uses the operand address (" + std::to_string(dissect->To(operand).size()) + ")";
+                if (ImGui::MenuItem(other.c_str()))
+                    m_workspace.OpenCodeDissect(CodeDissectWindow::References, operand);
+            }
+        }
         if (broken && ImGui::MenuItem(ICON_FA_MAP_MARKER_ALT "  Set the instruction pointer here"))
         {
             Disasm::RegisterValues registers = debugger.Break().Registers;

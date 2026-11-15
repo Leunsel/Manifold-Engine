@@ -72,6 +72,12 @@
     <ClCompile Include="..\Source\Debug\Debugger.cpp">
       <Filter>Source\Debug</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Disasm\CodeDissect.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
@@ -116,6 +122,9 @@
     </ClCompile>
     <ClCompile Include="..\Source\Table\Structures.cpp">
       <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\PatchScan.cpp">
+      <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Process.cpp">
       <Filter>Source\Target</Filter>

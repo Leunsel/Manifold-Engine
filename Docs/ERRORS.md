@@ -19,6 +19,8 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-1011 | The module list of the process could not be read. | The process is still starting, or a 64-bit process is examined from a 32-bit build. | Wait a moment and open the process again. |
 | ME-1012 | A thread could not be started in the process: …. | CreateRemoteThread was refused. Some games block it. | Start Manifold Engine as administrator. Protected processes (anti-cheat, system services) cannot be opened at all. |
 | ME-1013 | The library could not be loaded into the process: …. | LoadLibrary in the target failed: the file is missing, has the wrong bitness, or its imports are missing. | Use a library built for the same bitness as the target and keep its dependencies beside it. |
+| ME-1014 | The module file on disk could not be read: …. | The file was moved or deleted after the process loaded it, or another program holds it locked. | Check that the file still exists at that path, then scan again. |
+| ME-1015 | The module file does not match the loaded module: …. | The file on disk is not a valid program image, or it was replaced by a different version after the process started. | Restart the process so it loads the file on disk, then scan again. |
 
 ## Scanner
 

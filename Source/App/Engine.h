@@ -5,6 +5,7 @@
 #include "Core/Errors.h"
 #include "Core/RuntimeLog.h"
 #include "Debug/Debugger.h"
+#include "Disasm/CodeDissect.h"
 #include "Disasm/Disassembler.h"
 #include "Scan/Scanner.h"
 #include "Table/AddressList.h"
@@ -85,6 +86,8 @@ namespace Manifold
         std::uint64_t ProcessGeneration() const { return m_processGeneration; }
         Target::Symbols& Symbols() { return m_symbols; }
         const Disasm::Disassembler& Disassembler() const;
+        std::shared_ptr<const Disasm::DissectResult> CodeDissect() const { return m_codeDissect; }
+        void SetCodeDissect(std::shared_ptr<const Disasm::DissectResult> result) { m_codeDissect = std::move(result); }
         Scan::Scanner& Scanner() { return m_scanner; }
         Debug::Debugger& Debugger() { return m_debugger; }
         Status EnsureDebugger();
@@ -186,6 +189,7 @@ namespace Manifold
         Table::StructureStore m_structures;
         std::unique_ptr<Lua::LuaEngine> m_lua;
         Asm::AaMemory m_scratchMemory;
+        std::shared_ptr<const Disasm::DissectResult> m_codeDissect;
 
         std::deque<Notice> m_notices;
         int m_nextNotice = 1;

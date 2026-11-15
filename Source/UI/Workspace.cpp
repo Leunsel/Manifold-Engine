@@ -104,6 +104,12 @@ namespace Manifold::UI
             m_regions->Draw();
         if (m_tableFiles && !m_tableFiles->Closed())
             m_tableFiles->Draw();
+        if (m_patchScan && !m_patchScan->Closed())
+            m_patchScan->Draw();
+        if (m_codeDissect && !m_codeDissect->Closed())
+            m_codeDissect->Draw();
+        if (m_asmSearch && !m_asmSearch->Closed())
+            m_asmSearch->Draw();
         Prune(m_memoryViewers);
         Prune(m_structures);
         Prune(m_scripts);
@@ -261,6 +267,27 @@ namespace Manifold::UI
         if (!m_tableFiles)
             m_tableFiles = std::make_unique<TableFilesWindow>(*this);
         m_tableFiles->Show();
+    }
+
+    void Workspace::OpenCodeDissect(int tab, std::uint64_t address)
+    {
+        if (!m_codeDissect)
+            m_codeDissect = std::make_unique<CodeDissectWindow>(*this);
+        m_codeDissect->Show(tab, address);
+    }
+
+    void Workspace::OpenAsmSearch()
+    {
+        if (!m_asmSearch)
+            m_asmSearch = std::make_unique<AsmSearchWindow>(*this);
+        m_asmSearch->Show();
+    }
+
+    void Workspace::OpenPatchScan()
+    {
+        if (!m_patchScan)
+            m_patchScan = std::make_unique<PatchScanWindow>(*this);
+        m_patchScan->Show();
     }
 
     void Workspace::OpenRegions()

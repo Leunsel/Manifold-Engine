@@ -343,6 +343,14 @@ namespace Manifold::UI
                 workspace.OpenSymbols();
             if (ImGui::MenuItem(ICON_FA_TH_LIST "  Memory regions", nullptr, false, hasProcess))
                 workspace.OpenRegions();
+            if (ImGui::MenuItem(ICON_FA_BAND_AID "  Scan for patches", nullptr, false, hasProcess))
+                workspace.OpenPatchScan();
+            if (ImGui::MenuItem(ICON_FA_PROJECT_DIAGRAM "  Dissect code", nullptr, false, hasProcess))
+                workspace.OpenCodeDissect(CodeDissectWindow::Functions);
+            if (ImGui::MenuItem(ICON_FA_QUOTE_LEFT "  Referenced strings", nullptr, false, hasProcess))
+                workspace.OpenCodeDissect(CodeDissectWindow::Strings);
+            if (ImGui::MenuItem(ICON_FA_SEARCH_LOCATION "  Find assembly code", nullptr, false, hasProcess))
+                workspace.OpenAsmSearch();
             if (ImGui::MenuItem(ICON_FA_STREAM "  Log"))
                 workspace.OpenLog();
             ImGui::Separator();

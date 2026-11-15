@@ -19,6 +19,8 @@
     X(ModulesUnreadable, 1011) \
     X(ThreadCreateFailed, 1012) \
     X(InjectFailed, 1013) \
+    X(ModuleFileUnreadable, 1014) \
+    X(ModuleFileDifferent, 1015) \
     X(ScanNoValue, 2001) \
     X(ScanBadValue, 2002) \
     X(ScanBadPattern, 2003) \

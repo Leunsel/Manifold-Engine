@@ -4,6 +4,8 @@
 #include "Core/Text.h"
 #include "Core/RuntimeLog.h"
 #include "Lua/LuaEngine.h"
+#include "Target/PatchScan.h"
+#include "Disasm/AssemblySearch.h"
 
 #include <chrono>
 #include <cstring>
@@ -164,6 +166,35 @@ namespace Manifold::Tests
         const Disasm::Instruction first = engine.Disassembler().Read(process, damage, &engine.Symbols());
         CHECK_MSG(first.Valid && first.Mnemonic == "sub" && first.Memory.Present && first.Memory.Written, first.Text());
 
+        if (module)
+        {
+            Disasm::DissectProgress progress;
+            const auto dissect = Disasm::DissectCode(process, { *module }, &progress);
+            CHECK(dissect && !dissect->Cancelled && dissect->Stats.Instructions > 1000 && !dissect->Spans.empty());
+            if (dissect)
+            {
+                const auto refs = dissect->To(damage);
+                CHECK_MSG(std::any_of(refs.begin(), refs.end(), [](const Disasm::CodeRef& ref) { return ref.Kind() == Disasm::RefKind::Call; }),
+                          std::to_string(refs.size()) + " references to Damage");
+                CHECK(std::any_of(dissect->Functions.begin(), dissect->Functions.end(), [&](const Disasm::ReferencedFunction& function) { return function.Address == damage && function.Calls > 0; }));
+                const bool banner = std::any_of(dissect->Strings.begin(), dissect->Strings.end(),
+                    [](const Disasm::ReferencedString& entry) { return entry.Text.find("Manifold test target") != std::string::npos && !entry.Wide; });
+                CHECK_MSG(banner, std::to_string(dissect->Strings.size()) + " referenced strings, none with the banner");
+                CHECK(std::is_sorted(dissect->Refs.begin(), dissect->Refs.end(), [](const Disasm::CodeRef& a, const Disasm::CodeRef& b) { return a.Target < b.Target; }));
+            }
+            const auto spans = Disasm::ExecutableSpans(process, { *module });
+            for (const char* text : { "sub [rcx],edx\nret", "s?b *[rcx],*; ret" })
+            {
+                const auto pattern = Disasm::ParseAsmPattern(text);
+                CHECK(pattern.has_value());
+                if (!pattern)
+                    continue;
+                const Disasm::AsmSearchResult found = Disasm::SearchAssembly(process, engine.Disassembler(), &engine.Symbols(), spans, *pattern);
+                CHECK_MSG(std::any_of(found.Matches.begin(), found.Matches.end(), [&](const Disasm::AsmMatch& match) { return match.Address == damage && match.Lines.size() == 2; }),
+                          std::string(text) + ": " + std::to_string(found.Matches.size()) + " matches");
+            }
+        }
+
         const auto healthNow = process.ReadValue<std::int32_t>(health);
         CHECK(healthNow.has_value());
         Scan::ScanOptions options;
@@ -242,6 +273,27 @@ namespace Manifold::Tests
         CHECK(engine.Symbols().FindRegistered("code").has_value());
         const Disasm::Instruction jump = engine.Disassembler().Read(process, damage, nullptr);
         CHECK_MSG(jump.Kind == Disasm::Flow::Jump && jump.Length == 5, jump.Text());
+        const auto scanTarget = [&](std::vector<Target::CodePatch>& patches)
+            {
+                const auto exe = process.FindModule("TestTarget.exe");
+                CHECK(exe.has_value());
+                if (!exe)
+                    return Target::ModulePatchSummary();
+                return Target::ScanModuleForPatches(process, *exe, patches);
+            };
+        {
+            std::vector<Target::CodePatch> patches;
+            const Target::ModulePatchSummary summary = scanTarget(patches);
+            CHECK_MSG(summary.Problem.Ok(), summary.Problem.Text);
+            CHECK(summary.CodeBytes > 0 && !summary.TooMany && summary.UnreadableBytes == 0);
+            CHECK_MSG(patches.size() == 1, std::to_string(patches.size()) + " patches, first at " + (patches.empty() ? std::string("-") : Hex(patches.front().Address)));
+            if (patches.size() == 1)
+            {
+                const Target::CodePatch& patch = patches.front();
+                CHECK(patch.Address == damage && patch.Complete() && patch.Size <= 5 && patch.Current[0] == 0xE9);
+                CHECK(std::memcmp(patch.Original.data(), original, static_cast<std::size_t>(patch.Size)) == 0);
+            }
+        }
         const std::int32_t healedFrom = process.ReadValue<std::int32_t>(health).value_or(0);
         Pause(engine, 2300);
         CHECK_MSG(process.ReadValue<std::int32_t>(health).value_or(0) > healedFrom, "health did not rise while the script was active");
@@ -249,6 +301,11 @@ namespace Manifold::Tests
         CHECK_MSG(disabled.Ok(), disabled.Text);
         std::uint8_t restored[5]{};
         CHECK(process.ReadExact(damage, restored, sizeof(restored)) && std::memcmp(restored, original, sizeof(original)) == 0);
+        {
+            std::vector<Target::CodePatch> patches;
+            const Target::ModulePatchSummary summary = scanTarget(patches);
+            CHECK_MSG(summary.Problem.Ok() && patches.empty(), std::to_string(patches.size()) + " patches left after the script was turned off");
+        }
         CHECK(!engine.Symbols().FindRegistered("code").has_value());
         CHECK(script.ScriptMemory.Allocations.empty());
 

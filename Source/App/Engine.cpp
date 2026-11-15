@@ -131,6 +131,7 @@ namespace Manifold
         LOG_INFO("Process", "Closed " + m_process->Name());
         m_symbols.Detach();
         m_process.reset();
+        m_codeDissect.reset();
         ++m_processGeneration;
     }
 

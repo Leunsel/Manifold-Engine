@@ -54,6 +54,9 @@ namespace Manifold::UI
     class SymbolsWindow;
     class RegionsWindow;
     class TableFilesWindow;
+    class PatchScanWindow;
+    class CodeDissectWindow;
+    class AsmSearchWindow;
 
     struct FileFilter
     {
@@ -86,6 +89,9 @@ namespace Manifold::UI
         void OpenSymbols();
         void OpenRegions();
         void OpenTableFiles();
+        void OpenPatchScan();
+        void OpenCodeDissect(int tab = -1, std::uint64_t address = 0);
+        void OpenAsmSearch();
         void OpenRecordEditor(int recordId);
         void StartWatch(Debug::WatchKind kind, std::uint64_t address, int size);
         void AddAddress(std::uint64_t address, Scan::ValueType type, std::string description = {});
@@ -137,6 +143,9 @@ namespace Manifold::UI
         std::unique_ptr<SymbolsWindow> m_symbols;
         std::unique_ptr<RegionsWindow> m_regions;
         std::unique_ptr<TableFilesWindow> m_tableFiles;
+        std::unique_ptr<PatchScanWindow> m_patchScan;
+        std::unique_ptr<CodeDissectWindow> m_codeDissect;
+        std::unique_ptr<AsmSearchWindow> m_asmSearch;
         int m_nextWindow = 1;
 
         struct ConfirmRequest

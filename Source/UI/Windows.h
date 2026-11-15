@@ -1,11 +1,17 @@
 #pragma once
 
+#include "Disasm/AssemblySearch.h"
+#include "Disasm/CodeDissect.h"
+#include "Target/PatchScan.h"
 #include "UI/CodeEditor.h"
 #include "UI/Workspace.h"
 
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <map>
+#include <memory>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -580,5 +586,118 @@ namespace Manifold::UI
         bool m_committedOnly = true;
         std::string m_filter;
         std::vector<Target::RegionInfo> m_regions;
+    };
+
+    struct ModuleScope
+    {
+        int Kind = 0;
+        std::string Module;
+    };
+
+    void ModuleScopeCombo(const char* id, Engine& engine, ModuleScope& scope, float width);
+    std::vector<Target::ModuleInfo> ScopeModules(Engine& engine, const ModuleScope& scope);
+    std::string ScopeName(Engine& engine, const ModuleScope& scope);
+
+    class CodeDissectWindow : public ToolWindow
+    {
+    public:
+        enum Tab
+        {
+            Strings,
+            Functions,
+            References
+        };
+
+        explicit CodeDissectWindow(Workspace& workspace);
+        ~CodeDissectWindow() override;
+        void Draw() override;
+        bool Closed() const override { return !m_open && !m_task.valid(); }
+        void Show(int tab, std::uint64_t address);
+
+    private:
+        void Start();
+        void Collect();
+        void Toolbar();
+        void StringsTab(const Disasm::DissectResult& result, float height);
+        void FunctionsTab(const Disasm::DissectResult& result, float height);
+        void ReferencesTab(const Disasm::DissectResult& result, float height);
+        void ReferenceList(const Disasm::DissectResult& result);
+
+        Workspace& m_workspace;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        int m_tab = Strings;
+        int m_wantTab = -1;
+        ModuleScope m_scope;
+        std::string m_filter;
+        std::string m_referenceText;
+        std::uint64_t m_selected = 0;
+        std::shared_ptr<const Disasm::DissectResult> m_sorted;
+        std::vector<std::size_t> m_byCalls;
+        std::vector<std::size_t> m_visible;
+        std::string m_visibleFilter;
+        const Disasm::DissectResult* m_visibleFor = nullptr;
+        std::unique_ptr<Disasm::DissectProgress> m_progress;
+        std::future<std::shared_ptr<Disasm::DissectResult>> m_task;
+        std::uint64_t m_generation = 0;
+    };
+
+    class AsmSearchWindow : public ToolWindow
+    {
+    public:
+        explicit AsmSearchWindow(Workspace& workspace);
+        ~AsmSearchWindow() override;
+        void Draw() override;
+        bool Closed() const override { return !m_open && !m_task.valid(); }
+        void Show() { m_open = true; m_bringToFront = true; }
+
+    private:
+        void Start();
+        void Collect();
+        void Results();
+
+        Workspace& m_workspace;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        bool m_focus = true;
+        ModuleScope m_scope;
+        std::string m_pattern;
+        std::string m_searched;
+        std::shared_ptr<Target::Process> m_process;
+        std::unique_ptr<Disasm::AsmSearchProgress> m_progress;
+        std::future<Disasm::AsmSearchResult> m_task;
+        std::optional<Disasm::AsmSearchResult> m_result;
+    };
+
+    class PatchScanWindow : public ToolWindow
+    {
+    public:
+        explicit PatchScanWindow(Workspace& workspace);
+        ~PatchScanWindow() override;
+        void Draw() override;
+        bool Closed() const override { return !m_open && !m_task.valid(); }
+        void Show() { m_open = true; m_bringToFront = true; }
+
+    private:
+        void Start();
+        void Collect();
+        void Notes();
+        void Results();
+        void PatchRow(std::size_t index);
+        std::vector<Disasm::Instruction> Listing(std::uint64_t address, std::span<const std::uint8_t> bytes, std::uint64_t size, int limit) const;
+
+        Workspace& m_workspace;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        bool m_windowsModules = false;
+        bool m_allNotes = false;
+        std::string m_filter;
+        std::shared_ptr<Target::Process> m_scanned;
+        std::unique_ptr<Target::PatchScanProgress> m_progress;
+        std::future<Target::PatchScanResult> m_task;
+        std::optional<Target::PatchScanResult> m_result;
+        double m_started = 0.0;
+        double m_seconds = 0.0;
+        int m_restore = -1;
     };
 }

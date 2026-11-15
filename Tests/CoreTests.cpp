@@ -4,6 +4,7 @@
 #include "Core/Errors.h"
 #include "Core/Text.h"
 #include "Core/Xml.h"
+#include "Disasm/AssemblySearch.h"
 #include "Scan/ValueType.h"
 #include "Table/CheatTable.h"
 
@@ -288,6 +289,42 @@ data:
             CHECK(Asm::HasSections("[ENABLE]\n[DISABLE]\n"));
             CHECK_EQ(Asm::SectionText("a\n[ENABLE]\nb\n[DISABLE]\nc\n", Asm::AaSection::Disable), "a\nc\n");
         }
+
+        void CodeSearchHelpers()
+        {
+            CHECK(Disasm::WildcardMatch("mov [rcx+*],eax", "mov [rcx+10],eax"));
+            CHECK(!Disasm::WildcardMatch("mov [rcx+*],eax", "mov [rdx+10],eax"));
+            CHECK(Disasm::WildcardMatch("j?", "jz") && !Disasm::WildcardMatch("j?", "jmp"));
+            CHECK(Disasm::WildcardMatch("*", "") && Disasm::WildcardMatch("*ret*", "ret") && !Disasm::WildcardMatch("", "nop"));
+            CHECK_EQ(Disasm::NormalizeAsm("MOV  dword ptr [RCX + 0x10] , EAX", false), "mov [rcx+10],eax");
+            CHECK_EQ(Disasm::NormalizeAsm("mov dword ptr [rcx+10],eax", true), "mov dword ptr [rcx+10],eax");
+            CHECK(Disasm::WildcardMatch(Disasm::NormalizeAsm("mov *,eax", false), Disasm::NormalizeAsm("mov dword ptr [rcx],eax", false)));
+            const auto pattern = Disasm::ParseAsmPattern("lock xadd [rcx],eax; ret\n\n");
+            CHECK(pattern && pattern->Lines.size() == 2 && pattern->Lines[0].Mnemonic == "xadd" && pattern->Lines[1].Mnemonic == "ret");
+            const auto wild = Disasm::ParseAsmPattern("mo? rax,*");
+            CHECK(wild && wild->Lines.size() == 1 && wild->Lines[0].Mnemonic.empty());
+            CHECK(!Disasm::ParseAsmPattern(" ;\n ").has_value());
+
+            std::string text;
+            bool wide = false;
+            const std::uint8_t ascii[] = "Hello world";
+            CHECK(Disasm::ReadStringAt(std::span<const std::uint8_t>(ascii, sizeof(ascii)), text, wide) && text == "Hello world" && !wide);
+            const std::uint8_t utf16[] = { 'H', 0, 'e', 0, 'l', 0, 'l', 0, 0xF6, 0, 0, 0 };
+            CHECK(Disasm::ReadStringAt(std::span<const std::uint8_t>(utf16, sizeof(utf16)), text, wide) && text == "Hell\xC3\xB6" && wide);
+            const std::uint8_t code[] = { 0x48, 0x8B, 0x05, 0x10, 0x00, 0x00, 0x00 };
+            CHECK(!Disasm::ReadStringAt(std::span<const std::uint8_t>(code, sizeof(code)), text, wide));
+            const std::uint8_t spaces[] = "    ";
+            CHECK(!Disasm::ReadStringAt(std::span<const std::uint8_t>(spaces, sizeof(spaces)), text, wide));
+            const std::uint8_t utf8[] = "Gr\xC3\xBC\xC3\x9F" "e";
+            CHECK(Disasm::ReadStringAt(std::span<const std::uint8_t>(utf8, sizeof(utf8)), text, wide) && text == "Gr\xC3\xBC\xC3\x9F" "e" && !wide);
+
+            Disasm::DissectResult result;
+            result.Refs = { { 0x100, 0x10 }, { 0x200, 0x20 | (static_cast<std::uint64_t>(Disasm::RefKind::Write) << 56) }, { 0x200, 0x30 }, { 0x300, 0x40 } };
+            CHECK_EQ(result.To(0x200).size(), 2u);
+            CHECK(result.To(0x200)[0].From() == 0x20 && result.To(0x200)[0].Kind() == Disasm::RefKind::Write);
+            CHECK_EQ(result.Between(0x100, 0x300).size(), 3u);
+            CHECK(result.To(0x250).empty());
+        }
     }
 
     int RunCoreTests()
@@ -299,6 +336,7 @@ data:
         XmlParsing();
         TableRoundTrip();
         AutoAssemblerOffline();
+        CodeSearchHelpers();
         return Totals().Failures - before;
     }
 }

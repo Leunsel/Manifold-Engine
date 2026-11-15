@@ -87,6 +87,12 @@
     <ClCompile Include="..\Source\Debug\Debugger.cpp">
       <Filter>Source\Debug</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Disasm\CodeDissect.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
@@ -132,6 +138,9 @@
     <ClCompile Include="..\Source\Table\Structures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\PatchScan.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\Process.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -139,6 +148,9 @@
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\CodeEditor.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\CodeTools.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\DialogHost.cpp">
@@ -154,6 +166,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\MemoryViewer.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\PatchScanWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\RecordEditor.cpp">
@@ -234,6 +249,12 @@
     <ClInclude Include="..\Source\Debug\VehProtocol.h">
       <Filter>Source\Debug</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Disasm\AssemblySearch.h">
+      <Filter>Source\Disasm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Disasm\CodeDissect.h">
+      <Filter>Source\Disasm</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Disasm\Disassembler.h">
       <Filter>Source\Disasm</Filter>
     </ClInclude>
@@ -269,6 +290,9 @@
     </ClInclude>
     <ClInclude Include="..\Source\Table\Structures.h">
       <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\PatchScan.h">
+      <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\Process.h">
       <Filter>Source\Target</Filter>

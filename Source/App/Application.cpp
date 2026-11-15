@@ -127,6 +127,12 @@ namespace Manifold
                 m_workspace->OpenRegions();
             else if (window == "tablefiles")
                 m_workspace->OpenTableFiles();
+            else if (window == "patches")
+                m_workspace->OpenPatchScan();
+            else if (window == "dissect")
+                m_workspace->OpenCodeDissect();
+            else if (window == "asmsearch")
+                m_workspace->OpenAsmSearch();
             else if (window == "processes")
                 m_workspace->OpenProcessPicker();
             else if (window == "about")
