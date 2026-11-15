@@ -373,11 +373,19 @@ namespace Manifold::Disasm
 
     std::uint64_t Disassembler::BackUp(const Target::Process& process, std::uint64_t address, int lines) const
     {
+        const auto region = process.RegionAt(address);
+        const std::uint64_t floor = region ? region->Base : 0;
         std::uint64_t at = address;
-        for (int i = 0; i < lines; ++i)
+        for (int i = 0; i < lines && at > floor; ++i)
         {
             const auto previous = PreviousStart(process, at);
-            at = previous ? *previous : at - 1;
+            const std::uint64_t next = previous ? *previous : (at > 0 ? at - 1 : at);
+            if (next < floor)
+            {
+                at = floor;
+                break;
+            }
+            at = next;
         }
         return at;
     }
