@@ -477,6 +477,57 @@ namespace Manifold::Tests
                 return "ok")LUA");
         }
 
+        void PaintBoxCanvas(Engine& engine)
+        {
+            LuaCheck(engine, "paint box canvas", R"LUA(
+                local form = createForm(false)
+                form.ClientWidth, form.ClientHeight = 200, 100
+                local box = createPaintBox(form)
+                box.Align = "alClient"
+                local bitmap = createBitmap(300, 200)
+                local c = bitmap.Canvas
+                c.Brush.Color = 0x101010
+                c.fillRect(0, 0, 200, 100)
+                c.Pen.Color = 0xFFFFFF
+                c.line(0, 0, 10, 10)
+                c.textOut(5, 5, "hi")
+                c.ellipse(1, 1, 9, 9)
+                local painted = 0
+                box.OnPaint = function(sender)
+                  painted = painted + 1
+                  sender.Canvas.draw(0, 0, bitmap)
+                end
+                local moves = {}
+                box.OnMouseMove = function(sender, x, y) moves[#moves + 1] = x .. "," .. y end
+                form.show()
+                local function surface()
+                  for _, f in ipairs(__manifoldFormSnapshot()) do
+                    for _, control in ipairs(f.controls) do
+                      if control.kind == "paintbox" then return control end
+                    end
+                  end
+                end
+                local entry = surface()
+                if not entry or entry.w ~= 200 or entry.h ~= 100 or not entry.mouse then return "entry" end
+                if painted ~= 1 then return "painted " .. painted end
+                local count, draws = __manifoldCanvasCount(entry.canvas)
+                if count ~= 1 or #draws ~= 1 then return "paint box list " .. count end
+                local inner = __manifoldCanvasCount(draws[1])
+                if inner ~= 4 then return "bitmap list " .. inner end
+                c.fillRect(0, 0, 200, 100)
+                if __manifoldCanvasCount(draws[1]) ~= 1 then return "frame reset " .. __manifoldCanvasCount(draws[1]) end
+                surface()
+                if painted ~= 1 then return "painted without a repaint" end
+                box.repaint()
+                surface()
+                if painted ~= 2 then return "repaint " .. painted end
+                __manifoldFormFire(entry.id, "mousemove", 12, 34)
+                if moves[1] ~= "12,34" then return "mouse move " .. tostring(moves[1]) end
+                form.destroy()
+                bitmap.destroy()
+                return "ok")LUA");
+        }
+
         void ScriptSettings(Engine& engine)
         {
             const std::filesystem::path path = Paths::ScriptSettingsFile();
@@ -657,6 +708,7 @@ namespace Manifold::Tests
         ScriptMenus(engine);
         ScriptForms(engine);
         ScriptLayout(engine);
+        PaintBoxCanvas(engine);
         ScriptSettings(engine);
         return Totals().Failures - before;
     }

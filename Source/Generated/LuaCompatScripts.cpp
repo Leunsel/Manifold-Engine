@@ -1339,7 +1339,7 @@ end
 }
 )MLUA"),
         };
-        constexpr std::array<std::string_view, 8> kScript2 = {
+        constexpr std::array<std::string_view, 9> kScript2 = {
             std::string_view(R"MLUA(local classes = __ceClasses or {}
 __ceClasses = nil
 
@@ -1780,6 +1780,9 @@ local function destroy(obj)
   end
   call(d.props.ondestroy, obj)
   d.destroyed = true
+  if d.class == "canvas" and layout.canvasFreed then
+    layout.canvasFreed(d)
+  end
   for i = #d.components, 1, -1 do
     destroy(d.components[i])
   end
@@ -2114,10 +2117,10 @@ Impl.strings = {
     end
     self.Text = text
   end,
-  savetofile = function(self, path)
-    local file = io.open(path, "wb")
 )MLUA"),
-            std::string_view(R"MLUA(    if not file then
+            std::string_view(R"MLUA(  savetofile = function(self, path)
+    local file = io.open(path, "wb")
+    if not file then
       error("Unable to create file \"" .. tostring(path) .. "\"")
     end
     file:write(self.Text)
@@ -2411,9 +2414,9 @@ local function attachItem(parent, item, index)
   end
 end
 Impl.menuitem = {
-  add = function(self, item) attachItem(self, item) end,
 )MLUA"),
-            std::string_view(R"MLUA(  insert = function(self, index, item) attachItem(self, item, tonumber(index) or 0) end,
+            std::string_view(R"MLUA(  add = function(self, item) attachItem(self, item) end,
+  insert = function(self, index, item) attachItem(self, item, tonumber(index) or 0) end,
   delete = function(self, index)
     local d = D[self]
     local item = d.items[(tonumber(index) or -1) + 1]
@@ -2758,9 +2761,9 @@ Impl.treenode = {
   getnextsibling = function(self) return sibling(self, 1) end,
   getprevsibling = function(self) return sibling(self, -1) end,
   getnext = function(self) return D[self].children[1] or sibling(self, 1) end,
-  displayrect = function() return { Left = 0, Top = 0, Right = 0, Bottom = 0 } end,
 )MLUA"),
-            std::string_view(R"MLUA(  getitem = function(self, i) return D[self].children[(tonumber(i) or -1) + 1] end,
+            std::string_view(R"MLUA(  displayrect = function() return { Left = 0, Top = 0, Right = 0, Bottom = 0 } end,
+  getitem = function(self, i) return D[self].children[(tonumber(i) or -1) + 1] end,
   getcount = function(self) return #D[self].children end,
   getparent = function(self) return D[self].parentNode end,
 }
@@ -3119,10 +3122,10 @@ getMemoryViewForm = getMemoryViewForm or function()
   end
   memoryView = new("memoryview")
   local p = D[memoryView].props
-  p.name = "MemoryBrowser"
-  p.caption = "Memory Viewer"
 )MLUA"),
-            std::string_view(R"MLUA(  local view = construct("disassemblerview", memoryView)
+            std::string_view(R"MLUA(  p.name = "MemoryBrowser"
+  p.caption = "Memory Viewer"
+  local view = construct("disassemblerview", memoryView)
   D[view].props.name = "DisassemblerView"
   p.disassemblerview = view
   local hex = construct("hexadecimal", memoryView)
@@ -3292,6 +3295,7 @@ local layoutNames = { tltop = 0, tlcenter = 1, tlbottom = 2 }
 local drawnKinds = {
   label = true, button = true, edit = true, memo = true, checkbox = true, togglebox = true, listbox = true,
   panel = true, groupbox = true, splitter = true, combobox = true, treeview = true, cecustombutton = true,
+  paintbox = true, image = true,
 }
 local defaultSizes = {
   panel = { 170, 50 }, label = { 65, 17 }, edit = { 80, 23 }, memo = { 150, 90 }, button = { 75, 25 },
@@ -3538,15 +3542,17 @@ local function place(control, d, align, rect)
   local resized = p.width ~= w or p.height ~= h
   p.left, p.top, p.width, p.height = l, t, w, h
   if resized then
+    d.paintDirty = true
+    d.resizePending = true
     realign(control, nil)
-  end
+)MLUA"),
+            std::string_view(R"MLUA(  end
 end
 
 local aligning = setmetatable({}, { __mode = "k" })
 realign = function(parent, start)
   local pd = parent and D[parent]
-)MLUA"),
-            std::string_view(R"MLUA(  if not pd or pd.destroyed or aligning[parent] or #pd.controls == 0 then
+  if not pd or pd.destroyed or aligning[parent] or #pd.controls == 0 then
     return
   end
   aligning[parent] = true
@@ -3570,6 +3576,8 @@ realign = function(parent, start)
         local w, h = constrain(cd, aw or num(cd.props.width), ah or num(cd.props.height))
         if w ~= cd.props.width or h ~= cd.props.height then
           cd.props.width, cd.props.height = w, h
+          cd.paintDirty = true
+          cd.resizePending = true
           realign(control, nil)
         end
       end
@@ -3681,6 +3689,223 @@ end
 
 layout.realign = realign
 
+local penStyles = { pssolid = 0, psdash = 1, psdot = 2, psdashdot = 3, psdashdotdot = 4, psinsideframe = 5, pspattern = 6, psclear = 7 }
+local brushStyles = { bssolid = 0, bsclear = 1 }
+
+local function canvasPen(canvas, d)
+  local pen = d.props.pen or canvas.Pen
+  local p = D[pen].props
+  return tonumber(p.color) or 0, math.max(1, tonumber(p.width) or 1), enum(p.style, penStyles, 0) == 7
+end
+
+local function canvasBrush(canvas, d)
+  local brush = d.props.brush or canvas.Brush
+  local p = D[brush].props
+  return tonumber(p.color) or 0xFFFFFF, enum(p.style, brushStyles, 0) == 1
+end
+
+local function canvasFontInfo(canvas, d)
+  local font = d.props.font or canvas.Font
+  local p = D[font].props
+  local size = tonumber(p.size) or 9
+  if size <= 0 then
+    size = 9
+  end
+  local name = lower(tostring(p.name or ""))
+  local mono = name:find("consolas") ~= nil or name:find("courier") ~= nil or name:find("mono") ~= nil or name:find("lucida console") ~= nil
+  return size, tonumber(p.color) or 0x20000000, lower(tostring(p.style or "")):find("fsbold") ~= nil, mono
+end
+
+local function canvasArea(d)
+  local owner = d.owner and D[d.owner]
+  if not owner then
+    return 0, 0
+  end
+  return num(owner.props.width), num(owner.props.height)
+end
+
+local function canvasReset(d)
+  local reset = rawget(_G, "__manifoldCanvasReset")
+  if reset then
+    reset(d.serial)
+  end
+end
+
+local function canvasShape(canvas, op, x1, y1, x2, y2, usePen, useBrush, rx, ry)
+  local native = rawget(_G, "__manifoldCanvasShape")
+  if not native then
+    return
+  end
+  local d = D[canvas]
+  local pen, width, penClear = 0, 1, true
+  if usePen then
+    pen, width, penClear = canvasPen(canvas, d)
+  end
+  local brush, brushClear = 0xFFFFFF, true
+  if useBrush then
+    brush, brushClear = canvasBrush(canvas, d)
+  end
+  native(d.serial, op, num(x1), num(y1), num(x2), num(y2), pen, width, penClear, brush, brushClear, num(rx), num(ry))
+end
+
+local function pointList(points, ...)
+  local flat = {}
+  if type(points) == "table" then
+    for _, point in ipairs(points) do
+      if type(point) == "table" then
+        flat[#flat + 1] = num(point.x or point.X or point[1])
+        flat[#flat + 1] = num(point.y or point.Y or point[2])
+      else
+        flat[#flat + 1] = num(point)
+      end
+    end
+  else
+    for _, value in ipairs({ points, ... }) do
+      flat[#flat + 1] = num(value)
+    end
+  end
+  return flat
+end
+
+local function canvasPoly(canvas, closed, points, ...)
+  local native = rawget(_G, "__manifoldCanvasPoly")
+  if not native then
+    return
+  end
+  local d = D[canvas]
+  local pen, width, penClear = canvasPen(canvas, d)
+  local brush, brushClear = canvasBrush(canvas, d)
+  native(d.serial, closed, pointList(points, ...), pen, width, penClear, brush, closed and brushClear or true)
+end
+
+Impl.canvas.line = function(self, x1, y1, x2, y2)
+  canvasShape(self, 1, x1, y1, x2, y2, true, false)
+  local d = D[self]
+  d.penX, d.penY = x2, y2
+end
+Impl.canvas.moveto = function(self, x, y)
+  local d = D[self]
+  d.penX, d.penY = x, y
+end
+Impl.canvas.lineto = function(self, x, y)
+  local d = D[self]
+  canvasShape(self, 1, d.penX or 0, d.penY or 0, x, y, true, false)
+  d.penX, d.penY = x, y
+end
+Impl.canvas.rect = function(self, x1, y1, x2, y2) canvasShape(self, 2, x1, y1, x2, y2, true, true) end
+Impl.canvas.rectangle = Impl.canvas.rect
+Impl.canvas.framerect = function(self, x1, y1, x2, y2)
+  local native = rawget(_G, "__manifoldCanvasShape")
+  if native then
+    local d = D[self]
+    local brush = canvasBrush(self, d)
+    native(d.serial, 2, num(x1), num(y1), num(x2), num(y2), brush, 1, false, 0, true, 0, 0)
+  end
+end
+Impl.canvas.fillrect = function(self, x1, y1, x2, y2)
+  local d = D[self]
+  local w, h = canvasArea(d)
+  if w > 0 and num(x1) <= 0 and num(y1) <= 0 and num(x2) >= w and num(y2) >= h then
+    canvasReset(d)
+  end
+  canvasShape(self, 3, x1, y1, x2, y2, false, true)
+end
+Impl.canvas.clear = function(self)
+  local d = D[self]
+  canvasReset(d)
+  local w, h = canvasArea(d)
+  canvasShape(self, 3, 0, 0, w, h, false, true)
+end
+Impl.canvas.ellipse = function(self, x1, y1, x2, y2) canvasShape(self, 4, x1, y1, x2, y2, true, true) end
+Impl.canvas.roundrect = function(self, x1, y1, x2, y2, rx, ry) canvasShape(self, 5, x1, y1, x2, y2, true, true, rx, ry or rx) end
+Impl.canvas.setpixel = function(self, x, y, color)
+  local native = rawget(_G, "__manifoldCanvasShape")
+  if native then
+    native(D[self].serial, 6, num(x), num(y), num(x) + 1, num(y) + 1, tonumber(color) or 0, 1, false, 0, true, 0, 0)
+  end
+end
+Impl.canvas.polygon = function(self, points, ...) canvasPoly(self, true, points, ...) end
+Impl.canvas.polyline = function(self, points, ...) canvasPoly(self, false, points, ...) end
+Impl.canvas.textout = function(self, x, y, text)
+  local native = rawget(_G, "__manifoldCanvasText")
+  if not native then
+    return
+  end
+  local d = D[self]
+  local size, color, bold, mono = canvasFontInfo(self, d)
+  local brush, brushClear = canvasBrush(self, d)
+  native(d.serial, num(x), num(y), tostring(text or ""), size, color, bold, mono, brush, brushClear)
+end
+Impl.canvas.textrect = function(self, rect, x, y, text) Impl.canvas.textout(self, x, y, text) end
+Impl.canvas.draw = function(self, x, y, graphic)
+  local native = rawget(_G, "__manifoldCanvasDraw")
+  if not native or not isObject(graphic) then
+    return
+  end
+  local source = graphic.Canvas
+  if source and D[source] then
+    native(D[self].serial, D[source].serial, num(x), num(y), 0, 0)
+  end
+end
+Impl.canvas.stretchdraw = function(self, rect, graphic)
+  local native = rawget(_G, "__manifoldCanvasDraw")
+  if not native or not isObject(graphic) or type(rect) ~= "table" then
+    return
+  end
+  local source = graphic.Canvas
+  if source and D[source] then
+    local left, top = num(rect.Left or rect[1]), num(rect.Top or rect[2])
+    native(D[self].serial, D[source].serial, left, top, num(rect.Right or rect[3]) - left, num(rect.Bottom or rect[4]) - top)
+  end
+end
+Impl.canvas.copyrect = function(self, dest, source, sourceRect)
+  if isObject(source) and D[source] and D[source].class == "canvas" then
+    local native = rawget(_G, "__manifoldCanvasDraw")
+    if native and type(dest) == "table" then
+      native(D[self].serial, D[source].serial, num(dest.Left or dest[1]), num(dest.Top or dest[2]), 0, 0)
+    end
+  end
+end
+
+local function markPaint(self)
+  local d = D[self]
+  d.paintDirty = true
+  touchForms()
+end
+Impl.paintbox = Impl.paintbox or {}
+for _, name in ipairs({ "repaint", "invalidate", "refresh", "update" }) do
+  Impl.paintbox[name] = markPaint
+end
+
+layout.canvasFreed = function(d)
+  local free = rawget(_G, "__manifoldCanvasFree")
+  if free then
+    free(d.serial)
+  end
+end
+
+local paintErrors = setmetatable({}, { __mode = "k" })
+local function paintSurface(control, d)
+  local canvas = control.Canvas
+  local cd = canvas and D[canvas]
+  if not cd then
+    return 0
+  end
+  if d.class == "paintbox" and d.paintDirty ~= false then
+    d.paintDirty = false
+    canvasReset(cd)
+    if type(d.props.onpaint) == "function" then
+      local ok, err = pcall(d.props.onpaint, control)
+      if not ok and paintErrors[control] ~= tostring(err) then
+        paintErrors[control] = tostring(err)
+        print("OnPaint failed: " .. tostring(err))
+      end
+    end
+  end
+  return cd.serial
+end
+layout.paintSurface = paintSurface
+
 local function splitterTarget(splitter, sd)
   local parent = sd.parent
   if not parent or not D[parent] then
@@ -3701,7 +3926,8 @@ local function splitterTarget(splitter, sd)
         end
       elseif align == 4 then
         edge = num(p.left)
-        if edge >= num(sp.left) + num(sp.width) - 1 and (not bestEdge or edge < bestEdge) then
+)MLUA"),
+            std::string_view(R"MLUA(        if edge >= num(sp.left) + num(sp.width) - 1 and (not bestEdge or edge < bestEdge) then
           best, bestEdge = control, edge
         end
       elseif align == 1 then
@@ -3748,9 +3974,27 @@ local function nodeEntries(list)
   return out
 end
 
+local function fires(p, ...)
+  for _, name in ipairs({ ... }) do
+    if type(p[name]) == "function" then
+      return true
+    end
+  end
+  return false
+end
+
 local function controlEntry(control, form)
   local d = D[control]
   local p = d.props
+  if d.resizePending then
+    d.resizePending = nil
+    if type(p.onresize) == "function" then
+      local ok, err = pcall(p.onresize, control)
+      if not ok then
+        print("OnResize failed: " .. tostring(err))
+      end
+    end
+  end
   local font = fontInfo(control)
   local popup = p.popupmenu
   local entry = {
@@ -3771,6 +4015,8 @@ local function controlEntry(control, form)
     dblclick = type(p.ondblclick) == "function",
     hover = type(p.onmouseenter) == "function" or type(p.onmouseleave) == "function",
     popup = (popup and D[popup] and not D[popup].destroyed) and uidOf(popup) or nil,
+    mouse = fires(p, "onmousedown", "onmouseup", "onmousemove"),
+    wheel = fires(p, "onmousewheelup", "onmousewheeldown", "onmousewheel"),
     children = {},
   }
   if not drawnKinds[d.class] then
@@ -3809,6 +4055,8 @@ local function controlEntry(control, form)
     entry.resizes = target and uidOf(target) or nil
     entry.minsize = tonumber(p.minsize) or 30
     entry.align = alignOf(control)
+  elseif kind == "paintbox" or kind == "image" then
+    entry.canvas = paintSurface(control, d)
   elseif kind == "treeview" then
     local items = p.items
     entry.nodes = (items and D[items]) and nodeEntries(D[items].roots) or {}
@@ -3856,6 +4104,7 @@ __manifoldFormSnapshot = function()
         minheight = num(constraints.minheight),
         menu = (menu and D[menu] and not D[menu].destroyed) and uidOf(menu) or nil,
         color = colorValue(p.color),
+        keydown = type(p.onkeydown) == "function",
         fontsize = font.size,
         fontcolor = font.color,
         bold = font.bold,
@@ -3913,7 +4162,7 @@ __manifoldFormSet = function(id, field, value)
   end
 end
 
-__manifoldFormFire = function(id, event)
+__manifoldFormFire = function(id, event, a, b, c)
   local control, d = live(id)
   if not control then
     return
@@ -3928,8 +4177,7 @@ __manifoldFormFire = function(id, event)
       call(p.onselectionchange, control, true)
     end
   elseif event == "nodechange" then
-)MLUA"),
-            std::string_view(R"MLUA(    call(p.onchange, control, p.selected)
+    call(p.onchange, control, p.selected)
     call(p.onselectionchanged, control)
   elseif event == "dblclick" then
     call(p.ondblclick, control)
@@ -3946,6 +4194,21 @@ __manifoldFormFire = function(id, event)
     call(p.onmouseleave, control)
   elseif event == "moved" then
     call(p.onmoved, control)
+  elseif event == "mousedown" then
+    call(p.onmousedown, control, a, b, c)
+  elseif event == "mouseup" then
+    call(p.onmouseup, control, a, b, c)
+  elseif event == "mousemove" then
+    call(p.onmousemove, control, a, b)
+  elseif event == "wheelup" or event == "wheeldown" then
+    local named = event == "wheelup" and p.onmousewheelup or p.onmousewheeldown
+    if type(named) == "function" then
+      named(control, a, b)
+    else
+      call(p.onmousewheel, control, event == "wheelup" and 120 or -120, a, b)
+    end
+  elseif event == "keydown" then
+    call(p.onkeydown, control, a)
   end
 end
 
@@ -4022,7 +4285,8 @@ showSelectionList = showSelectionList or function(title, caption, list, allowCus
   return __manifoldShowSelectionList(title, caption, items, allowCustom)
 end
 
-__manifoldNewThreadObject = function()
+)MLUA"),
+            std::string_view(R"MLUA(__manifoldNewThreadObject = function()
   return new("thread")
 end
 

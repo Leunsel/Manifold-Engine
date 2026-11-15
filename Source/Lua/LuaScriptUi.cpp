@@ -163,6 +163,9 @@ namespace Manifold::Lua
             control.Nodes = ListField<ScriptNode>(state, index, "nodes", &ReadNode);
             control.Selected = IntField(state, index, "selected", 0);
             control.RightClickSelect = BoolField(state, index, "rightclickselect", false);
+            control.Canvas = IntField(state, index, "canvas", 0);
+            control.Mouse = BoolField(state, index, "mouse", false);
+            control.Wheel = BoolField(state, index, "wheel", false);
             control.Unsupported = StringField(state, index, "unsupported");
             control.Children = ListField<ScriptControl>(state, index, "children", &ReadControl);
             return control;
@@ -185,6 +188,7 @@ namespace Manifold::Lua
             form.Raise = IntField(state, index, "raise", 0);
             form.Menu = IntField(state, index, "menu", 0);
             form.Color = IntField(state, index, "color", -1);
+            form.KeyDown = BoolField(state, index, "keydown", false);
             form.Font = ReadFont(state, index);
             form.Unsupported = StringField(state, index, "unsupported");
             form.Controls = ListField<ScriptControl>(state, index, "controls", &ReadControl);
@@ -361,9 +365,37 @@ namespace Manifold::Lua
         lua_settop(m_state, top);
     }
 
-    void LuaEngine::FireFormEvent(int control, std::string_view event)
+    void LuaEngine::FireFormEvent(int control, std::string_view event, std::initializer_list<int> arguments)
     {
-        RunCallback("__manifoldFormFire(" + std::to_string(control) + ", " + Quoted(event) + ")", "form event");
+        std::string code = "__manifoldFormFire(" + std::to_string(control) + ", " + Quoted(event);
+        for (const int argument : arguments)
+            code += ", " + std::to_string(argument);
+        RunCallback(code + ")", "form event");
+    }
+
+    ScriptCanvas& LuaEngine::CanvasFor(int id)
+    {
+        return m_canvases[id];
+    }
+
+    const ScriptCanvas* LuaEngine::FindCanvas(int id) const
+    {
+        const auto found = m_canvases.find(id);
+        return found == m_canvases.end() ? nullptr : &found->second;
+    }
+
+    void LuaEngine::ResetCanvas(int id)
+    {
+        ScriptCanvas& canvas = m_canvases[id];
+        canvas.Commands.clear();
+        canvas.Texts.clear();
+        canvas.Coordinates.clear();
+        ++canvas.Generation;
+    }
+
+    void LuaEngine::FreeCanvas(int id)
+    {
+        m_canvases.erase(id);
     }
 
     void LuaEngine::CloseForm(int form)

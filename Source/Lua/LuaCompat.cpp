@@ -1826,6 +1826,161 @@ namespace Manifold::Lua
             return 2;
         }
 
+        constexpr std::size_t kCanvasLimit = 400000;
+
+        ScriptCanvas& CanvasArgument(lua_State* state)
+        {
+            ScriptCanvas& canvas = EngineOf(state).CanvasFor(static_cast<int>(luaL_checkinteger(state, 1)));
+            if (canvas.Commands.size() >= kCanvasLimit)
+            {
+                canvas.Commands.clear();
+                canvas.Texts.clear();
+                canvas.Coordinates.clear();
+            }
+            ++canvas.Generation;
+            return canvas;
+        }
+
+        float NumberAt(lua_State* state, int index, float fallback = 0.0f)
+        {
+            return static_cast<float>(luaL_optnumber(state, index, fallback));
+        }
+
+        std::uint32_t ColorAt(lua_State* state, int index, std::uint32_t fallback)
+        {
+            return lua_isnoneornil(state, index) ? fallback : static_cast<std::uint32_t>(static_cast<std::uint64_t>(luaL_checkinteger(state, index)) & 0xFFFFFFFFull);
+        }
+
+        int CanvasShape(lua_State* state)
+        {
+            ScriptCanvas& canvas = CanvasArgument(state);
+            CanvasCommand command;
+            command.Op = static_cast<CanvasOp>(luaL_checkinteger(state, 2));
+            command.X1 = NumberAt(state, 3);
+            command.Y1 = NumberAt(state, 4);
+            command.X2 = NumberAt(state, 5);
+            command.Y2 = NumberAt(state, 6);
+            command.Pen = ColorAt(state, 7, 0);
+            command.PenWidth = NumberAt(state, 8, 1.0f);
+            command.PenClear = lua_toboolean(state, 9) != 0;
+            command.Brush = ColorAt(state, 10, 0xFFFFFF);
+            command.BrushClear = lua_toboolean(state, 11) != 0;
+            command.Rx = NumberAt(state, 12);
+            command.Ry = NumberAt(state, 13);
+            const bool opaque = !command.BrushClear && command.Brush != 0x1FFFFFFFu;
+            if (command.Op == CanvasOp::FillRect && opaque && command.X1 <= 0.0f && command.Y1 <= 0.0f && !canvas.Commands.empty())
+            {
+                const CanvasCommand& first = canvas.Commands.front();
+                if (first.Op == CanvasOp::FillRect && first.X1 <= 0.0f && first.Y1 <= 0.0f)
+                {
+                    const float firstArea = std::max(1.0f, (first.X2 - first.X1) * (first.Y2 - first.Y1));
+                    const float overlap = std::max(0.0f, std::min(first.X2, command.X2) - std::max(first.X1, command.X1)) *
+                                          std::max(0.0f, std::min(first.Y2, command.Y2) - std::max(first.Y1, command.Y1));
+                    if (overlap >= firstArea * 0.5f)
+                    {
+                        canvas.Commands.clear();
+                        canvas.Texts.clear();
+                        canvas.Coordinates.clear();
+                    }
+                }
+            }
+            canvas.Commands.push_back(command);
+            return 0;
+        }
+
+        int CanvasText(lua_State* state)
+        {
+            ScriptCanvas& canvas = CanvasArgument(state);
+            CanvasCommand command;
+            command.Op = CanvasOp::Text;
+            command.X1 = NumberAt(state, 2);
+            command.Y1 = NumberAt(state, 3);
+            std::size_t length = 0;
+            const char* text = luaL_checklstring(state, 4, &length);
+            command.Points = NumberAt(state, 5, 9.0f);
+            command.Pen = ColorAt(state, 6, 0x20000000);
+            command.Bold = lua_toboolean(state, 7) != 0;
+            command.Mono = lua_toboolean(state, 8) != 0;
+            command.Brush = ColorAt(state, 9, 0xFFFFFF);
+            command.BrushClear = lua_toboolean(state, 10) != 0;
+            command.Ref = static_cast<std::int32_t>(canvas.Texts.size());
+            canvas.Texts.emplace_back(text, length);
+            canvas.Commands.push_back(command);
+            return 0;
+        }
+
+        int CanvasDraw(lua_State* state)
+        {
+            ScriptCanvas& canvas = CanvasArgument(state);
+            CanvasCommand command;
+            command.Op = CanvasOp::Draw;
+            command.Ref = static_cast<std::int32_t>(luaL_checkinteger(state, 2));
+            command.X1 = NumberAt(state, 3);
+            command.Y1 = NumberAt(state, 4);
+            command.X2 = NumberAt(state, 5);
+            command.Y2 = NumberAt(state, 6);
+            canvas.Commands.push_back(command);
+            return 0;
+        }
+
+        int CanvasPoly(lua_State* state)
+        {
+            ScriptCanvas& canvas = CanvasArgument(state);
+            CanvasCommand command;
+            command.Op = lua_toboolean(state, 2) ? CanvasOp::Polygon : CanvasOp::Polyline;
+            luaL_checktype(state, 3, LUA_TTABLE);
+            command.Ref = static_cast<std::int32_t>(canvas.Coordinates.size());
+            const lua_Integer count = static_cast<lua_Integer>(lua_rawlen(state, 3));
+            for (lua_Integer i = 1; i + 1 <= count; i += 2)
+            {
+                lua_rawgeti(state, 3, i);
+                lua_rawgeti(state, 3, i + 1);
+                canvas.Coordinates.push_back(static_cast<float>(lua_tonumber(state, -2)));
+                canvas.Coordinates.push_back(static_cast<float>(lua_tonumber(state, -1)));
+                lua_pop(state, 2);
+            }
+            command.Count = static_cast<std::int32_t>((canvas.Coordinates.size() - static_cast<std::size_t>(command.Ref)) / 2);
+            command.Pen = ColorAt(state, 4, 0);
+            command.PenWidth = NumberAt(state, 5, 1.0f);
+            command.PenClear = lua_toboolean(state, 6) != 0;
+            command.Brush = ColorAt(state, 7, 0xFFFFFF);
+            command.BrushClear = lua_toboolean(state, 8) != 0;
+            canvas.Commands.push_back(command);
+            return 0;
+        }
+
+        int CanvasReset(lua_State* state)
+        {
+            EngineOf(state).ResetCanvas(static_cast<int>(luaL_checkinteger(state, 1)));
+            return 0;
+        }
+
+        int CanvasCount(lua_State* state)
+        {
+            const ScriptCanvas* canvas = EngineOf(state).FindCanvas(static_cast<int>(luaL_checkinteger(state, 1)));
+            lua_pushinteger(state, canvas ? static_cast<lua_Integer>(canvas->Commands.size()) : 0);
+            lua_newtable(state);
+            if (canvas)
+            {
+                lua_Integer index = 1;
+                for (const CanvasCommand& command : canvas->Commands)
+                {
+                    if (command.Op == CanvasOp::Draw)
+                    {
+                        lua_pushinteger(state, command.Ref);
+                        lua_rawseti(state, -2, index++);
+                    }
+                }
+            }
+            return 2;
+        }
+
+        int CanvasFree(lua_State* state)
+        {
+            EngineOf(state).FreeCanvas(static_cast<int>(luaL_checkinteger(state, 1)));
+            return 0;
+        }
+
         int MenusChanged(lua_State* state)
         {
             EngineOf(state).TouchMenus();
@@ -3175,6 +3330,13 @@ namespace Manifold::Lua
             { "__manifoldMemoryViewVisible", &MemoryViewVisible },
             { "__manifoldMenusChanged", &MenusChanged },
             { "__manifoldTextExtent", &TextExtent },
+            { "__manifoldCanvasShape", &CanvasShape },
+            { "__manifoldCanvasText", &CanvasText },
+            { "__manifoldCanvasDraw", &CanvasDraw },
+            { "__manifoldCanvasPoly", &CanvasPoly },
+            { "__manifoldCanvasReset", &CanvasReset },
+            { "__manifoldCanvasFree", &CanvasFree },
+            { "__manifoldCanvasCount", &CanvasCount },
             { "__manifoldFormsChanged", &FormsChanged },
             { "__manifoldSettingRead", &SettingRead },
             { "__manifoldSettingWrite", &SettingWrite },

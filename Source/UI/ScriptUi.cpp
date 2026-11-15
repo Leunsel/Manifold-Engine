@@ -57,6 +57,46 @@ namespace Manifold::UI
             return kind == "panel" || kind == "label" || kind == "groupbox" || kind == "image" || kind == "paintbox" || kind == "radiogroup";
         }
 
+        ImU32 CanvasColor(std::uint32_t value, ImU32 fallback)
+        {
+            if (value == 0x1FFFFFFFu)
+                return 0;
+            if (value > 0xFFFFFFu)
+                return fallback;
+            return Bgr(static_cast<int>(value));
+        }
+
+        struct VirtualKey
+        {
+            ImGuiKey Key;
+            int Code;
+        };
+
+        const std::vector<VirtualKey>& VirtualKeys()
+        {
+            static const std::vector<VirtualKey> keys = []
+                {
+                    std::vector<VirtualKey> list = {
+                        { ImGuiKey_LeftArrow, 0x25 }, { ImGuiKey_UpArrow, 0x26 }, { ImGuiKey_RightArrow, 0x27 }, { ImGuiKey_DownArrow, 0x28 },
+                        { ImGuiKey_Escape, 0x1B }, { ImGuiKey_Enter, 0x0D }, { ImGuiKey_KeypadEnter, 0x0D }, { ImGuiKey_Space, 0x20 },
+                        { ImGuiKey_Tab, 0x09 }, { ImGuiKey_Backspace, 0x08 }, { ImGuiKey_Delete, 0x2E }, { ImGuiKey_Insert, 0x2D },
+                        { ImGuiKey_Home, 0x24 }, { ImGuiKey_End, 0x23 }, { ImGuiKey_PageUp, 0x21 }, { ImGuiKey_PageDown, 0x22 },
+                        { ImGuiKey_KeypadAdd, 0x6B }, { ImGuiKey_KeypadSubtract, 0x6D }, { ImGuiKey_Equal, 0xBB }, { ImGuiKey_Minus, 0xBD },
+                    };
+                    for (int i = 0; i < 26; ++i)
+                        list.push_back({ static_cast<ImGuiKey>(ImGuiKey_A + i), 0x41 + i });
+                    for (int i = 0; i < 10; ++i)
+                    {
+                        list.push_back({ static_cast<ImGuiKey>(ImGuiKey_0 + i), 0x30 + i });
+                        list.push_back({ static_cast<ImGuiKey>(ImGuiKey_Keypad0 + i), 0x60 + i });
+                    }
+                    for (int i = 0; i < 12; ++i)
+                        list.push_back({ static_cast<ImGuiKey>(ImGuiKey_F1 + i), 0x70 + i });
+                    return list;
+                }();
+            return keys;
+        }
+
         bool MeasureScriptText(std::string_view text, float points, bool bold, bool mono, float& width, float& height)
         {
             if (!ImGui::GetCurrentContext())
@@ -149,6 +189,7 @@ namespace Manifold::UI
         }
         m_scale = Scale();
         m_seen.clear();
+        m_mins.clear();
         std::set<int> alive;
         for (const Lua::ScriptForm& form : m_forms)
         {
@@ -247,12 +288,20 @@ namespace Manifold::UI
             const bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
             m_hit = nullptr;
             m_hitPopup = 0;
+            m_hitWheel = 0;
+            m_surfaces.clear();
+            ImGui::SetCursorScreenPos(origin);
+            ImGui::SetNextItemAllowOverlap();
+            ImGui::InvisibleButton("##background", ImVec2(std::max(1.0f, available.x), std::max(1.0f, available.y)), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
+            m_background = ImGui::GetItemID();
             PushScriptFont(form.Font);
             DrawControls(form.Controls, origin, { origin, ImVec2(origin.x + available.x, origin.y + available.y) }, 0);
             ImGui::PopFont();
             ImGui::SetCursorScreenPos(origin);
             ImGui::Dummy(ImVec2(1.0f, 1.0f));
             Interact(state, hovered);
+            if (form.KeyDown)
+                Keys(form);
             if (state.OpenPopup)
             {
                 ImGui::OpenPopup("##scriptpopup");
@@ -281,11 +330,63 @@ namespace Manifold::UI
         m_state = nullptr;
     }
 
+    void ScriptForms::Keys(const Lua::ScriptForm& form)
+    {
+        if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) || ImGui::GetIO().WantTextInput)
+            return;
+        for (const VirtualKey& key : VirtualKeys())
+        {
+            if (ImGui::IsKeyPressed(key.Key))
+                m_engine.Lua().FireFormEvent(form.Id, "keydown", { key.Code });
+        }
+    }
+
     void ScriptForms::Interact(FormState& state, bool hovered)
     {
         Lua::LuaEngine& lua = m_engine.Lua();
+        const ImGuiIO& io = ImGui::GetIO();
         const Lua::ScriptControl* hit = hovered ? m_hit : nullptr;
         const int hitId = hit ? hit->Id : 0;
+        const auto local = [&](int id)
+            {
+                const auto found = m_mins.find(id);
+                const ImVec2 min = found != m_mins.end() ? found->second : ImVec2(0.0f, 0.0f);
+                return std::pair<int, int>(static_cast<int>(std::floor((io.MousePos.x - min.x) / m_scale)), static_cast<int>(std::floor((io.MousePos.y - min.y) / m_scale)));
+            };
+        const ImGuiID hoveredItem = ImGui::GetHoveredID();
+        const bool overSurface = hoveredItem == 0 || hoveredItem == m_background || m_surfaces.count(hoveredItem) > 0;
+        for (int button = 0; button < 3; ++button)
+        {
+            if (hit && hit->Mouse && overSurface && ImGui::IsMouseClicked(button))
+            {
+                const auto [x, y] = local(hitId);
+                lua.FireFormEvent(hitId, "mousedown", { button, x, y });
+                state.Capture = hitId;
+                state.CaptureButtons |= 1 << button;
+            }
+            if (state.Capture && (state.CaptureButtons & (1 << button)) && ImGui::IsMouseReleased(button))
+            {
+                const auto [x, y] = local(state.Capture);
+                lua.FireFormEvent(state.Capture, "mouseup", { button, x, y });
+                state.CaptureButtons &= ~(1 << button);
+                if (!state.CaptureButtons)
+                    state.Capture = 0;
+            }
+        }
+        const int moveTarget = state.Capture ? state.Capture : (hit && hit->Mouse ? hitId : 0);
+        if (moveTarget && Differs(io.MousePos, state.LastMouse))
+        {
+            const auto [x, y] = local(moveTarget);
+            lua.FireFormEvent(moveTarget, "mousemove", { x, y });
+        }
+        state.LastMouse = io.MousePos;
+        if (hit && m_hitWheel && io.MouseWheel != 0.0f)
+        {
+            const auto [x, y] = local(m_hitWheel);
+            const int notches = std::max(1, static_cast<int>(std::round(std::abs(io.MouseWheel))));
+            for (int i = 0; i < notches; ++i)
+                lua.FireFormEvent(m_hitWheel, io.MouseWheel > 0.0f ? "wheelup" : "wheeldown", { x, y });
+        }
         if (hitId != state.Hovered)
         {
             if (state.Hovered && state.HoveredHasHover)
@@ -304,7 +405,7 @@ namespace Manifold::UI
         if (hit->Cursor == kCursorHand)
             ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
         const bool passive = Passive(hit->Kind) || !hit->Unsupported.empty();
-        const bool free = passive && !ImGui::IsAnyItemHovered();
+        const bool free = passive && overSurface;
         if (free && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             state.Pressed = hitId;
         if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
@@ -329,15 +430,122 @@ namespace Manifold::UI
         m_state->OpenPopup = !m_state->Popup.empty();
     }
 
-    void ScriptForms::DrawControls(const std::vector<Lua::ScriptControl>& controls, ImVec2 origin, Clip clip, int popup)
+    void ScriptForms::DrawControls(const std::vector<Lua::ScriptControl>& controls, ImVec2 origin, Clip clip, int popup, int wheel)
     {
         const float s = m_scale;
         for (const Lua::ScriptControl& control : controls)
         {
             const ImVec2 min(std::floor(origin.x + static_cast<float>(control.X) * s), std::floor(origin.y + static_cast<float>(control.Y) * s));
             const ImVec2 max(std::floor(min.x + static_cast<float>(control.W) * s), std::floor(min.y + static_cast<float>(control.H) * s));
-            DrawControl(control, min, max, clip, control.Popup ? control.Popup : popup);
+            DrawControl(control, min, max, clip, control.Popup ? control.Popup : popup, control.Wheel ? control.Id : wheel);
         }
+    }
+
+    void ScriptForms::DrawCanvas(int id, ImVec2 origin, Clip clip, int depth)
+    {
+        const Lua::ScriptCanvas* canvas = m_engine.Lua().FindCanvas(id);
+        if (!canvas || depth > 6)
+            return;
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const float s = m_scale;
+        const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
+        const ImU32 frame = ImGui::GetColorU32(ImGuiCol_FrameBg);
+        ImFontAtlas* atlas = ImGui::GetIO().Fonts;
+        ImFont* regular = atlas && !atlas->Fonts.empty() ? atlas->Fonts[0] : ImGui::GetFont();
+        const auto at = [&](float x, float y) { return ImVec2(origin.x + x * s, origin.y + y * s); };
+        std::vector<ImVec2> points;
+        draw->PushClipRect(clip.Min, clip.Max, true);
+        for (const Lua::CanvasCommand& command : canvas->Commands)
+        {
+            const ImU32 pen = CanvasColor(command.Pen, text);
+            const ImU32 brush = CanvasColor(command.Brush, frame);
+            const float width = std::max(1.0f, command.PenWidth * s);
+            const ImVec2 a = at(command.X1, command.Y1);
+            const ImVec2 b = at(command.X2, command.Y2);
+            switch (command.Op)
+            {
+            case Lua::CanvasOp::Line:
+                if (!command.PenClear)
+                    draw->AddLine(ImVec2(a.x + 0.5f, a.y + 0.5f), ImVec2(b.x + 0.5f, b.y + 0.5f), pen, width);
+                break;
+            case Lua::CanvasOp::Rect:
+                if (!command.BrushClear)
+                    draw->AddRectFilled(a, b, brush);
+                if (!command.PenClear)
+                    draw->AddRect(ImVec2(a.x + width * 0.5f, a.y + width * 0.5f), ImVec2(b.x - width * 0.5f, b.y - width * 0.5f), pen, 0.0f, 0, width);
+                break;
+            case Lua::CanvasOp::FillRect:
+                if (!command.BrushClear)
+                    draw->AddRectFilled(a, b, brush);
+                break;
+            case Lua::CanvasOp::Ellipse:
+            {
+                const ImVec2 center((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+                const ImVec2 radius(std::abs(b.x - a.x) * 0.5f, std::abs(b.y - a.y) * 0.5f);
+                if (!command.BrushClear)
+                    draw->AddEllipseFilled(center, radius, brush);
+                if (!command.PenClear)
+                    draw->AddEllipse(center, ImVec2(std::max(0.5f, radius.x - width * 0.5f), std::max(0.5f, radius.y - width * 0.5f)), pen, 0.0f, 0, width);
+                break;
+            }
+            case Lua::CanvasOp::RoundRect:
+            {
+                const float rounding = std::min(command.Rx, command.Ry) * 0.5f * s;
+                if (!command.BrushClear)
+                    draw->AddRectFilled(a, b, brush, rounding);
+                if (!command.PenClear)
+                    draw->AddRect(ImVec2(a.x + width * 0.5f, a.y + width * 0.5f), ImVec2(b.x - width * 0.5f, b.y - width * 0.5f), pen, rounding, 0, width);
+                break;
+            }
+            case Lua::CanvasOp::Pixel:
+                draw->AddRectFilled(a, ImVec2(a.x + s, a.y + s), pen);
+                break;
+            case Lua::CanvasOp::Text:
+            {
+                if (command.Ref < 0 || command.Ref >= static_cast<int>(canvas->Texts.size()))
+                    break;
+                const std::string& value = canvas->Texts[static_cast<std::size_t>(command.Ref)];
+                ImFont* font = command.Mono ? Fonts::Mono() : command.Bold ? Fonts::Bold() : regular;
+                if (!font)
+                    break;
+                const float size = std::max(6.0f, command.Points * 96.0f / 72.0f) * s;
+                if (!command.BrushClear)
+                {
+                    const ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.0f, value.c_str(), value.c_str() + value.size());
+                    draw->AddRectFilled(a, ImVec2(a.x + extent.x + (command.Bold && command.Mono ? 1.0f : 0.0f), a.y + extent.y), brush);
+                }
+                const ImU32 color = CanvasColor(command.Pen, text);
+                draw->AddText(font, size, a, color, value.c_str(), value.c_str() + value.size());
+                if (command.Bold && command.Mono)
+                    draw->AddText(font, size, ImVec2(a.x + 1.0f, a.y), color, value.c_str(), value.c_str() + value.size());
+                break;
+            }
+            case Lua::CanvasOp::Draw:
+                if (command.Ref != id)
+                    DrawCanvas(command.Ref, a, clip, depth + 1);
+                break;
+            case Lua::CanvasOp::Polygon:
+            case Lua::CanvasOp::Polyline:
+            {
+                points.clear();
+                for (int i = 0; i < command.Count; ++i)
+                {
+                    const std::size_t at2 = static_cast<std::size_t>(command.Ref + i * 2);
+                    if (at2 + 1 >= canvas->Coordinates.size())
+                        break;
+                    points.push_back(at(canvas->Coordinates[at2], canvas->Coordinates[at2 + 1]));
+                }
+                if (points.size() < 2)
+                    break;
+                if (command.Op == Lua::CanvasOp::Polygon && !command.BrushClear && points.size() >= 3)
+                    draw->AddConcavePolyFilled(points.data(), static_cast<int>(points.size()), brush);
+                if (!command.PenClear)
+                    draw->AddPolyline(points.data(), static_cast<int>(points.size()), pen, command.Op == Lua::CanvasOp::Polygon ? ImDrawFlags_Closed : ImDrawFlags_None, width);
+                break;
+            }
+            }
+        }
+        draw->PopClipRect();
     }
 
     void ScriptForms::IndexControls(const std::vector<Lua::ScriptControl>& controls)
@@ -376,9 +584,10 @@ namespace Manifold::UI
         ImGui::PopFont();
     }
 
-    void ScriptForms::DrawControl(const Lua::ScriptControl& control, ImVec2 min, ImVec2 max, Clip clip, int popup)
+    void ScriptForms::DrawControl(const Lua::ScriptControl& control, ImVec2 min, ImVec2 max, Clip clip, int popup, int wheel)
     {
         m_seen.insert(control.Id);
+        m_mins[control.Id] = min;
         const Clip inner{ ImVec2(std::max(min.x, clip.Min.x), std::max(min.y, clip.Min.y)), ImVec2(std::min(max.x, clip.Max.x), std::min(max.y, clip.Max.y)) };
         if (inner.Max.x <= inner.Min.x || inner.Max.y <= inner.Min.y)
             return;
@@ -386,6 +595,7 @@ namespace Manifold::UI
         {
             m_hit = &control;
             m_hitPopup = popup;
+            m_hitWheel = wheel;
         }
         Lua::LuaEngine& lua = m_engine.Lua();
         ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -425,7 +635,19 @@ namespace Manifold::UI
                 }
                 ImGui::PopFont();
             }
-            DrawControls(control.Children, min, inner, popup);
+            DrawControls(control.Children, min, inner, popup, wheel);
+        }
+        else if (kind == "paintbox" || kind == "image")
+        {
+            if (control.Color >= 0)
+                draw->AddRectFilled(min, max, Bgr(control.Color));
+            if (control.Canvas)
+                DrawCanvas(control.Canvas, min, inner, 0);
+            ImGui::SetCursorScreenPos(min);
+            ImGui::InvisibleButton("##surface", ImVec2(std::max(1.0f, size.x), std::max(1.0f, size.y)),
+                ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
+            m_surfaces.insert(ImGui::GetItemID());
+            DrawControls(control.Children, min, inner, popup, wheel);
         }
         else if (kind == "label")
         {

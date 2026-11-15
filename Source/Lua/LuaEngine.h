@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 struct lua_State;
@@ -146,6 +147,49 @@ namespace Manifold::Lua
         bool Mono = false;
     };
 
+    enum class CanvasOp : std::uint8_t
+    {
+        Line = 1,
+        Rect = 2,
+        FillRect = 3,
+        Ellipse = 4,
+        RoundRect = 5,
+        Pixel = 6,
+        Text = 7,
+        Draw = 8,
+        Polygon = 9,
+        Polyline = 10
+    };
+
+    struct CanvasCommand
+    {
+        CanvasOp Op = CanvasOp::Line;
+        bool PenClear = false;
+        bool BrushClear = false;
+        bool Bold = false;
+        bool Mono = false;
+        float X1 = 0.0f;
+        float Y1 = 0.0f;
+        float X2 = 0.0f;
+        float Y2 = 0.0f;
+        float Rx = 0.0f;
+        float Ry = 0.0f;
+        float PenWidth = 1.0f;
+        float Points = 9.0f;
+        std::uint32_t Pen = 0;
+        std::uint32_t Brush = 0xFFFFFF;
+        std::int32_t Ref = 0;
+        std::int32_t Count = 0;
+    };
+
+    struct ScriptCanvas
+    {
+        std::vector<CanvasCommand> Commands;
+        std::vector<std::string> Texts;
+        std::vector<float> Coordinates;
+        std::uint64_t Generation = 0;
+    };
+
     struct ScriptControl
     {
         int Id = 0;
@@ -183,6 +227,9 @@ namespace Manifold::Lua
         std::vector<ScriptNode> Nodes;
         int Selected = 0;
         bool RightClickSelect = false;
+        int Canvas = 0;
+        bool Mouse = false;
+        bool Wheel = false;
         std::string Unsupported;
         std::vector<ScriptControl> Children;
     };
@@ -203,6 +250,7 @@ namespace Manifold::Lua
         int Raise = 0;
         int Menu = 0;
         int Color = -1;
+        bool KeyDown = false;
         ScriptFont Font;
         std::string Unsupported;
         std::vector<ScriptControl> Controls;
@@ -308,7 +356,11 @@ namespace Manifold::Lua
         std::uint64_t FormsGeneration() const { return m_formsGeneration; }
         std::vector<ScriptForm> ShownForms();
         void SetFormValue(int control, std::string_view field, std::string_view value);
-        void FireFormEvent(int control, std::string_view event);
+        void FireFormEvent(int control, std::string_view event, std::initializer_list<int> arguments = {});
+        ScriptCanvas& CanvasFor(int id);
+        const ScriptCanvas* FindCanvas(int id) const;
+        void ResetCanvas(int id);
+        void FreeCanvas(int id);
         void CloseForm(int form);
         void SetFormBounds(int form, int left, int top, int width, int height, int clientWidth, int clientHeight);
 
@@ -375,6 +427,7 @@ namespace Manifold::Lua
         std::vector<Task*> m_taskStack;
         std::uint64_t m_menuGeneration = 1;
         std::uint64_t m_formsGeneration = 1;
+        std::unordered_map<int, ScriptCanvas> m_canvases;
         bool m_formsShown = false;
     };
 }

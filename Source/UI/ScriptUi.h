@@ -38,6 +38,9 @@ namespace Manifold::UI
             int Hovered = 0;
             bool HoveredHasHover = false;
             int Pressed = 0;
+            int Capture = 0;
+            int CaptureButtons = 0;
+            ImVec2 LastMouse;
             bool OpenPopup = false;
             std::vector<Lua::ScriptMenuItem> Popup;
         };
@@ -60,8 +63,8 @@ namespace Manifold::UI
 
         void DrawForm(const Lua::ScriptForm& form);
         void DrawMenuBar(int menu);
-        void DrawControls(const std::vector<Lua::ScriptControl>& controls, ImVec2 origin, Clip clip, int popup);
-        void DrawControl(const Lua::ScriptControl& control, ImVec2 min, ImVec2 max, Clip clip, int popup);
+        void DrawControls(const std::vector<Lua::ScriptControl>& controls, ImVec2 origin, Clip clip, int popup, int wheel = 0);
+        void DrawControl(const Lua::ScriptControl& control, ImVec2 min, ImVec2 max, Clip clip, int popup, int wheel);
         void DrawCaption(const std::string& text, const Lua::ScriptFont& font, bool enabled, int alignment, int layout, bool wordWrap, ImVec2 min, ImVec2 max);
         void IndexControls(const std::vector<Lua::ScriptControl>& controls);
         void DrawEdit(const Lua::ScriptControl& control, ImVec2 min, ImVec2 max);
@@ -69,6 +72,8 @@ namespace Manifold::UI
         void DrawTree(const Lua::ScriptControl& control, ImVec2 min, ImVec2 size, int popup);
         void DrawNodes(const Lua::ScriptControl& tree, const std::vector<Lua::ScriptNode>& nodes, std::vector<const Lua::ScriptNode*>& visible, bool scroll, int popup);
         void DrawSplitter(const Lua::ScriptControl& control, ImVec2 min, ImVec2 size);
+        void DrawCanvas(int id, ImVec2 origin, Clip clip, int depth);
+        void Keys(const Lua::ScriptForm& form);
         void SelectNode(const Lua::ScriptControl& tree, int node);
         void RequestPopup(int menu);
         void Interact(FormState& state, bool hovered);
@@ -87,6 +92,10 @@ namespace Manifold::UI
         std::map<int, const Lua::ScriptControl*> m_byId;
         const Lua::ScriptControl* m_hit = nullptr;
         int m_hitPopup = 0;
+        int m_hitWheel = 0;
+        std::map<int, ImVec2> m_mins;
+        std::set<ImGuiID> m_surfaces;
+        ImGuiID m_background = 0;
         FormState* m_state = nullptr;
         float m_scale = 1.0f;
     };
