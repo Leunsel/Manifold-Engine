@@ -2040,6 +2040,34 @@ namespace Manifold::UI
             }
         }
 
+        struct Border
+        {
+            float X = 0.0f;
+            ImU32 Color = 0;
+        };
+        std::vector<Border> borders;
+        const float textStart = table->Columns[1].MinX;
+        const float textEnd = std::min(x, max.x) + Px(6.0f);
+        for (int order = 0; order < table->ColumnsCount; ++order)
+        {
+            const int index = table->DisplayOrderToIndex[order];
+            const ImGuiTableColumn& column = table->Columns[index];
+            if (!column.IsEnabled || column.NextEnabledColumn == -1)
+                continue;
+            if (column.MaxX > table->InnerClipRect.Max.x || column.MaxX <= column.ClipRect.Min.x)
+                continue;
+            if (column.MaxX >= textStart && column.MaxX <= textEnd)
+                continue;
+            const bool hovered = table->HoveredColumnBorder == index;
+            const bool resized = table->ResizedColumn == index && table->InstanceInteracted == table->InstanceCurrent;
+            ImU32 color = table->BorderColorLight;
+            if (resized || hovered)
+                color = ImGui::GetColorU32(resized ? ImGuiCol_SeparatorActive : ImGuiCol_SeparatorHovered);
+            else if (table->FreezeColumnsCount == order + 1)
+                color = table->BorderColorStrong;
+            borders.push_back({ column.MaxX, color });
+        }
+
         ImGui::PushClipRect(min, max, false);
         ImGui::SetCursorScreenPos(min);
         if (ImGui::InvisibleButton("##stickygroup", ImVec2(max.x - min.x, max.y - min.y)))
@@ -2052,11 +2080,13 @@ namespace Manifold::UI
         ImGui::PopClipRect();
 
         return [draw = ImGui::GetWindowDrawList(), clip = table->InnerClipRect, min, max, fillColor = ImGui::GetColorU32(fill),
-                   borderColor = ImGui::GetColorU32(ManifoldTheme::Border), line = Px(1.0f), shadow = Px(6.0f), pieces = std::move(pieces)]()
+                   borderColor = ImGui::GetColorU32(ManifoldTheme::Border), line = Px(1.0f), shadow = Px(6.0f), pieces = std::move(pieces), borders = std::move(borders)]()
             {
                 draw->PushClipRect(clip.Min, clip.Max, false);
                 draw->AddRectFilledMultiColor(ImVec2(min.x, max.y), ImVec2(max.x, max.y + shadow), IM_COL32(0, 0, 0, 70), IM_COL32(0, 0, 0, 70), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0));
                 draw->AddRectFilled(min, max, fillColor);
+                for (const Border& border : borders)
+                    draw->AddLineV(border.X, min.y, max.y, border.Color, 1.0f);
                 draw->AddLine(ImVec2(min.x, max.y - 0.5f), ImVec2(max.x, max.y - 0.5f), borderColor, line);
                 for (const Piece& piece : pieces)
                     draw->AddText(piece.Pos, piece.Color, piece.Text.c_str());
