@@ -79,6 +79,51 @@ namespace Manifold::Target
             return status >= 0;
         }
 
+        // Region query, protection, allocation and release go through the same
+        // direct Nt* system calls when their service number resolved, and fall
+        // back to the Win32 Ex-APIs otherwise. The Nt forms take in/out pointers
+        // for base and size (rounded to pages), so the wrappers translate the
+        // Win32-style arguments the call sites still use.
+        SIZE_T QueryVm(HANDLE handle, std::uint64_t address, MEMORY_BASIC_INFORMATION& info)
+        {
+            if (QueryVmSysCall == 0)
+                return ::VirtualQueryEx(handle, reinterpret_cast<LPCVOID>(address), &info, sizeof(info));
+            SIZE_T returned = 0;
+            const NTSTATUS status = NtQueryVirtualMemory_direct(
+                handle, reinterpret_cast<PVOID>(address), 0 /*MemoryBasicInformation*/, &info, sizeof(info), &returned);
+            return status >= 0 ? returned : 0;
+        }
+
+        bool ProtectVm(HANDLE handle, std::uint64_t address, std::size_t size, DWORD newProtect, DWORD& oldProtect)
+        {
+            if (ProtectVmSysCall == 0)
+                return ::VirtualProtectEx(handle, reinterpret_cast<LPVOID>(address), size, newProtect, &oldProtect) != 0;
+            PVOID base = reinterpret_cast<PVOID>(address);
+            SIZE_T region = size;
+            const NTSTATUS status = NtProtectVirtualMemory_direct(handle, &base, &region, newProtect, &oldProtect);
+            return status >= 0;
+        }
+
+        void* AllocVm(HANDLE handle, std::uint64_t desired, std::size_t size, DWORD allocationType, DWORD protect)
+        {
+            if (AllocVmSysCall == 0)
+                return ::VirtualAllocEx(handle, reinterpret_cast<LPVOID>(desired), size, allocationType, protect);
+            PVOID base = reinterpret_cast<PVOID>(desired);
+            SIZE_T region = size;
+            const NTSTATUS status = NtAllocateVirtualMemory_direct(handle, &base, 0, &region, allocationType, protect);
+            return status >= 0 ? base : nullptr;
+        }
+
+        bool FreeVm(HANDLE handle, std::uint64_t address)
+        {
+            if (FreeVmSysCall == 0)
+                return ::VirtualFreeEx(handle, reinterpret_cast<LPVOID>(address), 0, MEM_RELEASE) != 0;
+            PVOID base = reinterpret_cast<PVOID>(address);
+            SIZE_T region = 0;
+            const NTSTATUS status = NtFreeVirtualMemory_direct(handle, &base, &region, MEM_RELEASE);
+            return status >= 0;
+        }
+
         RegionInfo FromQuery(const MEMORY_BASIC_INFORMATION& info)
         {
             RegionInfo region;
@@ -476,7 +521,7 @@ namespace Manifold::Target
                 for (std::uint64_t page = address & ~0xFFFull; page < address + size; page += 0x1000)
                 {
                     MEMORY_BASIC_INFORMATION info{};
-                    if (!::VirtualQueryEx(m_handle, reinterpret_cast<LPCVOID>(page), &info, sizeof(info)) || info.State != MEM_COMMIT)
+                    if (!QueryVm(m_handle, page, info) || info.State != MEM_COMMIT)
                         return Status::Fail(ErrorCode::WriteFailed, Hex(address));
                 }
                 std::lock_guard lock(m_dryLock);
@@ -493,12 +538,12 @@ namespace Manifold::Target
         for (std::uint64_t page = address & ~0xFFFull; page < address + size; page += 0x1000)
         {
             MEMORY_BASIC_INFORMATION info{};
-            if (!::VirtualQueryEx(m_handle, reinterpret_cast<LPCVOID>(page), &info, sizeof(info)) || info.State != MEM_COMMIT)
+            if (!QueryVm(m_handle, page, info) || info.State != MEM_COMMIT)
                 return Status::Fail(ErrorCode::WriteFailed, Hex(address));
             if (!WritableProtect(info.Protect) || (info.Protect & PAGE_GUARD))
             {
                 DWORD old = 0;
-                if (::VirtualProtectEx(m_handle, reinterpret_cast<LPVOID>(page), 0x1000, WritableFor(info.Protect), &old))
+                if (ProtectVm(m_handle, page, 0x1000, WritableFor(info.Protect), old))
                     changed.emplace_back(page, old);
             }
         }
@@ -509,7 +554,7 @@ namespace Manifold::Target
         for (const auto& [page, old] : changed)
         {
             DWORD ignored = 0;
-            ::VirtualProtectEx(m_handle, reinterpret_cast<LPVOID>(page), 0x1000, old, &ignored);
+            ProtectVm(m_handle, page, 0x1000, old, ignored);
         }
         ::FlushInstructionCache(m_handle, reinterpret_cast<LPCVOID>(address), size);
         if (!written)
@@ -568,7 +613,7 @@ namespace Manifold::Target
                     }
                     continue;
                 }
-                if (void* memory = ::VirtualAllocEx(m_handle, reinterpret_cast<LPVOID>(candidate), size, MEM_RESERVE | MEM_COMMIT, protect))
+                if (void* memory = AllocVm(m_handle, candidate, size, MEM_RESERVE | MEM_COMMIT, protect))
                 {
                     status = Status::Success();
                     return reinterpret_cast<std::uint64_t>(memory);
@@ -596,7 +641,7 @@ namespace Manifold::Target
             status = Status::Fail(ErrorCode::AllocFailed, Hex(size) + " bytes");
             return 0;
         }
-        void* memory = ::VirtualAllocEx(m_handle, nullptr, size, MEM_RESERVE | MEM_COMMIT, protect);
+        void* memory = AllocVm(m_handle, 0, size, MEM_RESERVE | MEM_COMMIT, protect);
         if (!memory)
         {
             status = Status::Fail(ErrorCode::AllocFailed, Hex(size) + " bytes, " + LastErrorText(::GetLastError()));
@@ -618,7 +663,7 @@ namespace Manifold::Target
                 return Status::Fail(ErrorCode::FreeFailed, Hex(address));
             return Status::Success();
         }
-        if (!::VirtualFreeEx(m_handle, reinterpret_cast<LPVOID>(address), 0, MEM_RELEASE))
+        if (!FreeVm(m_handle, address))
             return Status::Fail(ErrorCode::FreeFailed, Hex(address));
         return Status::Success();
     }
@@ -635,11 +680,11 @@ namespace Manifold::Target
             if (DryInsideAllocation(address, std::max<std::size_t>(size, 1)))
                 return static_cast<std::uint32_t>(PAGE_EXECUTE_READWRITE);
             MEMORY_BASIC_INFORMATION info{};
-            if (!::VirtualQueryEx(m_handle, reinterpret_cast<LPCVOID>(address), &info, sizeof(info)) || info.State != MEM_COMMIT)
+            if (!QueryVm(m_handle, address, info) || info.State != MEM_COMMIT)
                 return std::nullopt;
             return static_cast<std::uint32_t>(info.Protect);
         }
-        if (!m_handle || !::VirtualProtectEx(m_handle, reinterpret_cast<LPVOID>(address), size, protect, &old))
+        if (!m_handle || !ProtectVm(m_handle, address, size, protect, old))
             return std::nullopt;
         return old;
     }
@@ -651,7 +696,7 @@ namespace Manifold::Target
             return regions;
         std::uint64_t at = start;
         MEMORY_BASIC_INFORMATION info{};
-        while (at < stop && ::VirtualQueryEx(m_handle, reinterpret_cast<LPCVOID>(at), &info, sizeof(info)) == sizeof(info))
+        while (at < stop && QueryVm(m_handle, at, info) == sizeof(info))
         {
             RegionInfo region = FromQuery(info);
             if (region.Size == 0)
@@ -668,7 +713,7 @@ namespace Manifold::Target
     std::optional<RegionInfo> Process::RegionAt(std::uint64_t address) const
     {
         MEMORY_BASIC_INFORMATION info{};
-        if (!m_handle || ::VirtualQueryEx(m_handle, reinterpret_cast<LPCVOID>(address), &info, sizeof(info)) != sizeof(info))
+        if (!m_handle || QueryVm(m_handle, address, info) != sizeof(info))
             return std::nullopt;
         return FromQuery(info);
     }

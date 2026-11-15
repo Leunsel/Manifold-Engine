@@ -115,6 +115,10 @@ void InitSysCalls()
 	OpenSysCall = SysCalls["NtOpenProcess"];
 	ReadVmSysCall = SysCalls["NtReadVirtualMemory"];
 	WriteVmSysCall = SysCalls["NtWriteVirtualMemory"];
+	QueryVmSysCall = SysCalls["NtQueryVirtualMemory"];
+	ProtectVmSysCall = SysCalls["NtProtectVirtualMemory"];
+	AllocVmSysCall = SysCalls["NtAllocateVirtualMemory"];
+	FreeVmSysCall = SysCalls["NtFreeVirtualMemory"];
 	// A number that stays 0 was not found in ntdll; callers fall back to the
 	// Win32 API for that one instead of firing a guessed service number.
 }
@@ -209,6 +213,115 @@ __attribute__((naked)) NTSTATUS NTAPI NtWriteVirtualMemory_direct(
 		mov eax,[WriteVmSysCall]
 		call dword ptr fs:[0C0h]
 		ret 14h
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtQueryVirtualMemory_direct(
+	_In_ HANDLE ProcessHandle,
+	_In_opt_ PVOID BaseAddress,
+	_In_ int MemoryInformationClass,
+	_Out_ PVOID MemoryInformation,
+	_In_ SIZE_T MemoryInformationLength,
+	_Out_opt_ PSIZE_T ReturnLength
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[QueryVmSysCall]
+		syscall
+		ret
+	}
+#else
+	// Six __stdcall arguments of four bytes each -> ret 18h.
+	__asm
+	{
+		mov eax,[QueryVmSysCall]
+		call dword ptr fs:[0C0h]
+		ret 18h
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtProtectVirtualMemory_direct(
+	_In_ HANDLE ProcessHandle,
+	_Inout_ PVOID* BaseAddress,
+	_Inout_ PSIZE_T RegionSize,
+	_In_ ULONG NewProtect,
+	_Out_ PULONG OldProtect
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[ProtectVmSysCall]
+		syscall
+		ret
+	}
+#else
+	// Five __stdcall arguments of four bytes each -> ret 14h.
+	__asm
+	{
+		mov eax,[ProtectVmSysCall]
+		call dword ptr fs:[0C0h]
+		ret 14h
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtAllocateVirtualMemory_direct(
+	_In_ HANDLE ProcessHandle,
+	_Inout_ PVOID* BaseAddress,
+	_In_ ULONG_PTR ZeroBits,
+	_Inout_ PSIZE_T RegionSize,
+	_In_ ULONG AllocationType,
+	_In_ ULONG Protect
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[AllocVmSysCall]
+		syscall
+		ret
+	}
+#else
+	// Six __stdcall arguments of four bytes each (ZeroBits is one DWORD on x86) -> ret 18h.
+	__asm
+	{
+		mov eax,[AllocVmSysCall]
+		call dword ptr fs:[0C0h]
+		ret 18h
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtFreeVirtualMemory_direct(
+	_In_ HANDLE ProcessHandle,
+	_Inout_ PVOID* BaseAddress,
+	_Inout_ PSIZE_T RegionSize,
+	_In_ ULONG FreeType
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[FreeVmSysCall]
+		syscall
+		ret
+	}
+#else
+	// Four __stdcall arguments of four bytes each -> ret 10h.
+	__asm
+	{
+		mov eax,[FreeVmSysCall]
+		call dword ptr fs:[0C0h]
+		ret 10h
 	}
 #endif
 }

@@ -50,6 +50,10 @@ int main()
 
     std::printf("NtReadVirtualMemory  service number = 0x%X\n", ReadVmSysCall);
     std::printf("NtWriteVirtualMemory service number = 0x%X\n", WriteVmSysCall);
+    std::printf("NtQueryVirtualMemory service number = 0x%X\n", QueryVmSysCall);
+    std::printf("NtProtectVirtualMemory  service number = 0x%X\n", ProtectVmSysCall);
+    std::printf("NtAllocateVirtualMemory service number = 0x%X\n", AllocVmSysCall);
+    std::printf("NtFreeVirtualMemory  service number = 0x%X\n", FreeVmSysCall);
 
     int failures = 0;
 
@@ -75,6 +79,60 @@ int main()
     std::printf("NtWriteVirtualMemory_direct -> status = 0x%08lX, value = 0x%08X -> %s\n",
                 static_cast<unsigned long>(ws), sink, writeOk ? "OK" : "FAILED");
     failures += writeOk ? 0 : 1;
+
+    // Allocate a page in our own address space through the direct call, round-trip
+    // a marker through it, flip its protection, query it back, then release it —
+    // every step a direct system call.
+    PVOID region = nullptr;
+    SIZE_T regionSize = 0x1000;
+    const NTSTATUS as = NtAllocateVirtualMemory_direct(
+        handle, &region, 0, &regionSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    const bool allocOk = as >= 0 && region != nullptr && regionSize >= 0x1000;
+    std::printf("NtAllocateVirtualMemory_direct -> status = 0x%08lX, base = %p, size = 0x%llX -> %s\n",
+                static_cast<unsigned long>(as), region,
+                static_cast<unsigned long long>(regionSize), allocOk ? "OK" : "FAILED");
+    failures += allocOk ? 0 : 1;
+
+    if (allocOk)
+    {
+        const unsigned int marker = 0xFEEDFACEu;
+        unsigned int echo = 0;
+        SIZE_T n = 0;
+        NtWriteVirtualMemory_direct(handle, region, const_cast<unsigned int*>(&marker), sizeof(marker), &n);
+        NtReadVirtualMemory_direct(handle, region, &echo, sizeof(echo), &n);
+        const bool roundTrip = echo == 0xFEEDFACEu;
+        std::printf("  write+read back in the allocated page -> 0x%08X -> %s\n",
+                    echo, roundTrip ? "OK" : "FAILED");
+        failures += roundTrip ? 0 : 1;
+
+        PVOID protBase = region;
+        SIZE_T protSize = 0x1000;
+        ULONG oldProtect = 0;
+        const NTSTATUS ps = NtProtectVirtualMemory_direct(handle, &protBase, &protSize, PAGE_NOACCESS, &oldProtect);
+        const bool protectOk = ps >= 0 && oldProtect == PAGE_READWRITE;
+        std::printf("NtProtectVirtualMemory_direct  -> status = 0x%08lX, old = 0x%lX -> %s\n",
+                    static_cast<unsigned long>(ps), static_cast<unsigned long>(oldProtect),
+                    protectOk ? "OK" : "FAILED");
+        failures += protectOk ? 0 : 1;
+
+        MEMORY_BASIC_INFORMATION mbi{};
+        SIZE_T returned = 0;
+        const NTSTATUS qs = NtQueryVirtualMemory_direct(
+            handle, region, 0 /*MemoryBasicInformation*/, &mbi, sizeof(mbi), &returned);
+        const bool queryOk = qs >= 0 && returned >= sizeof(mbi) && mbi.State == MEM_COMMIT;
+        std::printf("NtQueryVirtualMemory_direct    -> status = 0x%08lX, state = 0x%lX, protect = 0x%lX -> %s\n",
+                    static_cast<unsigned long>(qs), static_cast<unsigned long>(mbi.State),
+                    static_cast<unsigned long>(mbi.Protect), queryOk ? "OK" : "FAILED");
+        failures += queryOk ? 0 : 1;
+
+        PVOID freeBase = region;
+        SIZE_T freeSize = 0;
+        const NTSTATUS fs = NtFreeVirtualMemory_direct(handle, &freeBase, &freeSize, MEM_RELEASE);
+        const bool freeOk = fs >= 0;
+        std::printf("NtFreeVirtualMemory_direct     -> status = 0x%08lX -> %s\n",
+                    static_cast<unsigned long>(fs), freeOk ? "OK" : "FAILED");
+        failures += freeOk ? 0 : 1;
+    }
 
     ::CloseHandle(handle);
     if (failures == 0)
