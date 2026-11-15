@@ -1,0 +1,5 @@
+[ENABLE]
+// code from here to [DISABLE] runs when the script is switched on
+
+[DISABLE]
+// code from here to the end runs when the script is switched off

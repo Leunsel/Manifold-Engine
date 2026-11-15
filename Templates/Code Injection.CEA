@@ -1,0 +1,20 @@
+alloc(newmem,<< AllocationSize >>,<< Address >>)
+label(returnhere)
+label(originalcode)
+label(exit)
+
+newmem:
+  // your code here
+
+originalcode:
+<< OriginalOpcodes >>
+
+exit:
+  jmp returnhere
+
+<< Address >>:
+  << JumpType >> newmem
+<% if NopPadding ~= "" then %>
+  << trim(NopPadding) >>
+<% end %>
+returnhere:

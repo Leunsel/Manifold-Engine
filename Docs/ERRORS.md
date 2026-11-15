@@ -121,3 +121,16 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-8003 | The pointer at … could not be read. | A [ ] part of the address points to unreadable memory. | The pointer path is wrong or the object does not exist right now. |
 | ME-8004 | Division by zero in "…". | The address expression divides by zero. | Fix the expression. |
 | ME-8005 | The name … is taken. | Another symbol with this name exists. | Pick another name. |
+
+## Other
+
+| Code | Message | Cause | Help |
+| --- | --- | --- | --- |
+| ME-9001 | The template has a syntax error: …. | A << >> or <% %> block in the template or its settings file is not valid Lua, or a block is not closed. | Fix the template at the reported line. |
+| ME-9002 | The template stopped with an error: …. | Lua code inside the template raised an error while the script was generated. | Fix the template at the reported line. |
+| ME-9003 | The template needs …, which could not be determined. | The template lists the value under Requires, and it came out empty for the selected address. | Pick an address the template supports, or remove the value from Requires. |
+| ME-9004 | … | A value the template uses could not be worked out, or a question was cancelled. | Open a process and select an instruction in the memory viewer first. |
+| ME-9005 | The template file … was not found. | include() looks in the Partials folder, then in the template folder, then in the built-in templates. | Put the file there or correct the name. |
+| ME-9006 | …. | Templates include each other in a circle, or the includes nest more than 16 levels deep. | Remove the include that leads back. |
+| ME-9007 | … | The template declares the architectures it supports, and the attached process is another one. | Use a template for this architecture. |
+| ME-9008 | … | A template file could not be written, moved or removed, or the action is not possible for this template. | Check that the templates folder is writable and the file is not open elsewhere. Built-in templates change only through a copy. |

@@ -81,24 +81,5 @@ namespace Manifold::Asm
     bool HasSections(std::string_view script);
     std::string SectionText(std::string_view script, AaSection section);
 
-    struct TemplateInput
-    {
-        std::uint64_t Address = 0;
-        std::string AddressText;
-        std::string ModuleName;
-        std::uint64_t ModuleBase = 0;
-        bool Is64Bit = true;
-        std::string Name;
-        std::vector<std::string> OriginalLines;
-        std::vector<std::uint8_t> OriginalBytes;
-        std::string Pattern;
-        int PatternOffset = 0;
-        std::vector<std::string> ContextLines;
-    };
-
     std::string CheatTableTemplate();
-    std::string CodeInjectionTemplate(const TemplateInput& input);
-    std::string AobInjectionTemplate(const TemplateInput& input);
-    std::string FullInjectionTemplate(const TemplateInput& input);
-    std::string LuaCallTemplate();
 }

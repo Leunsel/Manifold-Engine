@@ -1,0 +1,44 @@
+{ Game   : << Process >>
+  Date   : << Date >>
+  Author :
+
+  Describe what this script changes.
+}
+
+[ENABLE]
+
+aobscanmodule(<< HookName >>,<< Module >>,<< AoBStr >>) // should be unique
+alloc(newmem,<< AllocationSize >>,<< HookName >>)
+
+label(code)
+label(return)
+
+newmem:
+
+code:
+<< OriginalOpcodes >>
+  jmp return
+
+<< HookName >><< AoBOffset >>:
+  << JumpType >> newmem
+<% if NopPadding ~= "" then %>
+  << trim(NopPadding) >>
+<% end %>
+return:
+registersymbol(<< HookName >>)
+
+[DISABLE]
+
+<< HookName >><< AoBOffset >>:
+  db << OriginalBytes >>
+
+unregistersymbol(<< HookName >>)
+dealloc(newmem)
+<% if not isEmpty(CodeContext) then %>
+
+{
+// ORIGINAL CODE - INJECTION POINT: << Address >>
+
+<< CodeContext >>
+}
+<% end %>

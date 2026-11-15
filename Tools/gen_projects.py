@@ -209,8 +209,9 @@ def write(name, text):
 
 PREBUILD = """    <PreBuildEvent>
       <Command>where python &gt;nul 2&gt;nul || exit /b 0
-python "$(ProjectDir)..\\Tools\\embed_lua.py"</Command>
-      <Message>Embedding the Lua compatibility scripts</Message>
+python "$(ProjectDir)..\\Tools\\embed_lua.py"
+python "$(ProjectDir)..\\Tools\\embed_templates.py"</Command>
+      <Message>Embedding the Lua compatibility scripts and the built-in templates</Message>
     </PreBuildEvent>
 """
 
@@ -226,6 +227,8 @@ def main():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import embed_lua
     embed_lua.main()
+    import embed_templates
+    embed_templates.main()
     os.makedirs(PROJECTS, exist_ok=True)
     source = os.path.join(ROOT, "Source")
     app_sources = collect(source, {".cpp"})

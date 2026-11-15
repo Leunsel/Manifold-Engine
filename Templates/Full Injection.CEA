@@ -1,0 +1,28 @@
+define(<< HookName >>,<< Address >>)
+
+[ENABLE]
+assert(<< HookName >>,<< OriginalBytes >>)
+alloc(newmem,<< AllocationSize >>,<< HookName >>)
+
+label(code)
+label(return)
+
+newmem:
+  // your code here
+
+code:
+<< OriginalOpcodes >>
+  jmp return
+
+<< HookName >>:
+  << JumpType >> newmem
+<% if NopPadding ~= "" then %>
+  << trim(NopPadding) >>
+<% end %>
+return:
+
+[DISABLE]
+<< HookName >>:
+  db << OriginalBytes >>
+
+dealloc(newmem)

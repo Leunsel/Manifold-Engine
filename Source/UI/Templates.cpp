@@ -1,109 +1,446 @@
 #include "UI/Templates.h"
 
-#include "Asm/AutoAssembler.h"
+#include "App/Settings.h"
+#include "Core/RuntimeLog.h"
 #include "Core/Text.h"
-#include "Scan/Scanner.h"
+#include "Generated/IconsFontAwesome5.h"
+#include "Lua/InputBox.h"
+#include "Lua/LuaEngine.h"
+#include "Target/Process.h"
+#include "UI/UiScale.h"
+#include "UI/Widgets.h"
+#include "UI/Workspace.h"
+
+#include "imgui.h"
+
+#include <windows.h>
+#include <shellapi.h>
+
+#include <algorithm>
+#include <limits>
+#include <memory>
+#include <utility>
 
 namespace Manifold::UI
 {
     namespace
     {
-        constexpr int kJumpSize = 5;
-        constexpr int kMaxPattern = 64;
-        constexpr int kContextBefore = 8;
-        constexpr int kContextAfter = 8;
+        bool g_use14ByteJump = false;
+        bool g_previewFirst = false;
+
+        struct CategoryNode
+        {
+            std::string Label;
+            double Order = std::numeric_limits<double>::infinity();
+            std::vector<std::unique_ptr<CategoryNode>> Children;
+            std::vector<const Templates::TemplateInfo*> Items;
+
+            CategoryNode& Child(const std::string& label)
+            {
+                for (const auto& child : Children)
+                {
+                    if (child->Label == label)
+                        return *child;
+                }
+                Children.push_back(std::make_unique<CategoryNode>());
+                Children.back()->Label = label;
+                return *Children.back();
+            }
+        };
+
+        std::filesystem::path Folder()
+        {
+            return Paths::ProgramFolder() / L"templates";
+        }
+
+        Templates::Library& SharedLibrary()
+        {
+            static Templates::Library library(Folder());
+            return library;
+        }
     }
 
-    std::optional<std::string> MakeTemplate(Engine& engine, TemplateKind kind, std::uint64_t address, const std::string& name, std::string& error)
+    std::filesystem::path TemplateFolder()
     {
-        if (kind == TemplateKind::CheatTable)
-            return Asm::CheatTableTemplate();
-        if (kind == TemplateKind::LuaCall)
-            return Asm::LuaCallTemplate();
-        if (!engine.HasProcess())
-        {
-            error = ErrorMessage(ErrorCode::NoProcess);
-            return std::nullopt;
-        }
-        const Target::Process& process = *engine.Process();
-        const Disasm::Disassembler& disassembler = engine.Disassembler();
+        return Folder();
+    }
 
-        Asm::TemplateInput input;
-        input.Address = address;
-        input.AddressText = engine.Symbols().ModuleOffset(address);
-        input.Is64Bit = process.Is64Bit();
-        input.Name = name.empty() ? "INJECT" : name;
-        if (const auto module = process.ModuleAt(address))
+    TemplateRunner::TemplateRunner(Workspace& workspace) : m_workspace(workspace), m_engine(workspace.Core())
+    {
+    }
+
+    namespace
+    {
+
+        bool Supported(Engine& engine, const Templates::TemplateInfo& info, std::string& reason)
         {
-            input.ModuleName = module->Name;
-            input.ModuleBase = module->Base;
+            if (info.Architectures.empty() || !engine.HasProcess())
+                return true;
+            const std::string target = engine.Process()->Is64Bit() ? "x64" : "x86";
+            if (std::find(info.Architectures.begin(), info.Architectures.end(), target) != info.Architectures.end())
+                return true;
+            reason = "Only for ";
+            for (std::size_t index = 0; index < info.Architectures.size(); ++index)
+                reason += (index ? "/" : "") + info.Architectures[index];
+            reason += " processes";
+            return false;
         }
 
-        std::uint64_t at = address;
-        while (input.OriginalBytes.size() < static_cast<std::size_t>(kJumpSize))
+        std::vector<std::string> Segments(const std::string& category)
         {
-            const Disasm::Instruction instruction = disassembler.Read(process, at, &engine.Symbols());
-            if (!instruction.Valid)
+            std::vector<std::string> segments;
+            std::size_t start = 0;
+            while (start <= category.size())
             {
-                error = "The code at " + Hex(at) + " could not be disassembled.";
-                return std::nullopt;
-            }
-            input.OriginalLines.push_back(instruction.Text());
-            input.OriginalBytes.insert(input.OriginalBytes.end(), instruction.Bytes.begin(), instruction.Bytes.begin() + instruction.Length);
-            at += instruction.Length;
-        }
-
-        if (kind == TemplateKind::AobInjection)
-        {
-            std::uint64_t start = input.ModuleBase ? input.ModuleBase : 0;
-            std::uint64_t stop = input.ModuleBase ? input.ModuleBase + process.ModuleAt(address)->Size : process.HighestAddress();
-            std::vector<std::uint8_t> bytes(kMaxPattern);
-            const std::size_t got = process.Read(address, bytes.data(), bytes.size());
-            bytes.resize(got);
-            std::size_t length = input.OriginalBytes.size();
-            bool unique = false;
-            while (length <= bytes.size())
-            {
-                Scan::Pattern pattern;
-                pattern.Bytes.assign(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(length));
-                pattern.Mask.assign(length, 0xFF);
-                const auto hits = Scan::FindPattern(process, pattern, start, stop, false, 2);
-                if (hits.size() == 1)
-                {
-                    unique = true;
+                const std::size_t end = category.find('>', start);
+                const std::string segment = Trim(category.substr(start, end == std::string::npos ? std::string::npos : end - start));
+                if (!segment.empty())
+                    segments.push_back(segment);
+                if (end == std::string::npos)
                     break;
-                }
-                length += 2;
+                start = end + 1;
             }
-            length = std::min(length, bytes.size());
-            input.Pattern = HexBytes(std::span<const std::uint8_t>(bytes.data(), length));
-            if (!unique)
-                input.Pattern += " // not unique within 64 bytes";
-            if (input.ModuleName.empty())
-                input.ModuleName.clear();
+            if (segments.empty())
+                segments.push_back("Templates");
+            return segments;
+        }
+    }
+
+    Templates::Library& TemplateLibrary(Engine& engine)
+    {
+        static double lastCheck = -10.0;
+        Templates::Library& library = SharedLibrary();
+        const double now = ImGui::GetCurrentContext() ? ImGui::GetTime() : lastCheck + 10.0;
+        if (now - lastCheck >= 1.0)
+        {
+            lastCheck = now;
+            if (library.ReloadIfChanged(engine.Lua().State()))
+            {
+                for (const Templates::LibraryProblem& problem : library.Problems())
+                    LOG_WARN("Templates", "Skipped " + problem.File + ": " + problem.Message);
+            }
+        }
+        return library;
+    }
+
+    void TemplateRunner::MenuItems(std::uint64_t address, const std::string* script)
+    {
+        Templates::Library& library = TemplateLibrary(m_engine);
+        auto choose = [&](const Templates::TemplateInfo& info)
+        {
+            m_pending = info.Id;
+            m_address = address;
+        };
+        auto item = [&](const Templates::TemplateInfo& info)
+        {
+            std::string reason;
+            const bool supported = Supported(m_engine, info, reason);
+            if (ImGui::MenuItem(info.Caption.c_str(), info.Shortcut.empty() ? nullptr : info.Shortcut.c_str(), false, supported))
+                choose(info);
+            const std::string tip = supported ? info.Description : reason;
+            if (!tip.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("%s", tip.c_str());
+        };
+
+        CategoryNode root;
+        bool topLevel = false;
+        for (const Templates::TemplateInfo& info : library.Templates())
+        {
+            if (!info.InSubMenu)
+            {
+                item(info);
+                topLevel = true;
+                continue;
+            }
+            CategoryNode* node = &root;
+            for (const std::string& segment : Segments(info.Category))
+            {
+                std::optional<double> prefix;
+                const std::string label = Templates::CategoryLabel(segment, &prefix);
+                node = &node->Child(label.empty() ? segment : label);
+                if (prefix)
+                    node->Order = std::min(node->Order, *prefix);
+                if (info.CategoryOrder)
+                    node->Order = std::min(node->Order, *info.CategoryOrder);
+            }
+            node->Items.push_back(&info);
         }
 
-        std::uint64_t contextStart = disassembler.BackUp(process, address, kContextBefore);
-        const auto before = disassembler.ReadMany(process, contextStart, kContextBefore + kContextAfter + static_cast<int>(input.OriginalLines.size()), &engine.Symbols());
-        for (const Disasm::Instruction& instruction : before)
+        auto draw = [&](auto& self, const CategoryNode& node) -> void
         {
-            std::string line = engine.Symbols().ModuleOffset(instruction.Address) + ": " + instruction.BytesText();
-            line.resize(std::max<std::size_t>(line.size(), 44), ' ');
-            line += "- " + instruction.Text();
-            if (instruction.Address == address)
-                line = "// ---------- INJECTING HERE ----------\n" + line;
-            if (instruction.Address == at)
-                line = "// ---------- DONE INJECTING  ----------\n" + line;
-            input.ContextLines.push_back(line);
-        }
+            std::vector<const CategoryNode*> children;
+            for (const auto& child : node.Children)
+                children.push_back(child.get());
+            std::stable_sort(children.begin(), children.end(), [](const CategoryNode* a, const CategoryNode* b)
+                {
+                    if (a->Order != b->Order)
+                        return a->Order < b->Order;
+                    return Lower(a->Label) < Lower(b->Label);
+                });
+            for (const CategoryNode* child : children)
+            {
+                if (ImGui::BeginMenu(child->Label.c_str()))
+                {
+                    self(self, *child);
+                    ImGui::EndMenu();
+                }
+            }
+            for (const Templates::TemplateInfo* info : node.Items)
+                item(*info);
+        };
+        if (topLevel && !root.Children.empty())
+            ImGui::Separator();
+        draw(draw, root);
 
-        switch (kind)
+        ImGui::Separator();
+        ImGui::MenuItem("Use 14-byte jumps", nullptr, &g_use14ByteJump);
+        ImGui::MenuItem("Preview before inserting", nullptr, &g_previewFirst);
+        ImGui::Separator();
+        if (ImGui::MenuItem(ICON_FA_SHAPES "  Manage templates..."))
+            m_workspace.OpenTemplateManager();
+        if (script && ImGui::MenuItem(ICON_FA_FILE_EXPORT "  Save script as template...", nullptr, false, !Trim(*script).empty()))
+            m_workspace.OpenTemplateManager({}, *script);
+        if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open template folder"))
         {
-        case TemplateKind::AobInjection: return Asm::AobInjectionTemplate(input);
-        case TemplateKind::CodeInjection: return Asm::CodeInjectionTemplate(input);
-        case TemplateKind::FullInjection: return Asm::FullInjectionTemplate(input);
-        default: break;
+            std::error_code ignored;
+            std::filesystem::create_directories(Folder(), ignored);
+            ::ShellExecuteW(nullptr, L"open", Folder().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         }
-        return std::nullopt;
+        if (ImGui::MenuItem(ICON_FA_SYNC "  Reload templates"))
+            library.Load(m_engine.Lua().State());
+        if (!library.Problems().empty())
+        {
+            const std::string label = std::to_string(library.Problems().size()) + (library.Problems().size() == 1 ? " template skipped" : " templates skipped");
+            if (ImGui::BeginMenu(label.c_str()))
+            {
+                for (const Templates::LibraryProblem& problem : library.Problems())
+                {
+                    const std::string text = std::filesystem::path(Utf8ToWide(problem.File)).filename().string() + ": " + problem.Message;
+                    ImGui::MenuItem(text.c_str(), nullptr, false, false);
+                }
+                ImGui::EndMenu();
+            }
+        }
+    }
+
+    bool TemplateRunner::Choose(const std::string& id, std::uint64_t address)
+    {
+        const Templates::TemplateInfo* info = TemplateLibrary(m_engine).Find(id);
+        if (!info)
+            return false;
+        std::string reason;
+        if (!Supported(m_engine, *info, reason))
+            return false;
+        m_pending = info->Id;
+        m_address = address;
+        return true;
+    }
+
+    void TemplateRunner::Start(const Templates::TemplateInfo& info)
+    {
+        if (info.Inputs.empty())
+        {
+            Run(info, {});
+            return;
+        }
+        m_running = info.Id;
+        m_inputTexts.clear();
+        m_inputFlags.clear();
+        m_inputChoices.clear();
+        m_inputError.clear();
+        for (const Templates::InputDefinition& input : info.Inputs)
+        {
+            const std::string text = Templates::InputText(input.Default);
+            m_inputTexts.push_back(text);
+            m_inputFlags.push_back(std::holds_alternative<bool>(input.Default) && std::get<bool>(input.Default));
+            const auto found = std::find(input.Values.begin(), input.Values.end(), text);
+            m_inputChoices.push_back(found == input.Values.end() ? 0 : static_cast<int>(found - input.Values.begin()));
+        }
+        m_openInputs = true;
+    }
+
+    void TemplateRunner::Run(const Templates::TemplateInfo& info, std::map<std::string, Templates::Value> inputs)
+    {
+        Templates::GenerationRequest request;
+        request.Address = m_address;
+        request.Use14ByteJump = g_use14ByteJump;
+        request.Inputs = std::move(inputs);
+        request.Ask.Ask = [](const std::string& title, const std::string& message, const std::string& value) -> std::optional<std::string>
+        {
+            std::string text = value;
+            if (!Lua::AskText(title, message, text))
+                return std::nullopt;
+            return text;
+        };
+        const Templates::GenerationResult result = Templates::Generate(m_engine, SharedLibrary(), info, request);
+        for (const std::string& warning : result.Warnings)
+            LOG_WARN("Templates", info.Caption + ": " + warning);
+        if (!result.Ok())
+        {
+            if (result.Failure.Cancelled)
+                return;
+            m_failure = Templates::Describe(result.Failure, info.Caption);
+            LOG_ERROR("Templates", ErrorMessage(result.Failure.Code, result.Failure.Message));
+            m_openFailure = true;
+            return;
+        }
+        if (g_previewFirst)
+        {
+            m_preview = *result.Text;
+            m_previewCaption = info.Caption;
+            m_openPreview = true;
+            return;
+        }
+        m_ready = *result.Text;
+    }
+
+    void TemplateRunner::InputsPopup()
+    {
+        if (m_openInputs)
+        {
+            ImGui::OpenPopup("Template Inputs###templateinputs");
+            m_openInputs = false;
+        }
+        if (!ImGui::BeginPopupModal("Template Inputs###templateinputs", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            return;
+        Templates::Library& library = SharedLibrary();
+        const Templates::TemplateInfo* info = library.Find(m_running);
+        if (!info || info->Inputs.size() != m_inputTexts.size())
+        {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            return;
+        }
+        ImGui::TextUnformatted(info->Caption.c_str());
+        if (!info->Description.empty())
+            Muted(info->Description);
+        ImGui::Spacing();
+        if (ImGui::BeginTable("##inputs", 2, ImGuiTableFlags_SizingFixedFit))
+        {
+            for (std::size_t index = 0; index < info->Inputs.size(); ++index)
+            {
+                const Templates::InputDefinition& input = info->Inputs[index];
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(input.Caption.c_str());
+                ImGui::TableNextColumn();
+                ImGui::PushID(static_cast<int>(index));
+                ImGui::SetNextItemWidth(Px(260.0f));
+                if (input.Type == "boolean")
+                {
+                    bool value = m_inputFlags[index];
+                    if (ImGui::Checkbox("##value", &value))
+                        m_inputFlags[index] = value;
+                }
+                else if (input.Type == "enum")
+                {
+                    int& choice = m_inputChoices[index];
+                    if (ImGui::BeginCombo("##value", input.Values[static_cast<std::size_t>(choice)].c_str()))
+                    {
+                        for (std::size_t option = 0; option < input.Values.size(); ++option)
+                        {
+                            if (ImGui::Selectable(input.Values[option].c_str(), choice == static_cast<int>(option)))
+                                choice = static_cast<int>(option);
+                        }
+                        ImGui::EndCombo();
+                    }
+                }
+                else
+                    InputText("##value", m_inputTexts[index]);
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+        if (!m_inputError.empty())
+            TextWithError(m_inputError, ManifoldTheme::Error);
+        bool run = false;
+        std::map<std::string, Templates::Value> values;
+        if (AccentButton("Generate", ImVec2(Px(110.0f), 0.0f)))
+        {
+            m_inputError.clear();
+            for (std::size_t index = 0; index < info->Inputs.size() && m_inputError.empty(); ++index)
+            {
+                const Templates::InputDefinition& input = info->Inputs[index];
+                const std::string text = input.Type == "boolean" ? (m_inputFlags[index] ? "true" : "false")
+                    : input.Type == "enum" ? input.Values[static_cast<std::size_t>(m_inputChoices[index])] : m_inputTexts[index];
+                std::string error;
+                if (const auto value = Templates::ParseInput(input, text, error))
+                    values[input.Name] = *value;
+                else
+                    m_inputError = error;
+            }
+            if (m_inputError.empty())
+            {
+                run = true;
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(Px(90.0f), 0.0f)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        if (run)
+            Run(*info, std::move(values));
+    }
+
+    void TemplateRunner::PreviewPopup()
+    {
+        if (m_openPreview)
+        {
+            ImGui::OpenPopup("Template Preview###templatepreview");
+            m_openPreview = false;
+        }
+        ImGui::SetNextWindowSize(ImVec2(Px(760.0f), Px(540.0f)), ImGuiCond_Appearing);
+        if (!ImGui::BeginPopupModal("Template Preview###templatepreview", nullptr))
+            return;
+        ImGui::TextUnformatted(m_previewCaption.c_str());
+        const float footer = ImGui::GetFrameHeightWithSpacing() + Px(6.0f);
+        ImGui::InputTextMultiline("##preview", m_preview.data(), m_preview.size() + 1, ImVec2(-FLT_MIN, -footer), ImGuiInputTextFlags_ReadOnly);
+        if (AccentButton("Insert", ImVec2(Px(110.0f), 0.0f)))
+        {
+            m_ready = m_preview;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(Px(90.0f), 0.0f)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    void TemplateRunner::FailurePopup()
+    {
+        if (m_openFailure)
+        {
+            ImGui::OpenPopup("Template Generation Failed###templatefailure");
+            m_openFailure = false;
+        }
+        if (!ImGui::BeginPopupModal("Template Generation Failed###templatefailure", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+            return;
+        ImGui::PushTextWrapPos(Px(620.0f));
+        ImGui::TextUnformatted(m_failure.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        if (ImGui::Button("Close", ImVec2(Px(90.0f), 0.0f)))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    void TemplateRunner::Draw()
+    {
+        if (!m_pending.empty())
+        {
+            const std::string id = std::exchange(m_pending, std::string());
+            if (const Templates::TemplateInfo* info = SharedLibrary().Find(id))
+                Start(*info);
+        }
+        InputsPopup();
+        PreviewPopup();
+        FailurePopup();
+    }
+
+    std::optional<std::string> TemplateRunner::TakeText()
+    {
+        return std::exchange(m_ready, std::nullopt);
     }
 }

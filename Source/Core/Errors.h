@@ -85,7 +85,15 @@
     X(ExprUnknownSymbol, 8002) \
     X(ExprPointerUnreadable, 8003) \
     X(ExprDivideByZero, 8004) \
-    X(SymbolNameTaken, 8005)
+    X(SymbolNameTaken, 8005) \
+    X(TemplateSyntax, 9001) \
+    X(TemplateRender, 9002) \
+    X(TemplateRequirement, 9003) \
+    X(TemplateContext, 9004) \
+    X(TemplateNotFound, 9005) \
+    X(TemplateIncludeCycle, 9006) \
+    X(TemplateArchitecture, 9007) \
+    X(TemplateWrite, 9008)
 
 namespace Manifold
 {

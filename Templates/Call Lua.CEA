@@ -1,0 +1,11 @@
+[ENABLE]
+{$lua}
+if syntaxcheck then return end
+print("enabled")
+{$asm}
+
+[DISABLE]
+{$lua}
+if syntaxcheck then return end
+print("disabled")
+{$asm}
