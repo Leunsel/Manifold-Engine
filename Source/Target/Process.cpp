@@ -359,6 +359,110 @@ namespace Manifold::Target
                 known = WideToUtf8(title);
             return TRUE;
         }
+
+        // A single process entry as returned by the system-wide snapshot. We
+        // keep only the four fields the engine actually uses; further fields
+        // (handle count, memory usage, per-thread info) live past them in the
+        // Nt data but are of no interest here.
+        struct ProcSnapshotEntry
+        {
+            std::uint32_t Id;
+            std::uint32_t ParentId;
+            std::uint32_t Threads;
+            std::string Name;
+        };
+
+        // Layout of SYSTEM_PROCESS_INFORMATION up to the fields we read. The
+        // public winternl.h declaration hides the parent-pid slot behind a
+        // reserved field, so we spell the full prefix out ourselves. Trailing
+        // fields are not referenced; NextEntryOffset carries us past them.
+        constexpr int kSystemProcessInformation = 5;
+        struct SysProcInfoPrefix
+        {
+            ULONG NextEntryOffset;
+            ULONG NumberOfThreads;
+            LARGE_INTEGER WorkingSetPrivateSize;
+            ULONG HardFaultCount;
+            ULONG NumberOfThreadsHighWatermark;
+            ULONGLONG CycleTime;
+            LARGE_INTEGER CreateTime;
+            LARGE_INTEGER UserTime;
+            LARGE_INTEGER KernelTime;
+            UNICODE_STRING ImageName;
+            LONG BasePriority;
+            HANDLE UniqueProcessId;
+            HANDLE InheritedFromUniqueProcessId;
+        };
+
+        bool TryProcessSnapshotNt(std::vector<ProcSnapshotEntry>& out)
+        {
+            if (QuerySysInfoSysCall == 0)
+                return false;
+
+            // Grow the buffer until the call stops asking for more. On a busy
+            // system the process list changes between calls, so we also cap
+            // the retries to avoid an unbounded loop.
+            std::vector<std::uint8_t> buffer(1 << 18);
+            NTSTATUS status = static_cast<NTSTATUS>(0xC0000004L); // STATUS_INFO_LENGTH_MISMATCH
+            for (int attempt = 0; attempt < 8; ++attempt)
+            {
+                ULONG returned = 0;
+                status = NtQuerySystemInformation_direct(
+                    kSystemProcessInformation, buffer.data(), static_cast<ULONG>(buffer.size()), &returned);
+                if (status >= 0)
+                    break;
+                if (status != static_cast<NTSTATUS>(0xC0000004L) /*STATUS_INFO_LENGTH_MISMATCH*/)
+                    return false;
+                buffer.resize(std::max<std::size_t>(buffer.size() * 2, returned + 0x10000));
+            }
+            if (status < 0)
+                return false;
+
+            const std::uint8_t* cursor = buffer.data();
+            const std::uint8_t* end = cursor + buffer.size();
+            while (cursor + sizeof(SysProcInfoPrefix) <= end)
+            {
+                const auto* entry = reinterpret_cast<const SysProcInfoPrefix*>(cursor);
+                ProcSnapshotEntry snap;
+                snap.Id = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(entry->UniqueProcessId));
+                snap.ParentId = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(entry->InheritedFromUniqueProcessId));
+                snap.Threads = entry->NumberOfThreads;
+                if (entry->ImageName.Buffer && entry->ImageName.Length > 0)
+                {
+                    const std::wstring name(entry->ImageName.Buffer, entry->ImageName.Length / sizeof(wchar_t));
+                    snap.Name = WideToUtf8(name);
+                }
+                out.push_back(std::move(snap));
+
+                if (entry->NextEntryOffset == 0)
+                    break;
+                cursor += entry->NextEntryOffset;
+            }
+            return !out.empty();
+        }
+
+        std::vector<ProcSnapshotEntry> ProcessSnapshot()
+        {
+            std::vector<ProcSnapshotEntry> out;
+            if (TryProcessSnapshotNt(out))
+                return out;
+
+            HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if (snapshot == INVALID_HANDLE_VALUE)
+                return out;
+            PROCESSENTRY32W entry{ sizeof(entry) };
+            for (BOOL more = ::Process32FirstW(snapshot, &entry); more; more = ::Process32NextW(snapshot, &entry))
+            {
+                ProcSnapshotEntry snap;
+                snap.Id = entry.th32ProcessID;
+                snap.ParentId = entry.th32ParentProcessID;
+                snap.Threads = entry.cntThreads;
+                snap.Name = WideToUtf8(entry.szExeFile);
+                out.push_back(std::move(snap));
+            }
+            ::CloseHandle(snapshot);
+            return out;
+        }
     }
 
     bool RegionInfo::Committed() const
@@ -405,23 +509,19 @@ namespace Manifold::Target
             ::EnumWindows(&CollectTitle, reinterpret_cast<LPARAM>(&search));
         }
 
-        HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snapshot == INVALID_HANDLE_VALUE)
-            return list;
-        PROCESSENTRY32W entry{ sizeof(entry) };
         const DWORD self = ::GetCurrentProcessId();
-        for (BOOL more = ::Process32FirstW(snapshot, &entry); more; more = ::Process32NextW(snapshot, &entry))
+        for (const ProcSnapshotEntry& entry : ProcessSnapshot())
         {
-            if (entry.th32ProcessID == 0 || entry.th32ProcessID == self)
+            if (entry.Id == 0 || entry.Id == self)
                 continue;
             ProcessEntry process;
-            process.Id = entry.th32ProcessID;
-            process.ParentId = entry.th32ParentProcessID;
-            process.Name = WideToUtf8(entry.szExeFile);
-            process.Threads = entry.cntThreads;
-            if (const auto title = titles.find(entry.th32ProcessID); title != titles.end())
+            process.Id = entry.Id;
+            process.ParentId = entry.ParentId;
+            process.Name = entry.Name;
+            process.Threads = entry.Threads;
+            if (const auto title = titles.find(entry.Id); title != titles.end())
                 process.WindowTitle = title->second;
-            if (HANDLE handle = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID))
+            if (HANDLE handle = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.Id))
             {
                 process.Is64Bit = TargetIs64Bit(handle);
                 process.Path = ImagePath(handle);
@@ -433,27 +533,22 @@ namespace Manifold::Target
             }
             list.push_back(std::move(process));
         }
-        ::CloseHandle(snapshot);
         return list;
     }
 
     std::optional<std::uint32_t> FindProcessId(std::string_view name)
     {
-        HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snapshot == INVALID_HANDLE_VALUE)
+        if (name.empty())
             return std::nullopt;
-        PROCESSENTRY32W entry{ sizeof(entry) };
         std::optional<std::uint32_t> exact;
         std::optional<std::uint32_t> prefix;
-        for (BOOL more = ::Process32FirstW(snapshot, &entry); more && !name.empty(); more = ::Process32NextW(snapshot, &entry))
+        for (const ProcSnapshotEntry& entry : ProcessSnapshot())
         {
-            const std::string exe = WideToUtf8(entry.szExeFile);
-            if (EqualsNoCase(exe, name))
-                exact = entry.th32ProcessID;
-            else if (exe.size() > name.size() && EqualsNoCase(std::string_view(exe).substr(0, name.size()), name))
-                prefix = entry.th32ProcessID;
+            if (EqualsNoCase(entry.Name, name))
+                exact = entry.Id;
+            else if (entry.Name.size() > name.size() && EqualsNoCase(std::string_view(entry.Name).substr(0, name.size()), name))
+                prefix = entry.Id;
         }
-        ::CloseHandle(snapshot);
         return exact ? exact : prefix;
     }
 

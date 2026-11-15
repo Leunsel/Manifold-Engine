@@ -10,6 +10,7 @@
 #include <windows.h>
 #include <winternl.h>
 #include <cstdio>
+#include <vector>
 
 #include "Syscalls/Syscall.h"
 
@@ -55,6 +56,7 @@ int main()
     std::printf("NtAllocateVirtualMemory service number = 0x%X\n", AllocVmSysCall);
     std::printf("NtFreeVirtualMemory  service number = 0x%X\n", FreeVmSysCall);
     std::printf("NtQueryInformationProcess service number = 0x%X\n", QueryInfoProcSysCall);
+    std::printf("NtQuerySystemInformation  service number = 0x%X\n", QuerySysInfoSysCall);
     std::printf("NtGetContextThread service number = 0x%X\n", GetContextSysCall);
     std::printf("NtSetContextThread service number = 0x%X\n", SetContextSysCall);
     std::printf("NtSuspendThread    service number = 0x%X\n", SuspendThreadSysCall);
@@ -166,6 +168,47 @@ int main()
     std::printf("NtQueryInformationProcess_direct -> status = 0x%08lX, PEB = 0x%llX (ours 0x%llX) -> %s\n",
                 static_cast<unsigned long>(qips), reportedPeb, ownPeb, qipsOk ? "OK" : "FAILED");
     failures += qipsOk ? 0 : 1;
+
+    // Ask for the system process list through the direct syscall and confirm
+    // that our own PID appears in it — proves the stub, the length-grow loop
+    // and the UniqueProcessId/NextEntryOffset layout. A length-mismatch answer
+    // (0xC0000004) is expected on the first pass and triggers a bigger buffer.
+    {
+        std::vector<unsigned char> buffer(1 << 18);
+        NTSTATUS st = static_cast<NTSTATUS>(0xC0000004L);
+        for (int attempt = 0; attempt < 6; ++attempt)
+        {
+            ULONG got = 0;
+            st = NtQuerySystemInformation_direct(
+                5 /*SystemProcessInformation*/, buffer.data(), static_cast<ULONG>(buffer.size()), &got);
+            if (st >= 0)
+                break;
+            if (st != static_cast<NTSTATUS>(0xC0000004L))
+                break;
+            buffer.resize(buffer.size() * 2);
+        }
+        const DWORD self = ::GetCurrentProcessId();
+        bool sawSelf = false;
+        unsigned processes = 0;
+        if (st >= 0)
+        {
+            const unsigned char* cursor = buffer.data();
+            while (true)
+            {
+                const auto* entry = reinterpret_cast<const SYSTEM_PROCESS_INFORMATION*>(cursor);
+                if (static_cast<DWORD>(reinterpret_cast<ULONG_PTR>(entry->UniqueProcessId)) == self)
+                    sawSelf = true;
+                ++processes;
+                if (entry->NextEntryOffset == 0)
+                    break;
+                cursor += entry->NextEntryOffset;
+            }
+        }
+        const bool ok = st >= 0 && sawSelf;
+        std::printf("NtQuerySystemInformation_direct -> status = 0x%08lX, %u processes, own pid %s -> %s\n",
+                    static_cast<unsigned long>(st), processes, sawSelf ? "found" : "missing", ok ? "OK" : "FAILED");
+        failures += ok ? 0 : 1;
+    }
 
     ::CloseHandle(handle);
     if (failures == 0)

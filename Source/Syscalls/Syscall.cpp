@@ -120,6 +120,7 @@ void InitSysCalls()
 	AllocVmSysCall = SysCalls["NtAllocateVirtualMemory"];
 	FreeVmSysCall = SysCalls["NtFreeVirtualMemory"];
 	QueryInfoProcSysCall = SysCalls["NtQueryInformationProcess"];
+	QuerySysInfoSysCall = SysCalls["NtQuerySystemInformation"];
 	GetContextSysCall = SysCalls["NtGetContextThread"];
 	SetContextSysCall = SysCalls["NtSetContextThread"];
 	SuspendThreadSysCall = SysCalls["NtSuspendThread"];
@@ -354,6 +355,32 @@ __attribute__((naked)) NTSTATUS NTAPI NtQueryInformationProcess_direct(
 		mov eax,[QueryInfoProcSysCall]
 		call dword ptr fs:[0C0h]
 		ret 14h
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtQuerySystemInformation_direct(
+	_In_ int SystemInformationClass,
+	_Out_ PVOID SystemInformation,
+	_In_ ULONG SystemInformationLength,
+	_Out_opt_ PULONG ReturnLength
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[QuerySysInfoSysCall]
+		syscall
+		ret
+	}
+#else
+	// Four __stdcall arguments of four bytes each -> ret 10h.
+	__asm
+	{
+		mov eax,[QuerySysInfoSysCall]
+		call dword ptr fs:[0C0h]
+		ret 10h
 	}
 #endif
 }
