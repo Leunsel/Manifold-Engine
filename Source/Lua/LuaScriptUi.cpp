@@ -37,6 +37,16 @@ namespace Manifold::Lua
             return value;
         }
 
+        float FloatField(lua_State* state, int index, const char* name, float fallback)
+        {
+            lua_getfield(state, index, name);
+            float value = fallback;
+            if (lua_isnumber(state, -1))
+                value = static_cast<float>(lua_tonumber(state, -1));
+            lua_pop(state, 1);
+            return value;
+        }
+
         bool BoolField(lua_State* state, int index, const char* name, bool fallback)
         {
             lua_getfield(state, index, name);
@@ -54,6 +64,7 @@ namespace Manifold::Lua
             {
                 const int list = lua_gettop(state);
                 const lua_Integer count = static_cast<lua_Integer>(lua_rawlen(state, list));
+                items.reserve(static_cast<std::size_t>(count));
                 for (lua_Integer i = 1; i <= count; ++i)
                 {
                     lua_rawgeti(state, list, i);
@@ -78,20 +89,57 @@ namespace Manifold::Lua
             return item;
         }
 
+        ScriptNode ReadNode(lua_State* state, int index)
+        {
+            ScriptNode node;
+            node.Id = IntField(state, index, "id", 0);
+            node.Text = StringField(state, index, "text");
+            node.Expanded = BoolField(state, index, "expanded", false);
+            node.HasChildren = BoolField(state, index, "haschildren", false);
+            node.Children = ListField<ScriptNode>(state, index, "children", &ReadNode);
+            return node;
+        }
+
+        ScriptFont ReadFont(lua_State* state, int index)
+        {
+            ScriptFont font;
+            font.Points = FloatField(state, index, "fontsize", 9.0f);
+            font.Color = IntField(state, index, "fontcolor", -1);
+            font.Bold = BoolField(state, index, "bold", false);
+            font.Mono = BoolField(state, index, "mono", false);
+            return font;
+        }
+
         ScriptControl ReadControl(lua_State* state, int index)
         {
             ScriptControl control;
             control.Id = IntField(state, index, "id", 0);
             control.Kind = StringField(state, index, "kind");
             control.Text = StringField(state, index, "text");
-            control.Align = IntField(state, index, "align", 0);
-            control.Left = IntField(state, index, "left", 0);
-            control.Top = IntField(state, index, "top", 0);
-            control.Width = IntField(state, index, "width", 100);
-            control.Height = IntField(state, index, "height", 100);
+            control.X = IntField(state, index, "x", 0);
+            control.Y = IntField(state, index, "y", 0);
+            control.W = IntField(state, index, "w", 0);
+            control.H = IntField(state, index, "h", 0);
             control.Enabled = BoolField(state, index, "enabled", true);
+            control.Color = IntField(state, index, "color", -1);
+            control.Font = ReadFont(state, index);
+            control.Cursor = IntField(state, index, "cursor", 0);
+            control.Click = BoolField(state, index, "click", false);
+            control.DoubleClick = BoolField(state, index, "dblclick", false);
+            control.Hover = BoolField(state, index, "hover", false);
+            control.Popup = IntField(state, index, "popup", 0);
+            control.Bevel = IntField(state, index, "bevel", 0);
+            control.BevelInner = IntField(state, index, "bevelinner", 0);
+            control.BevelWidth = IntField(state, index, "bevelwidth", 1);
+            control.BevelColor = IntField(state, index, "bevelcolor", -1);
+            control.Alignment = IntField(state, index, "alignment", 0);
+            control.Layout = IntField(state, index, "layout", 0);
+            control.WordWrap = BoolField(state, index, "wordwrap", false);
             control.Checked = BoolField(state, index, "checked", false);
             control.ReadOnly = BoolField(state, index, "readonly", false);
+            control.Password = BoolField(state, index, "password", false);
+            control.Frame = BoolField(state, index, "frame", true);
+            control.Hint = StringField(state, index, "hint");
             control.ItemIndex = IntField(state, index, "itemindex", -1);
             lua_getfield(state, index, "items");
             if (lua_istable(state, -1))
@@ -109,6 +157,13 @@ namespace Manifold::Lua
                 }
             }
             lua_pop(state, 1);
+            control.Resizes = IntField(state, index, "resizes", 0);
+            control.MinSize = IntField(state, index, "minsize", 30);
+            control.Align = IntField(state, index, "align", 0);
+            control.Nodes = ListField<ScriptNode>(state, index, "nodes", &ReadNode);
+            control.Selected = IntField(state, index, "selected", 0);
+            control.RightClickSelect = BoolField(state, index, "rightclickselect", false);
+            control.Unsupported = StringField(state, index, "unsupported");
             control.Children = ListField<ScriptControl>(state, index, "children", &ReadControl);
             return control;
         }
@@ -122,16 +177,18 @@ namespace Manifold::Lua
             form.Top = IntField(state, index, "top", 0);
             form.Width = IntField(state, index, "width", 400);
             form.Height = IntField(state, index, "height", 300);
+            form.ClientWidth = IntField(state, index, "clientwidth", -1);
+            form.ClientHeight = IntField(state, index, "clientheight", -1);
+            form.MinWidth = IntField(state, index, "minwidth", 0);
+            form.MinHeight = IntField(state, index, "minheight", 0);
             form.Center = BoolField(state, index, "center", false);
             form.Raise = IntField(state, index, "raise", 0);
+            form.Menu = IntField(state, index, "menu", 0);
+            form.Color = IntField(state, index, "color", -1);
+            form.Font = ReadFont(state, index);
             form.Unsupported = StringField(state, index, "unsupported");
             form.Controls = ListField<ScriptControl>(state, index, "controls", &ReadControl);
             return form;
-        }
-
-        const char* MenuName(ScriptMenu menu)
-        {
-            return menu == ScriptMenu::MemoryViewPopup ? "popup" : "menu";
         }
 
         std::string Quoted(std::string_view text)
@@ -164,7 +221,7 @@ namespace Manifold::Lua
         Run(code, name);
     }
 
-    std::vector<ScriptMenuItem> LuaEngine::MenuItems(ScriptMenu menu)
+    std::vector<ScriptMenuItem> LuaEngine::ReadMenu(bool byId, int id, const char* which)
     {
         std::vector<ScriptMenuItem> items;
         if (std::this_thread::get_id() != m_thread)
@@ -176,7 +233,10 @@ namespace Manifold::Lua
             lua_settop(m_state, top);
             return items;
         }
-        lua_pushstring(m_state, MenuName(menu));
+        if (byId)
+            lua_pushinteger(m_state, id);
+        else
+            lua_pushstring(m_state, which);
         std::string error;
         if (!CallStack(1, 1, error))
         {
@@ -200,7 +260,7 @@ namespace Manifold::Lua
         return items;
     }
 
-    void LuaEngine::MenuOpening(ScriptMenu menu)
+    void LuaEngine::OpenMenu(bool byId, int id, const char* which)
     {
         if (std::this_thread::get_id() != m_thread)
             return;
@@ -208,12 +268,35 @@ namespace Manifold::Lua
         lua_getglobal(m_state, "__manifoldMenuPopup");
         if (lua_isfunction(m_state, -1))
         {
-            lua_pushstring(m_state, MenuName(menu));
+            if (byId)
+                lua_pushinteger(m_state, id);
+            else
+                lua_pushstring(m_state, which);
             std::string error;
             if (!CallStack(1, 0, error))
                 m_engine.Notify(Status::Fail(ErrorCode::LuaRuntime, error));
         }
         lua_settop(m_state, top);
+    }
+
+    std::vector<ScriptMenuItem> LuaEngine::MenuItems(ScriptMenu menu)
+    {
+        return ReadMenu(false, 0, menu == ScriptMenu::MemoryViewPopup ? "popup" : "menu");
+    }
+
+    std::vector<ScriptMenuItem> LuaEngine::MenuItemsOf(int menu)
+    {
+        return ReadMenu(true, menu, nullptr);
+    }
+
+    void LuaEngine::MenuOpening(ScriptMenu menu)
+    {
+        OpenMenu(false, 0, menu == ScriptMenu::MemoryViewPopup ? "popup" : "menu");
+    }
+
+    void LuaEngine::MenuOpeningOf(int menu)
+    {
+        OpenMenu(true, menu, nullptr);
     }
 
     void LuaEngine::ClickMenuItem(int id)
@@ -288,7 +371,7 @@ namespace Manifold::Lua
         RunCallback("__manifoldFormClose(" + std::to_string(form) + ")", "form close");
     }
 
-    void LuaEngine::SetFormBounds(int form, int left, int top, int width, int height)
+    void LuaEngine::SetFormBounds(int form, int left, int top, int width, int height, int clientWidth, int clientHeight)
     {
         if (std::this_thread::get_id() != m_thread)
             return;
@@ -301,8 +384,11 @@ namespace Manifold::Lua
             lua_pushinteger(m_state, top);
             lua_pushinteger(m_state, width);
             lua_pushinteger(m_state, height);
+            lua_pushinteger(m_state, clientWidth);
+            lua_pushinteger(m_state, clientHeight);
             std::string error;
-            CallStack(5, 0, error);
+            if (!CallStack(7, 0, error))
+                LOG_WARN("Lua", "Resizing a script form failed: " + error);
         }
         lua_settop(m_state, stackTop);
     }

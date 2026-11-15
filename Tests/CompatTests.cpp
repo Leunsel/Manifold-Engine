@@ -399,18 +399,20 @@ namespace Manifold::Tests
             CHECK(hits != forms.end());
             if (hits == forms.end())
                 return;
-            CHECK(hits->Unsupported.empty() && hits->Width == 300 && hits->Height == 120);
+            CHECK(hits->Unsupported.empty() && hits->ClientWidth == 300 && hits->ClientHeight == 120);
             CHECK(hits->Controls.size() == 1);
             if (hits->Controls.size() != 1)
                 return;
             const Lua::ScriptControl& list = hits->Controls[0];
-            CHECK(list.Kind == "listbox" && list.Align == 5 && list.Items.size() == 2 && list.ItemIndex == -1);
+            CHECK(list.Kind == "listbox" && list.X == 0 && list.Y == 0 && list.W == 300 && list.H == 120 && list.Items.size() == 2 && list.ItemIndex == -1);
             lua.SetFormValue(list.Id, "itemindex", "1");
             lua.FireFormEvent(list.Id, "select");
-            lua.SetFormBounds(hits->Id, 10, 20, 320, 140);
+            lua.SetFormBounds(hits->Id, 10, 20, 340, 180, 320, 140);
             const auto after = lua.ShownForms();
             const auto again = std::find_if(after.begin(), after.end(), [](const Lua::ScriptForm& form) { return form.Caption == "Hits"; });
             CHECK(again != after.end() && !again->Controls.empty() && again->Controls[0].ItemIndex == 1);
+            if (again != after.end() && !again->Controls.empty())
+                CHECK(again->Controls[0].W == 320 && again->Controls[0].H == 140);
             lua.CloseForm(hits->Id);
             LuaCheck(engine, "script form events", R"LUA(
                 if #formPicks ~= 1 or formPicks[1] ~= 1 then return "picks " .. #formPicks end
@@ -420,6 +422,59 @@ namespace Manifold::Tests
                 return "ok")LUA");
             CHECK(lua.ShownForms().empty());
             CHECK(!lua.FormsShown());
+        }
+
+        void ScriptLayout(Engine& engine)
+        {
+            LuaCheck(engine, "lazarus layout", R"LUA(
+                local form = createForm(false)
+                form.ClientWidth, form.ClientHeight = 200, 200
+                local function panel(parent, align, size)
+                  local p = createPanel(parent)
+                  p.Align = align
+                  if align == "alTop" or align == "alBottom" then p.Height = size else p.Width = size end
+                  p.BevelOuter = "bvNone"
+                  return p
+                end
+                local a, b, c = panel(form, "alTop", 10), panel(form, "alTop", 20), panel(form, "alTop", 30)
+                if c.Top ~= 0 or b.Top ~= 30 or a.Top ~= 50 then return string.format("alTop order %d %d %d", c.Top, b.Top, a.Top) end
+                if a.Width ~= 200 then return "alTop width " .. a.Width end
+                local body = panel(form, "alClient", 0)
+                if body.Top ~= 60 or body.Height ~= 140 then return string.format("alClient %d %d", body.Top, body.Height) end
+                local editor = panel(body, "alClient", 0)
+                local splitter = createSplitter(body)
+                splitter.Align = "alLeft"
+                splitter.Width = 6
+                local tree = panel(body, "alLeft", 80)
+                if tree.Left ~= 0 or splitter.Left ~= 80 or editor.Left ~= 86 or editor.Width ~= 114 then
+                  return string.format("splitter %d %d %d %d", tree.Left, splitter.Left, editor.Left, editor.Width)
+                end
+                local spaced = createPanel(form)
+                spaced.BevelOuter = "bvNone"
+                spaced.Align = "alBottom"
+                spaced.Height = 20
+                spaced.BorderSpacing.Around = 6
+                if spaced.Left ~= 6 or spaced.Width ~= 188 or spaced.Top ~= 174 then return string.format("spacing %d %d %d", spaced.Left, spaced.Width, spaced.Top) end
+                local framed = createPanel(form)
+                framed.Align = "alNone"
+                framed.Width, framed.Height = 50, 50
+                local inner = createPanel(framed)
+                inner.Align = "alClient"
+                if inner.Left ~= 1 or inner.Width ~= 48 then return string.format("bevel inset %d %d", inner.Left, inner.Width) end
+                local label = createLabel(spaced)
+                label.Align = "alLeft"
+                label.Caption = "Status text"
+                if label.Width <= 20 then return "autosize " .. label.Width end
+                local view = createTreeView(form)
+                local root = view.Items:add("Root")
+                local child = root:add("Child")
+                local other = view.Items.add("Other")
+                if root.Text ~= "Root" or other.Text ~= "Other" or child.Text ~= "Child" then return "node text" end
+                if root.Count ~= 1 or child.Parent ~= root or view.Items.Count ~= 3 then return "node tree" end
+                local one, two = createPanel(form), createPanel(form)
+                if tostring(one) == tostring(two) or not tostring(one):match("^TPanel: %x+$") then return "tostring " .. tostring(one) end
+                form.destroy()
+                return "ok")LUA");
         }
 
         void ScriptSettings(Engine& engine)
@@ -601,6 +656,7 @@ namespace Manifold::Tests
         SettingsRoundTrip();
         ScriptMenus(engine);
         ScriptForms(engine);
+        ScriptLayout(engine);
         ScriptSettings(engine);
         return Totals().Failures - before;
     }

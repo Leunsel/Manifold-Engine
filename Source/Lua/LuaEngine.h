@@ -129,21 +129,61 @@ namespace Manifold::Lua
         std::vector<ScriptMenuItem> Children;
     };
 
+    struct ScriptNode
+    {
+        int Id = 0;
+        std::string Text;
+        bool Expanded = false;
+        bool HasChildren = false;
+        std::vector<ScriptNode> Children;
+    };
+
+    struct ScriptFont
+    {
+        float Points = 9.0f;
+        int Color = -1;
+        bool Bold = false;
+        bool Mono = false;
+    };
+
     struct ScriptControl
     {
         int Id = 0;
         std::string Kind;
         std::string Text;
-        int Align = 0;
-        int Left = 0;
-        int Top = 0;
-        int Width = 100;
-        int Height = 100;
+        int X = 0;
+        int Y = 0;
+        int W = 0;
+        int H = 0;
         bool Enabled = true;
+        int Color = -1;
+        ScriptFont Font;
+        int Cursor = 0;
+        bool Click = false;
+        bool DoubleClick = false;
+        bool Hover = false;
+        int Popup = 0;
+        int Bevel = 0;
+        int BevelInner = 0;
+        int BevelWidth = 1;
+        int BevelColor = -1;
+        int Alignment = 0;
+        int Layout = 0;
+        bool WordWrap = false;
         bool Checked = false;
         bool ReadOnly = false;
+        bool Password = false;
+        bool Frame = true;
+        std::string Hint;
         int ItemIndex = -1;
         std::vector<std::string> Items;
+        int Resizes = 0;
+        int MinSize = 30;
+        int Align = 0;
+        std::vector<ScriptNode> Nodes;
+        int Selected = 0;
+        bool RightClickSelect = false;
+        std::string Unsupported;
         std::vector<ScriptControl> Children;
     };
 
@@ -155,11 +195,21 @@ namespace Manifold::Lua
         int Top = 0;
         int Width = 400;
         int Height = 300;
+        int ClientWidth = -1;
+        int ClientHeight = -1;
+        int MinWidth = 0;
+        int MinHeight = 0;
         bool Center = false;
         int Raise = 0;
+        int Menu = 0;
+        int Color = -1;
+        ScriptFont Font;
         std::string Unsupported;
         std::vector<ScriptControl> Controls;
     };
+
+    using TextMeasurer = bool (*)(std::string_view text, float points, bool bold, bool mono, float& width, float& height);
+    void SetTextMeasurer(TextMeasurer measurer);
 
     class LuaEngine
     {
@@ -245,15 +295,22 @@ namespace Manifold::Lua
         void TouchMenus() { ++m_menuGeneration; }
         std::uint64_t MenuGeneration() const { return m_menuGeneration; }
         std::vector<ScriptMenuItem> MenuItems(ScriptMenu menu);
+        std::vector<ScriptMenuItem> MenuItemsOf(int menu);
         void MenuOpening(ScriptMenu menu);
+        void MenuOpeningOf(int menu);
         void ClickMenuItem(int id);
-        void TouchForms() { m_formsShown = true; }
+        void TouchForms()
+        {
+            ++m_formsGeneration;
+            m_formsShown = true;
+        }
         bool FormsShown() const { return m_formsShown; }
+        std::uint64_t FormsGeneration() const { return m_formsGeneration; }
         std::vector<ScriptForm> ShownForms();
         void SetFormValue(int control, std::string_view field, std::string_view value);
         void FireFormEvent(int control, std::string_view event);
         void CloseForm(int form);
-        void SetFormBounds(int form, int left, int top, int width, int height);
+        void SetFormBounds(int form, int left, int top, int width, int height, int clientWidth, int clientHeight);
 
         std::vector<std::string> FunctionNames() const;
         std::vector<LuaCompletion> Complete(std::string_view chain, std::string_view prefix, bool method);
@@ -280,6 +337,8 @@ namespace Manifold::Lua
         void Open();
         void Register();
         void RunCallback(const std::string& code, const char* name);
+        std::vector<ScriptMenuItem> ReadMenu(bool byId, int id, const char* which);
+        void OpenMenu(bool byId, int id, const char* which);
         void FinishTask(Task& task, int status, int results);
         static void TaskHook(lua_State* state, lua_Debug* debug);
 
@@ -315,6 +374,7 @@ namespace Manifold::Lua
         int m_nextTask = 1;
         std::vector<Task*> m_taskStack;
         std::uint64_t m_menuGeneration = 1;
+        std::uint64_t m_formsGeneration = 1;
         bool m_formsShown = false;
     };
 }

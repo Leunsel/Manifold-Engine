@@ -46,12 +46,20 @@ namespace Manifold::UI
         }
     }
 
-    void ModuleScopeCombo(const char* id, Engine& engine, ModuleScope& scope, float width)
+    void ModuleScopeCombo(const char* id, Engine& engine, ModuleScope& scope, float width, bool memory)
     {
         ImGui::SetNextItemWidth(width);
         const std::string preview = ScopeName(engine, scope);
         if (!ImGui::BeginCombo(id, preview.c_str()))
             return;
+        if (memory)
+        {
+            if (ImGui::Selectable("All memory", scope.Kind == kScopeAllMemory))
+                scope = { kScopeAllMemory, {} };
+            if (ImGui::Selectable("Executable memory", scope.Kind == kScopeExecutable))
+                scope = { kScopeExecutable, {} };
+            ImGui::Separator();
+        }
         const auto main = engine.HasProcess() ? engine.Process()->MainModule() : std::nullopt;
         if (ImGui::Selectable(main ? ("Main module  ·  " + main->Name).c_str() : "Main module", scope.Kind == 0))
             scope = { 0, {} };
@@ -81,7 +89,7 @@ namespace Manifold::UI
     std::vector<Target::ModuleInfo> ScopeModules(Engine& engine, const ModuleScope& scope)
     {
         std::vector<Target::ModuleInfo> modules;
-        if (!engine.HasProcess())
+        if (!engine.HasProcess() || scope.Kind < 0)
             return modules;
         if (scope.Kind == 0)
         {
@@ -104,6 +112,8 @@ namespace Manifold::UI
     {
         switch (scope.Kind)
         {
+        case kScopeAllMemory: return "All memory";
+        case kScopeExecutable: return "Executable memory";
         case 0:
         {
             const auto main = engine.HasProcess() ? engine.Process()->MainModule() : std::nullopt;

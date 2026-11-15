@@ -183,6 +183,9 @@
     <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp">
       <Filter>Source\Templates</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\ByteSearch.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\CodeEditor.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>

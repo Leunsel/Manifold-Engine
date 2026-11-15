@@ -1807,6 +1807,25 @@ namespace Manifold::Lua
             return 1;
         }
 
+        TextMeasurer g_textMeasurer = nullptr;
+
+        int TextExtent(lua_State* state)
+        {
+            std::size_t length = 0;
+            const char* text = luaL_checklstring(state, 1, &length);
+            const float points = static_cast<float>(luaL_optnumber(state, 2, 9.0));
+            float width = 0.0f;
+            float height = 0.0f;
+            if (!g_textMeasurer || !g_textMeasurer(std::string_view(text, length), points, lua_toboolean(state, 3) != 0, lua_toboolean(state, 4) != 0, width, height))
+            {
+                lua_pushnil(state);
+                return 1;
+            }
+            lua_pushinteger(state, static_cast<lua_Integer>(width + 0.5f));
+            lua_pushinteger(state, static_cast<lua_Integer>(height + 0.5f));
+            return 2;
+        }
+
         int MenusChanged(lua_State* state)
         {
             EngineOf(state).TouchMenus();
@@ -3010,6 +3029,11 @@ namespace Manifold::Lua
         }
     }
 
+    void SetTextMeasurer(TextMeasurer measurer)
+    {
+        g_textMeasurer = measurer;
+    }
+
     void RegisterCompat(LuaEngine& engine, lua_State* state)
     {
         (void)engine;
@@ -3150,6 +3174,7 @@ namespace Manifold::Lua
             { "__manifoldShowMemoryView", &ShowMemoryView },
             { "__manifoldMemoryViewVisible", &MemoryViewVisible },
             { "__manifoldMenusChanged", &MenusChanged },
+            { "__manifoldTextExtent", &TextExtent },
             { "__manifoldFormsChanged", &FormsChanged },
             { "__manifoldSettingRead", &SettingRead },
             { "__manifoldSettingWrite", &SettingWrite },

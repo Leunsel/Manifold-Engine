@@ -60,6 +60,7 @@ namespace Manifold::UI
     {
         m_main = std::make_unique<MainWindow>(*this);
         m_scriptForms = std::make_unique<ScriptForms>(engine);
+        InstallTextMeasurer();
     }
 
     Workspace::~Workspace() = default;
@@ -114,6 +115,8 @@ namespace Manifold::UI
             m_codeDissect->Draw();
         if (m_asmSearch && !m_asmSearch->Closed())
             m_asmSearch->Draw();
+        if (m_byteSearch && !m_byteSearch->Closed())
+            m_byteSearch->Draw();
         if (m_shortcuts && !m_shortcuts->Closed())
             m_shortcuts->Draw();
         if (m_templateManager && !m_templateManager->Closed())
@@ -368,6 +371,26 @@ namespace Manifold::UI
         if (!m_asmSearch)
             m_asmSearch = std::make_unique<AsmSearchWindow>(*this);
         m_asmSearch->Show();
+    }
+
+    void Workspace::OpenByteSearch(const std::string& pattern)
+    {
+        if (!m_byteSearch)
+            m_byteSearch = std::make_unique<ByteSearchWindow>(*this);
+        if (pattern.empty())
+            m_byteSearch->Show();
+        else
+            m_byteSearch->Search(pattern);
+    }
+
+    void Workspace::RevealInMemoryViewer(std::uint64_t address, std::uint64_t length, bool code, bool raise)
+    {
+        MemoryViewer& viewer = ActiveMemoryViewer();
+        if (code)
+            viewer.Select(address);
+        viewer.ShowHex(address, address, address + std::max<std::uint64_t>(length, 1) - 1);
+        if (raise)
+            viewer.Raise();
     }
 
     void Workspace::OpenPatchScan()

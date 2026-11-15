@@ -154,6 +154,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Templates\TemplateFiles.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateGenerator.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp" />
+    <ClCompile Include="..\Source\UI\ByteSearch.cpp" />
     <ClCompile Include="..\Source\UI\CodeEditor.cpp" />
     <ClCompile Include="..\Source\UI\CodeTools.cpp" />
     <ClCompile Include="..\Source\UI\DialogHost.cpp" />

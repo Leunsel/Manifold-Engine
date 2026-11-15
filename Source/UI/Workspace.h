@@ -60,6 +60,7 @@ namespace Manifold::UI
     class PatchScanWindow;
     class CodeDissectWindow;
     class AsmSearchWindow;
+    class ByteSearchWindow;
     class ShortcutsWindow;
     class TemplateManager;
     class ScriptForms;
@@ -98,6 +99,8 @@ namespace Manifold::UI
         void OpenPatchScan();
         void OpenCodeDissect(int tab = -1, std::uint64_t address = 0);
         void OpenAsmSearch();
+        void OpenByteSearch(const std::string& pattern = {});
+        void RevealInMemoryViewer(std::uint64_t address, std::uint64_t length, bool code, bool raise);
         void OpenShortcuts();
         void OpenTemplateManager(const std::string& id = {}, std::optional<std::string> script = std::nullopt);
         void OpenRecordEditor(int recordId);
@@ -158,6 +161,7 @@ namespace Manifold::UI
         std::unique_ptr<PatchScanWindow> m_patchScan;
         std::unique_ptr<CodeDissectWindow> m_codeDissect;
         std::unique_ptr<AsmSearchWindow> m_asmSearch;
+        std::unique_ptr<ByteSearchWindow> m_byteSearch;
         std::unique_ptr<ShortcutsWindow> m_shortcuts;
         std::unique_ptr<TemplateManager> m_templateManager;
         std::unique_ptr<ScriptForms> m_scriptForms;

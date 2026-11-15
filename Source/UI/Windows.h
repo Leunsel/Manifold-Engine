@@ -698,7 +698,10 @@ namespace Manifold::UI
         std::string Module;
     };
 
-    void ModuleScopeCombo(const char* id, Engine& engine, ModuleScope& scope, float width);
+    inline constexpr int kScopeAllMemory = -2;
+    inline constexpr int kScopeExecutable = -1;
+
+    void ModuleScopeCombo(const char* id, Engine& engine, ModuleScope& scope, float width, bool memory = false);
     std::vector<Target::ModuleInfo> ScopeModules(Engine& engine, const ModuleScope& scope);
     std::string ScopeName(Engine& engine, const ModuleScope& scope);
 
@@ -771,6 +774,55 @@ namespace Manifold::UI
         std::unique_ptr<Disasm::AsmSearchProgress> m_progress;
         std::future<Disasm::AsmSearchResult> m_task;
         std::optional<Disasm::AsmSearchResult> m_result;
+    };
+
+    std::optional<Scan::Pattern> BytePattern(std::string_view text);
+
+    class ByteSearchWindow : public ToolWindow
+    {
+    public:
+        explicit ByteSearchWindow(Workspace& workspace);
+        ~ByteSearchWindow() override;
+        void Draw() override;
+        bool Closed() const override { return !m_open && !m_task.valid(); }
+        void Show() { m_open = true; m_bringToFront = true; }
+        void Search(const std::string& pattern);
+
+    private:
+        struct Hit
+        {
+            std::uint64_t Address = 0;
+            bool Code = false;
+        };
+
+        struct Outcome
+        {
+            std::vector<Hit> Hits;
+            std::size_t Length = 0;
+            bool Truncated = false;
+            double Seconds = 0.0;
+        };
+
+        void Start();
+        void Collect();
+        void Keys();
+        void Results();
+        void Reveal(int row, bool raise);
+
+        Workspace& m_workspace;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        bool m_focus = true;
+        ModuleScope m_scope;
+        std::string m_pattern;
+        std::string m_error;
+        std::string m_searched;
+        std::string m_searchedPattern;
+        std::shared_ptr<Target::Process> m_process;
+        std::future<Outcome> m_task;
+        std::optional<Outcome> m_result;
+        int m_selected = -1;
+        bool m_scrollToSelected = false;
     };
 
     class PatchScanWindow : public ToolWindow

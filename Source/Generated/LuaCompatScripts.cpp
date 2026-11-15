@@ -1339,7 +1339,7 @@ end
 }
 )MLUA"),
         };
-        constexpr std::array<std::string_view, 6> kScript2 = {
+        constexpr std::array<std::string_view, 8> kScript2 = {
             std::string_view(R"MLUA(local classes = __ceClasses or {}
 __ceClasses = nil
 
@@ -1363,6 +1363,8 @@ local function touchForms()
     f()
   end
 end
+
+local layout = {}
 
 local ExtraParents = {
   customcontrol = "wincontrol", customapplication = "component", tobject = "object", custompen = "object",
@@ -1476,9 +1478,12 @@ local function removeValue(list, value)
   end
 end
 
+local serial = 0
+
 local function new(class, owner)
   local obj = setmetatable({}, Meta)
-  local d = { class = class, props = {}, components = {}, controls = {} }
+  serial = serial + 1
+  local d = { class = class, props = {}, components = {}, controls = {}, serial = serial }
   D[obj] = d
   if isObject(owner) then
     d.owner = owner
@@ -1492,13 +1497,17 @@ local function new(class, owner)
       init(obj, d)
     end
   end
+  if layout.created then
+    layout.created(obj, d)
+  end
   return obj
 end
 
 local function setParent(obj, parent)
   local d = D[obj]
-  if d.parent and D[d.parent] then
-    removeValue(D[d.parent].controls, obj)
+  local old = d.parent
+  if old and D[old] then
+    removeValue(D[old].controls, obj)
   end
   d.parent = nil
   if isObject(parent) then
@@ -1506,6 +1515,10 @@ local function setParent(obj, parent)
     local list = D[parent].controls
     list[#list + 1] = obj
   end
+  if layout.parentChanged and old ~= d.parent then
+    layout.parentChanged(obj, old, d.parent)
+  end
+  touchForms()
 end
 
 local function findOwned(obj, name, deep)
@@ -1717,6 +1730,7 @@ Meta.__newindex = function(obj, key, value)
   if d.class == "menuitem" then
     touchMenus()
   end
+  touchForms()
   local chain = lineage(d.class)
   if type(key) == "number" then
     for i = 1, #chain do
@@ -1728,19 +1742,27 @@ Meta.__newindex = function(obj, key, value)
     return
   end
   local k = lower(tostring(key))
+  local handled = false
   for i = 1, #chain do
     local setter = Set[chain[i]] and Set[chain[i]][k]
     if setter then
-      return setter(obj, d, value)
+      setter(obj, d, value)
+      handled = true
+      break
     end
   end
-  d.props[k] = value
+  if not handled then
+    d.props[k] = value
+  end
+  if layout.changed then
+    layout.changed(obj, d, k)
+  end
 end
 
 Meta.__tostring = function(obj)
   local d = D[obj]
-  local name = d and d.props.name
-  return (ClassNames[d and d.class or "object"] or "TObject") .. (name and (" " .. tostring(name)) or "")
+)MLUA"),
+            std::string_view(R"MLUA(  return string.format("%s: %016X", ClassNames[d and d.class or "object"] or "TObject", 0x10000000 + (d and d.serial or 0) * 16)
 end
 
 Meta.__concat = function(a, b)
@@ -1754,8 +1776,7 @@ end
 local function destroy(obj)
   local d = D[obj]
   if not d or d.destroyed then
-)MLUA"),
-            std::string_view(R"MLUA(    return
+    return
   end
   call(d.props.ondestroy, obj)
   d.destroyed = true
@@ -1767,15 +1788,16 @@ local function destroy(obj)
   end
   if d.parent and D[d.parent] then
     removeValue(D[d.parent].controls, obj)
+    if layout.parentChanged then
+      layout.parentChanged(obj, d.parent, nil)
+    end
   end
   if d.parentItem and D[d.parentItem] then
     removeValue(D[d.parentItem].items, obj)
     touchMenus()
   end
   removeValue(forms, obj)
-  if d.script then
-    touchForms()
-  end
+  touchForms()
 end
 
 Impl.object = {
@@ -1824,8 +1846,8 @@ Get.control = {
   parent = function(self, d) return d.parent end,
   caption = controlText,
   text = controlText,
-  clientwidth = function(self, d) return d.props.width or 100 end,
-  clientheight = function(self, d) return d.props.height or 100 end,
+  clientwidth = function(self, d) return d.hostW or d.props.width or 100 end,
+  clientheight = function(self, d) return d.hostH or d.props.height or 100 end,
   boundsrect = function(self, d)
     local left, top = d.props.left or 0, d.props.top or 0
     return { Left = left, Top = top, Right = left + (d.props.width or 100), Bottom = top + (d.props.height or 100) }
@@ -1847,18 +1869,18 @@ Defaults.control = {
 }
 Impl.control = {
   getposition = function(self) local d = D[self] return d.props.left or 0, d.props.top or 0 end,
-  setposition = function(self, x, y) local d = D[self] d.props.left, d.props.top = x, y end,
+  setposition = function(self, x, y) local d = D[self] d.props.left, d.props.top = x, y if layout.boundsChanged then layout.boundsChanged(self, d) end end,
   getsize = function(self) local d = D[self] return d.props.width or 100, d.props.height or 100 end,
-  setsize = function(self, w, h) local d = D[self] d.props.width, d.props.height = w, h end,
+  setsize = function(self, w, h) local d = D[self] d.props.width, d.props.height = w, h if layout.boundsChanged then layout.boundsChanged(self, d) end end,
   doclick = function(self) return call(D[self].props.onclick, self) end,
   click = function(self) return call(D[self].props.onclick, self) end,
   clienttoscreen = function(self, x, y) return x or 0, y or 0 end,
   screentoclient = function(self, x, y) return x or 0, y or 0 end,
   canfocus = function() return true end,
   focused = function() return false end,
-  show = function(self) D[self].props.visible = true end,
-  hide = function(self) D[self].props.visible = false end,
-  setbounds = function(self, l, t, w, h) local p = D[self].props p.left, p.top, p.width, p.height = l, t, w, h end,
+  show = function(self) D[self].props.visible = true if layout.changed then layout.changed(self, D[self], "visible") end end,
+  hide = function(self) D[self].props.visible = false if layout.changed then layout.changed(self, D[self], "visible") end end,
+  setbounds = function(self, l, t, w, h) local d = D[self] local p = d.props p.left, p.top, p.width, p.height = l, t, w, h if layout.boundsChanged then layout.boundsChanged(self, d) end end,
 }
 
 Get.wincontrol = {
@@ -1903,6 +1925,7 @@ local function splitLines(text)
 end
 
 local function stringsChanged(self, d)
+  touchForms()
   if d.onChange then
     d.onChange(self, d)
   end
@@ -2093,7 +2116,8 @@ Impl.strings = {
   end,
   savetofile = function(self, path)
     local file = io.open(path, "wb")
-    if not file then
+)MLUA"),
+            std::string_view(R"MLUA(    if not file then
       error("Unable to create file \"" .. tostring(path) .. "\"")
     end
     file:write(self.Text)
@@ -2128,8 +2152,7 @@ Get.memo = {
   caption = function(self, d) return Get.memo.text(self, d) end,
 }
 Set.memo = {
-)MLUA"),
-            std::string_view(R"MLUA(  text = function(self, d, value) self.Lines.Text = value end,
+  text = function(self, d, value) self.Lines.Text = value end,
   caption = function(self, d, value) self.Lines.Text = value end,
 }
 Impl.memo = {
@@ -2227,7 +2250,7 @@ Impl.paintbox = { repaint = function(self) end }
 Defaults.phantom = { canvas = function(self) return new("canvas", self) end, items = function(self) return new("stringlist", self) end }
 Defaults.splitter = { resizestyle = 0, minsize = 30 }
 Defaults.groupbox = {}
-Defaults.panel = { bevelouter = 1, fullrepaint = true }
+Defaults.panel = { bevelouter = 2, fullrepaint = true }
 
 Defaults.font = { name = "Segoe UI", size = 9, height = -12, color = 0x20000000, style = "[]", charset = 1, quality = 0, pitch = 0, orientation = 0 }
 Impl.font = { assign = function(self, other) local source = D[other] if source then for k, v in pairs(source.props) do D[self].props[k] = v end end end, isequal = function() return false end }
@@ -2247,19 +2270,44 @@ Get.canvas = {
   width = function(self, d) local owner = d.owner and D[d.owner] return owner and owner.props.width or 100 end,
   height = function(self, d) local owner = d.owner and D[d.owner] return owner and owner.props.height or 100 end,
 }
+local function canvasFont(self)
+  local font = self.Font
+  local size = tonumber(font.Size) or 9
+  if size <= 0 then
+    size = 9
+  end
+  local name = lower(tostring(font.Name or ""))
+  local mono = name:find("consolas") ~= nil or name:find("courier") ~= nil or name:find("mono") ~= nil
+  return size, lower(tostring(font.Style or "")):find("fsbold") ~= nil, mono
+end
 local function textWidth(self, text)
-  local size = (self.Font.Size or 9)
+  local size, bold, mono = canvasFont(self)
+  local native = rawget(_G, "__manifoldTextExtent")
+  if native then
+    local w = native(tostring(text or ""), size, bold, mono)
+    if w then
+      return w
+    end
+  end
   return math.floor(#tostring(text or "") * size * 0.75 + 0.5)
 end
-local function textHeight(self)
-  return math.floor((self.Font.Size or 9) * 1.6 + 0.5)
+local function textHeight(self, text)
+  local size, bold, mono = canvasFont(self)
+  local native = rawget(_G, "__manifoldTextExtent")
+  if native then
+    local _, h = native(tostring(text or "Xg"), size, bold, mono)
+    if h then
+      return h
+    end
+  end
+  return math.floor(size * 1.6 + 0.5)
 end
 Impl.canvas = {
   textwidth = textWidth,
   gettextwidth = textWidth,
   textheight = textHeight,
   gettextheight = textHeight,
-  textextent = function(self, text) return textWidth(self, text), textHeight(self) end,
+  textextent = function(self, text) return textWidth(self, text), textHeight(self, text) end,
   getpixel = function() return 0 end,
   getpenposition = function() return 0, 0 end,
   handleallocated = function() return true end,
@@ -2364,7 +2412,8 @@ local function attachItem(parent, item, index)
 end
 Impl.menuitem = {
   add = function(self, item) attachItem(self, item) end,
-  insert = function(self, index, item) attachItem(self, item, tonumber(index) or 0) end,
+)MLUA"),
+            std::string_view(R"MLUA(  insert = function(self, index, item) attachItem(self, item, tonumber(index) or 0) end,
   delete = function(self, index)
     local d = D[self]
     local item = d.items[(tonumber(index) or -1) + 1]
@@ -2419,8 +2468,7 @@ Defaults.menu = {
   images = nil,
 }
 Get.menu = { images = function(self, d) return d.props.images end }
-)MLUA"),
-            std::string_view(R"MLUA(Impl.menu = { getitems = function(self) return self.Items end }
+Impl.menu = { getitems = function(self) return self.Items end }
 Impl.popupmenu = { popup = noop, close = noop }
 
 Init.listitems = function(self, d) d.items = {} end
@@ -2532,6 +2580,7 @@ Impl.listview = {
 
 Init.treenodes = function(self, d) d.nodes = {} d.roots = {} end
 local function newNode(nodes, parent, text)
+  touchForms()
   local node = new("treenode", nodes)
   local nd = D[node]
   nd.tree = nodes
@@ -2549,6 +2598,11 @@ local function removeNode(node)
   if not nd then
     return
   end
+  touchForms()
+  local tree = nd.tree and D[nd.tree] and D[nd.tree].owner
+  if tree and D[tree] and rawequal(D[tree].props.selected, node) then
+    D[tree].props.selected = nil
+  end
   for i = #nd.children, 1, -1 do
     removeNode(nd.children[i])
   end
@@ -2559,16 +2613,63 @@ end
 Get.treenodes = { count = function(self, d) return #d.nodes end }
 IndexGet.treenodes = function(self, d, i) return d.nodes[i + 1] end
 Indexed.treenodes = { item = { get = function(self, d, i) return d.nodes[(tonumber(i) or -1) + 1] end, len = function(self, d) return #d.nodes end } }
+local function nodeArguments(first, second)
+  if isObject(first) then
+    return first, second
+  end
+  if first ~= nil and second == nil then
+    return nil, first
+  end
+  return nil, second
+end
+local function insertNode(nodes, sibling, text, after)
+  local node = newNode(nodes, sibling and D[sibling] and D[sibling].parentNode or nil, text)
+  if sibling and D[sibling] then
+    local nd = D[node]
+    local list = nd.parentNode and D[nd.parentNode].children or D[nodes].roots
+    removeValue(list, node)
+    local at = #list + 1
+    for i, other in ipairs(list) do
+      if rawequal(other, sibling) then
+        at = after and i + 1 or i
+        break
+      end
+    end
+    table.insert(list, at, node)
+  end
+  return node
+end
 Impl.treenodes = {
-  add = function(self, sibling, text)
+  add = function(self, a, b)
+    local sibling, text = nodeArguments(a, b)
     local parent = sibling and D[sibling] and D[sibling].parentNode or nil
     return newNode(self, parent, text)
   end,
-  addchild = function(self, parent, text) return newNode(self, parent, text) end,
-  addfirst = function(self, sibling, text) return Impl.treenodes.add(self, sibling, text) end,
-  addchildfirst = function(self, parent, text) return newNode(self, parent, text) end,
-  insert = function(self, sibling, text) return Impl.treenodes.add(self, sibling, text) end,
-  clear = function(self) local d = D[self] d.nodes = {} d.roots = {} end,
+  addchild = function(self, parent, text) return newNode(self, isObject(parent) and parent or nil, text) end,
+  addfirst = function(self, a, b)
+    local sibling, text = nodeArguments(a, b)
+    return Impl.treenodes.add(self, sibling, text)
+  end,
+  addchildfirst = function(self, parent, text)
+    local node = newNode(self, isObject(parent) and parent or nil, text)
+    local nd = D[node]
+    local list = nd.parentNode and D[nd.parentNode].children or D[self].roots
+    removeValue(list, node)
+    table.insert(list, 1, node)
+    return node
+  end,
+  insert = function(self, sibling, text) return insertNode(self, isObject(sibling) and sibling or nil, text, false) end,
+  insertbehind = function(self, sibling, text) return insertNode(self, isObject(sibling) and sibling or nil, text, true) end,
+  clear = function(self)
+    local d = D[self]
+    d.nodes = {}
+    d.roots = {}
+    local tree = d.owner
+    if tree and D[tree] then
+      D[tree].props.selected = nil
+    end
+    touchForms()
+  end,
   delete = function(self, node) removeNode(node) end,
   getfirstnode = function(self) return D[self].roots[1] end,
   getcount = function(self) return #D[self].nodes end,
@@ -2623,10 +2724,34 @@ local function sibling(self, delta)
   end
 end
 Impl.treenode = {
+  add = function(self, text) return newNode(D[self].tree, self, text) end,
+  addchild = function(self, text) return newNode(D[self].tree, self, text) end,
   delete = function(self) removeNode(self) end,
   deletechildren = function(self) local d = D[self] for i = #d.children, 1, -1 do removeNode(d.children[i]) end end,
-  expand = function(self) D[self].props.expanded = true end,
-  collapse = function(self) D[self].props.expanded = false end,
+  expand = function(self, recursive)
+    local function open(node, deep)
+      D[node].props.expanded = true
+      if deep then
+        for _, child in ipairs(D[node].children) do
+          open(child, true)
+        end
+      end
+    end
+    open(self, recursive ~= false)
+    touchForms()
+  end,
+  collapse = function(self, recursive)
+    local function close(node, deep)
+      D[node].props.expanded = false
+      if deep then
+        for _, child in ipairs(D[node].children) do
+          close(child, true)
+        end
+      end
+    end
+    close(self, recursive ~= false)
+    touchForms()
+  end,
   makevisible = noop,
   getfirstchild = function(self) return D[self].children[1] end,
   getlastchild = function(self) local c = D[self].children return c[#c] end,
@@ -2634,7 +2759,8 @@ Impl.treenode = {
   getprevsibling = function(self) return sibling(self, -1) end,
   getnext = function(self) return D[self].children[1] or sibling(self, 1) end,
   displayrect = function() return { Left = 0, Top = 0, Right = 0, Bottom = 0 } end,
-  getitem = function(self, i) return D[self].children[(tonumber(i) or -1) + 1] end,
+)MLUA"),
+            std::string_view(R"MLUA(  getitem = function(self, i) return D[self].children[(tonumber(i) or -1) + 1] end,
   getcount = function(self) return #D[self].children end,
   getparent = function(self) return D[self].parentNode end,
 }
@@ -2764,8 +2890,7 @@ Impl.colordialog = {
     return true
   end,
 }
-)MLUA"),
-            std::string_view(R"MLUA(Impl.fontdialog = { execute = function() return false end }
+Impl.fontdialog = { execute = function() return false end }
 Impl.finddialog = { execute = function() return false end, closedialog = noop }
 Defaults.fontdialog = { font = function(self) return new("font", self) end }
 
@@ -2996,7 +3121,8 @@ getMemoryViewForm = getMemoryViewForm or function()
   local p = D[memoryView].props
   p.name = "MemoryBrowser"
   p.caption = "Memory Viewer"
-  local view = construct("disassemblerview", memoryView)
+)MLUA"),
+            std::string_view(R"MLUA(  local view = construct("disassemblerview", memoryView)
   D[view].props.name = "DisassemblerView"
   p.disassemblerview = view
   local hex = construct("hexadecimal", memoryView)
@@ -3120,6 +3246,10 @@ local function menuEntries(parent, skipBuiltin)
 end
 
 local function scriptMenu(which)
+  if type(which) == "number" then
+    local menu = live(which)
+    return menu
+  end
   if not memoryView then
     return nil
   end
@@ -3134,7 +3264,7 @@ __manifoldMenuSnapshot = function(which)
   if not menu then
     return {}
   end
-  return menuEntries(menu.Items, which ~= "popup")
+  return menuEntries(menu.Items, which == "menu")
 end
 
 __manifoldMenuPopup = function(which)
@@ -3156,25 +3286,438 @@ __manifoldMenuClick = function(id)
 end
 
 local alignNames = { alnone = 0, altop = 1, albottom = 2, alleft = 3, alright = 4, alclient = 5, alcustom = 6 }
-)MLUA"),
-            std::string_view(R"MLUA(local formKinds = {
-  label = true, button = true, edit = true, memo = true, checkbox = true, listbox = true, panel = true,
-  groupbox = true, splitter = true, combobox = true,
+local bevelNames = { bvnone = 0, bvlowered = 1, bvraised = 2, bvspace = 3 }
+local alignmentNames = { taleftjustify = 0, tarightjustify = 1, tacenter = 2 }
+local layoutNames = { tltop = 0, tlcenter = 1, tlbottom = 2 }
+local drawnKinds = {
+  label = true, button = true, edit = true, memo = true, checkbox = true, togglebox = true, listbox = true,
+  panel = true, groupbox = true, splitter = true, combobox = true, treeview = true, cecustombutton = true,
+}
+local defaultSizes = {
+  panel = { 170, 50 }, label = { 65, 17 }, edit = { 80, 23 }, memo = { 150, 90 }, button = { 75, 25 },
+  cecustombutton = { 75, 25 }, checkbox = { 90, 19 }, togglebox = { 90, 25 }, listbox = { 100, 100 },
+  combobox = { 100, 23 }, groupbox = { 185, 105 }, radiogroup = { 185, 105 }, splitter = { 5, 100 },
+  treeview = { 121, 97 }, listview = { 250, 150 }, image = { 90, 90 }, paintbox = { 105, 105 },
+  progressbar = { 100, 20 }, trackbar = { 100, 25 }, scrollbox = { 150, 150 }, pagecontrol = { 200, 200 },
+  tabsheet = { 200, 200 }, statusbar = { 100, 23 }, synedit = { 150, 150 },
 }
 
-local function alignOf(value)
+local function enum(value, names, fallback)
   if type(value) == "number" then
     return value
   end
-  return alignNames[lower(tostring(value or ""))] or 0
+  if value == nil then
+    return fallback
+  end
+  return names[lower(tostring(value))] or fallback
+end
+
+local function num(value)
+  return tonumber(value) or 0
+end
+
+local function alignOf(control)
+  return enum(D[control].props.align, alignNames, 0)
+end
+
+local function shown(control)
+  local visible = D[control].props.visible
+  return visible == nil or visible == true
 end
 
 local function centred(value)
   if type(value) == "number" then
     return value >= 4
   end
-  local text = lower(tostring(value or ""))
-  return text:find("center") ~= nil
+  return lower(tostring(value or "")):find("center") ~= nil
+end
+
+local function colorValue(value)
+  local color = tonumber(value)
+  if not color or color < 0 or color > 0xFFFFFF then
+    return nil
+  end
+  return color
+end
+
+local function fontOf(control)
+  local current = control
+  while current and D[current] do
+    local cd = D[current]
+    local font = cd.props.font
+    if font and D[font] and (D[font].changed or cd.props.parentfont == false) then
+      return D[font].props
+    end
+    current = cd.parent
+  end
+  return {}
+end
+
+local function fontInfo(control)
+  local props = fontOf(control)
+  local size = tonumber(props.size) or 9
+  if size <= 0 then
+    size = 9
+  end
+  local name = lower(tostring(props.name or ""))
+  return {
+    size = size,
+    bold = lower(tostring(props.style or "")):find("fsbold") ~= nil,
+    mono = name:find("consolas") ~= nil or name:find("courier") ~= nil or name:find("mono") ~= nil or name:find("lucida console") ~= nil,
+    color = colorValue(props.color),
+  }
+end
+
+local function measure(control, text)
+  local font = fontInfo(control)
+  text = tostring(text or "")
+  local native = rawget(_G, "__manifoldTextExtent")
+  if native then
+    local w, h = native(text, font.size, font.bold, font.mono)
+    if w then
+      return w, h
+    end
+  end
+  local px = font.size * 96 / 72
+  local longest, lines = 0, 0
+  for line in (text .. "\n"):gmatch("(.-)\r?\n") do
+    lines = lines + 1
+    longest = math.max(longest, #line)
+  end
+  return math.floor(longest * px * (font.mono and 0.55 or 0.52) + 0.5), math.floor(math.max(1, lines) * px * 1.25 + 0.5)
+end
+
+local function isPanel(control, d)
+  return d.class == "panel" or inherits(control, "panel")
+end
+
+local function insets(control, d)
+  local n = num(d.props.borderwidth)
+  if isPanel(control, d) then
+    local width = tonumber(control.BevelWidth) or 1
+    if enum(control.BevelOuter, bevelNames, 2) ~= 0 then
+      n = n + width
+    end
+    if enum(control.BevelInner, bevelNames, 0) ~= 0 then
+      n = n + width
+    end
+    return n, n, n, n
+  end
+  if d.class == "groupbox" or d.class == "radiogroup" then
+    local _, h = measure(control, "Xg")
+    return n + 2, n + h + 2, n + 2, n + 2
+  end
+  return n, n, n, n
+end
+
+local function clientSize(control, d)
+  if inherits(control, "form") then
+    return d.hostW or tonumber(d.props.clientwidth) or num(d.props.width), d.hostH or tonumber(d.props.clientheight) or num(d.props.height)
+  end
+  return num(d.props.width), num(d.props.height)
+end
+
+local function spacingOf(d)
+  local bs = d.props.borderspacing
+  local s = bs and D[bs] and D[bs].props or {}
+  local around = num(s.around)
+  return num(s.left) + around, num(s.top) + around, num(s.right) + around, num(s.bottom) + around
+end
+
+local function constrain(d, w, h)
+  local cs = d.props.constraints
+  local s = cs and D[cs] and D[cs].props
+  if s then
+    if num(s.maxwidth) > 0 then
+      w = math.min(w, num(s.maxwidth))
+    end
+    if num(s.maxheight) > 0 then
+      h = math.min(h, num(s.maxheight))
+    end
+    w = math.max(w, num(s.minwidth))
+    h = math.max(h, num(s.minheight))
+  end
+  return math.max(0, math.floor(w + 0.5)), math.max(0, math.floor(h + 0.5))
+end
+
+local function autoSizeOf(control, d)
+  local kind = d.class
+  local auto = d.props.autosize
+  if auto == nil then
+    auto = kind == "label" or kind == "checkbox" or kind == "edit" or kind == "combobox"
+  end
+  if not auto then
+    return nil, nil
+  end
+  if kind == "label" then
+    local w, h = measure(control, controlText(control, d))
+    if d.props.wordwrap then
+      return nil, h
+    end
+    return w, h
+  end
+  if kind == "checkbox" then
+    local w, h = measure(control, controlText(control, d))
+    return w + 21, math.max(h, 17)
+  end
+  if kind == "edit" or kind == "combobox" then
+    local _, h = measure(control, "Xg")
+    return nil, h + 8
+  end
+  return nil, nil
+end
+
+local function insertBefore(c1, c2, align)
+  local p1, p2 = D[c1].props, D[c2].props
+  local b1, b2 = D[c1].base or {}, D[c2].base or {}
+  if align == 1 then
+    return num(p1.top) < num(p2.top) or (num(p1.top) == num(p2.top) and num(b1.top) < num(b2.top))
+  elseif align == 3 then
+    return num(p1.left) < num(p2.left) or (num(p1.left) == num(p2.left) and num(b1.left) < num(b2.left))
+  elseif align == 2 then
+    local e1, e2 = num(p1.top) + num(p1.height), num(p2.top) + num(p2.height)
+    return e1 > e2 or (e1 == e2 and num(b1.top) + num(b1.height) > num(b2.top) + num(b2.height))
+  elseif align == 4 then
+    local e1, e2 = num(p1.left) + num(p1.width), num(p2.left) + num(p2.width)
+    return e1 > e2 or (e1 == e2 and num(b1.left) + num(b1.width) > num(b2.left) + num(b2.width))
+  end
+  return false
+end
+
+local function alignList(parent, pd, align, start)
+  local list = {}
+  if start and D[start] and rawequal(D[start].parent, parent) and alignOf(start) == align and shown(start) then
+    list[1] = start
+  end
+  for _, control in ipairs(pd.alignOrder or pd.controls) do
+    local cd = D[control]
+    if not rawequal(control, start) and cd and not cd.destroyed and rawequal(cd.parent, parent) and alignOf(control) == align and shown(control) then
+      local at = 1
+      while at <= #list and not insertBefore(control, list[at], align) do
+        at = at + 1
+      end
+      table.insert(list, at, control)
+    end
+  end
+  return list
+end
+
+local realign
+local function place(control, d, align, rect)
+  local p = d.props
+  local sl, st, sr, sb = spacingOf(d)
+  local w, h = num(p.width), num(p.height)
+  local aw, ah = autoSizeOf(control, d)
+  if align == 1 or align == 2 then
+    w = rect.r - rect.l - sl - sr
+    h = ah or h
+  elseif align == 3 or align == 4 then
+    h = rect.b - rect.t - st - sb
+    w = aw or w
+  else
+    w = rect.r - rect.l - sl - sr
+    h = rect.b - rect.t - st - sb
+  end
+  w, h = constrain(d, w, h)
+  local l, t
+  if align == 1 then
+    l, t = rect.l + sl, rect.t + st
+    rect.t = t + h + sb
+  elseif align == 2 then
+    l, t = rect.l + sl, rect.b - sb - h
+    rect.b = t - st
+  elseif align == 3 then
+    l, t = rect.l + sl, rect.t + st
+    rect.l = l + w + sr
+  elseif align == 4 then
+    l, t = rect.r - sr - w, rect.t + st
+    rect.r = l - sl
+  else
+    l, t = rect.l + sl, rect.t + st
+  end
+  local resized = p.width ~= w or p.height ~= h
+  p.left, p.top, p.width, p.height = l, t, w, h
+  if resized then
+    realign(control, nil)
+  end
+end
+
+local aligning = setmetatable({}, { __mode = "k" })
+realign = function(parent, start)
+  local pd = parent and D[parent]
+)MLUA"),
+            std::string_view(R"MLUA(  if not pd or pd.destroyed or aligning[parent] or #pd.controls == 0 then
+    return
+  end
+  aligning[parent] = true
+  local cw, ch = clientSize(parent, pd)
+  local il, it, ir, ib = 0, 0, 0, 0
+  if not inherits(parent, "form") then
+    il, it, ir, ib = insets(parent, pd)
+  end
+  local rect = { l = il, t = it, r = math.max(il, cw - ir), b = math.max(it, ch - ib) }
+  for align = 1, 5 do
+    for _, control in ipairs(alignList(parent, pd, align, start)) do
+      place(control, D[control], align, rect)
+    end
+  end
+  for _, control in ipairs(pd.controls) do
+    local cd = D[control]
+    if cd and not cd.destroyed and shown(control) then
+      local align = alignOf(control)
+      if align == 0 or align == 6 then
+        local aw, ah = autoSizeOf(control, cd)
+        local w, h = constrain(cd, aw or num(cd.props.width), ah or num(cd.props.height))
+        if w ~= cd.props.width or h ~= cd.props.height then
+          cd.props.width, cd.props.height = w, h
+          realign(control, nil)
+        end
+      end
+    end
+  end
+  aligning[parent] = nil
+end
+
+function layout.created(obj, d)
+  if not inherits(obj, "control") or inherits(obj, "form") then
+    return
+  end
+  local size = defaultSizes[d.class] or { 100, 100 }
+  local p = d.props
+  p.width = p.width or size[1]
+  p.height = p.height or size[2]
+  p.left = p.left or 0
+  p.top = p.top or 0
+  d.base = { left = p.left, top = p.top, width = p.width, height = p.height }
+  if d.class == "splitter" and p.align == nil then
+    p.align = "alLeft"
+  end
+end
+
+function layout.parentChanged(obj, old, new)
+  if old and D[old] then
+    local od = D[old]
+    if od.alignOrder then
+      removeValue(od.alignOrder, obj)
+    end
+    realign(old, nil)
+  end
+  if new and D[new] then
+    local nd = D[new]
+    nd.alignOrder = nd.alignOrder or {}
+    removeValue(nd.alignOrder, obj)
+    table.insert(nd.alignOrder, 1, obj)
+    realign(new, obj)
+  end
+end
+
+local boundsKeys = { left = true, top = true, width = true, height = true }
+local layoutKeys = {
+  align = true, visible = true, autosize = true, caption = true, text = true, borderwidth = true, bevelouter = true,
+  bevelinner = true, bevelwidth = true, wordwrap = true, clientwidth = true, clientheight = true, parentfont = true,
+}
+local ownBoundsKeys = {
+  left = true, top = true, width = true, height = true, clientwidth = true, clientheight = true, bevelouter = true,
+  bevelinner = true, bevelwidth = true, borderwidth = true,
+}
+
+function layout.changed(obj, d, k)
+  local class = d.class
+  if class == "borderspacing" or class == "constraints" then
+    local owner = d.owner
+    local od = owner and D[owner]
+    if od then
+      if od.parent then
+        realign(od.parent, nil)
+      end
+      realign(owner, nil)
+    end
+    return
+  end
+  if class == "font" then
+    d.changed = true
+    local owner = d.owner
+    local od = owner and D[owner]
+    if od then
+      if od.parent then
+        realign(od.parent, nil)
+      end
+      realign(owner, nil)
+    end
+    return
+  end
+  if not (boundsKeys[k] or layoutKeys[k]) or not inherits(obj, "control") then
+    return
+  end
+  if boundsKeys[k] then
+    d.base = d.base or {}
+    d.base[k] = num(d.props[k])
+  end
+  if k == "align" and d.parent then
+    local pd = D[d.parent]
+    pd.alignOrder = pd.alignOrder or {}
+    removeValue(pd.alignOrder, obj)
+    table.insert(pd.alignOrder, 1, obj)
+  end
+  if d.parent then
+    realign(d.parent, obj)
+  end
+  if ownBoundsKeys[k] and inherits(obj, "wincontrol") then
+    realign(obj, nil)
+  end
+end
+
+function layout.boundsChanged(obj, d)
+  d.base = d.base or {}
+  for key in pairs(boundsKeys) do
+    d.base[key] = num(d.props[key])
+  end
+  touchForms()
+  if d.parent then
+    realign(d.parent, obj)
+  end
+  realign(obj, nil)
+end
+
+layout.realign = realign
+
+local function splitterTarget(splitter, sd)
+  local parent = sd.parent
+  if not parent or not D[parent] then
+    return nil
+  end
+  local align = alignOf(splitter)
+  local sp = sd.props
+  local best, bestEdge
+  for _, control in ipairs(D[parent].controls) do
+    local cd = D[control]
+    if not rawequal(control, splitter) and cd and not cd.destroyed and shown(control) and alignOf(control) == align then
+      local p = cd.props
+      local edge
+      if align == 3 then
+        edge = num(p.left) + num(p.width)
+        if edge <= num(sp.left) + 1 and (not bestEdge or edge > bestEdge) then
+          best, bestEdge = control, edge
+        end
+      elseif align == 4 then
+        edge = num(p.left)
+        if edge >= num(sp.left) + num(sp.width) - 1 and (not bestEdge or edge < bestEdge) then
+          best, bestEdge = control, edge
+        end
+      elseif align == 1 then
+        edge = num(p.top) + num(p.height)
+        if edge <= num(sp.top) + 1 and (not bestEdge or edge > bestEdge) then
+          best, bestEdge = control, edge
+        end
+      elseif align == 2 then
+        edge = num(p.top)
+        if edge >= num(sp.top) + num(sp.height) - 1 and (not bestEdge or edge < bestEdge) then
+          best, bestEdge = control, edge
+        end
+      end
+    end
+  end
+  return best
 end
 
 local function stringItems(list)
@@ -3188,41 +3731,101 @@ local function stringItems(list)
   return out
 end
 
+local function nodeEntries(list)
+  local out = {}
+  for _, node in ipairs(list or {}) do
+    local nd = D[node]
+    if nd then
+      out[#out + 1] = {
+        id = uidOf(node),
+        text = tostring(nd.props.text or ""),
+        expanded = nd.props.expanded == true,
+        haschildren = nd.props.haschildren == true,
+        children = nodeEntries(nd.children),
+      }
+    end
+  end
+  return out
+end
+
 local function controlEntry(control, form)
   local d = D[control]
+  local p = d.props
+  local font = fontInfo(control)
+  local popup = p.popupmenu
   local entry = {
     id = uidOf(control),
     kind = d.class,
-    align = alignOf(control.Align),
-    left = tonumber(control.Left) or 0,
-    top = tonumber(control.Top) or 0,
-    width = tonumber(d.props.width) or -1,
-    height = tonumber(d.props.height) or -1,
-    enabled = control.Enabled ~= false,
+    x = num(p.left),
+    y = num(p.top),
+    w = num(p.width),
+    h = num(p.height),
+    enabled = p.enabled ~= false,
+    color = (p.parentcolor ~= true and p.transparent ~= true) and colorValue(p.color) or nil,
+    fontsize = font.size,
+    fontcolor = font.color,
+    bold = font.bold,
+    mono = font.mono,
+    cursor = tonumber(p.cursor) or 0,
+    click = type(p.onclick) == "function",
+    dblclick = type(p.ondblclick) == "function",
+    hover = type(p.onmouseenter) == "function" or type(p.onmouseleave) == "function",
+    popup = (popup and D[popup] and not D[popup].destroyed) and uidOf(popup) or nil,
     children = {},
   }
-  if not formKinds[d.class] then
-    form.unsupported = form.unsupported or (ClassNames[d.class] or d.class)
-    return entry
+  if not drawnKinds[d.class] then
+    entry.unsupported = ClassNames[d.class] or d.class
+    form.unsupported = form.unsupported or entry.unsupported
   end
-  if d.class == "listbox" or d.class == "combobox" then
+  local kind = d.class
+  if isPanel(control, d) then
+    entry.bevel = enum(control.BevelOuter, bevelNames, 2)
+    entry.bevelinner = enum(control.BevelInner, bevelNames, 0)
+    entry.bevelwidth = tonumber(control.BevelWidth) or 1
+    entry.bevelcolor = colorValue(p.bevelcolor)
+    entry.text = plainCaption(p.caption or "")
+  elseif kind == "label" then
+    entry.text = plainCaption(controlText(control, d))
+    entry.alignment = enum(p.alignment, alignmentNames, 0)
+    entry.layout = enum(p.layout, layoutNames, 0)
+    entry.wordwrap = p.wordwrap == true
+    entry.color = (p.parentcolor == false and p.transparent == false) and colorValue(p.color) or nil
+  elseif kind == "listbox" or kind == "combobox" then
     entry.items = stringItems(control.Items)
-    entry.itemindex = tonumber(d.props.itemindex) or -1
-  elseif d.class == "memo" then
+    entry.itemindex = tonumber(p.itemindex) or -1
+    entry.frame = enum(p.borderstyle, { bsnone = 0, bssingle = 1 }, 1) ~= 0
+  elseif kind == "memo" or kind == "synedit" then
     entry.text = control.Text
     entry.readonly = control.ReadOnly == true
-  elseif d.class == "edit" then
+    entry.frame = enum(p.borderstyle, { bsnone = 0, bssingle = 1 }, 1) ~= 0
+  elseif kind == "edit" then
     entry.text = control.Text
     entry.readonly = control.ReadOnly == true
+    entry.hint = tostring(p.texthint or "")
+    entry.password = p.passwordchar ~= nil and p.passwordchar ~= "" and p.passwordchar ~= "#0"
+    entry.frame = enum(p.borderstyle, { bsnone = 0, bssingle = 1 }, 1) ~= 0
+  elseif kind == "splitter" then
+    local target = splitterTarget(control, d)
+    entry.resizes = target and uidOf(target) or nil
+    entry.minsize = tonumber(p.minsize) or 30
+    entry.align = alignOf(control)
+  elseif kind == "treeview" then
+    local items = p.items
+    entry.nodes = (items and D[items]) and nodeEntries(D[items].roots) or {}
+    local selected = p.selected
+    entry.selected = (selected and D[selected] and not D[selected].destroyed) and uidOf(selected) or nil
+    entry.rightclickselect = p.rightclickselect == true
+    entry.autoexpand = p.autoexpand == true
+    entry.frame = enum(p.borderstyle, { bsnone = 0, bssingle = 1 }, 1) ~= 0
   else
-    entry.text = plainCaption(control.Caption)
+    entry.text = plainCaption(controlText(control, d))
   end
-  if d.class == "checkbox" then
-    entry.checked = d.props.checked == true
+  if kind == "checkbox" or kind == "togglebox" then
+    entry.checked = p.checked == true
   end
   for _, child in ipairs(d.controls) do
     local cd = D[child]
-    if cd and not cd.destroyed and child.Visible ~= false then
+    if cd and not cd.destroyed and shown(child) then
       entry.children[#entry.children + 1] = controlEntry(child, form)
     end
   end
@@ -3235,20 +3838,33 @@ __manifoldFormSnapshot = function()
     local d = D[form]
     if d and d.script and not d.destroyed and d.props.visible then
       local p = d.props
+      local constraints = p.constraints and D[p.constraints] and D[p.constraints].props or {}
+      local menu = p.menu
+      local font = fontInfo(form)
       local entry = {
         id = uidOf(form),
         caption = tostring(form.Caption or ""),
-        left = tonumber(p.left) or 0,
-        top = tonumber(p.top) or 0,
-        width = tonumber(p.clientwidth or p.width) or 400,
-        height = tonumber(p.clientheight or p.height) or 300,
+        left = num(p.left),
+        top = num(p.top),
+        width = tonumber(p.width) or 400,
+        height = tonumber(p.height) or 300,
+        clientwidth = tonumber(p.clientwidth),
+        clientheight = tonumber(p.clientheight),
         center = centred(p.position),
         raise = d.raise or 0,
+        minwidth = num(constraints.minwidth),
+        minheight = num(constraints.minheight),
+        menu = (menu and D[menu] and not D[menu].destroyed) and uidOf(menu) or nil,
+        color = colorValue(p.color),
+        fontsize = font.size,
+        fontcolor = font.color,
+        bold = font.bold,
+        mono = font.mono,
         controls = {},
       }
       for _, child in ipairs(d.controls) do
         local cd = D[child]
-        if cd and not cd.destroyed and child.Visible ~= false then
+        if cd and not cd.destroyed and shown(child) then
           entry.controls[#entry.controls + 1] = controlEntry(child, entry)
         end
       end
@@ -3263,6 +3879,7 @@ __manifoldFormSet = function(id, field, value)
   if not control then
     return
   end
+  touchForms()
   if field == "itemindex" then
     d.props.itemindex = tonumber(value) or -1
     d.props.text = nil
@@ -3276,6 +3893,23 @@ __manifoldFormSet = function(id, field, value)
     else
       d.props.text = tostring(value or "")
     end
+  elseif field == "expanded" then
+    d.props.expanded = value == "1"
+  elseif field == "selected" then
+    local node = live(tonumber(value))
+    d.props.selected = node
+    if node and d.props.autoexpand == true then
+      D[node].props.expanded = true
+    end
+  elseif field == "width" or field == "height" then
+    local size = math.max(0, tonumber(value) or 0)
+    d.props[field] = size
+    d.base = d.base or {}
+    d.base[field] = size
+    if d.parent then
+      realign(d.parent, nil)
+    end
+    realign(control, nil)
   end
 end
 
@@ -3293,6 +3927,10 @@ __manifoldFormFire = function(id, event)
       call(p.onclick, control)
       call(p.onselectionchange, control, true)
     end
+  elseif event == "nodechange" then
+)MLUA"),
+            std::string_view(R"MLUA(    call(p.onchange, control, p.selected)
+    call(p.onselectionchanged, control)
   elseif event == "dblclick" then
     call(p.ondblclick, control)
   elseif event == "change" then
@@ -3302,6 +3940,12 @@ __manifoldFormFire = function(id, event)
     end
   elseif event == "click" then
     call(p.onclick, control)
+  elseif event == "mouseenter" then
+    call(p.onmouseenter, control)
+  elseif event == "mouseleave" then
+    call(p.onmouseleave, control)
+  elseif event == "moved" then
+    call(p.onmoved, control)
   end
 end
 
@@ -3312,20 +3956,23 @@ __manifoldFormClose = function(id)
   end
 end
 
-__manifoldFormBounds = function(id, left, top, width, height)
+__manifoldFormBounds = function(id, left, top, width, height, clientWidth, clientHeight)
   local form, d = live(id)
   if not form then
     return
   end
   local p = d.props
   p.left, p.top = left, top
+  p.width, p.height = width, height
   if p.clientwidth then
-    p.clientwidth = width
+    p.clientwidth = clientWidth or width
   end
   if p.clientheight then
-    p.clientheight = height
+    p.clientheight = clientHeight or height
   end
-  p.width, p.height = width, height
+  d.hostW, d.hostH = clientWidth, clientHeight
+  realign(form, nil)
+  touchForms()
 end
 
 getFormCount = getFormCount or function() return #forms end

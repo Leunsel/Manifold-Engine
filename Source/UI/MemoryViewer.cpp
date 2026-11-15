@@ -348,6 +348,8 @@ namespace Manifold::UI
         {
             item(ICON_FA_LOCATION_ARROW "  Go to address...", Command::GotoAddress);
             item(ICON_FA_SEARCH "  Find bytes...", Command::FindMemory);
+            if (ImGui::MenuItem(ICON_FA_LIST "  Find all matching bytes..."))
+                m_workspace.OpenByteSearch();
             item(ICON_FA_SEARCH_LOCATION "  Find assembly code...", Command::FindAssembly);
             ImGui::EndMenu();
         }
@@ -1999,30 +2001,33 @@ namespace Manifold::UI
         }
         if (!ImGui::BeginPopup("##find"))
             return;
-        ImGui::TextUnformatted("Find bytes (searches forward from the hex view)");
+        ImGui::TextUnformatted("Find bytes");
+        Muted("Find next searches forward from the hex view, Find all lists every match.");
         if (ImGui::IsWindowAppearing())
             ImGui::SetKeyboardFocusHere();
         ImGui::SetNextItemWidth(Px(360.0f));
         const bool enter = InputTextWithHint("##pattern", "48 8B ?? 10 or 'text'", m_findText, ImGuiInputTextFlags_EnterReturnsTrue);
         if (!m_findError.empty())
             TextWithError(m_findError, ManifoldTheme::Error);
-        if (enter || AccentButton("Find next", Px(100.0f, 0.0f)))
+        const bool next = enter || AccentButton("Find next", Px(100.0f, 0.0f));
+        ImGui::SameLine();
+        if (ImGui::Button(ICON_FA_LIST "  Find all", Px(100.0f, 0.0f)))
         {
-            std::optional<Scan::Pattern> pattern;
-            const std::string text = Trim(m_findText);
-            if (text.size() >= 2 && (text.front() == '\'' || text.front() == '"') && text.back() == text.front())
+            if (BytePattern(m_findText))
             {
-                Scan::Pattern bytes;
-                for (char c : text.substr(1, text.size() - 2))
-                {
-                    bytes.Bytes.push_back(static_cast<std::uint8_t>(c));
-                    bytes.Mask.push_back(0xFF);
-                }
-                pattern = bytes;
+                m_workspace.OpenByteSearch(Trim(m_findText));
+                ImGui::CloseCurrentPopup();
             }
             else
-                pattern = Scan::ParsePattern(text);
-            if (!pattern || pattern->Empty())
+            {
+                m_findError = ErrorMessage(ErrorCode::ScanBadPattern, Trim(m_findText));
+            }
+        }
+        if (next)
+        {
+            const std::string text = Trim(m_findText);
+            const std::optional<Scan::Pattern> pattern = BytePattern(text);
+            if (!pattern)
                 m_findError = ErrorMessage(ErrorCode::ScanBadPattern, text);
             else
             {
