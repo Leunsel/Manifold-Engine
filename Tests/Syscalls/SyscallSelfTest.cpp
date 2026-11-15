@@ -55,6 +55,10 @@ int main()
     std::printf("NtAllocateVirtualMemory service number = 0x%X\n", AllocVmSysCall);
     std::printf("NtFreeVirtualMemory  service number = 0x%X\n", FreeVmSysCall);
     std::printf("NtQueryInformationProcess service number = 0x%X\n", QueryInfoProcSysCall);
+    std::printf("NtGetContextThread service number = 0x%X\n", GetContextSysCall);
+    std::printf("NtSetContextThread service number = 0x%X\n", SetContextSysCall);
+    std::printf("NtSuspendThread    service number = 0x%X\n", SuspendThreadSysCall);
+    std::printf("NtResumeThread     service number = 0x%X\n", ResumeThreadSysCall);
 
     int failures = 0;
 

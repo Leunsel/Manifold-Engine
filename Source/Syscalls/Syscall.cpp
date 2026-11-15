@@ -120,6 +120,10 @@ void InitSysCalls()
 	AllocVmSysCall = SysCalls["NtAllocateVirtualMemory"];
 	FreeVmSysCall = SysCalls["NtFreeVirtualMemory"];
 	QueryInfoProcSysCall = SysCalls["NtQueryInformationProcess"];
+	GetContextSysCall = SysCalls["NtGetContextThread"];
+	SetContextSysCall = SysCalls["NtSetContextThread"];
+	SuspendThreadSysCall = SysCalls["NtSuspendThread"];
+	ResumeThreadSysCall = SysCalls["NtResumeThread"];
 	// A number that stays 0 was not found in ntdll; callers fall back to the
 	// Win32 API for that one instead of firing a guessed service number.
 }
@@ -350,6 +354,99 @@ __attribute__((naked)) NTSTATUS NTAPI NtQueryInformationProcess_direct(
 		mov eax,[QueryInfoProcSysCall]
 		call dword ptr fs:[0C0h]
 		ret 14h
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtGetContextThread_direct(
+	_In_ HANDLE ThreadHandle,
+	_Inout_ PVOID ThreadContext
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[GetContextSysCall]
+		syscall
+		ret
+	}
+#else
+	// Two __stdcall arguments of four bytes each -> ret 8.
+	__asm
+	{
+		mov eax,[GetContextSysCall]
+		call dword ptr fs:[0C0h]
+		ret 8
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtSetContextThread_direct(
+	_In_ HANDLE ThreadHandle,
+	_In_ PVOID ThreadContext
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[SetContextSysCall]
+		syscall
+		ret
+	}
+#else
+	__asm
+	{
+		mov eax,[SetContextSysCall]
+		call dword ptr fs:[0C0h]
+		ret 8
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtSuspendThread_direct(
+	_In_ HANDLE ThreadHandle,
+	_Out_opt_ PULONG PreviousSuspendCount
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[SuspendThreadSysCall]
+		syscall
+		ret
+	}
+#else
+	__asm
+	{
+		mov eax,[SuspendThreadSysCall]
+		call dword ptr fs:[0C0h]
+		ret 8
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtResumeThread_direct(
+	_In_ HANDLE ThreadHandle,
+	_Out_opt_ PULONG PreviousSuspendCount
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[ResumeThreadSysCall]
+		syscall
+		ret
+	}
+#else
+	__asm
+	{
+		mov eax,[ResumeThreadSysCall]
+		call dword ptr fs:[0C0h]
+		ret 8
 	}
 #endif
 }

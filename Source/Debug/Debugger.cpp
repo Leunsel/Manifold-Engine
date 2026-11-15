@@ -3,6 +3,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Debug/VehProtocol.h"
+#include "Syscalls/Syscall.h"
 #include "Target/Process.h"
 
 #include <algorithm>
@@ -40,6 +41,39 @@ namespace Manifold::Debug
             const QueryThread query = NtQueryThread();
             BOOLEAN hidden = FALSE;
             return query && query(thread, kThreadHideFromDebugger, &hidden, sizeof(hidden), nullptr) >= 0 && hidden;
+        }
+
+        // Thread suspend/resume and the 64-bit context read/write go through
+        // the direct system call when its service number resolved, and fall
+        // back to the matching Win32 API when it did not. The Wow64 context
+        // for a 32-bit target stays on Win32: it does not map cleanly to a
+        // single documented syscall from a 64-bit host.
+        bool SuspendThreadDirect(HANDLE thread)
+        {
+            if (SuspendThreadSysCall == 0)
+                return ::SuspendThread(thread) != static_cast<DWORD>(-1);
+            return NtSuspendThread_direct(thread, nullptr) >= 0;
+        }
+
+        bool ResumeThreadDirect(HANDLE thread)
+        {
+            if (ResumeThreadSysCall == 0)
+                return ::ResumeThread(thread) != static_cast<DWORD>(-1);
+            return NtResumeThread_direct(thread, nullptr) >= 0;
+        }
+
+        bool GetContextDirect(HANDLE thread, CONTEXT& ctx)
+        {
+            if (GetContextSysCall == 0)
+                return ::GetThreadContext(thread, &ctx) != FALSE;
+            return NtGetContextThread_direct(thread, &ctx) >= 0;
+        }
+
+        bool SetContextDirect(HANDLE thread, const CONTEXT& ctx)
+        {
+            if (SetContextSysCall == 0)
+                return ::SetThreadContext(thread, &ctx) != FALSE;
+            return NtSetContextThread_direct(thread, const_cast<CONTEXT*>(&ctx)) >= 0;
         }
 
         bool StillRunning(HANDLE thread)
@@ -84,7 +118,7 @@ namespace Manifold::Debug
                 {
                     std::memset(&m_native, 0, sizeof(m_native));
                     m_native.ContextFlags = scope == Scope::DebugRegisters ? CONTEXT_DEBUG_REGISTERS : scope == Scope::Control ? CONTEXT_CONTROL : CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS;
-                    return ::GetThreadContext(thread, &m_native) != FALSE;
+                    return GetContextDirect(thread, m_native);
                 }
                 std::memset(&m_wow, 0, sizeof(m_wow));
                 m_wow.ContextFlags = scope == Scope::DebugRegisters ? WOW64_CONTEXT_DEBUG_REGISTERS : scope == Scope::Control ? WOW64_CONTEXT_CONTROL :
@@ -95,7 +129,7 @@ namespace Manifold::Debug
             bool Write() const
             {
                 if (m_is64)
-                    return ::SetThreadContext(m_thread, &m_native) != FALSE;
+                    return SetContextDirect(m_thread, m_native);
                 return ::Wow64SetThreadContext(m_thread, &m_wow) != FALSE;
             }
 
@@ -450,7 +484,7 @@ namespace Manifold::Debug
                 LeaveOut(*thread);
                 continue;
             }
-            const bool suspended = ::SuspendThread(thread->Handle) != static_cast<DWORD>(-1);
+            const bool suspended = SuspendThreadDirect(thread->Handle);
             ContextHolder context(m_is64Bit);
             if (context.Read(thread->Handle, ContextHolder::Scope::DebugRegisters))
             {
@@ -461,7 +495,7 @@ namespace Manifold::Debug
                     result = Status::Fail(ErrorCode::DebugContextFailed, std::to_string(id));
             }
             if (suspended)
-                ::ResumeThread(thread->Handle);
+                ResumeThreadDirect(thread->Handle);
             if (thread->Armed && HiddenFromDebugger(thread->Handle))
                 LeaveOut(*thread);
         }
@@ -476,7 +510,7 @@ namespace Manifold::Debug
         thread.Hidden = true;
         if (thread.Armed)
         {
-            const bool suspended = ::SuspendThread(thread.Handle) != static_cast<DWORD>(-1);
+            const bool suspended = SuspendThreadDirect(thread.Handle);
             ContextHolder context(m_is64Bit);
             if (context.Read(thread.Handle, ContextHolder::Scope::DebugRegisters))
             {
@@ -485,7 +519,7 @@ namespace Manifold::Debug
                 context.Write();
             }
             if (suspended)
-                ::ResumeThread(thread.Handle);
+                ResumeThreadDirect(thread.Handle);
             thread.Armed = false;
         }
         LOG_WARN("Debugger", Format("Thread %u%s hides itself from debuggers. Hardware breakpoints leave it out, so its accesses are not seen.", static_cast<unsigned>(thread.Id),

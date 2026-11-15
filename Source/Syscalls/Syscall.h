@@ -10,6 +10,10 @@ inline unsigned int ProtectVmSysCall = 0;
 inline unsigned int AllocVmSysCall = 0;
 inline unsigned int FreeVmSysCall = 0;
 inline unsigned int QueryInfoProcSysCall = 0;
+inline unsigned int GetContextSysCall = 0;
+inline unsigned int SetContextSysCall = 0;
+inline unsigned int SuspendThreadSysCall = 0;
+inline unsigned int ResumeThreadSysCall = 0;
 
 void InitSysCalls();
 
@@ -75,4 +79,24 @@ __attribute__((naked)) NTSTATUS NTAPI NtQueryInformationProcess_direct(
 	_Out_ PVOID ProcessInformation,
 	_In_ ULONG ProcessInformationLength,
 	_Out_opt_ PULONG ReturnLength
+);
+
+__attribute__((naked)) NTSTATUS NTAPI NtGetContextThread_direct(
+	_In_ HANDLE ThreadHandle,
+	_Inout_ PVOID ThreadContext
+);
+
+__attribute__((naked)) NTSTATUS NTAPI NtSetContextThread_direct(
+	_In_ HANDLE ThreadHandle,
+	_In_ PVOID ThreadContext
+);
+
+__attribute__((naked)) NTSTATUS NTAPI NtSuspendThread_direct(
+	_In_ HANDLE ThreadHandle,
+	_Out_opt_ PULONG PreviousSuspendCount
+);
+
+__attribute__((naked)) NTSTATUS NTAPI NtResumeThread_direct(
+	_In_ HANDLE ThreadHandle,
+	_Out_opt_ PULONG PreviousSuspendCount
 );
