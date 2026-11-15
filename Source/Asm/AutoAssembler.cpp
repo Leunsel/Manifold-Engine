@@ -46,6 +46,14 @@ namespace Manifold::Asm
             int Line = 0;
         };
 
+        struct PendingRead
+        {
+            std::size_t Index = 0;
+            std::string Address;
+            int Line = 0;
+            std::string Text;
+        };
+
         struct PendingAlloc
         {
             std::string Name;
@@ -352,7 +360,7 @@ namespace Manifold::Asm
                     return m_result;
                 if (!Collect(lines))
                     return Abort();
-                if (!PrepareLibraries() || !RunScans() || !Allocate())
+                if (!PrepareLibraries() || !RunScans() || !Allocate() || !ReadMemory())
                     return Abort();
                 if (!Layout())
                     return Abort();
@@ -749,21 +757,15 @@ namespace Manifold::Asm
                         return false;
                     if (!m_host.Process || !m_host.Symbols)
                         return Fail(ErrorCode::NoProcess, line.Line, "");
-                    const auto address = m_host.Symbols->Evaluate(command.Arguments[0], Extra());
                     const auto size = ParseNumber(command.Arguments[1]);
-                    if (!address.Ok() || !size || *size == 0 || *size > 0x100000)
+                    if (!size || *size == 0 || *size > 0x100000)
                         return Fail(ErrorCode::AaBadArguments, line.Line, "readmem(address, size) got an invalid address or size", line.Text);
                     Statement statement;
                     statement.Type = Statement::Kind::Bytes;
                     statement.Data.resize(static_cast<std::size_t>(*size));
-                    if (!m_host.Process->ReadExact(*address.Value, statement.Data.data(), statement.Data.size()))
-                    {
-                        m_result.Error = Status::Fail(ErrorCode::AaReadMemFailed, Hex(*address.Value));
-                        m_result.Line = line.Line;
-                        return false;
-                    }
                     statement.Line = line.Line;
                     statement.Text = line.Text;
+                    m_reads.push_back({ m_statements.size(), command.Arguments[0], line.Line, line.Text });
                     m_statements.push_back(std::move(statement));
                     return true;
                 }
@@ -943,6 +945,7 @@ namespace Manifold::Asm
                     {
                         block = nearAddress ? (nearAddress & ~0xFFFFull) + 0x100000 : fakeBase;
                         fakeBase += (total + 0xFFFF) & ~0xFFFFull;
+                        m_fakeBlocks.emplace_back(block, block + total);
                     }
                     else
                     {
@@ -964,6 +967,31 @@ namespace Manifold::Asm
                         m_values[Lower(alloc->Name)] = address;
                         m_newAllocations.push_back({ alloc->Name, address, alloc->Size, block, alloc->Global });
                         offset += (alloc->Size + 15) & ~15ull;
+                    }
+                }
+                return true;
+            }
+
+            bool ReadMemory()
+            {
+                for (const PendingRead& read : m_reads)
+                {
+                    Statement& statement = m_statements[read.Index];
+                    const auto address = m_host.Symbols->Evaluate(read.Address, Extra());
+                    if (!address.Ok())
+                        return Fail(ErrorCode::AaBadArguments, read.Line, "readmem(address, size) got an invalid address or size", read.Text);
+                    if (m_options.CheckOnly)
+                    {
+                        const std::uint64_t at = *address.Value;
+                        const bool fake = std::any_of(m_fakeBlocks.begin(), m_fakeBlocks.end(), [at](const auto& block) { return at >= block.first && at < block.second; });
+                        if (fake)
+                            continue;
+                    }
+                    if (!m_host.Process->ReadExact(*address.Value, statement.Data.data(), statement.Data.size()))
+                    {
+                        m_result.Error = Status::Fail(ErrorCode::AaReadMemFailed, Hex(*address.Value));
+                        m_result.Line = read.Line;
+                        return false;
                     }
                 }
                 return true;
@@ -1363,6 +1391,8 @@ namespace Manifold::Asm
             AaResult m_result;
 
             std::vector<Statement> m_statements;
+            std::vector<PendingRead> m_reads;
+            std::vector<std::pair<std::uint64_t, std::uint64_t>> m_fakeBlocks;
             std::vector<PendingAlloc> m_allocs;
             std::vector<std::string> m_deallocs;
             std::map<std::string, std::string> m_labels;

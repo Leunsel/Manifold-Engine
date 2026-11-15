@@ -28,7 +28,7 @@ Failures name the line and end in an `ME-3xxx` code; see [ERRORS.md](ERRORS.md).
 | `aobscanmodule(name, module, bytes)` | Finds the pattern inside one module. |
 | `aobscanregion(name, start, stop, bytes)` | Finds the pattern between two addresses. |
 | `assert(address, bytes)` | Stops the script when the memory does not hold these bytes, before anything is written. |
-| `readmem(address, size)` | Writes a copy of the bytes found at `address` into the current position. |
+| `readmem(address, size)` | Writes a copy of the bytes found at `address` into the current position. The bytes are read after the `aobscan` commands and `alloc`, so `address` may be a symbol from a scan of the same script. |
 | `reassemble(address)` | Assembles the instruction found at `address` again at the current position, with relative jumps fixed. |
 | `fullaccess(address, size)` | Makes memory readable, writable and executable. |
 | `createthread(address)` / `createthreadandwait(address)` | Starts a thread in the process after the code is written. |
