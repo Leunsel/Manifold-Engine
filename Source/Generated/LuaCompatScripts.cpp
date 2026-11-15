@@ -1,0 +1,3111 @@
+#include "Lua/LuaCompatScripts.h"
+
+#include <array>
+
+namespace Manifold::Lua
+{
+    namespace
+    {
+        constexpr std::array<std::string_view, 1> kScript0 = {
+            std::string_view(R"MLUA(local defines = {
+  cbUnchecked = 0,
+  cbChecked = 1,
+  cbGrayed = 2,
+  mbLeft = 0,
+  mbRight = 1,
+  mbMiddle = 2,
+  mbExtra1 = 3,
+  mbExtra2 = 4,
+  ssNone = 0,
+  ssHorizontal = 1,
+  ssVertical = 2,
+  ssBoth = 3,
+  ssAutoHorizontal = 4,
+  ssAutoVertical = 5,
+  ssAutoBoth = 6,
+  bsNone = 0,
+  bsSingle = 1,
+  bsSizeable = 2,
+  bsDialog = 3,
+  bsToolWindow = 4,
+  bsSizeToolWin = 5,
+  fsmNotAligned = 0,
+  fsmAligned = 1,
+  fsmLastDigits = 2,
+  rtRounded = 0,
+  rtExtremerounded = 1,
+  rtTruncated = 2,
+  soUnknownValue = 0,
+  soExactValue = 1,
+  soValueBetween = 2,
+  soBiggerThan = 3,
+  soSmallerThan = 4,
+  soIncreasedValue = 5,
+  soIncreasedValueBy = 6,
+  soDecreasedValue = 7,
+  soDecreasedValueBy = 8,
+  soChanged = 9,
+  soUnchanged = 10,
+  bpmInt3 = 0,
+  bpmDebugRegister = 1,
+  bpmException = 2,
+  bptExecute = 0,
+  bptAccess = 1,
+  bptWrite = 2,
+  co_run = 0,
+  co_stepinto = 1,
+  co_stepover = 2,
+  caNone = 0,
+  caHide = 1,
+  caFree = 2,
+  caMinimize = 3,
+  alNone = 0,
+  alTop = 1,
+  alBottom = 2,
+  alLeft = 3,
+  alRight = 4,
+  alClient = 5,
+  mtWarning = 0,
+  mtError = 1,
+  mtInformation = 2,
+  mtConfirmation = 3,
+  mbYes = 0,
+  mbNo = 1,
+  mbOK = 2,
+  mbCancel = 3,
+  mbAbort = 4,
+  mbRetry = 5,
+  mbIgnore = 6,
+  mbAll = 7,
+  mbNoToAll = 8,
+  mbYesToAll = 9,
+  mbHelp = 10,
+  mbClose = 11,
+  mrNone = 0,
+  mrOK = 1,
+  mrCancel = 2,
+  mrAbort = 3,
+  mrRetry = 4,
+  mrIgnore = 5,
+  mrYes = 6,
+  mrNo = 7,
+  mrAll = 8,
+  mrNoToAll = 9,
+  mrYesToAll = 10,
+  mrLast = 10,
+  dupIgnore = 0,
+  dupAccept = 1,
+  dupError = 2,
+  vtByte = 0,
+  vtWord = 1,
+  vtDword = 2,
+  vtQword = 3,
+  vtSingle = 4,
+  vtDouble = 5,
+  vtString = 6,
+  vtUnicodeString = 7,
+  vtWideString = 7,
+  vtByteArray = 8,
+  vtBinary = 9,
+  vtAll = 10,
+  vtAutoAssembler = 11,
+  vtPointer = 12,
+  vtCustom = 13,
+  vtGrouped = 14,
+  VK_LBUTTON = 1,
+  VK_RBUTTON = 2,
+  VK_CANCEL = 3,
+  VK_MBUTTON = 4,
+  VK_XBUTTON1 = 5,
+  VK_XBUTTON2 = 6,
+  VK_BACK = 8,
+  VK_TAB = 9,
+  VK_CLEAR = 12,
+  VK_RETURN = 13,
+  VK_SHIFT = 16,
+  VK_CONTROL = 17,
+  VK_MENU = 18,
+  VK_PAUSE = 19,
+  VK_CAPITAL = 20,
+  VK_ESCAPE = 27,
+  VK_SPACE = 32,
+  VK_PRIOR = 33,
+  VK_NEXT = 34,
+  VK_END = 35,
+  VK_HOME = 36,
+  VK_LEFT = 37,
+  VK_UP = 38,
+  VK_RIGHT = 39,
+  VK_DOWN = 40,
+  VK_SELECT = 41,
+  VK_PRINT = 42,
+  VK_EXECUTE = 43,
+  VK_SNAPSHOT = 44,
+  VK_INSERT = 45,
+  VK_DELETE = 46,
+  VK_HELP = 47,
+  VK_0 = 48,
+  VK_1 = 49,
+  VK_2 = 50,
+  VK_3 = 51,
+  VK_4 = 52,
+  VK_5 = 53,
+  VK_6 = 54,
+  VK_7 = 55,
+  VK_8 = 56,
+  VK_9 = 57,
+  VK_A = 65,
+  VK_B = 66,
+  VK_C = 67,
+  VK_D = 68,
+  VK_E = 69,
+  VK_F = 70,
+  VK_G = 71,
+  VK_H = 72,
+  VK_I = 73,
+  VK_J = 74,
+  VK_K = 75,
+  VK_L = 76,
+  VK_M = 77,
+  VK_N = 78,
+  VK_O = 79,
+  VK_P = 80,
+  VK_Q = 81,
+  VK_R = 82,
+  VK_S = 83,
+  VK_T = 84,
+  VK_U = 85,
+  VK_V = 86,
+  VK_W = 87,
+  VK_X = 88,
+  VK_Y = 89,
+  VK_Z = 90,
+  VK_LWIN = 91,
+  VK_RWIN = 92,
+  VK_APPS = 93,
+  VK_NUMPAD0 = 96,
+  VK_NUMPAD1 = 97,
+  VK_NUMPAD2 = 98,
+  VK_NUMPAD3 = 99,
+  VK_NUMPAD4 = 100,
+  VK_NUMPAD5 = 101,
+  VK_NUMPAD6 = 102,
+  VK_NUMPAD7 = 103,
+  VK_NUMPAD8 = 104,
+  VK_NUMPAD9 = 105,
+  VK_MULTIPLY = 106,
+  VK_ADD = 107,
+  VK_SEPARATOR = 108,
+  VK_SUBTRACT = 109,
+  VK_DECIMAL = 110,
+  VK_DIVIDE = 111,
+  VK_F1 = 112,
+  VK_F2 = 113,
+  VK_F3 = 114,
+  VK_F4 = 115,
+  VK_F5 = 116,
+  VK_F6 = 117,
+  VK_F7 = 118,
+  VK_F8 = 119,
+  VK_F9 = 120,
+  VK_F10 = 121,
+  VK_F11 = 122,
+  VK_F12 = 123,
+  VK_F13 = 124,
+  VK_F14 = 125,
+  VK_F15 = 126,
+  VK_F16 = 127,
+  VK_F17 = 128,
+  VK_F18 = 129,
+  VK_F19 = 130,
+  VK_F20 = 131,
+  VK_F21 = 132,
+  VK_F22 = 133,
+  VK_F23 = 134,
+  VK_F24 = 135,
+  VK_NUMLOCK = 144,
+  VK_SCROLL = 145,
+  VK_LSHIFT = 160,
+  VK_LCONTROL = 162,
+  VK_LMENU = 164,
+  VK_RSHIFT = 161,
+  VK_RCONTROL = 163,
+  VK_RMENU = 165,
+  VK_OEM1 = 186,
+  VK_OEM2 = 191,
+  VK_OEM3 = 192,
+  SW_HIDE = 0,
+  SW_MAXIMIZE = 3,
+  SW_MINIMIZE = 6,
+  SW_NORMAL = 1,
+  SW_RESTORE = 9,
+  SW_SHOW = 5,
+  SW_SHOWDEFAULT = 10,
+  SW_SHOWMAXIMIZED = 3,
+  SW_SHOWMINIMIZED = 2,
+  SW_SHOWMINNOACTIVE = 7,
+  SW_SHOWNA = 8,
+  SW_SHOWNOACTIVATE = 4,
+  SW_SHOWNORMAL = 1,
+  pfDevice = 0,
+  pf1bit = 1,
+  pf4bit = 2,
+  pf8bit = 3,
+  pf15bit = 4,
+  pf16bit = 5,
+  pf24bit = 6,
+  pf32bit = 7,
+  pfCustom = 8,
+  dvtNone = 0,
+  dvtAddress = 1,
+  dvtValue = 2,
+  jtCall = 0,
+  jtUnconditional = 1,
+  jtConditional = 2,
+  jtMemory = 3,
+  slStart = 0,
+  slNotInt = 1,
+  slNotModule = 2,
+  slNotUserdefinedSymbol = 3,
+  slNotSymbol = 4,
+  slFailure = 5,
+  poDesigned = 0,
+  poDefault = 1,
+  poDefaultPosOnly = 2,
+  poDefaultSizeOnly = 3,
+  poScreenCenter = 4,
+  poDesktopCenter = 5,
+  poMainFormCenter = 6,
+  poOwnerFormCenter = 7,
+  asrTop = 0,
+  asrBottom = 1,
+  asrCenter = 2,
+  asrLeft = 0,
+  asrRight = 1,
+  vsIcon = 0,
+  vsSmallIcon = 1,
+  vsList = 2,
+  vsReport = 3,
+  LWA_COLORKEY = 1,
+  LWA_ALPHA = 2,
+  GW_HWNDFIRST = 0,
+  GW_HWNDLAST = 1,
+  GW_HWNDNEXT = 2,
+  GW_HWNDPREV = 3,
+  GW_HWNDOWNER = 4,
+  GW_OWNER = 4,
+  GW_CHILD = 5,
+  GW_ENABLEDPOPUP = 6,
+  mrhToggleActivation = 0,
+  mrhToggleActivationAllowIncrease = 1,
+  mrhToggleActivationAllowDecrease = 2,
+  mrhActivate = 3,
+  mrhDeactivate = 4,
+  mrhSetValue = 5,
+  mrhIncreaseValue = 6,
+  mrhDecreaseValue = 7,
+  MOUSEEVENTF_MOVE = 1,
+  MOUSEEVENTF_LEFTDOWN = 2,
+  MOUSEEVENTF_LEFTUP = 4,
+  MOUSEEVENTF_RIGHTDOWN = 8,
+  MOUSEEVENTF_RIGHTUP = 16,
+  MOUSEEVENTF_MIDDLEDOWN = 32,
+  MOUSEEVENTF_MIDDLEUP = 64,
+  MOUSEEVENTF_XDOWN = 128,
+  MOUSEEVENTF_XUP = 256,
+  MOUSEEVENTF_WHEEL = 2048,
+  MOUSEEVENTF_HWHEEL = 4096,
+  MOUSEEVENTF_ABSOLUTE = 32768,
+  SPF_DEFAULT = 0,
+  SPF_ASYNC = 1,
+  SPF_PURGEBEFORESPEAK = 2,
+  SPF_IS_FILENAME = 4,
+  SPF_IS_XML = 8,
+  SPF_IS_NOT_XML = 16,
+  SPF_PERSIST_XML = 32,
+  SPF_NLP_SPEAK_PUNC = 64,
+  SPF_PARSE_SAPI = 128,
+  SPF_PARSE_SSML = 256,
+  SPF_PARSE_AUTODETECT = 0,
+  wrSignaled = 0,
+  wrTimeout = 1,
+  wrAbandoned = 2,
+  wrError = 3,
+  fsSurface = 0,
+  fsBorder = 1,
+  cdsSelected = 0,
+  cdsGrayed = 1,
+  cdsDisabled = 2,
+  cdsChecked = 3,
+  cdsFocused = 4,
+  cdsDefault = 5,
+  cdsHot = 6,
+  cdsMarked = 7,
+  cdsIndeterminate = 8,
+  cdPrePaint = 0,
+  cdPostPaint = 1,
+  cdPreErase = 2,
+  cdPostErase = 3,
+  drBounds = 0,
+  drIcon = 1,
+  drLabel = 2,
+  drSelectBounds = 3,
+  fmCreate = 65280,
+  fmOpenRead = 0,
+  fmOpenWrite = 1,
+  fmOpenReadWrite = 2,
+  fmShareCompat = 0,
+  fmShareExclusive = 16,
+  fmShareDenyWrite = 32,
+  fmShareDenyRead = 48,
+  fmShareDenyNone = 64,
+  crDefault = 0,
+  crNone = -1,
+  crArrow = -2,
+  crCross = -3,
+  crIBeam = -4,
+  crSize = -22,
+  crSizeNESW = -6,
+  crSizeNS = -7,
+  crSizeNWSE = -8,
+  crSizeWE = -9,
+  crSizeNW = -23,
+  crSizeN = -24,
+  crSizeNE = -25,
+  crSizeW = -26,
+  crSizeE = -27,
+  crSizeSW = -28,
+  crSizeS = -29,
+  crSizeSE = -30,
+  crUpArrow = -10,
+  crHourGlass = -11,
+  crDrag = -12,
+  crNoDrop = -13,
+  crHSplit = -14,
+  crVSplit = -15,
+  crMultiDrag = -16,
+  crSQLWait = -17,
+  crNo = -18,
+  crAppStart = -19,
+  crHelp = -20,
+  crHandPoint = -21,
+  crSizeAll = -22,
+  CLR_NONE = 4294967295,
+  CLR_DEFAULT = 4278190080,
+  CLR_INVALID = 4294967295,
+  COLOR_SCROLLBAR = 0,
+  COLOR_BACKGROUND = 1,
+  COLOR_ACTIVECAPTION = 2,
+  COLOR_INACTIVECAPTION = 3,
+  COLOR_MENU = 4,
+  COLOR_WINDOW = 5,
+  COLOR_WINDOWFRAME = 6,
+  COLOR_MENUTEXT = 7,
+  COLOR_WINDOWTEXT = 8,
+  COLOR_CAPTIONTEXT = 9,
+  COLOR_ACTIVEBORDER = 10,
+  COLOR_INACTIVEBORDER = 11,
+  COLOR_APPWORKSPACE = 12,
+  COLOR_HIGHLIGHT = 13,
+  COLOR_HIGHLIGHTTEXT = 14,
+  COLOR_BTNFACE = 15,
+  COLOR_BTNSHADOW = 16,
+  COLOR_GRAYTEXT = 17,
+  COLOR_BTNTEXT = 18,
+  COLOR_INACTIVECAPTIONTEXT = 19,
+  COLOR_BTNHIGHLIGHT = 20,
+  COLOR_3DDKSHADOW = 21,
+  COLOR_3DLIGHT = 22,
+  COLOR_INFOTEXT = 23,
+  COLOR_INFOBK = 24,
+  COLOR_HOTLIGHT = 26,
+  COLOR_GRADIENTACTIVECAPTION = 27,
+  COLOR_GRADIENTINACTIVECAPTION = 28,
+  COLOR_MENUHILIGHT = 29,
+  COLOR_MENUBAR = 30,
+  COLOR_FORM = 31,
+  COLOR_ENDCOLORS = 31,
+  COLOR_DESKTOP = 1,
+  COLOR_3DFACE = 15,
+  COLOR_3DSHADOW = 16,
+  COLOR_3DHIGHLIGHT = 20,
+  COLOR_3DHILIGHT = 20,
+  COLOR_BTNHILIGHT = 20,
+  MAX_SYS_COLORS = 31,
+  SYS_COLOR_BASE = 2147483648,
+  clBlack = 0,
+  clMaroon = 128,
+  clGreen = 32768,
+  clOlive = 32896,
+  clNavy = 8388608,
+  clPurple = 8388736,
+  clTeal = 8421376,
+  clGray = 8421504,
+  clSilver = 12632256,
+  clOrange = 33023,
+  clRed = 255,
+  clLime = 65280,
+  clYellow = 65535,
+  clBlue = 16711680,
+  clFuchsia = 16711935,
+  clAqua = 16776960,
+  clLtGray = 12632256,
+  clDkGray = 8421504,
+  clWhite = 16777215,
+  StandardColorsCount = 16,
+  clMoneyGreen = 12639424,
+  clSkyBlue = 15780518,
+  clCream = 15793151,
+  clMedGray = 10789024,
+  ExtendedColorCount = 4,
+  clNone = 536870911,
+  clDefault = 536870912,
+  clScrollBar = 2147483648,
+  clBackground = 2147483649,
+  clActiveCaption = 2147483650,
+  clInactiveCaption = 2147483651,
+  clMenu = 2147483652,
+  clWindow = 2147483653,
+  clWindowFrame = 2147483654,
+  clMenuText = 2147483655,
+  clWindowText = 2147483656,
+  clCaptionText = 2147483657,
+  clActiveBorder = 2147483658,
+  clInactiveBorder = 2147483659,
+  clAppWorkspace = 2147483660,
+  clHighlight = 2147483661,
+  clHighlightText = 2147483662,
+  clBtnFace = 2147483663,
+  clBtnShadow = 2147483664,
+  clGrayText = 2147483665,
+  clBtnText = 2147483666,
+  clInactiveCaptionText = 2147483667,
+  clBtnHighlight = 2147483668,
+  cl3DDkShadow = 2147483669,
+  cl3DLight = 2147483670,
+  clInfoText = 2147483671,
+  clInfoBk = 2147483672,
+  clHotLight = 2147483674,
+  clGradientActiveCaption = 2147483675,
+  clGradientInactiveCaption = 2147483676,
+  clMenuHighlight = 2147483677,
+  clMenuBar = 2147483678,
+  clForm = 2147483679,
+  clColorDesktop = 2147483649,
+  cl3DFace = 2147483663,
+  cl3DShadow = 2147483664,
+  cl3DHiLight = 2147483668,
+  clBtnHiLight = 2147483668,
+  clFirstSpecialColor = 2147483668,
+  clMask = 16777215,
+  clDontMask = 0,
+  pmBlack = 0,
+  pmWhite = 1,
+  pmNop = 2,
+  pmNot = 3,
+  pmCopy = 4,
+  pmNotCopy = 5,
+  pmMergePenNot = 6,
+  pmMaskPenNot = 7,
+  pmMergeNotPen = 8,
+  pmMaskNotPen = 9,
+  pmMerge = 10,
+  pmNotMerge = 11,
+  pmMask = 12,
+  pmNotMask = 13,
+  pmXor = 14,
+  pmNotXor = 15,
+  tbpsNone = 0,
+  tbpsIndeterminate = 1,
+  tbpsNormal = 2,
+  tbpsError = 3,
+  tbpsPaused = 4,
+  PAGE_READONLY = 2,
+  PAGE_READWRITE = 4,
+  PAGE_WRITECOPY = 8,
+  PAGE_EXECUTE = 16,
+  PAGE_EXECUTE_READ = 32,
+  PAGE_EXECUTE_READWRITE = 64,
+  PAGE_EXECUTE_WRITECOPY = 128,
+  DT_UNKNOWN = 0,
+  DT_FIFO = 1,
+  DT_CHR = 2,
+  DT_DIR = 4,
+  DT_BLK = 6,
+  DT_REG = 8,
+  DT_LNK = 10,
+  DT_SOCK = 12,
+  DT_WHT = 14,
+}
+for name, value in pairs(defines) do
+  if rawget(_G, name) == nil then
+    rawset(_G, name, value)
+  end
+end
+)MLUA"),
+        };
+        constexpr std::array<std::string_view, 5> kScript1 = {
+            std::string_view(R"MLUA(__ceClasses = {
+  ["addresslist"] = {
+    parent = "panel",
+    props = {["checkboxactivecolor"] = "color", ["checkboxactiveselectedcolor"] = "color", ["checkboxcolor"] = "color", ["checkboxselectedcolor"] = "color", ["count"] = "integer", ["decreasearrowcolor"] = "color", ["expandsigncolor"] = "color", ["increasearrowcolor"] = "color", ["loadedtableversion"] = "integer", ["onaddresschange"] = "function", ["onautoassembleredit"] = "function", ["ondescriptionchange"] = "function", ["ontypechange"] = "function", ["onvaluechange"] = "function", ["selcount"] = "integer", ["selectedbackgroundcolor"] = "color", ["selectedrecord"] = "memoryrecord", ["selectedsecondarybackgroundcolor"] = "color"},
+    indexed = {["memoryrecord"] = "memoryrecord"},
+    methods = {["creatememoryrecord"] = true, ["disableallwithoutexecute"] = true, ["doaddresschange"] = true, ["dodescriptionchange"] = true, ["dotypechange"] = true, ["dovaluechange"] = true, ["getcount"] = true, ["getmemoryrecord"] = true, ["getmemoryrecordbydescription"] = true, ["getmemoryrecordbyid"] = true, ["getselectedrecord"] = true, ["getselectedrecords"] = true, ["mousehighlightedrecord"] = true, ["rebuilddescriptioncache"] = true, ["setselectedrecord"] = true},
+  },
+  ["application"] = {
+    parent = "customapplication",
+    props = {["icon"] = "the", ["title"] = "the"},
+    indexed = {},
+    methods = {["bringtofront"] = true, ["minimize"] = true, ["processmessages"] = true, ["terminate"] = true},
+  },
+  ["bitmap"] = {
+    parent = "custombitmap",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["brush"] = {
+    parent = "custombrush",
+    props = {["color"] = "integer"},
+    indexed = {},
+    methods = {["getcolor"] = true, ["setcolor"] = true},
+  },
+  ["button"] = {
+    parent = "buttoncontrol",
+    props = {["modalresult"] = "modalresult"},
+    indexed = {},
+    methods = {["getmodalresult"] = true, ["setmodalresult"] = true},
+  },
+  ["buttoncontrol"] = {
+    parent = "wincontrol",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["calendar"] = {
+    parent = "wincontrol",
+    props = {["date"] = "string", ["datetime"] = "number"},
+    indexed = {},
+    methods = {},
+  },
+  ["canvas"] = {
+    parent = "customcanvas",
+    props = {["brush"] = "brush", ["font"] = "font", ["fsborder"] = "fill", ["fssurface"] = "fill", ["handle"] = "integer", ["height"] = "integer", ["pen"] = "pen", ["width"] = "integer"},
+    indexed = {},
+    methods = {["clear"] = true, ["copyrect"] = true, ["draw"] = true, ["drawfocusrect"] = true, ["ellipse"] = true, ["fillrect"] = true, ["floodfill"] = true, ["getbrush"] = true, ["getcliprect"] = true, ["getfont"] = true, ["getheight"] = true, ["getpen"] = true, ["getpenposition"] = true, ["getpixel"] = true, ["gettextheight"] = true, ["gettextwidth"] = true, ["getwidth"] = true, ["gradientfill"] = true, ["line"] = true, ["lineto"] = true, ["moveto"] = true, ["rect"] = true, ["roundrect"] = true, ["setpenposition"] = true, ["setpixel"] = true, ["stretchdraw"] = true, ["textout"] = true, ["textrect"] = true},
+  },
+  ["cecustombutton"] = {
+    parent = "customcontrol",
+    props = {["bordercolor"] = "color", ["bordersize"] = "integer", ["buttonanimationspeed"] = "integer", ["buttoncolor"] = "color", ["buttondowncolor"] = "color", ["buttonhighlightedcolor"] = "color", ["customdrawn"] = "boolean", ["drawborder"] = "boolean", ["drawfocusrect"] = "boolean", ["focusedsize"] = "integer", ["focuselipsecolor"] = "color", ["framespersecond"] = "integer", ["growfont"] = "boolean", ["roundingx"] = "integer", ["roundingy"] = "integer", ["showprefix"] = "boolean"},
+    indexed = {},
+    methods = {["startanimatortimer"] = true, ["stopanimatortimer"] = true},
+  },
+  ["ceform"] = {
+    parent = "form",
+    props = {["donotsaveintable"] = "boolean"},
+    indexed = {},
+    methods = {["getdonotsaveintable"] = true, ["savecurrentstateasdesign"] = true, ["savetofile"] = true, ["savetostream"] = true, ["setdonotsaveintable"] = true},
+  },
+  ["cheatcomponent"] = {
+    parent = "wincontrol",
+    props = {["activated"] = "boolean", ["activationcolor"] = "integer", ["color"] = "integer", ["description"] = "string", ["descriptionleft"] = "integer", ["editleft"] = "integer", ["editvalue"] = "string", ["editwidth"] = "integer", ["font"] = "font", ["hascheckbox"] = "boolean", ["haseditbox"] = "boolean", ["hotkey"] = "string", ["hotkeyleft"] = "integer", ["showhotkey"] = "boolean", ["textcolor"] = "integer"},
+    indexed = {},
+    methods = {},
+  },
+  ["checkbox"] = {
+    parent = "buttoncontrol",
+    props = {["allowgrayed"] = "boolean", ["checked"] = "boolean", ["onchange"] = "function", ["state"] = "checkboxstate"},
+    indexed = {},
+    methods = {["getallowgrayed"] = true, ["getstate"] = true, ["onchange"] = true, ["setallowgrayed"] = true, ["setstate"] = true},
+  },
+  ["collection"] = {
+    parent = "object",
+    props = {["count"] = "integer"},
+    indexed = {["items"] = "collectionitem"},
+    methods = {["clear"] = true, ["delete"] = true, ["getcount"] = true},
+  },
+  ["collectionitem"] = {
+    parent = "object",
+    props = {["displayname"] = "string", ["id"] = "integer", ["index"] = "integer"},
+    indexed = {},
+    methods = {["getdisplayname"] = true, ["getid"] = true, ["getindex"] = true, ["setdisplayname"] = true, ["setindex"] = true},
+  },
+  ["combobox"] = {
+    parent = "wincontrol",
+    props = {["canvas"] = "canvas", ["itemindex"] = "integer", ["items"] = "strings"},
+    indexed = {},
+    methods = {["clear"] = true, ["getcanvas"] = true, ["getextrawidth"] = true, ["getitemindex"] = true, ["getitems"] = true, ["setitemindex"] = true, ["setitems"] = true},
+  },
+  ["commondialog"] = {
+    parent = "component",
+    props = {["onclose"] = "function", ["onshow"] = "function", ["title"] = "string"},
+    indexed = {},
+    methods = {["execute"] = true},
+  },
+  ["component"] = {
+    parent = "object",
+    props = {["componentcount"] = "integer", ["name"] = "string", ["owner"] = "component", ["tag"] = "integer"},
+    indexed = {["component"] = "component", ["componentbyname"] = "component"},
+    methods = {["findcomponentbyname"] = true, ["getcomponent"] = true, ["getcomponentcount"] = true, ["getname"] = true, ["getowner"] = true, ["gettag"] = true, ["setname"] = true, ["settag"] = true},
+  },
+  ["control"] = {
+    parent = "component",
+    props = {["align"] = "alignmentoption", ["caption"] = "string", ["clientheight"] = "integer", ["clientwidth"] = "integer", ["color"] = "colordefinition", ["enabled"] = "boolean", ["font"] = "font", ["height"] = "integer", ["left"] = "integer", ["onchangebounds"] = "function", ["onclick"] = "function", ["parent"] = "wincontrol", ["popupmenu"] = "popupmenu", ["rgbcolor"] = "rgbinteger", ["top"] = "integer", ["visible"] = "boolean", ["width"] = "integer"},
+    indexed = {},
+    methods = {["bringtofront"] = true, ["clienttoscreen"] = true, ["doclick"] = true, ["getalign"] = true, ["getcaption"] = true, ["getcolor"] = true, ["getenabled"] = true, ["getfont"] = true, ["getheight"] = true, ["getleft"] = true, ["getonclick"] = true, ["getparent"] = true, ["getpopupmenu"] = true, ["getposition"] = true, ["getsize"] = true, ["gettop"] = true, ["getvisible"] = true, ["getwidth"] = true, ["refresh"] = true, ["repaint"] = true, ["screentoclient"] = true, ["sendtoback"] = true, ["setalign"] = true, ["setcaption"] = true, ["setcolor"] = true, ["setenabled"] = true, ["setfont"] = true, ["setheight"] = true, ["setleft"] = true, ["setonclick"] = true, ["setparent"] = true, ["setpopupmenu"] = true, ["setposition"] = true, ["setsize"] = true, ["settop"] = true, ["setvisible"] = true, ["setwidth"] = true, ["update"] = true},
+  },
+  ["controlscrollbar"] = {
+    parent = "object",
+    props = {["increment"] = "word", ["page"] = "word", ["position"] = "integer", ["range"] = "integer", ["smooth"] = "boolean", ["tracking"] = "boolean", ["visible"] = "boolean"},
+    indexed = {},
+    methods = {},
+  },
+  ["criticalsection"] = {
+    parent = "object",
+    props = {},
+    indexed = {},
+    methods = {["enter"] = true, ["leave"] = true, ["tryenter"] = true},
+  },
+  ["custombufdataset"] = {
+    parent = "dbdataset",
+    props = {["changecount"] = "integer", ["filename"] = "string", ["indexname"] = "string", ["maxindexescount"] = "integer", ["packetrecords"] = "integer", ["readonly"] = "boolean", ["unidirectional"] = "boolean"},
+    indexed = {},
+    methods = {["applyupdates"] = true, ["cancelupdates"] = true, ["createdataset"] = true, ["loadfromfile"] = true, ["loadfromstream"] = true, ["savetofile"] = true, ["savetostream"] = true},
+  },
+  ["customconnection"] = {
+    parent = "component",
+    props = {["afterconnect"] = "function", ["afterdisconnect"] = "function", ["beforeconnect"] = "function", ["beforedisconnect"] = "function", ["connected"] = "boolean", ["loginprompt"] = "boolean"},
+    indexed = {},
+    methods = {["close"] = true, ["open"] = true},
+  },
+  ["customcontrol"] = {
+    parent = "wincontrol",
+    props = {["canvas"] = "the", ["onpaint"] = "an"},
+    indexed = {},
+    methods = {["getcanvas"] = true},
+  },
+  ["customsqlquery"] = {
+    parent = "custombufdataset",
+    props = {["prepared"] = "boolean", ["sqlconnection"] = "sqlconnection", ["sqltransaction"] = "sqltransaction"},
+    indexed = {},
+    methods = {["execsql"] = true, ["parambyname"] = true, ["prepare"] = true, ["rowsaffected"] = true, ["unprepare"] = true},
+  },
+  ["customtype"] = {
+    parent = "object",
+    props = {["customtypetype"] = "tcustomtypetype", ["functiontypename"] = "string", ["name"] = "string", ["script"] = "string", ["scriptusesfloat"] = "boolean"},
+    indexed = {},
+    methods = {["bytetabletovalue"] = true, ["getcustomtype"] = true, ["registercustomtypeautoassembler"] = true, ["registercustomtypelua"] = true, ["valuetobytetable"] = true},
+  },
+  ["d3dhook_fontmap"] = {
+    parent = "d3dhook_texture",
+    props = {},
+    indexed = {},
+    methods = {["changefont"] = true, ["gettextwidth"] = true},
+  },
+  ["d3dhook_renderobject"] = {
+    parent = "object",
+    props = {["alphablend"] = "float", ["centerx"] = "float", ["centery"] = "float", ["rotation"] = "float", ["visible"] = "boolean", ["x"] = "float", ["y"] = "float", ["zorder"] = "integer"},
+    indexed = {},
+    methods = {},
+  },
+  ["d3dhook_sprite"] = {
+    parent = "d3dhook_renderobject",
+    props = {["height"] = "integer", ["texture"] = "d3dhook_texture", ["width"] = "integer"},
+    indexed = {},
+    methods = {},
+  },
+  ["d3dhook_textcontainer"] = {
+    parent = "d3dhook_renderobject",
+    props = {["fontmap"] = "the", ["text"] = "the"},
+    indexed = {},
+    methods = {},
+  },
+  ["d3dhook_texture"] = {
+    parent = "object",
+    props = {["height"] = "integer", ["width"] = "integer"},
+    indexed = {},
+    methods = {["loadtexturebypicture"] = true},
+  },
+  ["database"] = {
+    parent = "customconnection",
+    props = {["connected"] = "boolean", ["databasename"] = "string", ["keepconnection"] = "boolean", ["params"] = "strings", ["transactioncount"] = "integer"},
+    indexed = {},
+    methods = {},
+  },
+  ["dataset"] = {
+    parent = "component",
+    props = {["active"] = "boolean", ["autocalcfields"] = "boolean", ["blockreadsize"] = "integer", ["bof"] = "boolean;", ["canmodify"] = "boolean", ["defaultfields"] = "boolean", ["eof"] = "boolean;", ["fieldcount"] = "integer;", ["fields"] = "fields", ["filter"] = "string", ["filtered"] = "boolean", ["filteroptions"] = "set", ["found"] = "boolean", ["isunidirectional"] = "boolean", ["modified"] = "boolean", ["recno"] = "integer", ["recordcount"] = "integer"},
+    indexed = {["fieldvalues"] = "something"},
+)MLUA"),
+            std::string_view(R"MLUA(    methods = {["append"] = true, ["appendrecord"] = true, ["cancel"] = true, ["checkbrowsemode"] = true, ["clearfields"] = true, ["close"] = true, ["controlsdisabled"] = true, ["fieldbyname"] = true, ["findfield"] = true, ["findfirst"] = true, ["findlast"] = true, ["findnext"] = true, ["findprior"] = true, ["first"] = true, ["insert"] = true, ["isempty"] = true, ["last"] = true, ["locate"] = true, ["lookup"] = true, ["moveby"] = true, ["next"] = true, ["open"] = true, ["post"] = true, ["prior"] = true, ["refresh"] = true, ["updatecursorpos"] = true, ["updaterecord"] = true},
+  },
+  ["dbdataset"] = {
+    parent = "dataset",
+    props = {["database"] = "database", ["transaction"] = "dbtransaction"},
+    indexed = {},
+    methods = {},
+  },
+  ["dbtransaction"] = {
+    parent = "component",
+    props = {["active"] = "boolean", ["database"] = "database"},
+    indexed = {},
+    methods = {["closedatasets"] = true},
+  },
+  ["diagram"] = {
+    parent = "customcontrol",
+    props = {["allowusertochangeattachpoints"] = "boolean", ["allowusertocreateplotpoints"] = "boolean", ["allowusertomoveblocks"] = "boolean", ["allowusertomoveplotpoints"] = "boolean", ["allowusertoresizeblocks"] = "boolean", ["arrowstyles"] = "string", ["ascenter"] = "there", ["ascenterbetweenpoints"] = "there", ["asdestination"] = "there", ["asorigin"] = "there", ["aspoints"] = "there", ["autoside"] = "boolean", ["autosidedistance"] = "integer", ["autosize"] = "boolean", ["backgroundcolor"] = "integer", ["block"] = "diagramblock", ["blockbackground"] = "integer", ["blockcount"] = "integer", ["caption"] = "string", ["destinationblock"] = "dialogblock", ["destinationdescriptor"] = "blocksidedescriptortable", ["dragbody"] = "boolean", ["drawplotpoints"] = "boolean", ["height"] = "integer", ["linecolor"] = "integer", ["linethickness"] = "integer", ["linkcount"] = "integer", ["name"] = "string", ["ondblclick"] = "function", ["ondoubleclickbody"] = "function", ["ondoubleclickheader"] = "function", ["ondrag"] = "function", ["ondragend"] = "function", ["ondragstart"] = "funtion", ["onrenderbody"] = "function", ["onrenderheader"] = "function", ["originblock"] = "dialogblock", ["origindescriptor"] = "blocksidedescriptortable", ["owner"] = "diagram", ["plotpointcolor"] = "integer", ["pointcount"] = "integer", ["position"] = "integer", ["scrollx"] = "integer", ["scrolly"] = "integer", ["showheader"] = "boolean", ["side"] = "integer", ["strings"] = "strings", ["tag"] = "integer", ["textcolor"] = "integer", ["width"] = "integer", ["x"] = "integer", ["y"] = "integer", ["zoom"] = "float"},
+    indexed = {["block"] = "diagramblock", ["link"] = "diagramlink", ["points"] = "table{x"},
+    methods = {["addconnection"] = true, ["addpoint"] = true, ["createblock"] = true, ["executestub"] = true, ["getlinks"] = true, ["getobjectat"] = true, ["getpointindexat"] = true, ["haslinktoblock"] = true, ["intersectswithline"] = true, ["loadfromfile"] = true, ["loadfromstream"] = true, ["overlapswith"] = true, ["removeallpoints"] = true, ["reset"] = true, ["saveasimage"] = true, ["savetofile"] = true, ["savetostream"] = true, ["updateside"] = true},
+  },
+  ["disassembler"] = {
+    parent = "object",
+    props = {["address"] = "integer", ["bytes"] = "table", ["commentsoverride"] = "string", ["description"] = "string", ["iscall"] = "boolean", ["isconditionaljump"] = "boolean", ["isjump"] = "boolean", ["isrep"] = "boolean", ["isret"] = "boolean", ["lastdisassembledata"] = "table", ["modrmvalue"] = "integer", ["modrmvaluetype"] = "disassemblervaluetype", ["ondisassembleoverride"] = "function", ["onpostdisassemble"] = "function", ["opcode"] = "string", ["parameters"] = "string", ["parametervalue"] = "integer", ["parametervaluetype"] = "disassemblervaluetype", ["syntaxhighlighting"] = "boolean"},
+    indexed = {},
+    methods = {["decodelastparameterstostring"] = true, ["disassemble"] = true, ["getlastdisassembledata"] = true},
+  },
+  ["disassemblerview"] = {
+    parent = "panel",
+    props = {["hidefocusrect"] = "boolean", ["onextralinerender"] = "function", ["onselectionchange"] = "function", ["osb"] = "bitmap", ["selectedaddress"] = "integer", ["selectedaddress2"] = "integer", ["showjumplines"] = "boolean", ["spaceabovelines"] = "integer", ["spacebelowlines"] = "integer", ["topaddress"] = "integer"},
+    indexed = {},
+    methods = {},
+  },
+  ["disassemblerviewline"] = {
+    parent = "object",
+    props = {["address"] = "the", ["ondisassemblerviewoverride"] = "called", ["owner"] = "the"},
+    indexed = {},
+    methods = {["funtion"] = true},
+  },
+  ["dissectcode"] = {
+    parent = "object",
+    props = {},
+    indexed = {},
+    methods = {["addreference"] = true, ["clear"] = true, ["deletereference"] = true, ["dissect"] = true, ["getreferencedfunctions"] = true, ["getreferencedstrings"] = true, ["getreferences"] = true, ["loadfromfile"] = true, ["savetofile"] = true},
+  },
+  ["domdocument"] = {
+    parent = "domnode_toplevel",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["domnode"] = {
+    parent = nil,
+    props = {},
+    indexed = {},
+    methods = {["writetofile"] = true, ["writetostream"] = true},
+  },
+  ["edit"] = {
+    parent = "wincontrol",
+    props = {["caretpos"] = "point", ["onchange"] = "function", ["onkeydown"] = "function", ["onkeypress"] = "function", ["onkeyup"] = "function", ["passwordchar"] = "string[1]", ["sellength"] = "number", ["selstart"] = "number", ["seltext"] = "string", ["text"] = "string"},
+    indexed = {},
+    methods = {["clear"] = true, ["clearselection"] = true, ["copytoclipboard"] = true, ["cuttoclipboard"] = true, ["getonchange"] = true, ["getonkeydown"] = true, ["getonkeypress"] = true, ["getonkeyup"] = true, ["getsellength"] = true, ["getselstart"] = true, ["getseltext"] = true, ["pastefromclipboard"] = true, ["select"] = true, ["selectall"] = true, ["selecttext"] = true, ["setonchange"] = true, ["setonkeydown"] = true, ["setonkeypress"] = true, ["setonkeyup"] = true},
+  },
+  ["event"] = {
+    parent = "object",
+    props = {},
+    indexed = {},
+    methods = {["resetevent"] = true, ["setevent"] = true, ["waitfor"] = true},
+  },
+  ["field"] = {
+    parent = "component",
+    props = {["datatype"] = "string", ["fieldname"] = "string", ["index"] = "integer", ["isnull"] = "boolean", ["value"] = "something"},
+    indexed = {},
+    methods = {},
+  },
+  ["fields"] = {
+    parent = "inheritence: object",
+    props = {["count"] = "integer"},
+    indexed = {["fields"] = "field"},
+    methods = {["add"] = true, ["clear"] = true, ["fieldbyname"] = true, ["fieldbynumber"] = true, ["indexof"] = true},
+  },
+  ["filedialog"] = {
+    parent = "commondialog",
+    props = {["defaultext"] = "string", ["filename"] = "string", ["files"] = "strings", ["filter"] = "string", ["filterindex"] = "integer", ["initialdir"] = "string"},
+    indexed = {},
+    methods = {},
+  },
+  ["filestream"] = {
+    parent = "handlestream",
+    props = {},
+    indexed = {},
+    methods = {["fmsharecompat"] = true},
+  },
+  ["finddialog"] = {
+    parent = "commondialog",
+    props = {["findtext"] = "string", ["onfind"] = "function", ["onhelp"] = "function", ["options"] = "enum"},
+    indexed = {},
+    methods = {},
+  },
+  ["font"] = {
+    parent = "customfont",
+    props = {["charset"] = "integer", ["color"] = "integer", ["height"] = "integer", ["name"] = "string", ["orientation"] = "integer", ["pitch"] = "string", ["quality"] = "string", ["size"] = "integer", ["style"] = "string"},
+    indexed = {},
+    methods = {["assign"] = true, ["getcolor"] = true, ["getname"] = true, ["getsize"] = true, ["setcolor"] = true, ["setname"] = true, ["setsize"] = true},
+  },
+  ["form"] = {
+    parent = "scrollingwincontrol",
+    props = {["allowdropfiles"] = "boolean", ["designtimeppi"] = "integer", ["formstate"] = "formstate", ["menu"] = "mainmenu", ["modalresult"] = "integer", ["onclose"] = "function", ["ondropfiles"] = "function"},
+    indexed = {},
+    methods = {["bringtofront"] = true, ["centerscreen"] = true, ["close"] = true, ["dragnow"] = true, ["fixdpi"] = true, ["getborderstyle"] = true, ["getmenu"] = true, ["getonclose"] = true, ["hide"] = true, ["isforegroundwindow"] = true, ["loadformposition"] = true, ["printtorasterimage"] = true, ["registerclosecallback"] = true, ["registercreatecallback"] = true, ["registerfirstshowcallback"] = true, ["saveformposition"] = true, ["setborderstyle"] = true, ["setmenu"] = true, ["setonclose"] = true, ["show"] = true, ["showmodal"] = true, ["unregisterclosecallback"] = true, ["unregistercreatecallback"] = true, ["unregisterfirstshowcallback"] = true},
+  },
+  ["generichotkey"] = {
+    parent = "object",
+    props = {["delaybetweenactivate"] = "integer", ["onhotkey"] = "the"},
+    indexed = {},
+    methods = {["getkeys"] = true, ["setkeys"] = true, ["setonhotkey"] = true},
+  },
+  ["graphic"] = {
+    parent = "object",
+    props = {["height"] = "integer", ["transparent"] = "boolean", ["width"] = "integer"},
+    indexed = {},
+    methods = {["getheight"] = true, ["getwidth"] = true, ["loadfromfile"] = true, ["savetofile"] = true, ["setheight"] = true, ["setwidth"] = true},
+  },
+  ["graphiccontrol"] = {
+    parent = "control",
+    props = {["canvas"] = "canvas"},
+    indexed = {},
+    methods = {["getcanvas"] = true},
+  },
+  ["groupbox"] = {
+    parent = "wincontrol",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["headersection"] = {
+    parent = "collectionitem",
+    props = {["alignment"] = "string", ["imageindex"] = "imageindex", ["maxwidth"] = "integer", ["minwidth"] = "integer", ["originalindex"] = "integer", ["text"] = "string", ["visible"] = "boolean", ["width"] = "integer"},
+    indexed = {},
+    methods = {},
+  },
+  ["headersections"] = {
+    parent = "collection",
+    props = {},
+    indexed = {},
+    methods = {["add"] = true, ["delete"] = true, ["insert"] = true},
+  },
+  ["hexadecimal"] = {
+    parent = "panel",
+    props = {["address"] = "integer", ["displaytype"] = "displaytype", ["hasselection"] = "boolean", ["oncharacterrender"] = "function", ["onvaluerender"] = "function", ["selectionstart"] = "integer", ["selectionstop"] = "integer"},
+    indexed = {},
+    methods = {["onaddresschange"] = true, ["onbyteselect"] = true},
+  },
+  ["icon"] = {
+    parent = "inheritence: custombitmap",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["image"] = {
+    parent = "graphiccontrol",
+    props = {["canvas"] = "canvas", ["picture"] = "picture", ["stretch"] = "boolean", ["transparent"] = "boolean"},
+    indexed = {},
+    methods = {["getcanvas"] = true, ["getpicture"] = true, ["getstretch"] = true, ["gettransparent"] = true, ["loadimagefromfile"] = true, ["setpicture"] = true, ["setstretch"] = true, ["settransparent"] = true},
+  },
+  ["imagelist"] = {
+    parent = nil,
+    props = {["count"] = "integer", ["drawingstyle"] = "'dsfocus'", ["height"] = "integer", ["masked"] = "boolean", ["onchange"] = "function", ["scaled"] = "boolean", ["width"] = "integer"},
+    indexed = {},
+    methods = {["add"] = true, ["draw"] = true, ["getbitmap"] = true},
+  },
+  ["internet"] = {
+    parent = "object",
+    props = {["header"] = "string"},
+    indexed = {},
+    methods = {["getinternet"] = true, ["geturl"] = true, ["posturl"] = true},
+  },
+  ["jpegimage"] = {
+    parent = "inheritence: custombitmap",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["label"] = {
+    parent = "graphiccontrol",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["listbox"] = {
+    parent = "wincontrol",
+    props = {["canvas"] = "canvas", ["itemindex"] = "integer", ["items"] = "strings", ["multiselect"] = "boolean"},
+    indexed = {["selected"] = "unknown"},
+    methods = {["clear"] = true, ["clearselection"] = true, ["getcanvas"] = true, ["getitemindex"] = true, ["getitems"] = true, ["selectall"] = true, ["setitemindex"] = true, ["setitems"] = true},
+  },
+  ["listcolumn"] = {
+    parent = "collectionitem",
+)MLUA"),
+            std::string_view(R"MLUA(    props = {["autosize"] = "boolean", ["caption"] = "string", ["maxwidth"] = "integer", ["minwidth"] = "integer", ["visible"] = "boolean", ["width"] = "integer"},
+    indexed = {},
+    methods = {["getautosize"] = true, ["getcaption"] = true, ["getmaxwidth"] = true, ["getminwidth"] = true, ["getwidth"] = true, ["setautosize"] = true, ["setcaption"] = true, ["setmaxwidth"] = true, ["setminwidth"] = true, ["setwidth"] = true},
+  },
+  ["listcolumns"] = {
+    parent = "collection",
+    props = {},
+    indexed = {["columns"] = "array"},
+    methods = {["add"] = true, ["getcolumn"] = true, ["setcolumn"] = true},
+  },
+  ["listitem"] = {
+    parent = "tobject",
+    props = {["caption"] = "boolean", ["checked"] = "boolean", ["data"] = "integer", ["imageindex"] = "integer", ["index"] = "integer", ["owner"] = "listitems", ["selected"] = "boolean", ["stateindex"] = "integer", ["subitems"] = "strings"},
+    indexed = {},
+    methods = {["delete"] = true, ["displayrect"] = true, ["displayrectsubitem"] = true, ["getcaption"] = true, ["getchecked"] = true, ["getsubitems"] = true, ["makevisible"] = true, ["setcaption"] = true, ["setchecked"] = true},
+  },
+  ["listitems"] = {
+    parent = "tobject",
+    props = {["count"] = "integer"},
+    indexed = {["item"] = "listitem[]"},
+    methods = {["add"] = true, ["clear"] = true, ["getcount"] = true, ["getitem"] = true},
+  },
+  ["listview"] = {
+    parent = "wincontrol",
+    props = {["autowidthlastcolumn"] = "boolean", ["canvas"] = "canvas", ["columns"] = "listcolumns", ["hideselection"] = "boolean", ["itemindex"] = "integer", ["items"] = "listitems", ["largeimages"] = "imagelist", ["oncustomdraw"] = "function", ["oncustomdrawitem"] = "function", ["oncustomdrawsubitem"] = "function", ["ondata"] = "function", ["ownerdata"] = "boolean", ["rowselect"] = "boolean", ["selected"] = "listitem", ["smallimages"] = "imagelist", ["stateimages"] = "imagelist", ["topitem"] = "listitem", ["visiblerowcount"] = "integer"},
+    indexed = {},
+    methods = {["beginupdate"] = true, ["clear"] = true, ["endupdate"] = true, ["getcanvas"] = true, ["getcolumns"] = true, ["getitemat"] = true, ["getitemindex"] = true, ["getitems"] = true, ["setitemindex"] = true},
+  },
+  ["luapipe"] = {
+    parent = "object",
+    props = {["connected"] = "boolean:"},
+    indexed = {},
+    methods = {["lock"] = true, ["readbyte"] = true, ["readbytes"] = true, ["readdouble"] = true, ["readdword"] = true, ["readfloat"] = true, ["readqword"] = true, ["readstring"] = true, ["readwidestring"] = true, ["readword"] = true, ["unlock"] = true, ["writebyte"] = true, ["writebytes"] = true, ["writedouble"] = true, ["writedword"] = true, ["writefloat"] = true, ["writeqword"] = true, ["writestring"] = true, ["writewidestring"] = true, ["writeword"] = true},
+  },
+  ["luapipeclient"] = {
+    parent = "luapipe",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["luapipeserver"] = {
+    parent = "luapipe",
+    props = {["address"] = "integer", ["handle"] = "integer", ["modulename"] = "string", ["name"] = "string", ["parameters"] = "string", ["path"] = "string", ["pid"] = "integer", ["returntype"] = "string", ["searchkey"] = "string", ["symbolsize"] = "integer", ["valid"] = "boolean"},
+    indexed = {["value"] = "a"},
+    methods = {["acceptconnection"] = true, ["addmodule"] = true, ["addsymbol"] = true, ["clear"] = true, ["createsymbollist"] = true, ["deletemodule"] = true, ["deletesymbol"] = true, ["enumregisteredsymbollists"] = true, ["function"] = true, ["getbinaryvalue"] = true, ["getmainsymbollist"] = true, ["getmodulelist"] = true, ["getsettings"] = true, ["getsymbolfromaddress"] = true, ["getsymbolfromstring"] = true, ["getsymbollist"] = true, ["register"] = true, ["reloadsettingsfromregistry"] = true, ["setbinaryvalue"] = true, ["unregister"] = true},
+  },
+  ["mainmenu"] = {
+    parent = "menu",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["memo"] = {
+    parent = "edit",
+    props = {["canpaste"] = "boolean", ["canredo"] = "boolean", ["canundo"] = "boolean", ["charwidth"] = "integer", ["gutter"] = "gutter", ["lineheight"] = "integer", ["lines"] = "strings", ["readonly"] = "boolean", ["scrollbars"] = "scrollstyle", ["selend"] = "integer", ["selstart"] = "integer", ["seltext"] = "string", ["ssautoboth"] = "\"", ["ssautohorizontal"] = "same", ["ssautovertical"] = "\"", ["ssboth"] = "has", ["sshorizontal"] = "has", ["ssnone"] = "no", ["ssvertical"] = "has", ["wantreturns"] = "boolean", ["wanttabs"] = "boolean", ["wordwrap"] = "boolean"},
+    indexed = {},
+    methods = {["append"] = true, ["clearselection"] = true, ["clearundo"] = true, ["copytoclipboard"] = true, ["cuttoclipboard"] = true, ["getlines"] = true, ["getscrollbars"] = true, ["getwantreturns"] = true, ["getwanttabs"] = true, ["getwordwrap"] = true, ["marktextassaved"] = true, ["pastefromclipboard"] = true, ["redo"] = true, ["selectall"] = true, ["setscrollbars"] = true, ["setwantreturns"] = true, ["setwanttabs"] = true, ["setwordwrap"] = true, ["undo"] = true},
+  },
+  ["memoryrecordhotkey"] = {
+    parent = "object",
+    props = {["action"] = "integer", ["activatesound"] = "string", ["active"] = "boolean", ["address"] = "string", ["addressstring"] = "string", ["allowdecrease"] = "boolean", ["allowincrease"] = "boolean", ["async"] = "boolean", ["asyncprocessing"] = "boolean", ["asyncprocessingtime"] = "qword", ["collapsed"] = "boolean", ["color"] = "integer", ["count"] = "number", ["currentaddress"] = "integer", ["customtypename"] = "string", ["deactivatesound"] = "string", ["description"] = "string", ["displayasdropdownlistitem"] = "boolean", ["dohotkey"] = "executes", ["dontsave"] = "boolean", ["dropdowncount"] = "integer", ["dropdowndescriptiononly"] = "boolean", ["dropdownlinked"] = "boolean", ["dropdownlinkedmemrec"] = "string", ["dropdownlist"] = "stringlist", ["dropdownreadonly"] = "boolean", ["hasmouseover"] = "boolean", ["hotkeycount"] = "integer", ["hotkeystring"] = "string", ["id"] = "integer", ["index"] = "integer", ["isaddressgroupheader"] = "boolean", ["isgroupheader"] = "boolean", ["isreadable"] = "boolean", ["keys"] = "table", ["numericalvalue"] = "number", ["offsetcount"] = "integer", ["onactivate"] = "function", ["ondeactivate"] = "function", ["ondestroy"] = "function", ["ongetdisplayvalue"] = "function", ["onhotkey"] = "function", ["onposthotkey"] = "function", ["onvaluechanged"] = "function", ["onvaluechangedbyuser"] = "function", ["options"] = "string", ["owner"] = "memoryrecord", ["parent"] = "memoryrecord", ["script"] = "string", ["selected"] = "boolean", ["showashex"] = "boolean", ["showassigned"] = "boolean", ["type"] = "valuetype", ["value"] = "string", ["vartype"] = "valuetype"},
+    indexed = {["child"] = "array", ["dropdowndescription"] = "array", ["dropdownvalue"] = "array", ["hotkey"] = "array", ["offset"] = "integer", ["offsettext"] = "string"},
+    methods = {["appendtoentry"] = true, ["beginedit"] = true, ["createhotkey"] = true, ["disablewithoutexecute"] = true, ["endedit"] = true, ["getaddress"] = true, ["getcurrentaddress"] = true, ["getdescription"] = true, ["gethotkey"] = true, ["gethotkeybyid"] = true, ["getoffset"] = true, ["getoffsetcount"] = true, ["mrhactivate"] = true, ["mrhdeactivate"] = true, ["mrhdecreasevalue"] = true, ["mrhincreasevalue"] = true, ["mrhsetvalue"] = true, ["mrhtoggleactivation"] = true, ["mrhtoggleactivationallowdecrease"] = true, ["mrhtoggleactivationallowincrease"] = true, ["reinterpret"] = true, ["setaddress"] = true, ["setdescription"] = true, ["setoffset"] = true, ["setoffsetcount"] = true},
+  },
+  ["memorystream"] = {
+    parent = "stream",
+    props = {["memory"] = "integer"},
+    indexed = {},
+    methods = {["loadfromfile"] = true, ["loadfromfilenoerror"] = true, ["savetofile"] = true, ["savetofilenoerror"] = true},
+  },
+  ["memoryview"] = {
+    parent = "form",
+    props = {["disassemblerview"] = "the", ["hexadecimalview"] = "the"},
+    indexed = {},
+    methods = {},
+  },
+  ["memscan"] = {
+    parent = "object",
+    props = {["alignmentparam"] = "string", ["alignmenttype"] = "scan", ["binarystringasdecimal"] = "boolean", ["casesensitive"] = "boolean", ["codepage"] = "boolean;", ["comparetosavedscan"] = "boolean", ["count"] = "integer", ["customtype"] = "tcustomtype", ["fastscanmethod"] = "tfastscanmethod", ["fastscanparameter"] = "string", ["foundlist"] = "foundlist", ["fsmaligned"] = "the", ["fsmlastdigits"] = "the", ["fsmnotaligned"] = "no", ["hexadecimal"] = "boolean", ["input1"] = "if", ["input2"] = "if", ["iscasesensitive"] = "when", ["ishexadecimalinput"] = "when", ["isnotabinarystring"] = "when", ["ispercentage"] = "when", ["isunicodescan"] = "when", ["isunique"] = "boolean", ["lastscantype"] = "scantype", ["lastscanvalue"] = "string", ["lastscanwasregionscan"] = "boolean", ["memscan"] = "the", ["onguiupdate"] = "function", ["onlyoneresult"] = "boolean", ["onscandone"] = "function", ["percentage"] = "boolean", ["protectionflags"] = "see", ["result"] = "integer", ["roundingtype"] = "troundingtype", ["rtextremerounded"] = "rounded", ["rtrounded"] = "normal", ["rttruncated"] = "truncated", ["savedresultname"] = "string", ["savedscanname"] = "string", ["scancopyonwrite"] = "tscanregionpreference", ["scanexecutable"] = "tscanregionpreference", ["scanoption"] = "tscanoption", ["scanresultfolder"] = "string", ["scanvalue"] = "string", ["scanvalue1"] = "string", ["scanvalue2"] = "string", ["scanwritable"] = "tscanregionpreference", ["sobiggerthan"] = "bigger", ["sochanged"] = "changed", ["sodecreasedvalue"] = "decreased", ["sodecreasedvalueby"] = "decreased", ["soexactvalue"] = "exact", ["soincreasedvalue"] = "increased", ["soincreasedvalueby"] = "increased", ["sosmallerthan"] = "smaller", ["sounchanged"] = "unchanged", ["sounknownvalue"] = "unknown", ["sovaluebetween"] = "value", ["startaddress"] = "integer", ["stopaddress"] = "integer", ["utf16"] = "boolean", ["variabletype"] = "tvariabletype", ["vartype"] = "tvariabletype"},
+    indexed = {["address"] = "string", ["value"] = "string"},
+    methods = {["deinitialize"] = true, ["firstscan"] = true, ["getaddress"] = true, ["getattachedfoundlist"] = true, ["getcount"] = true, ["getonlyresult"] = true, ["getprogress"] = true, ["getsavedresulthandler"] = true, ["getsavedresultlist"] = true, ["getstringfromaddress"] = true, ["getvalue"] = true, ["initialize"] = true, ["newscan"] = true, ["nextscan"] = true, ["savecurrentresults"] = true, ["scan"] = true, ["setonlyoneresult"] = true, ["waittilldone"] = true},
+  },
+  ["menu"] = {
+    parent = "component",
+    props = {["items"] = "menuitem"},
+    indexed = {},
+    methods = {["getitems"] = true},
+  },
+  ["menuitem"] = {
+    parent = "component",
+    props = {["caption"] = "string", ["count"] = "integer", ["fontcolor"] = "color", ["imageindex"] = "integer", ["imagelist"] = "imagelist", ["menu"] = "menu", ["menuindex"] = "integer", ["onclick"] = "function", ["parent"] = "menuitem", ["shortcut"] = "string"},
+    indexed = {["item"] = "array"},
+    methods = {["add"] = true, ["clear"] = true, ["delete"] = true, ["doclick"] = true, ["getcaption"] = true, ["getcount"] = true, ["getitem"] = true, ["getonclick"] = true, ["getshortcut"] = true, ["insert"] = true, ["setcaption"] = true, ["setonclick"] = true, ["setshortcut"] = true},
+  },
+  ["multireadexclusivewritesynchronizer"] = {
+    parent = "object",
+    props = {},
+    indexed = {},
+    methods = {["beginread"] = true, ["beginwrite"] = true, ["endread"] = true, ["endwrite"] = true},
+  },
+  ["object"] = {
+    parent = nil,
+    props = {["classname"] = "string"},
+    indexed = {},
+    methods = {["destroy"] = true, ["fieldaddress"] = true, ["getclassname"] = true, ["methodaddress"] = true, ["methodname"] = true},
+  },
+  ["odbcconnection"] = {
+    parent = "sqlconnection",
+    props = {["databasename"] = "string", ["driver"] = "string", ["filedsn"] = "string"},
+    indexed = {},
+    methods = {},
+  },
+  ["opendialog"] = {
+    parent = "filedialog",
+)MLUA"),
+            std::string_view(R"MLUA(    props = {["ofallowmultiselect"] = "allow", ["ofautopreview"] = "details", ["ofdontaddtorecent"] = "do", ["ofenablesizing"] = "dialog", ["offilemustexist"] = "shows", ["offorceshowhidden"] = "show", ["ofhidereadonly"] = "hide", ["ofnochangedir"] = "do", ["ofnodereferencelinks"] = "do", ["ofnoreadonlyreturn"] = "do", ["ofoverwriteprompt"] = "if", ["ofpathmustexist"] = "shows", ["ofshowhelp"] = "show", ["ofviewdetail"] = "details", ["options"] = "string"},
+    indexed = {},
+    methods = {},
+  },
+  ["pagecontrol"] = {
+    parent = "wincontrol",
+    props = {["activepage"] = "tabsheet", ["pagecount"] = "integer", ["showtabs"] = "boolean", ["tabindex"] = "integer"},
+    indexed = {["page"] = "tabsheet"},
+    methods = {["addtab"] = true, ["createpagecontrol"] = true, ["tabrect"] = true},
+  },
+  ["paintbox"] = {
+    parent = "graphiccontrol",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["panel"] = {
+    parent = "customcontrol",
+    props = {["alignment"] = "alignment", ["bevelinner"] = "panelbevel", ["bevelouter"] = "panelbevel", ["bevelwidth"] = "integer", ["fullrepaint"] = "boolean"},
+    indexed = {},
+    methods = {["getalignment"] = true, ["getbevelinner"] = true, ["getbevelouter"] = true, ["getbevelwidth"] = true, ["getfullrepaint"] = true, ["setalignment"] = true, ["setbevelinner"] = true, ["setbevelouter"] = true, ["setbevelwidth"] = true, ["setfullrepaint"] = true},
+  },
+  ["param"] = {
+    parent = "inheritence: collectionitem",
+    props = {["datatype"] = "string", ["isnull"] = "boolean", ["name"] = "string", ["value"] = "something"},
+    indexed = {},
+    methods = {},
+  },
+  ["params"] = {
+    parent = "inheritence: collection",
+    props = {},
+    indexed = {["items"] = "param"},
+    methods = {["addparam"] = true},
+  },
+  ["pen"] = {
+    parent = "custompen",
+    props = {["color"] = "integer", ["width"] = "integer"},
+    indexed = {},
+    methods = {["getcolor"] = true, ["getwidth"] = true, ["setcolor"] = true, ["setwidth"] = true},
+  },
+  ["picture"] = {
+    parent = "object",
+    props = {},
+    indexed = {},
+    methods = {["assign"] = true, ["loadfromfile"] = true, ["loadfromstream"] = true, ["savetofile"] = true},
+  },
+  ["popupmenu"] = {
+    parent = "menu",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["portablenetworkgraphic"] = {
+    parent = "inheritence: custombitmap",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["progressbar"] = {
+    parent = "wincontrol",
+    props = {["max"] = "integer", ["min"] = "integer", ["position"] = "integer", ["step"] = "integer"},
+    indexed = {},
+    methods = {["getmax"] = true, ["getmin"] = true, ["getposition"] = true, ["setmax"] = true, ["setmin"] = true, ["setposition"] = true, ["setposition2"] = true, ["stepby"] = true, ["stepit"] = true},
+  },
+  ["radiogroup"] = {
+    parent = "groupbox",
+    props = {["columns"] = "integer", ["itemindex"] = "integer", ["items"] = "strings", ["onclick"] = "called"},
+    indexed = {},
+    methods = {["getcolumns"] = true, ["getitemindex"] = true, ["getitems"] = true, ["getonclick"] = true, ["getrows"] = true, ["setcolumns"] = true, ["setitemindex"] = true, ["setonclick"] = true},
+  },
+  ["rasterimage"] = {
+    parent = "graphic",
+    props = {["canvas"] = "canvas", ["pixelformat"] = "pixelformat", ["transparentcolor"] = "integer"},
+    indexed = {},
+    methods = {["getcanvas"] = true, ["getpixelformat"] = true, ["gettransparentcolor"] = true, ["loadfromstream"] = true, ["savetostream"] = true, ["settransparentcolor"] = true},
+  },
+  ["region"] = {
+    parent = "graphicsobject",
+    props = {},
+    indexed = {},
+    methods = {["addpolygon"] = true, ["addrectangle"] = true},
+  },
+  ["remotethread"] = {
+    parent = "-",
+    props = {["entrypoint"] = "integer", ["exports"] = "table", ["loaded"] = "boolean", ["result"] = "the"},
+    indexed = {},
+    methods = {["waitforthread"] = true},
+  },
+  ["riprelativescanner"] = {
+    parent = "object",
+    props = {["count"] = "integer"},
+    indexed = {["address"] = "integer"},
+    methods = {},
+  },
+  ["savedialog"] = {
+    parent = "opendialog",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["scrollingwincontrol"] = {
+    parent = "customcontrol",
+    props = {["horzscrollbar"] = "controlscrollbar", ["vertscrollbar"] = "controlscrollbar"},
+    indexed = {},
+    methods = {},
+  },
+  ["selectdirectorydialog"] = {
+    parent = "opendialog",
+    props = {["position"] = "integer", ["size"] = "integer"},
+    indexed = {},
+    methods = {["copyfrom"] = true, ["read"] = true, ["readansistring"] = true, ["readbyte"] = true, ["readdword"] = true, ["readqword"] = true, ["readword"] = true, ["write"] = true, ["writeansistring"] = true, ["writebyte"] = true, ["writedword"] = true, ["writeqword"] = true, ["writeword"] = true},
+  },
+  ["semaphore"] = {
+    parent = "object",
+    props = {},
+    indexed = {},
+    methods = {["acquire"] = true, ["release"] = true},
+  },
+  ["splitter"] = {
+    parent = "customcontrol",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["sqlconnection"] = {
+    parent = "database",
+    props = {["charset"] = "string", ["hostname"] = "string", ["options"] = "string", ["password"] = "string", ["transaction"] = "sqltransaction", ["username"] = "string"},
+    indexed = {},
+    methods = {["endtransaction"] = true, ["executedirect"] = true, ["gettablenames"] = true, ["starttransaction"] = true},
+  },
+  ["sqlite3connection"] = {
+    parent = "sqlconnection",
+    props = {},
+    indexed = {},
+    methods = {["createdb"] = true, ["dropdb"] = true, ["getinsertid"] = true},
+  },
+  ["sqlquery"] = {
+    parent = "customsqlquery",
+    props = {["database"] = "database", ["deletesql"] = "stringlist", ["insertsql"] = "stringlist", ["options"] = "string", ["paramcheck"] = "boolean", ["params"] = "params", ["parsesql"] = "boolean", ["readonly"] = "boolean", ["refreshsql"] = "stringlist", ["schematype"] = "string", ["sql"] = "string", ["state"] = "0", ["statementtype"] = "string", ["updatemode"] = "string", ["updatesql"] = "stringlist", ["useprimarykeyaskey"] = "boolean"},
+    indexed = {},
+    methods = {},
+  },
+  ["sqltransaction"] = {
+    parent = "inheritence: dbtransaction",
+    props = {["action"] = "string", ["options"] = "string", ["params"] = "stringlist", ["sqlconnection"] = "sqlconnection"},
+    indexed = {},
+    methods = {["commit"] = true, ["commitretaining"] = true, ["endtransaction"] = true, ["rollback"] = true, ["rollbackretaining"] = true, ["starttransaction"] = true},
+  },
+  ["stringlist"] = {
+    parent = "strings",
+    props = {["casesensitive"] = "boolean", ["duplicates"] = "duplicatestype", ["sorted"] = "boolean"},
+    indexed = {},
+    methods = {["getcasesensitive"] = true, ["getduplicates"] = true, ["getsorted"] = true, ["setcasesensitive"] = true, ["setduplicates"] = true, ["setsorted"] = true},
+  },
+  ["strings"] = {
+    parent = "object",
+    props = {["count"] = "integer", ["linebreak"] = "string", ["text"] = "string"},
+    indexed = {["data"] = "integer", ["string"] = "string"},
+    methods = {["add"] = true, ["addtext"] = true, ["beginupdate"] = true, ["clear"] = true, ["delete"] = true, ["endupdate"] = true, ["getcount"] = true, ["getdata"] = true, ["getstring"] = true, ["gettext"] = true, ["indexof"] = true, ["insert"] = true, ["loadfromfile"] = true, ["remove"] = true, ["savetofile"] = true, ["setdata"] = true, ["setstring"] = true, ["settext"] = true},
+  },
+  ["stringstream"] = {
+    parent = "stream",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["structure"] = {
+    parent = "object",
+    props = {["count"] = "integer", ["name"] = "string", ["size"] = "integer"},
+    indexed = {["element"] = "structureelement"},
+    methods = {["addelement"] = true, ["addtoglobalstructurelist"] = true, ["autoguess"] = true, ["beginupdate"] = true, ["endupdate"] = true, ["fillfromdotnetaddress"] = true, ["getelement"] = true, ["getelementbyoffset"] = true, ["getname"] = true, ["removefromglobalstructurelist"] = true, ["setname"] = true},
+  },
+  ["structureelement"] = {
+    parent = "object",
+    props = {["attachwindow"] = "type=form", ["bytesize"] = "integer", ["childstruct"] = "structure", ["childstructstart"] = "integer", ["disabledzbuffer"] = "boolean", ["displaymethod"] = "string", ["extraparameters"] = "type=string", ["hasclosebutton"] = "type=boolean", ["height"] = "integer:", ["logfpu"] = "boolean", ["logstack"] = "boolean", ["mouseclip"] = "boolean", ["name"] = "string", ["newaf"] = "integer", ["newcf"] = "integer", ["newof"] = "integer", ["newpf"] = "integer", ["newr10"] = "integer", ["newr11"] = "integer", ["newr12"] = "integer", ["newr13"] = "integer", ["newr14"] = "integer", ["newr15"] = "integer", ["newr8"] = "integer", ["newr9"] = "integer", ["newrax"] = "integer", ["newrbp"] = "integer", ["newrbx"] = "integer", ["newrcx"] = "integer", ["newrdi"] = "integer", ["newrdx"] = "integer", ["newrip"] = "integer", ["newrsi"] = "integer", ["newrsp"] = "integer", ["newsf"] = "integer", ["newzf"] = "integer", ["offset"] = "integer", ["onclick"] = "function", ["onkeydown"] = "function", ["owner"] = "structure", ["percentageshown"] = "you", ["position"] = "type=integer", ["vartype"] = "integer", ["width"] = "integer", ["wireframemode"] = "boolean", ["yoururl"] = "type=string:"},
+    indexed = {},
+    methods = {["beginupdate"] = true, ["createfontmap"] = true, ["createsprite"] = true, ["createtextcontainer"] = true, ["createtexture"] = true, ["enableconsole"] = true, ["endupdate"] = true, ["function"] = true, ["getbytesize"] = true, ["getchildstruct"] = true, ["getchildstructstart"] = true, ["getname"] = true, ["getoffset"] = true, ["getownerstructure"] = true, ["getvalue"] = true, ["getvaluefrombase"] = true, ["getvartype"] = true, ["setbytesize"] = true, ["setchildstruct"] = true, ["setchildstructstart"] = true, ["setname"] = true, ["setoffset"] = true, ["setvalue"] = true, ["setvaluefrombase"] = true, ["setvartype"] = true},
+  },
+  ["tablefile"] = {
+    parent = "object",
+    props = {["initialized"] = "boolean", ["isplaying"] = "boolean", ["name"] = "string", ["stream"] = "memorystream"},
+    indexed = {},
+    methods = {["delete"] = true, ["getdata"] = true, ["pause"] = true, ["playxm"] = true, ["resume"] = true, ["savetofile"] = true, ["setvolume"] = true, ["stop"] = true},
+  },
+  ["tabsheet"] = {
+    parent = "wincontrol",
+    props = {["tabindex"] = "integer"},
+    indexed = {},
+    methods = {},
+  },
+  ["tfrmautoinject"] = {
+    parent = "form",
+    props = {["assemblescreen"] = "synedit", ["tabcount"] = "integer"},
+    indexed = {["tabscript"] = "string"},
+    methods = {["addtab"] = true, ["deletetab"] = true},
+  },
+  ["tfrmcodefilter"] = {
+    parent = "form",
+    props = {},
+    indexed = {},
+    methods = {["isinlist"] = true},
+  },
+  ["tfrmluaengine"] = {
+    parent = "form",
+    props = {["moutput"] = "memo", ["mscript"] = "synedit"},
+    indexed = {},
+    methods = {},
+  },
+  ["tfrmtracer"] = {
+    parent = "form",
+    props = {["address"] = "integer", ["context"] = "contexttable", ["count"] = "integer", ["hasstacksnapshot"] = "boolean", ["instruction"] = "string", ["instructionsize"] = "integer", ["referencedaddress"] = "integer", ["referenceddata"] = "bytearray", ["selected"] = "boolean", ["selectioncount"] = "integer"},
+    indexed = {["entry"] = "table", ["stackentry"] = "bytearray"},
+    methods = {},
+  },
+  ["tfrmultimap2"] = {
+    parent = "form",
+    props = {["count"] = "integer"},
+    indexed = {},
+    methods = {["isinlist"] = true},
+  },
+  ["thread"] = {
+    parent = "object",
+    props = {["finished"] = "boolean", ["name"] = "string", ["result"] = "string", ["terminated"] = "boolean"},
+    indexed = {},
+    methods = {["freeonterminate"] = true, ["resume"] = true, ["suspend"] = true, ["synchronize"] = true, ["terminate"] = true, ["waitfor"] = true},
+  },
+  ["timer"] = {
+    parent = "component",
+    props = {["enabled"] = "boolean", ["interval"] = "integer", ["ontimer"] = "function"},
+    indexed = {},
+)MLUA"),
+            std::string_view(R"MLUA(    methods = {["getenabled"] = true, ["getinterval"] = true, ["getontimer"] = true, ["setenabled"] = true, ["setinterval"] = true, ["setontimer"] = true},
+  },
+  ["togglebox"] = {
+    parent = "checkbox",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+  ["trackbar"] = {
+    parent = "wincontrol",
+    props = {["max"] = "integer", ["min"] = "integer", ["onchange"] = "function", ["position"] = "integer"},
+    indexed = {},
+    methods = {["getmax"] = true, ["getmin"] = true, ["getonchange"] = true, ["getposition"] = true, ["setmax"] = true, ["setmin"] = true, ["setonchange"] = true, ["setposition"] = true},
+  },
+  ["treenode"] = {
+    parent = "tobject",
+    props = {["absoluteindex"] = "integer", ["count"] = "integer", ["data"] = "pointer", ["expanded"] = "boolean", ["haschildren"] = "boolean", ["imageindex"] = "integer", ["index"] = "integer", ["level"] = "integer", ["multiselected"] = "boolean", ["parent"] = "treenode", ["selected"] = "boolean", ["text"] = "string"},
+    indexed = {["items"] = "treenode"},
+    methods = {["add"] = true, ["collapse"] = true, ["delete"] = true, ["deletechildren"] = true, ["expand"] = true, ["getdisplayrect"] = true, ["getnextsibling"] = true, ["makevisible"] = true},
+  },
+  ["treenodes"] = {
+    parent = "tobject",
+    props = {["count"] = "integer"},
+    indexed = {["item"] = "treenode"},
+    methods = {["add"] = true, ["clear"] = true, ["getcount"] = true, ["getitem"] = true, ["insert"] = true, ["insertbehind"] = true},
+  },
+  ["treeview"] = {
+    parent = "customcontrol",
+    props = {["items"] = "treenodes", ["selected"] = "treenode"},
+    indexed = {},
+    methods = {["beginupdate"] = true, ["endupdate"] = true, ["fullcollapse"] = true, ["fullexpand"] = true, ["getitems"] = true, ["getselected"] = true, ["loadfromfile"] = true, ["savetofile"] = true, ["setselected"] = true},
+  },
+  ["virtualtreecolumn"] = {
+    parent = "collectionitem",
+    props = {["animationoptions"] = "comma", ["autooptions"] = "comma", ["autoresize"] = "boolean", ["autosizeindex"] = "integer", ["columns"] = "virtualtreecolunmns", ["focusedcolumn"] = "integer", ["focusednode"] = "node", ["fullrowselect"] = "boolean", ["index"] = "integer", ["miscoptions"] = "comma", ["nodedatasize"] = "integer", ["ondrawtext"] = "function", ["onexpanding"] = "function", ["onfreenode"] = "function", ["ongettext"] = "function", ["oninitnode"] = "function", ["onpainttext"] = "function", ["options"] = "set", ["paintoptions"] = "comma", ["selectionoptions"] = "comma", ["stringoptions"] = "comma", ["text"] = "string", ["treeoptions"] = "stringtreeoptions", ["visible"] = "shortcut"},
+    indexed = {["expanded"] = "boolean", ["haschildren"] = "boolean", ["nodeheight"] = "height", ["nodeparent"] = "node", ["selected"] = "boolean"},
+    methods = {["absoluteindex"] = true, ["add"] = true, ["addchild"] = true, ["addtoselection"] = true, ["beginupdate"] = true, ["clear"] = true, ["deletenode"] = true, ["deleteselectednodes"] = true, ["endupdate"] = true, ["enumcheckednodes"] = true, ["enumchildren"] = true, ["enumselectednodes"] = true, ["getfirstchild"] = true, ["getnextsibling"] = true, ["getnodedata"] = true, ["getnodedataasinteger"] = true, ["getnodedatapointer"] = true, ["getnodeparent"] = true, ["getrootnode"] = true, ["loadfromfile"] = true, ["nodechecked"] = true, ["nodeselected"] = true, ["removefromselection"] = true, ["savetofile"] = true, ["setnodedata"] = true, ["setnodedataasinteger"] = true},
+  },
+  ["wincontrol"] = {
+    parent = "control",
+    props = {["controlcount"] = "integer", ["doublebuffered"] = "boolean", ["handle"] = "integer", ["onenter"] = "function", ["onexit"] = "function"},
+    indexed = {["control"] = "control"},
+    methods = {["canfocus"] = true, ["focused"] = true, ["getcontrol"] = true, ["getcontrolatpos"] = true, ["getcontrolcount"] = true, ["getonenter"] = true, ["getonexit"] = true, ["setfocus"] = true, ["setlayeredattributes"] = true, ["setonenter"] = true, ["setonexit"] = true, ["setshape"] = true},
+  },
+  ["writelog"] = {
+    parent = "inheritence: -",
+    props = {["logsize"] = "integer", ["status"] = "boolean"},
+    indexed = {},
+    methods = {["getlog"] = true},
+  },
+  ["xmldocument"] = {
+    parent = "domdocument",
+    props = {},
+    indexed = {},
+    methods = {},
+  },
+}
+)MLUA"),
+        };
+        constexpr std::array<std::string_view, 5> kScript2 = {
+            std::string_view(R"MLUA(local classes = __ceClasses or {}
+__ceClasses = nil
+
+local lower = string.lower
+local D = setmetatable({}, { __mode = "k" })
+local Meta = {}
+local Impl, Get, Set, Defaults, IndexGet, IndexSet, Init, Indexed = {}, {}, {}, {}, {}, {}, {}, {}
+local forms = {}
+local formNotifications = {}
+
+local ExtraParents = {
+  customcontrol = "wincontrol", customapplication = "component", tobject = "object", custompen = "object",
+  custombrush = "object", customfont = "object", canvashelper = "object", customcanvas = "object",
+  custombitmap = "rasterimage", handlestream = "stream", stream = "object", lclcomponent = "component",
+  persistent = "object", graphicsobject = "object", phantom = "panel", mainform = "form",
+  tfrmluaengine = "form", memoryview = "form", cefrm = "form", png = "bitmap", jpeg = "bitmap", icon = "bitmap",
+  synedit = "memo", headercontrol = "panel", thread = "object", scrollbox = "scrollingwincontrol",
+  pagecontrol = "wincontrol", tabsheet = "wincontrol", statusbar = "wincontrol", constraints = "object",
+  borderspacing = "object", childsizing = "object", anchorside = "object", gutter = "object", point = "object",
+}
+
+local ClassNames = {
+  object = "TObject", component = "TComponent", control = "TControl", wincontrol = "TWinControl", form = "TForm", cefrm = "TCEForm",
+  mainform = "TMainForm", label = "TLabel", edit = "TEdit", memo = "TMemo", button = "TButton", checkbox = "TCheckBox",
+  togglebox = "TToggleBox", combobox = "TComboBox", listbox = "TListBox", listview = "TListView", treeview = "TTreeView",
+  panel = "TPanel", groupbox = "TGroupBox", radiogroup = "TRadioGroup", image = "TImage", paintbox = "TPaintBox",
+  splitter = "TSplitter", progressbar = "TProgressBar", trackbar = "TTrackBar", mainmenu = "TMainMenu", popupmenu = "TPopupMenu",
+  menuitem = "TMenuItem", imagelist = "TImageList", bitmap = "TBitmap", png = "TPortableNetworkGraphic", jpeg = "TJPEGImage",
+  icon = "TIcon", picture = "TPicture", stringlist = "TStringList", strings = "TStrings", font = "TFont", canvas = "TCanvas",
+  brush = "TBrush", pen = "TPen", opendialog = "TOpenDialog", savedialog = "TSaveDialog", selectdirectorydialog = "TSelectDirectoryDialog",
+  colordialog = "TColorDialog", fontdialog = "TFontDialog", finddialog = "TFindDialog", listitems = "TListItems", listitem = "TListItem",
+  listcolumns = "TListColumns", listcolumn = "TListColumn", treenodes = "TTreeNodes", treenode = "TTreeNode", application = "TApplication",
+  thread = "TThread", phantom = "TControl", tfrmluaengine = "TfrmLuaEngine", memoryview = "TMemoryBrowser",
+  disassemblerview = "TDisassemblerview", hexadecimal = "THexView", addresslist = "TAddresslist", synedit = "TSynEdit",
+  headercontrol = "THeaderControl", scrollbox = "TScrollBox", pagecontrol = "TPageControl", tabsheet = "TTabSheet", statusbar = "TStatusBar",
+}
+
+local ObjectTypes = {
+  font = "font", strings = "stringlist", stringlist = "stringlist", tstrings = "stringlist", canvas = "canvas", brush = "brush", pen = "pen",
+  picture = "picture", listitems = "listitems", listcolumns = "listcolumns", treenodes = "treenodes", controlscrollbar = "controlscrollbar",
+  bitmap = "bitmap", graphic = "bitmap", rasterimage = "bitmap", headersections = "headersections", constraints = "constraints",
+  borderspacing = "borderspacing", gutter = "gutter", point = "point",
+}
+
+local Scalars = {
+  string = "", integer = 0, number = 0, boolean = false, cardinal = 0, int64 = 0, word = 0, byte = 0, double = 0, single = 0,
+  float = 0, ptruint = 0, qword = 0, dword = 0, longint = 0, smallint = 0, real = 0, int = 0, bool = false, ["string;"] = "",
+  ["boolean;"] = false, ["integer;"] = 0, pointer = 0, rgbinteger = 0, modalresult = 0, imageindex = -1, height = 0, shortcut = "",
+  alignmentoption = 0, alignment = 0, formstate = 0, panelbevel = 0, scrollstyle = 0, pixelformat = 0, checkboxstate = 0,
+  duplicatestype = 0, displaytype = 0, troundingtype = 0, tfastscanmethod = 0, tscanoption = 0, scantype = 0, valuetype = 0,
+  tvariabletype = 0, enum = 0, set = "[]", tscanregionpreference = 0, disassemblervaluetype = 0, colordefinition = 0x20000000,
+}
+
+local lineageCache = {}
+
+local function parentOf(name)
+  local info = classes[name]
+  if info and info.parent and info.parent ~= "" and not info.parent:find(":") then
+    return info.parent
+  end
+  return ExtraParents[name]
+end
+
+local function lineage(name)
+  local cached = lineageCache[name]
+  if cached then
+    return cached
+  end
+  local list, seen, current = {}, {}, name
+  while current and not seen[current] do
+    seen[current] = true
+    list[#list + 1] = current
+    current = parentOf(current)
+  end
+  if not seen.object then
+    list[#list + 1] = "object"
+  end
+  lineageCache[name] = list
+  return list
+end
+
+local function isObject(value)
+  return type(value) == "table" and D[value] ~= nil
+end
+
+local function inherits(value, name)
+  local d = type(value) == "table" and D[value]
+  if not d then
+    return false
+  end
+  for _, class in ipairs(lineage(d.class)) do
+    if class == name then
+      return true
+    end
+  end
+  return false
+end
+
+local function bind(obj, fn)
+  return function(first, ...)
+    if rawequal(first, obj) then
+      return fn(obj, ...)
+    end
+    return fn(obj, first, ...)
+  end
+end
+
+local function call(fn, ...)
+  if type(fn) == "function" then
+    return fn(...)
+  end
+end
+
+local function removeValue(list, value)
+  for i = #list, 1, -1 do
+    if rawequal(list[i], value) then
+      table.remove(list, i)
+      return i
+    end
+  end
+end
+
+local function new(class, owner)
+  local obj = setmetatable({}, Meta)
+  local d = { class = class, props = {}, components = {}, controls = {} }
+  D[obj] = d
+  if isObject(owner) then
+    d.owner = owner
+    local list = D[owner].components
+    list[#list + 1] = obj
+  end
+  local chain = lineage(class)
+  for i = #chain, 1, -1 do
+    local init = Init[chain[i]]
+    if init then
+      init(obj, d)
+    end
+  end
+  return obj
+end
+
+local function setParent(obj, parent)
+  local d = D[obj]
+  if d.parent and D[d.parent] then
+    removeValue(D[d.parent].controls, obj)
+  end
+  d.parent = nil
+  if isObject(parent) then
+    d.parent = parent
+    local list = D[parent].controls
+    list[#list + 1] = obj
+  end
+end
+
+local function findOwned(obj, name, deep)
+  local d = D[obj]
+  if not d then
+    return nil
+  end
+  for _, child in ipairs(d.components) do
+    local childName = D[child] and D[child].props.name
+    if childName and lower(childName) == name then
+      return child
+    end
+  end
+  for _, child in ipairs(d.controls) do
+    local childName = D[child] and D[child].props.name
+    if childName and lower(childName) == name then
+      return child
+    end
+  end
+  if deep then
+    for _, child in ipairs(d.components) do
+      local found = findOwned(child, name, true)
+      if found then
+        return found
+      end
+    end
+  end
+  return nil
+end
+
+local noop = function() end
+local genericCache = {}
+
+local function generic(k)
+  local cached = genericCache[k]
+  if cached then
+    return cached
+  end
+  local fn = noop
+  local prefix = k:sub(1, 3)
+  if #k > 3 and prefix == "get" then
+    local prop = k:sub(4)
+    fn = function(self, index)
+      if index ~= nil then
+        local holder = self[prop]
+        if type(holder) == "table" then
+          return holder[index]
+        end
+      end
+      return self[prop]
+    end
+  elseif #k > 3 and prefix == "set" then
+    local prop = k:sub(4)
+    fn = function(self, a, b)
+      if b ~= nil then
+        local holder = self[prop]
+        if type(holder) == "table" then
+          holder[a] = b
+          return
+        end
+      end
+      self[prop] = a
+    end
+  elseif #k > 2 and k:sub(1, 2) == "is" then
+    local prop = k:sub(3)
+    fn = function(self)
+      return self[prop] and true or false
+    end
+  end
+  genericCache[k] = fn
+  return fn
+end
+
+local knownMethods = {}
+for _, info in pairs(classes) do
+  for name in pairs(info.methods or {}) do
+    knownMethods[name] = true
+  end
+end
+
+local function indexer(obj, name, handler)
+  return setmetatable({}, {
+    __index = function(_, i)
+      return handler.get(obj, D[obj], i)
+    end,
+    __newindex = function(_, i, v)
+      if handler.set then
+        handler.set(obj, D[obj], i, v)
+      end
+    end,
+    __len = function()
+      return handler.len and handler.len(obj, D[obj]) or 0
+    end,
+  })
+end
+
+local function typedDefault(obj, d, k, kind)
+  local scalar = Scalars[kind]
+  if scalar ~= nil then
+    return scalar
+  end
+  if kind:find("color") then
+    return 0x20000000
+  end
+  local objectClass = ObjectTypes[kind]
+  if objectClass then
+    local value = new(objectClass, obj)
+    d.props[k] = value
+    return value
+  end
+  return nil
+end
+
+Meta.__index = function(obj, key)
+  local d = D[obj]
+  if d == nil then
+    return nil
+  end
+  local chain = lineage(d.class)
+  if type(key) == "number" then
+    for i = 1, #chain do
+      local f = IndexGet[chain[i]]
+      if f then
+        return f(obj, d, key)
+      end
+    end
+    return nil
+  end
+  if type(key) ~= "string" then
+    return nil
+  end
+  local k = lower(key)
+  local value = d.props[k]
+  if value ~= nil then
+    return value
+  end
+  for i = 1, #chain do
+    local class = chain[i]
+    local getter = Get[class] and Get[class][k]
+    if getter then
+      return getter(obj, d)
+    end
+    local method = Impl[class] and Impl[class][k]
+    if method then
+      return bind(obj, method)
+    end
+    local defaults = Defaults[class]
+    if defaults then
+      local default = defaults[k]
+      if default ~= nil then
+        if type(default) == "function" then
+          local made = default(obj, d)
+          d.props[k] = made
+          return made
+        end
+        return default
+      end
+    end
+    local handlers = Indexed[class] and Indexed[class][k]
+    if handlers then
+      return indexer(obj, k, handlers)
+    end
+  end
+  local child = findOwned(obj, k, false)
+  if child then
+    return child
+  end
+  for i = 1, #chain do
+    local info = classes[chain[i]]
+    if info then
+      local kind = info.props[k]
+      if kind then
+        return typedDefault(obj, d, k, kind)
+      end
+      if info.indexed[k] then
+        return indexer(obj, k, { get = function() return nil end })
+      end
+    end
+  end
+  for i = 1, #chain do
+    local info = classes[chain[i]]
+    if info and info.methods[k] then
+      return bind(obj, generic(k))
+    end
+  end
+  if knownMethods[k] then
+    return bind(obj, generic(k))
+  end
+  if k:sub(1, 2) == "on" then
+    return nil
+  end
+  if key:match("^%u") then
+    local phantom = new("phantom", obj)
+    D[phantom].props.name = key
+    d.props[k] = phantom
+    return phantom
+  end
+  if #k > 3 and (k:sub(1, 3) == "get" or k:sub(1, 3) == "set") then
+    return bind(obj, generic(k))
+  end
+  return nil
+end
+
+Meta.__newindex = function(obj, key, value)
+  local d = D[obj]
+  if d == nil then
+    return
+  end
+  local chain = lineage(d.class)
+  if type(key) == "number" then
+    for i = 1, #chain do
+      local f = IndexSet[chain[i]]
+      if f then
+        return f(obj, d, key, value)
+      end
+    end
+    return
+  end
+  local k = lower(tostring(key))
+  for i = 1, #chain do
+    local setter = Set[chain[i]] and Set[chain[i]][k]
+    if setter then
+      return setter(obj, d, value)
+    end
+  end
+  d.props[k] = value
+end
+
+Meta.__tostring = function(obj)
+  local d = D[obj]
+  local name = d and d.props.name
+  return (ClassNames[d and d.class or "object"] or "TObject") .. (name and (" " .. tostring(name)) or "")
+end
+
+Meta.__concat = function(a, b)
+  return tostring(a) .. tostring(b)
+end
+
+local function className(d)
+  return ClassNames[d.class] or ("T" .. d.class:sub(1, 1):upper() .. d.class:sub(2))
+end
+
+local function destroy(obj)
+  local d = D[obj]
+  if not d or d.destroyed then
+    return
+  end
+  call(d.props.ondestroy, obj)
+  d.destroyed = true
+  for i = #d.components, 1, -1 do
+    destroy(d.components[i])
+  end
+  if d.owner and D[d.owner] then
+    removeValue(D[d.owner].components, obj)
+  end
+  if d.parent and D[d.parent] then
+)MLUA"),
+            std::string_view(R"MLUA(    removeValue(D[d.parent].controls, obj)
+  end
+  if d.parentItem and D[d.parentItem] then
+    removeValue(D[d.parentItem].items, obj)
+  end
+  removeValue(forms, obj)
+end
+
+Impl.object = {
+  getclassname = function(self) return className(D[self]) end,
+  destroy = destroy,
+  free = destroy,
+  fieldaddress = function() return 0 end,
+  methodaddress = function() return 0 end,
+  methodname = function() return "" end,
+  inheritsfrom = function(self, name) return inherits(self, lower(tostring(name)):gsub("^t", "")) end,
+}
+Get.object = {
+  classname = function(self, d) return className(d) end,
+}
+
+Get.component = {
+  componentcount = function(self, d) return #d.components end,
+  owner = function(self, d) return d.owner end,
+}
+Indexed.component = {
+  component = {
+    get = function(self, d, i) return d.components[(tonumber(i) or -1) + 1] end,
+    len = function(self, d) return #d.components end,
+  },
+  componentbyname = {
+    get = function(self, d, name) return findOwned(self, lower(tostring(name)), false) end,
+  },
+}
+Impl.component = {
+  getcomponentcount = function(self) return #D[self].components end,
+  getcomponent = function(self, i) return D[self].components[(tonumber(i) or -1) + 1] end,
+  findcomponentbyname = function(self, name) return findOwned(self, lower(tostring(name or "")), false) end,
+  getowner = function(self) return D[self].owner end,
+}
+Defaults.component = { name = "", tag = 0 }
+
+local function controlText(self, d)
+  local text = d.props.caption
+  if text == nil then
+    text = d.props.text
+  end
+  return text or ""
+end
+
+Get.control = {
+  parent = function(self, d) return d.parent end,
+  caption = controlText,
+  text = controlText,
+  clientwidth = function(self, d) return d.props.width or 100 end,
+  clientheight = function(self, d) return d.props.height or 100 end,
+  boundsrect = function(self, d)
+    local left, top = d.props.left or 0, d.props.top or 0
+    return { Left = left, Top = top, Right = left + (d.props.width or 100), Bottom = top + (d.props.height or 100) }
+  end,
+}
+Set.control = {
+  parent = function(self, d, value) setParent(self, value) end,
+  caption = function(self, d, value) d.props.caption = value; d.props.text = nil end,
+  text = function(self, d, value) d.props.caption = value; d.props.text = nil end,
+}
+Defaults.control = {
+  visible = true, enabled = true, left = 0, top = 0, width = 100, height = 100, color = 0x20000000, align = 0, autosize = false,
+  showhint = false, hint = "", cursor = 0, parentcolor = false, parentfont = true, parentshowhint = true, doublebuffered = false,
+  borderwidth = 0, bevelouter = 0, bevelinner = 0, bevelwidth = 1, bevelcolor = 0x20000000, borderstyle = 0, transparent = false,
+  alignment = 0, layout = 0, wordwrap = false, anchors = "[akTop,akLeft]", tabstop = true, taborder = 0, dragmode = 0,
+  constraints = function(self) return new("constraints", self) end,
+  borderspacing = function(self) return new("borderspacing", self) end,
+  font = function(self) return new("font", self) end,
+}
+Impl.control = {
+  getposition = function(self) local d = D[self] return d.props.left or 0, d.props.top or 0 end,
+  setposition = function(self, x, y) local d = D[self] d.props.left, d.props.top = x, y end,
+  getsize = function(self) local d = D[self] return d.props.width or 100, d.props.height or 100 end,
+  setsize = function(self, w, h) local d = D[self] d.props.width, d.props.height = w, h end,
+  doclick = function(self) return call(D[self].props.onclick, self) end,
+  click = function(self) return call(D[self].props.onclick, self) end,
+  clienttoscreen = function(self, x, y) return x or 0, y or 0 end,
+  screentoclient = function(self, x, y) return x or 0, y or 0 end,
+  canfocus = function() return true end,
+  focused = function() return false end,
+  show = function(self) D[self].props.visible = true end,
+  hide = function(self) D[self].props.visible = false end,
+  setbounds = function(self, l, t, w, h) local p = D[self].props p.left, p.top, p.width, p.height = l, t, w, h end,
+}
+
+Get.wincontrol = {
+  controlcount = function(self, d) return #d.controls end,
+}
+Indexed.wincontrol = {
+  control = {
+    get = function(self, d, i) return d.controls[(tonumber(i) or -1) + 1] end,
+    len = function(self, d) return #d.controls end,
+  },
+}
+Impl.wincontrol = {
+  getcontrolcount = function(self) return #D[self].controls end,
+  getcontrol = function(self, i) return D[self].controls[(tonumber(i) or -1) + 1] end,
+  getcontrolatpos = function() return nil end,
+}
+Defaults.wincontrol = {
+  canvas = function(self) return new("canvas", self) end,
+  handle = 0,
+}
+
+local function splitLines(text)
+  local items = {}
+  text = tostring(text or "")
+  if text == "" then
+    return items
+  end
+  local position = 1
+  while position <= #text do
+    local a, b = text:find("\r?\n", position)
+    if not a then
+      a, b = text:find("\r", position)
+    end
+    if not a then
+      items[#items + 1] = text:sub(position)
+      break
+    end
+    items[#items + 1] = text:sub(position, a - 1)
+    position = b + 1
+  end
+  return items
+end
+
+local function stringsChanged(self, d)
+  if d.onChange then
+    d.onChange(self, d)
+  end
+  call(d.props.onchange, self)
+end
+
+Init.strings = function(self, d)
+  d.items = {}
+  d.data = {}
+end
+Get.strings = {
+  count = function(self, d) return #d.items end,
+  text = function(self, d)
+    if #d.items == 0 then
+      return ""
+    end
+    return table.concat(d.items, "\r\n") .. "\r\n"
+  end,
+  commatext = function(self, d) return table.concat(d.items, ",") end,
+  linebreak = function() return "\r\n" end,
+}
+Set.strings = {
+  text = function(self, d, value)
+    d.items = splitLines(value)
+    d.data = {}
+    stringsChanged(self, d)
+  end,
+  commatext = function(self, d, value)
+    d.items = {}
+    for part in tostring(value or ""):gmatch("[^,]+") do
+      d.items[#d.items + 1] = part
+    end
+    stringsChanged(self, d)
+  end,
+}
+IndexGet.strings = function(self, d, i) return d.items[i + 1] end
+IndexSet.strings = function(self, d, i, v)
+  if i >= 0 and i < #d.items then
+    d.items[i + 1] = tostring(v)
+    stringsChanged(self, d)
+  end
+end
+Indexed.strings = {
+  string = { get = function(self, d, i) return d.items[(tonumber(i) or -1) + 1] end, set = function(self, d, i, v) IndexSet.strings(self, d, i, v) end, len = function(self, d) return #d.items end },
+  strings = { get = function(self, d, i) return d.items[(tonumber(i) or -1) + 1] end, set = function(self, d, i, v) IndexSet.strings(self, d, i, v) end, len = function(self, d) return #d.items end },
+  data = { get = function(self, d, i) return d.data[(tonumber(i) or -1) + 1] end, set = function(self, d, i, v) d.data[i + 1] = v end },
+  objects = { get = function(self, d, i) return d.data[(tonumber(i) or -1) + 1] end, set = function(self, d, i, v) d.data[i + 1] = v end },
+  values = {
+    get = function(self, d, name)
+      for _, line in ipairs(d.items) do
+        local k, v = line:match("^([^=]*)=(.*)$")
+        if k == name then
+          return v
+        end
+      end
+      return ""
+    end,
+    set = function(self, d, name, value)
+      for i, line in ipairs(d.items) do
+        if line:match("^([^=]*)=") == name then
+          d.items[i] = name .. "=" .. tostring(value)
+          return
+        end
+      end
+      d.items[#d.items + 1] = name .. "=" .. tostring(value)
+    end,
+  },
+  names = { get = function(self, d, i) local line = d.items[(tonumber(i) or -1) + 1] return line and line:match("^([^=]*)=") or "" end },
+}
+Impl.strings = {
+  add = function(self, text)
+    local d = D[self]
+    d.items[#d.items + 1] = tostring(text == nil and "" or text)
+    stringsChanged(self, d)
+    return #d.items - 1
+  end,
+  addobject = function(self, text, data)
+    local d = D[self]
+    d.items[#d.items + 1] = tostring(text == nil and "" or text)
+    d.data[#d.items] = data
+    stringsChanged(self, d)
+    return #d.items - 1
+  end,
+  addtext = function(self, text)
+    local d = D[self]
+    for _, line in ipairs(splitLines(text)) do
+      d.items[#d.items + 1] = line
+    end
+    stringsChanged(self, d)
+  end,
+  addstrings = function(self, other)
+    local d = D[self]
+    local source = D[other]
+    if source and source.items then
+      for _, line in ipairs(source.items) do
+        d.items[#d.items + 1] = line
+      end
+    elseif type(other) == "table" then
+      for _, line in ipairs(other) do
+        d.items[#d.items + 1] = tostring(line)
+      end
+    end
+    stringsChanged(self, d)
+  end,
+  assign = function(self, other)
+    local d = D[self]
+    local source = D[other]
+    d.items = {}
+    d.data = {}
+    if source and source.items then
+      for i, line in ipairs(source.items) do
+        d.items[i] = line
+      end
+    end
+    stringsChanged(self, d)
+  end,
+  clear = function(self)
+    local d = D[self]
+    d.items = {}
+    d.data = {}
+    stringsChanged(self, d)
+  end,
+  delete = function(self, index)
+    local d = D[self]
+    index = tonumber(index) or -1
+    if index >= 0 and index < #d.items then
+      table.remove(d.items, index + 1)
+      table.remove(d.data, index + 1)
+      stringsChanged(self, d)
+    end
+  end,
+  insert = function(self, index, text)
+    local d = D[self]
+    index = math.max(0, math.min(tonumber(index) or 0, #d.items))
+    table.insert(d.items, index + 1, tostring(text))
+    stringsChanged(self, d)
+  end,
+  remove = function(self, text)
+    local d = D[self]
+    for i, line in ipairs(d.items) do
+      if line == text then
+        table.remove(d.items, i)
+        stringsChanged(self, d)
+        return i - 1
+      end
+    end
+    return -1
+  end,
+  indexof = function(self, text)
+    for i, line in ipairs(D[self].items) do
+      if line == text then
+        return i - 1
+      end
+    end
+    return -1
+  end,
+  indexofname = function(self, name)
+    for i, line in ipairs(D[self].items) do
+      if line:match("^([^=]*)=") == name then
+        return i - 1
+      end
+    end
+    return -1
+  end,
+  exchange = function(self, a, b)
+    local items = D[self].items
+    items[a + 1], items[b + 1] = items[b + 1], items[a + 1]
+  end,
+  sort = function(self) table.sort(D[self].items) end,
+  gettext = function(self) return self.Text end,
+  settext = function(self, text) self.Text = text end,
+  getcount = function(self) return #D[self].items end,
+  getstring = function(self, i) return D[self].items[(tonumber(i) or -1) + 1] end,
+  setstring = function(self, i, v) IndexSet.strings(self, D[self], i, v) end,
+  beginupdate = noop,
+  endupdate = noop,
+  loadfromfile = function(self, path)
+    local file = io.open(path, "rb")
+    if not file then
+      error("Unable to open file \"" .. tostring(path) .. "\"")
+    end
+    local text = file:read("a")
+    file:close()
+    if text:sub(1, 3) == "\239\187\191" then
+      text = text:sub(4)
+    end
+    self.Text = text
+  end,
+  savetofile = function(self, path)
+    local file = io.open(path, "wb")
+    if not file then
+      error("Unable to create file \"" .. tostring(path) .. "\"")
+    end
+    file:write(self.Text)
+    file:close()
+  end,
+}
+ExtraParents.stringlist = "strings"
+Defaults.stringlist = { sorted = false, duplicates = 0, casesensitive = false }
+
+Defaults.memo = {
+  lines = function(self, d)
+    local lines = new("stringlist", self)
+    D[lines].onChange = function()
+      call(D[self].props.onchange, self)
+    end
+    return lines
+  end,
+  scrollbars = 0,
+  readonly = false,
+  wordwrap = true,
+  wantreturns = true,
+  wanttabs = false,
+}
+Get.memo = {
+  text = function(self, d)
+    local text = self.Lines.Text
+    if text:sub(-2) == "\r\n" then
+      text = text:sub(1, -3)
+    end
+    return text
+  end,
+  caption = function(self, d) return Get.memo.text(self, d) end,
+}
+Set.memo = {
+  text = function(self, d, value) self.Lines.Text = value end,
+  caption = function(self, d, value) self.Lines.Text = value end,
+}
+Impl.memo = {
+  append = function(self, text) self.Lines.add(text) end,
+  clear = function(self) self.Lines.clear() end,
+  clearselection = noop,
+  selectall = noop,
+  copytoclipboard = noop,
+  pastefromclipboard = noop,
+}
+
+)MLUA"),
+            std::string_view(R"MLUA(Get.edit = {
+  text = function(self, d) return d.props.text or "" end,
+  caption = function(self, d) return d.props.text or "" end,
+}
+Set.edit = {
+  text = function(self, d, value)
+    d.props.text = value == nil and "" or tostring(value)
+    call(d.props.onchange, self)
+  end,
+  caption = function(self, d, value) d.props.text = value == nil and "" or tostring(value) end,
+}
+Defaults.edit = { selstart = 0, sellength = 0, seltext = "", maxlength = 0, passwordchar = "", readonly = false, numbersonly = false, charcase = 0, texthint = "" }
+Impl.edit = {
+  clear = function(self) self.Text = "" end,
+  selectall = noop,
+  copytoclipboard = noop,
+  cuttoclipboard = noop,
+  pastefromclipboard = noop,
+  clearselection = noop,
+}
+
+local function listText(self, d)
+  local index = d.props.itemindex or -1
+  local items = self.Items
+  if index >= 0 and items[index] then
+    return items[index]
+  end
+  return d.props.text or ""
+end
+
+Defaults.combobox = { items = function(self) return new("stringlist", self) end, itemindex = -1, style = 0, dropdowncount = 8, readonly = false }
+Get.combobox = { text = listText, caption = listText }
+Set.combobox = {
+  text = function(self, d, value)
+    d.props.text = tostring(value)
+    local found = self.Items.indexOf(tostring(value))
+    if found >= 0 then
+      d.props.itemindex = found
+    end
+  end,
+  itemindex = function(self, d, value)
+    d.props.itemindex = tonumber(value) or -1
+    d.props.text = nil
+    call(d.props.onchange, self)
+    call(d.props.onselect, self)
+  end,
+}
+Impl.combobox = { clear = function(self) self.Items.clear() D[self].props.itemindex = -1 D[self].props.text = "" end }
+
+Defaults.listbox = { items = function(self) return new("stringlist", self) end, itemindex = -1, multiselect = false }
+Get.listbox = { text = listText, selcount = function(self, d) return (d.props.itemindex or -1) >= 0 and 1 or 0 end }
+Indexed.listbox = {
+  selected = {
+    get = function(self, d, i) return (d.props.itemindex or -1) == i end,
+    set = function(self, d, i, v) if v then d.props.itemindex = i end end,
+  },
+}
+Impl.listbox = { clear = function(self) self.Items.clear() D[self].props.itemindex = -1 end, getitemindex = function(self) return D[self].props.itemindex or -1 end, setitemindex = function(self, v) D[self].props.itemindex = v end }
+
+Defaults.radiogroup = { items = function(self) return new("stringlist", self) end, itemindex = -1, columns = 1 }
+Defaults.checkbox = { checked = false, state = 0, allowgrayed = false }
+Set.checkbox = {
+  checked = function(self, d, value)
+    local changed = (d.props.checked or false) ~= (value and true or false)
+    d.props.checked = value and true or false
+    d.props.state = value and 1 or 0
+    if changed then
+      call(d.props.onchange, self)
+    end
+  end,
+  state = function(self, d, value)
+    d.props.state = value
+    d.props.checked = value == 1 or value == "cbChecked"
+  end,
+}
+Defaults.button = { modalresult = 0, default = false, cancel = false }
+Defaults.progressbar = { min = 0, max = 100, position = 0, step = 10 }
+Impl.progressbar = { stepit = function(self) local d = D[self] d.props.position = (d.props.position or 0) + (d.props.step or 10) end, stepby = function(self, n) local d = D[self] d.props.position = (d.props.position or 0) + (n or 0) end }
+Defaults.trackbar = { min = 0, max = 10, position = 0 }
+Defaults.image = { picture = function(self) return new("picture", self) end, stretch = false, proportional = false, center = false, transparent = false }
+Get.image = { canvas = function(self, d) return self.Picture.Bitmap.Canvas end }
+Defaults.paintbox = { canvas = function(self) return new("canvas", self) end }
+Impl.paintbox = { repaint = function(self) end }
+Defaults.phantom = { canvas = function(self) return new("canvas", self) end, items = function(self) return new("stringlist", self) end }
+Defaults.splitter = { resizestyle = 0, minsize = 30 }
+Defaults.groupbox = {}
+Defaults.panel = { bevelouter = 1, fullrepaint = true }
+
+Defaults.font = { name = "Segoe UI", size = 9, height = -12, color = 0x20000000, style = "[]", charset = 1, quality = 0, pitch = 0, orientation = 0 }
+Impl.font = { assign = function(self, other) local source = D[other] if source then for k, v in pairs(source.props) do D[self].props[k] = v end end end, isequal = function() return false end }
+Defaults.brush = { color = 0xFFFFFF, style = 0 }
+Defaults.gutter = { color = 0x20000000, width = 30, visible = true, autosize = true }
+Defaults.point = { x = 0, y = 0 }
+Defaults.borderspacing = { around = 0, left = 0, top = 0, right = 0, bottom = 0, innerborder = 0, cellalignhorizontal = 0, cellalignvertical = 0 }
+Defaults.constraints = { minwidth = 0, minheight = 0, maxwidth = 0, maxheight = 0 }
+Defaults.pen = { color = 0, width = 1, style = 0, mode = 0 }
+Defaults.canvas = {
+  pen = function(self) return new("pen", self) end,
+  brush = function(self) return new("brush", self) end,
+  font = function(self) return new("font", self) end,
+  penposition = 0,
+}
+Get.canvas = {
+  width = function(self, d) local owner = d.owner and D[d.owner] return owner and owner.props.width or 100 end,
+  height = function(self, d) local owner = d.owner and D[d.owner] return owner and owner.props.height or 100 end,
+}
+local function textWidth(self, text)
+  local size = (self.Font.Size or 9)
+  return math.floor(#tostring(text or "") * size * 0.75 + 0.5)
+end
+local function textHeight(self)
+  return math.floor((self.Font.Size or 9) * 1.6 + 0.5)
+end
+Impl.canvas = {
+  textwidth = textWidth,
+  gettextwidth = textWidth,
+  textheight = textHeight,
+  gettextheight = textHeight,
+  textextent = function(self, text) return textWidth(self, text), textHeight(self) end,
+  getpixel = function() return 0 end,
+  getpenposition = function() return 0, 0 end,
+  handleallocated = function() return true end,
+}
+Defaults.graphic = { width = 0, height = 0, transparent = false, empty = true, modified = false }
+Defaults.bitmap = { canvas = function(self) return new("canvas", self) end, pixelformat = 0, transparentcolor = 0x20000000, transparentmode = 0, handle = 0 }
+Impl.bitmap = {
+  setsize = function(self, w, h) local p = D[self].props p.width, p.height = w, h end,
+  loadfromfile = function(self) D[self].props.empty = false end,
+  loadfromstream = function(self) D[self].props.empty = false end,
+  savetofile = noop,
+  savetostream = noop,
+  assign = function(self, other) local source = D[other] if source then D[self].props.width = source.props.width D[self].props.height = source.props.height end end,
+  clear = noop,
+  freeimage = noop,
+}
+Defaults.picture = {
+  bitmap = function(self) return new("bitmap", self) end,
+  png = function(self) return new("png", self) end,
+  portablenetworkgraphic = function(self) return new("png", self) end,
+  jpeg = function(self) return new("jpeg", self) end,
+  icon = function(self) return new("icon", self) end,
+  graphic = function(self) return new("bitmap", self) end,
+}
+Get.picture = {
+  width = function(self) return self.Graphic.Width end,
+  height = function(self) return self.Graphic.Height end,
+}
+Impl.picture = { loadfromfile = noop, loadfromstream = noop, savetofile = noop, assign = noop, clear = noop }
+
+Init.imagelist = function(self, d) d.images = {} end
+Defaults.imagelist = { width = 16, height = 16, masked = false, bkcolor = 0x1FFFFFFF }
+Get.imagelist = { count = function(self, d) return #d.images end }
+Impl.imagelist = {
+  add = function(self, image) local d = D[self] d.images[#d.images + 1] = image or true return #d.images - 1 end,
+  addmasked = function(self, image) local d = D[self] d.images[#d.images + 1] = image or true return #d.images - 1 end,
+  addicon = function(self, image) local d = D[self] d.images[#d.images + 1] = image or true return #d.images - 1 end,
+  insert = function(self, index, image) table.insert(D[self].images, (index or 0) + 1, image or true) end,
+  delete = function(self, index) table.remove(D[self].images, (index or 0) + 1) end,
+  clear = function(self) D[self].images = {} end,
+  getbitmap = noop,
+  draw = noop,
+  replace = noop,
+}
+
+Init.menuitem = function(self, d) d.items = {} end
+Defaults.menuitem = { caption = "", shortcut = "", imageindex = -1, checked = false, radioitem = false, autocheck = false, default = false, visible = true, enabled = true, groupindex = 0, hint = "" }
+Get.menuitem = {
+  count = function(self, d) return #d.items end,
+  parent = function(self, d) return d.parentItem end,
+  menuindex = function(self, d)
+    local parent = d.parentItem and D[d.parentItem]
+    if not parent then
+      return -1
+    end
+    for i, item in ipairs(parent.items) do
+      if rawequal(item, self) then
+        return i - 1
+      end
+    end
+    return -1
+  end,
+  menu = function(self, d)
+    local current = self
+    while D[current] and D[current].parentItem do
+      current = D[current].parentItem
+    end
+    return D[current] and D[current].menu
+  end,
+}
+Set.menuitem = {
+  menuindex = function(self, d, value)
+    local parent = d.parentItem and D[d.parentItem]
+    if not parent then
+      return
+    end
+    removeValue(parent.items, self)
+    table.insert(parent.items, math.max(1, math.min((tonumber(value) or 0) + 1, #parent.items + 1)), self)
+  end,
+}
+IndexGet.menuitem = function(self, d, i) return d.items[i + 1] end
+Indexed.menuitem = {
+  item = { get = function(self, d, i) return d.items[(tonumber(i) or -1) + 1] end, len = function(self, d) return #d.items end },
+  items = { get = function(self, d, i) return d.items[(tonumber(i) or -1) + 1] end, len = function(self, d) return #d.items end },
+}
+local function attachItem(parent, item, index)
+  local d = D[parent]
+  local child = D[item]
+  if not child then
+    return
+  end
+  if child.parentItem and D[child.parentItem] then
+    removeValue(D[child.parentItem].items, item)
+  end
+  child.parentItem = parent
+  if index then
+    table.insert(d.items, math.max(1, math.min(index + 1, #d.items + 1)), item)
+  else
+    d.items[#d.items + 1] = item
+  end
+end
+Impl.menuitem = {
+  add = function(self, item) attachItem(self, item) end,
+  insert = function(self, index, item) attachItem(self, item, tonumber(index) or 0) end,
+  delete = function(self, index)
+    local d = D[self]
+    local item = d.items[(tonumber(index) or -1) + 1]
+    if item then
+      table.remove(d.items, index + 1)
+      D[item].parentItem = nil
+    end
+  end,
+  remove = function(self, item)
+    removeValue(D[self].items, item)
+    if D[item] then
+      D[item].parentItem = nil
+    end
+  end,
+  clear = function(self)
+    for _, item in ipairs(D[self].items) do
+      D[item].parentItem = nil
+    end
+    D[self].items = {}
+  end,
+  indexof = function(self, item)
+    for i, child in ipairs(D[self].items) do
+      if rawequal(child, item) then
+        return i - 1
+      end
+    end
+    return -1
+  end,
+  find = function(self, caption)
+    local wanted = tostring(caption or ""):gsub("&", "")
+    for _, child in ipairs(D[self].items) do
+      if tostring(child.Caption or ""):gsub("&", "") == wanted then
+        return child
+      end
+    end
+    return nil
+  end,
+  getitem = function(self, i) return D[self].items[(tonumber(i) or -1) + 1] end,
+  getcount = function(self) return #D[self].items end,
+  doclick = function(self) return call(D[self].props.onclick, self) end,
+  click = function(self) return call(D[self].props.onclick, self) end,
+}
+Defaults.menu = {
+  items = function(self)
+    local root = new("menuitem", self)
+    D[root].menu = self
+    return root
+  end,
+  images = nil,
+}
+Impl.menu = { getitems = function(self) return self.Items end }
+Impl.popupmenu = { popup = noop, close = noop }
+
+Init.listitems = function(self, d) d.items = {} end
+local function newListItem(owner)
+  local item = new("listitem", owner)
+  D[item].listOwner = owner
+  return item
+end
+Get.listitems = { count = function(self, d) return #d.items end }
+Set.listitems = {
+  count = function(self, d, value)
+    value = tonumber(value) or 0
+    while #d.items < value do
+      d.items[#d.items + 1] = newListItem(self)
+    end
+    while #d.items > value do
+)MLUA"),
+            std::string_view(R"MLUA(      table.remove(d.items)
+    end
+  end,
+}
+IndexGet.listitems = function(self, d, i) return d.items[i + 1] end
+Indexed.listitems = { item = { get = function(self, d, i) return d.items[(tonumber(i) or -1) + 1] end, len = function(self, d) return #d.items end } }
+Impl.listitems = {
+  add = function(self) local d = D[self] local item = newListItem(self) d.items[#d.items + 1] = item return item end,
+  insert = function(self, index) local d = D[self] local item = newListItem(self) table.insert(d.items, math.max(1, math.min((index or 0) + 1, #d.items + 1)), item) return item end,
+  clear = function(self) D[self].items = {} end,
+  delete = function(self, index) table.remove(D[self].items, (tonumber(index) or -1) + 1) end,
+  beginupdate = noop,
+  endupdate = noop,
+  getitem = function(self, i) return D[self].items[(tonumber(i) or -1) + 1] end,
+  getcount = function(self) return #D[self].items end,
+}
+Defaults.listitem = {
+  caption = "",
+  subitems = function(self) return new("stringlist", self) end,
+  imageindex = -1,
+  stateindex = -1,
+  selected = false,
+  checked = false,
+  data = 0,
+  focused = false,
+}
+Get.listitem = {
+  index = function(self, d)
+    local owner = d.listOwner and D[d.listOwner]
+    if owner then
+      for i, item in ipairs(owner.items) do
+        if rawequal(item, self) then
+          return i - 1
+        end
+      end
+    end
+    return -1
+  end,
+  owner = function(self, d) return d.listOwner end,
+}
+Impl.listitem = {
+  delete = function(self) local d = D[self] if d.listOwner then removeValue(D[d.listOwner].items, self) end end,
+  makevisible = noop,
+  displayrect = function() return { Left = 0, Top = 0, Right = 0, Bottom = 0 } end,
+}
+
+Init.listcolumns = function(self, d) d.items = {} end
+Get.listcolumns = { count = function(self, d) return #d.items end }
+IndexGet.listcolumns = function(self, d, i) return d.items[i + 1] end
+Impl.listcolumns = {
+  add = function(self) local d = D[self] local column = new("listcolumn", self) d.items[#d.items + 1] = column return column end,
+  clear = function(self) D[self].items = {} end,
+  delete = function(self, index) table.remove(D[self].items, (tonumber(index) or -1) + 1) end,
+  getcount = function(self) return #D[self].items end,
+  getcolumn = function(self, i) return D[self].items[(tonumber(i) or -1) + 1] end,
+  beginupdate = noop,
+  endupdate = noop,
+}
+Defaults.listcolumn = { caption = "", width = 50, autosize = false, alignment = 0, visible = true, minwidth = 0, maxwidth = 0, imageindex = -1, tag = 0 }
+
+Defaults.listview = {
+  items = function(self) return new("listitems", self) end,
+  columns = function(self) return new("listcolumns", self) end,
+  itemindex = -1,
+  viewstyle = 0,
+  rowselect = false,
+  readonly = false,
+  multiselect = false,
+  checkboxes = false,
+  hideselection = true,
+  gridlines = false,
+  ownerdata = false,
+  showcolumnheaders = true,
+}
+Get.listview = {
+  selected = function(self, d)
+    local index = d.props.itemindex or -1
+    return index >= 0 and self.Items[index] or nil
+  end,
+  selcount = function(self, d) return (d.props.itemindex or -1) >= 0 and 1 or 0 end,
+}
+Set.listview = {
+  selected = function(self, d, item)
+    d.props.itemindex = item and item.Index or -1
+  end,
+}
+Impl.listview = {
+  clear = function(self) self.Items.clear() D[self].props.itemindex = -1 end,
+  getitemat = function() return nil end,
+  beginupdate = noop,
+  endupdate = noop,
+}
+
+Init.treenodes = function(self, d) d.nodes = {} d.roots = {} end
+local function newNode(nodes, parent, text)
+  local node = new("treenode", nodes)
+  local nd = D[node]
+  nd.tree = nodes
+  nd.children = {}
+  nd.parentNode = parent
+  nd.props.text = tostring(text or "")
+  local list = parent and D[parent].children or D[nodes].roots
+  list[#list + 1] = node
+  local all = D[nodes].nodes
+  all[#all + 1] = node
+  return node
+end
+local function removeNode(node)
+  local nd = D[node]
+  if not nd then
+    return
+  end
+  for i = #nd.children, 1, -1 do
+    removeNode(nd.children[i])
+  end
+  local tree = D[nd.tree]
+  removeValue(tree.nodes, node)
+  removeValue(nd.parentNode and D[nd.parentNode].children or tree.roots, node)
+end
+Get.treenodes = { count = function(self, d) return #d.nodes end }
+IndexGet.treenodes = function(self, d, i) return d.nodes[i + 1] end
+Indexed.treenodes = { item = { get = function(self, d, i) return d.nodes[(tonumber(i) or -1) + 1] end, len = function(self, d) return #d.nodes end } }
+Impl.treenodes = {
+  add = function(self, sibling, text)
+    local parent = sibling and D[sibling] and D[sibling].parentNode or nil
+    return newNode(self, parent, text)
+  end,
+  addchild = function(self, parent, text) return newNode(self, parent, text) end,
+  addfirst = function(self, sibling, text) return Impl.treenodes.add(self, sibling, text) end,
+  addchildfirst = function(self, parent, text) return newNode(self, parent, text) end,
+  insert = function(self, sibling, text) return Impl.treenodes.add(self, sibling, text) end,
+  clear = function(self) local d = D[self] d.nodes = {} d.roots = {} end,
+  delete = function(self, node) removeNode(node) end,
+  getfirstnode = function(self) return D[self].roots[1] end,
+  getcount = function(self) return #D[self].nodes end,
+  getitem = function(self, i) return D[self].nodes[(tonumber(i) or -1) + 1] end,
+  beginupdate = noop,
+  endupdate = noop,
+}
+Defaults.treenode = { text = "", data = 0, imageindex = -1, selectedindex = -1, stateindex = -1, expanded = false, selected = false }
+Get.treenode = {
+  count = function(self, d) return #d.children end,
+  parent = function(self, d) return d.parentNode end,
+  haschildren = function(self, d) return #d.children > 0 or d.props.haschildren == true end,
+  level = function(self, d)
+    local level, current = 0, d.parentNode
+    while current do
+      level = level + 1
+      current = D[current].parentNode
+    end
+    return level
+  end,
+  index = function(self, d)
+    local list = d.parentNode and D[d.parentNode].children or D[d.tree].roots
+    for i, node in ipairs(list) do
+      if rawequal(node, self) then
+        return i - 1
+      end
+    end
+    return -1
+  end,
+  absoluteindex = function(self, d)
+    for i, node in ipairs(D[d.tree].nodes) do
+      if rawequal(node, self) then
+        return i - 1
+      end
+    end
+    return -1
+  end,
+  owner = function(self, d) return d.tree end,
+}
+IndexGet.treenode = function(self, d, i) return d.children[i + 1] end
+Indexed.treenode = {
+  items = { get = function(self, d, i) return d.children[(tonumber(i) or -1) + 1] end, len = function(self, d) return #d.children end },
+  item = { get = function(self, d, i) return d.children[(tonumber(i) or -1) + 1] end, len = function(self, d) return #d.children end },
+}
+local function sibling(self, delta)
+  local d = D[self]
+  local list = d.parentNode and D[d.parentNode].children or D[d.tree].roots
+  for i, node in ipairs(list) do
+    if rawequal(node, self) then
+      return list[i + delta]
+    end
+  end
+end
+Impl.treenode = {
+  delete = function(self) removeNode(self) end,
+  deletechildren = function(self) local d = D[self] for i = #d.children, 1, -1 do removeNode(d.children[i]) end end,
+  expand = function(self) D[self].props.expanded = true end,
+  collapse = function(self) D[self].props.expanded = false end,
+  makevisible = noop,
+  getfirstchild = function(self) return D[self].children[1] end,
+  getlastchild = function(self) local c = D[self].children return c[#c] end,
+  getnextsibling = function(self) return sibling(self, 1) end,
+  getprevsibling = function(self) return sibling(self, -1) end,
+  getnext = function(self) return D[self].children[1] or sibling(self, 1) end,
+  displayrect = function() return { Left = 0, Top = 0, Right = 0, Bottom = 0 } end,
+  getitem = function(self, i) return D[self].children[(tonumber(i) or -1) + 1] end,
+  getcount = function(self) return #D[self].children end,
+  getparent = function(self) return D[self].parentNode end,
+}
+Defaults.treeview = { items = function(self) return new("treenodes", self) end, readonly = false, multiselect = false, rightclickselect = false, hideselection = true, showroot = true, showlines = true }
+Impl.treeview = {
+  clear = function(self) self.Items.clear() D[self].props.selected = nil end,
+  fullexpand = noop,
+  fullcollapse = noop,
+  getnodeat = function() return nil end,
+  beginupdate = noop,
+  endupdate = noop,
+}
+
+local function addForm(form)
+  forms[#forms + 1] = form
+  for _, entry in pairs(formNotifications) do
+    call(entry, form)
+  end
+end
+
+Defaults.form = {
+  visible = false, caption = "", position = 0, borderstyle = 2, formstyle = 0, windowstate = 0, modalresult = 0, alphablend = false,
+  alphablendvalue = 255, keypreview = false, showintaskbar = 0, designtimeppi = 96, width = 400, height = 300, popupparent = nil,
+}
+Impl.form = {
+  show = function(self)
+    local d = D[self]
+    d.props.visible = true
+    call(d.props.onshow, self)
+  end,
+  hide = function(self) D[self].props.visible = false end,
+  close = function(self)
+    local d = D[self]
+    local action = call(d.props.onclose, self)
+    d.props.visible = false
+    if action == caFree then
+      destroy(self)
+    end
+  end,
+  showmodal = function(self)
+    local d = D[self]
+    call(d.props.onshow, self)
+    if __manifoldHeadless then
+      return d.props.modalresult ~= 0 and d.props.modalresult or mrCancel
+    end
+    return d.props.modalresult ~= 0 and d.props.modalresult or mrCancel
+  end,
+  centerscreen = noop,
+  bringtofront = noop,
+  sendtoback = noop,
+  dragnow = noop,
+  setfocus = noop,
+  repaint = noop,
+  update = noop,
+  invalidate = noop,
+  refresh = noop,
+  loadformposition = function() return false end,
+  saveformposition = noop,
+  isforegroundwindow = function() return false end,
+  registerclosecallback = noop,
+  registercreatecallback = noop,
+  registerfirstshowcallback = noop,
+  fixdpi = noop,
+  printtorasterimage = noop,
+}
+
+Defaults.filedialog = { filename = "", filter = "", filterindex = 1, initialdir = "", title = "", defaultext = "", options = "[]", files = function(self) return new("stringlist", self) end }
+Impl.filedialog = {
+  execute = function(self)
+    if __manifoldHeadless then
+      return false
+    end
+    local d = D[self]
+    local save = d.class == "savedialog"
+    local chosen = __manifoldFileDialog(save, self.Title, self.Filter, self.FileName, self.InitialDir, self.DefaultExt)
+    if not chosen then
+      return false
+    end
+    d.props.filename = chosen
+    self.Files.clear()
+    self.Files.add(chosen)
+    return true
+  end,
+}
+Impl.selectdirectorydialog = {
+  execute = function(self)
+    if __manifoldHeadless then
+      return false
+    end
+    local chosen = __manifoldFolderDialog(self.Title ~= "" and self.Title or nil)
+    if not chosen then
+      return false
+    end
+    D[self].props.filename = chosen
+    return true
+  end,
+}
+Defaults.colordialog = { color = 0, title = "" }
+Impl.colordialog = {
+  execute = function(self)
+    if __manifoldHeadless then
+      return false
+    end
+    local chosen = __manifoldColorDialog(self.Color)
+    if not chosen then
+      return false
+    end
+    D[self].props.color = chosen
+    return true
+  end,
+}
+Impl.fontdialog = { execute = function() return false end }
+Impl.finddialog = { execute = function() return false end, closedialog = noop }
+Defaults.fontdialog = { font = function(self) return new("font", self) end }
+
+Defaults.thread = { terminated = false, name = "", freeonterminate = true, finished = false }
+Impl.thread = {
+  synchronize = function(self, fn, ...) return call(fn, self, ...) end,
+  queue = function(self, fn, ...) return call(fn, self, ...) end,
+  terminate = function(self) D[self].props.terminated = true end,
+  waitfor = noop,
+  waittilldone = noop,
+  freeonterminate = function(self, value) D[self].props.freeonterminate = value end,
+  resume = noop,
+  suspend = noop,
+}
+
+Defaults.disassemblerview = { selectedaddress2 = 0, topaddress = 0, showjumplines = true, hidefocusrect = false }
+)MLUA"),
+            std::string_view(R"MLUA(Get.disassemblerview = { selectedaddress = function() return __manifoldSelectedCodeAddress() end }
+Set.disassemblerview = { selectedaddress = function(self, d, value) __manifoldSetSelectedCodeAddress(value) end }
+Defaults.hexadecimal = { selectionstart = 0, selectionstop = 0, displaytype = 0 }
+Get.hexadecimal = { address = function() return __manifoldSelectedHexAddress() end, topaddress = function() return __manifoldSelectedHexAddress() end }
+
+local function construct(class, owner)
+  local obj = new(class, owner)
+  if isObject(owner) and inherits(owner, "wincontrol") and inherits(obj, "control") then
+    setParent(obj, owner)
+  end
+  return obj
+end
+
+local creators = {
+  createLabel = "label", createEdit = "edit", createMemo = "memo", createButton = "button", createCheckBox = "checkbox",
+  createToggleBox = "togglebox", createComboBox = "combobox", createListBox = "listbox", createListView = "listview",
+  createTreeView = "treeview", createPanel = "panel", createGroupBox = "groupbox", createRadioGroup = "radiogroup",
+  createImage = "image", createPaintBox = "paintbox", createSplitter = "splitter", createProgressBar = "progressbar",
+  createTrackBar = "trackbar", createScrollBox = "scrollbox", createPageControl = "pagecontrol", createTabSheet = "tabsheet",
+  createStatusBar = "statusbar", createSynEdit = "synedit", createCECustomButton = "cecustombutton",
+}
+for name, class in pairs(creators) do
+  if rawget(_G, name) == nil then
+    _G[name] = function(owner) return construct(class, owner) end
+  end
+end
+
+local plain = {
+  createMainMenu = "mainmenu", createPopupMenu = "popupmenu", createMenuItem = "menuitem", createImageList = "imagelist",
+  createPicture = "picture", createFont = "font", createOpenDialog = "opendialog", createSaveDialog = "savedialog",
+  createSelectDirectoryDialog = "selectdirectorydialog", createColorDialog = "colordialog", createFontDialog = "fontdialog",
+  createFindDialog = "finddialog",
+}
+for name, class in pairs(plain) do
+  if rawget(_G, name) == nil then
+    _G[name] = function(owner)
+      local obj = new(class, owner)
+      if class == "mainmenu" and isObject(owner) then
+        D[owner].props.menu = obj
+      end
+      return obj
+    end
+  end
+end
+
+createStringlist = createStringlist or function() return new("stringlist") end
+createStringList = createStringList or createStringlist
+
+local function graphic(class)
+  return function(width, height)
+    local obj = new(class)
+    D[obj].props.width = tonumber(width) or 0
+    D[obj].props.height = tonumber(height) or 0
+    return obj
+  end
+end
+createBitmap = createBitmap or graphic("bitmap")
+createPNG = createPNG or graphic("png")
+createJpeg = createJpeg or graphic("jpeg")
+createIcon = createIcon or graphic("icon")
+
+createForm = createForm or function(visible)
+  local form = new("cefrm")
+  if visible == nil or visible then
+    D[form].props.visible = true
+  end
+  addForm(form)
+  return form
+end
+
+local mainForm = new("mainform")
+do
+  local p = D[mainForm].props
+  p.name = "MainForm"
+  p.caption = "Cheat Engine 7.5"
+  p.width, p.height = 900, 700
+  p.visible = true
+  p.onprocessopened = function() end
+  local menu = new("mainmenu", mainForm)
+  D[menu].props.name = "MainMenu1"
+  p.menu = menu
+  for _, entry in ipairs({ { "miFile", "&File" }, { "miEdit", "&Edit" }, { "miTable", "&Table" }, { "miD3D", "D3D" }, { "miHelp", "&Help" } }) do
+    local item = new("menuitem", mainForm)
+    D[item].props.name = entry[1]
+    D[item].props.caption = entry[2]
+    menu.Items.add(item)
+  end
+  local tableMenu = findOwned(mainForm, "mitable", false)
+  local fixed = {}
+  for _, entry in ipairs({ { "miShowLuaScript", "Show Cheat Table Lua Script" }, { "miAddFile", "Add file" }, { "miTableSeparator", "-" } }) do
+    local item = new("menuitem", mainForm)
+    D[item].props.name = entry[1]
+    D[item].props.caption = entry[2]
+    tableMenu.add(item)
+    fixed[#fixed + 1] = item
+  end
+  local fileItems = {}
+  D[tableMenu].props.onclick = function(sender)
+    for _, item in ipairs(fileItems) do
+      tableMenu.remove(item)
+      destroy(item)
+    end
+    fileItems = {}
+    for _, name in ipairs(__manifoldTableFileNames()) do
+      local item = new("menuitem", mainForm)
+      D[item].props.caption = name
+      tableMenu.add(item)
+      fileItems[#fileItems + 1] = item
+    end
+  end
+  for _, entry in ipairs({ { "Foundlist3", "listview" }, { "Panel4", "panel" }, { "Panel5", "panel" }, { "lblSigned", "label" }, { "Splitter1", "splitter" }, { "Panel1", "panel" }, { "btnMemoryView", "button" }, { "ProgressBar", "progressbar" } }) do
+    local control = construct(entry[2], mainForm)
+    D[control].props.name = entry[1]
+  end
+end
+forms[#forms + 1] = mainForm
+MainForm = mainForm
+
+getMainForm = getMainForm or function() return mainForm end
+
+local application = new("application")
+do
+  local p = D[application].props
+  p.title = "Cheat Engine 7.5"
+  p.mainform = mainForm
+  p.icon = new("icon", application)
+  p.exename = ""
+end
+Impl.application = { processmessages = noop, terminate = noop, minimize = noop, restore = noop, bringtofront = noop }
+getApplication = getApplication or function() return application end
+
+local luaEngineForm
+getLuaEngine = getLuaEngine or function()
+  if luaEngineForm then
+    return luaEngineForm
+  end
+  luaEngineForm = new("tfrmluaengine")
+  local p = D[luaEngineForm].props
+  p.name = "frmLuaEngine"
+  p.caption = "Lua Engine"
+  local function child(name, class, parent)
+    local control = new(class, luaEngineForm)
+    setParent(control, parent or luaEngineForm)
+    D[control].props.name = name
+    return control
+  end
+  local panel1 = child("Panel1", "panel")
+  child("Panel3", "panel")
+  child("GroupBox1", "groupbox")
+  child("Splitter1", "splitter")
+  child("mOutput", "memo", panel1)
+  child("mScript", "synedit")
+  child("btnExecute", "button")
+  local menu = new("mainmenu", luaEngineForm)
+  D[luaEngineForm].props.menu = menu
+  addForm(luaEngineForm)
+  return luaEngineForm
+end
+createLuaEngine = createLuaEngine or function()
+  local form = new("tfrmluaengine")
+  local output = construct("memo", form)
+  D[output].props.name = "mOutput"
+  local script = construct("synedit", form)
+  D[script].props.name = "mScript"
+  addForm(form)
+  return form
+end
+
+local memoryView
+getMemoryViewForm = getMemoryViewForm or function()
+  if memoryView then
+    return memoryView
+  end
+  memoryView = new("memoryview")
+  local p = D[memoryView].props
+  p.name = "MemoryBrowser"
+  p.caption = "Memory Viewer"
+  local view = construct("disassemblerview", memoryView)
+  D[view].props.name = "DisassemblerView"
+  p.disassemblerview = view
+  local hex = construct("hexadecimal", memoryView)
+  D[hex].props.name = "HexadecimalView"
+  p.hexadecimalview = hex
+  local menu = new("mainmenu", memoryView)
+  p.menu = menu
+  local popup = new("popupmenu", memoryView)
+  D[popup].props.name = "debuggerpopup"
+  for _, name in ipairs({ "miDebugSetAddress", "Watchmemoryallocations1", "MenuItem14", "InjectDLL1", "CreateThread1", "AutoInject1" }) do
+    local item = new("menuitem", memoryView)
+    D[item].props.name = name
+    D[item].props.caption = name
+    menu.Items.add(item)
+  end
+  addForm(memoryView)
+  return memoryView
+end
+
+getFormCount = getFormCount or function() return #forms end
+getForm = getForm or function(index) return forms[(tonumber(index) or -1) + 1] end
+
+registerFormAddNotification = registerFormAddNotification or function(fn)
+  local handle = new("object")
+  formNotifications[handle] = fn
+  Impl.object.unregister = Impl.object.unregister or function(self) formNotifications[self] = nil end
+  return handle
+end
+unregisterFormAddNotification = unregisterFormAddNotification or function(handle)
+  if handle ~= nil then
+    formNotifications[handle] = nil
+  end
+end
+
+setMethodProperty = setMethodProperty or function(object, property, fn) object[property] = fn end
+getMethodProperty = getMethodProperty or function(object, property) return object[property] end
+setProperty = setProperty or function(object, property, value) object[property] = value end
+getProperty = getProperty or function(object, property) return object[property] end
+
+inheritsFromObject = inheritsFromObject or function(v) return isObject(v) or type(v) == "userdata" end
+inheritsFromComponent = inheritsFromComponent or function(v) return inherits(v, "component") end
+inheritsFromControl = inheritsFromControl or function(v) return inherits(v, "control") end
+inheritsFromWinControl = inheritsFromWinControl or function(v) return inherits(v, "wincontrol") end
+
+darkMode = darkMode or function() return true end
+translate = translate or function(text) return text end
+getTranslationFolder = getTranslationFolder or function() return "" end
+loadPOFile = loadPOFile or function() return false end
+
+showSelectionList = showSelectionList or function(title, caption, list, allowCustom)
+  if __manifoldHeadless then
+    return -1, ""
+  end
+  local items = {}
+  if isObject(list) and D[list] and D[list].items then
+    for i, text in ipairs(D[list].items) do
+      items[i] = tostring(text)
+    end
+  elseif type(list) == "table" then
+    for i, text in ipairs(list) do
+      items[i] = tostring(text)
+    end
+  end
+  return __manifoldShowSelectionList(title, caption, items, allowCustom)
+end
+
+__manifoldNewThreadObject = function()
+  return new("thread")
+end
+
+local addressListObject = new("addresslist")
+D[addressListObject].props.name = "Addresslist"
+for _, entry in ipairs({ { "List", "treeview" }, { "Header", "headercontrol" } }) do
+  local control = construct(entry[2], addressListObject)
+  D[control].props.name = entry[1]
+  D[addressListObject].props[lower(entry[1])] = control
+end
+D[mainForm].props.addresslist = addressListObject
+
+__manifoldSetFallback("list", function(list, key)
+  if type(key) ~= "string" then
+    return nil
+  end
+  local value = addressListObject[key]
+  if type(value) == "function" then
+    return function(first, ...)
+      if rawequal(first, list) or rawequal(first, addressListObject) then
+        return value(addressListObject, ...)
+      end
+      return value(first, ...)
+    end
+  end
+  return value
+end)
+
+local legacyClasses = {}
+for name in pairs(classes) do
+  legacyClasses[name] = true
+end
+for _, name in ipairs({ "memoryrecord", "addresslist", "timer", "memscan", "foundlist", "tablefile", "memorystream", "stream", "hotkey", "genericHotkey" }) do
+  legacyClasses[lower(name)] = true
+end
+local globalMeta = getmetatable(_G) or {}
+local previousIndex = globalMeta.__index
+globalMeta.__index = function(globals, name)
+  if type(name) == "string" then
+    local class, method = name:match("^(%a+)_(%a[%w]*)$")
+    if class and legacyClasses[lower(class)] and method:match("^%l") then
+      local fn = function(object, ...)
+        local member = object and object[method]
+        if type(member) == "function" then
+          return member(object, ...)
+        end
+        return member
+      end
+      rawset(globals, name, fn)
+      return fn
+    end
+  end
+  if type(previousIndex) == "function" then
+    return previousIndex(globals, name)
+  elseif type(previousIndex) == "table" then
+    return previousIndex[name]
+  end
+  return nil
+end
+setmetatable(_G, globalMeta)
+
+__manifoldLcl = {
+  new = new,
+  data = D,
+  isObject = isObject,
+  inherits = inherits,
+  forms = forms,
+}
+)MLUA"),
+        };
+        constexpr std::array<std::string_view, 1> kScript3 = {
+            std::string_view(R"MLUA(if string.split == nil then
+  string.split = function(text, separator)
+    text = tostring(text)
+    if separator == nil or separator == "" then
+      return text
+    end
+    local parts, start = {}, 1
+    while true do
+      local first, last = string.find(text, separator, start, true)
+      if not first then
+        parts[#parts + 1] = string.sub(text, start)
+        break
+      end
+      parts[#parts + 1] = string.sub(text, start, first - 1)
+      start = last + 1
+    end
+    return table.unpack(parts)
+  end
+end
+
+if string.startsWith == nil then
+  string.startsWith = function(text, prefix)
+    return string.sub(tostring(text), 1, #prefix) == prefix
+  end
+end
+
+if string.endsWith == nil then
+  string.endsWith = function(text, suffix)
+    return suffix == "" or string.sub(tostring(text), -#suffix) == suffix
+  end
+end
+)MLUA"),
+        };
+
+        const std::array<CompatScript, 4> kScripts = {
+            CompatScript{ "Defines.lua", std::span<const std::string_view>(kScript0) },
+            CompatScript{ "Classes.lua", std::span<const std::string_view>(kScript1) },
+            CompatScript{ "Lcl.lua", std::span<const std::string_view>(kScript2) },
+            CompatScript{ "Extensions.lua", std::span<const std::string_view>(kScript3) },
+        };
+    }
+
+    std::string CompatScript::Text() const
+    {
+        std::string text;
+        for (std::string_view chunk : Chunks)
+            text += chunk;
+        return text;
+    }
+
+    std::span<const CompatScript> CompatScripts()
+    {
+        return kScripts;
+    }
+}

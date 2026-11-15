@@ -1,0 +1,316 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source">
+      <UniqueIdentifier>{E25FDF9A-E54E-5571-A8F0-D1ECF6236D1E}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\App">
+      <UniqueIdentifier>{397AD8EC-106D-5FC0-8EAC-18877AC387D7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Asm">
+      <UniqueIdentifier>{02180128-6CED-5F2E-99B7-EA4864CAC077}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Core">
+      <UniqueIdentifier>{73A25774-4378-5584-ACEE-7DE4AE2DAA51}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Debug">
+      <UniqueIdentifier>{1A4BBA3D-F86F-53E8-9249-3FE146E2D14C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Disasm">
+      <UniqueIdentifier>{0FC4E3E6-ACD6-5947-8C02-7DDC395AB4D3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Generated">
+      <UniqueIdentifier>{38C20A1D-57EE-50A2-9FC6-502A5A108FAC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Lua">
+      <UniqueIdentifier>{BB690E34-A333-5E3B-A34A-37A6C93871AC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Resources">
+      <UniqueIdentifier>{5797848E-A90F-54AF-B16B-39A960F8E5EC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Scan">
+      <UniqueIdentifier>{0F036376-D2E8-5DD5-8DC2-6D8E1FF89B4B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Table">
+      <UniqueIdentifier>{BCBB4A0B-09B3-5523-8419-09DCDD32F877}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Target">
+      <UniqueIdentifier>{FF59DD34-E865-52DD-BE8F-230722E791C0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\UI">
+      <UniqueIdentifier>{041FB265-57A2-5EC0-B136-25B380A66EBC}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Source\Main.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\App\Application.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\App\CrashHandler.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\App\Engine.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\App\Settings.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\App\WindowHost.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Asm\Assembler.cpp">
+      <Filter>Source\Asm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Asm\AutoAssembler.cpp">
+      <Filter>Source\Asm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp">
+      <Filter>Source\Asm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\Deflate.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\Errors.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\RuntimeLog.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\Text.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\Xml.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Debug\Debugger.cpp">
+      <Filter>Source\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Disasm\Disassembler.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp">
+      <Filter>Source\Generated</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Generated\LuaDocs.cpp">
+      <Filter>Source\Generated</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\InputBox.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaApi.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaAssist.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaCompat.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaEngine.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaObjects.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaTasks.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Scan\Scanner.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Scan\ValueType.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\AddressList.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\CheatTable.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\Structures.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\Process.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\Symbols.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\CodeEditor.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\DialogHost.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\Fonts.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\LuaDialogs.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\MainWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\MemoryViewer.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\RecordEditor.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\ScriptWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\SettingsWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\StructureWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\TableFilesWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\Templates.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\ToolWindows.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\WatchWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\Widgets.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\Workspace.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClInclude Include="..\Source\Resource.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\Application.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\CrashHandler.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\Engine.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\Settings.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\WindowHost.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Asm\Assembler.h">
+      <Filter>Source\Asm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Asm\AutoAssembler.h">
+      <Filter>Source\Asm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Core\Deflate.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Core\Errors.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Core\RuntimeLog.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Core\Text.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Core\Version.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Core\Xml.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Debug\Debugger.h">
+      <Filter>Source\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Debug\VehProtocol.h">
+      <Filter>Source\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Disasm\Disassembler.h">
+      <Filter>Source\Disasm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h">
+      <Filter>Source\Generated</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\InputBox.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaApi.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaCompatScripts.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaDocs.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaEngine.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Scan\Scanner.h">
+      <Filter>Source\Scan</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Scan\ValueType.h">
+      <Filter>Source\Scan</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Table\AddressList.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Table\CheatTable.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Table\Structures.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\Process.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\Symbols.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\CodeEditor.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\DialogHost.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\Fonts.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\LuaDialogs.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\Templates.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\Theme.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\UiScale.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\Widgets.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\Windows.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\Workspace.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ResourceCompile Include="..\Source\Resources\App.rc">
+      <Filter>Source\Resources</Filter>
+    </ResourceCompile>
+    <Image Include="..\Source\Resources\icon.ico">
+      <Filter>Source\Resources</Filter>
+    </Image>
+  </ItemGroup>
+</Project>

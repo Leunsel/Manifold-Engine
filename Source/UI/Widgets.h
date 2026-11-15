@@ -1,0 +1,78 @@
+#pragma once
+
+#include "Core/RuntimeLog.h"
+#include "UI/Theme.h"
+
+#include "imgui.h"
+
+#include <functional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace Manifold::UI
+{
+    struct EmptyAction
+    {
+        std::string Label;
+        const char* Shortcut = nullptr;
+        bool Accent = false;
+        bool NewRow = false;
+        const char* Tooltip = nullptr;
+    };
+
+    struct SkeletonColumn
+    {
+        float Share = 1.0f;
+        ImVec4 Color = ManifoldTheme::Text;
+        float Alpha = 0.06f;
+        bool Square = false;
+    };
+
+    int EmptyState(const char* icon, std::string_view title, std::string_view text, const std::vector<EmptyAction>& actions, bool card, std::string_view footer = {});
+    void TableSkeleton(ImVec2 min, ImVec2 max, const std::vector<SkeletonColumn>& columns, unsigned int seed, ImVec4 background);
+    unsigned int SkeletonNoise(unsigned int value);
+
+    void BeginCard(const char* id, const char* title, ImVec2 size, ImGuiWindowFlags flags = 0);
+    void EndCard();
+    void CardTitle(const char* icon, const char* title, std::string_view note = {});
+
+    bool IconButton(const char* icon, const char* tooltip, bool danger = false, float side = 0.0f);
+    bool AccentButton(const char* label, ImVec2 size = ImVec2(0.0f, 0.0f));
+    bool DangerButton(const char* label, ImVec2 size = ImVec2(0.0f, 0.0f));
+    bool ToolbarButton(const char* icon, const char* text, const char* tooltip = nullptr, bool enabled = true);
+    bool DangerMenuItem(const char* label, const char* shortcut = nullptr, bool enabled = true);
+
+    void ItemTooltip(const char* text);
+    void ShowTooltip(const std::function<void()>& content);
+    bool ErrorTooltip(std::string_view message);
+    void TextWithError(std::string_view text, ImVec4 color);
+    void Muted(std::string_view text);
+    void SectionLabel(const char* text);
+
+    bool InputText(const char* label, std::string& value, ImGuiInputTextFlags flags = 0, ImGuiInputTextCallback callback = nullptr, void* user = nullptr);
+    bool InputTextWithHint(const char* label, const char* hint, std::string& value, ImGuiInputTextFlags flags = 0, ImGuiInputTextCallback callback = nullptr, void* user = nullptr);
+    bool InputMultiline(const char* label, std::string& value, ImVec2 size, ImGuiInputTextFlags flags = 0, ImGuiInputTextCallback callback = nullptr, void* user = nullptr);
+
+    bool Splitter(const char* id, bool vertical, float thickness, float* first, float* second, float minFirst, float minSecond);
+    void Spinner(float size, ImVec4 color);
+    void AsmOperands(ImDrawList* draw, ImFont* font, float size, ImVec2 pos, const ImVec4& clip, std::string_view operands);
+    bool ToggleSwitch(const char* id, bool* value);
+    float ToggleSwitchWidth();
+    bool Segmented(const char* id, int* value, const std::vector<const char*>& options, float width);
+    bool TriStateCheckbox(const char* label, int& state);
+    bool ColorDot(const char* id, ImVec4 color, float size);
+
+    bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags = 0, ImVec2 minimum = ImVec2(260.0f, 160.0f));
+    void EndToolWindow();
+    bool BeginModal(const char* id, const char* icon, const char* title, ImVec2 size, bool* open = nullptr, ImGuiID viewport = 0);
+    ImGuiID CallerViewport();
+    void EndModal();
+
+    ImVec4 LevelColor(LogLevel level);
+    const char* LevelIcon(LogLevel level);
+    ImVec4 RecordColor(std::uint32_t bgr);
+
+    void PushMono();
+    void PopMono();
+}

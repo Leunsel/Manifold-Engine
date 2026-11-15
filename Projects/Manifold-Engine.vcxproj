@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{6C1E2A4B-7D93-4F0E-9A51-2B8C3D4E5F60}</ProjectGuid>
+    <RootNamespace>ManifoldEngine</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>Manifold-Engine</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup>
+    <OutDir>$(ProjectDir)..\Build\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\Build\obj\$(Configuration)\App\</IntDir>
+    <TargetName>Manifold-Engine</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Source;$(ProjectDir)..\Dependencies\ImGui;$(ProjectDir)..\Dependencies\ImGui\backends;$(ProjectDir)..\Dependencies\Zydis;$(ProjectDir)..\Dependencies\Lua;$(ProjectDir)..\Dependencies\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WINDOWS;WIN32_LEAN_AND_MEAN;NOMINMAX;ZYDIS_STATIC_BUILD;ZYCORE_STATIC_BUILD;IMGUI_IMPL_WIN32_DISABLE_GAMEPAD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalOptions>/PDBALTPATH:%_PDB% %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;dwmapi.lib;comdlg32.lib;shell32.lib;ole32.lib;advapi32.lib;user32.lib;gdi32.lib;dbghelp.lib;bcrypt.lib;version.lib;wininet.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <Manifest>
+      <EnableDpiAwareness>false</EnableDpiAwareness>
+      <AdditionalManifestFiles>$(ProjectDir)..\Source\Resources\App.manifest</AdditionalManifestFiles>
+    </Manifest>
+    <PreBuildEvent>
+      <Command>where python &gt;nul 2&gt;nul || exit /b 0
+python "$(ProjectDir)..\Tools\embed_lua.py"</Command>
+      <Message>Embedding the Lua compatibility scripts</Message>
+    </PreBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Source\Main.cpp" />
+    <ClCompile Include="..\Source\App\Application.cpp" />
+    <ClCompile Include="..\Source\App\CrashHandler.cpp" />
+    <ClCompile Include="..\Source\App\Engine.cpp" />
+    <ClCompile Include="..\Source\App\Settings.cpp" />
+    <ClCompile Include="..\Source\App\WindowHost.cpp" />
+    <ClCompile Include="..\Source\Asm\Assembler.cpp" />
+    <ClCompile Include="..\Source\Asm\AutoAssembler.cpp" />
+    <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp" />
+    <ClCompile Include="..\Source\Core\Deflate.cpp" />
+    <ClCompile Include="..\Source\Core\Errors.cpp" />
+    <ClCompile Include="..\Source\Core\RuntimeLog.cpp" />
+    <ClCompile Include="..\Source\Core\Text.cpp" />
+    <ClCompile Include="..\Source\Core\Xml.cpp" />
+    <ClCompile Include="..\Source\Debug\Debugger.cpp" />
+    <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
+    <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
+    <ClCompile Include="..\Source\Generated\LuaDocs.cpp" />
+    <ClCompile Include="..\Source\Lua\InputBox.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaApi.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaAssist.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaCompat.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaEngine.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaObjects.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
+    <ClCompile Include="..\Source\Scan\Scanner.cpp" />
+    <ClCompile Include="..\Source\Scan\ValueType.cpp" />
+    <ClCompile Include="..\Source\Table\AddressList.cpp" />
+    <ClCompile Include="..\Source\Table\CheatTable.cpp" />
+    <ClCompile Include="..\Source\Table\Structures.cpp" />
+    <ClCompile Include="..\Source\Target\Process.cpp" />
+    <ClCompile Include="..\Source\Target\Symbols.cpp" />
+    <ClCompile Include="..\Source\UI\CodeEditor.cpp" />
+    <ClCompile Include="..\Source\UI\DialogHost.cpp" />
+    <ClCompile Include="..\Source\UI\Fonts.cpp" />
+    <ClCompile Include="..\Source\UI\LuaDialogs.cpp" />
+    <ClCompile Include="..\Source\UI\MainWindow.cpp" />
+    <ClCompile Include="..\Source\UI\MemoryViewer.cpp" />
+    <ClCompile Include="..\Source\UI\RecordEditor.cpp" />
+    <ClCompile Include="..\Source\UI\ScriptWindow.cpp" />
+    <ClCompile Include="..\Source\UI\SettingsWindow.cpp" />
+    <ClCompile Include="..\Source\UI\StructureWindow.cpp" />
+    <ClCompile Include="..\Source\UI\TableFilesWindow.cpp" />
+    <ClCompile Include="..\Source\UI\Templates.cpp" />
+    <ClCompile Include="..\Source\UI\ToolWindows.cpp" />
+    <ClCompile Include="..\Source\UI\WatchWindow.cpp" />
+    <ClCompile Include="..\Source\UI\Widgets.cpp" />
+    <ClCompile Include="..\Source\UI\Workspace.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Source\Resource.h" />
+    <ClInclude Include="..\Source\App\Application.h" />
+    <ClInclude Include="..\Source\App\CrashHandler.h" />
+    <ClInclude Include="..\Source\App\Engine.h" />
+    <ClInclude Include="..\Source\App\Settings.h" />
+    <ClInclude Include="..\Source\App\WindowHost.h" />
+    <ClInclude Include="..\Source\Asm\Assembler.h" />
+    <ClInclude Include="..\Source\Asm\AutoAssembler.h" />
+    <ClInclude Include="..\Source\Core\Deflate.h" />
+    <ClInclude Include="..\Source\Core\Errors.h" />
+    <ClInclude Include="..\Source\Core\RuntimeLog.h" />
+    <ClInclude Include="..\Source\Core\Text.h" />
+    <ClInclude Include="..\Source\Core\Version.h" />
+    <ClInclude Include="..\Source\Core\Xml.h" />
+    <ClInclude Include="..\Source\Debug\Debugger.h" />
+    <ClInclude Include="..\Source\Debug\VehProtocol.h" />
+    <ClInclude Include="..\Source\Disasm\Disassembler.h" />
+    <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h" />
+    <ClInclude Include="..\Source\Lua\InputBox.h" />
+    <ClInclude Include="..\Source\Lua\LuaApi.h" />
+    <ClInclude Include="..\Source\Lua\LuaCompatScripts.h" />
+    <ClInclude Include="..\Source\Lua\LuaDocs.h" />
+    <ClInclude Include="..\Source\Lua\LuaEngine.h" />
+    <ClInclude Include="..\Source\Scan\Scanner.h" />
+    <ClInclude Include="..\Source\Scan\ValueType.h" />
+    <ClInclude Include="..\Source\Table\AddressList.h" />
+    <ClInclude Include="..\Source\Table\CheatTable.h" />
+    <ClInclude Include="..\Source\Table\Structures.h" />
+    <ClInclude Include="..\Source\Target\Process.h" />
+    <ClInclude Include="..\Source\Target\Symbols.h" />
+    <ClInclude Include="..\Source\UI\CodeEditor.h" />
+    <ClInclude Include="..\Source\UI\DialogHost.h" />
+    <ClInclude Include="..\Source\UI\Fonts.h" />
+    <ClInclude Include="..\Source\UI\LuaDialogs.h" />
+    <ClInclude Include="..\Source\UI\Templates.h" />
+    <ClInclude Include="..\Source\UI\Theme.h" />
+    <ClInclude Include="..\Source\UI\UiScale.h" />
+    <ClInclude Include="..\Source\UI\Widgets.h" />
+    <ClInclude Include="..\Source\UI\Windows.h" />
+    <ClInclude Include="..\Source\UI\Workspace.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\Source\Resources\App.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Manifest Include="..\Source\Resources\App.manifest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\Source\Resources\icon.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Dependencies.vcxproj">
+      <Project>{9A2B3C4D-5E6F-4071-8293-A4B5C6D7E8F9}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="ManifoldAgent.vcxproj">
+      <Project>{2D3C4B5A-6978-4A1B-9C8D-0E1F2A3B4C5D}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

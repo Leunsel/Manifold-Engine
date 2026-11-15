@@ -1,0 +1,583 @@
+#pragma once
+
+#include "UI/CodeEditor.h"
+#include "UI/Workspace.h"
+
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <set>
+#include <span>
+#include <string>
+#include <vector>
+
+namespace Manifold::UI
+{
+    class MainWindow
+    {
+    public:
+        explicit MainWindow(Workspace& workspace);
+        void Draw();
+        void FocusScanValue() { m_focusValue = true; }
+
+    private:
+        void TitleBar();
+        void ProcessBar();
+        void ScanArea(float height);
+        void ResultsCard(float width, float height);
+        void ScanCard(float width, float height);
+        void AddressListCard(float height);
+        void StatusBar();
+        void RecordRow(Table::MemoryRecord& record, int depth, int& row, bool match = true);
+        void BuildRows();
+        bool RowMatches(const Table::MemoryRecord& record) const;
+        void ListKeys();
+        void SelectRow(int index, bool extend);
+        void StartInlineEdit(Table::MemoryRecord& record);
+        void InlineValue(Table::MemoryRecord& record);
+        void ProgressLine(float right);
+        std::function<void()> StickyHeader();
+        void DropOnRecord(Table::MemoryRecord& record, int depth);
+        std::vector<Table::MemoryRecord*> DraggedRecords(int draggedId);
+        void RecordMenu(Table::MemoryRecord& record);
+        void ValueDialog();
+        bool ValueChoices(const std::vector<Table::DropDownEntry>& entries);
+        void AddAddressDialog();
+        void DescriptionDialog();
+        void HotkeyHandling();
+        void DoFirstScan();
+        void DoNextScan();
+        Scan::ScanOptions CurrentOptions() const;
+        std::vector<Table::MemoryRecord*> SelectedRecords();
+        void SaveOptions();
+        void OpenValueDialog(Table::MemoryRecord& record);
+
+        Workspace& m_workspace;
+        Engine& m_engine;
+        bool m_release = false;
+
+        int m_typeIndex = 2;
+        int m_compareIndex = 0;
+        std::string m_value;
+        std::string m_value2;
+        bool m_hex = false;
+        bool m_unicode = false;
+        bool m_caseSensitive = true;
+        int m_floatMode = 0;
+        int m_writable = 1;
+        int m_executable = 2;
+        int m_copyOnWrite = 0;
+        bool m_fastScan = true;
+        int m_alignment = 4;
+        bool m_pause = false;
+        bool m_private = true;
+        bool m_image = true;
+        bool m_mapped = false;
+        std::string m_start = "0";
+        std::string m_stop = "7FFFFFFFFFFF";
+        bool m_focusValue = false;
+        float m_topHeight = 0.0f;
+        float m_resultsShare = 0.58f;
+
+        std::set<std::uint64_t> m_selectedResults;
+        std::uint64_t m_lastClickedResult = 0;
+        std::map<std::uint64_t, std::string> m_liveValues;
+        double m_liveAt = -1.0;
+        int m_liveScan = -1;
+
+        int m_lastClickedRecord = -1;
+        int m_dragRecord = 0;
+
+        bool m_valueDialog = false;
+        std::string m_valueText;
+        std::vector<int> m_valueTargets;
+        std::string m_valueSearch;
+        std::string m_valueCurrent;
+        std::string m_valueFiltered;
+        std::vector<int> m_valueVisible;
+        std::size_t m_valueEntries = 0;
+        int m_valueCursor = -1;
+        int m_valueScroll = 0;
+        float m_valueColumn = 0.0f;
+        bool m_addDialog = false;
+        std::string m_addAddress;
+        std::string m_addDescription;
+        int m_addType = 2;
+        bool m_descriptionDialog = false;
+        std::string m_descriptionText;
+        int m_descriptionTarget = 0;
+        std::string m_tableFilter;
+        struct ListRow
+        {
+            int Id = 0;
+            int Depth = 0;
+            bool Match = true;
+        };
+        struct RowSpot
+        {
+            int Id = 0;
+            float Top = 0.0f;
+        };
+        std::vector<ListRow> m_rows;
+        std::vector<RowSpot> m_spots;
+        int m_anchorRecord = -1;
+        int m_scrollToRecord = -1;
+        int m_inlineEdit = -1;
+        std::string m_inlineText;
+        bool m_inlineFocus = false;
+        bool m_filterActiveOnly = false;
+        int m_filterKind = 0;
+        std::string m_recentChecked;
+        bool m_recentExists = false;
+        double m_recentCheckedAt = -100.0;
+    };
+
+    class ProcessPicker : public ToolWindow
+    {
+    public:
+        explicit ProcessPicker(Workspace& workspace);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        void Show();
+
+    private:
+        void Refresh();
+
+        Workspace& m_workspace;
+        bool m_open = true;
+        std::vector<Target::ProcessEntry> m_list;
+        std::string m_filter;
+        bool m_windowsOnly = false;
+        std::uint32_t m_selected = 0;
+        bool m_focusFilter = true;
+    };
+
+    class MemoryViewer : public ToolWindow
+    {
+    public:
+        MemoryViewer(Workspace& workspace, int number);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        void Show(std::uint64_t address, bool hexView);
+        int Number() const { return m_number; }
+
+    private:
+        void Toolbar();
+        void Disassembly(float height);
+        void HexView(float height);
+        void Registers(float width, float height);
+        void CodeMenu(const Disasm::Instruction& instruction);
+        void HexMenu(std::uint64_t address);
+        void GotoDialog();
+        void AssembleDialog();
+        void FindDialog();
+        void AllocateDialog();
+        void InjectDialog();
+        void Navigate(std::uint64_t address, bool remember = true);
+        void HandleCodeKeys();
+        void HandleHexKeys();
+        void Nop(const Disasm::Instruction& instruction);
+        int HexValueSize() const;
+
+        Workspace& m_workspace;
+        Engine& m_engine;
+        int m_number = 1;
+        std::string m_title;
+        bool m_open = true;
+        bool m_bringToFront = false;
+
+        std::uint64_t m_top = 0;
+        std::uint64_t m_selected = 0;
+        std::uint64_t m_selectionEnd = 0;
+        std::vector<std::uint64_t> m_history;
+        std::vector<Disasm::Instruction> m_lines;
+        int m_visibleLines = 30;
+        bool m_followBreaks = true;
+        std::uint64_t m_lastBreak = 0;
+        float m_codeShare = 0.62f;
+        bool m_focusCode = false;
+        float m_addressWidth = 0.0f;
+        float m_bytesWidth = 0.0f;
+        float m_opcodeWidth = 0.0f;
+        float m_dragStartWidth = 0.0f;
+        bool m_addressAuto = true;
+        std::uint32_t m_addressProcess = 0;
+
+        std::uint64_t m_hexTop = 0;
+        std::uint64_t m_hexSelected = 0;
+        int m_hexNibble = 0;
+        bool m_hexFocus = false;
+        int m_hexDisplay = 0;
+        int m_hexColumns = 16;
+        bool m_hexEditing = false;
+        std::vector<std::uint8_t> m_hexPrevious;
+        std::uint64_t m_hexPreviousTop = 0;
+        std::vector<double> m_hexChangedAt;
+        std::string m_valueBuffer;
+
+        bool m_gotoOpen = false;
+        bool m_gotoHex = false;
+        std::string m_gotoText;
+        std::string m_gotoError;
+        bool m_assembleOpen = false;
+        std::uint64_t m_assembleAddress = 0;
+        std::string m_assembleText;
+        std::string m_assembleError;
+        bool m_assembleNopFill = true;
+        bool m_findOpen = false;
+        std::string m_findText;
+        std::string m_findError;
+        bool m_allocateOpen = false;
+        std::string m_allocateSize = "1000";
+        bool m_injectOpen = false;
+        std::string m_injectPath;
+        std::map<std::uint64_t, std::vector<std::uint8_t>> m_nopped;
+    };
+
+    class StructureWindow : public ToolWindow
+    {
+    public:
+        StructureWindow(Workspace& workspace, int number);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        void Show(std::uint64_t address, const std::string& structure = {});
+
+    private:
+        struct Column
+        {
+            std::string Address;
+            std::uint64_t Value = 0;
+            bool Valid = false;
+        };
+
+        struct Block
+        {
+            std::vector<std::uint64_t> Bases;
+            std::string Path;
+        };
+
+        struct Row
+        {
+            Table::StructDefinition* Definition = nullptr;
+            int Field = 0;
+            int Depth = 0;
+            int Block = 0;
+            bool Expanded = false;
+            int Twin = 0;
+        };
+
+        struct Snapshot
+        {
+            int Block = 0;
+            std::size_t Column = 0;
+            std::uint64_t Start = 0;
+            std::vector<std::uint8_t> Bytes;
+            std::vector<std::uint8_t> Valid;
+            bool Whole = false;
+        };
+
+        void Toolbar();
+        void BuildRows(Table::StructDefinition& definition, std::vector<std::uint64_t> bases, const std::string& path, int depth);
+        int FindEditRow() const;
+        void ReadVisible(int first, int last);
+        bool ReadField(int block, std::size_t column, std::uint64_t address, std::uint8_t* out, std::size_t size) const;
+        void DrawRow(int index, int pointerSize);
+        void FieldMenu(Table::StructDefinition& definition, Table::StructField& field, const std::vector<std::uint64_t>& addresses);
+        Table::StructDefinition& Guess(const std::string& name, std::uint64_t address, int size);
+        Table::StructDefinition& ChildFor(const Table::StructDefinition& parent, const Table::StructField& field, std::uint64_t target);
+        void PrepareNew(std::uint64_t address);
+        std::string FieldText(const Table::StructField& field, std::span<const std::uint8_t> bytes, std::uint64_t address, int pointerSize);
+        Table::StructDefinition* Current();
+
+        Workspace& m_workspace;
+        Engine& m_engine;
+        int m_number = 1;
+        std::string m_title;
+        bool m_open = true;
+        std::vector<Column> m_columns;
+        std::string m_structure;
+        std::set<std::string> m_expanded;
+        std::vector<Block> m_blocks;
+        std::vector<Row> m_rows;
+        std::vector<Snapshot> m_snapshots;
+        int m_guessSize = 4096;
+        bool m_newOpen = false;
+        std::string m_newName;
+        std::uint64_t m_newFrom = 0;
+        std::uint64_t m_newStart = 0;
+        bool m_renameOpen = false;
+        std::string m_renameText;
+        std::string m_editPath;
+        std::string m_editText;
+        bool m_editName = false;
+        std::string m_addOffset;
+        std::string m_pendingStructure;
+        int m_pendingOffset = 0;
+        bool m_pendingInsert = false;
+    };
+
+    class ScriptWindow : public ToolWindow
+    {
+    public:
+        ScriptWindow(Workspace& workspace, int number, std::string script, int recordId, bool lua);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        int RecordId() const { return m_recordId; }
+        void Focus() { m_bringToFront = true; }
+
+    private:
+        void Menu();
+        void Run(bool disable);
+        void Check();
+        void SaveToRecord();
+        void TemplateDialog();
+
+        Workspace& m_workspace;
+        Engine& m_engine;
+        std::string m_title;
+        std::string m_text;
+        std::string m_saved;
+        int m_recordId = 0;
+        bool m_lua = false;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        CodeEditorState m_editor;
+        std::string m_result;
+        bool m_resultOk = true;
+        bool m_templateOpen = false;
+        int m_templateKind = 0;
+        std::string m_templateAddress;
+        std::string m_templateName = "INJECT";
+        std::string m_templateError;
+    };
+
+    class WatchWindow : public ToolWindow
+    {
+    public:
+        WatchWindow(Workspace& workspace, int watchId, Debug::WatchKind kind, std::uint64_t address, int size);
+        ~WatchWindow() override;
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+
+    private:
+        Workspace& m_workspace;
+        Engine& m_engine;
+        std::string m_title;
+        bool m_open = true;
+        int m_watchId = 0;
+        Debug::WatchKind m_kind;
+        std::uint64_t m_address = 0;
+        int m_size = 4;
+        Debug::Watch m_copy;
+        int m_selected = -1;
+        std::map<std::uint64_t, std::string> m_text;
+    };
+
+    class LuaWindow : public ToolWindow
+    {
+    public:
+        explicit LuaWindow(Workspace& workspace);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        void Show() { m_open = true; m_bringToFront = true; }
+
+    private:
+        void Execute();
+        void FunctionList();
+
+        Workspace& m_workspace;
+        Engine& m_engine;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        std::string m_text;
+        CodeEditorState m_editor;
+        CodeAssist m_assist;
+        float m_outputShare = 0.35f;
+        std::uint64_t m_seenOutput = 0;
+        bool m_followOutput = true;
+        bool m_showFunctions = false;
+        float m_functionsWidth = 0.0f;
+        std::string m_functionFilter;
+        std::string m_listedFilter;
+        double m_listedAt = -1.0;
+        std::vector<CodeSuggestion> m_listed;
+    };
+
+    class LogWindow : public ToolWindow
+    {
+    public:
+        explicit LogWindow(Workspace& workspace);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        void Show() { m_open = true; m_bringToFront = true; }
+
+    private:
+        Workspace& m_workspace;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        int m_level = 1;
+        std::string m_search;
+        bool m_follow = true;
+        std::uint64_t m_generation = 0;
+        std::vector<LogEntry> m_entries;
+    };
+
+    class SettingsList;
+
+    class SettingsWindow : public ToolWindow
+    {
+    public:
+        explicit SettingsWindow(Workspace& workspace);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        void Show() { m_open = true; m_bringToFront = true; }
+
+    private:
+        void Navigation(float width, float height);
+        void PageHeader(Settings& settings);
+        bool GeneralPage(SettingsList& list, Settings& settings);
+        bool AppearancePage(SettingsList& list, Settings& settings);
+        bool ScannerPage(SettingsList& list, Settings& settings);
+        bool ScriptsPage(SettingsList& list, Settings& settings);
+        bool DebuggerPage(SettingsList& list, Settings& settings);
+
+        Workspace& m_workspace;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        int m_page = 0;
+        bool m_scrollTop = false;
+        bool m_allImGuiColors = false;
+        bool m_themeReset = false;
+        std::string m_search;
+        std::string m_autoAttach;
+        std::string m_saveError;
+        double m_themeSaveAt = 0.0;
+        double m_savedAt = -100.0;
+    };
+
+    class RecordEditor : public ToolWindow
+    {
+    public:
+        RecordEditor(Workspace& workspace, int recordId);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        int RecordId() const { return m_recordId; }
+        void Focus() { m_bringToFront = true; }
+
+    private:
+        void Load(const Table::MemoryRecord& record);
+        void Apply(Table::MemoryRecord& record);
+        void AddressSection(Table::MemoryRecord& record);
+        void ValueSection();
+        void DropDownSection(Table::MemoryRecord& record);
+        void ChildrenSection(Table::MemoryRecord& record);
+        void HotkeySection();
+        void LookSection();
+        void CopyAddress(const char* id, std::uint64_t address);
+
+        Workspace& m_workspace;
+        Engine& m_engine;
+        int m_recordId = 0;
+        std::string m_title;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        std::string m_description;
+        std::string m_address;
+        std::vector<std::string> m_offsets;
+        int m_type = 2;
+        int m_length = 10;
+        bool m_unicode = false;
+        bool m_zeroTerminate = true;
+        int m_bitStart = 0;
+        int m_bitLength = 1;
+        bool m_hex = false;
+        bool m_signed = true;
+        Table::RecordOptions m_options;
+        int m_freeze = 0;
+        std::string m_dropDown;
+        std::string m_dropDownLink;
+        int m_dropDownSource = 0;
+        bool m_hasAddress = false;
+        std::string m_copied;
+        double m_copiedAt = -10.0;
+        bool m_async = false;
+        bool m_dropDownOnly = false;
+        bool m_dropDownDescription = false;
+        std::vector<Table::Hotkey> m_hotkeys;
+        bool m_capturing = false;
+        int m_captureIndex = -1;
+        std::vector<int> m_capture;
+        float m_color[3] = { 1.0f, 1.0f, 1.0f };
+        bool m_hasColor = false;
+        std::string m_comment;
+        std::string m_error;
+    };
+
+    class SymbolsWindow : public ToolWindow
+    {
+    public:
+        explicit SymbolsWindow(Workspace& workspace);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        void Show() { m_open = true; m_bringToFront = true; }
+
+    private:
+        Workspace& m_workspace;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        std::string m_name;
+        std::string m_address;
+        std::string m_error;
+        std::string m_filter;
+        int m_tab = 0;
+        std::string m_module;
+    };
+
+    class TableFilesWindow : public ToolWindow
+    {
+    public:
+        explicit TableFilesWindow(Workspace& workspace);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        void Show() { m_open = true; m_bringToFront = true; }
+
+    private:
+        void Select(const std::string& name);
+        void Import();
+        void ImportFolder();
+        void AddFiles(const std::vector<std::filesystem::path>& paths);
+        void NewTextFile();
+        void Export(const Table::TableFile& file);
+
+        Workspace& m_workspace;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        std::string m_filter;
+        std::string m_selected;
+        bool m_renaming = false;
+        bool m_renameFocus = false;
+        std::string m_rename;
+        std::string m_text;
+        std::string m_textFor;
+        bool m_textDirty = false;
+        CodeEditorState m_editor;
+    };
+
+    class RegionsWindow : public ToolWindow
+    {
+    public:
+        explicit RegionsWindow(Workspace& workspace);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        void Show() { m_open = true; m_bringToFront = true; m_dirty = true; }
+
+    private:
+        Workspace& m_workspace;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        bool m_dirty = true;
+        bool m_committedOnly = true;
+        std::string m_filter;
+        std::vector<Target::RegionInfo> m_regions;
+    };
+}

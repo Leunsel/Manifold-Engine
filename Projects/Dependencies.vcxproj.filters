@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Dependencies">
+      <UniqueIdentifier>{9D453107-EA73-5083-B7FE-3F8AA4EEE5F0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Dependencies\ImGui">
+      <UniqueIdentifier>{F120EDC0-8222-513E-A261-E69EF84574F9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Dependencies\ImGui\backends">
+      <UniqueIdentifier>{115E8BCC-FB38-5D31-9FC9-B98A3EB1FE23}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Dependencies\Lua">
+      <UniqueIdentifier>{A1115B7C-074C-5ACC-BC6E-ADACD56C48BC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Dependencies\Zydis">
+      <UniqueIdentifier>{D846E18A-62AA-5BD7-8D2B-DC7417CB15FA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Dependencies\stb">
+      <UniqueIdentifier>{C1718A3D-12D7-5AA6-AD9F-76CE84315060}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Dependencies\ImGui\imgui.cpp">
+      <Filter>Dependencies\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\ImGui\imgui_draw.cpp">
+      <Filter>Dependencies\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\ImGui\imgui_tables.cpp">
+      <Filter>Dependencies\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\ImGui\imgui_widgets.cpp">
+      <Filter>Dependencies\ImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\ImGui\backends\imgui_impl_dx11.cpp">
+      <Filter>Dependencies\ImGui\backends</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\ImGui\backends\imgui_impl_win32.cpp">
+      <Filter>Dependencies\ImGui\backends</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Zydis\Zydis.c">
+      <Filter>Dependencies\Zydis</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lapi.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lauxlib.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lbaselib.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lcode.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lcorolib.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lctype.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\ldblib.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\ldebug.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\ldo.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\ldump.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lfunc.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lgc.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\linit.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\liolib.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\llex.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lmathlib.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lmem.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\loadlib.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lobject.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lopcodes.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\loslib.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lparser.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lstate.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lstring.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lstrlib.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\ltable.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\ltablib.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\ltm.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lundump.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lutf8lib.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lvm.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Dependencies\Lua\lzio.c">
+      <Filter>Dependencies\Lua</Filter>
+    </ClCompile>
+    <ClInclude Include="..\Dependencies\ImGui\imconfig.h">
+      <Filter>Dependencies\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\ImGui\imgui.h">
+      <Filter>Dependencies\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\ImGui\imgui_internal.h">
+      <Filter>Dependencies\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\ImGui\imstb_rectpack.h">
+      <Filter>Dependencies\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\ImGui\imstb_textedit.h">
+      <Filter>Dependencies\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\ImGui\imstb_truetype.h">
+      <Filter>Dependencies\ImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\ImGui\backends\imgui_impl_dx11.h">
+      <Filter>Dependencies\ImGui\backends</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\ImGui\backends\imgui_impl_win32.h">
+      <Filter>Dependencies\ImGui\backends</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lapi.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lauxlib.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lcode.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lctype.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\ldebug.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\ldo.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lfunc.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lgc.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\ljumptab.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\llex.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\llimits.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lmem.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lobject.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lopcodes.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lopnames.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lparser.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lprefix.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lstate.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lstring.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\ltable.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\ltm.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lua.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lua.hpp">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\luaconf.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lualib.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lundump.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lvm.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Lua\lzio.h">
+      <Filter>Dependencies\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\Zydis\Zydis.h">
+      <Filter>Dependencies\Zydis</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\stb\stb_image.h">
+      <Filter>Dependencies\stb</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Dependencies\stb\stb_image_write.h">
+      <Filter>Dependencies\stb</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

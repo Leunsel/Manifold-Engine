@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{9A2B3C4D-5E6F-4071-8293-A4B5C6D7E8F9}</ProjectGuid>
+    <RootNamespace>Dependencies</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>Dependencies</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup>
+    <OutDir>$(ProjectDir)..\Build\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\Build\obj\$(Configuration)\Dependencies\</IntDir>
+    <TargetName>Dependencies</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Source;$(ProjectDir)..\Dependencies\ImGui;$(ProjectDir)..\Dependencies\ImGui\backends;$(ProjectDir)..\Dependencies\Zydis;$(ProjectDir)..\Dependencies\Lua;$(ProjectDir)..\Dependencies\stb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_WINDOWS;WIN32_LEAN_AND_MEAN;NOMINMAX;ZYDIS_STATIC_BUILD;ZYCORE_STATIC_BUILD;IMGUI_IMPL_WIN32_DISABLE_GAMEPAD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Dependencies\ImGui\imgui.cpp" />
+    <ClCompile Include="..\Dependencies\ImGui\imgui_draw.cpp" />
+    <ClCompile Include="..\Dependencies\ImGui\imgui_tables.cpp" />
+    <ClCompile Include="..\Dependencies\ImGui\imgui_widgets.cpp" />
+    <ClCompile Include="..\Dependencies\ImGui\backends\imgui_impl_dx11.cpp" />
+    <ClCompile Include="..\Dependencies\ImGui\backends\imgui_impl_win32.cpp" />
+    <ClCompile Include="..\Dependencies\Zydis\Zydis.c" />
+    <ClCompile Include="..\Dependencies\Lua\lapi.c" />
+    <ClCompile Include="..\Dependencies\Lua\lauxlib.c" />
+    <ClCompile Include="..\Dependencies\Lua\lbaselib.c" />
+    <ClCompile Include="..\Dependencies\Lua\lcode.c" />
+    <ClCompile Include="..\Dependencies\Lua\lcorolib.c" />
+    <ClCompile Include="..\Dependencies\Lua\lctype.c" />
+    <ClCompile Include="..\Dependencies\Lua\ldblib.c" />
+    <ClCompile Include="..\Dependencies\Lua\ldebug.c" />
+    <ClCompile Include="..\Dependencies\Lua\ldo.c" />
+    <ClCompile Include="..\Dependencies\Lua\ldump.c" />
+    <ClCompile Include="..\Dependencies\Lua\lfunc.c" />
+    <ClCompile Include="..\Dependencies\Lua\lgc.c" />
+    <ClCompile Include="..\Dependencies\Lua\linit.c" />
+    <ClCompile Include="..\Dependencies\Lua\liolib.c" />
+    <ClCompile Include="..\Dependencies\Lua\llex.c" />
+    <ClCompile Include="..\Dependencies\Lua\lmathlib.c" />
+    <ClCompile Include="..\Dependencies\Lua\lmem.c" />
+    <ClCompile Include="..\Dependencies\Lua\loadlib.c" />
+    <ClCompile Include="..\Dependencies\Lua\lobject.c" />
+    <ClCompile Include="..\Dependencies\Lua\lopcodes.c" />
+    <ClCompile Include="..\Dependencies\Lua\loslib.c" />
+    <ClCompile Include="..\Dependencies\Lua\lparser.c" />
+    <ClCompile Include="..\Dependencies\Lua\lstate.c" />
+    <ClCompile Include="..\Dependencies\Lua\lstring.c" />
+    <ClCompile Include="..\Dependencies\Lua\lstrlib.c" />
+    <ClCompile Include="..\Dependencies\Lua\ltable.c" />
+    <ClCompile Include="..\Dependencies\Lua\ltablib.c" />
+    <ClCompile Include="..\Dependencies\Lua\ltm.c" />
+    <ClCompile Include="..\Dependencies\Lua\lundump.c" />
+    <ClCompile Include="..\Dependencies\Lua\lutf8lib.c" />
+    <ClCompile Include="..\Dependencies\Lua\lvm.c" />
+    <ClCompile Include="..\Dependencies\Lua\lzio.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\Dependencies\ImGui\imconfig.h" />
+    <ClInclude Include="..\Dependencies\ImGui\imgui.h" />
+    <ClInclude Include="..\Dependencies\ImGui\imgui_internal.h" />
+    <ClInclude Include="..\Dependencies\ImGui\imstb_rectpack.h" />
+    <ClInclude Include="..\Dependencies\ImGui\imstb_textedit.h" />
+    <ClInclude Include="..\Dependencies\ImGui\imstb_truetype.h" />
+    <ClInclude Include="..\Dependencies\ImGui\backends\imgui_impl_dx11.h" />
+    <ClInclude Include="..\Dependencies\ImGui\backends\imgui_impl_win32.h" />
+    <ClInclude Include="..\Dependencies\Lua\lapi.h" />
+    <ClInclude Include="..\Dependencies\Lua\lauxlib.h" />
+    <ClInclude Include="..\Dependencies\Lua\lcode.h" />
+    <ClInclude Include="..\Dependencies\Lua\lctype.h" />
+    <ClInclude Include="..\Dependencies\Lua\ldebug.h" />
+    <ClInclude Include="..\Dependencies\Lua\ldo.h" />
+    <ClInclude Include="..\Dependencies\Lua\lfunc.h" />
+    <ClInclude Include="..\Dependencies\Lua\lgc.h" />
+    <ClInclude Include="..\Dependencies\Lua\ljumptab.h" />
+    <ClInclude Include="..\Dependencies\Lua\llex.h" />
+    <ClInclude Include="..\Dependencies\Lua\llimits.h" />
+    <ClInclude Include="..\Dependencies\Lua\lmem.h" />
+    <ClInclude Include="..\Dependencies\Lua\lobject.h" />
+    <ClInclude Include="..\Dependencies\Lua\lopcodes.h" />
+    <ClInclude Include="..\Dependencies\Lua\lopnames.h" />
+    <ClInclude Include="..\Dependencies\Lua\lparser.h" />
+    <ClInclude Include="..\Dependencies\Lua\lprefix.h" />
+    <ClInclude Include="..\Dependencies\Lua\lstate.h" />
+    <ClInclude Include="..\Dependencies\Lua\lstring.h" />
+    <ClInclude Include="..\Dependencies\Lua\ltable.h" />
+    <ClInclude Include="..\Dependencies\Lua\ltm.h" />
+    <ClInclude Include="..\Dependencies\Lua\lua.h" />
+    <ClInclude Include="..\Dependencies\Lua\lua.hpp" />
+    <ClInclude Include="..\Dependencies\Lua\luaconf.h" />
+    <ClInclude Include="..\Dependencies\Lua\lualib.h" />
+    <ClInclude Include="..\Dependencies\Lua\lundump.h" />
+    <ClInclude Include="..\Dependencies\Lua\lvm.h" />
+    <ClInclude Include="..\Dependencies\Lua\lzio.h" />
+    <ClInclude Include="..\Dependencies\Zydis\Zydis.h" />
+    <ClInclude Include="..\Dependencies\stb\stb_image.h" />
+    <ClInclude Include="..\Dependencies\stb\stb_image_write.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source">
+      <UniqueIdentifier>{E25FDF9A-E54E-5571-A8F0-D1ECF6236D1E}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\App">
+      <UniqueIdentifier>{397AD8EC-106D-5FC0-8EAC-18877AC387D7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Asm">
+      <UniqueIdentifier>{02180128-6CED-5F2E-99B7-EA4864CAC077}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Core">
+      <UniqueIdentifier>{73A25774-4378-5584-ACEE-7DE4AE2DAA51}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Debug">
+      <UniqueIdentifier>{1A4BBA3D-F86F-53E8-9249-3FE146E2D14C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Disasm">
+      <UniqueIdentifier>{0FC4E3E6-ACD6-5947-8C02-7DDC395AB4D3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Generated">
+      <UniqueIdentifier>{38C20A1D-57EE-50A2-9FC6-502A5A108FAC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Lua">
+      <UniqueIdentifier>{BB690E34-A333-5E3B-A34A-37A6C93871AC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Scan">
+      <UniqueIdentifier>{0F036376-D2E8-5DD5-8DC2-6D8E1FF89B4B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Table">
+      <UniqueIdentifier>{BCBB4A0B-09B3-5523-8419-09DCDD32F877}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Target">
+      <UniqueIdentifier>{FF59DD34-E865-52DD-BE8F-230722E791C0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Tests">
+      <UniqueIdentifier>{08C95972-B402-5B3A-A3B9-36F843A24550}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Source\App\Engine.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\App\Settings.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Asm\Assembler.cpp">
+      <Filter>Source\Asm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Asm\AutoAssembler.cpp">
+      <Filter>Source\Asm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp">
+      <Filter>Source\Asm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\Deflate.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\Errors.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\RuntimeLog.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\Text.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\Xml.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Debug\Debugger.cpp">
+      <Filter>Source\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Disasm\Disassembler.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp">
+      <Filter>Source\Generated</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Generated\LuaDocs.cpp">
+      <Filter>Source\Generated</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\InputBox.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaApi.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaAssist.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaCompat.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaEngine.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaObjects.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaTasks.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Scan\Scanner.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Scan\ValueType.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\AddressList.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\CheatTable.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\Structures.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\Process.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\Symbols.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\AssemblerTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\CompatHarness.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\CompatTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\CoreTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\IntegrationTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\Main.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\WatchStress.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClInclude Include="..\Tests\TestKit.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

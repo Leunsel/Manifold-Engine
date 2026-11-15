@@ -1,0 +1,17 @@
+.vs/
+*.user
+*.suo
+*.aps
+*.VC.db
+*.VC.VC.opendb
+ipch/
+
+/Build/
+
+Manifold-Engine.ini
+Manifold-Engine.ini.tmp
+Manifold-Engine.layout.ini
+Manifold-Engine.log
+Manifold-Engine.previous.log
+crashes/
+__pycache__/

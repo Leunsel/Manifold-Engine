@@ -1,0 +1,42 @@
+#include <windows.h>
+#include "..\Resource.h"
+#include "..\Core\Version.h"
+
+#pragma code_page(65001)
+
+IDR_FONT_FA_SOLID        RCDATA "..\..\Dependencies\Fonts\fa-solid-900.ttf"
+
+IDI_APPICON ICON "icon.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    MANIFOLD_VERSION_MAJOR,MANIFOLD_VERSION_MINOR,MANIFOLD_VERSION_PATCH,0
+ PRODUCTVERSION MANIFOLD_VERSION_MAJOR,MANIFOLD_VERSION_MINOR,MANIFOLD_VERSION_PATCH,0
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS      VS_FF_DEBUG
+#else
+ FILEFLAGS      0x0L
+#endif
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_APP
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "000004b0"
+        BEGIN
+            VALUE "CompanyName",      "Manifold"
+            VALUE "Comments",         "Memory scanner, debugger, assembler and Lua scripting for Windows processes."
+            VALUE "FileDescription",  "Manifold Engine"
+            VALUE "FileVersion",      MANIFOLD_VERSION_TEXT
+            VALUE "InternalName",     "Manifold-Engine"
+            VALUE "OriginalFilename", "Manifold-Engine.exe"
+            VALUE "ProductName",      "Manifold Engine"
+            VALUE "ProductVersion",   MANIFOLD_VERSION_TEXT
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0, 1200
+    END
+END

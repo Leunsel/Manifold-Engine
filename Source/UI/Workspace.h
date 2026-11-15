@@ -1,0 +1,163 @@
+#pragma once
+
+#include "App/Engine.h"
+
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace Manifold::UI
+{
+    class Shell
+    {
+    public:
+        virtual void Minimise() = 0;
+        virtual void ToggleMaximised() = 0;
+        virtual bool Maximised() const = 0;
+        virtual void Close() = 0;
+        virtual void AddDragArea(float left, float top, float right, float bottom) = 0;
+        virtual float CornerRadius() const = 0;
+        virtual void* NativeWindow() const = 0;
+        virtual void RestartElevated() = 0;
+        virtual void Restyle() = 0;
+
+    protected:
+        Shell() = default;
+        Shell(const Shell&) = default;
+        Shell& operator=(const Shell&) = default;
+        ~Shell() = default;
+    };
+
+    class ToolWindow
+    {
+    public:
+        virtual ~ToolWindow() = default;
+        virtual void Draw() = 0;
+        virtual bool Closed() const = 0;
+    };
+
+    class MainWindow;
+    class MemoryViewer;
+    class ScriptWindow;
+    class StructureWindow;
+    class WatchWindow;
+    class LuaWindow;
+    class LogWindow;
+    class SettingsWindow;
+    class ProcessPicker;
+    class RecordEditor;
+    class SymbolsWindow;
+    class RegionsWindow;
+    class TableFilesWindow;
+
+    struct FileFilter
+    {
+        const wchar_t* Name;
+        const wchar_t* Pattern;
+    };
+
+    class Workspace
+    {
+    public:
+        Workspace(Engine& engine, Shell& shell);
+        ~Workspace();
+
+        Workspace(const Workspace&) = delete;
+        Workspace& operator=(const Workspace&) = delete;
+
+        void Draw();
+        Engine& Core() { return m_engine; }
+        Shell& Window() { return m_shell; }
+        void RequestRestyle() { m_restyle = true; }
+
+        void OpenMemoryViewer(std::uint64_t address, bool hexView = false, bool newWindow = false);
+        void OpenStructure(std::uint64_t address, const std::string& structure = {});
+        void OpenScript(std::string script, int recordId = 0, bool lua = false);
+        void OpenLua();
+        void OpenLog();
+        void OpenSettings();
+        void OpenProcessPicker();
+        void OpenAbout();
+        void OpenSymbols();
+        void OpenRegions();
+        void OpenTableFiles();
+        void OpenRecordEditor(int recordId);
+        void StartWatch(Debug::WatchKind kind, std::uint64_t address, int size);
+        void AddAddress(std::uint64_t address, Scan::ValueType type, std::string description = {});
+        void Confirm(std::string title, std::string text, std::function<void()> yes, std::string yesLabel = "Yes");
+        void Report(const Status& status);
+        void NoProcessState(const char* icon, std::string_view text);
+
+        std::optional<std::filesystem::path> OpenFileDialog(const std::vector<FileFilter>& filters, const std::filesystem::path& folder = {});
+        std::optional<std::filesystem::path> SaveFileDialog(const std::vector<FileFilter>& filters, const std::string& name, const wchar_t* extension);
+        std::vector<std::filesystem::path> OpenFilesDialog(const std::vector<FileFilter>& filters, const std::filesystem::path& folder = {});
+        std::optional<std::filesystem::path> FolderDialog();
+
+        bool OpenTable(const std::filesystem::path& path, bool merge);
+        bool SaveTable(bool askName);
+        void NewTable();
+        void RequestQuit();
+        static std::string WithoutCodes(std::string_view text);
+        void TurnOffEverything();
+        bool QuitConfirmed() const { return m_quitConfirmed; }
+
+        void CopyRecords(const std::vector<int>& ids);
+        void PasteRecords(int parentId);
+
+        std::uint64_t LastCodeAddress = 0;
+
+    private:
+        void HandleRequests();
+        void HandleShortcuts();
+        void DrawNotices();
+        void DrawConfirm();
+        void DrawTableScriptPrompt();
+        void DrawAbout();
+        void DrawWindows();
+
+        Engine& m_engine;
+        Shell& m_shell;
+        double m_lastProcessCheckedAt = -100.0;
+        std::uint32_t m_lastProcessId = 0;
+        std::unique_ptr<MainWindow> m_main;
+        std::vector<std::unique_ptr<MemoryViewer>> m_memoryViewers;
+        std::vector<std::unique_ptr<StructureWindow>> m_structures;
+        std::vector<std::unique_ptr<ScriptWindow>> m_scripts;
+        std::vector<std::unique_ptr<WatchWindow>> m_watches;
+        std::vector<std::unique_ptr<RecordEditor>> m_editors;
+        std::unique_ptr<LuaWindow> m_lua;
+        std::unique_ptr<LogWindow> m_log;
+        std::unique_ptr<SettingsWindow> m_settings;
+        std::unique_ptr<ProcessPicker> m_picker;
+        std::unique_ptr<SymbolsWindow> m_symbols;
+        std::unique_ptr<RegionsWindow> m_regions;
+        std::unique_ptr<TableFilesWindow> m_tableFiles;
+        int m_nextWindow = 1;
+
+        struct ConfirmRequest
+        {
+            std::string Title;
+            std::string Text;
+            std::string YesLabel;
+            std::function<void()> Yes;
+            unsigned int Viewport = 0;
+        };
+        std::vector<ConfirmRequest> m_confirms;
+        bool m_quitPrompt = false;
+        bool m_quitRemember = false;
+        void QuitAfterTable();
+        void TurnOffAndQuit();
+        void FinishQuit();
+        void DrawQuitPrompt();
+        bool m_aboutOpen = false;
+        bool m_quitConfirmed = false;
+        bool m_restyle = false;
+    };
+
+    std::string NextWindowTitle(const char* base, int number);
+}

@@ -1,0 +1,46 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Manifold-Engine", "Projects\Manifold-Engine.vcxproj", "{6C1E2A4B-7D93-4F0E-9A51-2B8C3D4E5F60}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Dependencies", "Projects\Dependencies.vcxproj", "{9A2B3C4D-5E6F-4071-8293-A4B5C6D7E8F9}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Manifold-Engine.Tests", "Projects\Manifold-Engine.Tests.vcxproj", "{3F4E5D6C-7B8A-4990-A1B2-C3D4E5F60718}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TestTarget", "Projects\TestTarget.vcxproj", "{7E8F9A0B-1C2D-4E3F-8A4B-5C6D7E8F9012}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ManifoldAgent", "Projects\ManifoldAgent.vcxproj", "{2D3C4B5A-6978-4A1B-9C8D-0E1F2A3B4C5D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6C1E2A4B-7D93-4F0E-9A51-2B8C3D4E5F60}.Debug|x64.ActiveCfg = Debug|x64
+		{6C1E2A4B-7D93-4F0E-9A51-2B8C3D4E5F60}.Debug|x64.Build.0 = Debug|x64
+		{6C1E2A4B-7D93-4F0E-9A51-2B8C3D4E5F60}.Release|x64.ActiveCfg = Release|x64
+		{6C1E2A4B-7D93-4F0E-9A51-2B8C3D4E5F60}.Release|x64.Build.0 = Release|x64
+		{9A2B3C4D-5E6F-4071-8293-A4B5C6D7E8F9}.Debug|x64.ActiveCfg = Debug|x64
+		{9A2B3C4D-5E6F-4071-8293-A4B5C6D7E8F9}.Debug|x64.Build.0 = Debug|x64
+		{9A2B3C4D-5E6F-4071-8293-A4B5C6D7E8F9}.Release|x64.ActiveCfg = Release|x64
+		{9A2B3C4D-5E6F-4071-8293-A4B5C6D7E8F9}.Release|x64.Build.0 = Release|x64
+		{3F4E5D6C-7B8A-4990-A1B2-C3D4E5F60718}.Debug|x64.ActiveCfg = Debug|x64
+		{3F4E5D6C-7B8A-4990-A1B2-C3D4E5F60718}.Debug|x64.Build.0 = Debug|x64
+		{3F4E5D6C-7B8A-4990-A1B2-C3D4E5F60718}.Release|x64.ActiveCfg = Release|x64
+		{3F4E5D6C-7B8A-4990-A1B2-C3D4E5F60718}.Release|x64.Build.0 = Release|x64
+		{7E8F9A0B-1C2D-4E3F-8A4B-5C6D7E8F9012}.Debug|x64.ActiveCfg = Debug|x64
+		{7E8F9A0B-1C2D-4E3F-8A4B-5C6D7E8F9012}.Debug|x64.Build.0 = Debug|x64
+		{7E8F9A0B-1C2D-4E3F-8A4B-5C6D7E8F9012}.Release|x64.ActiveCfg = Release|x64
+		{7E8F9A0B-1C2D-4E3F-8A4B-5C6D7E8F9012}.Release|x64.Build.0 = Release|x64
+		{2D3C4B5A-6978-4A1B-9C8D-0E1F2A3B4C5D}.Debug|x64.ActiveCfg = Debug|x64
+		{2D3C4B5A-6978-4A1B-9C8D-0E1F2A3B4C5D}.Debug|x64.Build.0 = Debug|x64
+		{2D3C4B5A-6978-4A1B-9C8D-0E1F2A3B4C5D}.Release|x64.ActiveCfg = Release|x64
+		{2D3C4B5A-6978-4A1B-9C8D-0E1F2A3B4C5D}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

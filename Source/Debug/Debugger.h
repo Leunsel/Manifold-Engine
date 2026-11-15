@@ -1,0 +1,232 @@
+#pragma once
+
+#include "Core/Errors.h"
+#include "Disasm/Disassembler.h"
+
+#include <atomic>
+#include <condition_variable>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <future>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace Manifold::Target
+{
+    class Process;
+}
+
+namespace Manifold::Debug
+{
+    enum class WatchKind
+    {
+        Accesses,
+        Writes,
+        InstructionAccesses,
+        Calls
+    };
+
+    struct WatchEntry
+    {
+        std::uint64_t Instruction = 0;
+        std::uint64_t Accessed = 0;
+        std::uint64_t Count = 0;
+        std::uint32_t ThreadId = 0;
+        Disasm::RegisterValues Registers;
+    };
+
+    struct Watch
+    {
+        int Id = 0;
+        WatchKind Kind = WatchKind::Accesses;
+        std::uint64_t Address = 0;
+        int Size = 4;
+        bool Running = false;
+        int Slot = -1;
+        std::uint64_t Hits = 0;
+        std::uint64_t Generation = 0;
+        std::vector<WatchEntry> Entries;
+    };
+
+    enum class BreakpointType
+    {
+        Execute,
+        Write,
+        Access
+    };
+
+    struct Breakpoint
+    {
+        std::uint64_t Address = 0;
+        BreakpointType Type = BreakpointType::Execute;
+        int Size = 1;
+        bool Hardware = false;
+        int Slot = -1;
+        bool Temporary = false;
+        int WatchId = 0;
+        std::uint8_t Original = 0;
+        bool Inserted = false;
+    };
+
+    enum class ResumeMode
+    {
+        Continue,
+        StepInto,
+        StepOver,
+        RunToReturn
+    };
+
+    struct BreakInfo
+    {
+        bool Broken = false;
+        std::uint32_t ThreadId = 0;
+        std::uint64_t Address = 0;
+        std::uint64_t BreakpointAddress = 0;
+        Disasm::RegisterValues Registers;
+        std::string Reason;
+        std::uint64_t Serial = 0;
+        bool Is64Bit = true;
+    };
+
+    const char* WatchKindName(WatchKind kind);
+    const char* BreakpointTypeName(BreakpointType type);
+
+    enum class Backend
+    {
+        Windows,
+        Veh
+    };
+
+    class Debugger
+    {
+    public:
+        Debugger();
+        ~Debugger();
+
+        Debugger(const Debugger&) = delete;
+        Debugger& operator=(const Debugger&) = delete;
+
+        Status Attach(std::shared_ptr<Target::Process> process);
+        void Detach();
+        bool Attached() const { return m_attached.load(); }
+        std::uint64_t Generation() const { return m_generation.load(); }
+        void SetLogDebugStrings(bool on) { m_logDebugStrings = on; }
+        void SetPreferHardware(bool on) { m_preferHardware = on; }
+        void SetBackend(Backend backend) { m_backend = backend; }
+        Backend CurrentBackend() const { return m_backend; }
+        bool UsingVeh() const { return m_backend == Backend::Veh; }
+        int HiddenThreads() const { return m_hiddenThreads.load(); }
+        bool MainThreadHidden() const { return m_mainThreadHidden.load(); }
+
+        Status StartWatch(WatchKind kind, std::uint64_t address, int size, int& id);
+        void StopWatch(int id);
+        void RemoveWatch(int id);
+        void ClearWatch(int id);
+        bool CopyWatch(int id, Watch& out) const;
+        std::vector<int> WatchIds() const;
+
+        Status SetBreakpoint(std::uint64_t address, BreakpointType type, int size, bool hardware);
+        Status RemoveBreakpoint(std::uint64_t address);
+        Status ToggleBreakpoint(std::uint64_t address);
+        bool HasBreakpoint(std::uint64_t address) const;
+        std::vector<Breakpoint> Breakpoints() const;
+        int FreeHardwareSlots() const;
+
+        bool Broken() const;
+        BreakInfo Break() const;
+        void Resume(ResumeMode mode);
+        void SetRegisters(const Disasm::RegisterValues& registers);
+        Status BreakNow();
+        void Unpatch(std::uint64_t address, std::uint8_t* buffer, std::size_t size) const;
+
+    private:
+        struct ThreadState;
+        struct Task
+        {
+            std::function<Status()> Work;
+            std::shared_ptr<std::promise<Status>> Done;
+        };
+
+        Status Post(std::function<Status()> work, unsigned timeoutMilliseconds = 3000);
+        void Loop(std::shared_ptr<std::promise<Status>> attached);
+        void RunTasks();
+        unsigned long HandleException(void* event, bool& enterBreak, std::string& reason, std::uint64_t& breakpointAddress);
+        void EnterBreak(std::uint32_t threadId, const std::string& reason, std::uint64_t breakpointAddress);
+        Status ApplyHardware(std::uint32_t onlyThread = 0);
+        void LeaveOut(ThreadState& thread);
+        void CheckHiddenThreads(bool force);
+        void CountHidden();
+        void AttributeLostHit(std::uint64_t ip, std::uint32_t threadId, const Disasm::RegisterValues& registers);
+        Status InsertSoftware(Breakpoint& breakpoint);
+        void RemoveSoftware(Breakpoint& breakpoint);
+        int TakeSlot() const;
+        Status AddBreakpointInternal(Breakpoint breakpoint);
+        void RemoveBreakpointInternal(std::uint64_t address);
+        void UnpatchLocked(std::uint64_t address, std::uint8_t* buffer, std::size_t size) const;
+        std::optional<std::uint64_t> PreviousInstruction(std::uint64_t address) const;
+        void RecordHit(Watch& watch, std::uint64_t instruction, std::uint64_t accessed, std::uint32_t threadId, const Disasm::RegisterValues& registers);
+        void CleanUp();
+
+        Status VehAttach();
+        void VehDetach();
+        Status VehStartWatch(WatchKind kind, std::uint64_t address, int size, int& id);
+        void VehSetActive(int id, bool active);
+        void VehBump();
+        void VehPollLoop();
+        int VehFreeSlot() const;
+        Status VehSetBreakpoint(std::uint64_t address);
+        void VehRemoveBreakpoint(std::uint64_t address);
+        void VehResume(ResumeMode mode);
+        void VehSetRegisters(const Disasm::RegisterValues& registers);
+        void VehWriteSlot(int slot, std::uint32_t mode, std::uint64_t address, int size, bool active);
+        void VehCheckBreak();
+        std::vector<std::uint64_t> VehStepTargets(const Disasm::Instruction& instruction, const Disasm::RegisterValues& registers, ResumeMode mode) const;
+        void VehClearTempSlots();
+        std::wstring AgentPath() const;
+
+        std::shared_ptr<Target::Process> m_process;
+        std::unique_ptr<Disasm::Disassembler> m_disassembler;
+        std::thread m_thread;
+        std::atomic<bool> m_attached{ false };
+        std::atomic<bool> m_stop{ false };
+        std::atomic<std::uint64_t> m_generation{ 1 };
+        std::atomic<bool> m_logDebugStrings{ true };
+        std::atomic<bool> m_preferHardware{ false };
+        bool m_is64Bit = true;
+        bool m_initialBreakSeen = false;
+
+        mutable std::mutex m_lock;
+        std::condition_variable m_wake;
+        std::deque<Task> m_tasks;
+        std::map<std::uint32_t, std::unique_ptr<ThreadState>> m_threads;
+        std::map<std::uint64_t, Breakpoint> m_breakpoints;
+        std::map<int, Watch> m_watches;
+        int m_nextWatchId = 1;
+
+        BreakInfo m_break;
+        bool m_resumeRequested = false;
+        ResumeMode m_resumeMode = ResumeMode::Continue;
+        bool m_registersChanged = false;
+        Disasm::RegisterValues m_newRegisters;
+        std::uint64_t m_breakSerial = 0;
+        bool m_breakRequested = false;
+        std::uint64_t m_lastHardwareTick = 0;
+        std::uint64_t m_lastHiddenCheck = 0;
+        std::uint32_t m_mainThread = 0;
+        std::atomic<int> m_hiddenThreads{ 0 };
+        std::atomic<bool> m_mainThreadHidden{ false };
+
+        Backend m_backend = Backend::Windows;
+        std::uint64_t m_vehBlock = 0;
+        std::thread m_vehThread;
+        std::atomic<bool> m_vehStop{ false };
+        std::uint64_t m_vehBreakSerial = 0;
+        std::vector<int> m_vehTempSlots;
+    };
+}
