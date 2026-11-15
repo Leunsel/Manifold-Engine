@@ -70,6 +70,11 @@ namespace Manifold::UI
         void ResultMenu(std::uint64_t index);
         void RunResultCommand(Command command, std::uint64_t index);
         void ResultValueDialog();
+        void SaveResultsDialog();
+        std::string ResultText(const Scan::ScanRecord& record, std::span<const std::uint8_t> bytes);
+        void AddResult(const Scan::ScanRecord& record);
+        Status FillCustom(Scan::ScanOptions& options, const std::string& name) const;
+        std::string ScanTypeLabel() const;
         Table::MemoryRecord* FocusRecord();
         void WriteValues(const std::vector<int>& ids, const std::string& text);
         void UndoValueChange();
@@ -86,11 +91,23 @@ namespace Manifold::UI
         Engine& m_engine;
         bool m_release = false;
         std::vector<ValueUndo> m_valueUndo;
+        struct ResultTarget
+        {
+            std::uint64_t Address = 0;
+            Scan::ValueType Type = Scan::ValueType::FourBytes;
+        };
+
         bool m_resultValueDialog = false;
         std::string m_resultValueText;
-        std::vector<std::uint64_t> m_resultValueTargets;
+        std::vector<ResultTarget> m_resultValueTargets;
+        bool m_saveResultsDialog = false;
+        std::string m_saveResultsName;
 
         int m_typeIndex = 2;
+        Scan::ScanKind m_scanKind = Scan::ScanKind::Single;
+        std::string m_customName;
+        Scan::CompareTo m_compareTo = Scan::CompareTo::Previous;
+        std::string m_savedName;
         int m_compareIndex = 0;
         std::string m_value;
         std::string m_value2;

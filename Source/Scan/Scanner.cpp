@@ -183,9 +183,17 @@ namespace Manifold::Scan
         public:
             Status Build(const ScanOptions& options, int pointerSize)
             {
-                m_type = options.Type;
+                m_kind = options.Kind;
                 m_mode = options.Mode;
                 m_floats = options.Floats;
+                if (m_kind == ScanKind::Grouped || m_kind == ScanKind::Custom)
+                {
+                    if (!CompareAvailable(m_kind, m_mode))
+                        return Status::Fail(ErrorCode::ScanCompareUnavailable, CompareName(m_mode));
+                    m_type = ValueType::ByteArray;
+                    return m_kind == ScanKind::Grouped ? BuildGroup(options, pointerSize) : BuildCustom(options);
+                }
+                m_type = options.Type;
                 ValueFormat format;
                 format.Hex = options.Hex;
                 format.Unicode = options.Unicode;
@@ -288,9 +296,46 @@ namespace Manifold::Scan
                 return Status::Success();
             }
 
+            Status BuildGroup(const ScanOptions& options, int pointerSize)
+            {
+                const bool needsSpec = m_mode == Compare::Exact || options.BlockSize <= 0;
+                if (needsSpec)
+                {
+                    std::string error;
+                    auto spec = ParseGroup(options.Value, options.Hex, pointerSize, error);
+                    if (!spec)
+                        return Status::Fail(ErrorCode::ScanGroupSyntax, error);
+                    if (options.BlockSize > 0 && spec->BlockSize != options.BlockSize)
+                        return Status::Fail(ErrorCode::ScanGroupSyntax,
+                            Manifold::Format("the group covers %d bytes, the results %d; a next scan needs the same size", spec->BlockSize, options.BlockSize));
+                    m_group = std::make_shared<const GroupSpec>(std::move(*spec));
+                    m_size = m_group->BlockSize;
+                    return Status::Success();
+                }
+                m_size = options.BlockSize;
+                return Status::Success();
+            }
+
+            Status BuildCustom(const ScanOptions& options)
+            {
+                m_size = options.CustomSize;
+                if (m_size <= 0 || m_size > kGroupMaxBytes)
+                    return Status::Fail(ErrorCode::ScanCustomMissing, options.CustomName);
+                if (m_mode == Compare::Exact)
+                {
+                    if (options.CustomBytes.size() != static_cast<std::size_t>(m_size))
+                        return Status::Fail(ErrorCode::ScanBadValue, options.Value);
+                    m_patternA = options.CustomBytes;
+                    m_patternB = options.CustomBytes;
+                    m_mask.assign(m_patternA.size(), 0xFF);
+                }
+                return Status::Success();
+            }
+
             int Size() const { return m_size; }
             ValueType Type() const { return m_type; }
             Compare Mode() const { return m_mode; }
+            std::shared_ptr<const GroupSpec> Group() const { return m_group; }
             bool NeedsPrevious() const
             {
                 return m_mode == Compare::Increased || m_mode == Compare::IncreasedBy || m_mode == Compare::Decreased || m_mode == Compare::DecreasedBy ||
@@ -299,6 +344,17 @@ namespace Manifold::Scan
 
             bool Test(const std::uint8_t* now, const std::uint8_t* previous, const std::uint8_t* first) const
             {
+                if (m_kind == ScanKind::Grouped)
+                {
+                    switch (m_mode)
+                    {
+                    case Compare::Exact: return m_group && m_group->Matches(now);
+                    case Compare::Changed: return std::memcmp(now, previous, static_cast<std::size_t>(m_size)) != 0;
+                    case Compare::Unchanged: return std::memcmp(now, previous, static_cast<std::size_t>(m_size)) == 0;
+                    case Compare::SameAsFirst: return std::memcmp(now, first, static_cast<std::size_t>(m_size)) == 0;
+                    default: return true;
+                    }
+                }
                 if (m_type == ValueType::String || (m_type == ValueType::ByteArray && !m_patternA.empty() && CompareNeedsValue(m_mode)))
                 {
                     if (m_mode == Compare::Changed)
@@ -411,9 +467,11 @@ namespace Manifold::Scan
                 }
             }
 
+            ScanKind m_kind = ScanKind::Single;
             ValueType m_type = ValueType::FourBytes;
             Compare m_mode = Compare::Exact;
             FloatMode m_floats = FloatMode::Rounded;
+            std::shared_ptr<const GroupSpec> m_group;
             int m_size = 4;
             std::int64_t m_intA = 0;
             std::int64_t m_intB = 0;
@@ -432,56 +490,322 @@ namespace Manifold::Scan
             const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
             return static_cast<int>(std::clamp(cores / 2u, 2u, 8u));
         }
+
+        constexpr std::size_t kTypeSlots = 16;
+
+        std::size_t Slot(ValueType type)
+        {
+            return static_cast<std::size_t>(type) % kTypeSlots;
+        }
+
+        struct TypedMatchers
+        {
+            std::vector<ValueType> Types;
+            std::optional<Matcher> ByType[kTypeSlots];
+
+            const Matcher* Find(ValueType type) const
+            {
+                const auto& slot = ByType[Slot(type)];
+                return slot ? &*slot : nullptr;
+            }
+        };
+
+        std::vector<ValueType> MaskTypes(std::uint32_t mask)
+        {
+            std::vector<ValueType> types;
+            for (ValueType type : kAllTypes)
+            {
+                if (mask & AllTypeBit(type))
+                    types.push_back(type);
+            }
+            return types;
+        }
+
+        bool Fractional(std::string_view text)
+        {
+            return TrimView(text).find_first_of(".,") != std::string_view::npos;
+        }
+
+        Status BuildAll(const ScanOptions& options, int pointerSize, const std::vector<ValueType>& types, TypedMatchers& out)
+        {
+            const bool needsValue = CompareNeedsValue(options.Mode);
+            const bool fractional = needsValue && !options.Hex && (Fractional(options.Value) || (CompareNeedsTwoValues(options.Mode) && Fractional(options.Value2)));
+            Status first;
+            for (ValueType type : types)
+            {
+                if (fractional && !IsFloating(type))
+                    continue;
+                ScanOptions single = options;
+                single.Kind = ScanKind::Single;
+                single.Type = type;
+                Matcher matcher;
+                if (Status built = matcher.Build(single, pointerSize); !built)
+                {
+                    if (first.Ok())
+                        first = built;
+                    continue;
+                }
+                out.ByType[Slot(type)] = std::move(matcher);
+                out.Types.push_back(type);
+            }
+            if (out.Types.empty())
+                return first.Ok() || first.Code == ErrorCode::ScanBadValue ? Status::Fail(ErrorCode::ScanNoTypes) : first;
+            return Status::Success();
+        }
     }
 
     class ResultSet
     {
     public:
+        ScanKind Kind = ScanKind::Single;
         ValueType Type = ValueType::FourBytes;
         ValueFormat Format;
         int ValueSize = 4;
         int Alignment = 4;
         bool IsSnapshot = false;
+        std::vector<ValueType> AllList;
+        std::shared_ptr<const GroupSpec> Group;
+        std::string CustomName;
         std::vector<std::unique_ptr<TempFile>> Files;
         std::vector<Segment> Segments;
         std::vector<Snapshot> Snapshots;
         std::uint64_t Count = 0;
 
-        std::size_t RecordSize() const { return 8 + 2 * static_cast<std::size_t>(ValueSize); }
+        std::size_t TagBytes() const { return Kind == ScanKind::All ? 1 : 0; }
+        std::uint64_t Multiplicity() const { return Kind == ScanKind::All ? std::max<std::uint64_t>(1, AllList.size()) : 1; }
+        std::size_t RecordSize() const { return 8 + TagBytes() + 2 * static_cast<std::size_t>(ValueSize); }
 
         bool Record(std::uint64_t index, ScanRecord& out) const
         {
             if (index >= Count)
                 return false;
+            out.Type = Type;
             if (IsSnapshot)
             {
                 auto found = std::upper_bound(Snapshots.begin(), Snapshots.end(), index, [](std::uint64_t value, const Snapshot& snapshot) { return value < snapshot.Before; });
                 if (found == Snapshots.begin())
                     return false;
                 --found;
-                const std::uint64_t position = index - found->Before;
+                const std::uint64_t entry = index - found->Before;
+                const std::uint64_t position = entry / Multiplicity();
+                if (Kind == ScanKind::All && !AllList.empty())
+                    out.Type = AllList[static_cast<std::size_t>(entry % Multiplicity())];
                 const std::uint64_t offset = position * static_cast<std::uint64_t>(Alignment);
                 out.Address = found->Base + offset;
                 out.Previous.resize(static_cast<std::size_t>(ValueSize));
                 if (!Files[static_cast<std::size_t>(found->File)]->ReadAt(found->Offset + offset, out.Previous.data(), out.Previous.size()))
                     return false;
+                Fit(out.Previous, out.Type);
                 out.First = out.Previous;
                 return true;
             }
+            std::vector<std::uint8_t> raw;
+            std::uint64_t got = 0;
+            if (!ReadBatch(index, 1, raw, got) || got != 1)
+                return false;
+            std::memcpy(&out.Address, raw.data(), 8);
+            const std::size_t tag = TagBytes();
+            if (tag)
+                out.Type = static_cast<ValueType>(raw[8]);
+            out.Previous.assign(raw.begin() + static_cast<std::ptrdiff_t>(8 + tag), raw.begin() + static_cast<std::ptrdiff_t>(8 + tag + static_cast<std::size_t>(ValueSize)));
+            out.First.assign(raw.begin() + static_cast<std::ptrdiff_t>(8 + tag + static_cast<std::size_t>(ValueSize)), raw.end());
+            Fit(out.Previous, out.Type);
+            Fit(out.First, out.Type);
+            return true;
+        }
+
+        bool ReadBatch(std::uint64_t index, std::uint64_t most, std::vector<std::uint8_t>& out, std::uint64_t& got) const
+        {
+            got = 0;
+            if (IsSnapshot || index >= Count)
+                return false;
             auto found = std::upper_bound(Segments.begin(), Segments.end(), index, [](std::uint64_t value, const Segment& segment) { return value < segment.Before; });
             if (found == Segments.begin())
                 return false;
             --found;
             const std::uint64_t position = index - found->Before;
-            std::vector<std::uint8_t> raw(RecordSize());
-            if (!Files[static_cast<std::size_t>(found->File)]->ReadAt(found->Offset + position * RecordSize(), raw.data(), raw.size()))
-                return false;
-            std::memcpy(&out.Address, raw.data(), 8);
-            out.Previous.assign(raw.begin() + 8, raw.begin() + 8 + ValueSize);
-            out.First.assign(raw.begin() + 8 + ValueSize, raw.end());
-            return true;
+            got = std::min(most, found->Count - position);
+            out.resize(static_cast<std::size_t>(got) * RecordSize());
+            return Files[static_cast<std::size_t>(found->File)]->ReadAt(found->Offset + position * RecordSize(), out.data(), out.size());
+        }
+
+    private:
+        void Fit(std::vector<std::uint8_t>& bytes, ValueType type) const
+        {
+            if (Kind == ScanKind::All)
+                bytes.resize(static_cast<std::size_t>(Scan::ValueSize(type, Format)));
         }
     };
+
+    namespace
+    {
+        std::uint64_t KeyOf(std::uint64_t address, std::uint8_t tag)
+        {
+            return (address << 8) | tag;
+        }
+
+        class SavedLookup
+        {
+        public:
+            explicit SavedLookup(const ResultSet& saved) : m_saved(saved) {}
+
+            const std::uint8_t* Find(std::uint64_t address, ValueType type)
+            {
+                if (m_saved.IsSnapshot)
+                    return FromSnapshot(address);
+                if (m_saved.Count == 0)
+                    return nullptr;
+                const std::uint8_t tag = m_saved.TagBytes() ? static_cast<std::uint8_t>(type) : 0;
+                const std::uint64_t key = KeyOf(address, tag);
+                if (!m_maxKey)
+                {
+                    std::uint64_t last = 0;
+                    if (!KeyAt(m_saved.Count - 1, last))
+                        return nullptr;
+                    m_maxKey = last;
+                }
+                if (key > *m_maxKey)
+                    return nullptr;
+                if (m_count == 0 || key < m_firstKey || key > m_lastKey)
+                {
+                    bool placed = false;
+                    if (m_count != 0 && key > m_lastKey)
+                    {
+                        for (int step = 0; step < 4 && m_start + m_count < m_saved.Count; ++step)
+                        {
+                            if (!Load(m_start + m_count))
+                                return nullptr;
+                            if (key <= m_lastKey)
+                            {
+                                placed = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!placed)
+                    {
+                        std::uint64_t low = 0;
+                        std::uint64_t high = m_saved.Count;
+                        while (low < high)
+                        {
+                            const std::uint64_t middle = low + (high - low) / 2;
+                            std::uint64_t value = 0;
+                            if (!KeyAt(middle, value))
+                                return nullptr;
+                            if (value < key)
+                                low = middle + 1;
+                            else
+                                high = middle;
+                        }
+                        if (low >= m_saved.Count || !Load(low))
+                            return nullptr;
+                    }
+                }
+                std::uint64_t low = 0;
+                std::uint64_t high = m_count;
+                while (low < high)
+                {
+                    const std::uint64_t middle = low + (high - low) / 2;
+                    if (EntryKey(middle) < key)
+                        low = middle + 1;
+                    else
+                        high = middle;
+                }
+                if (low >= m_count || EntryKey(low) != key)
+                    return nullptr;
+                return m_bytes.data() + static_cast<std::size_t>(low) * m_saved.RecordSize() + 8 + m_saved.TagBytes();
+            }
+
+        private:
+            const std::uint8_t* FromSnapshot(std::uint64_t address)
+            {
+                const auto& snapshots = m_saved.Snapshots;
+                auto found = std::upper_bound(snapshots.begin(), snapshots.end(), address, [](std::uint64_t value, const Snapshot& snapshot) { return value < snapshot.Base; });
+                if (found == snapshots.begin())
+                    return nullptr;
+                --found;
+                if (address + static_cast<std::uint64_t>(m_saved.ValueSize) > found->Base + found->Size)
+                    return nullptr;
+                const std::size_t index = static_cast<std::size_t>(found - snapshots.begin());
+                if (index != m_snapshot)
+                {
+                    m_bytes.resize(static_cast<std::size_t>(found->Size));
+                    if (!m_saved.Files[static_cast<std::size_t>(found->File)]->ReadAt(found->Offset, m_bytes.data(), m_bytes.size()))
+                    {
+                        m_snapshot = static_cast<std::size_t>(-1);
+                        return nullptr;
+                    }
+                    m_snapshot = index;
+                }
+                return m_bytes.data() + (address - found->Base);
+            }
+
+            bool KeyAt(std::uint64_t index, std::uint64_t& key) const
+            {
+                std::vector<std::uint8_t> raw;
+                std::uint64_t got = 0;
+                if (!m_saved.ReadBatch(index, 1, raw, got) || got != 1)
+                    return false;
+                std::uint64_t address = 0;
+                std::memcpy(&address, raw.data(), 8);
+                key = KeyOf(address, m_saved.TagBytes() ? raw[8] : 0);
+                return true;
+            }
+
+            std::uint64_t EntryKey(std::uint64_t entry) const
+            {
+                const std::uint8_t* raw = m_bytes.data() + static_cast<std::size_t>(entry) * m_saved.RecordSize();
+                std::uint64_t address = 0;
+                std::memcpy(&address, raw, 8);
+                return KeyOf(address, m_saved.TagBytes() ? raw[8] : 0);
+            }
+
+            bool Load(std::uint64_t index)
+            {
+                m_count = 0;
+                std::uint64_t got = 0;
+                if (!m_saved.ReadBatch(index, 4096, m_bytes, got) || got == 0)
+                    return false;
+                m_start = index;
+                m_count = got;
+                m_firstKey = EntryKey(0);
+                m_lastKey = EntryKey(got - 1);
+                return true;
+            }
+
+            const ResultSet& m_saved;
+            std::vector<std::uint8_t> m_bytes;
+            std::size_t m_snapshot = static_cast<std::size_t>(-1);
+            std::uint64_t m_start = 0;
+            std::uint64_t m_count = 0;
+            std::uint64_t m_firstKey = 0;
+            std::uint64_t m_lastKey = 0;
+            std::optional<std::uint64_t> m_maxKey;
+        };
+
+        bool SavedFits(const ResultSet& saved, ScanKind kind, ValueType type, int valueSize, std::string_view custom)
+        {
+            if (saved.Kind != kind || saved.ValueSize != valueSize)
+                return false;
+            if (kind == ScanKind::Single)
+                return saved.Type == type;
+            if (kind == ScanKind::Custom)
+                return EqualsNoCase(saved.CustomName, custom);
+            return true;
+        }
+    }
+
+    std::uint32_t AllTypeBit(ValueType type)
+    {
+        std::uint32_t bit = 1;
+        for (ValueType candidate : kAllTypes)
+        {
+            if (candidate == type)
+                return bit;
+            bit <<= 1;
+        }
+        return 0;
+    }
 
     const char* CompareName(Compare compare)
     {
@@ -524,6 +848,19 @@ namespace Manifold::Scan
         return compare != Compare::Unknown;
     }
 
+    bool CompareAvailable(ScanKind kind, Compare compare)
+    {
+        if (kind != ScanKind::Grouped && kind != ScanKind::Custom)
+            return true;
+        return compare == Compare::Exact || compare == Compare::Unknown || compare == Compare::Changed || compare == Compare::Unchanged || compare == Compare::SameAsFirst;
+    }
+
+    bool CompareUsesPrevious(Compare compare)
+    {
+        return compare == Compare::Increased || compare == Compare::IncreasedBy || compare == Compare::Decreased || compare == Compare::DecreasedBy ||
+               compare == Compare::Changed || compare == Compare::Unchanged;
+    }
+
     Scanner::Scanner() = default;
 
     Scanner::~Scanner()
@@ -544,9 +881,53 @@ namespace Manifold::Scan
         if (firstScan && !CompareAllowedFirst(options.Mode))
             return Status::Fail(ErrorCode::ScanNothingToCompare);
 
-        Matcher probe;
-        if (Status built = probe.Build(options, process->PointerSize()); !built)
-            return built;
+        ScanOptions effective = options;
+        std::shared_ptr<const ResultSet> saved;
+        if (firstScan)
+        {
+            effective.Against = CompareTo::Previous;
+            effective.BlockSize = 0;
+        }
+        else
+        {
+            effective.Kind = m_current->Kind;
+            effective.Type = m_current->Type;
+            effective.CustomName = m_current->CustomName;
+            if (effective.Kind == ScanKind::Custom)
+                effective.CustomSize = m_current->ValueSize;
+            effective.BlockSize = effective.Kind == ScanKind::Grouped ? m_current->ValueSize : 0;
+            if (effective.Against == CompareTo::Saved && CompareUsesPrevious(effective.Mode))
+            {
+                auto found = m_saved.find(effective.SavedName);
+                if (found == m_saved.end())
+                    return Status::Fail(ErrorCode::ScanSavedMissing, effective.SavedName);
+                if (!SavedFits(*found->second, m_current->Kind, m_current->Type, m_current->ValueSize, m_current->CustomName))
+                    return Status::Fail(ErrorCode::ScanSavedDifferent, effective.SavedName);
+                saved = found->second;
+            }
+            else if (effective.Against == CompareTo::Saved)
+            {
+                effective.Against = CompareTo::Previous;
+            }
+        }
+        if (!CompareAvailable(effective.Kind, effective.Mode))
+            return Status::Fail(ErrorCode::ScanCompareUnavailable, CompareName(effective.Mode));
+
+        if (effective.Kind == ScanKind::All)
+        {
+            TypedMatchers probe;
+            const std::vector<ValueType> types = firstScan ? MaskTypes(effective.AllTypes) : m_current->AllList;
+            if (types.empty())
+                return Status::Fail(ErrorCode::ScanNoTypes);
+            if (Status built = BuildAll(effective, process->PointerSize(), types, probe); !built)
+                return built;
+        }
+        else
+        {
+            Matcher probe;
+            if (Status built = probe.Build(effective, process->PointerSize()); !built)
+                return built;
+        }
 
         if (m_thread.joinable())
             m_thread.join();
@@ -554,11 +935,48 @@ namespace Manifold::Scan
         m_busy = true;
         m_done = 0;
         m_total = 1;
-        m_options = options;
+        m_options = effective;
         m_startedAt = Now();
         std::shared_ptr<const ResultSet> previous = firstScan ? nullptr : m_current;
-        m_thread = std::thread(&Scanner::Run, this, std::move(process), options, std::move(previous));
+        m_thread = std::thread(&Scanner::Run, this, std::move(process), effective, std::move(previous), std::move(saved));
         return Status::Success();
+    }
+
+    ScanKind Scanner::Kind() const
+    {
+        return m_current ? m_current->Kind : m_options.Kind;
+    }
+
+    std::shared_ptr<const GroupSpec> Scanner::Group() const
+    {
+        return m_current ? m_current->Group : nullptr;
+    }
+
+    std::string Scanner::CustomName() const
+    {
+        return m_current ? m_current->CustomName : m_options.CustomName;
+    }
+
+    bool Scanner::SaveResults(const std::string& name)
+    {
+        const std::string trimmed = Trim(name);
+        if (!m_current || m_busy || trimmed.empty())
+            return false;
+        m_saved[trimmed] = m_current;
+        return true;
+    }
+
+    std::vector<std::string> Scanner::SavedNames() const
+    {
+        std::vector<std::string> names;
+        for (const auto& [name, results] : m_saved)
+            names.push_back(name);
+        return names;
+    }
+
+    bool Scanner::HasSaved(std::string_view name) const
+    {
+        return m_saved.count(std::string(name)) > 0;
     }
 
     void Scanner::Cancel()
@@ -647,13 +1065,17 @@ namespace Manifold::Scan
         m_finished.reset();
         m_current.reset();
         m_undo.reset();
+        m_saved.clear();
         m_scanNumber = 0;
     }
 
-    void Scanner::Run(std::shared_ptr<Target::Process> process, ScanOptions options, std::shared_ptr<const ResultSet> previous)
+    void Scanner::Run(std::shared_ptr<Target::Process> process, ScanOptions options, std::shared_ptr<const ResultSet> previous, std::shared_ptr<const ResultSet> saved)
     {
+        const bool mixed = options.Kind == ScanKind::All;
         Matcher matcher;
-        Status status = matcher.Build(options, process->PointerSize());
+        TypedMatchers typed;
+        Status status = mixed ? BuildAll(options, process->PointerSize(), previous ? previous->AllList : MaskTypes(options.AllTypes), typed)
+                              : matcher.Build(options, process->PointerSize());
         auto result = std::make_shared<ResultSet>();
         const int threads = ThreadCount(options.Threads);
 
@@ -662,23 +1084,32 @@ namespace Manifold::Scan
 
         if (status)
         {
+            result->Kind = options.Kind;
             result->Type = options.Type;
-            result->ValueSize = matcher.Size();
+            result->CustomName = options.CustomName;
+            result->ValueSize = mixed ? 8 : matcher.Size();
+            result->AllList = mixed ? typed.Types : std::vector<ValueType>{};
+            result->Group = matcher.Group();
             result->Alignment = std::max(1, options.Alignment);
             result->Format.Hex = options.Hex;
             result->Format.Unicode = options.Unicode;
             result->Format.PointerSize = process->PointerSize();
-            result->Format.Length = options.Type == ValueType::String ? static_cast<int>(Utf8ToWide(options.Value).size()) : matcher.Size();
-            if (options.Type == ValueType::String && !options.Unicode)
+            result->Format.Length = options.Kind == ScanKind::Single && options.Type == ValueType::String ? static_cast<int>(Utf8ToWide(options.Value).size()) : result->ValueSize;
+            if (options.Kind == ScanKind::Single && options.Type == ValueType::String && !options.Unicode)
                 result->Format.Length = matcher.Size();
             if (previous)
             {
+                result->Kind = previous->Kind;
                 result->Type = previous->Type;
+                result->CustomName = previous->CustomName;
                 result->ValueSize = previous->ValueSize;
                 result->Alignment = previous->Alignment;
                 result->Format = previous->Format;
+                result->AllList = previous->AllList;
+                if (!result->Group)
+                    result->Group = previous->Group;
             }
-            if (options.Type == ValueType::String || options.Type == ValueType::ByteArray)
+            if (options.Kind == ScanKind::Single && (options.Type == ValueType::String || options.Type == ValueType::ByteArray))
                 result->Alignment = 1;
 
             for (int i = 0; i < threads; ++i)
@@ -699,6 +1130,30 @@ namespace Manifold::Scan
         std::atomic<bool> storeFailed{ false };
         const int valueSize = result->ValueSize;
         const int alignment = result->Alignment;
+        const std::size_t tagBytes = result->TagBytes();
+        const ValueType singleType = result->Type;
+        const bool usesPrevious = CompareUsesPrevious(options.Mode);
+        const bool againstFirst = options.Against == CompareTo::First && usesPrevious;
+        const bool againstSaved = saved != nullptr && usesPrevious;
+
+        const auto writer = [&](TempFile& file, std::vector<std::uint8_t>& record, Segment& segment)
+            {
+                return [&file, &record, &segment, &storeFailed, tagBytes, valueSize](std::uint64_t address, ValueType type, const std::uint8_t* now, const std::uint8_t* initial) -> bool
+                    {
+                        std::memcpy(record.data(), &address, 8);
+                        if (tagBytes)
+                            record[8] = static_cast<std::uint8_t>(type);
+                        std::memcpy(record.data() + 8 + tagBytes, now, static_cast<std::size_t>(valueSize));
+                        std::memcpy(record.data() + 8 + tagBytes + static_cast<std::size_t>(valueSize), initial, static_cast<std::size_t>(valueSize));
+                        if (!file.Append(record.data(), record.size()))
+                        {
+                            storeFailed = true;
+                            return false;
+                        }
+                        ++segment.Count;
+                        return true;
+                    };
+            };
 
         if (status && !previous)
         {
@@ -733,8 +1188,8 @@ namespace Manifold::Scan
             const auto worker = [&](int index)
                 {
                     TempFile& file = *result->Files[static_cast<std::size_t>(index)];
-                    std::vector<std::uint8_t> buffer(kChunkBytes + 64);
-                    std::vector<std::uint8_t> record(8 + 2 * static_cast<std::size_t>(valueSize));
+                    std::vector<std::uint8_t> buffer(kChunkBytes + kGroupMaxBytes + 64);
+                    std::vector<std::uint8_t> record(8 + tagBytes + 2 * static_cast<std::size_t>(valueSize));
                     std::vector<Segment> localSegments;
                     std::vector<Snapshot> localSnapshots;
                     for (;;)
@@ -770,22 +1225,30 @@ namespace Manifold::Scan
                         segment.Order = item;
                         segment.File = index;
                         segment.Offset = file.Size();
+                        const auto write = writer(file, record, segment);
                         const std::uint64_t firstOffset = (alignment - (chunk.Base % static_cast<std::uint64_t>(alignment))) % static_cast<std::uint64_t>(alignment);
                         for (std::uint64_t offset = firstOffset; offset < chunk.Size && offset + static_cast<std::uint64_t>(valueSize) <= readSize; offset += static_cast<std::uint64_t>(alignment))
                         {
                             const std::uint8_t* value = buffer.data() + offset;
-                            if (!matcher.Test(value, value, value))
-                                continue;
                             const std::uint64_t address = chunk.Base + offset;
-                            std::memcpy(record.data(), &address, 8);
-                            std::memcpy(record.data() + 8, value, static_cast<std::size_t>(valueSize));
-                            std::memcpy(record.data() + 8 + valueSize, value, static_cast<std::size_t>(valueSize));
-                            if (!file.Append(record.data(), record.size()))
+                            if (mixed)
                             {
-                                storeFailed = true;
+                                bool ok = true;
+                                for (ValueType type : typed.Types)
+                                {
+                                    if (typed.Find(type)->Test(value, value, value) && !write(address, type, value, value))
+                                    {
+                                        ok = false;
+                                        break;
+                                    }
+                                }
+                                if (!ok)
+                                    break;
+                            }
+                            else if (matcher.Test(value, value, value) && !write(address, singleType, value, value))
+                            {
                                 break;
                             }
-                            ++segment.Count;
                         }
                         if (segment.Count)
                             localSegments.push_back(segment);
@@ -823,11 +1286,21 @@ namespace Manifold::Scan
                 {
                     TempFile& file = *result->Files[static_cast<std::size_t>(index)];
                     const std::size_t recordSize = previous->RecordSize();
-                    std::vector<std::uint8_t> record(8 + 2 * static_cast<std::size_t>(valueSize));
+                    const std::size_t previousTag = previous->TagBytes();
+                    std::vector<std::uint8_t> record(8 + tagBytes + 2 * static_cast<std::size_t>(valueSize));
                     std::vector<std::uint8_t> input;
-                    std::vector<std::uint8_t> window(kWindowBytes + 64);
+                    std::vector<std::uint8_t> window(kWindowBytes + kGroupMaxBytes + 64);
                     std::vector<std::uint8_t> current;
                     std::vector<Segment> localSegments;
+                    std::optional<SavedLookup> lookup;
+                    if (againstSaved)
+                        lookup.emplace(*saved);
+                    const auto compareWith = [&](std::uint64_t address, ValueType type, const std::uint8_t* before, const std::uint8_t* initial) -> const std::uint8_t*
+                        {
+                            if (againstSaved)
+                                return lookup->Find(address, type);
+                            return againstFirst ? initial : before;
+                        };
                     for (;;)
                     {
                         const std::size_t item = next.fetch_add(1);
@@ -837,6 +1310,7 @@ namespace Manifold::Scan
                         segment.Order = item;
                         segment.File = index;
                         segment.Offset = file.Size();
+                        const auto write = writer(file, record, segment);
                         if (fromSnapshot)
                         {
                             const Snapshot& snapshot = previous->Snapshots[item];
@@ -848,25 +1322,28 @@ namespace Manifold::Scan
                                 m_done += snapshot.Size;
                                 continue;
                             }
-                            for (std::uint64_t position = 0; position < snapshot.Positions; ++position)
+                            for (std::uint64_t position = 0; position < snapshot.Positions && !storeFailed; ++position)
                             {
                                 const std::size_t offset = static_cast<std::size_t>(position * static_cast<std::uint64_t>(alignment));
                                 if (offset + static_cast<std::size_t>(valueSize) > current.size())
                                     break;
                                 const std::uint8_t* now = current.data() + offset;
                                 const std::uint8_t* before = input.data() + offset;
-                                if (!matcher.Test(now, before, before))
-                                    continue;
                                 const std::uint64_t address = snapshot.Base + offset;
-                                std::memcpy(record.data(), &address, 8);
-                                std::memcpy(record.data() + 8, now, static_cast<std::size_t>(valueSize));
-                                std::memcpy(record.data() + 8 + valueSize, before, static_cast<std::size_t>(valueSize));
-                                if (!file.Append(record.data(), record.size()))
+                                if (mixed)
                                 {
-                                    storeFailed = true;
-                                    break;
+                                    for (ValueType type : previous->AllList)
+                                    {
+                                        const Matcher* test = typed.Find(type);
+                                        const std::uint8_t* against = test ? compareWith(address, type, before, before) : nullptr;
+                                        if (against && test->Test(now, against, before) && !write(address, type, now, before))
+                                            break;
+                                    }
+                                    continue;
                                 }
-                                ++segment.Count;
+                                const std::uint8_t* against = compareWith(address, singleType, before, before);
+                                if (against && matcher.Test(now, against, before) && !write(address, singleType, now, before))
+                                    break;
                             }
                             m_done += snapshot.Size;
                         }
@@ -875,7 +1352,7 @@ namespace Manifold::Scan
                             const Segment& source = previous->Segments[item];
                             std::uint64_t windowBase = 0;
                             std::size_t windowSize = 0;
-                            for (std::uint64_t first = 0; first < source.Count && !m_cancel; first += kNextBatchRecords)
+                            for (std::uint64_t first = 0; first < source.Count && !m_cancel && !storeFailed; first += kNextBatchRecords)
                             {
                                 const std::uint64_t batch = std::min<std::uint64_t>(kNextBatchRecords, source.Count - first);
                                 input.resize(static_cast<std::size_t>(batch) * recordSize);
@@ -889,30 +1366,29 @@ namespace Manifold::Scan
                                     const std::uint8_t* raw = input.data() + i * recordSize;
                                     std::uint64_t address = 0;
                                     std::memcpy(&address, raw, 8);
+                                    const ValueType type = previousTag ? static_cast<ValueType>(raw[8]) : singleType;
+                                    const Matcher* test = mixed ? typed.Find(type) : &matcher;
+                                    if (!test)
+                                        continue;
                                     if (address < windowBase || address + static_cast<std::uint64_t>(valueSize) > windowBase + windowSize)
                                     {
                                         windowBase = address;
-                                        windowSize = process->Read(address, window.data(), kWindowBytes);
-                                        if (windowSize == 0)
+                                        windowSize = process->Read(address, window.data(), std::max<std::size_t>(kWindowBytes, static_cast<std::size_t>(valueSize)));
+                                        if (windowSize < static_cast<std::size_t>(valueSize))
                                         {
                                             windowBase = 0;
+                                            windowSize = 0;
                                             continue;
                                         }
                                     }
                                     const std::uint8_t* now = window.data() + (address - windowBase);
-                                    const std::uint8_t* before = raw + 8;
-                                    const std::uint8_t* initial = raw + 8 + previous->ValueSize;
-                                    if (!matcher.Test(now, before, initial))
+                                    const std::uint8_t* before = raw + 8 + previousTag;
+                                    const std::uint8_t* initial = before + previous->ValueSize;
+                                    const std::uint8_t* against = compareWith(address, type, before, initial);
+                                    if (!against || !test->Test(now, against, initial))
                                         continue;
-                                    std::memcpy(record.data(), &address, 8);
-                                    std::memcpy(record.data() + 8, now, static_cast<std::size_t>(valueSize));
-                                    std::memcpy(record.data() + 8 + valueSize, initial, static_cast<std::size_t>(valueSize));
-                                    if (!file.Append(record.data(), record.size()))
-                                    {
-                                        storeFailed = true;
+                                    if (!write(address, type, now, initial))
                                         break;
-                                    }
-                                    ++segment.Count;
                                 }
                                 m_done += batch;
                             }
@@ -952,7 +1428,7 @@ namespace Manifold::Scan
             for (Snapshot& snapshot : snapshots)
             {
                 snapshot.Before = count;
-                count += snapshot.Positions;
+                count += snapshot.Positions * result->Multiplicity();
             }
             result->Segments = std::move(segments);
             result->Snapshots = std::move(snapshots);
@@ -964,6 +1440,410 @@ namespace Manifold::Scan
         m_finished = std::move(finished);
         m_finishedError = m_cancel && status ? Status{} : status;
         m_finishedReady = true;
+    }
+
+    namespace
+    {
+        std::optional<std::int64_t> GroupInteger(std::string_view text, bool hex)
+        {
+            text = TrimView(text);
+            bool negative = false;
+            if (!text.empty() && text.front() == '-')
+            {
+                negative = true;
+                text.remove_prefix(1);
+            }
+            bool asHex = hex;
+            if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+            {
+                asHex = true;
+                text.remove_prefix(2);
+            }
+            if (text.empty())
+                return std::nullopt;
+            std::optional<std::uint64_t> value;
+            if (asHex)
+            {
+                value = ParseHex(text);
+            }
+            else if (const auto decimal = ParseDecimal(text); decimal && *decimal >= 0)
+            {
+                value = static_cast<std::uint64_t>(*decimal);
+            }
+            if (!value || (negative && *value > static_cast<std::uint64_t>(INT64_MAX)))
+                return std::nullopt;
+            return negative ? -static_cast<std::int64_t>(*value) : static_cast<std::int64_t>(*value);
+        }
+
+        bool FitsSize(std::int64_t value, int size)
+        {
+            if (size >= 8)
+                return true;
+            const std::int64_t high = (std::int64_t{ 1 } << (size * 8)) - 1;
+            const std::int64_t low = -(std::int64_t{ 1 } << (size * 8 - 1));
+            return value >= low && value <= high;
+        }
+
+        int ElementAlign(const GroupElement& element)
+        {
+            if (element.Type == ValueType::String)
+                return element.Unicode ? 2 : 1;
+            return std::clamp(element.Size, 1, 8);
+        }
+
+        bool ElementMatches(const GroupElement& element, const std::uint8_t* data)
+        {
+            if (element.Any || element.Skip)
+                return true;
+            switch (element.Type)
+            {
+            case ValueType::Float:
+            {
+                const float value = Load<float>(data);
+                return std::isfinite(value) && value >= element.LowFloat && value <= element.HighFloat;
+            }
+            case ValueType::Double:
+            {
+                const double value = Load<double>(data);
+                return std::isfinite(value) && value >= element.LowFloat && value <= element.HighFloat;
+            }
+            case ValueType::String:
+                return std::memcmp(data, element.Text.data(), element.Text.size()) == 0;
+            default:
+            {
+                std::uint64_t raw = 0;
+                std::memcpy(&raw, data, static_cast<std::size_t>(element.Size));
+                if (element.Signed)
+                {
+                    std::int64_t value = static_cast<std::int64_t>(raw);
+                    if (element.Size < 8)
+                    {
+                        const int shift = 64 - element.Size * 8;
+                        value = static_cast<std::int64_t>(raw << shift) >> shift;
+                    }
+                    return value >= element.Low && value <= element.High;
+                }
+                return raw >= static_cast<std::uint64_t>(element.Low) && raw <= static_cast<std::uint64_t>(element.High);
+            }
+            }
+        }
+
+        std::vector<std::string> GroupTokens(std::string_view text)
+        {
+            std::vector<std::string> tokens;
+            std::string current;
+            bool quoted = false;
+            bool started = false;
+            for (const char c : text)
+            {
+                if (c == '"')
+                {
+                    quoted = !quoted;
+                    started = true;
+                    continue;
+                }
+                if (!quoted && (c == ' ' || c == '\t' || c == '\r' || c == '\n'))
+                {
+                    if (started)
+                        tokens.push_back(current);
+                    current.clear();
+                    started = false;
+                    continue;
+                }
+                current += c;
+                started = true;
+            }
+            if (started)
+                tokens.push_back(current);
+            return tokens;
+        }
+
+        std::string Quoted(std::string_view text)
+        {
+            return "\"" + std::string(text) + "\"";
+        }
+    }
+
+    std::optional<GroupSpec> ParseGroup(std::string_view text, bool hex, int pointerSize, std::string& error)
+    {
+        GroupSpec spec;
+        for (const std::string& token : GroupTokens(text))
+        {
+            const std::size_t colon = token.find(':');
+            if (colon == std::string::npos || colon == 0)
+            {
+                error = Quoted(token) + " needs a type and a value, like 4:100";
+                return std::nullopt;
+            }
+            const std::string kind = Lower(token.substr(0, colon));
+            const std::string value = token.substr(colon + 1);
+            if (kind == "within")
+            {
+                const auto size = GroupInteger(value, false);
+                if (!size || *size < 1 || *size > kGroupMaxBytes)
+                {
+                    error = "within takes a size from 1 to " + std::to_string(kGroupMaxBytes) + " bytes";
+                    return std::nullopt;
+                }
+                spec.Within = static_cast<int>(*size);
+                continue;
+            }
+            GroupElement element;
+            if (kind == "1" || kind == "2" || kind == "4" || kind == "8")
+            {
+                element.Size = kind[0] - '0';
+                element.Type = element.Size == 1 ? ValueType::Byte : element.Size == 2 ? ValueType::TwoBytes : element.Size == 4 ? ValueType::FourBytes : ValueType::EightBytes;
+            }
+            else if (kind == "p")
+            {
+                element.Type = ValueType::Pointer;
+                element.Size = pointerSize == 4 ? 4 : 8;
+            }
+            else if (kind == "f")
+            {
+                element.Type = ValueType::Float;
+                element.Size = 4;
+            }
+            else if (kind == "d")
+            {
+                element.Type = ValueType::Double;
+                element.Size = 8;
+            }
+            else if (kind == "s" || kind == "u")
+            {
+                element.Type = ValueType::String;
+                element.Unicode = kind == "u";
+                if (value.empty())
+                {
+                    error = Quoted(token) + " has no text";
+                    return std::nullopt;
+                }
+                if (element.Unicode)
+                {
+                    for (const wchar_t c : Utf8ToWide(value))
+                    {
+                        element.Text.push_back(static_cast<std::uint8_t>(c & 0xFF));
+                        element.Text.push_back(static_cast<std::uint8_t>((c >> 8) & 0xFF));
+                    }
+                }
+                else
+                {
+                    element.Text.assign(value.begin(), value.end());
+                }
+                element.Size = static_cast<int>(element.Text.size());
+            }
+            else if (kind == "skip")
+            {
+                const auto size = GroupInteger(value, false);
+                if (!size || *size < 1 || *size > kGroupMaxBytes)
+                {
+                    error = "skip takes a number of bytes from 1 to " + std::to_string(kGroupMaxBytes);
+                    return std::nullopt;
+                }
+                element.Type = ValueType::ByteArray;
+                element.Skip = true;
+                element.Size = static_cast<int>(*size);
+            }
+            else
+            {
+                error = "unknown type " + Quoted(kind) + " in " + Quoted(token);
+                return std::nullopt;
+            }
+
+            if (!element.Skip && element.Type != ValueType::String)
+            {
+                if (TrimView(value) == "*")
+                {
+                    element.Any = true;
+                }
+                else
+                {
+                    const std::size_t dots = value.find("..");
+                    const std::string lowText = dots == std::string::npos ? value : value.substr(0, dots);
+                    const std::string highText = dots == std::string::npos ? value : value.substr(dots + 2);
+                    if (IsFloating(element.Type))
+                    {
+                        const auto low = ParseDouble(lowText);
+                        const auto high = ParseDouble(highText);
+                        if (!low || !high)
+                        {
+                            error = Quoted(value) + " is not a number in " + Quoted(token);
+                            return std::nullopt;
+                        }
+                        if (dots == std::string::npos)
+                        {
+                            const double step = std::pow(10.0, -DecimalsOf(lowText));
+                            const double slack = step * 0.5 + std::fabs(*low) * 1e-12;
+                            element.LowFloat = *low - slack;
+                            element.HighFloat = *low + slack;
+                        }
+                        else
+                        {
+                            element.LowFloat = std::min(*low, *high);
+                            element.HighFloat = std::max(*low, *high);
+                        }
+                    }
+                    else
+                    {
+                        const auto low = GroupInteger(lowText, hex);
+                        const auto high = GroupInteger(highText, hex);
+                        if (!low || !high || !FitsSize(*low, element.Size) || !FitsSize(*high, element.Size))
+                        {
+                            error = Quoted(value) + " does not fit " + std::to_string(element.Size) + (element.Size == 1 ? " byte" : " bytes") + " in " + Quoted(token);
+                            return std::nullopt;
+                        }
+                        element.Low = std::min(*low, *high);
+                        element.High = std::max(*low, *high);
+                        element.Signed = element.Low < 0;
+                    }
+                }
+            }
+            spec.Elements.push_back(std::move(element));
+        }
+
+        if (spec.Elements.empty())
+        {
+            error = "enter values like 4:100 f:1.5";
+            return std::nullopt;
+        }
+        if (std::all_of(spec.Elements.begin(), spec.Elements.end(), [](const GroupElement& element) { return element.Any || element.Skip; }))
+        {
+            error = "at least one value has to be more than * or skip";
+            return std::nullopt;
+        }
+        int total = 0;
+        for (GroupElement& element : spec.Elements)
+        {
+            element.Offset = total;
+            total += element.Size;
+        }
+        if (spec.Within == 0)
+        {
+            if (total > kGroupMaxBytes)
+            {
+                error = "the group covers more than " + std::to_string(kGroupMaxBytes) + " bytes";
+                return std::nullopt;
+            }
+            spec.BlockSize = total;
+            return spec;
+        }
+        for (const GroupElement& element : spec.Elements)
+        {
+            if (element.Any || element.Skip)
+            {
+                error = "* and skip need a fixed order; leave out within";
+                return std::nullopt;
+            }
+            if (element.Size > spec.Within)
+            {
+                error = "within has to be at least as big as each value";
+                return std::nullopt;
+            }
+        }
+        spec.BlockSize = spec.Within;
+        for (std::size_t i = 1; i < spec.Elements.size(); ++i)
+            spec.Elements[i].Offset = -1;
+        return spec;
+    }
+
+    bool GroupSpec::Matches(const std::uint8_t* block, std::vector<int>* offsets) const
+    {
+        if (offsets)
+            offsets->assign(Elements.size(), -1);
+        if (Elements.empty())
+            return false;
+        if (Within == 0)
+        {
+            for (const GroupElement& element : Elements)
+            {
+                if (!ElementMatches(element, block + element.Offset))
+                    return false;
+            }
+            if (offsets)
+            {
+                for (std::size_t i = 0; i < Elements.size(); ++i)
+                    (*offsets)[i] = Elements[i].Offset;
+            }
+            return true;
+        }
+        if (!ElementMatches(Elements[0], block))
+            return false;
+        std::vector<std::pair<int, int>> used;
+        used.reserve(Elements.size());
+        used.emplace_back(0, Elements[0].Size);
+        for (std::size_t i = 1; i < Elements.size(); ++i)
+        {
+            const GroupElement& element = Elements[i];
+            const int align = ElementAlign(element);
+            int found = -1;
+            for (int at = 0; at + element.Size <= BlockSize; at += align)
+            {
+                bool overlaps = false;
+                for (const auto& [start, end] : used)
+                {
+                    if (at < end && start < at + element.Size)
+                    {
+                        overlaps = true;
+                        break;
+                    }
+                }
+                if (!overlaps && ElementMatches(element, block + at))
+                {
+                    found = at;
+                    break;
+                }
+            }
+            if (found < 0)
+                return false;
+            used.emplace_back(found, found + element.Size);
+        }
+        if (offsets)
+        {
+            for (std::size_t i = 0; i < Elements.size(); ++i)
+                (*offsets)[i] = used[i].first;
+        }
+        return true;
+    }
+
+    std::vector<int> GroupSpec::Offsets(std::span<const std::uint8_t> block) const
+    {
+        std::vector<int> offsets(Elements.size(), -1);
+        if (Within == 0)
+        {
+            for (std::size_t i = 0; i < Elements.size(); ++i)
+                offsets[i] = Elements[i].Offset;
+            return offsets;
+        }
+        if (block.size() >= static_cast<std::size_t>(BlockSize))
+            Matches(block.data(), &offsets);
+        return offsets;
+    }
+
+    std::string GroupSpec::Describe(std::span<const std::uint8_t> block, int pointerSize) const
+    {
+        const std::vector<int> offsets = Offsets(block);
+        std::string text;
+        for (std::size_t i = 0; i < Elements.size(); ++i)
+        {
+            const GroupElement& element = Elements[i];
+            if (element.Skip)
+                continue;
+            if (!text.empty())
+                text += "  ";
+            const int at = offsets[i];
+            if (at < 0 || static_cast<std::size_t>(at + element.Size) > block.size())
+            {
+                text += "?";
+                continue;
+            }
+            ValueFormat format;
+            format.Signed = element.Signed;
+            format.PointerSize = pointerSize;
+            format.Unicode = element.Unicode;
+            format.Length = element.Unicode ? element.Size / 2 : element.Size;
+            text += FormatValue(element.Type, block.subspan(static_cast<std::size_t>(at), static_cast<std::size_t>(element.Size)), format);
+        }
+        return text;
     }
 
     bool PatternFilter::Accepts(const Target::RegionInfo& region) const

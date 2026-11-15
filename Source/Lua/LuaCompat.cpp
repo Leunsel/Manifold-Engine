@@ -2129,7 +2129,59 @@ namespace Manifold::Lua
             std::uint64_t Result = 0;
             bool RegionScan = false;
             bool Initialized = false;
+            std::string CustomType;
         };
+
+        constexpr lua_Integer kCeAll = 10;
+        constexpr lua_Integer kCeCustom = 13;
+        constexpr lua_Integer kCeGrouped = 14;
+
+        void FillCustomScan(lua_State* state, Scan::ScanOptions& options, const std::string& name)
+        {
+            const CustomType* custom = EngineOf(state).FindCustomType(name);
+            if (!custom)
+            {
+                luaL_error(state, "%s", ErrorMessage(ErrorCode::ScanCustomMissing, name).c_str());
+                return;
+            }
+            options.Kind = Scan::ScanKind::Custom;
+            options.CustomName = custom->Name;
+            options.CustomSize = custom->ByteCount();
+            options.CustomBytes.clear();
+            if (options.Mode == Scan::Compare::Exact)
+            {
+                std::vector<std::uint8_t> bytes;
+                if (!EngineOf(state).CustomFromText(*custom, options.Value, 0, bytes))
+                {
+                    luaL_error(state, "%s", ErrorMessage(ErrorCode::ScanBadValue, options.Value).c_str());
+                    return;
+                }
+                options.CustomBytes = std::move(bytes);
+            }
+        }
+
+        std::string FoundValue(lua_State* state, const Scan::Scanner& scanner, const Scan::ScanRecord& record)
+        {
+            switch (scanner.Kind())
+            {
+            case Scan::ScanKind::All:
+                return Scan::FormatValue(record.Type, record.Previous, scanner.Format());
+            case Scan::ScanKind::Grouped:
+                if (const auto group = scanner.Group())
+                    return group->Describe(record.Previous, scanner.Format().PointerSize);
+                return HexBytes(record.Previous);
+            case Scan::ScanKind::Custom:
+            {
+                std::string text;
+                const CustomType* custom = EngineOf(state).FindCustomType(scanner.CustomName());
+                if (custom && EngineOf(state).CustomToText(*custom, record.Previous, record.Address, text))
+                    return text;
+                return "??";
+            }
+            default:
+                return Scan::FormatValue(scanner.Type(), record.Previous, scanner.Format());
+            }
+        }
 
         MemScanState& CheckMemScan(lua_State* state, int index)
         {
@@ -2225,6 +2277,14 @@ namespace Manifold::Lua
             if (key == "lastscanwasregionscan") { lua_pushboolean(state, scan.RegionScan); return 1; }
             if (key == "onlyoneresult" || key == "isunique") { lua_pushboolean(state, scan.OnlyOne); return 1; }
             if (key == "result") { lua_pushinteger(state, static_cast<lua_Integer>(scan.Result)); return 1; }
+            if (key == "customtype")
+            {
+                if (scan.CustomType.empty() || !EngineOf(state).FindCustomType(scan.CustomType))
+                    lua_pushnil(state);
+                else
+                    PushCustomType(state, scan.CustomType);
+                return 1;
+            }
             if (key == "foundlist")
             {
                 PushFoundList(state, 1);
@@ -2238,8 +2298,11 @@ namespace Manifold::Lua
                         if (!process)
                             return luaL_error(s, "%s", ErrorMessage(ErrorCode::NoProcess).c_str());
                         Scan::ScanOptions options;
+                        const lua_Integer ceType = luaL_optinteger(s, 3, 2);
                         options.Mode = CompareFromCe(luaL_optinteger(s, 2, 1));
-                        options.Type = TypeFromCe(luaL_optinteger(s, 3, 2));
+                        options.Type = TypeFromCe(ceType);
+                        options.Kind = ceType == kCeAll ? Scan::ScanKind::All : ceType == kCeGrouped ? Scan::ScanKind::Grouped : Scan::ScanKind::Single;
+                        options.AllTypes = Owner(s).Options().AllTypes;
                         options.Floats = RoundingFromCe(luaL_optinteger(s, 4, 0));
                         options.Value = luaL_optstring(s, 5, "");
                         options.Value2 = luaL_optstring(s, 6, "");
@@ -2254,8 +2317,14 @@ namespace Manifold::Lua
                         options.Unicode = lua_toboolean(s, 14) != 0;
                         options.CaseSensitive = lua_isnoneornil(s, 15) || lua_toboolean(s, 15);
                         options.Mapped = false;
-                        if (luaL_optinteger(s, 3, 2) == 7)
+                        if (ceType == 7)
                             options.Unicode = true;
+                        if (ceType == kCeCustom)
+                        {
+                            if (target.CustomType.empty())
+                                return luaL_error(s, "%s", ErrorMessage(ErrorCode::ScanCustomMissing, "(none set in CustomType)").c_str());
+                            FillCustomScan(s, options, target.CustomType);
+                        }
                         target.Options = options;
                         target.RegionScan = options.Mode == Scan::Compare::Unknown;
                         target.Scanner->Reset();
@@ -2277,6 +2346,15 @@ namespace Manifold::Lua
                         options.Value = luaL_optstring(s, 4, "");
                         options.Value2 = luaL_optstring(s, 5, "");
                         options.Hex = lua_toboolean(s, 6) != 0;
+                        options.Against = Scan::CompareTo::Previous;
+                        options.SavedName.clear();
+                        if (lua_type(s, 11) == LUA_TSTRING)
+                        {
+                            options.Against = Scan::CompareTo::Saved;
+                            options.SavedName = lua_tostring(s, 11);
+                        }
+                        if (target.Scanner->Kind() == Scan::ScanKind::Custom)
+                            FillCustomScan(s, options, target.Scanner->CustomName());
                         target.Options = options;
                         target.RegionScan = false;
                         const Status status = target.Scanner->Start(process, options, false);
@@ -2325,7 +2403,26 @@ namespace Manifold::Lua
                         lua_setfield(s, -2, "ResultsFound");
                         return 1;
                     } },
-                { "savecurrentresults", &Nothing },
+                { "savecurrentresults", [](lua_State* s) -> int
+                    {
+                        MemScanState& target = CheckMemScan(s, 1);
+                        WaitForScan(target);
+                        if (!target.Scanner->SaveResults(luaL_checkstring(s, 2)))
+                            return luaL_error(s, "%s", ErrorMessage(ErrorCode::ScanNothingToCompare).c_str());
+                        return 0;
+                    } },
+                { "getsavedresultlist", [](lua_State* s) -> int
+                    {
+                        MemScanState& target = CheckMemScan(s, 1);
+                        lua_newtable(s);
+                        lua_Integer index = 1;
+                        for (const std::string& name : target.Scanner->SavedNames())
+                        {
+                            lua_pushstring(s, name.c_str());
+                            lua_rawseti(s, -2, index++);
+                        }
+                        return 1;
+                    } },
                 { "destroy", [](lua_State* s) -> int
                     {
                         CheckMemScan(s, 1).Scanner->Reset();
@@ -2352,6 +2449,13 @@ namespace Manifold::Lua
             const std::string key = Key(state, 2);
             if (key == "onlyoneresult" || key == "isunique")
                 scan.OnlyOne = lua_toboolean(state, 3) != 0;
+            if (key == "customtype")
+            {
+                if (lua_isnoneornil(state, 3))
+                    scan.CustomType.clear();
+                else
+                    scan.CustomType = lua_type(state, 3) == LUA_TSTRING ? std::string(lua_tostring(state, 3)) : CheckCustomType(state, 3).Name;
+            }
             return 0;
         }
 
@@ -2404,7 +2508,7 @@ namespace Manifold::Lua
                             return 1;
                         }
                         if (wantValue)
-                            lua_pushstring(s, Scan::FormatValue(target.Scanner->Type(), record.Previous, target.Scanner->Format()).c_str());
+                            lua_pushstring(s, FoundValue(s, *target.Scanner, record).c_str());
                         else
                             lua_pushstring(s, Hex(record.Address).c_str());
                         return 1;
@@ -2435,7 +2539,7 @@ namespace Manifold::Lua
                         MemScanState& target = **static_cast<std::shared_ptr<MemScanState>*>(luaL_checkudata(s, 1, kFoundListType));
                         Scan::ScanRecord record;
                         if (target.Scanner->Record(static_cast<std::uint64_t>(luaL_checkinteger(s, 2)), record))
-                            lua_pushstring(s, Scan::FormatValue(target.Scanner->Type(), record.Previous, target.Scanner->Format()).c_str());
+                            lua_pushstring(s, FoundValue(s, *target.Scanner, record).c_str());
                         else
                             lua_pushnil(s);
                         return 1;

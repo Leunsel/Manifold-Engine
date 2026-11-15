@@ -28,6 +28,12 @@
     X(ScanRangeEmpty, 2005) \
     X(ScanBusy, 2006) \
     X(ScanNothingToCompare, 2007) \
+    X(ScanNoTypes, 2008) \
+    X(ScanGroupSyntax, 2009) \
+    X(ScanCompareUnavailable, 2010) \
+    X(ScanSavedMissing, 2011) \
+    X(ScanSavedDifferent, 2012) \
+    X(ScanCustomMissing, 2013) \
     X(AsmSyntax, 3001) \
     X(AsmUnknownInstruction, 3002) \
     X(AsmBadOperand, 3003) \

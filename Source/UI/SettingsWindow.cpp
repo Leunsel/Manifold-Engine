@@ -942,6 +942,23 @@ namespace Manifold::UI
             list.EndRow();
         }
 
+        list.Section("Types for All");
+        for (const Scan::ValueType type : Scan::kAllTypes)
+        {
+            const std::uint32_t bit = Scan::AllTypeBit(type);
+            const std::string hint = std::string("The value type All looks for ") + Scan::TypeName(type) + " values as well.";
+            if (list.Row(Scan::TypeName(type), hint, toggle))
+            {
+                bool on = (settings.AllTypes & bit) != 0;
+                if (ToggleSwitch(("##all" + std::to_string(bit)).c_str(), &on))
+                {
+                    settings.AllTypes = on ? (settings.AllTypes | bit) : (settings.AllTypes & ~bit);
+                    changed = true;
+                }
+                list.EndRow();
+            }
+        }
+
         list.Section("Memory to scan");
         if (list.Row("Private memory", "Memory the process allocated itself, such as the heap. Most values live here.", toggle))
         {

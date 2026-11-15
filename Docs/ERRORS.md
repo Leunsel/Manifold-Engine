@@ -33,6 +33,12 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-2005 | No memory matches the scan options. | The start/stop range or the protection filters leave no memory to scan. | Widen the range, or set Writable/Executable/Copy on write to either. |
 | ME-2006 | A scan is still running. | Only one scan runs at a time. | Wait for it, or cancel it with the button beside the progress bar. |
 | ME-2007 | There is nothing to compare with yet. | A next scan needs the results of a first scan. | Run a first scan. |
+| ME-2008 | No value type is chosen for All. | All scans the types ticked in Settings, and none of them is ticked, or the value fits none of them. | Tick the types under Settings, Scanner, Types for All, or check the value. |
+| ME-2009 | The group is not valid: …. | A grouped scan takes values like 4:100 f:1.5 d:* separated by spaces. | Write each value as type:value. Types are 1, 2, 4, 8, f, d, p, s, u and skip; within:N lets the values after the first one be anywhere in N bytes. |
+| ME-2010 | … is not available for this value type. | Grouped values and custom types compare their bytes only, so they have no bigger, smaller or increased. | Use Exact value, Unknown initial value, Changed, Unchanged or Same as first scan. |
+| ME-2011 | There are no saved results named "…". | Saved results belong to the current scan and are gone after New scan. | Save the results under that name first, or pick another one. |
+| ME-2012 | The saved results "…" have a different value type. | A next scan can compare only with results of the same value type and size. | Pick saved results of the same scan. |
+| ME-2013 | The custom type "…" is not registered. | A script registers custom types, and this one is not known (any more). | Run the script that registers it, or pick another value type. |
 
 ## Assembler
 

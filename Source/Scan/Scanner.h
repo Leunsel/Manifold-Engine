@@ -5,9 +5,13 @@
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -49,8 +53,59 @@ namespace Manifold::Scan
         Exact
     };
 
+    enum class ScanKind
+    {
+        Single,
+        All,
+        Grouped,
+        Custom
+    };
+
+    enum class CompareTo
+    {
+        Previous,
+        First,
+        Saved
+    };
+
+    inline constexpr ValueType kAllTypes[] = { ValueType::Byte, ValueType::TwoBytes, ValueType::FourBytes, ValueType::EightBytes, ValueType::Float, ValueType::Double };
+    inline constexpr std::uint32_t kAllTypesDefault = 0x3F;
+    inline constexpr int kGroupMaxBytes = 4096;
+
+    std::uint32_t AllTypeBit(ValueType type);
+
+    struct GroupElement
+    {
+        ValueType Type = ValueType::FourBytes;
+        int Size = 4;
+        int Offset = 0;
+        bool Any = false;
+        bool Skip = false;
+        bool Unicode = false;
+        bool Signed = false;
+        std::int64_t Low = 0;
+        std::int64_t High = 0;
+        double LowFloat = 0.0;
+        double HighFloat = 0.0;
+        std::vector<std::uint8_t> Text;
+    };
+
+    struct GroupSpec
+    {
+        std::vector<GroupElement> Elements;
+        int BlockSize = 0;
+        int Within = 0;
+
+        bool Matches(const std::uint8_t* block, std::vector<int>* offsets = nullptr) const;
+        std::vector<int> Offsets(std::span<const std::uint8_t> block) const;
+        std::string Describe(std::span<const std::uint8_t> block, int pointerSize) const;
+    };
+
+    std::optional<GroupSpec> ParseGroup(std::string_view text, bool hex, int pointerSize, std::string& error);
+
     struct ScanOptions
     {
+        ScanKind Kind = ScanKind::Single;
         ValueType Type = ValueType::FourBytes;
         Compare Mode = Compare::Exact;
         std::string Value;
@@ -70,6 +125,13 @@ namespace Manifold::Scan
         int Alignment = 4;
         bool PauseProcess = false;
         int Threads = 0;
+        std::uint32_t AllTypes = kAllTypesDefault;
+        std::string CustomName;
+        int CustomSize = 0;
+        std::vector<std::uint8_t> CustomBytes;
+        int BlockSize = 0;
+        CompareTo Against = CompareTo::Previous;
+        std::string SavedName;
     };
 
     const char* CompareName(Compare compare);
@@ -77,10 +139,13 @@ namespace Manifold::Scan
     bool CompareNeedsTwoValues(Compare compare);
     bool CompareAllowedFirst(Compare compare);
     bool CompareAllowedNext(Compare compare);
+    bool CompareAvailable(ScanKind kind, Compare compare);
+    bool CompareUsesPrevious(Compare compare);
 
     struct ScanRecord
     {
         std::uint64_t Address = 0;
+        ValueType Type = ValueType::FourBytes;
         std::vector<std::uint8_t> Previous;
         std::vector<std::uint8_t> First;
     };
@@ -108,8 +173,11 @@ namespace Manifold::Scan
         bool IsSnapshot() const;
         bool Record(std::uint64_t index, ScanRecord& out) const;
         ValueType Type() const;
+        ScanKind Kind() const;
         int ValueSize() const;
         ValueFormat Format() const;
+        std::shared_ptr<const GroupSpec> Group() const;
+        std::string CustomName() const;
         const ScanOptions& Options() const { return m_options; }
 
         bool CanUndo() const { return m_undo != nullptr; }
@@ -118,12 +186,17 @@ namespace Manifold::Scan
         int ScanNumber() const { return m_scanNumber; }
         double LastSeconds() const { return m_lastSeconds; }
 
+        bool SaveResults(const std::string& name);
+        std::vector<std::string> SavedNames() const;
+        bool HasSaved(std::string_view name) const;
+
     private:
-        void Run(std::shared_ptr<Target::Process> process, ScanOptions options, std::shared_ptr<const ResultSet> previous);
+        void Run(std::shared_ptr<Target::Process> process, ScanOptions options, std::shared_ptr<const ResultSet> previous, std::shared_ptr<const ResultSet> saved);
 
         std::shared_ptr<const ResultSet> m_current;
         std::shared_ptr<const ResultSet> m_undo;
         std::shared_ptr<const ResultSet> m_finished;
+        std::map<std::string, std::shared_ptr<const ResultSet>> m_saved;
         Status m_finishedError;
         bool m_finishedReady = false;
         std::mutex m_lock;

@@ -185,6 +185,7 @@ namespace Manifold::UI
 
         ValueDialog();
         ResultValueDialog();
+        SaveResultsDialog();
         AddAddressDialog();
         DescriptionDialog();
         ImGui::End();
@@ -263,6 +264,8 @@ namespace Manifold::UI
     {
         m_engine.Scanner().Reset();
         m_selectedResults.clear();
+        m_compareTo = Scan::CompareTo::Previous;
+        m_savedName.clear();
         if (!Scan::CompareAllowedFirst(kCompares[m_compareIndex]))
             m_compareIndex = 0;
     }
@@ -555,7 +558,7 @@ namespace Manifold::UI
                 {
                     Scan::ScanRecord record;
                     if (scanner.Record(index, record))
-                        m_workspace.AddAddress(record.Address, scanner.Type());
+                        AddResult(record);
                 }
             }
         }
@@ -591,17 +594,19 @@ namespace Manifold::UI
 
         const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp;
         PushMono();
-        if (ImGui::BeginTable("##found", 4, flags, ImVec2(0.0f, ImGui::GetContentRegionAvail().y)))
+        const bool showType = scanner.Kind() == Scan::ScanKind::All;
+        const bool wideValues = scanner.Kind() == Scan::ScanKind::Grouped;
+        if (ImGui::BeginTable(showType ? "##foundall" : "##found", showType ? 5 : 4, flags, ImVec2(0.0f, ImGui::GetContentRegionAvail().y)))
         {
             ImGui::TableSetupScrollFreeze(0, 1);
             ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 1.4f);
-            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-            ImGui::TableSetupColumn("Previous", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-            ImGui::TableSetupColumn("First", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+            if (showType)
+                ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch, 0.7f);
+            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, wideValues ? 2.0f : 1.0f);
+            ImGui::TableSetupColumn("Previous", ImGuiTableColumnFlags_WidthStretch, wideValues ? 2.0f : 1.0f);
+            ImGui::TableSetupColumn("First", ImGuiTableColumnFlags_WidthStretch, wideValues ? 2.0f : 1.0f);
             ImGui::TableHeadersRow();
             const int shown = static_cast<int>(std::min<std::uint64_t>(count, 50'000'000ull));
-            const Scan::ValueType type = scanner.Type();
-            const Scan::ValueFormat format = scanner.Format();
             ImGuiListClipper clipper;
             clipper.Begin(shown);
             while (clipper.Step())
@@ -641,7 +646,7 @@ namespace Manifold::UI
                         }
                         m_lastClickedResult = index;
                         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                            m_workspace.AddAddress(record.Address, type);
+                            AddResult(record);
                     }
                     if (ImGui::BeginPopupContextItem("##resultmenu"))
                     {
@@ -662,6 +667,13 @@ namespace Manifold::UI
                     if (isStatic)
                         ItemTooltip("Static address inside a module: it stays the same after the game restarts.");
                     ImGui::PopID();
+                    if (showType)
+                    {
+                        ImGui::TableNextColumn();
+                        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
+                        ImGui::TextUnformatted(Scan::TypeName(record.Type));
+                        ImGui::PopStyleColor();
+                    }
 
                     auto live = m_liveValues.find(static_cast<std::uint64_t>(row));
                     if (live == m_liveValues.end())
@@ -671,11 +683,11 @@ namespace Manifold::UI
                         {
                             std::vector<std::uint8_t> bytes(record.Previous.size());
                             if (!bytes.empty() && engine.Process()->ReadExact(record.Address, bytes.data(), bytes.size()))
-                                value = Scan::FormatValue(type, bytes, format);
+                                value = ResultText(record, bytes);
                         }
                         live = m_liveValues.emplace(static_cast<std::uint64_t>(row), value).first;
                     }
-                    const std::string previous = Scan::FormatValue(type, record.Previous, format);
+                    const std::string previous = ResultText(record, record.Previous);
                     ImGui::TableNextColumn();
                     ImGui::PushStyleColor(ImGuiCol_Text, live->second != previous ? ManifoldTheme::Changed : ManifoldTheme::Text);
                     ImGui::TextUnformatted(live->second.c_str());
@@ -684,7 +696,7 @@ namespace Manifold::UI
                     ImGui::TextUnformatted(previous.c_str());
                     ImGui::TableNextColumn();
                     ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
-                    ImGui::TextUnformatted(Scan::FormatValue(type, record.First, format).c_str());
+                    ImGui::TextUnformatted(ResultText(record, record.First).c_str());
                     ImGui::PopStyleColor();
                 }
             }
@@ -729,32 +741,50 @@ namespace Manifold::UI
     void MainWindow::RunResultCommand(Command command, std::uint64_t index)
     {
         Scan::Scanner& scanner = m_engine.Scanner();
-        const Scan::ValueType type = scanner.Type();
         Scan::ScanRecord focus;
         if (!scanner.Record(index, focus))
             return;
-        const auto addresses = [&]()
+        const auto selection = [&]()
             {
-                std::vector<std::uint64_t> found;
+                std::vector<Scan::ScanRecord> found;
                 for (std::uint64_t selected : m_selectedResults)
                 {
                     Scan::ScanRecord record;
                     if (scanner.Record(selected, record))
-                        found.push_back(record.Address);
+                        found.push_back(std::move(record));
                 }
                 return found;
             };
-        const int size = Scan::ValueSize(type, scanner.Format());
+        const auto addresses = [&]()
+            {
+                std::vector<std::uint64_t> found;
+                for (const Scan::ScanRecord& record : selection())
+                    found.push_back(record.Address);
+                return found;
+            };
+        int size = scanner.Kind() == Scan::ScanKind::All ? Scan::ValueSize(focus.Type, scanner.Format()) : static_cast<int>(focus.Previous.size());
+        if (scanner.Kind() == Scan::ScanKind::Single)
+            size = Scan::ValueSize(scanner.Type(), scanner.Format());
+        if (const auto group = scanner.Group(); group && scanner.Kind() == Scan::ScanKind::Grouped && !group->Elements.empty())
+            size = group->Elements.front().Size;
+        size = size >= 8 ? 8 : size >= 4 ? 4 : size >= 2 ? 2 : 1;
         if (m_release && command != Command::AddResults && command != Command::SelectAllResults)
             return;
         switch (command)
         {
         case Command::AddResults:
-            for (std::uint64_t address : addresses())
-                m_workspace.AddAddress(address, type);
+            for (const Scan::ScanRecord& record : selection())
+                AddResult(record);
             break;
         case Command::ChangeResultValue:
-            m_resultValueTargets = addresses();
+            if (scanner.Kind() == Scan::ScanKind::Grouped)
+            {
+                m_engine.Notify(LogLevel::Info, "Grouped results hold several values. Add them to the address list to change one of them.");
+                break;
+            }
+            m_resultValueTargets.clear();
+            for (const Scan::ScanRecord& record : selection())
+                m_resultValueTargets.push_back({ record.Address, record.Type });
             m_resultValueText = m_liveValues.count(index) && m_liveValues[index] != "??" ? m_liveValues[index] : "";
             m_resultValueDialog = true;
             break;
@@ -795,7 +825,7 @@ namespace Manifold::UI
         if (!BeginModal("Change value##results", ICON_FA_EDIT, "Change value", ImVec2(380.0f, 0.0f)))
             return;
         Scan::Scanner& scanner = m_engine.Scanner();
-        Muted(std::to_string(m_resultValueTargets.size()) + (m_resultValueTargets.size() == 1 ? " result, " : " results, ") + Scan::TypeName(scanner.Type()));
+        Muted(std::to_string(m_resultValueTargets.size()) + (m_resultValueTargets.size() == 1 ? " result, " : " results, ") + ScanTypeLabel());
         if (ImGui::IsWindowAppearing())
             ImGui::SetKeyboardFocusHere();
         ImGui::SetNextItemWidth(-1.0f);
@@ -803,14 +833,29 @@ namespace Manifold::UI
         ImGui::Spacing();
         if (AccentButton("OK", Px(90.0f, 0.0f)) || apply)
         {
-            const auto bytes = Scan::ParseValue(scanner.Type(), m_resultValueText, scanner.Format());
-            if (!bytes)
-                m_workspace.Report(Status::Fail(ErrorCode::ScanBadValue, m_resultValueText));
-            else if (m_engine.HasProcess())
+            const Lua::CustomType* custom = scanner.Kind() == Scan::ScanKind::Custom ? m_engine.Lua().FindCustomType(scanner.CustomName()) : nullptr;
+            if (m_engine.HasProcess())
             {
-                for (std::uint64_t address : m_resultValueTargets)
+                for (const ResultTarget& target : m_resultValueTargets)
                 {
-                    const Status status = m_engine.Process()->Write(address, *bytes);
+                    std::optional<std::vector<std::uint8_t>> bytes;
+                    if (custom)
+                    {
+                        std::vector<std::uint8_t> converted;
+                        if (m_engine.Lua().CustomFromText(*custom, m_resultValueText, target.Address, converted))
+                            bytes = std::move(converted);
+                    }
+                    else if (scanner.Kind() != Scan::ScanKind::Custom)
+                    {
+                        bytes = Scan::ParseValue(scanner.Kind() == Scan::ScanKind::All ? target.Type : scanner.Type(), m_resultValueText, scanner.Format());
+                    }
+                    if (!bytes)
+                    {
+                        m_workspace.Report(Status::Fail(custom || scanner.Kind() != Scan::ScanKind::Custom ? ErrorCode::ScanBadValue : ErrorCode::ScanCustomMissing,
+                            custom || scanner.Kind() != Scan::ScanKind::Custom ? m_resultValueText : scanner.CustomName()));
+                        break;
+                    }
+                    const Status status = m_engine.Process()->Write(target.Address, *bytes);
                     if (!status)
                     {
                         m_workspace.Report(status);
@@ -830,7 +875,12 @@ namespace Manifold::UI
     Scan::ScanOptions MainWindow::CurrentOptions() const
     {
         Scan::ScanOptions options;
+        options.Kind = m_scanKind;
         options.Type = Scan::kScanTypes[m_typeIndex];
+        options.AllTypes = m_engine.Options().AllTypes;
+        options.CustomName = m_customName;
+        options.Against = m_compareTo;
+        options.SavedName = m_savedName;
         options.Mode = kCompares[m_compareIndex];
         options.Value = Trim(m_value);
         options.Value2 = Trim(m_value2);
@@ -859,9 +909,18 @@ namespace Manifold::UI
             m_workspace.Report(Status::Fail(ErrorCode::NoProcess));
             return;
         }
-        if (!Scan::CompareAllowedFirst(kCompares[m_compareIndex]))
+        if (!Scan::CompareAllowedFirst(kCompares[m_compareIndex]) || !Scan::CompareAvailable(m_scanKind, kCompares[m_compareIndex]))
             m_compareIndex = 0;
-        const Status status = m_engine.Scanner().Start(m_engine.Process(), CurrentOptions(), true);
+        Scan::ScanOptions options = CurrentOptions();
+        if (options.Kind == Scan::ScanKind::Custom)
+        {
+            if (Status filled = FillCustom(options, m_customName); !filled)
+            {
+                m_workspace.Report(filled);
+                return;
+            }
+        }
+        const Status status = m_engine.Scanner().Start(m_engine.Process(), options, true);
         m_workspace.Report(status);
     }
 
@@ -872,10 +931,161 @@ namespace Manifold::UI
             m_workspace.Report(Status::Fail(ErrorCode::NoProcess));
             return;
         }
+        Scan::Scanner& scanner = m_engine.Scanner();
         Scan::ScanOptions options = CurrentOptions();
-        options.Type = m_engine.Scanner().Type();
-        const Status status = m_engine.Scanner().Start(m_engine.Process(), options, false);
+        options.Kind = scanner.Kind();
+        options.Type = scanner.Type();
+        if (options.Kind == Scan::ScanKind::Custom)
+        {
+            if (Status filled = FillCustom(options, scanner.CustomName()); !filled)
+            {
+                m_workspace.Report(filled);
+                return;
+            }
+        }
+        const Status status = scanner.Start(m_engine.Process(), options, false);
         m_workspace.Report(status);
+    }
+
+    Status MainWindow::FillCustom(Scan::ScanOptions& options, const std::string& name) const
+    {
+        const Lua::CustomType* custom = m_engine.Lua().FindCustomType(name);
+        if (!custom)
+            return Status::Fail(ErrorCode::ScanCustomMissing, name);
+        options.CustomName = custom->Name;
+        options.CustomSize = custom->ByteCount();
+        options.CustomBytes.clear();
+        if (options.Mode == Scan::Compare::Exact)
+        {
+            if (TrimView(options.Value).empty())
+                return Status::Fail(ErrorCode::ScanNoValue);
+            std::vector<std::uint8_t> bytes;
+            if (!m_engine.Lua().CustomFromText(*custom, options.Value, 0, bytes) || bytes.size() != static_cast<std::size_t>(options.CustomSize))
+                return Status::Fail(ErrorCode::ScanBadValue, options.Value);
+            options.CustomBytes = std::move(bytes);
+        }
+        return Status::Success();
+    }
+
+    std::string MainWindow::ScanTypeLabel() const
+    {
+        const Scan::Scanner& scanner = m_engine.Scanner();
+        const bool scanned = scanner.HasResults();
+        const Scan::ScanKind kind = scanned ? scanner.Kind() : m_scanKind;
+        switch (kind)
+        {
+        case Scan::ScanKind::All: return "All";
+        case Scan::ScanKind::Grouped: return "Grouped";
+        case Scan::ScanKind::Custom: return scanned ? scanner.CustomName() : m_customName;
+        default: return Scan::TypeName(scanned ? scanner.Type() : Scan::kScanTypes[m_typeIndex]);
+        }
+    }
+
+    std::string MainWindow::ResultText(const Scan::ScanRecord& record, std::span<const std::uint8_t> bytes)
+    {
+        Scan::Scanner& scanner = m_engine.Scanner();
+        switch (scanner.Kind())
+        {
+        case Scan::ScanKind::Grouped:
+        {
+            const auto group = scanner.Group();
+            return group ? group->Describe(bytes, scanner.Format().PointerSize) : HexBytes(bytes);
+        }
+        case Scan::ScanKind::Custom:
+        {
+            const Lua::CustomType* custom = m_engine.Lua().FindCustomType(scanner.CustomName());
+            std::string text;
+            if (!custom || !m_engine.Lua().CustomToText(*custom, bytes, record.Address, text))
+                return "??";
+            return text;
+        }
+        case Scan::ScanKind::All:
+            return Scan::FormatValue(record.Type, bytes, scanner.Format());
+        default:
+            return Scan::FormatValue(scanner.Type(), bytes, scanner.Format());
+        }
+    }
+
+    void MainWindow::AddResult(const Scan::ScanRecord& record)
+    {
+        Scan::Scanner& scanner = m_engine.Scanner();
+        switch (scanner.Kind())
+        {
+        case Scan::ScanKind::All:
+            m_workspace.AddAddress(record.Address, record.Type);
+            return;
+        case Scan::ScanKind::Custom:
+        {
+            Table::MemoryRecord& added = m_engine.Table().AddValue("No description", m_engine.Symbols().ModuleOffset(record.Address), Scan::ValueType::FourBytes);
+            added.CustomTypeName = scanner.CustomName();
+            m_engine.RefreshValues(true);
+            return;
+        }
+        case Scan::ScanKind::Grouped:
+        {
+            const auto group = scanner.Group();
+            if (!group)
+                return;
+            std::vector<std::uint8_t> bytes(record.Previous.size());
+            if (!m_engine.HasProcess() || bytes.empty() || !m_engine.Process()->ReadExact(record.Address, bytes.data(), bytes.size()))
+                bytes = record.Previous;
+            std::vector<int> offsets = group->Offsets(bytes);
+            if (std::find(offsets.begin(), offsets.end(), -1) != offsets.end())
+                offsets = group->Offsets(record.Previous);
+            Table::MemoryRecord& parent = m_engine.Table().AddGroup("Group at " + m_engine.Symbols().ModuleOffset(record.Address));
+            for (std::size_t i = 0; i < group->Elements.size() && i < offsets.size(); ++i)
+            {
+                const Scan::GroupElement& element = group->Elements[i];
+                if (element.Skip || offsets[i] < 0)
+                    continue;
+                const std::uint64_t address = record.Address + static_cast<std::uint64_t>(offsets[i]);
+                Table::MemoryRecord& added = m_engine.Table().AddValue("+" + Hex(static_cast<std::uint64_t>(offsets[i])), m_engine.Symbols().ModuleOffset(address), element.Type, &parent);
+                if (element.Type == Scan::ValueType::String)
+                {
+                    added.Unicode = element.Unicode;
+                    added.Length = element.Unicode ? element.Size / 2 : element.Size;
+                }
+            }
+            m_engine.RefreshValues(true);
+            return;
+        }
+        default:
+            m_workspace.AddAddress(record.Address, scanner.Type());
+            return;
+        }
+    }
+
+    void MainWindow::SaveResultsDialog()
+    {
+        if (m_saveResultsDialog)
+        {
+            ImGui::OpenPopup("Save results##scan");
+            m_saveResultsDialog = false;
+        }
+        if (!BeginModal("Save results##scan", ICON_FA_SAVE, "Save results", ImVec2(380.0f, 0.0f)))
+            return;
+        Scan::Scanner& scanner = m_engine.Scanner();
+        Muted("A next scan can compare with these results later. They stay until New scan.");
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(-1.0f);
+        const bool apply = InputTextWithHint("##savedname", "name", m_saveResultsName, ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::Spacing();
+        ImGui::BeginDisabled(TrimView(m_saveResultsName).empty());
+        if (AccentButton("Save", Px(90.0f, 0.0f)) || (apply && !TrimView(m_saveResultsName).empty()))
+        {
+            if (scanner.SaveResults(m_saveResultsName))
+            {
+                m_savedName = Trim(m_saveResultsName);
+                m_engine.Notify(LogLevel::Info, "Saved " + Grouped(scanner.Count()) + " results as \"" + m_savedName + "\".");
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", Px(90.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            ImGui::CloseCurrentPopup();
+        EndModal();
     }
 
     void MainWindow::ScanCard(float width, float height)
@@ -928,8 +1138,11 @@ namespace Manifold::UI
         }
 
         ImGui::Spacing();
+        const Scan::ScanKind kind = scanned ? scanner.Kind() : m_scanKind;
+        if (!Scan::CompareAvailable(kind, kCompares[m_compareIndex]))
+            m_compareIndex = 0;
         const Scan::Compare compare = kCompares[m_compareIndex];
-        const bool needsValue = Scan::CompareNeedsValue(compare);
+        const bool needsValue = Scan::CompareNeedsValue(compare) || (kind == Scan::ScanKind::Grouped && compare == Scan::Compare::Unknown && !scanned);
         const float labelWidth = Px(84.0f);
         ImGui::BeginDisabled(busy);
 
@@ -944,13 +1157,19 @@ namespace Manifold::UI
         }
         const float hexWidth = ImGui::CalcTextSize("Hex").x + ImGui::GetFrameHeight() + Px(12.0f);
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - hexWidth);
-        if (InputTextWithHint("##value", Scan::CompareNeedsTwoValues(compare) ? "from" : "value", m_value, ImGuiInputTextFlags_EnterReturnsTrue))
+        const char* hint = kind == Scan::ScanKind::Grouped ? "4:100 f:1.5 d:*" : Scan::CompareNeedsTwoValues(compare) ? "from" : "value";
+        if (InputTextWithHint("##value", hint, m_value, ImGuiInputTextFlags_EnterReturnsTrue))
         {
             if (!scanned)
                 DoFirstScan();
             else
                 DoNextScan();
         }
+        if (kind == Scan::ScanKind::Grouped)
+            ItemTooltip("Values next to each other, separated by spaces, each as type:value.\n"
+                        "Types: 1, 2, 4, 8 (bytes), f (float), d (double), p (pointer), s (text), u (UTF-16 text), skip:N (N bytes in between).\n"
+                        "Values: a number, * for any value, or a range like 10..20. Text with spaces goes in quotes: s:\"two words\".\n"
+                        "within:N: the values after the first one may be anywhere in the N bytes from the first, in any order.");
         ImGui::SameLine();
         ImGui::Checkbox("Hex", &m_hex);
         if (Scan::CompareNeedsTwoValues(compare))
@@ -969,7 +1188,7 @@ namespace Manifold::UI
         {
             for (int i = 0; i < static_cast<int>(std::size(kCompares)); ++i)
             {
-                const bool allowed = scanned ? Scan::CompareAllowedNext(kCompares[i]) : Scan::CompareAllowedFirst(kCompares[i]);
+                const bool allowed = (scanned ? Scan::CompareAllowedNext(kCompares[i]) : Scan::CompareAllowedFirst(kCompares[i])) && Scan::CompareAvailable(kind, kCompares[i]);
                 if (!allowed)
                     continue;
                 if (ImGui::Selectable(Scan::CompareName(kCompares[i]), i == m_compareIndex))
@@ -982,27 +1201,105 @@ namespace Manifold::UI
         if (scanned && !Scan::CompareAllowedNext(compare))
             m_compareIndex = 0;
 
+        if (scanned)
+        {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted("Compare to");
+            ImGui::SameLine(labelWidth);
+            if (m_compareTo == Scan::CompareTo::Saved && !scanner.HasSaved(m_savedName))
+                m_compareTo = Scan::CompareTo::Previous;
+            const bool usesPrevious = Scan::CompareUsesPrevious(compare);
+            const std::string preview = !usesPrevious ? "Previous scan" : m_compareTo == Scan::CompareTo::First ? "First scan" : m_compareTo == Scan::CompareTo::Saved ? "Saved: " + m_savedName : "Previous scan";
+            const char* saveLabel = ICON_FA_SAVE "  Save";
+            const float saveWidth = ImGui::CalcTextSize(saveLabel).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - saveWidth - ImGui::GetStyle().ItemSpacing.x);
+            ImGui::BeginDisabled(!usesPrevious);
+            if (ImGui::BeginCombo("##compareto", preview.c_str()))
+            {
+                if (ImGui::Selectable("Previous scan", m_compareTo == Scan::CompareTo::Previous))
+                    m_compareTo = Scan::CompareTo::Previous;
+                if (ImGui::Selectable("First scan", m_compareTo == Scan::CompareTo::First))
+                    m_compareTo = Scan::CompareTo::First;
+                const std::vector<std::string> saved = scanner.SavedNames();
+                if (!saved.empty())
+                    ImGui::Separator();
+                for (const std::string& name : saved)
+                {
+                    ImGui::PushID(name.c_str());
+                    if (ImGui::Selectable(("Saved: " + name).c_str(), m_compareTo == Scan::CompareTo::Saved && m_savedName == name))
+                    {
+                        m_compareTo = Scan::CompareTo::Saved;
+                        m_savedName = name;
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("%s", usesPrevious ? "What the next scan compares the values with" : "Only scans that compare with an earlier value use this");
+            ImGui::SameLine();
+            if (ImGui::Button(saveLabel, ImVec2(saveWidth, 0.0f)))
+            {
+                m_saveResultsName = "Scan " + std::to_string(scanner.ScanNumber());
+                m_saveResultsDialog = true;
+            }
+            ItemTooltip("Save these results, so a later scan can compare with them");
+        }
+
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted("Value type");
         ImGui::SameLine(labelWidth);
         ImGui::SetNextItemWidth(-1.0f);
         ImGui::BeginDisabled(scanned);
-        if (ImGui::BeginCombo("##type", Scan::TypeName(Scan::kScanTypes[m_typeIndex])))
+        if (m_scanKind == Scan::ScanKind::Custom && !m_engine.Lua().FindCustomType(m_customName))
+            m_scanKind = Scan::ScanKind::Single;
+        if (ImGui::BeginCombo("##type", ScanTypeLabel().c_str(), ImGuiComboFlags_HeightLarge))
         {
             for (int i = 0; i < static_cast<int>(std::size(Scan::kScanTypes)); ++i)
             {
-                if (ImGui::Selectable(Scan::TypeName(Scan::kScanTypes[i]), i == m_typeIndex))
+                if (ImGui::Selectable(Scan::TypeName(Scan::kScanTypes[i]), m_scanKind == Scan::ScanKind::Single && i == m_typeIndex))
                 {
+                    m_scanKind = Scan::ScanKind::Single;
                     m_typeIndex = i;
                     m_alignment = Scan::DefaultAlignment(Scan::kScanTypes[i]);
                 }
+            }
+            ImGui::Separator();
+            if (ImGui::Selectable("All##kind", m_scanKind == Scan::ScanKind::All))
+            {
+                m_scanKind = Scan::ScanKind::All;
+                m_alignment = 1;
+            }
+            ItemTooltip("Byte, 2, 4 and 8 bytes, float and double in one scan. Settings, Scanner, Types for All picks which of them.");
+            if (ImGui::Selectable("Grouped##kind", m_scanKind == Scan::ScanKind::Grouped))
+            {
+                m_scanKind = Scan::ScanKind::Grouped;
+                m_alignment = 4;
+            }
+            ItemTooltip("Several values that lie next to each other, like 4:100 f:1.5 d:*");
+            const std::vector<std::string> customs = m_engine.Lua().CustomTypeNames();
+            if (!customs.empty())
+                ImGui::Separator();
+            for (const std::string& name : customs)
+            {
+                ImGui::PushID(name.c_str());
+                if (ImGui::Selectable(name.c_str(), m_scanKind == Scan::ScanKind::Custom && EqualsNoCase(name, m_customName)))
+                {
+                    m_scanKind = Scan::ScanKind::Custom;
+                    m_customName = name;
+                    const Lua::CustomType* custom = m_engine.Lua().FindCustomType(name);
+                    const int size = custom ? custom->ByteCount() : 1;
+                    m_alignment = size % 4 == 0 ? 4 : size % 2 == 0 ? 2 : 1;
+                }
+                ImGui::PopID();
             }
             ImGui::EndCombo();
         }
         ImGui::EndDisabled();
 
         const Scan::ValueType type = scanned ? scanner.Type() : Scan::kScanTypes[m_typeIndex];
-        if (Scan::IsFloating(type))
+        if ((kind == Scan::ScanKind::Single && Scan::IsFloating(type)) || kind == Scan::ScanKind::All)
         {
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + labelWidth - ImGui::GetStyle().WindowPadding.x + Px(2.0f));
             ImGui::RadioButton("Rounded", &m_floatMode, 0);
@@ -1013,7 +1310,7 @@ namespace Manifold::UI
             ImGui::SameLine();
             ImGui::RadioButton("Exact", &m_floatMode, 2);
         }
-        if (type == Scan::ValueType::String)
+        if (kind == Scan::ScanKind::Single && type == Scan::ValueType::String)
         {
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + labelWidth - ImGui::GetStyle().WindowPadding.x + Px(2.0f));
             ImGui::Checkbox("UTF-16", &m_unicode);

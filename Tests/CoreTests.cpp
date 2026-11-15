@@ -5,9 +5,11 @@
 #include "Core/Text.h"
 #include "Core/Xml.h"
 #include "Disasm/AssemblySearch.h"
+#include "Scan/Scanner.h"
 #include "Scan/ValueType.h"
 #include "Table/CheatTable.h"
 
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -325,6 +327,82 @@ data:
             CHECK_EQ(result.Between(0x100, 0x300).size(), 3u);
             CHECK(result.To(0x250).empty());
         }
+
+        template <class T>
+        void Put(std::vector<std::uint8_t>& block, std::size_t offset, T value)
+        {
+            std::memcpy(block.data() + offset, &value, sizeof(T));
+        }
+
+        void ScanKinds()
+        {
+            CHECK_EQ(Scan::AllTypeBit(Scan::ValueType::Byte), 1u);
+            CHECK_EQ(Scan::AllTypeBit(Scan::ValueType::Double), 32u);
+            CHECK_EQ(Scan::AllTypeBit(Scan::ValueType::String), 0u);
+            CHECK(Scan::CompareAvailable(Scan::ScanKind::All, Scan::Compare::IncreasedBy));
+            CHECK(!Scan::CompareAvailable(Scan::ScanKind::Grouped, Scan::Compare::Bigger));
+            CHECK(Scan::CompareAvailable(Scan::ScanKind::Custom, Scan::Compare::Unchanged));
+            CHECK(Scan::CompareUsesPrevious(Scan::Compare::Decreased) && !Scan::CompareUsesPrevious(Scan::Compare::SameAsFirst));
+
+            std::string error;
+            const auto spec = Scan::ParseGroup("4:100 f:1.5 skip:4 d:* s:\"a b\"", false, 8, error);
+            CHECK_MSG(spec.has_value(), error);
+            if (spec)
+            {
+                CHECK_EQ(spec->Elements.size(), 5u);
+                CHECK_EQ(spec->BlockSize, 23);
+                CHECK_EQ(spec->Elements[3].Offset, 12);
+                CHECK(spec->Elements[2].Skip && spec->Elements[3].Any);
+                std::vector<std::uint8_t> block(23);
+                Put<std::int32_t>(block, 0, 100);
+                Put<float>(block, 4, 1.54f);
+                Put<double>(block, 12, -7.25);
+                std::memcpy(block.data() + 20, "a b", 3);
+                CHECK(spec->Matches(block.data()));
+                const std::string text = spec->Describe(block, 8);
+                CHECK_MSG(text.find("100") == 0 && text.find("a b") != std::string::npos && text.find("-7.25") != std::string::npos, text);
+                Put<float>(block, 4, 1.56f);
+                CHECK(!spec->Matches(block.data()));
+                Put<float>(block, 4, 1.5f);
+                block[20] = 'A';
+                CHECK(!spec->Matches(block.data()));
+            }
+
+            const auto range = Scan::ParseGroup("2:10..20 1:0x7F 1:-2", false, 8, error);
+            CHECK_MSG(range.has_value() && range->BlockSize == 4, error);
+            if (range)
+            {
+                std::vector<std::uint8_t> block = { 15, 0, 0x7F, 0xFE };
+                CHECK(range->Matches(block.data()));
+                block[0] = 25;
+                CHECK(!range->Matches(block.data()));
+            }
+            const auto hex = Scan::ParseGroup("4:FF p:*", true, 4, error);
+            CHECK(hex && hex->Elements[0].Low == 255 && hex->Elements[1].Size == 4 && hex->BlockSize == 8);
+            CHECK(!Scan::ParseGroup("1:300", false, 8, error));
+            CHECK(!Scan::ParseGroup("x:1", false, 8, error));
+            CHECK(!Scan::ParseGroup("4:100 oops", false, 8, error));
+            CHECK(!Scan::ParseGroup("4:* skip:2", false, 8, error));
+            CHECK(!Scan::ParseGroup("", false, 8, error));
+            CHECK(!Scan::ParseGroup("4:1 4:* within:16", false, 8, error));
+            CHECK(!Scan::ParseGroup("d:1 within:4", false, 8, error));
+
+            const auto within = Scan::ParseGroup("4:7 f:2.5 2:9 within:32", false, 8, error);
+            CHECK_MSG(within.has_value() && within->BlockSize == 32, error);
+            if (within)
+            {
+                std::vector<std::uint8_t> block(32);
+                Put<std::int32_t>(block, 0, 7);
+                Put<std::int16_t>(block, 6, 9);
+                Put<float>(block, 20, 2.5f);
+                std::vector<int> offsets;
+                CHECK(within->Matches(block.data(), &offsets));
+                CHECK(offsets == std::vector<int>({ 0, 20, 6 }));
+                CHECK(within->Offsets(block) == offsets);
+                Put<std::int32_t>(block, 0, 8);
+                CHECK(!within->Matches(block.data()));
+            }
+        }
     }
 
     int RunCoreTests()
@@ -337,6 +415,7 @@ data:
         TableRoundTrip();
         AutoAssemblerOffline();
         CodeSearchHelpers();
+        ScanKinds();
         return Totals().Failures - before;
     }
 }

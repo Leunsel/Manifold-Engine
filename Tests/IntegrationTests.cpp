@@ -115,6 +115,147 @@ namespace Manifold::Tests
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
             }
         }
+
+        bool ContainsTyped(Engine& engine, std::uint64_t address, Scan::ValueType type)
+        {
+            const std::uint64_t count = std::min<std::uint64_t>(engine.Scanner().Count(), 5'000'000);
+            Scan::ScanRecord record;
+            for (std::uint64_t i = 0; i < count; ++i)
+            {
+                if (engine.Scanner().Record(i, record) && record.Address == address && record.Type == type)
+                    return true;
+            }
+            return false;
+        }
+
+        bool RunScan(Engine& engine, const Scan::ScanOptions& options, bool first)
+        {
+            const Status started = engine.Scanner().Start(engine.Process(), options, first);
+            CHECK_MSG(started.Ok(), started.Text);
+            return started.Ok() && WaitScan(engine);
+        }
+
+        void ScanKindTests(Engine& engine, std::uint64_t hero, std::uint64_t health)
+        {
+            const Target::Process& process = *engine.Process();
+            Scan::ScanOptions options;
+            options.Kind = Scan::ScanKind::All;
+            options.Value = "1234.5";
+            options.Alignment = 4;
+            CHECK(RunScan(engine, options, true));
+            CHECK(ContainsTyped(engine, hero + 8, Scan::ValueType::Double));
+            CHECK(!ContainsTyped(engine, hero + 8, Scan::ValueType::EightBytes));
+            engine.Scanner().Reset();
+
+            options = {};
+            options.Kind = Scan::ScanKind::All;
+            options.Value = std::to_string(process.ReadValue<std::int32_t>(health).value_or(0));
+            options.Alignment = 4;
+            CHECK(RunScan(engine, options, true));
+            CHECK_MSG(ContainsTyped(engine, health, Scan::ValueType::FourBytes) && ContainsTyped(engine, health, Scan::ValueType::TwoBytes), options.Value);
+            const std::uint64_t allCount = engine.Scanner().Count();
+            Pause(engine, 1300);
+            options.Mode = Scan::Compare::Decreased;
+            CHECK(RunScan(engine, options, false));
+            CHECK(ContainsTyped(engine, health, Scan::ValueType::FourBytes));
+            CHECK(engine.Scanner().Count() <= allCount);
+            CHECK(engine.Scanner().Kind() == Scan::ScanKind::All);
+            engine.Scanner().Reset();
+
+            options = {};
+            options.Value = std::to_string(process.ReadValue<std::int32_t>(health).value_or(0));
+            CHECK(RunScan(engine, options, true));
+            CHECK(engine.Scanner().SaveResults("start"));
+            CHECK(engine.Scanner().HasSaved("start"));
+            Pause(engine, 1300);
+            options.Mode = Scan::Compare::Changed;
+            CHECK(RunScan(engine, options, false));
+            CHECK(Contains(engine, health));
+            options.Mode = Scan::Compare::Decreased;
+            options.Against = Scan::CompareTo::Saved;
+            options.SavedName = "start";
+            CHECK(RunScan(engine, options, false));
+            CHECK(Contains(engine, health));
+            options.Mode = Scan::Compare::Unchanged;
+            options.Against = Scan::CompareTo::First;
+            CHECK(RunScan(engine, options, false));
+            CHECK(!Contains(engine, health));
+            options.Against = Scan::CompareTo::Saved;
+            options.SavedName = "missing";
+            CHECK_EQ(engine.Scanner().Start(engine.Process(), options, false).Code, ErrorCode::ScanSavedMissing);
+            engine.Scanner().Reset();
+            CHECK(!engine.Scanner().HasSaved("start"));
+
+            options = {};
+            options.Kind = Scan::ScanKind::Grouped;
+            options.Value = "4:0..2000 f:3.5 d:1234.5";
+            options.Alignment = 4;
+            CHECK(RunScan(engine, options, true));
+            CHECK(Contains(engine, hero));
+            CHECK(RunScan(engine, options, false));
+            CHECK(Contains(engine, hero));
+            options.Value = "4:* f:3.5";
+            CHECK_EQ(engine.Scanner().Start(engine.Process(), options, false).Code, ErrorCode::ScanGroupSyntax);
+            options.Mode = Scan::Compare::Bigger;
+            CHECK_EQ(engine.Scanner().Start(engine.Process(), options, false).Code, ErrorCode::ScanCompareUnavailable);
+            engine.Scanner().Reset();
+            options = {};
+            options.Kind = Scan::ScanKind::Grouped;
+            options.Value = "4:0..2000 d:1234.5 f:3.5 within:16";
+            options.Alignment = 4;
+            CHECK(RunScan(engine, options, true));
+            CHECK(Contains(engine, hero));
+            engine.Scanner().Reset();
+
+            const Status registered = engine.Lua().Run(
+                "registerCustomTypeLua('Big endian test', 4, function(a, b, c, d) return ((a * 256 + b) * 256 + c) * 256 + d end, "
+                "function(v) return (v >> 24) & 255, (v >> 16) & 255, (v >> 8) & 255, v & 255 end, false)", "custom type");
+            CHECK_MSG(registered.Ok(), registered.Text);
+            const Lua::CustomType* custom = engine.Lua().FindCustomType("Big endian test");
+            CHECK(custom != nullptr);
+            Status allocated;
+            const std::uint64_t box = engine.Process()->Allocate(4096, PAGE_READWRITE, 0, allocated);
+            CHECK(box != 0);
+            if (custom && box)
+            {
+                const std::uint8_t big[] = { 0x12, 0x34, 0x56, 0x78 };
+                CHECK(engine.Process()->Write(box + 16, big, sizeof(big)).Ok());
+                options = {};
+                options.Kind = Scan::ScanKind::Custom;
+                options.CustomName = custom->Name;
+                options.CustomSize = custom->ByteCount();
+                options.Value = "305419896";
+                CHECK(engine.Lua().CustomFromText(*custom, options.Value, 0, options.CustomBytes));
+                CHECK(options.CustomBytes == std::vector<std::uint8_t>(big, big + 4));
+                options.Start = box;
+                options.Stop = box + 4096;
+                options.Writable = Scan::Tristate::Any;
+                CHECK(RunScan(engine, options, true));
+                CHECK(Contains(engine, box + 16));
+                Scan::ScanRecord record;
+                CHECK(engine.Scanner().Record(0, record) && record.Previous == std::vector<std::uint8_t>(big, big + 4));
+                CHECK_EQ(engine.Scanner().CustomName(), custom->Name);
+                options.Mode = Scan::Compare::Unchanged;
+                CHECK(RunScan(engine, options, false));
+                CHECK(Contains(engine, box + 16));
+                options.Mode = Scan::Compare::Bigger;
+                CHECK_EQ(engine.Scanner().Start(engine.Process(), options, false).Code, ErrorCode::ScanCompareUnavailable);
+                engine.Scanner().Reset();
+                engine.Process()->Free(box);
+            }
+
+            std::string luaResult;
+            const Status lua = engine.Lua().RunWithResult(
+                "local ms = createMemScan()\n"
+                "ms.firstScan(soExactValue, vtAll, rtRounded, '1234.5', '', 0, 0x7fffffffffff, '+W*X-C', fsmAligned, '4', false, true, false, false)\n"
+                "ms.waitTillDone()\n"
+                "ms.saveCurrentResults('first')\n"
+                "local names = ms.getSavedResultList()\n"
+                "local found = ms.FoundList\n"
+                "return tostring(found.Count > 0) .. '|' .. names[1] .. '|' .. found.getValue(0)",
+                "memscan all", luaResult);
+            CHECK_MSG(lua.Ok() && luaResult.rfind("true|first|1234.", 0) == 0, lua.Text + " " + luaResult);
+        }
     }
 
     int RunIntegrationTests(const std::filesystem::path& targetPath)
@@ -234,6 +375,8 @@ namespace Manifold::Tests
         CHECK(WaitScan(engine));
         CHECK(Contains(engine, hero + 16));
         engine.Scanner().Reset();
+
+        ScanKindTests(engine, hero, health);
 
         options = {};
         options.Type = Scan::ValueType::FourBytes;

@@ -100,6 +100,7 @@ namespace Manifold
         if (auto v = text("scanprivate")) ScanPrivate = ToBool(*v);
         if (auto v = text("scanimage")) ScanImage = ToBool(*v);
         if (auto v = text("scanmapped")) ScanMapped = ToBool(*v);
+        if (auto v = text("alltypes")) AllTypes = static_cast<std::uint32_t>(std::clamp(ToInt(*v, 0x3F), 0, 0x3F));
         if (auto v = text("resultrefresh")) ResultValueRefreshMs = std::clamp(ToInt(*v, ResultValueRefreshMs), 50, 10000);
         if (auto v = text("autorun")) AutorunEnabled = ToBool(*v);
         if (auto v = text("autoattach")) AutoAttach = Split(*v, ';');
@@ -133,6 +134,7 @@ namespace Manifold
         out << "UpdateInterval=" << UpdateIntervalMs << "\nFreezeInterval=" << FreezeIntervalMs << "\nScanThreads=" << ScanThreads << "\n";
         out << "FastScan=" << (FastScan ? 1 : 0) << "\nPauseWhileScanning=" << (PauseWhileScanning ? 1 : 0) << "\n";
         out << "ScanPrivate=" << (ScanPrivate ? 1 : 0) << "\nScanImage=" << (ScanImage ? 1 : 0) << "\nScanMapped=" << (ScanMapped ? 1 : 0) << "\n";
+        out << "AllTypes=" << AllTypes << "\n";
         out << "ResultRefresh=" << ResultValueRefreshMs << "\n\n";
         out << "[Scripts]\n";
         out << "Autorun=" << (AutorunEnabled ? 1 : 0) << "\nAutoAttach=" << Join(AutoAttach, ";") << "\nAutoAttachEnabled=" << (AutoAttachEnabled ? 1 : 0) << "\n";
