@@ -14,6 +14,7 @@
 namespace Manifold::Target
 {
     class Process;
+    struct RegionInfo;
 }
 
 namespace Manifold::Scan
@@ -138,6 +139,22 @@ namespace Manifold::Scan
         double m_startedAt = 0.0;
     };
 
+    struct PatternFilter
+    {
+        Tristate Writable = Tristate::Any;
+        Tristate Executable = Tristate::Any;
+        Tristate CopyOnWrite = Tristate::Any;
+        bool IncludeReadOnly = true;
+        std::uint64_t Divisor = 0;
+        std::uint64_t Modulo = 0;
+        std::uint64_t Remainder = 0;
+
+        bool Accepts(const Target::RegionInfo& region) const;
+        bool Accepts(std::uint64_t address) const;
+    };
+
     std::vector<std::uint64_t> FindPattern(const Target::Process& process, const Pattern& pattern, std::uint64_t start, std::uint64_t stop, bool executableOnly,
         std::size_t limit, bool includeReadOnly = true);
+    std::vector<std::uint64_t> FindPattern(const Target::Process& process, const Pattern& pattern, std::uint64_t start, std::uint64_t stop, const PatternFilter& filter,
+        std::size_t limit);
 }

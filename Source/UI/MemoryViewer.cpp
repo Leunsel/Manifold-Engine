@@ -2,8 +2,11 @@
 
 #include "Asm/Assembler.h"
 #include "Core/Text.h"
+#include "Core/RuntimeLog.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Lua/LuaEngine.h"
 #include "UI/Fonts.h"
+#include "UI/ScriptUi.h"
 #include "UI/Shortcuts.h"
 #include "UI/Templates.h"
 #include "UI/UiScale.h"
@@ -161,6 +164,46 @@ namespace Manifold::UI
         }
     }
 
+    void MemoryViewer::Select(std::uint64_t address)
+    {
+        m_open = true;
+        if (address == 0)
+            return;
+        Navigate(address);
+    }
+
+    void MemoryViewer::ShowHex(std::uint64_t address, std::uint64_t start, std::uint64_t stop)
+    {
+        m_open = true;
+        if (address)
+        {
+            m_hexTop = address & ~0xFull;
+            m_hexSelected = address;
+            m_hexMarkStart = 0;
+            m_hexMarkStop = 0;
+        }
+        if (start && stop >= start)
+        {
+            m_hexMarkStart = start;
+            m_hexMarkStop = stop;
+        }
+    }
+
+    void MemoryViewer::Raise()
+    {
+        m_open = true;
+        m_bringToFront = true;
+    }
+
+    void MemoryViewer::PublishSelection()
+    {
+        m_workspace.ActiveViewer = m_number;
+        m_workspace.LastCodeAddress = m_selected;
+        m_engine.SelectedCodeAddress = m_selected;
+        if (m_hexSelected)
+            m_engine.SelectedHexAddress = m_hexSelected;
+    }
+
     void MemoryViewer::Navigate(std::uint64_t address, bool remember)
     {
         if (remember && m_selected && m_selected != address)
@@ -217,6 +260,8 @@ namespace Manifold::UI
             EndToolWindow();
             return;
         }
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+            PublishSelection();
         MenuBar();
         if (!m_engine.HasProcess())
         {
@@ -363,7 +408,88 @@ namespace Manifold::UI
             item(ICON_FA_MOON "  Lua engine", Command::ViewerLuaEngine);
             ImGui::EndMenu();
         }
+        ScriptMenuBar();
         ImGui::EndMenuBar();
+    }
+
+    void MemoryViewer::ScriptMenuBar()
+    {
+        Lua::LuaEngine& lua = m_engine.Lua();
+        if (lua.MenuGeneration() != m_scriptMenuGeneration)
+        {
+            m_scriptMenuGeneration = lua.MenuGeneration();
+            m_scriptMenu = lua.MenuItems(Lua::ScriptMenu::MemoryViewMenu);
+        }
+        int clicked = 0;
+        for (const Lua::ScriptMenuItem& root : m_scriptMenu)
+        {
+            if (root.Caption == "-")
+                continue;
+            const std::string label = root.Caption + "##script" + std::to_string(root.Id);
+            if (root.Children.empty())
+            {
+                if (ImGui::MenuItem(label.c_str(), nullptr, root.Checked, root.Enabled))
+                    clicked = root.Id;
+                continue;
+            }
+            if (ImGui::BeginMenu(label.c_str(), root.Enabled))
+            {
+                if (const int inner = DrawScriptMenuItems(root.Children))
+                    clicked = inner;
+                ImGui::EndMenu();
+            }
+        }
+        if (clicked)
+        {
+            PublishSelection();
+            lua.ClickMenuItem(clicked);
+        }
+    }
+
+    void MemoryViewer::ScriptShortcuts(std::vector<ImGuiKeyChord>& taken)
+    {
+        static std::set<std::pair<int, ImGuiKeyChord>> reported;
+        const bool code = m_focusCode;
+        const bool hex = !m_focusCode && m_hexFocus;
+        std::vector<ImGuiKeyChord> cheatEngine;
+        for (const CommandInfo& info : AllCommands())
+        {
+            const bool active = info.Scope == CommandScope::MemoryViewer || (info.Scope == CommandScope::Disassembler && code) || (info.Scope == CommandScope::HexView && hex);
+            if (!active || !info.FromCheatEngine || info.Digits)
+                continue;
+            const Binding binding = CurrentBinding(info.Id);
+            cheatEngine.push_back(binding.Chord);
+            if (binding.Alternate)
+                cheatEngine.push_back(binding.Alternate);
+        }
+        std::vector<const Lua::ScriptMenuItem*> pending;
+        for (const Lua::ScriptMenuItem& root : m_scriptMenu)
+            pending.push_back(&root);
+        int clicked = 0;
+        while (!pending.empty())
+        {
+            const Lua::ScriptMenuItem* item = pending.back();
+            pending.pop_back();
+            for (const Lua::ScriptMenuItem& child : item->Children)
+                pending.push_back(&child);
+            const ImGuiKeyChord chord = ScriptChord(item->Shortcut);
+            if (!chord || !item->Enabled || !item->Children.empty())
+                continue;
+            if (std::find(cheatEngine.begin(), cheatEngine.end(), chord) != cheatEngine.end())
+            {
+                if (reported.insert({ item->Id, chord }).second)
+                    LOG_INFO("Lua", "The memory viewer keeps " + ChordText(chord) + " for its own command, so the script entry \"" + item->Caption + "\" does not get it");
+                continue;
+            }
+            taken.push_back(chord);
+            if (!clicked && ChordPressed(chord, CommandScope::MemoryViewer))
+                clicked = item->Id;
+        }
+        if (clicked)
+        {
+            PublishSelection();
+            m_engine.Lua().ClickMenuItem(clicked);
+        }
     }
 
     void MemoryViewer::BookmarkItems()
@@ -723,7 +849,12 @@ namespace Manifold::UI
         PopMono();
 
         if (hoveredRow >= 0 && hoveredRow < static_cast<int>(m_lines.size()) && ImGui::IsMouseReleased(ImGuiMouseButton_Right) && hovered)
+        {
+            PublishSelection();
+            m_engine.Lua().MenuOpening(Lua::ScriptMenu::MemoryViewPopup);
+            m_scriptPopup = m_engine.Lua().MenuItems(Lua::ScriptMenu::MemoryViewPopup);
             ImGui::OpenPopup("##codemenu");
+        }
         if (ImGui::BeginPopup("##codemenu"))
         {
             const Disasm::Instruction selected = disassembler.Read(process, m_selected, &m_engine.Symbols());
@@ -779,12 +910,21 @@ namespace Manifold::UI
     {
         const bool code = m_focusCode;
         const bool hex = !m_focusCode && m_hexFocus;
+        std::vector<ImGuiKeyChord> scripted;
+        ScriptShortcuts(scripted);
+        const auto byScript = [&](const Binding& binding)
+            {
+                return std::find(scripted.begin(), scripted.end(), binding.Chord) != scripted.end() ||
+                       (binding.Alternate && std::find(scripted.begin(), scripted.end(), binding.Alternate) != scripted.end());
+            };
         std::vector<ImGuiKeyChord> claimed;
         for (const CommandInfo& info : AllCommands())
         {
             if (!(info.Scope == CommandScope::Disassembler && code) && !(info.Scope == CommandScope::HexView && hex))
                 continue;
             const Binding binding = CurrentBinding(info.Id);
+            if (!info.FromCheatEngine && byScript(binding))
+                continue;
             claimed.push_back(binding.Chord);
             if (binding.Alternate)
                 claimed.push_back(binding.Alternate);
@@ -801,6 +941,8 @@ namespace Manifold::UI
         for (const CommandInfo& info : AllCommands())
         {
             if (info.Scope != CommandScope::MemoryViewer || std::find(claimed.begin(), claimed.end(), CurrentBinding(info.Id).Chord) != claimed.end())
+                continue;
+            if (!info.FromCheatEngine && byScript(CurrentBinding(info.Id)))
                 continue;
             if (Pressed(info.Id))
                 RunCommand(info.Id);
@@ -1337,6 +1479,15 @@ namespace Manifold::UI
                 ImGui::SetClipboardText(instruction.Text().c_str());
             ImGui::EndMenu();
         }
+        if (!m_scriptPopup.empty())
+        {
+            ImGui::Separator();
+            if (const int clicked = DrawScriptMenuItems(m_scriptPopup))
+            {
+                PublishSelection();
+                m_engine.Lua().ClickMenuItem(clicked);
+            }
+        }
     }
 
     void MemoryViewer::Registers(float width, float height)
@@ -1506,6 +1657,8 @@ namespace Manifold::UI
             {
                 m_hexSelected = m_hexTop + static_cast<std::uint64_t>(row * m_hexColumns + column);
                 m_hexNibble = 0;
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                    m_hexMarkStart = m_hexMarkStop = 0;
             }
             if (ImGui::GetIO().MouseWheel != 0.0f)
             {
@@ -1532,6 +1685,10 @@ namespace Manifold::UI
                 const std::uint64_t address = rowAddress + static_cast<std::uint64_t>(cell * valueSize);
                 const float x = dataX + static_cast<float>(cell) * cellWidth;
                 const bool selected = m_hexSelected >= address && m_hexSelected < address + static_cast<std::uint64_t>(valueSize);
+                const bool marked = m_hexMarkStart && address + static_cast<std::uint64_t>(valueSize) > m_hexMarkStart && address <= m_hexMarkStop;
+                if (marked && !selected)
+                    drawList->AddRectFilled(ImVec2(x - Px(2.0f), y - Px(1.0f)), ImVec2(x + cellWidth - charWidth * 0.5f, y + rowHeight - Px(1.0f)),
+                        ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.16f)), Px(2.0f));
                 if (selected)
                     drawList->AddRectFilled(ImVec2(x - Px(2.0f), y - Px(1.0f)), ImVec2(x + cellWidth - charWidth * 0.5f, y + rowHeight - Px(1.0f)),
                         ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, m_hexFocus ? 0.35f : 0.18f)), Px(2.0f));

@@ -212,6 +212,11 @@ namespace Manifold
             return ProgramFolder() / L"Manifold-Engine.ini";
         }
 
+        std::filesystem::path ScriptSettingsFile()
+        {
+            return ProgramFolder() / L"Manifold-Engine.scripts.ini";
+        }
+
         std::filesystem::path LogFile()
         {
             return ProgramFolder() / L"Manifold-Engine.log";

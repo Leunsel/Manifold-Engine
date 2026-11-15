@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <thread>
@@ -292,6 +294,165 @@ namespace Manifold::Tests
             std::filesystem::remove(path, ignored);
         }
 
+        void ScriptMenus(Engine& engine)
+        {
+            LuaCheck(engine, "script menus", R"LUA(
+                local view = getMemoryViewForm()
+                local popup = view.debuggerpopup
+                if popup == nil then return "no popup" end
+                menuClicks, menuOpened = 0, 0
+                popup.OnPopup = function(sender) menuOpened = menuOpened + 1 end
+                local item = createMenuItem(popup)
+                item.Caption = "&Copy signature"
+                item.OnClick = function(sender) menuClicks = menuClicks + 10 end
+                popup.Items.add(item)
+                local hidden = createMenuItem(popup)
+                hidden.Caption = "Hidden"
+                hidden.Visible = false
+                popup.Items.add(hidden)
+                local root = createMenuItem(view.Menu)
+                root.Caption = "Manifold"
+                view.Menu.Items.add(root)
+                local child = createMenuItem(view.Menu)
+                child.Caption = "Find"
+                child.Shortcut = "Ctrl+Shift+F"
+                child.OnClick = function() menuClicks = menuClicks + 1 end
+                root.add(child)
+                menuItemId = 0
+                return "ok")LUA");
+            Lua::LuaEngine& lua = engine.Lua();
+            const std::uint64_t generation = lua.MenuGeneration();
+            const auto popup = lua.MenuItems(Lua::ScriptMenu::MemoryViewPopup);
+            CHECK_MSG(popup.size() == 1 && popup[0].Caption == "Copy signature", std::to_string(popup.size()));
+            const auto menu = lua.MenuItems(Lua::ScriptMenu::MemoryViewMenu);
+            CHECK_MSG(menu.size() == 1 && menu[0].Caption == "Manifold" && menu[0].Children.size() == 1, std::to_string(menu.size()));
+            if (menu.size() == 1 && menu[0].Children.size() == 1)
+                CHECK_EQ(menu[0].Children[0].Shortcut, std::string("Ctrl+Shift+F"));
+            lua.MenuOpening(Lua::ScriptMenu::MemoryViewPopup);
+            if (!popup.empty())
+                lua.ClickMenuItem(popup[0].Id);
+            if (menu.size() == 1 && menu[0].Children.size() == 1)
+                lua.ClickMenuItem(menu[0].Children[0].Id);
+            LuaCheck(engine, "script menu clicks", R"LUA(
+                if menuOpened ~= 1 then return "popup " .. menuOpened end
+                if menuClicks ~= 11 then return "clicks " .. menuClicks end
+                local view = getMemoryViewForm()
+                view.Menu.Items[view.Menu.Items.Count - 1].Caption = "Renamed"
+                return "ok")LUA");
+            CHECK(lua.MenuGeneration() != generation);
+            const auto renamed = lua.MenuItems(Lua::ScriptMenu::MemoryViewMenu);
+            CHECK(renamed.size() == 1 && renamed[0].Caption == "Renamed");
+
+            engine.TakeRequests();
+            LuaCheck(engine, "memory view bridge", R"LUA(
+                local view = getMemoryViewForm()
+                view.DisassemblerView.SelectedAddress = 0x140001000
+                if view.DisassemblerView.SelectedAddress ~= 0x140001000 then return "selected" end
+                local hex = view.HexadecimalView
+                hex.Address = 0x140002000
+                hex.SelectionStart = 0x140002000
+                hex.SelectionStop = 0x140002007
+                if hex.SelectionStart ~= 0x140002000 or hex.SelectionStop ~= 0x140002007 then return "hex selection" end
+                if hex.Address ~= 0x140002000 then return "hex address " .. tostring(hex.Address) end
+                view.show()
+                return "ok")LUA");
+            const std::vector<UiRequest> requests = engine.TakeRequests();
+            const auto has = [&](UiRequestKind kind, std::uint64_t address, std::uint64_t start, std::uint64_t stop)
+                {
+                    return std::any_of(requests.begin(), requests.end(), [&](const UiRequest& request)
+                        { return request.Kind == kind && request.Address == address && request.Start == start && request.Stop == stop; });
+                };
+            CHECK(has(UiRequestKind::MemoryViewerSelect, 0x140001000, 0, 0));
+            CHECK(has(UiRequestKind::MemoryViewerHex, 0x140002000, 0, 0));
+            CHECK(has(UiRequestKind::MemoryViewerHex, 0, 0x140002000, 0x140002007));
+            CHECK(has(UiRequestKind::MemoryViewerRaise, 0, 0, 0));
+            CHECK(engine.SelectedCodeAddress == 0x140001000);
+        }
+
+        void ScriptForms(Engine& engine)
+        {
+            LuaCheck(engine, "script form", R"LUA(
+                formPicks, formClosed = {}, false
+                local form = createForm(false)
+                form.Caption = "Hits"
+                form.ClientWidth, form.ClientHeight = 300, 120
+                local list = createListBox(form)
+                list.Align = "alClient"
+                list.Items.add("first")
+                list.Items.add("second")
+                list.OnClick = function(sender) formPicks[#formPicks + 1] = sender.ItemIndex end
+                form.OnClose = function() formClosed = true return caFree end
+                form.show()
+                scriptForm, scriptList = form, list
+                local odd = createForm(true)
+                createListView(odd)
+                odd.Caption = "Odd"
+                oddForm = odd
+                return "ok")LUA");
+            Lua::LuaEngine& lua = engine.Lua();
+            CHECK(lua.FormsShown());
+            const auto forms = lua.ShownForms();
+            CHECK_EQ(forms.size(), static_cast<std::size_t>(2));
+            const auto hits = std::find_if(forms.begin(), forms.end(), [](const Lua::ScriptForm& form) { return form.Caption == "Hits"; });
+            const auto odd = std::find_if(forms.begin(), forms.end(), [](const Lua::ScriptForm& form) { return form.Caption == "Odd"; });
+            CHECK(odd != forms.end() && odd->Unsupported == "TListView");
+            CHECK(hits != forms.end());
+            if (hits == forms.end())
+                return;
+            CHECK(hits->Unsupported.empty() && hits->Width == 300 && hits->Height == 120);
+            CHECK(hits->Controls.size() == 1);
+            if (hits->Controls.size() != 1)
+                return;
+            const Lua::ScriptControl& list = hits->Controls[0];
+            CHECK(list.Kind == "listbox" && list.Align == 5 && list.Items.size() == 2 && list.ItemIndex == -1);
+            lua.SetFormValue(list.Id, "itemindex", "1");
+            lua.FireFormEvent(list.Id, "select");
+            lua.SetFormBounds(hits->Id, 10, 20, 320, 140);
+            const auto after = lua.ShownForms();
+            const auto again = std::find_if(after.begin(), after.end(), [](const Lua::ScriptForm& form) { return form.Caption == "Hits"; });
+            CHECK(again != after.end() && !again->Controls.empty() && again->Controls[0].ItemIndex == 1);
+            lua.CloseForm(hits->Id);
+            LuaCheck(engine, "script form events", R"LUA(
+                if #formPicks ~= 1 or formPicks[1] ~= 1 then return "picks " .. #formPicks end
+                if not formClosed then return "closed" end
+                if scriptList.ItemIndex ~= 1 then return "index" end
+                oddForm.close()
+                return "ok")LUA");
+            CHECK(lua.ShownForms().empty());
+            CHECK(!lua.FormsShown());
+        }
+
+        void ScriptSettings(Engine& engine)
+        {
+            const std::filesystem::path path = Paths::ScriptSettingsFile();
+            std::error_code error;
+            const bool existed = std::filesystem::exists(path, error);
+            std::string original;
+            if (existed)
+            {
+                std::ifstream file(path, std::ios::binary);
+                original.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+            }
+            LuaCheck(engine, "getSettings", R"LUA(
+                local settings = getSettings("Manifold Tests\\Compat")
+                if settings.Value["missing"] ~= "" then return "missing" end
+                settings.Value["Scope"] = "process"
+                settings.Value.Lines = "a\nb"
+                local again = getSettings("manifold tests\\compat")
+                if again.Value["scope"] ~= "process" then return "read " .. tostring(again.Value["scope"]) end
+                if again.Value.Lines ~= "a\nb" then return "lines" end
+                return "ok")LUA");
+            if (existed)
+            {
+                std::ofstream file(path, std::ios::binary | std::ios::trunc);
+                file.write(original.data(), static_cast<std::streamsize>(original.size()));
+            }
+            else
+            {
+                std::filesystem::remove(path, error);
+            }
+        }
+
         void Commands(Engine& engine)
         {
             LuaCheck(engine, "register command", R"LUA(
@@ -438,6 +599,9 @@ namespace Manifold::Tests
         Commands(engine);
         WithoutProcess(engine);
         SettingsRoundTrip();
+        ScriptMenus(engine);
+        ScriptForms(engine);
+        ScriptSettings(engine);
         return Totals().Failures - before;
     }
 }

@@ -12,6 +12,8 @@
 #include "lua.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <set>
@@ -692,19 +694,49 @@ namespace Manifold::Lua
             return 2;
         }
 
-        std::vector<std::uint64_t> FindPatternFor(lua_State* state, const std::string& text, std::uint64_t start, std::uint64_t stop, std::size_t limit)
+        Scan::PatternFilter PatternFilterArguments(lua_State* state, int index)
+        {
+            Scan::PatternFilter filter;
+            const std::string flags = luaL_optstring(state, index, "");
+            for (std::size_t i = 0; i + 1 < flags.size(); i += 2)
+            {
+                const char mode = flags[i];
+                const char kind = static_cast<char>(std::toupper(static_cast<unsigned char>(flags[i + 1])));
+                const Scan::Tristate value = mode == '+' ? Scan::Tristate::Yes : mode == '-' ? Scan::Tristate::No : Scan::Tristate::Any;
+                if (kind == 'W')
+                    filter.Writable = value;
+                else if (kind == 'X')
+                    filter.Executable = value;
+                else if (kind == 'C')
+                    filter.CopyOnWrite = value;
+            }
+            const lua_Integer alignment = luaL_optinteger(state, index + 1, 0);
+            const std::string parameter = Trim(luaL_optstring(state, index + 2, ""));
+            const std::uint64_t value = parameter.empty() ? 0 : std::strtoull(parameter.c_str(), nullptr, 16);
+            if (alignment == 1)
+                filter.Divisor = value;
+            else if (alignment == 2 && !parameter.empty())
+            {
+                filter.Modulo = 1ull << std::min<std::size_t>(parameter.size() * 4, 60);
+                filter.Remainder = value % filter.Modulo;
+            }
+            return filter;
+        }
+
+        std::vector<std::uint64_t> FindPatternFor(lua_State* state, const std::string& text, std::uint64_t start, std::uint64_t stop, std::size_t limit, int filterIndex = 0)
         {
             const auto process = NeedProcess(state);
             const auto pattern = Scan::ParsePattern(text);
             if (!pattern)
                 luaL_error(state, "%s", ErrorMessage(ErrorCode::ScanBadPattern, text).c_str());
-            return Scan::FindPattern(*process, *pattern, start, stop, false, limit);
+            const Scan::PatternFilter filter = filterIndex > 0 ? PatternFilterArguments(state, filterIndex) : Scan::PatternFilter{};
+            return Scan::FindPattern(*process, *pattern, start, stop, filter, limit);
         }
 
         int AobScan(lua_State* state)
         {
             const std::string text = luaL_checkstring(state, 1);
-            const auto hits = FindPatternFor(state, text, 0, ~0ull, 100000);
+            const auto hits = FindPatternFor(state, text, 0, ~0ull, 100000, 2);
             if (hits.empty())
             {
                 lua_pushnil(state);
@@ -732,7 +764,7 @@ namespace Manifold::Lua
         int AobScanUnique(lua_State* state)
         {
             const std::string text = luaL_checkstring(state, 1);
-            const auto hits = FindPatternFor(state, text, 0, ~0ull, 2);
+            const auto hits = FindPatternFor(state, text, 0, ~0ull, 2, 2);
             if (hits.size() == 1)
                 PushAddress(state, hits.front());
             else
@@ -754,12 +786,24 @@ namespace Manifold::Lua
                 lua_pushnil(state);
                 return 1;
             }
-            const auto hits = FindPatternFor(state, luaL_checkstring(state, 2), module->Base, module->Base + module->Size, 2);
+            const auto hits = FindPatternFor(state, luaL_checkstring(state, 2), module->Base, module->Base + module->Size, 2, 3);
             if (hits.size() == 1)
                 PushAddress(state, hits.front());
             else
                 lua_pushnil(state);
             return 1;
+        }
+
+        std::string DisassemblyLine(Engine& engine, const Disasm::Instruction& instruction)
+        {
+            std::string text = Hex(instruction.Address) + " - " + instruction.BytesText() + " - " + instruction.Text();
+            if (instruction.Target)
+            {
+                const std::string extra = engine.Describe(*instruction.Target);
+                if (!extra.empty())
+                    text += " : " + extra;
+            }
+            return text;
         }
 
         int Disassemble(lua_State* state)
@@ -768,13 +812,55 @@ namespace Manifold::Lua
             const std::uint64_t address = AddressArgument(state, 1);
             Engine& engine = Owner(state);
             const Disasm::Instruction instruction = engine.Disassembler().Read(*process, address, &engine.Symbols());
-            std::string extra;
-            if (instruction.Target)
-                extra = engine.Describe(*instruction.Target);
-            std::string text = Hex(address) + " - " + instruction.BytesText() + " - " + instruction.Text();
-            if (!extra.empty())
-                text += " : " + extra;
-            lua_pushstring(state, text.c_str());
+            lua_pushstring(state, DisassemblyLine(engine, instruction).c_str());
+            return 1;
+        }
+
+        std::vector<std::uint8_t> ByteArgument(lua_State* state, int index)
+        {
+            std::vector<std::uint8_t> bytes;
+            if (lua_istable(state, index))
+            {
+                const lua_Integer count = static_cast<lua_Integer>(lua_rawlen(state, index));
+                for (lua_Integer i = 1; i <= count; ++i)
+                {
+                    lua_rawgeti(state, index, i);
+                    bytes.push_back(static_cast<std::uint8_t>(lua_tointeger(state, -1)));
+                    lua_pop(state, 1);
+                }
+                return bytes;
+            }
+            const std::string text = luaL_checkstring(state, index);
+            int high = -1;
+            for (const char c : text)
+            {
+                int digit = -1;
+                if (c >= '0' && c <= '9')
+                    digit = c - '0';
+                else if (c >= 'a' && c <= 'f')
+                    digit = c - 'a' + 10;
+                else if (c >= 'A' && c <= 'F')
+                    digit = c - 'A' + 10;
+                if (digit < 0)
+                    continue;
+                if (high < 0)
+                {
+                    high = digit;
+                    continue;
+                }
+                bytes.push_back(static_cast<std::uint8_t>(high * 16 + digit));
+                high = -1;
+            }
+            return bytes;
+        }
+
+        int DisassembleBytes(lua_State* state)
+        {
+            const std::vector<std::uint8_t> bytes = ByteArgument(state, 1);
+            const std::uint64_t address = lua_isnoneornil(state, 2) ? 0 : AddressArgument(state, 2);
+            Engine& engine = Owner(state);
+            const Disasm::Instruction instruction = engine.Disassembler().Decode(address, bytes.data(), bytes.size(), &engine.Symbols());
+            lua_pushstring(state, DisassemblyLine(engine, instruction).c_str());
             return 1;
         }
 
@@ -1053,6 +1139,7 @@ namespace Manifold::Lua
             { "AOBScanUnique", &AobScanUnique },
             { "AOBScanModuleUnique", &AobScanModuleUnique },
             { "disassemble", &Disassemble },
+            { "disassembleBytes", &DisassembleBytes },
             { "splitDisassembledString", &SplitDisassembled },
             { "getInstructionSize", &InstructionSize },
             { "getPreviousOpcode", &PreviousOpcode },

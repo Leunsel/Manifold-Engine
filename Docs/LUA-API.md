@@ -45,11 +45,12 @@ Scripts run on the program's main thread: in the Lua engine window (Ctrl+L), in 
 
 | Function | Returns |
 | --- | --- |
-| `AOBScan(pattern)` | table with `Count`, entries `[0]`..`[Count-1]` as hex strings and `destroy()`, or nil |
-| `AOBScanUnique(pattern)` / `AOBScanModuleUnique(module, pattern)` | address when there is exactly one match, else nil |
+| `AOBScan(pattern, protection, alignmentType, alignmentParam)` | table with `Count`, entries `[0]`..`[Count-1]` as hex strings and `destroy()`, or nil. `protection` works like Cheat Engine's: `+X` executable only, `-W` not writable, `*C` copy-on-write does not matter, empty or nil for all memory. `alignmentType` 1 keeps addresses divisible by the hex `alignmentParam`, 2 keeps addresses that end in its digits. |
+| `AOBScanUnique(pattern, protection, alignmentType, alignmentParam)` / `AOBScanModuleUnique(module, pattern, protection, ...)` | address when there is exactly one match, else nil |
 | `autoAssemble(script, targetself, disableInfo)` | `true, disableInfo` after the `[ENABLE]` part (or the whole script); with a `disableInfo` it runs `[DISABLE]` with that script's allocations and symbols and returns `true`. On failure `false, error`; the error also goes to the log. `targetself` is not supported. |
 | `autoAssembleCheck(script, enable)` | `success, error` without writing anything |
 | `disassemble(address)` | `"address - bytes - opcode : extra"` |
+| `disassembleBytes(bytes, address)` | the same line for the first instruction in `bytes` (a byte table or a hex string such as `"48 8B 4C 24 08"`) as if it stood at `address`; no process needed |
 | `splitDisassembledString(text)` | `extra, opcode, bytes, address` |
 | `getInstructionSize(address)` / `getPreviousOpcode(address)` | |
 
@@ -131,12 +132,23 @@ Tables and autorun scripts written for Cheat Engine 7.5 run here. Beyond the fun
 - Scanning from Lua: `createMemScan()` with `firstScan`, `nextScan`, `waitTillDone`, `setOnlyOneResult`, `getOnlyResult`, `FoundList`, and `createFoundList(memscan)` with `Count`, `Address[i]`, `Value[i]`.
 - Files and system: `lfs` (`attributes`, `dir`, `mkdir`, `rmdir`, `currentdir`, `chdir`, `touch`), `getFileList`, `getDirectoryList`, `extractFileName`, `extractFileNameWithoutExt`, `extractFilePath`, `extractFileExt`, `getFileVersion`, `md5file`, `md5memory`, `stringToMD5String`, `writeToClipboard`, `readFromClipboard`, `getInternet()` with `getURL(url)` and `postURL(url, data)`, `shellExecute(command, parameters, folder, show)` (also spelled `ShellExecute`), `getScreenWidth`, `getScreenHeight`, `getWorkAreaWidth`, `getWorkAreaHeight`, `getScreenDPI`, `getMousePos`, `getTempFolder`, `cheatEngineIs64Bit`, `pause`, `unpause`, `closeCE`, `enumMemoryRegions`, `inModule`, `inSystemModule`, `deleteAllRegisteredSymbols`.
 - The string helpers `split` (the parts as several values), `startsWith` and `endsWith`.
+- Stored settings: `getSettings(path)` returns an object whose `Value[name]` reads and writes text, `""` when nothing is stored. Cheat Engine keeps these in the registry; here they go into `Manifold-Engine.scripts.ini` next to the program, one section per path.
 
 ### Forms
 
 The form functions of Cheat Engine exist: `createForm`, `createLabel`, `createEdit`, `createMemo`, `createButton`, `createCheckBox`, `createComboBox`, `createListBox`, `createListView`, `createTreeView`, `createPanel`, `createGroupBox`, `createRadioGroup`, `createImage`, `createPaintBox`, `createSplitter`, `createProgressBar`, `createTrackBar`, `createMainMenu`, `createPopupMenu`, `createMenuItem`, `createImageList`, `createBitmap`, `createPNG`, `createPicture`, `createStringlist`, `createFont`, the dialogs, `getMainForm()`, `getLuaEngine()`, `getMemoryViewForm()`, `getForm(i)`, `getFormCount()`, `getApplication()`, `registerFormAddNotification`, `setMethodProperty`, `inheritsFromObject` and the other `inheritsFrom*` checks.
 
-Their objects behave like Cheat Engine's: properties, string lists, menus, list and tree items, canvases, owners and parents, `findComponentByName`, events. The main form has Cheat Engine's menu, and its Table menu lists the table's files when clicked. These forms are not drawn yet: scripts that build windows run without errors, but the windows do not appear.
+Their objects behave like Cheat Engine's: properties, string lists, menus, list and tree items, canvases, owners and parents, `findComponentByName`, events. The main form has Cheat Engine's menu, and its Table menu lists the table's files when clicked.
+
+Forms made with `createForm` are drawn as their own windows when they hold only labels, buttons, edits, memos, check boxes, list boxes, combo boxes, panels, group boxes and splitters. Controls are placed by `Align` (`alTop`, `alBottom`, `alLeft`, `alRight`, `alClient`) or by `Left`, `Top`, `Width` and `Height`. `OnClick`, `OnDblClick`, `OnChange`, `OnSelectionChange` and `OnClose` fire as in Cheat Engine; a list box also answers the arrow keys, `Home` and `End`. `show()` and `bringToFront()` bring the window up, closing it calls `OnClose` (`caFree` frees the form). A form with any other control (a list view, an image, a paint box and so on) is not drawn yet, and the log says which control kept it back. `showModal()` does not open a window.
+
+The memory viewer is `getMemoryViewForm()`:
+
+- `DisassemblerView.SelectedAddress` is the selected instruction of the memory viewer used last; setting it moves that viewer there without raising it.
+- `HexadecimalView.Address` moves the hex view; `SelectionStart` and `SelectionStop` mark a range of bytes.
+- `show()` and `bringToFront()` open or raise the viewer, and `Visible` says whether one is open.
+- Menu items added to the `debuggerpopup` menu appear at the end of the disassembler's context menu; its `OnPopup` runs before the menu opens. Root items added to the form's `Menu` appear in the viewer's menu bar after Tools, with their sub-items. `Caption` (`-` is a separator), `Visible`, `Enabled`, `Checked`, `AutoCheck`, `Shortcut` and `OnClick` are honoured.
+- The `Shortcut` of a menu bar item works while the memory viewer has the focus. When the key is one of the viewer's own keys that Cheat Engine 7.5 also uses, the viewer's command keeps it and the log says so; over the viewer's other keys (such as `Ctrl+Shift+F` for Find assembly code) the script's item wins, as it would in Cheat Engine.
 
 ## Checking a table without the program window
 

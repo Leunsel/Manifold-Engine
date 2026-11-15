@@ -6,6 +6,7 @@
 #include "Lua/LuaEngine.h"
 #include "Table/CheatTable.h"
 #include "Target/Process.h"
+#include "UI/ScriptUi.h"
 #include "UI/Shortcuts.h"
 #include "UI/TemplateManager.h"
 #include "UI/UiScale.h"
@@ -58,6 +59,7 @@ namespace Manifold::UI
     Workspace::Workspace(Engine& engine, Shell& shell) : m_engine(engine), m_shell(shell)
     {
         m_main = std::make_unique<MainWindow>(*this);
+        m_scriptForms = std::make_unique<ScriptForms>(engine);
     }
 
     Workspace::~Workspace() = default;
@@ -116,7 +118,9 @@ namespace Manifold::UI
             m_shortcuts->Draw();
         if (m_templateManager && !m_templateManager->Closed())
             m_templateManager->Draw();
+        m_scriptForms->Draw();
         Prune(m_memoryViewers);
+        m_engine.MemoryViewerVisible = std::any_of(m_memoryViewers.begin(), m_memoryViewers.end(), [](const auto& viewer) { return !viewer->Closed(); });
         Prune(m_structures);
         Prune(m_scripts);
         Prune(m_watches);
@@ -130,6 +134,9 @@ namespace Manifold::UI
             switch (request.Kind)
             {
             case UiRequestKind::MemoryViewer: OpenMemoryViewer(request.Address); break;
+            case UiRequestKind::MemoryViewerSelect: ActiveMemoryViewer().Select(request.Address); break;
+            case UiRequestKind::MemoryViewerHex: ActiveMemoryViewer().ShowHex(request.Address, request.Start, request.Stop); break;
+            case UiRequestKind::MemoryViewerRaise: ActiveMemoryViewer().Raise(); break;
             case UiRequestKind::StructureDissect: OpenStructure(request.Address, request.Text); break;
             case UiRequestKind::AutoAssembler: OpenScript(request.Text); break;
             case UiRequestKind::LuaEngine: OpenLua(); break;
@@ -219,6 +226,18 @@ namespace Manifold::UI
             m_templateManager->NewTemplate(*script);
         else if (!id.empty())
             m_templateManager->Select(id);
+    }
+
+    MemoryViewer& Workspace::ActiveMemoryViewer()
+    {
+        for (const auto& viewer : m_memoryViewers)
+        {
+            if (viewer->Number() == ActiveViewer && !viewer->Closed())
+                return *viewer;
+        }
+        if (m_memoryViewers.empty())
+            OpenMemoryViewer(0);
+        return *m_memoryViewers.back();
     }
 
     void Workspace::OpenMemoryViewer(std::uint64_t address, bool hexView, bool newWindow)

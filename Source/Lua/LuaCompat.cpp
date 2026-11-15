@@ -1,6 +1,7 @@
 #include "Lua/LuaApi.h"
 
 #include "App/Engine.h"
+#include "App/Settings.h"
 #include "Core/Text.h"
 #include "Core/RuntimeLog.h"
 #include "Lua/LuaCompatScripts.h"
@@ -14,6 +15,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <thread>
@@ -1764,13 +1766,184 @@ namespace Manifold::Lua
         {
             const std::uint64_t address = Number(state, 1);
             Owner(state).SelectedCodeAddress = address;
-            Owner(state).Request({ UiRequestKind::MemoryViewer, address, {} });
+            UiRequest request;
+            request.Kind = UiRequestKind::MemoryViewerSelect;
+            request.Address = address;
+            Owner(state).Request(std::move(request));
             return 0;
         }
 
         int SelectedHexAddress(lua_State* state)
         {
             lua_pushinteger(state, static_cast<lua_Integer>(Owner(state).SelectedHexAddress));
+            return 1;
+        }
+
+        int SetHexView(lua_State* state)
+        {
+            UiRequest request;
+            request.Kind = UiRequestKind::MemoryViewerHex;
+            request.Address = static_cast<std::uint64_t>(luaL_optinteger(state, 1, 0));
+            request.Start = static_cast<std::uint64_t>(luaL_optinteger(state, 2, 0));
+            request.Stop = static_cast<std::uint64_t>(luaL_optinteger(state, 3, 0));
+            if (request.Address)
+                Owner(state).SelectedHexAddress = request.Address;
+            Owner(state).Request(std::move(request));
+            return 0;
+        }
+
+        int ShowMemoryView(lua_State* state)
+        {
+            UiRequest request;
+            request.Kind = UiRequestKind::MemoryViewerRaise;
+            Owner(state).Request(std::move(request));
+            Owner(state).MemoryViewerVisible = true;
+            return 0;
+        }
+
+        int MemoryViewVisible(lua_State* state)
+        {
+            lua_pushboolean(state, Owner(state).MemoryViewerVisible);
+            return 1;
+        }
+
+        int MenusChanged(lua_State* state)
+        {
+            EngineOf(state).TouchMenus();
+            return 0;
+        }
+
+        int FormsChanged(lua_State* state)
+        {
+            EngineOf(state).TouchForms();
+            return 0;
+        }
+
+        using SettingsSections = std::map<std::string, std::vector<std::pair<std::string, std::string>>>;
+
+        std::string EscapeSetting(std::string_view text)
+        {
+            std::string out;
+            for (const char c : text)
+            {
+                if (c == '\\')
+                    out += "\\\\";
+                else if (c == '\n')
+                    out += "\\n";
+                else if (c == '\r')
+                    out += "\\r";
+                else
+                    out += c;
+            }
+            return out;
+        }
+
+        std::string UnescapeSetting(std::string_view text)
+        {
+            std::string out;
+            for (std::size_t i = 0; i < text.size(); ++i)
+            {
+                if (text[i] != '\\' || i + 1 >= text.size())
+                {
+                    out += text[i];
+                    continue;
+                }
+                const char next = text[++i];
+                out += next == 'n' ? '\n' : next == 'r' ? '\r' : next;
+            }
+            return out;
+        }
+
+        SettingsSections ReadScriptSettings()
+        {
+            SettingsSections sections;
+            std::ifstream file(Paths::ScriptSettingsFile(), std::ios::binary);
+            std::string line;
+            std::string current;
+            while (std::getline(file, line))
+            {
+                if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
+                if (line.size() >= 2 && line.front() == '[' && line.back() == ']')
+                {
+                    current = line.substr(1, line.size() - 2);
+                    sections[current];
+                    continue;
+                }
+                const std::size_t equals = line.find('=');
+                if (equals == std::string::npos || line.empty() || line.front() == ';')
+                    continue;
+                sections[current].emplace_back(line.substr(0, equals), UnescapeSetting(std::string_view(line).substr(equals + 1)));
+            }
+            return sections;
+        }
+
+        std::vector<std::pair<std::string, std::string>>* FindSection(SettingsSections& sections, std::string_view name)
+        {
+            for (auto& [section, values] : sections)
+            {
+                if (EqualsNoCase(section, name))
+                    return &values;
+            }
+            return nullptr;
+        }
+
+        int SettingRead(lua_State* state)
+        {
+            const std::string section = luaL_checkstring(state, 1);
+            const std::string name = luaL_checkstring(state, 2);
+            SettingsSections sections = ReadScriptSettings();
+            if (const auto* values = FindSection(sections, section))
+            {
+                for (const auto& [key, value] : *values)
+                {
+                    if (EqualsNoCase(key, name))
+                    {
+                        lua_pushlstring(state, value.data(), value.size());
+                        return 1;
+                    }
+                }
+            }
+            lua_pushstring(state, "");
+            return 1;
+        }
+
+        int SettingWrite(lua_State* state)
+        {
+            const std::string section = luaL_checkstring(state, 1);
+            const std::string name = luaL_checkstring(state, 2);
+            std::size_t length = 0;
+            const char* raw = luaL_tolstring(state, 3, &length);
+            const std::string value(raw, length);
+            lua_pop(state, 1);
+            SettingsSections sections = ReadScriptSettings();
+            auto* values = FindSection(sections, section);
+            if (!values)
+                values = &sections[section];
+            bool found = false;
+            for (auto& [key, existing] : *values)
+            {
+                if (EqualsNoCase(key, name))
+                {
+                    existing = value;
+                    found = true;
+                }
+            }
+            if (!found)
+                values->emplace_back(name, value);
+            std::string text;
+            for (const auto& [title, entries] : sections)
+            {
+                if (entries.empty())
+                    continue;
+                text += "[" + title + "]\r\n";
+                for (const auto& [key, entry] : entries)
+                    text += key + "=" + EscapeSetting(entry) + "\r\n";
+                text += "\r\n";
+            }
+            std::ofstream file(Paths::ScriptSettingsFile(), std::ios::binary | std::ios::trunc);
+            file.write(text.data(), static_cast<std::streamsize>(text.size()));
+            lua_pushboolean(state, static_cast<bool>(file));
             return 1;
         }
 
@@ -2973,6 +3146,13 @@ namespace Manifold::Lua
             { "__manifoldSelectedCodeAddress", &SelectedCodeAddress },
             { "__manifoldSetSelectedCodeAddress", &SetSelectedCodeAddress },
             { "__manifoldSelectedHexAddress", &SelectedHexAddress },
+            { "__manifoldSetHexView", &SetHexView },
+            { "__manifoldShowMemoryView", &ShowMemoryView },
+            { "__manifoldMemoryViewVisible", &MemoryViewVisible },
+            { "__manifoldMenusChanged", &MenusChanged },
+            { "__manifoldFormsChanged", &FormsChanged },
+            { "__manifoldSettingRead", &SettingRead },
+            { "__manifoldSettingWrite", &SettingWrite },
             { nullptr, nullptr },
         };
         for (const luaL_Reg* function = functions; function->name; ++function)

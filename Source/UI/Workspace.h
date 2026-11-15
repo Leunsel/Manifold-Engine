@@ -62,6 +62,7 @@ namespace Manifold::UI
     class AsmSearchWindow;
     class ShortcutsWindow;
     class TemplateManager;
+    class ScriptForms;
 
     struct FileFilter
     {
@@ -126,6 +127,7 @@ namespace Manifold::UI
         void PasteRecords(int parentId);
 
         std::uint64_t LastCodeAddress = 0;
+        int ActiveViewer = 0;
 
     private:
         void HandleRequests();
@@ -158,6 +160,8 @@ namespace Manifold::UI
         std::unique_ptr<AsmSearchWindow> m_asmSearch;
         std::unique_ptr<ShortcutsWindow> m_shortcuts;
         std::unique_ptr<TemplateManager> m_templateManager;
+        std::unique_ptr<ScriptForms> m_scriptForms;
+        MemoryViewer& ActiveMemoryViewer();
         int m_nextWindow = 1;
 
         struct ConfirmRequest

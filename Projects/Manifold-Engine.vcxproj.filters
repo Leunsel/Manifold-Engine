@@ -132,6 +132,9 @@
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -205,6 +208,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\RecordEditor.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\ScriptUi.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\ScriptWindow.cpp">
@@ -376,6 +382,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\LuaDialogs.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\ScriptUi.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Shortcuts.h">

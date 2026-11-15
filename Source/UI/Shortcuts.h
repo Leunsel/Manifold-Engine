@@ -8,6 +8,7 @@
 namespace Manifold::UI
 {
     bool Pressed(Command command);
+    bool ChordPressed(ImGuiKeyChord chord, CommandScope scope);
     int PressedDigit(Command command);
     bool CommandItem(const char* label, Command command, bool selected = false, bool enabled = true);
     bool DangerCommandItem(const char* label, Command command, bool enabled = true);

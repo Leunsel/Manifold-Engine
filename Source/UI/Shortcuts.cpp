@@ -48,6 +48,11 @@ namespace Manifold::UI
         }
     }
 
+    bool ChordPressed(ImGuiKeyChord chord, CommandScope scope)
+    {
+        return Route(chord, scope);
+    }
+
     bool Pressed(Command command)
     {
         const CommandInfo& info = Describe(command);

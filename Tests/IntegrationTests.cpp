@@ -324,6 +324,32 @@ namespace Manifold::Tests
         const auto parts = Split(luaResult, '|', true);
         CHECK_MSG(parts.size() == 4 && parts[0] == "7.25" && parts[1] == "1234.5" && parts[2] != "0" && parts[3] == "TestTarget.exe", luaResult);
 
+        lua = engine.Lua().RunWithResult(R"LUA(
+            local base = getAddress('TestTarget.exe') + 0x1000
+            local bytes = readBytes(base, 12, true)
+            local parts = {}
+            for i, b in ipairs(bytes) do parts[i] = string.format('%02X', b) end
+            local pattern = table.concat(parts, ' ')
+            local function has(list, address)
+              if not list then return false end
+              for i = 0, list.Count - 1 do
+                if tonumber(list[i], 16) == address then return true end
+              end
+              return false
+            end
+            if not has(AOBScan(pattern, '+X'), base) then return 'executable' end
+            if has(AOBScan(pattern, '-X'), base) then return 'not executable' end
+            if not has(AOBScan(pattern, '+X', 1, '1000'), base) then return 'divisor' end
+            if not has(AOBScan(pattern, '+X', 2, '000'), base) then return 'last digits' end
+            if has(AOBScan(pattern, '+X', 2, 'FFF'), base) then return 'wrong digits' end
+            local line = disassembleBytes(bytes, base)
+            local text = disassemble(base)
+            if line ~= text then return 'disassembleBytes ' .. tostring(line) .. ' vs ' .. tostring(text) end
+            local hexLine = disassembleBytes(pattern, base)
+            if hexLine ~= text then return 'hex string ' .. tostring(hexLine) end
+            return 'ok')LUA", "aob filters", luaResult);
+        CHECK_MSG(lua.Ok() && luaResult == "ok", lua.Ok() ? luaResult : lua.Text);
+
         lua = engine.Lua().RunWithResult("local s = createStructure('guess test')\n"
                                          "s.autoGuess(getAddress('hero'), 0, 16)\n"
                                          "local e = s.getElementByOffset(4)\n"

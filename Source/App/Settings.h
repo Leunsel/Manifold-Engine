@@ -79,6 +79,7 @@ namespace Manifold
     {
         std::filesystem::path ProgramFolder();
         std::filesystem::path SettingsFile();
+        std::filesystem::path ScriptSettingsFile();
         std::filesystem::path LogFile();
         std::filesystem::path LayoutFile();
         std::filesystem::path AutorunFolder();

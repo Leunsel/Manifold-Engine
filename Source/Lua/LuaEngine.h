@@ -113,6 +113,54 @@ namespace Manifold::Lua
         bool WasDown = false;
     };
 
+    enum class ScriptMenu
+    {
+        MemoryViewPopup,
+        MemoryViewMenu
+    };
+
+    struct ScriptMenuItem
+    {
+        int Id = 0;
+        std::string Caption;
+        std::string Shortcut;
+        bool Enabled = true;
+        bool Checked = false;
+        std::vector<ScriptMenuItem> Children;
+    };
+
+    struct ScriptControl
+    {
+        int Id = 0;
+        std::string Kind;
+        std::string Text;
+        int Align = 0;
+        int Left = 0;
+        int Top = 0;
+        int Width = 100;
+        int Height = 100;
+        bool Enabled = true;
+        bool Checked = false;
+        bool ReadOnly = false;
+        int ItemIndex = -1;
+        std::vector<std::string> Items;
+        std::vector<ScriptControl> Children;
+    };
+
+    struct ScriptForm
+    {
+        int Id = 0;
+        std::string Caption;
+        int Left = 0;
+        int Top = 0;
+        int Width = 400;
+        int Height = 300;
+        bool Center = false;
+        int Raise = 0;
+        std::string Unsupported;
+        std::vector<ScriptControl> Controls;
+    };
+
     class LuaEngine
     {
     public:
@@ -194,6 +242,19 @@ namespace Manifold::Lua
         int AddHotkey(std::vector<int> keys, int callback);
         void RemoveHotkey(int id);
 
+        void TouchMenus() { ++m_menuGeneration; }
+        std::uint64_t MenuGeneration() const { return m_menuGeneration; }
+        std::vector<ScriptMenuItem> MenuItems(ScriptMenu menu);
+        void MenuOpening(ScriptMenu menu);
+        void ClickMenuItem(int id);
+        void TouchForms() { m_formsShown = true; }
+        bool FormsShown() const { return m_formsShown; }
+        std::vector<ScriptForm> ShownForms();
+        void SetFormValue(int control, std::string_view field, std::string_view value);
+        void FireFormEvent(int control, std::string_view event);
+        void CloseForm(int form);
+        void SetFormBounds(int form, int left, int top, int width, int height);
+
         std::vector<std::string> FunctionNames() const;
         std::vector<LuaCompletion> Complete(std::string_view chain, std::string_view prefix, bool method);
         std::vector<std::string> CallSignatures(std::string_view chain, bool method);
@@ -218,6 +279,7 @@ namespace Manifold::Lua
 
         void Open();
         void Register();
+        void RunCallback(const std::string& code, const char* name);
         void FinishTask(Task& task, int status, int results);
         static void TaskHook(lua_State* state, lua_Debug* debug);
 
@@ -252,5 +314,7 @@ namespace Manifold::Lua
         std::vector<std::unique_ptr<Task>> m_tasks;
         int m_nextTask = 1;
         std::vector<Task*> m_taskStack;
+        std::uint64_t m_menuGeneration = 1;
+        bool m_formsShown = false;
     };
 }

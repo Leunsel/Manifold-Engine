@@ -966,8 +966,32 @@ namespace Manifold::Scan
         m_finishedReady = true;
     }
 
+    bool PatternFilter::Accepts(const Target::RegionInfo& region) const
+    {
+        const auto check = [](Tristate wanted, bool has) { return wanted == Tristate::Any || (wanted == Tristate::Yes) == has; };
+        if (!region.Readable() || !check(Writable, region.Writable()) || !check(Executable, region.Executable()) || !check(CopyOnWrite, region.CopyOnWrite()))
+            return false;
+        return IncludeReadOnly || region.Writable() || region.Executable();
+    }
+
+    bool PatternFilter::Accepts(std::uint64_t address) const
+    {
+        if (Divisor > 1 && address % Divisor != 0)
+            return false;
+        return Modulo <= 1 || address % Modulo == Remainder;
+    }
+
     std::vector<std::uint64_t> FindPattern(const Target::Process& process, const Pattern& pattern, std::uint64_t start, std::uint64_t stop, bool executableOnly,
         std::size_t limit, bool includeReadOnly)
+    {
+        PatternFilter filter;
+        filter.Executable = executableOnly ? Tristate::Yes : Tristate::Any;
+        filter.IncludeReadOnly = includeReadOnly;
+        return FindPattern(process, pattern, start, stop, filter, limit);
+    }
+
+    std::vector<std::uint64_t> FindPattern(const Target::Process& process, const Pattern& pattern, std::uint64_t start, std::uint64_t stop, const PatternFilter& filter,
+        std::size_t limit)
     {
         std::vector<std::uint64_t> found;
         if (pattern.Empty())
@@ -976,7 +1000,7 @@ namespace Manifold::Scan
         const std::uint64_t size = pattern.Bytes.size();
         for (const Target::RegionInfo& region : process.Regions(std::max(start, process.LowestAddress()), std::min(stop, process.HighestAddress())))
         {
-            if (!region.Readable() || (executableOnly && !region.Executable()) || (!includeReadOnly && !region.Writable() && !region.Executable()))
+            if (!filter.Accepts(region))
                 continue;
             const std::uint64_t regionStart = std::max(region.Base, start);
             const std::uint64_t regionEnd = std::min(region.End(), stop);
@@ -1017,7 +1041,7 @@ namespace Manifold::Scan
                                 break;
                             offset = static_cast<std::size_t>(static_cast<const std::uint8_t*>(hit) - buffer.data());
                         }
-                        if (pattern.Matches(buffer.data() + offset))
+                        if (pattern.Matches(buffer.data() + offset) && filter.Accepts(chunk.Base + offset))
                         {
                             perChunk[item].push_back(chunk.Base + offset);
                             ++total;

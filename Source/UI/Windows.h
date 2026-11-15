@@ -4,6 +4,7 @@
 #include "Disasm/AssemblySearch.h"
 #include "Disasm/CodeDissect.h"
 #include "Target/PatchScan.h"
+#include "Lua/LuaEngine.h"
 #include "UI/CodeEditor.h"
 #include "UI/Templates.h"
 #include "UI/Workspace.h"
@@ -192,6 +193,9 @@ namespace Manifold::UI
         void Draw() override;
         bool Closed() const override { return !m_open; }
         void Show(std::uint64_t address, bool hexView);
+        void Select(std::uint64_t address);
+        void ShowHex(std::uint64_t address, std::uint64_t start, std::uint64_t stop);
+        void Raise();
         int Number() const { return m_number; }
 
     private:
@@ -229,6 +233,9 @@ namespace Manifold::UI
         void HandleCodeKeys();
         void HandleHexKeys();
         void Shortcuts();
+        void ScriptMenuBar();
+        void ScriptShortcuts(std::vector<ImGuiKeyChord>& taken);
+        void PublishSelection();
         void RunCommand(Command command);
         void Bookmark(bool set, int slot);
         Status WriteBytes(std::uint64_t address, std::span<const std::uint8_t> bytes);
@@ -278,6 +285,11 @@ namespace Manifold::UI
 
         std::uint64_t m_hexTop = 0;
         std::uint64_t m_hexSelected = 0;
+        std::uint64_t m_hexMarkStart = 0;
+        std::uint64_t m_hexMarkStop = 0;
+        std::vector<Lua::ScriptMenuItem> m_scriptPopup;
+        std::vector<Lua::ScriptMenuItem> m_scriptMenu;
+        std::uint64_t m_scriptMenuGeneration = 0;
         int m_hexNibble = 0;
         bool m_hexFocus = false;
         int m_hexDisplay = 0;

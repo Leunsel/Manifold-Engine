@@ -45,6 +45,9 @@ namespace Manifold
     enum class UiRequestKind
     {
         MemoryViewer,
+        MemoryViewerSelect,
+        MemoryViewerHex,
+        MemoryViewerRaise,
         StructureDissect,
         AutoAssembler,
         LuaEngine,
@@ -65,6 +68,8 @@ namespace Manifold
         UiRequestKind Kind = UiRequestKind::MemoryViewer;
         std::uint64_t Address = 0;
         std::string Text;
+        std::uint64_t Start = 0;
+        std::uint64_t Stop = 0;
     };
 
     class Engine
@@ -154,6 +159,7 @@ namespace Manifold
 
         std::uint64_t SelectedCodeAddress = 0;
         std::uint64_t SelectedHexAddress = 0;
+        bool MemoryViewerVisible = false;
 
     private:
         void UpdateFreezes();

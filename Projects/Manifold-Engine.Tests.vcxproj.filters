@@ -117,6 +117,9 @@
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>

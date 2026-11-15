@@ -1339,7 +1339,7 @@ end
 }
 )MLUA"),
         };
-        constexpr std::array<std::string_view, 5> kScript2 = {
+        constexpr std::array<std::string_view, 6> kScript2 = {
             std::string_view(R"MLUA(local classes = __ceClasses or {}
 __ceClasses = nil
 
@@ -1349,6 +1349,20 @@ local Meta = {}
 local Impl, Get, Set, Defaults, IndexGet, IndexSet, Init, Indexed = {}, {}, {}, {}, {}, {}, {}, {}
 local forms = {}
 local formNotifications = {}
+
+local function touchMenus()
+  local f = rawget(_G, "__manifoldMenusChanged")
+  if f then
+    f()
+  end
+end
+
+local function touchForms()
+  local f = rawget(_G, "__manifoldFormsChanged")
+  if f then
+    f()
+  end
+end
 
 local ExtraParents = {
   customcontrol = "wincontrol", customapplication = "component", tobject = "object", custompen = "object",
@@ -1700,6 +1714,9 @@ Meta.__newindex = function(obj, key, value)
   if d == nil then
     return
   end
+  if d.class == "menuitem" then
+    touchMenus()
+  end
   local chain = lineage(d.class)
   if type(key) == "number" then
     for i = 1, #chain do
@@ -1737,7 +1754,8 @@ end
 local function destroy(obj)
   local d = D[obj]
   if not d or d.destroyed then
-    return
+)MLUA"),
+            std::string_view(R"MLUA(    return
   end
   call(d.props.ondestroy, obj)
   d.destroyed = true
@@ -1748,13 +1766,16 @@ local function destroy(obj)
     removeValue(D[d.owner].components, obj)
   end
   if d.parent and D[d.parent] then
-)MLUA"),
-            std::string_view(R"MLUA(    removeValue(D[d.parent].controls, obj)
+    removeValue(D[d.parent].controls, obj)
   end
   if d.parentItem and D[d.parentItem] then
     removeValue(D[d.parentItem].items, obj)
+    touchMenus()
   end
   removeValue(forms, obj)
+  if d.script then
+    touchForms()
+  end
 end
 
 Impl.object = {
@@ -2107,7 +2128,8 @@ Get.memo = {
   caption = function(self, d) return Get.memo.text(self, d) end,
 }
 Set.memo = {
-  text = function(self, d, value) self.Lines.Text = value end,
+)MLUA"),
+            std::string_view(R"MLUA(  text = function(self, d, value) self.Lines.Text = value end,
   caption = function(self, d, value) self.Lines.Text = value end,
 }
 Impl.memo = {
@@ -2119,8 +2141,7 @@ Impl.memo = {
   pastefromclipboard = noop,
 }
 
-)MLUA"),
-            std::string_view(R"MLUA(Get.edit = {
+Get.edit = {
   text = function(self, d) return d.props.text or "" end,
   caption = function(self, d) return d.props.text or "" end,
 }
@@ -2330,6 +2351,7 @@ local function attachItem(parent, item, index)
   if not child then
     return
   end
+  touchMenus()
   if child.parentItem and D[child.parentItem] then
     removeValue(D[child.parentItem].items, item)
   end
@@ -2349,6 +2371,7 @@ Impl.menuitem = {
     if item then
       table.remove(d.items, index + 1)
       D[item].parentItem = nil
+      touchMenus()
     end
   end,
   remove = function(self, item)
@@ -2356,12 +2379,14 @@ Impl.menuitem = {
     if D[item] then
       D[item].parentItem = nil
     end
+    touchMenus()
   end,
   clear = function(self)
     for _, item in ipairs(D[self].items) do
       D[item].parentItem = nil
     end
     D[self].items = {}
+    touchMenus()
   end,
   indexof = function(self, item)
     for i, child in ipairs(D[self].items) do
@@ -2393,7 +2418,9 @@ Defaults.menu = {
   end,
   images = nil,
 }
-Impl.menu = { getitems = function(self) return self.Items end }
+Get.menu = { images = function(self, d) return d.props.images end }
+)MLUA"),
+            std::string_view(R"MLUA(Impl.menu = { getitems = function(self) return self.Items end }
 Impl.popupmenu = { popup = noop, close = noop }
 
 Init.listitems = function(self, d) d.items = {} end
@@ -2410,8 +2437,7 @@ Set.listitems = {
       d.items[#d.items + 1] = newListItem(self)
     end
     while #d.items > value do
-)MLUA"),
-            std::string_view(R"MLUA(      table.remove(d.items)
+      table.remove(d.items)
     end
   end,
 }
@@ -2633,17 +2659,31 @@ Defaults.form = {
   visible = false, caption = "", position = 0, borderstyle = 2, formstyle = 0, windowstate = 0, modalresult = 0, alphablend = false,
   alphablendvalue = 255, keypreview = false, showintaskbar = 0, designtimeppi = 96, width = 400, height = 300, popupparent = nil,
 }
+Set.form = {
+  visible = function(self, d, value)
+    d.props.visible = value and true or false
+    touchForms()
+  end,
+}
 Impl.form = {
   show = function(self)
     local d = D[self]
+    if d.props.visible then
+      d.raise = (d.raise or 0) + 1
+    end
     d.props.visible = true
+    touchForms()
     call(d.props.onshow, self)
   end,
-  hide = function(self) D[self].props.visible = false end,
+  hide = function(self)
+    D[self].props.visible = false
+    touchForms()
+  end,
   close = function(self)
     local d = D[self]
     local action = call(d.props.onclose, self)
     d.props.visible = false
+    touchForms()
     if action == caFree then
       destroy(self)
     end
@@ -2657,7 +2697,11 @@ Impl.form = {
     return d.props.modalresult ~= 0 and d.props.modalresult or mrCancel
   end,
   centerscreen = noop,
-  bringtofront = noop,
+  bringtofront = function(self)
+    local d = D[self]
+    d.raise = (d.raise or 0) + 1
+    touchForms()
+  end,
   sendtoback = noop,
   dragnow = noop,
   setfocus = noop,
@@ -2720,7 +2764,8 @@ Impl.colordialog = {
     return true
   end,
 }
-Impl.fontdialog = { execute = function() return false end }
+)MLUA"),
+            std::string_view(R"MLUA(Impl.fontdialog = { execute = function() return false end }
 Impl.finddialog = { execute = function() return false end, closedialog = noop }
 Defaults.fontdialog = { font = function(self) return new("font", self) end }
 
@@ -2737,11 +2782,45 @@ Impl.thread = {
 }
 
 Defaults.disassemblerview = { selectedaddress2 = 0, topaddress = 0, showjumplines = true, hidefocusrect = false }
-)MLUA"),
-            std::string_view(R"MLUA(Get.disassemblerview = { selectedaddress = function() return __manifoldSelectedCodeAddress() end }
+Get.disassemblerview = { selectedaddress = function() return __manifoldSelectedCodeAddress() end }
 Set.disassemblerview = { selectedaddress = function(self, d, value) __manifoldSetSelectedCodeAddress(value) end }
-Defaults.hexadecimal = { selectionstart = 0, selectionstop = 0, displaytype = 0 }
-Get.hexadecimal = { address = function() return __manifoldSelectedHexAddress() end, topaddress = function() return __manifoldSelectedHexAddress() end }
+Defaults.hexadecimal = { displaytype = 0 }
+local function hexView(d, address)
+  local f = rawget(_G, "__manifoldSetHexView")
+  if f then
+    f(address or 0, d.selStart or 0, d.selStop or 0)
+  end
+end
+Get.hexadecimal = {
+  address = function() return __manifoldSelectedHexAddress() end,
+  topaddress = function() return __manifoldSelectedHexAddress() end,
+  selectionstart = function(self, d) return d.selStart or 0 end,
+  selectionstop = function(self, d) return d.selStop or 0 end,
+}
+Set.hexadecimal = {
+  address = function(self, d, value)
+    d.selStart, d.selStop = nil, nil
+    hexView(d, tonumber(value))
+  end,
+  topaddress = function(self, d, value)
+    d.selStart, d.selStop = nil, nil
+    hexView(d, tonumber(value))
+  end,
+  selectionstart = function(self, d, value)
+    d.selStart = tonumber(value) or 0
+    if (d.selStop or 0) < d.selStart then
+      d.selStop = d.selStart
+    end
+    hexView(d, 0)
+  end,
+  selectionstop = function(self, d, value)
+    d.selStop = tonumber(value) or 0
+    if (d.selStart or 0) == 0 or d.selStart > d.selStop then
+      d.selStart = d.selStop
+    end
+    hexView(d, 0)
+  end,
+}
 
 local function construct(class, owner)
   local obj = new(class, owner)
@@ -2801,10 +2880,12 @@ createIcon = createIcon or graphic("icon")
 
 createForm = createForm or function(visible)
   local form = new("cefrm")
+  D[form].script = true
   if visible == nil or visible then
     D[form].props.visible = true
   end
   addForm(form)
+  touchForms()
   return form
 end
 
@@ -2925,14 +3006,326 @@ getMemoryViewForm = getMemoryViewForm or function()
   p.menu = menu
   local popup = new("popupmenu", memoryView)
   D[popup].props.name = "debuggerpopup"
+  local images = new("imagelist", memoryView)
+  D[images].props.name = "mvImageList"
+  D[popup].props.images = images
   for _, name in ipairs({ "miDebugSetAddress", "Watchmemoryallocations1", "MenuItem14", "InjectDLL1", "CreateThread1", "AutoInject1" }) do
     local item = new("menuitem", memoryView)
     D[item].props.name = name
     D[item].props.caption = name
+    D[item].builtin = true
     menu.Items.add(item)
   end
   addForm(memoryView)
   return memoryView
+end
+
+Get.memoryview = {
+  visible = function()
+    local f = rawget(_G, "__manifoldMemoryViewVisible")
+    return f and f() or false
+  end,
+}
+Set.memoryview = {
+  visible = function(self, d, value)
+    if value then
+      local f = rawget(_G, "__manifoldShowMemoryView")
+      if f then
+        f()
+      end
+    end
+  end,
+}
+Impl.memoryview = {
+  show = function(self)
+    local f = rawget(_G, "__manifoldShowMemoryView")
+    if f then
+      f()
+    end
+    call(D[self].props.onshow, self)
+  end,
+  bringtofront = function()
+    local f = rawget(_G, "__manifoldShowMemoryView")
+    if f then
+      f()
+    end
+  end,
+  hide = noop,
+  close = noop,
+}
+
+local uids = setmetatable({}, { __mode = "v" })
+local nextUid = 0
+
+local function uidOf(obj)
+  local d = D[obj]
+  if not d.uid then
+    nextUid = nextUid + 1
+    d.uid = nextUid
+    uids[nextUid] = obj
+  end
+  return d.uid
+end
+
+local function live(id)
+  local obj = uids[tonumber(id) or -1]
+  local d = obj and D[obj]
+  if d and not d.destroyed then
+    return obj, d
+  end
+  return nil
+end
+
+local function plainCaption(text)
+  return (tostring(text or ""):gsub("&(.)", "%1"))
+end
+
+local function shortcutText(value)
+  if type(value) == "number" then
+    if value == 0 then
+      return ""
+    end
+    local f = rawget(_G, "shortCutToText")
+    if f then
+      local ok, text = pcall(f, value)
+      if ok and type(text) == "string" then
+        return text
+      end
+    end
+    return ""
+  end
+  return tostring(value or "")
+end
+
+local function menuEntries(parent, skipBuiltin)
+  local out = {}
+  local d = D[parent]
+  if not d or not d.items then
+    return out
+  end
+  for _, item in ipairs(d.items) do
+    local child = D[item]
+    if child and not child.destroyed and not (skipBuiltin and child.builtin) and item.Visible ~= false then
+      out[#out + 1] = {
+        id = uidOf(item),
+        caption = plainCaption(item.Caption),
+        shortcut = shortcutText(rawget(child.props, "shortcut")),
+        enabled = item.Enabled ~= false,
+        checked = item.Checked == true,
+        children = menuEntries(item, false),
+      }
+    end
+  end
+  return out
+end
+
+local function scriptMenu(which)
+  if not memoryView then
+    return nil
+  end
+  if which == "popup" then
+    return findOwned(memoryView, "debuggerpopup", false)
+  end
+  return D[memoryView].props.menu
+end
+
+__manifoldMenuSnapshot = function(which)
+  local menu = scriptMenu(which)
+  if not menu then
+    return {}
+  end
+  return menuEntries(menu.Items, which ~= "popup")
+end
+
+__manifoldMenuPopup = function(which)
+  local menu = scriptMenu(which)
+  if menu then
+    call(D[menu].props.onpopup, menu)
+  end
+end
+
+__manifoldMenuClick = function(id)
+  local item, d = live(id)
+  if not item then
+    return
+  end
+  if item.AutoCheck then
+    item.Checked = not item.Checked
+  end
+  call(d.props.onclick, item)
+end
+
+local alignNames = { alnone = 0, altop = 1, albottom = 2, alleft = 3, alright = 4, alclient = 5, alcustom = 6 }
+)MLUA"),
+            std::string_view(R"MLUA(local formKinds = {
+  label = true, button = true, edit = true, memo = true, checkbox = true, listbox = true, panel = true,
+  groupbox = true, splitter = true, combobox = true,
+}
+
+local function alignOf(value)
+  if type(value) == "number" then
+    return value
+  end
+  return alignNames[lower(tostring(value or ""))] or 0
+end
+
+local function centred(value)
+  if type(value) == "number" then
+    return value >= 4
+  end
+  local text = lower(tostring(value or ""))
+  return text:find("center") ~= nil
+end
+
+local function stringItems(list)
+  local out = {}
+  local d = list and D[list]
+  if d and d.items then
+    for i, text in ipairs(d.items) do
+      out[i] = tostring(text)
+    end
+  end
+  return out
+end
+
+local function controlEntry(control, form)
+  local d = D[control]
+  local entry = {
+    id = uidOf(control),
+    kind = d.class,
+    align = alignOf(control.Align),
+    left = tonumber(control.Left) or 0,
+    top = tonumber(control.Top) or 0,
+    width = tonumber(d.props.width) or -1,
+    height = tonumber(d.props.height) or -1,
+    enabled = control.Enabled ~= false,
+    children = {},
+  }
+  if not formKinds[d.class] then
+    form.unsupported = form.unsupported or (ClassNames[d.class] or d.class)
+    return entry
+  end
+  if d.class == "listbox" or d.class == "combobox" then
+    entry.items = stringItems(control.Items)
+    entry.itemindex = tonumber(d.props.itemindex) or -1
+  elseif d.class == "memo" then
+    entry.text = control.Text
+    entry.readonly = control.ReadOnly == true
+  elseif d.class == "edit" then
+    entry.text = control.Text
+    entry.readonly = control.ReadOnly == true
+  else
+    entry.text = plainCaption(control.Caption)
+  end
+  if d.class == "checkbox" then
+    entry.checked = d.props.checked == true
+  end
+  for _, child in ipairs(d.controls) do
+    local cd = D[child]
+    if cd and not cd.destroyed and child.Visible ~= false then
+      entry.children[#entry.children + 1] = controlEntry(child, form)
+    end
+  end
+  return entry
+end
+
+__manifoldFormSnapshot = function()
+  local out = {}
+  for _, form in ipairs(forms) do
+    local d = D[form]
+    if d and d.script and not d.destroyed and d.props.visible then
+      local p = d.props
+      local entry = {
+        id = uidOf(form),
+        caption = tostring(form.Caption or ""),
+        left = tonumber(p.left) or 0,
+        top = tonumber(p.top) or 0,
+        width = tonumber(p.clientwidth or p.width) or 400,
+        height = tonumber(p.clientheight or p.height) or 300,
+        center = centred(p.position),
+        raise = d.raise or 0,
+        controls = {},
+      }
+      for _, child in ipairs(d.controls) do
+        local cd = D[child]
+        if cd and not cd.destroyed and child.Visible ~= false then
+          entry.controls[#entry.controls + 1] = controlEntry(child, entry)
+        end
+      end
+      out[#out + 1] = entry
+    end
+  end
+  return out
+end
+
+__manifoldFormSet = function(id, field, value)
+  local control, d = live(id)
+  if not control then
+    return
+  end
+  if field == "itemindex" then
+    d.props.itemindex = tonumber(value) or -1
+    d.props.text = nil
+  elseif field == "checked" then
+    d.props.checked = value == "1"
+    d.props.state = value == "1" and 1 or 0
+  elseif field == "text" then
+    if d.class == "memo" then
+      local lines = control.Lines
+      D[lines].items = splitLines(value)
+    else
+      d.props.text = tostring(value or "")
+    end
+  end
+end
+
+__manifoldFormFire = function(id, event)
+  local control, d = live(id)
+  if not control then
+    return
+  end
+  local p = d.props
+  if event == "select" then
+    if d.class == "combobox" then
+      call(p.onchange, control)
+      call(p.onselect, control)
+    else
+      call(p.onclick, control)
+      call(p.onselectionchange, control, true)
+    end
+  elseif event == "dblclick" then
+    call(p.ondblclick, control)
+  elseif event == "change" then
+    call(p.onchange, control)
+    if d.class == "checkbox" then
+      call(p.onclick, control)
+    end
+  elseif event == "click" then
+    call(p.onclick, control)
+  end
+end
+
+__manifoldFormClose = function(id)
+  local form = live(id)
+  if form then
+    form.close()
+  end
+end
+
+__manifoldFormBounds = function(id, left, top, width, height)
+  local form, d = live(id)
+  if not form then
+    return
+  end
+  local p = d.props
+  p.left, p.top = left, top
+  if p.clientwidth then
+    p.clientwidth = width
+  end
+  if p.clientheight then
+    p.clientheight = height
+  end
+  p.width, p.height = width, height
 end
 
 getFormCount = getFormCount or function() return #forms end
@@ -3051,6 +3444,23 @@ __manifoldLcl = {
   inherits = inherits,
   forms = forms,
 }
+
+getSettings = getSettings or function(path)
+  local section = (path == nil or path == "") and "Cheat Engine" or tostring(path)
+  local value = setmetatable({}, {
+    __index = function(_, name)
+      return __manifoldSettingRead(section, tostring(name))
+    end,
+    __newindex = function(_, name, v)
+      __manifoldSettingWrite(section, tostring(name), v == nil and "" or tostring(v))
+    end,
+  })
+  local settings = { Path = section, Value = value, ClassName = "TSettings" }
+  settings.getValue = function(name) return value[name] end
+  settings.setValue = function(name, v) value[name] = v end
+  settings.destroy = noop
+  return settings
+end
 )MLUA"),
         };
         constexpr std::array<std::string_view, 1> kScript3 = {

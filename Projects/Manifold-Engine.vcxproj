@@ -135,6 +135,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Lua\LuaCompat.cpp" />
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp" />
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
@@ -162,6 +163,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\UI\MemoryViewer.cpp" />
     <ClCompile Include="..\Source\UI\PatchScanWindow.cpp" />
     <ClCompile Include="..\Source\UI\RecordEditor.cpp" />
+    <ClCompile Include="..\Source\UI\ScriptUi.cpp" />
     <ClCompile Include="..\Source\UI\ScriptWindow.cpp" />
     <ClCompile Include="..\Source\UI\SettingsWindow.cpp" />
     <ClCompile Include="..\Source\UI\Shortcuts.cpp" />
@@ -221,6 +223,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClInclude Include="..\Source\UI\DialogHost.h" />
     <ClInclude Include="..\Source\UI\Fonts.h" />
     <ClInclude Include="..\Source\UI\LuaDialogs.h" />
+    <ClInclude Include="..\Source\UI\ScriptUi.h" />
     <ClInclude Include="..\Source\UI\Shortcuts.h" />
     <ClInclude Include="..\Source\UI\TemplateManager.h" />
     <ClInclude Include="..\Source\UI\Templates.h" />
