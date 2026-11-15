@@ -97,6 +97,7 @@ namespace Manifold
             ImGui_ImplDX11_Shutdown();
             ImGui_ImplWin32_Shutdown();
             ImGui::DestroyContext();
+            m_imgui = nullptr;
         }
         DestroyDeviceAndSwapChain();
         if (m_hwnd)
@@ -490,7 +491,7 @@ namespace Manifold
                 return handled;
         }
 
-        if (m_imgui && ImGui_ImplWin32_WndProcHandlerEx(hwnd, msg, wp, lp, ImGui::GetIO(m_imgui)))
+        if (!m_closing && m_imgui && ImGui_ImplWin32_WndProcHandlerEx(hwnd, msg, wp, lp, ImGui::GetIO(m_imgui)))
             return 1;
 
         switch (msg)
