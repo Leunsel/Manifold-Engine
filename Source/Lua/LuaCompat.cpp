@@ -2230,6 +2230,12 @@ namespace Manifold::Lua
                 field.Size = sizes[type];
             else if (type == 12)
                 field.Size = 8;
+            else if (type == 9)
+            {
+                field.BitStart = std::clamp(field.BitStart, 0, 63);
+                field.BitLength = std::clamp(field.BitLength, 1, 64 - field.BitStart);
+                field.Size = Table::BitFieldSize(field.BitStart, field.BitLength);
+            }
         }
 
         void Touch(lua_State* state)
@@ -2435,9 +2441,12 @@ namespace Manifold::Lua
             if (key == "bytesize") { lua_pushinteger(state, field.Size); return 1; }
             if (key == "childstructstart") { lua_pushinteger(state, 0); return 1; }
             if (key == "classname") { lua_pushstring(state, "TStructelement"); return 1; }
+            if (key == "bitstart") { lua_pushinteger(state, field.BitStart); return 1; }
+            if (key == "bitlength") { lua_pushinteger(state, field.BitLength); return 1; }
             if (key == "displaymethod")
             {
-                lua_pushstring(state, field.Display == Table::FieldDisplay::Hex ? "dtHexadecimal" : field.Display == Table::FieldDisplay::Signed ? "dtSignedInteger" : "dtUnsignedInteger");
+                lua_pushstring(state, field.Display == Table::FieldDisplay::Hex ? "dtHexadecimal" : field.Display == Table::FieldDisplay::Signed ? "dtSignedInteger" :
+                    field.Display == Table::FieldDisplay::Binary ? "dtBinary" : "dtUnsignedInteger");
                 return 1;
             }
             if (key == "childstruct")
@@ -2515,7 +2524,20 @@ namespace Manifold::Lua
             else if (key == "displaymethod")
             {
                 const std::string method = Lower(luaL_checkstring(state, 3));
-                field.Display = method.find("hex") != std::string::npos ? Table::FieldDisplay::Hex : method.find("signed") != std::string::npos && method.find("unsigned") == std::string::npos ? Table::FieldDisplay::Signed : Table::FieldDisplay::Unsigned;
+                field.Display = method.find("hex") != std::string::npos ? Table::FieldDisplay::Hex :
+                    method.find("binary") != std::string::npos ? Table::FieldDisplay::Binary :
+                    method.find("signed") != std::string::npos && method.find("unsigned") == std::string::npos ? Table::FieldDisplay::Signed : Table::FieldDisplay::Unsigned;
+            }
+            else if (key == "bitstart" || key == "bitlength")
+            {
+                const int value = static_cast<int>(luaL_checkinteger(state, 3));
+                if (key == "bitstart")
+                    field.BitStart = std::clamp(value, 0, 63);
+                else
+                    field.BitLength = std::clamp(value, 1, 64);
+                field.BitLength = std::clamp(field.BitLength, 1, 64 - field.BitStart);
+                if (field.Type == Scan::ValueType::Binary)
+                    field.Size = Table::BitFieldSize(field.BitStart, field.BitLength);
             }
             else if (key == "childstruct")
             {

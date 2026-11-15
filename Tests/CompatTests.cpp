@@ -162,6 +162,15 @@ namespace Manifold::Tests
                 if e.Vartype ~= vtCustom or e.CustomTypeName ~= "Letters" or e.Bytesize ~= 2 or e.CustomType.Name ~= "Letters" then return "element custom type" end
                 e.Vartype = vtDword
                 if e.CustomTypeName ~= "" or e.CustomType ~= nil then return "custom type kept" end
+                local bits = s.addElement()
+                bits.Offset = 0x14
+                bits.BitStart = 6
+                bits.BitLength = 4
+                bits.Vartype = vtBinary
+                bits.DisplayMethod = "dtBinary"
+                if bits.Vartype ~= vtBinary or bits.Bytesize ~= 2 or bits.BitStart ~= 6 or bits.BitLength ~= 4 or bits.DisplayMethod ~= "dtBinary" then return "binary element" end
+                bits.BitLength = 1
+                if bits.Bytesize ~= 1 then return "binary size" end
                 s.destroy()
                 return "ok")LUA");
         }

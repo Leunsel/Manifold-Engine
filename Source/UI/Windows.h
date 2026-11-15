@@ -287,11 +287,12 @@ namespace Manifold::UI
         Table::StructDefinition& ChildFor(const Table::StructDefinition& parent, const Table::StructField& field, std::uint64_t target);
         void PrepareNew(std::uint64_t address);
         std::string FieldText(const Table::StructField& field, std::span<const std::uint8_t> bytes, std::uint64_t address, int pointerSize);
+        Status WriteBits(const Table::StructField& field, std::uint64_t address, const std::string& text);
         Table::StructDefinition* Current();
 
         Workspace& m_workspace;
         Engine& m_engine;
-        int m_number = 1;
+        [[maybe_unused]] int m_number = 1;
         std::string m_title;
         bool m_open = true;
         std::vector<Column> m_columns;

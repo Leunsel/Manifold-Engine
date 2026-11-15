@@ -331,6 +331,7 @@ namespace Manifold::Table
             {
             case FieldDisplay::Signed: return "signed integer";
             case FieldDisplay::Hex: return "hexadecimal";
+            case FieldDisplay::Binary: return "binary";
             default: return "unsigned integer";
             }
         }
@@ -352,8 +353,15 @@ namespace Manifold::Table
                 field.Unicode = EqualsNoCase(type, "Unicode String");
                 field.Size = static_cast<int>(ParseDecimal(element->Attribute("Bytesize").value_or("4")).value_or(4));
                 const std::string display = element->Attribute("DisplayMethod").value_or("");
-                field.Display = EqualsNoCase(display, "hexadecimal") ? FieldDisplay::Hex : EqualsNoCase(display, "signed integer") ? FieldDisplay::Signed : FieldDisplay::Unsigned;
+                field.Display = EqualsNoCase(display, "hexadecimal") ? FieldDisplay::Hex : EqualsNoCase(display, "signed integer") ? FieldDisplay::Signed :
+                    EqualsNoCase(display, "binary") ? FieldDisplay::Binary : FieldDisplay::Unsigned;
                 field.ChildStructure = element->Attribute("ChildStruct").value_or("");
+                if (field.Type == Scan::ValueType::Binary)
+                {
+                    field.BitStart = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element->Attribute("BitStart").value_or("0")).value_or(0), 0, 63));
+                    field.BitLength = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element->Attribute("BitLength").value_or("1")).value_or(1), 1, 64 - field.BitStart));
+                    field.Size = BitFieldSize(field.BitStart, field.BitLength);
+                }
                 if (EqualsNoCase(type, "Custom"))
                 {
                     field.Type = Scan::ValueType::ByteArray;
@@ -488,6 +496,11 @@ namespace Manifold::Table
                     element.SetAttribute("OffsetHex", Hex(static_cast<std::uint64_t>(field.Offset), 8));
                     element.SetAttribute("Description", field.Name);
                     element.SetAttribute("DisplayMethod", DisplayName(field.Display));
+                    if (field.Type == Scan::ValueType::Binary && field.CustomType.empty())
+                    {
+                        element.SetAttribute("BitStart", std::to_string(field.BitStart));
+                        element.SetAttribute("BitLength", std::to_string(field.BitLength));
+                    }
                     if (!field.ChildStructure.empty())
                         element.SetAttribute("ChildStruct", field.ChildStructure);
                 }

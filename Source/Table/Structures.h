@@ -18,7 +18,8 @@ namespace Manifold::Table
     {
         Unsigned,
         Signed,
-        Hex
+        Hex,
+        Binary
     };
 
     struct StructField
@@ -31,7 +32,11 @@ namespace Manifold::Table
         bool Unicode = false;
         std::string ChildStructure;
         std::string CustomType;
+        int BitStart = 0;
+        int BitLength = 1;
     };
+
+    int BitFieldSize(int bitStart, int bitLength);
 
     struct StructDefinition
     {

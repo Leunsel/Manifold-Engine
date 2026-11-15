@@ -133,7 +133,14 @@ namespace Manifold::Table
 
     void StructDefinition::Sort()
     {
-        std::stable_sort(Fields.begin(), Fields.end(), [](const StructField& a, const StructField& b) { return a.Offset < b.Offset; });
+        const auto bit = [](const StructField& field) { return field.Type == Scan::ValueType::Binary ? field.BitStart : 0; };
+        std::stable_sort(Fields.begin(), Fields.end(), [&](const StructField& a, const StructField& b) { return a.Offset != b.Offset ? a.Offset < b.Offset : bit(a) < bit(b); });
+    }
+
+    int BitFieldSize(int bitStart, int bitLength)
+    {
+        const int bits = std::clamp(bitStart, 0, 63) + std::clamp(bitLength, 1, 64);
+        return bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : 8;
     }
 
     StructDefinition* StructureStore::Find(const std::string& name)

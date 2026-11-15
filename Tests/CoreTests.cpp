@@ -139,6 +139,8 @@ namespace Manifold::Tests
             Table::StructureStore structures;
             Table::StructDefinition& definition = structures.Add("Player");
             definition.Fields.push_back({ 0x10, "Health", Scan::ValueType::FourBytes, 4, Table::FieldDisplay::Signed, false, "" });
+            definition.Fields.push_back({ 0x14, "Flags", Scan::ValueType::Binary, 2, Table::FieldDisplay::Binary, false, "", "", 5, 6 });
+            definition.Fields.push_back({ 0x14, "Alive", Scan::ValueType::Binary, 1, Table::FieldDisplay::Unsigned, false, "", "", 2, 1 });
             const std::string xml = Table::WriteTable(list, structures, { { "base", "game.exe+10" } });
 
             Table::LoadedTable loaded;
@@ -175,7 +177,15 @@ namespace Manifold::Tests
             }
             CHECK_EQ(loaded.LuaScript, "print('hi')");
             CHECK(loaded.Symbols.size() == 1 && loaded.Symbols[0].Name == "base");
-            CHECK(loaded.Structures.size() == 1 && loaded.Structures[0]->Fields.size() == 1 && loaded.Structures[0]->Fields[0].Display == Table::FieldDisplay::Signed);
+            CHECK(loaded.Structures.size() == 1 && loaded.Structures[0]->Fields.size() == 3 && loaded.Structures[0]->Fields[0].Display == Table::FieldDisplay::Signed);
+            if (loaded.Structures.size() == 1 && loaded.Structures[0]->Fields.size() == 3)
+            {
+                const Table::StructField& low = loaded.Structures[0]->Fields[1];
+                const Table::StructField& high = loaded.Structures[0]->Fields[2];
+                CHECK(low.Type == Scan::ValueType::Binary && low.Offset == 0x14 && low.BitStart == 2 && low.BitLength == 1 && low.Size == 1);
+                CHECK(high.Type == Scan::ValueType::Binary && high.BitStart == 5 && high.BitLength == 6 && high.Size == 2 && high.Display == Table::FieldDisplay::Binary);
+                CHECK(loaded.Structures[0]->Fields[0].Name == "Health" && high.Name == "Flags");
+            }
 
             const char* cheatEngine = R"(<?xml version="1.0" encoding="utf-8"?>
 <CheatTable CheatEngineTableVersion="45">

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <optional>
 #include <string_view>
 
 namespace Manifold::UI
@@ -26,7 +27,115 @@ namespace Manifold::UI
         }
 
         const Scan::ValueType kFieldTypes[] = { Scan::ValueType::Byte, Scan::ValueType::TwoBytes, Scan::ValueType::FourBytes, Scan::ValueType::EightBytes,
-            Scan::ValueType::Float, Scan::ValueType::Double, Scan::ValueType::Pointer, Scan::ValueType::String, Scan::ValueType::ByteArray };
+            Scan::ValueType::Binary, Scan::ValueType::Float, Scan::ValueType::Double, Scan::ValueType::Pointer, Scan::ValueType::String, Scan::ValueType::ByteArray };
+
+        bool IsWholeNumber(Scan::ValueType type)
+        {
+            return type == Scan::ValueType::Byte || type == Scan::ValueType::TwoBytes || type == Scan::ValueType::FourBytes ||
+                   type == Scan::ValueType::EightBytes || type == Scan::ValueType::Binary;
+        }
+
+        bool ShowsBits(const Table::StructField& field)
+        {
+            return field.CustomType.empty() && (field.Type == Scan::ValueType::Binary || (field.Display == Table::FieldDisplay::Binary && IsWholeNumber(field.Type)));
+        }
+
+        int BitCount(const Table::StructField& field)
+        {
+            return field.Type == Scan::ValueType::Binary ? std::clamp(field.BitLength, 1, 64) : std::clamp(field.Size, 1, 8) * 8;
+        }
+
+        std::uint64_t BitMask(int bits)
+        {
+            return bits >= 64 ? ~0ull : (1ull << bits) - 1;
+        }
+
+        std::uint64_t RawValue(std::span<const std::uint8_t> bytes)
+        {
+            std::uint64_t value = 0;
+            std::memcpy(&value, bytes.data(), std::min<std::size_t>(8, bytes.size()));
+            return value;
+        }
+
+        std::uint64_t FieldBits(const Table::StructField& field, std::span<const std::uint8_t> bytes)
+        {
+            const std::uint64_t raw = RawValue(bytes);
+            if (field.Type == Scan::ValueType::Binary)
+                return (raw >> std::clamp(field.BitStart, 0, 63)) & BitMask(BitCount(field));
+            return raw & BitMask(BitCount(field));
+        }
+
+        std::string BitText(std::uint64_t value, int bits)
+        {
+            std::string text;
+            for (int bit = bits - 1; bit >= 0; --bit)
+            {
+                text += ((value >> bit) & 1) ? '1' : '0';
+                if (bit > 0 && bit % 4 == 0)
+                    text += ' ';
+            }
+            return text;
+        }
+
+        std::string BitsValueText(const Table::StructField& field, std::uint64_t value)
+        {
+            const int bits = BitCount(field);
+            switch (field.Display)
+            {
+            case Table::FieldDisplay::Binary: return BitText(value, bits);
+            case Table::FieldDisplay::Hex: return Hex(value);
+            case Table::FieldDisplay::Signed:
+                if (bits < 64 && ((value >> (bits - 1)) & 1))
+                    return std::to_string(static_cast<std::int64_t>(value | ~BitMask(bits)));
+                return std::to_string(static_cast<std::int64_t>(value));
+            default: return std::to_string(value);
+            }
+        }
+
+        std::optional<std::uint64_t> ParseBitsValue(const Table::StructField& field, std::string_view text)
+        {
+            std::string clean;
+            for (char c : text)
+            {
+                if (c != ' ' && c != '_' && c != '\'')
+                    clean += c;
+            }
+            if (clean.empty())
+                return std::nullopt;
+            std::optional<std::uint64_t> value;
+            if (field.Display == Table::FieldDisplay::Binary)
+            {
+                std::string_view digits = clean;
+                if (digits.size() > 2 && digits[0] == '0' && (digits[1] == 'b' || digits[1] == 'B'))
+                    digits.remove_prefix(2);
+                if (digits.empty() || digits.size() > 64 || digits.find_first_not_of("01") != std::string_view::npos)
+                    return std::nullopt;
+                std::uint64_t bits = 0;
+                for (char c : digits)
+                    bits = (bits << 1) | static_cast<std::uint64_t>(c - '0');
+                value = bits;
+            }
+            else if (field.Display == Table::FieldDisplay::Hex)
+                value = ParseHex(clean);
+            else if (const auto number = ParseDecimal(clean))
+                value = static_cast<std::uint64_t>(*number);
+            if (!value)
+                return std::nullopt;
+            return *value & BitMask(BitCount(field));
+        }
+
+        std::string TypeLabel(const Table::StructField& field)
+        {
+            if (!field.CustomType.empty())
+                return field.CustomType;
+            if (field.Type == Scan::ValueType::String)
+                return "String[" + std::to_string(field.Size) + "]";
+            if (field.Type == Scan::ValueType::ByteArray)
+                return "AOB[" + std::to_string(field.Size) + "]";
+            if (field.Type == Scan::ValueType::Binary)
+                return field.BitLength <= 1 ? "Bit " + std::to_string(field.BitStart) : "Bits " + std::to_string(field.BitStart) + "-" + std::to_string(field.BitStart + field.BitLength - 1);
+            return Scan::TypeName(field.Type);
+        }
 
         constexpr std::int64_t kMaxSnapshotBytes = 0x10000;
         constexpr int kMaxDepth = 12;
@@ -42,6 +151,7 @@ namespace Manifold::UI
             case Scan::ValueType::EightBytes:
             case Scan::ValueType::Double: return 8;
             case Scan::ValueType::Pointer: return pointerSize;
+            case Scan::ValueType::Binary: return 1;
             default: return std::max(1, current);
             }
         }
@@ -53,6 +163,8 @@ namespace Manifold::UI
             format.Signed = field.Display == Table::FieldDisplay::Signed;
             format.Unicode = field.Unicode;
             format.Length = field.Size;
+            format.BitStart = field.BitStart;
+            format.BitLength = field.BitLength;
             format.PointerSize = pointerSize;
             return format;
         }
@@ -127,7 +239,32 @@ namespace Manifold::UI
                 return text;
             return "??";
         }
+        if (ShowsBits(field))
+            return BitsValueText(field, FieldBits(field, bytes));
         return Scan::FormatValue(field.Type, bytes, FieldFormat(field, pointerSize));
+    }
+
+    Status StructureWindow::WriteBits(const Table::StructField& field, std::uint64_t address, const std::string& text)
+    {
+        const auto value = ParseBitsValue(field, text);
+        if (!value)
+            return Status::Fail(ErrorCode::ScanBadValue, text);
+        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(std::clamp(field.Size, 1, 8)));
+        if (!m_engine.Process()->ReadExact(address, bytes.data(), bytes.size()))
+            return Status::Fail(ErrorCode::ReadFailed, Hex(address));
+        std::uint64_t whole = RawValue(bytes);
+        if (field.Type == Scan::ValueType::Binary)
+        {
+            const int start = std::clamp(field.BitStart, 0, 63);
+            const std::uint64_t mask = BitMask(BitCount(field)) << start;
+            whole = (whole & ~mask) | ((*value << start) & mask);
+        }
+        else
+        {
+            whole = *value;
+        }
+        std::memcpy(bytes.data(), &whole, bytes.size());
+        return m_engine.Process()->Write(address, bytes);
     }
 
     Table::StructDefinition* StructureWindow::Current()
@@ -585,7 +722,8 @@ namespace Manifold::UI
             ImGui::SameLine(0.0f, Px(4.0f));
         }
         PushMono();
-        const std::string offsetText = Hex(static_cast<std::uint64_t>(field.Offset), 4);
+        const std::string offsetText = Hex(static_cast<std::uint64_t>(field.Offset), 4) +
+            (field.Type == Scan::ValueType::Binary && field.CustomType.empty() ? ":" + std::to_string(field.BitStart) : std::string());
         if (ImGui::Selectable(offsetText.c_str(), false, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap) &&
             ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {
@@ -627,9 +765,7 @@ namespace Manifold::UI
             ImGui::TextUnformatted(field.Name.c_str());
         }
         ImGui::TableNextColumn();
-        Muted(!field.CustomType.empty() ? field.CustomType :
-              field.Type == Scan::ValueType::String ? "String[" + std::to_string(field.Size) + "]" :
-              field.Type == Scan::ValueType::ByteArray ? "AOB[" + std::to_string(field.Size) + "]" : Scan::TypeName(field.Type));
+        Muted(TypeLabel(field));
 
         std::vector<std::uint8_t> bytes;
         for (std::size_t column = 0; column < addresses.size(); ++column)
@@ -645,7 +781,13 @@ namespace Manifold::UI
             {
                 ImGui::SetNextItemWidth(-1.0f);
                 ImGui::SetKeyboardFocusHere();
-                if (InputText("##value", m_editText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll))
+                const bool entered = InputText("##value", m_editText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+                if (entered && ShowsBits(field))
+                {
+                    m_workspace.Report(WriteBits(field, address, m_editText));
+                    m_editPath.clear();
+                }
+                else if (entered)
                 {
                     Scan::ValueFormat format;
                     format.Hex = field.Display == Table::FieldDisplay::Hex;
@@ -704,6 +846,17 @@ namespace Manifold::UI
                     field.Size = SizeOf(type, pointerSize, field.Size);
                     if (type == Scan::ValueType::Pointer)
                         field.Display = Table::FieldDisplay::Hex;
+                    if (type == Scan::ValueType::Binary)
+                    {
+                        field.BitStart = std::clamp(field.BitStart, 0, 63);
+                        field.BitLength = std::clamp(field.BitLength, 1, 64 - field.BitStart);
+                        field.Size = Table::BitFieldSize(field.BitStart, field.BitLength);
+                        field.Display = Table::FieldDisplay::Binary;
+                    }
+                    else if (field.Display == Table::FieldDisplay::Binary && !IsWholeNumber(type))
+                    {
+                        field.Display = Table::FieldDisplay::Unsigned;
+                    }
                     m_engine.Table().Touch();
                 }
             }
@@ -734,16 +887,40 @@ namespace Manifold::UI
                 if (field.Type == Scan::ValueType::String)
                     ImGui::MenuItem("UTF-16", nullptr, &field.Unicode);
             }
+            if (field.CustomType.empty() && field.Type == Scan::ValueType::Binary)
+            {
+                ImGui::Separator();
+                int start = field.BitStart;
+                int length = field.BitLength;
+                ImGui::SetNextItemWidth(Px(80.0f));
+                const bool startChanged = ImGui::InputInt("Start bit", &start);
+                ImGui::SetNextItemWidth(Px(80.0f));
+                const bool lengthChanged = ImGui::InputInt("Bit count", &length);
+                if (startChanged || lengthChanged)
+                {
+                    field.BitStart = std::clamp(start, 0, 63);
+                    field.BitLength = std::clamp(length, 1, 64 - field.BitStart);
+                    field.Size = Table::BitFieldSize(field.BitStart, field.BitLength);
+                    m_engine.Table().Touch();
+                }
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu(ICON_FA_HASHTAG "  Show as"))
         {
-            if (ImGui::MenuItem("Unsigned", nullptr, field.Display == Table::FieldDisplay::Unsigned))
-                field.Display = Table::FieldDisplay::Unsigned;
-            if (ImGui::MenuItem("Signed", nullptr, field.Display == Table::FieldDisplay::Signed))
-                field.Display = Table::FieldDisplay::Signed;
-            if (ImGui::MenuItem("Hexadecimal", nullptr, field.Display == Table::FieldDisplay::Hex))
-                field.Display = Table::FieldDisplay::Hex;
+            const auto show = [&](const char* label, Table::FieldDisplay display)
+                {
+                    if (ImGui::MenuItem(label, nullptr, field.Display == display) && field.Display != display)
+                    {
+                        field.Display = display;
+                        m_engine.Table().Touch();
+                    }
+                };
+            show("Unsigned", Table::FieldDisplay::Unsigned);
+            show("Signed", Table::FieldDisplay::Signed);
+            show("Hexadecimal", Table::FieldDisplay::Hex);
+            if (field.CustomType.empty() && IsWholeNumber(field.Type))
+                show("Binary", Table::FieldDisplay::Binary);
             ImGui::EndMenu();
         }
         if (field.Type == Scan::ValueType::Pointer && ImGui::BeginMenu(ICON_FA_LINK "  Points to structure"))
@@ -765,6 +942,11 @@ namespace Manifold::UI
             record.Unicode = field.Unicode;
             record.ShowHex = field.Display == Table::FieldDisplay::Hex;
             record.CustomTypeName = field.CustomType;
+            if (field.Type == Scan::ValueType::Binary)
+            {
+                record.BitStart = field.BitStart;
+                record.BitLength = field.BitLength;
+            }
             m_engine.RefreshValues(true);
         }
         if (ImGui::MenuItem(ICON_FA_MEMORY "  Browse this memory"))
