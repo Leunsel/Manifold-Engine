@@ -9,6 +9,8 @@
 
 #include <string>
 
+#include "Syscalls/Syscall.h"
+
 namespace
 {
     Manifold::StartOptions ReadArguments()
@@ -37,6 +39,7 @@ namespace
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE, _In_ LPWSTR, _In_ int showCommand)
 {
+    InitSysCalls();
     ::SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS | LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
     Manifold::Paths::AdoptEarlierFiles();
     Manifold::RuntimeLog::OpenFile(Manifold::Paths::LogFile());

@@ -11,6 +11,8 @@
 #include <windows.h>
 #include <tlhelp32.h>
 
+#include "Syscalls/Syscall.h"
+
 namespace Manifold::Target
 {
     namespace
@@ -235,7 +237,16 @@ namespace Manifold::Target
     {
         constexpr DWORD kAccess = PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION | PROCESS_CREATE_THREAD |
                                   PROCESS_SUSPEND_RESUME | SYNCHRONIZE;
-        HANDLE handle = ::OpenProcess(kAccess, FALSE, id);
+        // handle = ::OpenProcess(kAccess, FALSE, id);
+
+        HANDLE handle = 0;
+	    OBJECT_ATTRIBUTES attributes;
+	    InitializeObjectAttributes(&attributes, NULL, 0, NULL, NULL);
+	    CLIENT_ID cid;
+	    cid.UniqueProcess = reinterpret_cast<HANDLE>(id);
+	    cid.UniqueThread = NULL;
+	    NtOpenProcess_direct(&handle, kAccess, &attributes, &cid);
+
         if (!handle)
         {
             const DWORD error = ::GetLastError();
