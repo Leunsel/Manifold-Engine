@@ -99,7 +99,7 @@ Timers, hotkeys and threads run between frames on the main thread. A timer that 
 | `debug_removeBreakpoint(address)` | |
 | `debug_continueFromBreakpoint(method)` | `co_run`, `co_stepinto`, `co_stepover`, `co_runtill` |
 | `debug_isBroken()`, `debug_isDebugging()`, `debug_getBreakpointList()` | |
-| `debug_getContext()` / `debug_setContext()` | copies the registers of the stopped thread to the globals and back |
+| `debug_getContext(extraregs)` / `debug_setContext(extraregs)` | copies the registers of the stopped thread to the globals and back; with `extraregs` true also `XMM0`… (tables of 16 bytes) and `MXCSR` |
 | `debug_breakThread()` | stops the process |
 
 ## Interface and helpers

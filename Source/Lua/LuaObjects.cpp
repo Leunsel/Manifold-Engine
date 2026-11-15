@@ -1561,6 +1561,56 @@ namespace Manifold::Lua
             return 1;
         }
 
+        void PushVectors(lua_State* state, const Debug::VectorRegisters& vectors)
+        {
+            for (int i = 0; i < vectors.Count; ++i)
+            {
+                lua_createtable(state, 16, 0);
+                for (int b = 0; b < 16; ++b)
+                {
+                    lua_pushinteger(state, vectors.Xmm[static_cast<std::size_t>(i)][static_cast<std::size_t>(b)]);
+                    lua_rawseti(state, -2, b + 1);
+                }
+                lua_setglobal(state, ("XMM" + std::to_string(i)).c_str());
+            }
+            lua_pushinteger(state, vectors.Mxcsr);
+            lua_setglobal(state, "MXCSR");
+        }
+
+        bool PullVectors(lua_State* state, Debug::VectorRegisters& vectors)
+        {
+            bool changed = false;
+            for (int i = 0; i < vectors.Count; ++i)
+            {
+                lua_getglobal(state, ("XMM" + std::to_string(i)).c_str());
+                if (lua_istable(state, -1))
+                {
+                    for (int b = 0; b < 16; ++b)
+                    {
+                        lua_rawgeti(state, -1, b + 1);
+                        if (lua_isinteger(state, -1))
+                        {
+                            const auto byte = static_cast<std::uint8_t>(lua_tointeger(state, -1));
+                            std::uint8_t& slot = vectors.Xmm[static_cast<std::size_t>(i)][static_cast<std::size_t>(b)];
+                            changed = changed || slot != byte;
+                            slot = byte;
+                        }
+                        lua_pop(state, 1);
+                    }
+                }
+                lua_pop(state, 1);
+            }
+            lua_getglobal(state, "MXCSR");
+            if (lua_isinteger(state, -1))
+            {
+                const auto mxcsr = static_cast<std::uint32_t>(lua_tointeger(state, -1));
+                changed = changed || mxcsr != vectors.Mxcsr;
+                vectors.Mxcsr = mxcsr;
+            }
+            lua_pop(state, 1);
+            return changed;
+        }
+
         int DebugGetContext(lua_State* state)
         {
             const Debug::BreakInfo info = Owner(state).Debugger().Break();
@@ -1570,6 +1620,8 @@ namespace Manifold::Lua
                 return 1;
             }
             PushRegisters(state, info.Registers, info.Is64Bit);
+            if (lua_toboolean(state, 1))
+                PushVectors(state, info.Vectors);
             lua_pushboolean(state, 1);
             return 1;
         }
@@ -1585,6 +1637,9 @@ namespace Manifold::Lua
             Disasm::RegisterValues registers = info.Registers;
             if (PullRegisters(state, registers, info.Is64Bit))
                 Owner(state).Debugger().SetRegisters(registers);
+            Debug::VectorRegisters vectors = info.Vectors;
+            if (lua_toboolean(state, 1) && vectors.Count > 0 && PullVectors(state, vectors))
+                Owner(state).Debugger().SetVectors(vectors);
             lua_pushboolean(state, 1);
             return 1;
         }

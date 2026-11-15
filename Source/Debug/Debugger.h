@@ -3,6 +3,7 @@
 #include "Core/Errors.h"
 #include "Disasm/Disassembler.h"
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -82,6 +83,15 @@ namespace Manifold::Debug
         RunToReturn
     };
 
+    struct VectorRegisters
+    {
+        std::array<std::array<std::uint8_t, 16>, 16> Xmm{};
+        std::uint32_t Mxcsr = 0;
+        int Count = 0;
+
+        bool operator==(const VectorRegisters&) const = default;
+    };
+
     struct BreakInfo
     {
         bool Broken = false;
@@ -89,6 +99,7 @@ namespace Manifold::Debug
         std::uint64_t Address = 0;
         std::uint64_t BreakpointAddress = 0;
         Disasm::RegisterValues Registers;
+        VectorRegisters Vectors;
         std::string Reason;
         std::uint64_t Serial = 0;
         bool Is64Bit = true;
@@ -142,6 +153,7 @@ namespace Manifold::Debug
         BreakInfo Break() const;
         void Resume(ResumeMode mode);
         void SetRegisters(const Disasm::RegisterValues& registers);
+        void SetVectors(const VectorRegisters& vectors);
         Status BreakNow();
         void Unpatch(std::uint64_t address, std::uint8_t* buffer, std::size_t size) const;
 
@@ -214,6 +226,8 @@ namespace Manifold::Debug
         ResumeMode m_resumeMode = ResumeMode::Continue;
         bool m_registersChanged = false;
         Disasm::RegisterValues m_newRegisters;
+        bool m_vectorsChanged = false;
+        VectorRegisters m_newVectors;
         std::uint64_t m_breakSerial = 0;
         bool m_breakRequested = false;
         std::uint64_t m_lastHardwareTick = 0;

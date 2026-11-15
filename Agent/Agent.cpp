@@ -155,6 +155,29 @@ namespace
         c.EFlags = static_cast<DWORD>(r.Flags);
     }
 
+    void CaptureVectors(Vectors& v, const CONTEXT& c)
+    {
+        if ((c.ContextFlags & CONTEXT_FLOATING_POINT) != CONTEXT_FLOATING_POINT)
+        {
+            v.Count = 0;
+            return;
+        }
+        for (int i = 0; i < 16; ++i)
+            __movsb(v.Xmm[i], reinterpret_cast<const unsigned char*>(&c.FltSave.XmmRegisters[i]), 16);
+        v.Mxcsr = c.MxCsr;
+        v.Count = 16;
+    }
+
+    void ApplyVectors(CONTEXT& c, const Vectors& v)
+    {
+        if ((c.ContextFlags & CONTEXT_FLOATING_POINT) != CONTEXT_FLOATING_POINT || v.Count != 16)
+            return;
+        for (int i = 0; i < 16; ++i)
+            __movsb(reinterpret_cast<unsigned char*>(&c.FltSave.XmmRegisters[i]), v.Xmm[i], 16);
+        c.MxCsr = v.Mxcsr;
+        c.FltSave.MxCsr = v.Mxcsr;
+    }
+
     void SuspendOthers()
     {
         const DWORD self = ::GetCurrentProcessId();
@@ -205,6 +228,8 @@ namespace
             return;
         }
         CaptureRegs(block->BreakRegs, context);
+        CaptureVectors(block->BreakXmm, context);
+        block->XmmDirty = 0;
         block->BreakAddress = address;
         block->BrokenThread = ::GetCurrentThreadId();
         block->ResumeCmd = ResumeNone;
@@ -217,6 +242,11 @@ namespace
         {
             ApplyRegs(context, block->NewRegs);
             block->RegsDirty = 0;
+        }
+        if (block->XmmDirty)
+        {
+            ApplyVectors(context, block->NewXmm);
+            block->XmmDirty = 0;
         }
         block->ResumeCmd = ResumeNone;
         block->Broken = 0;
@@ -352,6 +382,8 @@ namespace
                 if (thread && ::GetThreadContext(thread, &ctx))
                 {
                     CaptureRegs(block->BreakRegs, ctx);
+                    CaptureVectors(block->BreakXmm, ctx);
+                    block->XmmDirty = 0;
                     block->BreakRegs.GsBase = 0;
                     block->BreakAddress = ctx.Rip;
                     block->BrokenThread = target;
@@ -360,12 +392,16 @@ namespace
                     block->Broken = 1;
                     while (block->ResumeCmd == ResumeNone && !block->Stop)
                         ::Sleep(2);
-                    if (block->RegsDirty)
-                    {
+                    const bool registers = block->RegsDirty != 0;
+                    const bool vectors = block->XmmDirty != 0;
+                    if (registers)
                         ApplyRegs(ctx, block->NewRegs);
+                    if (vectors)
+                        ApplyVectors(ctx, block->NewXmm);
+                    if (registers || vectors)
                         ::SetThreadContext(thread, &ctx);
-                        block->RegsDirty = 0;
-                    }
+                    block->RegsDirty = 0;
+                    block->XmmDirty = 0;
                     block->ResumeCmd = ResumeNone;
                     block->Broken = 0;
                 }

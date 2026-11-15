@@ -16,6 +16,13 @@ namespace Manifold::Debug::Veh
         std::uint64_t Rip, Flags, GsBase;
     };
 
+    struct Vectors
+    {
+        std::uint8_t Xmm[16][16];
+        std::uint32_t Mxcsr;
+        std::uint32_t Count;
+    };
+
     struct Entry
     {
         std::uint64_t Instruction;
@@ -80,5 +87,9 @@ namespace Manifold::Debug::Veh
         Registers BreakRegs;
         Registers NewRegs;
         Watch Watches[kMaxWatches];
+        Vectors BreakXmm;
+        Vectors NewXmm;
+        volatile std::uint32_t XmmDirty;
+        std::uint32_t Pad4;
     };
 }

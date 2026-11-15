@@ -114,8 +114,25 @@ namespace Manifold::Tests
                 return 1;
             }
             Debug::BreakInfo b = engine.Debugger().Break();
-            std::printf("BROKE at %s thread %u  rcx=%s rdx=%s rsp=%s\n", Hex(b.Address).c_str(), b.ThreadId, Hex(b.Registers.Rcx).c_str(),
-                Hex(b.Registers.Rdx).c_str(), Hex(b.Registers.Rsp).c_str());
+            std::printf("BROKE at %s thread %u  rcx=%s rdx=%s rsp=%s  xmm registers %d\n", Hex(b.Address).c_str(), b.ThreadId, Hex(b.Registers.Rcx).c_str(),
+                Hex(b.Registers.Rdx).c_str(), Hex(b.Registers.Rsp).c_str(), b.Vectors.Count);
+            Debug::VectorRegisters vectors = b.Vectors;
+            for (std::size_t i = 0; i < 16; ++i)
+                vectors.Xmm[5][i] = static_cast<std::uint8_t>(0x11 + i);
+            engine.Debugger().SetVectors(vectors);
+            {
+                const std::uint64_t serial = b.Serial;
+                const std::uint32_t thread = b.ThreadId;
+                engine.Debugger().Resume(Debug::ResumeMode::StepInto);
+                if (waitBroken(serial))
+                {
+                    b = engine.Debugger().Break();
+                    if (b.ThreadId != thread)
+                        std::printf("xmm5 after one step: thread %u broke first, not comparable\n", b.ThreadId);
+                    else
+                        std::printf("xmm5 after one step: %s\n", b.Vectors.Count > 0 && b.Vectors.Xmm[5] == vectors.Xmm[5] ? "kept (OK)" : "LOST");
+                }
+            }
             for (int k = 0; k < 3; ++k)
             {
                 const std::uint64_t serial = b.Serial;

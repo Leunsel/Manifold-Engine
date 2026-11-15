@@ -235,6 +235,7 @@ namespace Manifold::UI
         void Disassembly(float height);
         void HexView(float height);
         void Registers(float width, float height);
+        bool RegisterLine(const std::string& id, std::string_view name, const std::string& editText, float rowHeight, float nameWidth, std::string& edited, ImVec2& valueMin, ImVec2& valueMax);
         void CodeMenu(const Disasm::Instruction& instruction);
         void HexMenu(std::uint64_t address);
         void BookmarkItems();
@@ -290,6 +291,17 @@ namespace Manifold::UI
         std::vector<Disasm::Instruction> m_lines;
         int m_visibleLines = 30;
         bool m_followBreaks = true;
+        float m_registersWidth = 0.0f;
+        int m_vectorFormat = 0;
+        std::string m_registerEdit;
+        std::string m_registerEditText;
+        bool m_registerEditFocus = false;
+        std::uint64_t m_registerSerial = 0;
+        bool m_havePreviousRegisters = false;
+        Disasm::RegisterValues m_previousRegisters;
+        Disasm::RegisterValues m_lastRegisters;
+        Debug::VectorRegisters m_previousVectors;
+        Debug::VectorRegisters m_lastVectors;
         std::uint64_t m_lastBreak = 0;
         float m_codeShare = 0.62f;
         bool m_focusCode = false;

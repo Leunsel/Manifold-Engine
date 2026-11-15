@@ -122,7 +122,7 @@ namespace Manifold::Debug
                 }
                 std::memset(&m_wow, 0, sizeof(m_wow));
                 m_wow.ContextFlags = scope == Scope::DebugRegisters ? WOW64_CONTEXT_DEBUG_REGISTERS : scope == Scope::Control ? WOW64_CONTEXT_CONTROL :
-                                     WOW64_CONTEXT_FULL | WOW64_CONTEXT_DEBUG_REGISTERS;
+                                     WOW64_CONTEXT_FULL | WOW64_CONTEXT_DEBUG_REGISTERS | WOW64_CONTEXT_EXTENDED_REGISTERS;
                 return ::Wow64GetThreadContext(thread, &m_wow) != FALSE;
             }
 
@@ -226,7 +226,50 @@ namespace Manifold::Debug
                 }
             }
 
+            VectorRegisters Vectors() const
+            {
+                VectorRegisters v;
+                if (m_is64)
+                {
+                    if ((m_native.ContextFlags & CONTEXT_FLOATING_POINT) != CONTEXT_FLOATING_POINT)
+                        return v;
+                    for (int i = 0; i < 16; ++i)
+                        std::memcpy(v.Xmm[static_cast<std::size_t>(i)].data(), &m_native.FltSave.XmmRegisters[i], 16);
+                    v.Mxcsr = m_native.MxCsr;
+                    v.Count = 16;
+                    return v;
+                }
+                if ((m_wow.ContextFlags & WOW64_CONTEXT_EXTENDED_REGISTERS) != WOW64_CONTEXT_EXTENDED_REGISTERS)
+                    return v;
+                for (int i = 0; i < 8; ++i)
+                    std::memcpy(v.Xmm[static_cast<std::size_t>(i)].data(), m_wow.ExtendedRegisters + kFxsaveXmm + i * 16, 16);
+                std::memcpy(&v.Mxcsr, m_wow.ExtendedRegisters + kFxsaveMxcsr, sizeof(v.Mxcsr));
+                v.Count = 8;
+                return v;
+            }
+
+            void ApplyVectors(const VectorRegisters& v)
+            {
+                if (m_is64)
+                {
+                    if ((m_native.ContextFlags & CONTEXT_FLOATING_POINT) != CONTEXT_FLOATING_POINT)
+                        return;
+                    for (int i = 0; i < 16; ++i)
+                        std::memcpy(&m_native.FltSave.XmmRegisters[i], v.Xmm[static_cast<std::size_t>(i)].data(), 16);
+                    m_native.MxCsr = v.Mxcsr;
+                    m_native.FltSave.MxCsr = v.Mxcsr;
+                    return;
+                }
+                if ((m_wow.ContextFlags & WOW64_CONTEXT_EXTENDED_REGISTERS) != WOW64_CONTEXT_EXTENDED_REGISTERS)
+                    return;
+                for (int i = 0; i < 8; ++i)
+                    std::memcpy(m_wow.ExtendedRegisters + kFxsaveXmm + i * 16, v.Xmm[static_cast<std::size_t>(i)].data(), 16);
+                std::memcpy(m_wow.ExtendedRegisters + kFxsaveMxcsr, &v.Mxcsr, sizeof(v.Mxcsr));
+            }
+
         private:
+            static constexpr int kFxsaveMxcsr = 24;
+            static constexpr int kFxsaveXmm = 160;
             bool m_is64 = true;
             HANDLE m_thread = nullptr;
             alignas(16) CONTEXT m_native{};
@@ -855,6 +898,36 @@ namespace Manifold::Debug
         ++m_generation;
     }
 
+    void Debugger::SetVectors(const VectorRegisters& vectors)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_break.Broken || m_break.Vectors.Count == 0)
+            return;
+        if (m_backend == Backend::Veh)
+        {
+            if (!m_vehBlock || !m_process)
+                return;
+            Veh::Vectors raw{};
+            for (int i = 0; i < 16; ++i)
+                std::memcpy(raw.Xmm[i], vectors.Xmm[static_cast<std::size_t>(i)].data(), 16);
+            raw.Mxcsr = vectors.Mxcsr;
+            raw.Count = static_cast<std::uint32_t>(m_break.Vectors.Count);
+            m_process->Write(m_vehBlock + offsetof(Veh::Block, NewXmm), &raw, sizeof(raw));
+            const std::uint32_t dirty = 1;
+            m_process->Write(m_vehBlock + offsetof(Veh::Block, XmmDirty), &dirty, sizeof(dirty));
+        }
+        else
+        {
+            m_newVectors = vectors;
+            m_newVectors.Count = m_break.Vectors.Count;
+            m_vectorsChanged = true;
+        }
+        const int count = m_break.Vectors.Count;
+        m_break.Vectors = vectors;
+        m_break.Vectors.Count = count;
+        ++m_generation;
+    }
+
     Status Debugger::BreakNow()
     {
         if (!m_attached)
@@ -947,11 +1020,13 @@ namespace Manifold::Debug
         m_break.Address = context.Ip();
         m_break.BreakpointAddress = breakpointAddress;
         m_break.Registers = context.Values();
+        m_break.Vectors = context.Vectors();
         m_break.Reason = reason;
         m_break.Is64Bit = m_is64Bit;
         m_break.Serial = ++m_breakSerial;
         m_resumeRequested = false;
         m_registersChanged = false;
+        m_vectorsChanged = false;
         ++m_generation;
         LOG_INFO("Debugger", reason + " at " + Hex(m_break.Address) + " in thread " + std::to_string(threadId));
     }
@@ -1320,6 +1395,8 @@ namespace Manifold::Debug
                     {
                         if (m_registersChanged)
                             context.Apply(m_newRegisters);
+                        if (m_vectorsChanged)
+                            context.ApplyVectors(m_newVectors);
                         std::uint64_t flags = context.Flags();
                         if (thread.ResumeFlag)
                         {
@@ -1361,6 +1438,7 @@ namespace Manifold::Debug
                 }
                 m_break.Broken = false;
                 m_registersChanged = false;
+                m_vectorsChanged = false;
                 ++m_generation;
             }
             lock.unlock();
@@ -1616,6 +1694,14 @@ namespace Manifold::Debug
             regs.R12 = head.Regs.R12; regs.R13 = head.Regs.R13; regs.R14 = head.Regs.R14; regs.R15 = head.Regs.R15;
             regs.Rip = head.Regs.Rip; regs.Flags = head.Regs.Flags; regs.GsBase = head.Regs.GsBase;
             m_break = {};
+            Veh::Vectors vectors{};
+            if (m_process->ReadExact(m_vehBlock + offsetof(Veh::Block, BreakXmm), &vectors, sizeof(vectors)) && vectors.Count > 0 && vectors.Count <= 16)
+            {
+                for (std::uint32_t i = 0; i < vectors.Count; ++i)
+                    std::memcpy(m_break.Vectors.Xmm[i].data(), vectors.Xmm[i], 16);
+                m_break.Vectors.Mxcsr = vectors.Mxcsr;
+                m_break.Vectors.Count = static_cast<int>(vectors.Count);
+            }
             m_break.Broken = true;
             m_break.ThreadId = head.BrokenThread;
             m_break.Address = head.BreakAddress;

@@ -638,6 +638,12 @@ namespace Manifold::Tests
                 const Debug::BreakInfo info = engine.Debugger().Break();
                 CHECK_EQ(info.Address, damage);
                 CHECK_EQ(info.Registers.Rcx, hero);
+                CHECK_EQ(info.Vectors.Count, 16);
+                Debug::VectorRegisters vectors = info.Vectors;
+                for (std::size_t b = 0; b < 16; ++b)
+                    vectors.Xmm[5][b] = static_cast<std::uint8_t>(0x11 + b);
+                engine.Debugger().SetVectors(vectors);
+                CHECK(engine.Debugger().Break().Vectors.Xmm[5] == vectors.Xmm[5]);
                 engine.Debugger().Resume(Debug::ResumeMode::StepInto);
                 bool stepped = false;
                 for (int i = 0; i < 100 && !stepped; ++i)
@@ -648,6 +654,10 @@ namespace Manifold::Tests
                 }
                 CHECK(stepped);
                 CHECK_EQ(engine.Debugger().Break().Address, first.Next());
+                CHECK_MSG(engine.Debugger().Break().Vectors.Xmm[5] == vectors.Xmm[5], "XMM5 did not keep the value set at the breakpoint");
+                std::string xmmText;
+                CHECK(engine.Lua().RunWithResult("debug_getContext(true) return tostring(XMM5[1]) .. ',' .. tostring(XMM5[16]) .. ',' .. tostring(XMM15 ~= nil)", "xmm context", xmmText).Ok());
+                CHECK_EQ(xmmText, std::string("17,32,true"));
                 CHECK(engine.Debugger().RemoveBreakpoint(damage).Ok());
                 engine.Debugger().Resume(Debug::ResumeMode::Continue);
             }
