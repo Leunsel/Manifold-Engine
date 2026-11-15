@@ -41,6 +41,8 @@ namespace Manifold::Target
 
     using ExtraResolver = std::function<std::optional<std::uint64_t>(std::string_view name)>;
     using LookupCallback = std::function<std::optional<std::uint64_t>(std::string_view name, bool first)>;
+    using SymbolForward = std::function<std::optional<std::uint64_t>(std::string_view name)>;
+    using SymbolReverse = std::function<std::optional<std::string>(std::uint64_t address)>;
 
     class Symbols
     {
@@ -65,6 +67,7 @@ namespace Manifold::Target
 
         Evaluation Evaluate(std::string_view expression, const ExtraResolver& extra = {}) const;
         void SetLookupCallback(LookupCallback callback) { m_lookup = std::move(callback); }
+        void SetSymbolProvider(SymbolForward forward, SymbolReverse reverse);
 
         static bool IsNameChar(char c);
 
@@ -86,5 +89,9 @@ namespace Manifold::Target
         std::atomic<std::uint64_t> m_generation = 1;
         mutable std::mutex m_exportLock;
         mutable std::unordered_map<std::uint64_t, std::shared_ptr<ExportTable>> m_exports;
+        std::atomic<bool> m_hasProvider{ false };
+        mutable std::mutex m_providerLock;
+        SymbolForward m_forward;
+        SymbolReverse m_reverse;
     };
 }

@@ -522,6 +522,24 @@ namespace Manifold::UI
             return;
         }
         Engine& engine = m_workspace.Core();
+        {
+            const bool hasProcess = engine.HasProcess();
+            ImGui::BeginDisabled(!hasProcess);
+            if (ImGui::Button(ICON_FA_DOWNLOAD "  Load symbols"))
+                engine.LoadSymbols(false);
+            ImGui::SameLine();
+            if (ImGui::Button(ICON_FA_GLOBE "  Load Windows symbols"))
+                engine.LoadSymbols(true);
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (engine.SymbolsActive() && !engine.SymbolsLoaded())
+                Muted("Loading " + std::to_string(engine.SymbolsModulesDone()) + "/" + std::to_string(engine.SymbolsModulesTotal()) + " modules...");
+            else if (engine.SymbolsLoaded())
+                Muted("Symbols loaded");
+            else
+                Muted("PDB symbols not loaded");
+            ImGui::Separator();
+        }
         if (ImGui::BeginTabBar("##symboltabs"))
         {
             if (ImGui::BeginTabItem("Registered symbols"))

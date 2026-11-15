@@ -1665,6 +1665,20 @@ namespace Manifold::Lua
             return 0;
         }
 
+        int EnableWindowsSymbols(lua_State* state)
+        {
+            const bool windows = lua_gettop(state) < 1 || lua_toboolean(state, 1) != 0;
+            Owner(state).LoadSymbols(windows);
+            return 0;
+        }
+
+        int WaitForPdb(lua_State* state)
+        {
+            const unsigned timeout = static_cast<unsigned>(luaL_optinteger(state, 1, 120000));
+            lua_pushboolean(state, Owner(state).WaitForSymbols(timeout) ? 1 : 0);
+            return 1;
+        }
+
         int ReturnTrue(lua_State* state)
         {
             lua_pushboolean(state, 1);
@@ -2850,6 +2864,9 @@ namespace Manifold::Lua
             { "getAddress", &GetAddressCompat },
             { "getAddressFromName", &GetAddressCompat },
             { "getAddressSafe", &GetAddressSafeCompat },
+            { "enableWindowsSymbols", &EnableWindowsSymbols },
+            { "waitForPDB", &WaitForPdb },
+            { "searchPDBWhileLoading", &Nothing },
             { "findTableFile", &FindTableFile },
             { "createTableFile", &CreateTableFile },
             { "createMemoryStream", &CreateMemoryStream },

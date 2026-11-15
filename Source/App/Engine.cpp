@@ -129,10 +129,28 @@ namespace Manifold
                 record.ValueText = "??";
             });
         LOG_INFO("Process", "Closed " + m_process->Name());
+        m_symbols.SetSymbolProvider({}, {});
+        m_pdbSymbols.End();
         m_symbols.Detach();
         m_process.reset();
         m_codeDissect.reset();
         ++m_processGeneration;
+    }
+
+    void Engine::LoadSymbols(bool windowsSymbols)
+    {
+        if (!m_process)
+            return;
+        m_process->RefreshModules();
+        std::vector<Target::ModuleInfo> list;
+        if (const auto modules = m_process->Modules())
+            list.assign(modules->begin(), modules->end());
+        if (!m_pdbSymbols.Begin(m_process->Handle(), std::move(list), windowsSymbols))
+            return;
+        m_symbols.SetSymbolProvider(
+            [this](std::string_view name) { return m_pdbSymbols.Resolve(name); },
+            [this](std::uint64_t address) { return m_pdbSymbols.Describe(address); });
+        LOG_INFO("Symbols", windowsSymbols ? "Loading symbols (incl. Windows symbol server)" : "Loading symbols");
     }
 
     Status Engine::EnsureDebugger()

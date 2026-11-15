@@ -12,6 +12,7 @@
 #include "Table/CheatTable.h"
 #include "Table/Structures.h"
 #include "Target/Process.h"
+#include "Target/PdbSymbols.h"
 #include "Target/Symbols.h"
 
 #include <cstdint>
@@ -85,6 +86,12 @@ namespace Manifold
         bool HasProcess() const { return m_process != nullptr; }
         std::uint64_t ProcessGeneration() const { return m_processGeneration; }
         Target::Symbols& Symbols() { return m_symbols; }
+        void LoadSymbols(bool windowsSymbols);
+        bool SymbolsActive() const { return m_pdbSymbols.Active(); }
+        bool SymbolsLoaded() const { return m_pdbSymbols.Loaded(); }
+        bool WaitForSymbols(unsigned timeoutMs) { return m_pdbSymbols.WaitUntilLoaded(timeoutMs); }
+        int SymbolsModulesDone() const { return m_pdbSymbols.ModulesDone(); }
+        int SymbolsModulesTotal() const { return m_pdbSymbols.ModulesTotal(); }
         const Disasm::Disassembler& Disassembler() const;
         std::shared_ptr<const Disasm::DissectResult> CodeDissect() const { return m_codeDissect; }
         void SetCodeDissect(std::shared_ptr<const Disasm::DissectResult> result) { m_codeDissect = std::move(result); }
@@ -181,6 +188,7 @@ namespace Manifold
         std::shared_ptr<Target::Process> m_process;
         std::uint64_t m_processGeneration = 0;
         Target::Symbols m_symbols;
+        Target::PdbSymbols m_pdbSymbols;
         std::unique_ptr<Disasm::Disassembler> m_disassembler64;
         std::unique_ptr<Disasm::Disassembler> m_disassembler32;
         Scan::Scanner m_scanner;

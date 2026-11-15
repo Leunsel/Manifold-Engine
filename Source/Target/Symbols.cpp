@@ -476,6 +476,14 @@ namespace Manifold::Target
         return ResolveName(name, {});
     }
 
+    void Symbols::SetSymbolProvider(SymbolForward forward, SymbolReverse reverse)
+    {
+        std::lock_guard lock(m_providerLock);
+        m_forward = std::move(forward);
+        m_reverse = std::move(reverse);
+        m_hasProvider = static_cast<bool>(m_forward) || static_cast<bool>(m_reverse);
+    }
+
     std::optional<std::uint64_t> Symbols::ResolveName(std::string_view name, const ExtraResolver& extra) const
     {
         if (name.empty())
@@ -487,6 +495,19 @@ namespace Manifold::Target
         }
         if (const auto value = ResolveBuiltin(name, extra))
             return value;
+        if (m_hasProvider.load())
+        {
+            SymbolForward forward;
+            {
+                std::lock_guard lock(m_providerLock);
+                forward = m_forward;
+            }
+            if (forward)
+            {
+                if (const auto value = forward(name))
+                    return value;
+            }
+        }
         if (m_lookup)
             return m_lookup(name, false);
         return std::nullopt;
@@ -601,6 +622,19 @@ namespace Manifold::Target
                 if (address != found->Address)
                     text += "+" + Hex(address - found->Address);
                 return text;
+            }
+        }
+        if (m_hasProvider.load())
+        {
+            SymbolReverse reverse;
+            {
+                std::lock_guard lock(m_providerLock);
+                reverse = m_reverse;
+            }
+            if (reverse)
+            {
+                if (const auto name = reverse(address))
+                    return *name;
             }
         }
         return module->Name + "+" + Hex(address - module->Base);
