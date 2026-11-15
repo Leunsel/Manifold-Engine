@@ -124,6 +124,173 @@ namespace Manifold::Target
             return status >= 0;
         }
 
+        bool IsSystemPath(const std::wstring& path);
+
+        // Read a block / a POD value out of the target address space through
+        // the existing TryReadVm wrapper (which goes through the direct
+        // NtReadVirtualMemory system call when it resolved).
+        bool ReadAt(HANDLE handle, std::uint64_t address, void* buffer, std::size_t size)
+        {
+            SIZE_T done = 0;
+            return TryReadVm(handle, address, buffer, size, done) && done == size;
+        }
+
+        template <typename T>
+        bool ReadStruct(HANDLE handle, std::uint64_t address, T& value)
+        {
+            return ReadAt(handle, address, &value, sizeof(value));
+        }
+
+        std::wstring ReadUnicodeString(HANDLE handle, std::uint16_t length, std::uint64_t buffer)
+        {
+            if (length == 0 || buffer == 0 || length > 0x8000)
+                return {};
+            std::wstring text(length / 2, L'\0');
+            if (!ReadAt(handle, buffer, text.data(), length))
+                return {};
+            return text;
+        }
+
+        // Walk the target's module list through its PEB → Ldr → InLoadOrderModuleList,
+        // read directly through NtReadVirtualMemory. The PEB base comes from
+        // NtQueryInformationProcess(ProcessBasicInformation); for a WoW64 target the
+        // 32-bit PEB comes from ProcessWow64Information. Returns false and leaves
+        // `out` empty when anything the walk needs is unavailable, so the caller
+        // can fall back to Toolhelp.
+        constexpr int kProcessBasicInformation = 0;
+        constexpr int kProcessWow64Information = 26;
+
+        struct ProcessBasicInformation64
+        {
+            NTSTATUS ExitStatus;
+            std::uint64_t PebBaseAddress;
+            std::uint64_t AffinityMask;
+            std::int32_t BasePriority;
+            std::uint64_t UniqueProcessId;
+            std::uint64_t InheritedFromUniqueProcessId;
+        };
+
+        bool TryModulesViaPeb64(HANDLE handle, std::vector<ModuleInfo>& out)
+        {
+            if (QueryInfoProcSysCall == 0)
+                return false;
+
+            ProcessBasicInformation64 pbi{};
+            ULONG returned = 0;
+            const NTSTATUS qs = NtQueryInformationProcess_direct(
+                handle, kProcessBasicInformation, &pbi, sizeof(pbi), &returned);
+            if (qs < 0 || pbi.PebBaseAddress == 0)
+                return false;
+
+            std::uint64_t ldr = 0;
+            if (!ReadStruct(handle, pbi.PebBaseAddress + 0x18, ldr) || ldr == 0)
+                return false;
+
+            const std::uint64_t listHead = ldr + 0x10;
+            std::uint64_t at = 0;
+            if (!ReadStruct(handle, listHead, at) || at == 0)
+                return false;
+
+            for (int i = 0; i < 1024 && at != listHead; ++i)
+            {
+                std::uint64_t dllBase = 0;
+                std::uint32_t sizeOfImage = 0;
+                std::uint16_t fullLen = 0, baseLen = 0;
+                std::uint64_t fullBuffer = 0, baseBuffer = 0;
+
+                ReadStruct(handle, at + 0x30, dllBase);
+                ReadStruct(handle, at + 0x40, sizeOfImage);
+                ReadStruct(handle, at + 0x48, fullLen);
+                ReadStruct(handle, at + 0x50, fullBuffer);
+                ReadStruct(handle, at + 0x58, baseLen);
+                ReadStruct(handle, at + 0x60, baseBuffer);
+
+                if (dllBase != 0 && sizeOfImage != 0)
+                {
+                    ModuleInfo module;
+                    module.Base = dllBase;
+                    module.Size = sizeOfImage;
+                    module.Path = ReadUnicodeString(handle, fullLen, fullBuffer);
+                    const std::wstring base = ReadUnicodeString(handle, baseLen, baseBuffer);
+                    if (!base.empty())
+                        module.Name = WideToUtf8(base);
+                    else if (!module.Path.empty())
+                    {
+                        const auto slash = module.Path.find_last_of(L"\\/");
+                        module.Name = WideToUtf8(slash == std::wstring::npos ? module.Path : module.Path.substr(slash + 1));
+                    }
+                    module.System = !module.Path.empty() && IsSystemPath(module.Path);
+                    out.push_back(std::move(module));
+                }
+
+                std::uint64_t next = 0;
+                if (!ReadStruct(handle, at, next) || next == 0 || next == at)
+                    break;
+                at = next;
+            }
+            return !out.empty();
+        }
+
+        bool TryModulesViaPeb32(HANDLE handle, std::vector<ModuleInfo>& out)
+        {
+            if (QueryInfoProcSysCall == 0)
+                return false;
+
+            std::uint64_t peb32 = 0;
+            ULONG returned = 0;
+            const NTSTATUS qs = NtQueryInformationProcess_direct(
+                handle, kProcessWow64Information, &peb32, sizeof(peb32), &returned);
+            if (qs < 0 || peb32 == 0)
+                return false;
+
+            std::uint32_t ldr = 0;
+            if (!ReadStruct(handle, peb32 + 0x0C, ldr) || ldr == 0)
+                return false;
+
+            const std::uint64_t listHead = static_cast<std::uint64_t>(ldr) + 0x0C;
+            std::uint32_t at = 0;
+            if (!ReadStruct(handle, listHead, at) || at == 0)
+                return false;
+
+            for (int i = 0; i < 1024 && static_cast<std::uint64_t>(at) != listHead; ++i)
+            {
+                std::uint32_t dllBase = 0, sizeOfImage = 0;
+                std::uint16_t fullLen = 0, baseLen = 0;
+                std::uint32_t fullBuffer = 0, baseBuffer = 0;
+
+                ReadStruct(handle, at + 0x18, dllBase);
+                ReadStruct(handle, at + 0x20, sizeOfImage);
+                ReadStruct(handle, at + 0x24, fullLen);
+                ReadStruct(handle, at + 0x28, fullBuffer);
+                ReadStruct(handle, at + 0x2C, baseLen);
+                ReadStruct(handle, at + 0x30, baseBuffer);
+
+                if (dllBase != 0 && sizeOfImage != 0)
+                {
+                    ModuleInfo module;
+                    module.Base = dllBase;
+                    module.Size = sizeOfImage;
+                    module.Path = ReadUnicodeString(handle, fullLen, fullBuffer);
+                    const std::wstring base = ReadUnicodeString(handle, baseLen, baseBuffer);
+                    if (!base.empty())
+                        module.Name = WideToUtf8(base);
+                    else if (!module.Path.empty())
+                    {
+                        const auto slash = module.Path.find_last_of(L"\\/");
+                        module.Name = WideToUtf8(slash == std::wstring::npos ? module.Path : module.Path.substr(slash + 1));
+                    }
+                    module.System = !module.Path.empty() && IsSystemPath(module.Path);
+                    out.push_back(std::move(module));
+                }
+
+                std::uint32_t next = 0;
+                if (!ReadStruct(handle, at, next) || next == 0 || next == at)
+                    break;
+                at = next;
+            }
+            return !out.empty();
+        }
+
         RegionInfo FromQuery(const MEMORY_BASIC_INFORMATION& info)
         {
             RegionInfo region;
@@ -733,34 +900,47 @@ namespace Manifold::Target
     void Process::RefreshModules()
     {
         auto modules = std::make_shared<std::vector<ModuleInfo>>();
-        HANDLE snapshot = INVALID_HANDLE_VALUE;
-        for (int attempt = 0; attempt < 5 && snapshot == INVALID_HANDLE_VALUE; ++attempt)
+
+        // First try reading the module list straight out of the target's PEB
+        // via NtReadVirtualMemory. It side-steps the Toolhelp cross-bitness bugs
+        // (ERROR_BAD_LENGTH/ERROR_PARTIAL_COPY retries) and goes through the
+        // direct system call path. On any failure we fall back to Toolhelp.
+        const bool viaPeb = m_handle && (m_is64Bit
+            ? TryModulesViaPeb64(m_handle, *modules)
+            : TryModulesViaPeb32(m_handle, *modules));
+
+        if (!viaPeb)
         {
-            snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, m_id);
-            if (snapshot == INVALID_HANDLE_VALUE && ::GetLastError() != ERROR_BAD_LENGTH)
-                break;
-        }
-        if (snapshot != INVALID_HANDLE_VALUE)
-        {
-            MODULEENTRY32W entry{ sizeof(entry) };
-            for (BOOL more = ::Module32FirstW(snapshot, &entry); more; more = ::Module32NextW(snapshot, &entry))
+            HANDLE snapshot = INVALID_HANDLE_VALUE;
+            for (int attempt = 0; attempt < 5 && snapshot == INVALID_HANDLE_VALUE; ++attempt)
             {
-                ModuleInfo module;
-                module.Name = WideToUtf8(entry.szModule);
-                module.Path = entry.szExePath;
-                module.Base = reinterpret_cast<std::uint64_t>(entry.modBaseAddr);
-                module.Size = entry.modBaseSize;
-                module.System = IsSystemPath(module.Path);
-                if (!m_is64Bit && module.Base > 0xFFFFFFFFull)
-                    continue;
-                modules->push_back(std::move(module));
+                snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, m_id);
+                if (snapshot == INVALID_HANDLE_VALUE && ::GetLastError() != ERROR_BAD_LENGTH)
+                    break;
             }
-            ::CloseHandle(snapshot);
+            if (snapshot != INVALID_HANDLE_VALUE)
+            {
+                MODULEENTRY32W entry{ sizeof(entry) };
+                for (BOOL more = ::Module32FirstW(snapshot, &entry); more; more = ::Module32NextW(snapshot, &entry))
+                {
+                    ModuleInfo module;
+                    module.Name = WideToUtf8(entry.szModule);
+                    module.Path = entry.szExePath;
+                    module.Base = reinterpret_cast<std::uint64_t>(entry.modBaseAddr);
+                    module.Size = entry.modBaseSize;
+                    module.System = IsSystemPath(module.Path);
+                    if (!m_is64Bit && module.Base > 0xFFFFFFFFull)
+                        continue;
+                    modules->push_back(std::move(module));
+                }
+                ::CloseHandle(snapshot);
+            }
+            else
+            {
+                LOG_WARN("Process", ErrorMessage(ErrorCode::ModulesUnreadable));
+            }
         }
-        else
-        {
-            LOG_WARN("Process", ErrorMessage(ErrorCode::ModulesUnreadable));
-        }
+
         std::lock_guard lock(m_moduleLock);
         m_modules = std::move(modules);
     }

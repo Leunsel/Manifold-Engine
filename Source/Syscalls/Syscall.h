@@ -1,4 +1,5 @@
 #pragma once
+#include <windows.h>
 #include <winternl.h>
 
 inline unsigned int OpenSysCall = 0;
@@ -8,6 +9,7 @@ inline unsigned int QueryVmSysCall = 0;
 inline unsigned int ProtectVmSysCall = 0;
 inline unsigned int AllocVmSysCall = 0;
 inline unsigned int FreeVmSysCall = 0;
+inline unsigned int QueryInfoProcSysCall = 0;
 
 void InitSysCalls();
 
@@ -65,4 +67,12 @@ __attribute__((naked)) NTSTATUS NTAPI NtFreeVirtualMemory_direct(
 	_Inout_ PVOID* BaseAddress,
 	_Inout_ PSIZE_T RegionSize,
 	_In_ ULONG FreeType
+);
+
+__attribute__((naked)) NTSTATUS NTAPI NtQueryInformationProcess_direct(
+	_In_ HANDLE ProcessHandle,
+	_In_ int ProcessInformationClass,
+	_Out_ PVOID ProcessInformation,
+	_In_ ULONG ProcessInformationLength,
+	_Out_opt_ PULONG ReturnLength
 );

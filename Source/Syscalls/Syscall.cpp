@@ -119,6 +119,7 @@ void InitSysCalls()
 	ProtectVmSysCall = SysCalls["NtProtectVirtualMemory"];
 	AllocVmSysCall = SysCalls["NtAllocateVirtualMemory"];
 	FreeVmSysCall = SysCalls["NtFreeVirtualMemory"];
+	QueryInfoProcSysCall = SysCalls["NtQueryInformationProcess"];
 	// A number that stays 0 was not found in ntdll; callers fall back to the
 	// Win32 API for that one instead of firing a guessed service number.
 }
@@ -322,6 +323,33 @@ __attribute__((naked)) NTSTATUS NTAPI NtFreeVirtualMemory_direct(
 		mov eax,[FreeVmSysCall]
 		call dword ptr fs:[0C0h]
 		ret 10h
+	}
+#endif
+}
+
+__attribute__((naked)) NTSTATUS NTAPI NtQueryInformationProcess_direct(
+	_In_ HANDLE ProcessHandle,
+	_In_ int ProcessInformationClass,
+	_Out_ PVOID ProcessInformation,
+	_In_ ULONG ProcessInformationLength,
+	_Out_opt_ PULONG ReturnLength
+)
+{
+#ifdef _WIN64
+	__asm
+	{
+		mov r10,rcx
+		mov eax,[QueryInfoProcSysCall]
+		syscall
+		ret
+	}
+#else
+	// Five __stdcall arguments of four bytes each -> ret 14h.
+	__asm
+	{
+		mov eax,[QueryInfoProcSysCall]
+		call dword ptr fs:[0C0h]
+		ret 14h
 	}
 #endif
 }

@@ -54,6 +54,7 @@ int main()
     std::printf("NtProtectVirtualMemory  service number = 0x%X\n", ProtectVmSysCall);
     std::printf("NtAllocateVirtualMemory service number = 0x%X\n", AllocVmSysCall);
     std::printf("NtFreeVirtualMemory  service number = 0x%X\n", FreeVmSysCall);
+    std::printf("NtQueryInformationProcess service number = 0x%X\n", QueryInfoProcSysCall);
 
     int failures = 0;
 
@@ -133,6 +134,34 @@ int main()
                     static_cast<unsigned long>(fs), freeOk ? "OK" : "FAILED");
         failures += freeOk ? 0 : 1;
     }
+
+    // Round-trip our own PEB base through the direct NtQueryInformationProcess
+    // and compare against what the TEB gives via the GS/FS register trick — a
+    // good smoke test for the service number and the stub. The struct is
+    // natively sized per bitness: on x86 the PEB pointer is 32-bit, which puts
+    // the whole thing at 0x18 bytes, not 0x30.
+    struct PBI
+    {
+        NTSTATUS ExitStatus;
+        PVOID PebBaseAddress;
+        ULONG_PTR AffinityMask;
+        LONG BasePriority;
+        ULONG_PTR UniqueProcessId;
+        ULONG_PTR InheritedFromUniqueProcessId;
+    } pbi{};
+    ULONG returned = 0;
+    const NTSTATUS qips = NtQueryInformationProcess_direct(
+        handle, 0 /*ProcessBasicInformation*/, &pbi, sizeof(pbi), &returned);
+#if defined(_WIN64)
+    const unsigned long long ownPeb = __readgsqword(0x60);
+#else
+    const unsigned long long ownPeb = static_cast<unsigned long long>(__readfsdword(0x30));
+#endif
+    const unsigned long long reportedPeb = reinterpret_cast<unsigned long long>(pbi.PebBaseAddress);
+    const bool qipsOk = qips >= 0 && reportedPeb != 0 && reportedPeb == ownPeb;
+    std::printf("NtQueryInformationProcess_direct -> status = 0x%08lX, PEB = 0x%llX (ours 0x%llX) -> %s\n",
+                static_cast<unsigned long>(qips), reportedPeb, ownPeb, qipsOk ? "OK" : "FAILED");
+    failures += qipsOk ? 0 : 1;
 
     ::CloseHandle(handle);
     if (failures == 0)
