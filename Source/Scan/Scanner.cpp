@@ -1871,7 +1871,7 @@ namespace Manifold::Scan
     }
 
     std::vector<std::uint64_t> FindPattern(const Target::Process& process, const Pattern& pattern, std::uint64_t start, std::uint64_t stop, const PatternFilter& filter,
-        std::size_t limit)
+        std::size_t limit, PatternProgress* progress)
     {
         std::vector<std::uint64_t> found;
         if (pattern.Empty())
@@ -1894,6 +1894,8 @@ namespace Manifold::Scan
             }
         }
 
+        if (progress)
+            progress->Total += chunks.size();
         std::vector<std::vector<std::uint64_t>> perChunk(chunks.size());
         std::atomic<std::size_t> next{ 0 };
         std::atomic<std::size_t> total{ 0 };
@@ -1905,8 +1907,10 @@ namespace Manifold::Scan
                 for (;;)
                 {
                     const std::size_t item = next.fetch_add(1);
-                    if (item >= chunks.size() || (limit && total >= limit))
+                    if (item >= chunks.size() || (limit && total >= limit) || (progress && progress->Cancel))
                         break;
+                    if (progress)
+                        ++progress->Done;
                     const WorkChunk& chunk = chunks[item];
                     const std::size_t readSize = static_cast<std::size_t>(chunk.ReadEnd - chunk.Base);
                     if (readSize < size || process.Read(chunk.Base, buffer.data(), readSize) == 0)

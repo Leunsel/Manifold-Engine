@@ -9,6 +9,7 @@
 #include "lua.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -22,6 +23,12 @@ namespace Manifold::Lua
         constexpr std::size_t kMaxOutputLines = 100000;
         constexpr std::size_t kMaxOutputBytes = 32u * 1024u * 1024u;
         constexpr const char* kEngineKey = "Manifold.Engine";
+        constexpr int kCallHookInstructions = 10000;
+
+        double CallClock()
+        {
+            return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        }
 
         int Traceback(lua_State* state)
         {
@@ -125,6 +132,39 @@ namespace Manifold::Lua
         lua_setfield(m_state, LUA_REGISTRYINDEX, kEngineKey);
         Register();
         AddCapitalAliases(m_state, standard);
+        lua_sethook(m_state, &LuaEngine::CallHook, LUA_MASKCOUNT, kCallHookInstructions);
+    }
+
+    void LuaEngine::CallHook(lua_State* state, lua_Debug*)
+    {
+        lua_getfield(state, LUA_REGISTRYINDEX, kEngineKey);
+        auto* engine = static_cast<LuaEngine*>(lua_touserdata(state, -1));
+        lua_pop(state, 1);
+        if (!engine || engine->m_callDeadline <= 0.0)
+        {
+            lua_sethook(state, &LuaEngine::CallHook, LUA_MASKCOUNT, kCallHookInstructions);
+            return;
+        }
+        if (CallClock() < engine->m_callDeadline)
+            return;
+        lua_sethook(state, &LuaEngine::CallHook, LUA_MASKCOUNT, 1);
+        luaL_error(state, "stopped after %d ms: a callback has to return quickly, so long work belongs in createThread (Settings → Scripts sets the limit)", engine->m_callLimit);
+    }
+
+    bool LuaEngine::GuardedCall(int arguments, int results, int handler)
+    {
+        const double previous = m_callDeadline;
+        const int limit = m_engine.Options().ScriptCallbackLimitMs;
+        if (limit > 0 && previous <= 0.0)
+        {
+            m_callLimit = limit;
+            m_callDeadline = CallClock() + limit / 1000.0;
+        }
+        const int status = lua_pcall(m_state, arguments, results, handler);
+        m_callDeadline = previous;
+        if (previous <= 0.0)
+            lua_sethook(m_state, &LuaEngine::CallHook, LUA_MASKCOUNT, kCallHookInstructions);
+        return status == LUA_OK;
     }
 
     void LuaEngine::Register()
@@ -277,7 +317,7 @@ namespace Manifold::Lua
         lua_insert(m_state, base + 1);
         lua_rawgeti(m_state, LUA_REGISTRYINDEX, reference);
         lua_insert(m_state, base + 2);
-        if (lua_pcall(m_state, arguments, results, base + 1) != LUA_OK)
+        if (!GuardedCall(arguments, results, base + 1))
         {
             error = lua_tostring(m_state, -1) ? lua_tostring(m_state, -1) : "unknown error";
             lua_settop(m_state, base);
@@ -293,7 +333,7 @@ namespace Manifold::Lua
         const int base = lua_gettop(m_state) - arguments - 1;
         lua_pushcfunction(m_state, &Traceback);
         lua_insert(m_state, base + 1);
-        if (lua_pcall(m_state, arguments, results, base + 1) != LUA_OK)
+        if (!GuardedCall(arguments, results, base + 1))
         {
             error = lua_tostring(m_state, -1) ? lua_tostring(m_state, -1) : "unknown error";
             lua_settop(m_state, base);
@@ -379,6 +419,11 @@ namespace Manifold::Lua
             };
         restore(saved.SyntaxCheck, "syntaxcheck");
         restore(saved.Record, "memrec");
+    }
+
+    std::vector<int> LuaEngine::RecordsWithEvent(std::string_view name)
+    {
+        return RecordsWithFunction(m_state, name);
     }
 
     bool LuaEngine::HasRecordEvent(int id, std::string_view name)
@@ -799,6 +844,119 @@ namespace Manifold::Lua
         return false;
     }
 
+    namespace
+    {
+        struct LookupChain
+        {
+            std::vector<int> References;
+            std::size_t Next = 0;
+            std::uint64_t Address = 0;
+            std::function<void(std::optional<StructureLookup>)> NameDone;
+            std::function<void(bool)> DissectDone;
+            Table::StructDefinition* Definition = nullptr;
+        };
+
+        bool StillRegistered(const std::map<int, int>& callbacks, int reference)
+        {
+            return std::any_of(callbacks.begin(), callbacks.end(), [reference](const auto& entry) { return entry.second == reference; });
+        }
+    }
+
+    void LuaEngine::LookupStructureNameLater(std::uint64_t address, std::function<void(std::optional<StructureLookup>)> done)
+    {
+        if (!m_engine.Async() || m_structureNameLookups.empty())
+        {
+            done(LookupStructureName(address));
+            return;
+        }
+        auto chain = std::make_shared<LookupChain>();
+        for (const auto& [id, reference] : m_structureNameLookups)
+            chain->References.push_back(reference);
+        chain->Address = address;
+        chain->NameDone = std::move(done);
+        auto step = std::make_shared<std::function<void()>>();
+        *step = [this, chain, weak = std::weak_ptr<std::function<void()>>(step)]()
+            {
+                while (chain->Next < chain->References.size() && !StillRegistered(m_structureNameLookups, chain->References[chain->Next]))
+                    ++chain->Next;
+                if (chain->Next >= chain->References.size())
+                {
+                    chain->NameDone(std::nullopt);
+                    return;
+                }
+                const int reference = chain->References[chain->Next++];
+                auto found = std::make_shared<StructureLookup>();
+                found->Address = chain->Address;
+                auto keep = weak.lock();
+                StartCall(reference, [address = chain->Address](lua_State* thread)
+                    {
+                        lua_pushinteger(thread, static_cast<lua_Integer>(address));
+                        return 1;
+                    }, "structure name lookup", [found](lua_State* thread, int results)
+                    {
+                        if (results >= 1 && lua_type(thread, -results) == LUA_TSTRING)
+                            found->Name = lua_tostring(thread, -results);
+                        if (results >= 2 && lua_isinteger(thread, -results + 1))
+                            found->Address = static_cast<std::uint64_t>(lua_tointeger(thread, -results + 1));
+                        else if (results >= 2 && lua_type(thread, -results + 1) == LUA_TNUMBER)
+                            found->Address = static_cast<std::uint64_t>(lua_tonumber(thread, -results + 1));
+                    }, [chain, found, keep](const Status&, const std::string&)
+                    {
+                        if (!found->Name.empty())
+                            chain->NameDone(*found);
+                        else if (keep)
+                            (*keep)();
+                    });
+            };
+        (*step)();
+    }
+
+    void LuaEngine::DissectStructureLater(Table::StructDefinition* definition, std::uint64_t address, std::function<void(bool handled)> done)
+    {
+        if (!m_engine.Async() || m_dissectOverrides.empty() || !definition)
+        {
+            const bool handled = definition && DissectStructure(*definition, address);
+            done(handled);
+            return;
+        }
+        auto chain = std::make_shared<LookupChain>();
+        for (const auto& [id, reference] : m_dissectOverrides)
+            chain->References.push_back(reference);
+        chain->Address = address;
+        chain->Definition = definition;
+        chain->DissectDone = std::move(done);
+        auto step = std::make_shared<std::function<void()>>();
+        *step = [this, chain, weak = std::weak_ptr<std::function<void()>>(step)]()
+            {
+                while (chain->Next < chain->References.size() && !StillRegistered(m_dissectOverrides, chain->References[chain->Next]))
+                    ++chain->Next;
+                if (chain->Next >= chain->References.size())
+                {
+                    chain->DissectDone(false);
+                    return;
+                }
+                const int reference = chain->References[chain->Next++];
+                auto handled = std::make_shared<bool>(false);
+                auto keep = weak.lock();
+                StartCall(reference, [chain](lua_State* thread)
+                    {
+                        PushStructureObject(thread, chain->Definition);
+                        lua_pushinteger(thread, static_cast<lua_Integer>(chain->Address));
+                        return 2;
+                    }, "structure dissect override", [handled](lua_State* thread, int results)
+                    {
+                        *handled = results >= 1 && lua_toboolean(thread, -results) != 0;
+                    }, [chain, handled, keep](const Status&, const std::string&)
+                    {
+                        if (*handled)
+                            chain->DissectDone(true);
+                        else if (keep)
+                            (*keep)();
+                    });
+            };
+        (*step)();
+    }
+
     void LuaEngine::ForgetRecords()
     {
         Lua::ForgetRecords(m_state);
@@ -843,6 +1001,34 @@ namespace Manifold::Lua
             return;
         Release(found->second.Callback);
         m_hotkeys.erase(found);
+    }
+
+    void LuaEngine::ProcessMessages()
+    {
+        if (std::this_thread::get_id() != m_thread)
+            return;
+        MSG message{};
+        ::PeekMessageW(&message, nullptr, 0, 0, PM_NOREMOVE);
+        Tick(m_engine.Now());
+    }
+
+    void LuaEngine::BlockingSleep(std::uint32_t milliseconds)
+    {
+        if (std::this_thread::get_id() != m_thread)
+        {
+            ::Sleep(milliseconds);
+            return;
+        }
+        const ULONGLONG until = ::GetTickCount64() + milliseconds;
+        for (;;)
+        {
+            MSG message{};
+            ::PeekMessageW(&message, nullptr, 0, 0, PM_NOREMOVE);
+            const ULONGLONG now = ::GetTickCount64();
+            if (now >= until)
+                return;
+            ::Sleep(static_cast<DWORD>(std::min<ULONGLONG>(until - now, 100)));
+        }
     }
 
     void LuaEngine::Tick(double now)

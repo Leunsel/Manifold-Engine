@@ -57,6 +57,33 @@ namespace Manifold::Lua
         return id;
     }
 
+    int LuaEngine::StartCall(int reference, const std::function<int(lua_State*)>& push, std::string_view name, TaskRead read, TaskDone done)
+    {
+        lua_State* thread = lua_newthread(m_state);
+        const int threadReference = luaL_ref(m_state, LUA_REGISTRYINDEX);
+        lua_rawgeti(thread, LUA_REGISTRYINDEX, reference);
+        if (!lua_isfunction(thread, -1))
+        {
+            luaL_unref(m_state, LUA_REGISTRYINDEX, threadReference);
+            if (done)
+                done(Status::Fail(ErrorCode::LuaRuntime, std::string(name) + " is no longer registered"), {});
+            return 0;
+        }
+        const int arguments = push ? push(thread) : 0;
+        lua_sethook(thread, &LuaEngine::TaskHook, LUA_MASKCOUNT, kHookInstructions);
+        auto task = std::make_unique<Task>();
+        task->Id = m_nextTask++;
+        task->Thread = thread;
+        task->Reference = threadReference;
+        task->Name = std::string(name);
+        task->Done = std::move(done);
+        task->Read = std::move(read);
+        task->Arguments = arguments;
+        const int id = task->Id;
+        m_tasks.push_back(std::move(task));
+        return id;
+    }
+
     void LuaEngine::TaskHook(lua_State* state, lua_Debug*)
     {
         LuaEngine* engine = t_engine;
@@ -111,7 +138,9 @@ namespace Manifold::Lua
             if (task.Enter)
                 task.Enter();
             int results = 0;
-            const int status = lua_resume(task.Thread, from, 0, &results);
+            const int arguments = task.Arguments;
+            task.Arguments = 0;
+            const int status = lua_resume(task.Thread, from, arguments, &results);
             m_taskStack.pop_back();
             task.Running = false;
             if (task.Leave)
@@ -135,7 +164,9 @@ namespace Manifold::Lua
         std::string output;
         if (status == LUA_OK)
         {
-            if (results > 0 && lua_type(task.Thread, -results) == LUA_TSTRING)
+            if (task.Read)
+                task.Read(task.Thread, results);
+            else if (results > 0 && lua_type(task.Thread, -results) == LUA_TSTRING)
                 output = lua_tostring(task.Thread, -results);
         }
         else

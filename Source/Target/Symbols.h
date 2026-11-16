@@ -88,7 +88,11 @@ namespace Manifold::Target
 
         std::shared_ptr<Process> m_process;
         LookupCallback m_lookup;
+        const UserSymbol* RegisteredAt(std::uint64_t address) const;
+        void ForgetAddress(std::uint64_t address, const std::string& key);
+
         std::map<std::string, UserSymbol> m_registered;
+        std::multimap<std::uint64_t, std::string> m_registeredByAddress;
         mutable std::mutex m_registeredLock;
         std::atomic<std::uint64_t> m_generation = 1;
         mutable std::mutex m_exportLock;

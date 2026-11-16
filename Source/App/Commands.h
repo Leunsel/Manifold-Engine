@@ -219,6 +219,7 @@ namespace Manifold
     std::string ChordText(ImGuiKeyChord chord, bool digits = false);
     ImGuiKeyChord ParseChord(std::string_view text);
     const char* ShortcutText(Command command);
+    std::string ShortcutLabel(Command command);
     std::string ShortcutsMarkdown();
 
     Binding DefaultBinding(Command command);

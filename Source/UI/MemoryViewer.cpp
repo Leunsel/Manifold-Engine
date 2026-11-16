@@ -42,6 +42,12 @@ namespace Manifold::UI
             return ImGui::GetColorU32(ManifoldTheme::CodeKeyword);
         }
 
+        std::string UndoNote()
+        {
+            const std::string keys = ShortcutLabel(Command::UndoMemoryEdit);
+            return keys.empty() ? std::string(".") : ". Undo with " + keys + ".";
+        }
+
         struct RegisterRow
         {
             const char* Name;
@@ -400,6 +406,11 @@ namespace Manifold::UI
     {
         if (!m_open)
             return;
+        if (const std::shared_ptr<Target::Process> process = m_engine.Process(); m_noppedProcess.lock() != process)
+        {
+            m_nopped.clear();
+            m_noppedProcess = process;
+        }
         if (m_bringToFront)
         {
             ImGui::SetNextWindowFocus();
@@ -1663,7 +1674,7 @@ namespace Manifold::UI
                         m_workspace.Report(status);
                         if (status)
                         {
-                            m_engine.Notify(LogLevel::Success, "Loaded " + ByteSize(length) + " to " + m_engine.Describe(*address) + ". Undo with " + ShortcutText(Command::UndoMemoryEdit) + ".");
+                            m_engine.Notify(LogLevel::Success, "Loaded " + ByteSize(length) + " to " + m_engine.Describe(*address) + UndoNote());
                             ImGui::CloseCurrentPopup();
                         }
                     }
@@ -1683,7 +1694,7 @@ namespace Manifold::UI
                     m_workspace.Report(status);
                     if (status)
                     {
-                        m_engine.Notify(LogLevel::Success, "Filled " + ByteSize(size) + " at " + m_engine.Describe(*address) + ". Undo with " + ShortcutText(Command::UndoMemoryEdit) + ".");
+                        m_engine.Notify(LogLevel::Success, "Filled " + ByteSize(size) + " at " + m_engine.Describe(*address) + UndoNote());
                         ImGui::CloseCurrentPopup();
                     }
                 }

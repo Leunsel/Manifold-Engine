@@ -105,6 +105,7 @@ namespace Manifold::Tests
             CHECK_EQ(ShortcutSettings().size(), static_cast<std::size_t>(1));
             SetBinding(Command::OpenProcess, {});
             CHECK(ShortcutText(Command::OpenProcess) == nullptr);
+            CHECK(ShortcutLabel(Command::OpenProcess).empty());
             CHECK_EQ(ShortcutSettings().at("OpenProcess"), "none");
             SetBinding(Command::OpenProcess, { 0, moved });
             CHECK(CurrentBinding(Command::OpenProcess) == (Binding{ moved, 0 }));

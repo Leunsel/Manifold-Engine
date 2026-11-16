@@ -83,9 +83,28 @@ namespace Manifold::UI
         m_editor.ErrorLine = 0;
         if (m_lua)
         {
-            const Status status = m_engine.Lua().Run(m_text, m_recordId == kTableLuaScript ? "table script" : "script");
-            m_resultOk = status.Ok();
-            m_result = status.Ok() ? "The script ran." : status.Text;
+            const char* name = m_recordId == kTableLuaScript ? "table script" : "script";
+            Lua::LuaEngine& lua = m_engine.Lua();
+            if (!m_engine.Async())
+            {
+                const Status status = lua.Run(m_text, name);
+                m_resultOk = status.Ok();
+                m_result = status.Ok() ? "The script ran." : status.Text;
+                return;
+            }
+            if (m_task && lua.TaskAlive(m_task))
+                return;
+            m_resultOk = true;
+            m_result.clear();
+            const std::weak_ptr<int> alive = m_alive;
+            m_task = lua.StartTask(m_text, name, [this, alive](const Status& status, const std::string&)
+                {
+                    if (alive.expired())
+                        return;
+                    m_task = 0;
+                    m_resultOk = status.Ok();
+                    m_result = status.Ok() ? "The script ran." : status.Text;
+                });
             return;
         }
         const Asm::AaSection section = Asm::HasSections(m_text) ? (disable ? Asm::AaSection::Disable : Asm::AaSection::Enable) : Asm::AaSection::Whole;
@@ -301,7 +320,16 @@ namespace Manifold::UI
         const float footer = ImGui::GetFrameHeightWithSpacing() * 2.0f + Px(4.0f);
         CodeEditor("##editor", m_text, m_lua ? Language::Lua : Language::AutoAssembler, ImVec2(0.0f, -footer), m_editor);
 
-        if (!m_result.empty())
+        if (m_task && m_engine.Lua().TaskAlive(m_task))
+        {
+            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
+            ImGui::SameLine();
+            Muted("The script is running");
+            ImGui::SameLine();
+            if (ImGui::SmallButton(ICON_FA_STOP "  Stop"))
+                m_engine.Lua().StopTask(m_task);
+        }
+        else if (!m_result.empty())
         {
             ImGui::PushTextWrapPos(ImGui::GetContentRegionAvail().x);
             TextWithError(m_result, m_resultOk ? ManifoldTheme::Accent : ManifoldTheme::Error);

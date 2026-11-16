@@ -319,6 +319,7 @@ namespace Manifold::Target
         {
             std::lock_guard registered(m_registeredLock);
             m_registered.clear();
+            m_registeredByAddress.clear();
         }
         std::lock_guard lock(m_exportLock);
         m_exports.clear();
@@ -334,7 +335,10 @@ namespace Manifold::Target
         auto found = m_registered.find(key);
         if (found != m_registered.end() && !replace && found->second.Address != address)
             return Status::Fail(ErrorCode::AaSymbolTaken, name);
+        if (found != m_registered.end())
+            ForgetAddress(found->second.Address, key);
         m_registered[key] = UserSymbol{ Trim(name), address, std::string(owner) };
+        m_registeredByAddress.emplace(address, key);
         ++m_generation;
         return Status::Success();
     }
@@ -342,10 +346,13 @@ namespace Manifold::Target
     bool Symbols::Unregister(std::string_view name)
     {
         std::lock_guard lock(m_registeredLock);
-        const bool removed = m_registered.erase(Lower(Trim(name))) > 0;
-        if (removed)
-            ++m_generation;
-        return removed;
+        const auto found = m_registered.find(Lower(Trim(name)));
+        if (found == m_registered.end())
+            return false;
+        ForgetAddress(found->second.Address, found->first);
+        m_registered.erase(found);
+        ++m_generation;
+        return true;
     }
 
     void Symbols::UnregisterOwner(std::string_view owner)
@@ -354,11 +361,44 @@ namespace Manifold::Target
         for (auto it = m_registered.begin(); it != m_registered.end();)
         {
             if (it->second.Owner == owner)
+            {
+                ForgetAddress(it->second.Address, it->first);
                 it = m_registered.erase(it);
+            }
             else
+            {
                 ++it;
+            }
         }
         ++m_generation;
+    }
+
+    void Symbols::ForgetAddress(std::uint64_t address, const std::string& key)
+    {
+        const auto [first, last] = m_registeredByAddress.equal_range(address);
+        for (auto it = first; it != last; ++it)
+        {
+            if (it->second == key)
+            {
+                m_registeredByAddress.erase(it);
+                return;
+            }
+        }
+    }
+
+    const UserSymbol* Symbols::RegisteredAt(std::uint64_t address) const
+    {
+        const auto [first, last] = m_registeredByAddress.equal_range(address);
+        const std::string* best = nullptr;
+        for (auto it = first; it != last; ++it)
+        {
+            if (!best || it->second < *best)
+                best = &it->second;
+        }
+        if (!best)
+            return nullptr;
+        const auto found = m_registered.find(*best);
+        return found == m_registered.end() ? nullptr : &found->second;
     }
 
     std::optional<std::uint64_t> Symbols::FindRegistered(std::string_view name) const
@@ -554,11 +594,8 @@ namespace Manifold::Target
     {
         {
             std::lock_guard lock(m_registeredLock);
-            for (const auto& [key, symbol] : m_registered)
-            {
-                if (symbol.Address == address)
-                    return symbol.Name;
-            }
+            if (const UserSymbol* symbol = RegisteredAt(address))
+                return symbol->Name;
         }
         if (!m_process)
             return std::nullopt;
@@ -592,8 +629,12 @@ namespace Manifold::Target
             };
         {
             std::lock_guard lock(m_registeredLock);
-            for (const auto& [key, symbol] : m_registered)
-                consider(symbol.Address, symbol.Name);
+            if (auto below = m_registeredByAddress.upper_bound(address); below != m_registeredByAddress.begin())
+            {
+                --below;
+                if (const UserSymbol* symbol = RegisteredAt(below->first))
+                    consider(symbol->Address, symbol->Name);
+            }
         }
         if (!m_process)
             return best;
@@ -629,11 +670,8 @@ namespace Manifold::Target
     {
         {
             std::lock_guard lock(m_registeredLock);
-            for (const auto& [key, symbol] : m_registered)
-            {
-                if (symbol.Address == address)
-                    return symbol.Name;
-            }
+            if (const UserSymbol* symbol = RegisteredAt(address))
+                return symbol->Name;
         }
         if (!m_process)
             return Hex(address);

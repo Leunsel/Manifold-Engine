@@ -3,6 +3,7 @@
 #include "App/Engine.h"
 #include "Templates/TemplateGenerator.h"
 #include "Templates/TemplateLibrary.h"
+#include "UI/Widgets.h"
 
 #include <cstdint>
 #include <deque>
@@ -44,9 +45,9 @@ namespace Manifold::UI
         std::deque<bool> m_inputFlags;
         std::vector<int> m_inputChoices;
         std::string m_inputError;
-        bool m_openInputs = false;
-        bool m_openPreview = false;
-        bool m_openFailure = false;
+        Dialog m_inputs;
+        Dialog m_previewDialog;
+        Dialog m_failureDialog;
         std::string m_preview;
         std::string m_previewCaption;
         std::string m_failure;

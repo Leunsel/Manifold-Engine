@@ -904,17 +904,18 @@ namespace Manifold::UI
         return window->Viewport->ID;
     }
 
-    bool BeginModal(const char* id, const char* icon, const char* title, ImVec2 size, bool* open, ImGuiID viewportId)
+    bool BeginModal(const char* id, const char* icon, const char* title, ImVec2 size, bool* open, ImGuiID viewportId, ImGuiWindowFlags flags)
     {
         const ImGuiViewport* viewport = viewportId ? ImGui::FindViewportByID(viewportId) : nullptr;
         if (!viewport)
             viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowViewport(viewport->ID);
         ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x + viewport->Size.x * 0.5f, viewport->Pos.y + viewport->Size.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize(Px(size.x, size.y), ImGuiCond_Appearing);
+        if (size.x > 0.0f || size.y > 0.0f)
+            ImGui::SetNextWindowSize(Px(size.x, size.y), ImGuiCond_Appearing);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, PxWhole(14.0f, 12.0f));
         const std::string label = std::string(icon) + "  " + title + "###" + id;
-        const bool visible = ImGui::BeginPopupModal(label.c_str(), open, ImGuiWindowFlags_NoSavedSettings);
+        const bool visible = ImGui::BeginPopupModal(label.c_str(), open, ImGuiWindowFlags_NoSavedSettings | flags);
         ImGui::PopStyleVar();
         return visible;
     }
@@ -922,6 +923,96 @@ namespace Manifold::UI
     void EndModal()
     {
         ImGui::EndPopup();
+    }
+
+    Dialog::Dialog(std::string id, std::string icon, std::string title, ImVec2 size) : m_id(std::move(id)), m_icon(std::move(icon)), m_title(std::move(title)), m_size(size)
+    {
+    }
+
+    void Dialog::Open(ImGuiID viewport)
+    {
+        m_pending = true;
+        m_viewport = viewport ? viewport : CallerViewport();
+    }
+
+    bool Dialog::Begin()
+    {
+        if (m_pending)
+        {
+            ImGui::OpenPopup(("###" + m_id).c_str());
+            m_pending = false;
+        }
+        if (m_size.y <= 0.0f)
+            ImGui::SetNextWindowSizeConstraints(ImVec2(m_size.x > 0.0f ? Px(m_size.x) : 0.0f, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
+        const bool autoSize = m_size.y <= 0.0f;
+        const bool open = BeginModal(m_id.c_str(), m_icon.c_str(), m_title.c_str(), autoSize ? ImVec2(0.0f, 0.0f) : m_size, nullptr, m_viewport, autoSize ? ImGuiWindowFlags_AlwaysAutoResize : 0);
+        m_appearing = open && ImGui::IsWindowAppearing();
+        return open;
+    }
+
+    void Dialog::End()
+    {
+        EndModal();
+    }
+
+    void Dialog::Close()
+    {
+        ImGui::CloseCurrentPopup();
+    }
+
+    DialogChoice Dialog::Buttons(const char* ok, bool okEnabled, bool enterConfirms, const char* cancel)
+    {
+        const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+        const bool enter = enterConfirms && focused && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
+        const bool escape = focused && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        ImGui::Spacing();
+        DialogChoice choice = DialogChoice::None;
+        ImGui::BeginDisabled(!okEnabled);
+        if (AccentButton(ok, Px(100.0f, 0.0f)) || (enter && okEnabled))
+            choice = DialogChoice::Ok;
+        ImGui::EndDisabled();
+        if (cancel)
+        {
+            ImGui::SameLine();
+            if (ImGui::Button(cancel, Px(100.0f, 0.0f)) || escape)
+                choice = DialogChoice::Cancel;
+        }
+        else if (escape)
+        {
+            choice = DialogChoice::Cancel;
+        }
+        if (choice == DialogChoice::Cancel)
+            ImGui::CloseCurrentPopup();
+        return choice;
+    }
+
+    bool BeginDataTable(const char* id, std::initializer_list<DataColumn> columns, ImVec2 size, ImGuiTableFlags extra)
+    {
+        const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable | extra;
+        if (!ImGui::BeginTable(id, static_cast<int>(columns.size()), flags, size))
+            return false;
+        ImGui::TableSetupScrollFreeze(0, 1);
+        for (const DataColumn& column : columns)
+        {
+            if (column.Fixed > 0.0f)
+                ImGui::TableSetupColumn(column.Name, ImGuiTableColumnFlags_WidthFixed, Px(column.Fixed));
+            else
+                ImGui::TableSetupColumn(column.Name, ImGuiTableColumnFlags_WidthStretch, column.Weight);
+        }
+        ImGui::TableHeadersRow();
+        return true;
+    }
+
+    bool TaskStatus(std::string_view text, bool cancellable)
+    {
+        Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
+        ImGui::SameLine(0.0f, Px(6.0f));
+        ImGui::AlignTextToFramePadding();
+        Muted(text);
+        if (!cancellable)
+            return false;
+        ImGui::SameLine(0.0f, Px(8.0f));
+        return ImGui::Button("Cancel");
     }
 
     ImVec4 LevelColor(LogLevel level)

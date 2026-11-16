@@ -65,7 +65,10 @@ namespace Manifold::UI
         return Folder();
     }
 
-    TemplateRunner::TemplateRunner(Workspace& workspace) : m_workspace(workspace), m_engine(workspace.Core())
+    TemplateRunner::TemplateRunner(Workspace& workspace) : m_workspace(workspace), m_engine(workspace.Core()),
+        m_inputs("templateinputs", ICON_FA_MAGIC, "Template inputs"),
+        m_previewDialog("templatepreview", ICON_FA_EYE, "Template preview", ImVec2(760.0f, 540.0f)),
+        m_failureDialog("templatefailure", ICON_FA_EXCLAMATION_TRIANGLE, "Template generation failed")
     {
     }
 
@@ -256,7 +259,7 @@ namespace Manifold::UI
             const auto found = std::find(input.Values.begin(), input.Values.end(), text);
             m_inputChoices.push_back(found == input.Values.end() ? 0 : static_cast<int>(found - input.Values.begin()));
         }
-        m_openInputs = true;
+        m_inputs.Open();
     }
 
     void TemplateRunner::Run(const Templates::TemplateInfo& info, std::map<std::string, Templates::Value> inputs)
@@ -281,14 +284,14 @@ namespace Manifold::UI
                 return;
             m_failure = Templates::Describe(result.Failure, info.Caption);
             LOG_ERROR("Templates", ErrorMessage(result.Failure.Code, result.Failure.Message));
-            m_openFailure = true;
+            m_failureDialog.Open();
             return;
         }
         if (g_previewFirst)
         {
             m_preview = *result.Text;
             m_previewCaption = info.Caption;
-            m_openPreview = true;
+            m_previewDialog.Open();
             return;
         }
         m_ready = *result.Text;
@@ -296,19 +299,14 @@ namespace Manifold::UI
 
     void TemplateRunner::InputsPopup()
     {
-        if (m_openInputs)
-        {
-            ImGui::OpenPopup("Template Inputs###templateinputs");
-            m_openInputs = false;
-        }
-        if (!ImGui::BeginPopupModal("Template Inputs###templateinputs", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        if (!m_inputs.Begin())
             return;
         Templates::Library& library = SharedLibrary();
         const Templates::TemplateInfo* info = library.Find(m_running);
         if (!info || info->Inputs.size() != m_inputTexts.size())
         {
-            ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
+            m_inputs.Close();
+            m_inputs.End();
             return;
         }
         ImGui::TextUnformatted(info->Caption.c_str());
@@ -356,7 +354,7 @@ namespace Manifold::UI
             TextWithError(m_inputError, ManifoldTheme::Error);
         bool run = false;
         std::map<std::string, Templates::Value> values;
-        if (AccentButton("Generate", ImVec2(Px(110.0f), 0.0f)))
+        if (m_inputs.Buttons("Generate") == DialogChoice::Ok)
         {
             m_inputError.clear();
             for (std::size_t index = 0; index < info->Inputs.size() && m_inputError.empty(); ++index)
@@ -373,57 +371,39 @@ namespace Manifold::UI
             if (m_inputError.empty())
             {
                 run = true;
-                ImGui::CloseCurrentPopup();
+                m_inputs.Close();
             }
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(Px(90.0f), 0.0f)))
-            ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
+        m_inputs.End();
         if (run)
             Run(*info, std::move(values));
     }
 
     void TemplateRunner::PreviewPopup()
     {
-        if (m_openPreview)
-        {
-            ImGui::OpenPopup("Template Preview###templatepreview");
-            m_openPreview = false;
-        }
-        ImGui::SetNextWindowSize(ImVec2(Px(760.0f), Px(540.0f)), ImGuiCond_Appearing);
-        if (!ImGui::BeginPopupModal("Template Preview###templatepreview", nullptr))
+        if (!m_previewDialog.Begin())
             return;
         ImGui::TextUnformatted(m_previewCaption.c_str());
         const float footer = ImGui::GetFrameHeightWithSpacing() + Px(6.0f);
         ImGui::InputTextMultiline("##preview", m_preview.data(), m_preview.size() + 1, ImVec2(-FLT_MIN, -footer), ImGuiInputTextFlags_ReadOnly);
-        if (AccentButton("Insert", ImVec2(Px(110.0f), 0.0f)))
+        if (m_previewDialog.Buttons("Insert", true, false) == DialogChoice::Ok)
         {
             m_ready = m_preview;
-            ImGui::CloseCurrentPopup();
+            m_previewDialog.Close();
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(Px(90.0f), 0.0f)))
-            ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
+        m_previewDialog.End();
     }
 
     void TemplateRunner::FailurePopup()
     {
-        if (m_openFailure)
-        {
-            ImGui::OpenPopup("Template Generation Failed###templatefailure");
-            m_openFailure = false;
-        }
-        if (!ImGui::BeginPopupModal("Template Generation Failed###templatefailure", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        if (!m_failureDialog.Begin())
             return;
         ImGui::PushTextWrapPos(Px(620.0f));
-        ImGui::TextUnformatted(m_failure.c_str());
+        TextWithError(m_failure, ManifoldTheme::Error);
         ImGui::PopTextWrapPos();
-        ImGui::Spacing();
-        if (ImGui::Button("Close", ImVec2(Px(90.0f), 0.0f)))
-            ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
+        if (m_failureDialog.Buttons("Close", true, true, nullptr) == DialogChoice::Ok)
+            m_failureDialog.Close();
+        m_failureDialog.End();
     }
 
     void TemplateRunner::Draw()

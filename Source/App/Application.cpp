@@ -10,6 +10,9 @@
 
 #include "imgui.h"
 
+#include <algorithm>
+
+#include <windows.h>
 #include <shellapi.h>
 
 namespace Manifold
@@ -23,6 +26,7 @@ namespace Manifold
         constexpr unsigned long long kBusyMilliseconds = 1200;
         constexpr unsigned kIdleFrameMilliseconds = 100;
         constexpr unsigned kHiddenMilliseconds = 50;
+        constexpr unsigned kIdleTickMilliseconds = 15;
 
         WindowHost::Setup HostSetup()
         {
@@ -216,6 +220,22 @@ namespace Manifold
         m_settings.Placed = true;
     }
 
+    void Application::TickWhileWaiting(unsigned milliseconds)
+    {
+        const ULONGLONG until = ::GetTickCount64() + milliseconds;
+        for (;;)
+        {
+            const ULONGLONG now = ::GetTickCount64();
+            if (now >= until)
+                return;
+            const unsigned slice = static_cast<unsigned>(std::min<ULONGLONG>(kIdleTickMilliseconds, until - now));
+            if (m_host.Wait(slice))
+                return;
+            if (::GetTickCount64() + kIdleTickMilliseconds / 2 < until)
+                m_engine->Tick();
+        }
+    }
+
     int Application::Run()
     {
         while (m_running)
@@ -227,14 +247,14 @@ namespace Manifold
             if (m_host.Hidden())
             {
                 m_engine->Tick();
-                m_host.Wait(kHiddenMilliseconds);
+                TickWhileWaiting(kHiddenMilliseconds);
                 continue;
             }
             const bool busy = m_engine->Scanner().Busy() || m_engine->Debugger().Broken() || !m_engine->Notices().empty() || m_engine->Working();
             if (!busy && m_host.InputAge() > kBusyMilliseconds)
-                m_host.Wait(kIdleFrameMilliseconds);
+                TickWhileWaiting(kIdleFrameMilliseconds);
             else if (busy && m_host.InputAge() > kBusyMilliseconds)
-                m_host.Wait(33);
+                TickWhileWaiting(33);
             m_host.ApplyPendingResize();
             m_host.RenderFrame();
         }

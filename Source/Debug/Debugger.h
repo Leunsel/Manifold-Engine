@@ -133,6 +133,7 @@ namespace Manifold::Debug
         std::uint64_t Generation() const { return m_generation.load(); }
         void SetLogDebugStrings(bool on) { m_logDebugStrings = on; }
         void SetPreferHardware(bool on) { m_preferHardware = on; }
+        void PauseHeartbeat(bool paused) { m_beatPaused = paused; }
         void SetBackend(Backend backend) { m_backend = backend; }
         Backend CurrentBackend() const { return m_backend; }
         bool UsingVeh() const { return m_backend == Backend::Veh; }
@@ -224,6 +225,7 @@ namespace Manifold::Debug
         std::atomic<std::uint64_t> m_generation{ 1 };
         std::atomic<bool> m_logDebugStrings{ true };
         std::atomic<bool> m_preferHardware{ false };
+        std::atomic<bool> m_beatPaused{ false };
         bool m_is64Bit = true;
         bool m_initialBreakSeen = false;
 

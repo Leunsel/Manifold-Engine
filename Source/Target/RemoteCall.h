@@ -2,6 +2,7 @@
 
 #include "Core/Errors.h"
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -17,7 +18,11 @@ namespace Manifold::Target
     // can be attached to a runtime once, e.g. mono_thread_attach). Manifold
     // drives it through a control block in a second page and reads results and
     // out-data back with ReadProcessMemory. A collector stub lets callback APIs
-    // such as mono_assembly_foreach gather their items into an array.
+    // such as mono_assembly_foreach gather their items into an array. Between
+    // calls the worker spins briefly, then waits on an event Call sets. Stop
+    // ends it with exit code 1; when this process ends without Stop (crash,
+    // killed), the worker sees it through a handle of this process and ends by
+    // itself with exit code 2.
     class RemoteCall
     {
     public:
@@ -30,6 +35,7 @@ namespace Manifold::Target
         Status Start(std::shared_ptr<Process> process);
         void Stop();
         bool Running() const { return m_thread != 0; }
+        void SetTimeout(std::chrono::milliseconds timeout) { m_timeout = timeout; }
 
         // Call function(a0..a3) in the target and return its 64-bit result.
         Status Call(std::uint64_t function, std::uint64_t a0, std::uint64_t a1, std::uint64_t a2, std::uint64_t a3, std::uint64_t& result);
@@ -48,12 +54,16 @@ namespace Manifold::Target
         std::string ReadCString(std::uint64_t address, std::size_t limit = 512) const;
 
     private:
+        void Wake() const;
+
         std::shared_ptr<Process> m_process;
+        void* m_wake = nullptr;          // local event; the worker waits on its duplicate
         std::uint64_t m_code = 0;      // executable page: worker + collector
         std::uint64_t m_control = 0;    // control block for the worker
         std::uint64_t m_data = 0;       // scratch arena
         std::uint64_t m_dataUsed = 0;
         std::uint64_t m_collector = 0;
         std::uint64_t m_thread = 0;     // target thread handle (as a value)
+        std::chrono::milliseconds m_timeout{ 5000 };
     };
 }

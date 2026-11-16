@@ -3,6 +3,7 @@
 #include "App/Settings.h"
 #include "Asm/AutoAssembler.h"
 #include "Core/Errors.h"
+#include "Core/JobQueue.h"
 #include "Core/RuntimeLog.h"
 #include "Debug/Debugger.h"
 #include "Debug/Trace.h"
@@ -86,6 +87,7 @@ namespace Manifold
         Engine& operator=(const Engine&) = delete;
 
         Settings& Options() { return m_settings; }
+        JobQueue& Jobs() { return m_jobs; }
         double Now() const;
 
         Status OpenProcess(std::uint32_t id);
@@ -147,6 +149,9 @@ namespace Manifold
         std::vector<std::string> DeactivateAll();
         void RequestDeactivateAll();
         void RefreshValues(bool force);
+        void RefreshRecord(int id);
+        bool NeedsValue(const Table::MemoryRecord& record) const;
+        void SetVisibleRecords(std::vector<int> ids);
 
         Asm::AaResult AutoAssemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record = nullptr);
         Asm::AaResult AutoAssemble(std::string_view script, bool checkOnly);
@@ -174,6 +179,7 @@ namespace Manifold
         bool MemoryViewerVisible = false;
 
     private:
+        void RefreshRecord(int id, double now);
         void UpdateFreezes();
         void UpdateHotkeys();
         void UpdateAutoAttach();
@@ -249,5 +255,8 @@ namespace Manifold
         int m_tableTask = 0;
         bool m_tableTaskStopped = false;
         double m_tableTaskStarted = 0.0;
+        std::vector<int> m_visibleRecords;
+        bool m_visibleKnown = false;
+        JobQueue m_jobs;
     };
 }

@@ -6,6 +6,7 @@
 #include "imgui.h"
 
 #include <functional>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -68,9 +69,66 @@ namespace Manifold::UI
     bool FocusRequested();
     void RequestWindowRaise(const char* title);
     void RaisePlatformWindow(bool requested);
-    bool BeginModal(const char* id, const char* icon, const char* title, ImVec2 size, bool* open = nullptr, ImGuiID viewport = 0);
+    bool BeginModal(const char* id, const char* icon, const char* title, ImVec2 size, bool* open = nullptr, ImGuiID viewport = 0, ImGuiWindowFlags flags = 0);
     ImGuiID CallerViewport();
     void EndModal();
+
+    enum class DialogChoice
+    {
+        None,
+        Ok,
+        Cancel
+    };
+
+    class Dialog
+    {
+    public:
+        Dialog(std::string id, std::string icon, std::string title, ImVec2 size = ImVec2(0.0f, 0.0f));
+
+        void Open(ImGuiID viewport = 0);
+        bool Begin();
+        void End();
+        bool Appearing() const { return m_appearing; }
+        void SetTitle(std::string title) { m_title = std::move(title); }
+        DialogChoice Buttons(const char* ok = "OK", bool okEnabled = true, bool enterConfirms = true, const char* cancel = "Cancel");
+        void Close();
+
+    private:
+        std::string m_id;
+        std::string m_icon;
+        std::string m_title;
+        ImVec2 m_size;
+        bool m_pending = false;
+        bool m_appearing = false;
+        ImGuiID m_viewport = 0;
+    };
+
+    struct DataColumn
+    {
+        const char* Name = "";
+        float Weight = 1.0f;
+        float Fixed = 0.0f;
+    };
+
+    bool BeginDataTable(const char* id, std::initializer_list<DataColumn> columns, ImVec2 size = ImVec2(0.0f, 0.0f), ImGuiTableFlags extra = 0);
+
+    template <class Row>
+    void ClippedRows(int count, Row&& row)
+    {
+        ImGuiListClipper clipper;
+        clipper.Begin(count);
+        while (clipper.Step())
+        {
+            for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; ++index)
+            {
+                ImGui::PushID(index);
+                row(index);
+                ImGui::PopID();
+            }
+        }
+    }
+
+    bool TaskStatus(std::string_view text, bool cancellable = true);
 
     ImVec4 LevelColor(LogLevel level);
     const char* LevelIcon(LogLevel level);

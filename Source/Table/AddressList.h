@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace Manifold::Table
@@ -112,6 +113,7 @@ namespace Manifold::Table
         std::vector<std::uint8_t> LastBytes;
         bool ValueChanged = false;
         double ChangedAt = -10.0;
+        double RefreshedAt = -1.0;
         Asm::AaMemory ScriptMemory;
         std::string LastError;
 
@@ -190,7 +192,14 @@ namespace Manifold::Table
         bool RemoveFile(std::string_view name);
 
     private:
+        void IndexTree(MemoryRecord& record);
+        void ForgetTree(const MemoryRecord& record);
+        void IndexDescriptions();
+
         std::vector<std::unique_ptr<MemoryRecord>> m_roots;
+        std::unordered_map<int, MemoryRecord*> m_byId;
+        std::unordered_map<std::string, MemoryRecord*> m_byDescription;
+        std::uint64_t m_describedAt = 0;
         std::vector<int> m_selection;
         int m_nextId = 0;
         std::uint64_t m_generation = 1;

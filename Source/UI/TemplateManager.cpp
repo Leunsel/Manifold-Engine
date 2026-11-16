@@ -158,7 +158,11 @@ namespace Manifold::UI
         }
     }
 
-    TemplateManager::TemplateManager(Workspace& workspace) : m_workspace(workspace), m_engine(workspace.Core())
+    TemplateManager::TemplateManager(Workspace& workspace) : m_workspace(workspace), m_engine(workspace.Core()),
+        m_unsavedDialog("templateunsaved", ICON_FA_SAVE, "Unsaved changes"),
+        m_deleteDialog("templatedelete", ICON_FA_TRASH, "Delete template"),
+        m_reportDialog("templatereport", ICON_FA_CHECK_DOUBLE, "Template check", ImVec2(720.0f, 460.0f)),
+        m_messageDialog("templatemessage", ICON_FA_SHAPES, "Templates")
     {
     }
 
@@ -175,7 +179,7 @@ namespace Manifold::UI
     void TemplateManager::Message(std::string text)
     {
         m_message = std::move(text);
-        m_openMessage = true;
+        m_messageDialog.Open();
     }
 
     void TemplateManager::Reload()
@@ -225,7 +229,7 @@ namespace Manifold::UI
         m_pendingScript = script;
         if (Dirty())
         {
-            m_askUnsaved = true;
+            m_unsavedDialog.Open();
             return;
         }
         if (m_pendingNew)
@@ -359,14 +363,14 @@ namespace Manifold::UI
         ImGui::SameLine();
         ImGui::BeginDisabled(current && current->BuiltIn);
         if (IconButton(ICON_FA_TRASH, "Move to the recycle bin", true))
-            m_askDelete = true;
+            m_deleteDialog.Open();
         ImGui::EndDisabled();
         ImGui::EndDisabled();
         ImGui::SameLine();
         if (IconButton(ICON_FA_CHECK_DOUBLE, "Check all templates"))
         {
             m_report = Templates::CheckAll(m_engine.Lua().State(), Library());
-            m_openReport = true;
+            m_reportDialog.Open();
         }
         ImGui::SameLine();
         if (IconButton(ICON_FA_FOLDER_OPEN, "Open the template folder"))
@@ -1046,12 +1050,7 @@ namespace Manifold::UI
 
     void TemplateManager::Popups()
     {
-        if (m_askUnsaved)
-        {
-            ImGui::OpenPopup("Unsaved Changes###templateunsaved");
-            m_askUnsaved = false;
-        }
-        if (ImGui::BeginPopupModal("Unsaved Changes###templateunsaved", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        if (m_unsavedDialog.Begin())
         {
             ImGui::Text("Save the changes to \"%s\"?", m_draft ? m_draft->Form.Caption.c_str() : "");
             ImGui::Spacing();
@@ -1062,11 +1061,11 @@ namespace Manifold::UI
             if (ImGui::Button("Discard", ImVec2(Px(90.0f), 0.0f)))
                 choice = 2;
             ImGui::SameLine();
-            if (ImGui::Button("Cancel", ImVec2(Px(90.0f), 0.0f)))
+            if (ImGui::Button("Cancel", ImVec2(Px(90.0f), 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
                 choice = 3;
             if (choice)
-                ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
+                m_unsavedDialog.Close();
+            m_unsavedDialog.End();
             if (choice == 1 && !Save())
                 choice = 3;
             if (choice == 1 || choice == 2)
@@ -1090,16 +1089,10 @@ namespace Manifold::UI
             }
         }
 
-        if (m_askDelete)
-        {
-            ImGui::OpenPopup("Delete Template###templatedelete");
-            m_askDelete = false;
-        }
-        if (ImGui::BeginPopupModal("Delete Template###templatedelete", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        if (m_deleteDialog.Begin())
         {
             ImGui::Text("Move \"%s\" to the recycle bin?", m_draft ? m_draft->Form.Caption.c_str() : "");
-            ImGui::Spacing();
-            if (AccentButton("Delete", ImVec2(Px(90.0f), 0.0f)))
+            if (m_deleteDialog.Buttons("Delete") == DialogChoice::Ok)
             {
                 if (m_draft)
                 {
@@ -1112,27 +1105,18 @@ namespace Manifold::UI
                     m_draft.reset();
                     Reload();
                 }
-                ImGui::CloseCurrentPopup();
+                m_deleteDialog.Close();
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Cancel", ImVec2(Px(90.0f), 0.0f)))
-                ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
+            m_deleteDialog.End();
         }
 
-        if (m_openReport)
-        {
-            ImGui::OpenPopup("Template Check###templatereport");
-            m_openReport = false;
-        }
-        ImGui::SetNextWindowSize(ImVec2(Px(720.0f), Px(460.0f)), ImGuiCond_Appearing);
-        if (ImGui::BeginPopupModal("Template Check###templatereport", nullptr))
+        if (m_reportDialog.Begin())
         {
             int failing = 0;
             for (const Templates::CheckEntry& entry : m_report)
                 failing += entry.Errors.empty() ? 0 : 1;
             ImGui::Text("%d templates, %d with errors", static_cast<int>(m_report.size()), failing);
-            const float footer = ImGui::GetFrameHeightWithSpacing() + Px(4.0f);
+            const float footer = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y + Px(4.0f);
             ImGui::BeginChild("##report", ImVec2(0.0f, -footer), ImGuiChildFlags_Borders);
             for (const Templates::CheckEntry& entry : m_report)
             {
@@ -1150,25 +1134,19 @@ namespace Manifold::UI
             if (std::all_of(m_report.begin(), m_report.end(), [](const Templates::CheckEntry& entry) { return entry.Errors.empty() && entry.Warnings.empty(); }))
                 Muted("No problems found.");
             ImGui::EndChild();
-            if (ImGui::Button("Close", ImVec2(Px(90.0f), 0.0f)))
-                ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
+            if (m_reportDialog.Buttons("Close", true, true, nullptr) == DialogChoice::Ok)
+                m_reportDialog.Close();
+            m_reportDialog.End();
         }
 
-        if (m_openMessage)
-        {
-            ImGui::OpenPopup("Templates###templatemessage");
-            m_openMessage = false;
-        }
-        if (ImGui::BeginPopupModal("Templates###templatemessage", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        if (m_messageDialog.Begin())
         {
             ImGui::PushTextWrapPos(Px(560.0f));
             ImGui::TextUnformatted(m_message.c_str());
             ImGui::PopTextWrapPos();
-            ImGui::Spacing();
-            if (ImGui::Button("OK", ImVec2(Px(90.0f), 0.0f)))
-                ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
+            if (m_messageDialog.Buttons("OK", true, true, nullptr) == DialogChoice::Ok)
+                m_messageDialog.Close();
+            m_messageDialog.End();
         }
     }
 
@@ -1190,7 +1168,7 @@ namespace Manifold::UI
         {
             m_open = true;
             m_closing = true;
-            m_askUnsaved = true;
+            m_unsavedDialog.Open();
         }
         ImGui::BeginChild("##side", ImVec2(Px(280.0f), 0.0f), ImGuiChildFlags_Borders);
         Toolbar();

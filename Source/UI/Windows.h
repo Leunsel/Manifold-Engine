@@ -6,8 +6,11 @@
 #include "Disasm/CodeDissect.h"
 #include "Target/PatchScan.h"
 #include "Lua/LuaEngine.h"
+#include "UI/AddressActions.h"
+#include "UI/BackgroundTask.h"
 #include "UI/CodeEditor.h"
 #include "UI/Templates.h"
+#include "UI/Widgets.h"
 #include "UI/Workspace.h"
 
 #include <array>
@@ -24,6 +27,32 @@
 
 namespace Manifold::UI
 {
+    class ToolWindowBase : public ToolWindow
+    {
+    public:
+        bool Closed() const override { return !m_open && !Busy(); }
+        void Show() { m_open = true; m_bringToFront = true; }
+
+    protected:
+        virtual bool Busy() const { return false; }
+
+        bool BeginWindow(const char* title, ImVec2 size, ImGuiWindowFlags flags = 0, ImVec2 minimum = ImVec2(260.0f, 160.0f))
+        {
+            if (m_bringToFront)
+            {
+                ImGui::SetNextWindowFocus();
+                m_bringToFront = false;
+            }
+            if (BeginToolWindow(title, &m_open, size, flags, minimum))
+                return true;
+            EndToolWindow();
+            return false;
+        }
+
+        bool m_open = true;
+        bool m_bringToFront = true;
+    };
+
     class MainWindow
     {
     public:
@@ -367,6 +396,7 @@ namespace Manifold::UI
         bool m_injectOpen = false;
         std::string m_injectPath;
         std::map<std::uint64_t, std::vector<std::uint8_t>> m_nopped;
+        std::weak_ptr<Target::Process> m_noppedProcess;
 
         ImGuiID m_viewport = 0;
         bool m_commentOpen = false;
@@ -386,7 +416,7 @@ namespace Manifold::UI
     private:
         struct Column
         {
-            std::string Address;
+            AddressField Address;
             std::uint64_t Value = 0;
             bool Valid = false;
         };
@@ -430,7 +460,9 @@ namespace Manifold::UI
         void DrawRow(int index, int pointerSize);
         void FieldMenu(Table::StructDefinition& definition, Table::StructField& field, const std::vector<std::uint64_t>& addresses, const std::string& path);
         Table::StructDefinition& Guess(const std::string& name, std::uint64_t address, int size);
-        Table::StructDefinition& ChildFor(const Table::StructDefinition& parent, const Table::StructField& field, std::uint64_t target);
+        void Fill(Table::StructDefinition* definition, std::uint64_t address, int size, bool mono);
+        void LookupName(std::uint64_t address, bool containing, std::function<void(std::optional<Lua::StructureLookup>)> done);
+        void ExpandPointer(Table::StructDefinition& parent, Table::StructField& field, std::uint64_t target, const std::string& path);
         void PrepareNew(std::uint64_t address);
         std::string FieldText(const Table::StructField& field, std::span<const std::uint8_t> bytes, std::uint64_t address, int pointerSize);
         Status WriteBits(const Table::StructField& field, std::uint64_t address, const std::string& text);
@@ -452,6 +484,12 @@ namespace Manifold::UI
         std::string m_newName;
         std::uint64_t m_newFrom = 0;
         std::uint64_t m_newStart = 0;
+        std::shared_ptr<int> m_alive = std::make_shared<int>(0);
+        std::uint64_t m_lookupSerial = 0;
+        bool m_lookupRunning = false;
+        std::string m_suggestedName;
+        std::set<const Table::StructDefinition*> m_filling;
+        std::set<std::string> m_childLookups;
         bool m_renameOpen = false;
         std::string m_renameText;
         std::string m_editPath;
@@ -497,6 +535,8 @@ namespace Manifold::UI
         CodeEditorState m_editor;
         std::string m_result;
         bool m_resultOk = true;
+        int m_task = 0;
+        std::shared_ptr<int> m_alive = std::make_shared<int>(0);
         TemplateRunner m_templates;
     };
 
@@ -532,6 +572,7 @@ namespace Manifold::UI
 
     private:
         void Execute();
+        void MarkError(const Status& status);
         void FunctionList();
         void RunCommand(Command command);
 
@@ -539,6 +580,8 @@ namespace Manifold::UI
         Engine& m_engine;
         bool m_open = true;
         bool m_bringToFront = true;
+        int m_task = 0;
+        std::shared_ptr<int> m_alive = std::make_shared<int>(0);
         std::string m_text;
         std::filesystem::path m_path;
         CodeEditorState m_editor;
@@ -761,7 +804,7 @@ namespace Manifold::UI
     std::vector<Target::ModuleInfo> ScopeModules(Engine& engine, const ModuleScope& scope);
     std::string ScopeName(Engine& engine, const ModuleScope& scope);
 
-    class CodeDissectWindow : public ToolWindow
+    class CodeDissectWindow : public ToolWindowBase
     {
     public:
         enum Tab
@@ -774,7 +817,7 @@ namespace Manifold::UI
         explicit CodeDissectWindow(Workspace& workspace);
         ~CodeDissectWindow() override;
         void Draw() override;
-        bool Closed() const override { return !m_open && !m_task.valid(); }
+        bool Busy() const override { return m_task.Running(); }
         void Show(int tab, std::uint64_t address);
 
     private:
@@ -787,8 +830,6 @@ namespace Manifold::UI
         void ReferenceList(const Disasm::DissectResult& result);
 
         Workspace& m_workspace;
-        bool m_open = true;
-        bool m_bringToFront = true;
         int m_tab = Strings;
         int m_wantTab = -1;
         ModuleScope m_scope;
@@ -799,20 +840,18 @@ namespace Manifold::UI
         std::vector<std::size_t> m_byCalls;
         std::vector<std::size_t> m_visible;
         std::string m_visibleFilter;
-        const Disasm::DissectResult* m_visibleFor = nullptr;
-        std::unique_ptr<Disasm::DissectProgress> m_progress;
-        std::future<std::shared_ptr<Disasm::DissectResult>> m_task;
+        std::shared_ptr<const Disasm::DissectResult> m_visibleFor;
+        BackgroundTask<std::shared_ptr<Disasm::DissectResult>, Disasm::DissectProgress> m_task;
         std::uint64_t m_generation = 0;
     };
 
-    class AsmSearchWindow : public ToolWindow
+    class AsmSearchWindow : public ToolWindowBase
     {
     public:
         explicit AsmSearchWindow(Workspace& workspace);
         ~AsmSearchWindow() override;
         void Draw() override;
-        bool Closed() const override { return !m_open && !m_task.valid(); }
-        void Show() { m_open = true; m_bringToFront = true; }
+        bool Busy() const override { return m_task.Running(); }
 
     private:
         void Start();
@@ -820,28 +859,24 @@ namespace Manifold::UI
         void Results();
 
         Workspace& m_workspace;
-        bool m_open = true;
-        bool m_bringToFront = true;
         bool m_focus = true;
         ModuleScope m_scope;
         std::string m_pattern;
         std::string m_searched;
         std::shared_ptr<Target::Process> m_process;
-        std::unique_ptr<Disasm::AsmSearchProgress> m_progress;
-        std::future<Disasm::AsmSearchResult> m_task;
+        BackgroundTask<Disasm::AsmSearchResult, Disasm::AsmSearchProgress> m_task;
         std::optional<Disasm::AsmSearchResult> m_result;
     };
 
     std::optional<Scan::Pattern> BytePattern(std::string_view text);
 
-    class ByteSearchWindow : public ToolWindow
+    class ByteSearchWindow : public ToolWindowBase
     {
     public:
         explicit ByteSearchWindow(Workspace& workspace);
         ~ByteSearchWindow() override;
         void Draw() override;
-        bool Closed() const override { return !m_open && !m_task.valid(); }
-        void Show() { m_open = true; m_bringToFront = true; }
+        bool Busy() const override { return m_task.Running(); }
         void Search(const std::string& pattern);
 
     private:
@@ -856,6 +891,7 @@ namespace Manifold::UI
             std::vector<Hit> Hits;
             std::size_t Length = 0;
             bool Truncated = false;
+            bool Cancelled = false;
             double Seconds = 0.0;
         };
 
@@ -866,8 +902,6 @@ namespace Manifold::UI
         void Reveal(int row, bool raise);
 
         Workspace& m_workspace;
-        bool m_open = true;
-        bool m_bringToFront = true;
         bool m_focus = true;
         ModuleScope m_scope;
         std::string m_pattern;
@@ -875,20 +909,19 @@ namespace Manifold::UI
         std::string m_searched;
         std::string m_searchedPattern;
         std::shared_ptr<Target::Process> m_process;
-        std::future<Outcome> m_task;
+        BackgroundTask<Outcome, Scan::PatternProgress> m_task;
         std::optional<Outcome> m_result;
         int m_selected = -1;
         bool m_scrollToSelected = false;
     };
 
-    class PatchScanWindow : public ToolWindow
+    class PatchScanWindow : public ToolWindowBase
     {
     public:
         explicit PatchScanWindow(Workspace& workspace);
         ~PatchScanWindow() override;
         void Draw() override;
-        bool Closed() const override { return !m_open && !m_task.valid(); }
-        void Show() { m_open = true; m_bringToFront = true; }
+        bool Busy() const override { return m_task.Running(); }
 
     private:
         void Start();
@@ -899,16 +932,12 @@ namespace Manifold::UI
         std::vector<Disasm::Instruction> Listing(std::uint64_t address, std::span<const std::uint8_t> bytes, std::uint64_t size, int limit) const;
 
         Workspace& m_workspace;
-        bool m_open = true;
-        bool m_bringToFront = true;
         bool m_windowsModules = false;
         bool m_allNotes = false;
         std::string m_filter;
         std::shared_ptr<Target::Process> m_scanned;
-        std::unique_ptr<Target::PatchScanProgress> m_progress;
-        std::future<Target::PatchScanResult> m_task;
+        BackgroundTask<Target::PatchScanResult, Target::PatchScanProgress> m_task;
         std::optional<Target::PatchScanResult> m_result;
-        double m_started = 0.0;
         double m_seconds = 0.0;
         int m_restore = -1;
     };

@@ -3078,7 +3078,7 @@ do
   p.icon = new("icon", application)
   p.exename = ""
 end
-Impl.application = { processmessages = noop, terminate = noop, minimize = noop, restore = noop, bringtofront = noop }
+Impl.application = { processmessages = function() if processMessages then return processMessages() end end, terminate = noop, minimize = noop, restore = noop, bringtofront = noop }
 getApplication = getApplication or function() return application end
 
 local luaEngineForm
@@ -3119,12 +3119,12 @@ createLuaEngine = createLuaEngine or function()
 end
 
 local memoryView
-getMemoryViewForm = getMemoryViewForm or function()
+)MLUA"),
+            std::string_view(R"MLUA(getMemoryViewForm = getMemoryViewForm or function()
   if memoryView then
     return memoryView
   end
-)MLUA"),
-            std::string_view(R"MLUA(  memoryView = new("memoryview")
+  memoryView = new("memoryview")
   local p = D[memoryView].props
   p.name = "MemoryBrowser"
   p.caption = "Memory Viewer"

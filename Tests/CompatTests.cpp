@@ -209,6 +209,131 @@ namespace Manifold::Tests
             CHECK_MSG(!engine.Lua().LookupStructureName(0x1234), "structure name lookup after unregister");
         }
 
+        void LaterCallbacks(Engine& engine)
+        {
+            LuaCheck(engine, "slow structure callbacks", R"LUA(
+                local function busy(milliseconds)
+                    local stop = getTickCount() + milliseconds
+                    while getTickCount() < stop do end
+                end
+                laterLookupId = registerStructureNameLookup(function(address)
+                    if address ~= 0x4321 then return nil end
+                    busy(150)
+                    return "Slow", 0x4300
+                end)
+                laterOverrideId = registerStructureDissectOverride(function(structure, base)
+                    if base ~= 0x4300 then return nil end
+                    busy(150)
+                    local field = structure.addElement()
+                    field.Offset, field.Name, field.Vartype = 4, "Late", vtDword
+                    return true
+                end)
+                return "ok")LUA");
+            engine.SetAsync(true);
+            std::optional<Lua::StructureLookup> named;
+            bool nameDone = false;
+            engine.Lua().LookupStructureNameLater(0x4321, [&](std::optional<Lua::StructureLookup> found) { named = found; nameDone = true; });
+            Table::StructDefinition& later = engine.Structures().Add("Later test");
+            bool handled = false;
+            bool dissectDone = false;
+            engine.Lua().DissectStructureLater(&later, 0x4300, [&](bool result) { handled = result; dissectDone = true; });
+            double longest = 0.0;
+            const double started = engine.Now();
+            while ((!nameDone || !dissectDone) && engine.Now() - started < 5.0)
+            {
+                const double before = engine.Now();
+                engine.Tick();
+                longest = std::max(longest, engine.Now() - before);
+            }
+            CHECK_MSG(nameDone && named && named->Name == "Slow" && named->Address == 0x4300, "a slow name lookup finishes in the background");
+            CHECK_MSG(dissectDone && handled && later.Fields.size() == 1 && later.Fields[0].Name == "Late", "a slow dissect override finishes in the background");
+            CHECK_MSG(longest < 0.1, "one frame took " + std::to_string(longest) + " s while the lookups ran");
+            engine.Structures().Remove(later);
+            engine.SetAsync(false);
+            LuaCheck(engine, "unregister slow structure callbacks", R"LUA(
+                unregisterStructureNameLookup(laterLookupId)
+                unregisterStructureDissectOverride(laterOverrideId)
+                return "ok")LUA");
+
+            bool none = false;
+            engine.Lua().LookupStructureNameLater(0x4321, [&](std::optional<Lua::StructureLookup> found) { none = !found; });
+            CHECK_MSG(none, "without lookups the answer comes at once");
+        }
+
+        void VisibleRefresh(Engine& engine)
+        {
+            Table::AddressList& list = engine.Table();
+            Table::MemoryRecord& shown = list.AddValue("Shown", "1000", Scan::ValueType::FourBytes);
+            Table::MemoryRecord& hidden = list.AddValue("Hidden", "2000", Scan::ValueType::FourBytes);
+            const int shownId = shown.Id;
+            const int hiddenId = hidden.Id;
+            engine.SetVisibleRecords({ shownId });
+            engine.RefreshValues(true);
+            CHECK_MSG(shown.RefreshedAt > 0.0 && shown.ValueText == "??", "a visible record is refreshed");
+            CHECK_MSG(hidden.RefreshedAt < 0.0, "a record that is not shown is left alone");
+            CHECK(engine.NeedsValue(hidden) && !engine.NeedsValue(shown));
+            engine.RefreshRecord(hiddenId);
+            CHECK(!engine.NeedsValue(hidden) && hidden.ValueText == "??");
+            list.Remove(*list.FindById(shownId));
+            list.Remove(*list.FindById(hiddenId));
+        }
+
+        void SymbolIndex(Engine& engine)
+        {
+            Target::Symbols& symbols = engine.Symbols();
+            CHECK(symbols.Register("Beta", 0x7000, "test").Ok());
+            CHECK(symbols.Register("Alpha", 0x7000, "test").Ok());
+            CHECK_EQ(symbols.Describe(0x7000), std::string("Alpha"));
+            CHECK(symbols.ExactName(0x7000) == std::optional<std::string>("Alpha"));
+            const auto inside = symbols.Containing(0x7010, 0x100);
+            CHECK(inside && inside->first == 0x7000 && inside->second == "Alpha");
+            CHECK(!symbols.Containing(0x7200, 0x100));
+            CHECK(!symbols.Containing(0x6FF0, 0x100));
+            CHECK(symbols.Unregister("alpha"));
+            CHECK_EQ(symbols.Describe(0x7000), std::string("Beta"));
+            CHECK(symbols.Register("Beta", 0x7100, "test", true).Ok());
+            CHECK_EQ(symbols.Describe(0x7100), std::string("Beta"));
+            CHECK(symbols.Describe(0x7000) != "Beta");
+            CHECK(symbols.Register("Gamma", 0x7200, "other").Ok());
+            symbols.UnregisterOwner("test");
+            CHECK(symbols.Describe(0x7100) != "Beta");
+            CHECK_EQ(symbols.Describe(0x7200), std::string("Gamma"));
+            CHECK(symbols.Unregister("Gamma"));
+            CHECK(!symbols.ExactName(0x7200));
+        }
+
+        void CallbackLimit(Engine& engine)
+        {
+            const int saved = engine.Options().ScriptCallbackLimitMs;
+            engine.Options().ScriptCallbackLimitMs = 250;
+            LuaCheck(engine, "endless timer", R"LUA(
+                endlessTimer = createTimer(nil, false)
+                endlessTimer.Interval = 1
+                endlessTimer.OnTimer = function()
+                    while true do
+                        pcall(function() while true do end end)
+                    end
+                end
+                endlessTimer.Enabled = true
+                return "ok")LUA");
+            const double started = engine.Now();
+            for (int i = 0; i < 6; ++i)
+            {
+                engine.Lua().Tick(engine.Now());
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            const double spent = engine.Now() - started;
+            CHECK_MSG(spent < 2.0, "the endless timer held the frame for " + std::to_string(spent) + " s");
+            LuaCheck(engine, "endless timer is off", R"LUA(
+                if endlessTimer.Enabled then return "still enabled" end
+                endlessTimer.destroy()
+                local value = 0
+                for i = 1, 1000000 do value = value + i end
+                if value ~= 500000500000 then return "ordinary code after the limit" end
+                return "ok")LUA");
+            engine.Options().ScriptCallbackLimitMs = saved;
+        }
+
         void SymbolCallbacks(Engine& engine)
         {
             LuaCheck(engine, "symbol lookup callbacks", R"LUA(
@@ -695,6 +820,33 @@ namespace Manifold::Tests
             CHECK_EQ(lua.OutputDropped(), static_cast<std::uint64_t>(0));
         }
 
+        void WaitingLoops(Engine& engine)
+        {
+            Lua::LuaEngine& lua = engine.Lua();
+            std::string result;
+            const Status pumped = lua.RunWithResult(
+                "local done = false\n"
+                "local t = createTimer(nil, false)\n"
+                "t.Interval = 1\n"
+                "t.OnTimer = function(sender) done = true sender.destroy() end\n"
+                "t.Enabled = true\n"
+                "local started = getTickCount()\n"
+                "repeat processMessages() until done or getTickCount() - started > 3000\n"
+                "local viaApplication = false\n"
+                "local u = createTimer(nil, false)\n"
+                "u.Interval = 1\n"
+                "u.OnTimer = function(sender) viaApplication = true sender.destroy() end\n"
+                "u.Enabled = true\n"
+                "started = getTickCount()\n"
+                "repeat getApplication().processMessages() until viaApplication or getTickCount() - started > 3000\n"
+                "started = getTickCount()\n"
+                "sleep(60)\n"
+                "return tostring(done) .. ' ' .. tostring(viaApplication) .. ' ' .. tostring(getTickCount() - started >= 45)",
+                "waiting", result);
+            CHECK_MSG(pumped.Ok(), pumped.Text);
+            CHECK_EQ(result, std::string("true true true"));
+        }
+
         bool HasCompletion(const std::vector<Lua::LuaCompletion>& list, const std::string& name, const std::string& signature = {})
         {
             return std::any_of(list.begin(), list.end(), [&](const Lua::LuaCompletion& item) { return item.Name == name && (signature.empty() || item.Signature == signature); });
@@ -787,6 +939,7 @@ namespace Manifold::Tests
         Engine engine(settings);
         engine.Lua().Run("__manifoldHeadless = true", "headless");
         OutputBuffer(engine);
+        WaitingLoops(engine);
         CeHabits(engine);
         Assist(engine);
         Extensions(engine);
@@ -795,6 +948,10 @@ namespace Manifold::Tests
         Forms(engine);
         CustomTypes(engine);
         StructureCallbacks(engine);
+        LaterCallbacks(engine);
+        CallbackLimit(engine);
+        VisibleRefresh(engine);
+        SymbolIndex(engine);
         SymbolCallbacks(engine);
         Commands(engine);
         WithoutProcess(engine);

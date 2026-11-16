@@ -1667,6 +1667,18 @@ namespace Manifold::Lua
             return 0;
         }
 
+        int ProcessMessages(lua_State* state)
+        {
+            LuaEngine& lua = EngineOf(state);
+            if (lua_isyieldable(state) && lua.IsCooperative(state))
+            {
+                lua_pushinteger(state, 0);
+                return lua_yield(state, 1);
+            }
+            lua.ProcessMessages();
+            return 0;
+        }
+
         int EnableWindowsSymbols(lua_State* state)
         {
             const bool windows = lua_gettop(state) < 1 || lua_toboolean(state, 1) != 0;
@@ -3315,7 +3327,7 @@ namespace Manifold::Lua
         const luaL_Reg functions[] = {
             { "registerLuaFunctionHighlight", &Nothing },
             { "unregisterLuaFunctionHighlight", &Nothing },
-            { "processMessages", &Nothing },
+            { "processMessages", &ProcessMessages },
             { "checkSynchronize", &Nothing },
             { "getAddress", &GetAddressCompat },
             { "getAddressFromName", &GetAddressCompat },

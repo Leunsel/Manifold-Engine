@@ -5,6 +5,7 @@
 #include "Generated/IconsFontAwesome5.h"
 #include "Scan/Scanner.h"
 #include "Target/Process.h"
+#include "UI/AddressActions.h"
 #include "UI/Fonts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
@@ -19,16 +20,6 @@ namespace Manifold::UI
     namespace
     {
         constexpr std::size_t kMaxHits = 100000;
-
-        std::string Where(Engine& engine, std::uint64_t address)
-        {
-            if (engine.HasProcess())
-            {
-                if (const auto module = engine.Process()->ModuleAt(address))
-                    return module->Name + "+" + Hex(address - module->Base);
-            }
-            return Hex(address);
-        }
     }
 
     std::optional<Scan::Pattern> BytePattern(std::string_view input)
@@ -57,11 +48,7 @@ namespace Manifold::UI
         m_scope.Kind = kScopeAllMemory;
     }
 
-    ByteSearchWindow::~ByteSearchWindow()
-    {
-        if (m_task.valid())
-            m_task.wait();
-    }
+    ByteSearchWindow::~ByteSearchWindow() = default;
 
     void ByteSearchWindow::Search(const std::string& pattern)
     {
@@ -74,7 +61,7 @@ namespace Manifold::UI
     void ByteSearchWindow::Start()
     {
         Engine& engine = m_workspace.Core();
-        if (!engine.HasProcess() || m_task.valid())
+        if (!engine.HasProcess() || m_task.Running())
             return;
         const auto pattern = BytePattern(m_pattern);
         if (!pattern)
@@ -103,7 +90,7 @@ namespace Manifold::UI
         m_result.reset();
         m_selected = -1;
         std::shared_ptr<Target::Process> process = m_process;
-        m_task = std::async(std::launch::async, [process, pattern = *pattern, ranges = std::move(ranges), filter]()
+        m_task.Start([process, pattern = *pattern, ranges = std::move(ranges), filter](Scan::PatternProgress& progress)
             {
                 const auto started = std::chrono::steady_clock::now();
                 Outcome outcome;
@@ -111,11 +98,12 @@ namespace Manifold::UI
                 std::vector<std::uint64_t> addresses;
                 for (const auto& [start, stop] : ranges)
                 {
-                    const auto hits = Scan::FindPattern(*process, pattern, start, stop, filter, kMaxHits + 1 - addresses.size());
+                    const auto hits = Scan::FindPattern(*process, pattern, start, stop, filter, kMaxHits + 1 - addresses.size(), &progress);
                     addresses.insert(addresses.end(), hits.begin(), hits.end());
-                    if (addresses.size() > kMaxHits)
+                    if (addresses.size() > kMaxHits || progress.Cancel)
                         break;
                 }
+                outcome.Cancelled = progress.Cancel;
                 std::sort(addresses.begin(), addresses.end());
                 addresses.erase(std::unique(addresses.begin(), addresses.end()), addresses.end());
                 if (addresses.size() > kMaxHits)
@@ -140,10 +128,11 @@ namespace Manifold::UI
 
     void ByteSearchWindow::Collect()
     {
-        if (!m_task.valid() || m_task.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        std::optional<Outcome> outcome = m_task.Collect();
+        if (!outcome)
             return;
-        m_result = m_task.get();
-        LOG_INFO("Scan", Grouped(m_result->Hits.size()) + " matches for " + m_searchedPattern + " in " + m_searched);
+        m_result = std::move(outcome);
+        LOG_INFO("Scan", Grouped(m_result->Hits.size()) + " matches for " + m_searchedPattern + " in " + m_searched + (m_result->Cancelled ? " (cancelled)" : ""));
         if (m_result->Hits.size() == 1)
         {
             m_selected = 0;
@@ -198,14 +187,8 @@ namespace Manifold::UI
             return;
         }
         Keys();
-        const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable;
-        if (!ImGui::BeginTable("##bytehits", 3, flags))
+        if (!BeginDataTable("##bytehits", { { "Address", 1.2f }, { "Bytes", 1.3f }, { "Code", 1.5f } }))
             return;
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 1.2f);
-        ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthStretch, 1.3f);
-        ImGui::TableSetupColumn("Code", ImGuiTableColumnFlags_WidthStretch, 1.5f);
-        ImGui::TableHeadersRow();
         const std::size_t shown = std::min<std::size_t>(m_result->Length, 16);
         std::vector<std::uint8_t> bytes(shown);
         ImGuiListClipper clipper;
@@ -223,7 +206,7 @@ namespace Manifold::UI
                 ImGui::PushID(row);
                 PushMono();
                 ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::AddressText);
-                if (ImGui::Selectable(Where(engine, hit.Address).c_str(), row == m_selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
+                if (ImGui::Selectable(AddressText(engine, hit.Address).c_str(), row == m_selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
                 {
                     m_selected = row;
                     Reveal(row, ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
@@ -240,13 +223,13 @@ namespace Manifold::UI
                     m_selected = row;
                     if (ImGui::MenuItem(ICON_FA_CODE "  Show in the memory viewer"))
                         Reveal(row, true);
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
-                        ImGui::SetClipboardText(Where(engine, hit.Address).c_str());
+                    ImGui::Separator();
+                    AddressMenuItems(m_workspace, hit.Address, hit.Code ? (CopyAddress | CopyModuleOffset) : (DissectHere | WatchAccesses | WatchWrites | AddToList | CopyAddress | CopyModuleOffset));
                     if (ImGui::MenuItem(ICON_FA_LIST "  Copy all addresses"))
                     {
                         std::string text;
                         for (const Hit& each : m_result->Hits)
-                            text += Where(engine, each.Address) + "\r\n";
+                            text += engine.Symbols().ModuleOffset(each.Address) + "\r\n";
                         ImGui::SetClipboardText(text.c_str());
                     }
                     ImGui::EndPopup();
@@ -280,18 +263,10 @@ namespace Manifold::UI
     void ByteSearchWindow::Draw()
     {
         Collect();
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_SEARCH "  Find bytes###bytesearch", &m_open, ImVec2(780.0f, 540.0f), 0, ImVec2(480.0f, 300.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_SEARCH "  Find bytes###bytesearch", ImVec2(780.0f, 540.0f), 0, ImVec2(480.0f, 300.0f)))
             return;
-        }
         Engine& engine = m_workspace.Core();
-        if (!engine.HasProcess() && !m_task.valid() && !m_result)
+        if (!engine.HasProcess() && !m_task.Running() && !m_result)
         {
             m_workspace.NoProcessState(ICON_FA_SEARCH, "Open a process to search its memory.");
             EndToolWindow();
@@ -303,7 +278,7 @@ namespace Manifold::UI
             ImGui::SetKeyboardFocusHere();
             m_focus = false;
         }
-        const bool running = m_task.valid();
+        const bool running = m_task.Running();
         ImGui::SetNextItemWidth(-FLT_MIN);
         const bool enter = InputTextWithHint("##bytepattern", "48 8B ?? 10 or 'text'", m_pattern, ImGuiInputTextFlags_EnterReturnsTrue);
         if (!m_error.empty())
@@ -321,16 +296,16 @@ namespace Manifold::UI
         ImGui::SameLine(0.0f, Px(12.0f));
         if (running)
         {
-            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
-            ImGui::SameLine(0.0f, Px(6.0f));
-            ImGui::AlignTextToFramePadding();
-            Muted("Searching " + m_searched);
+            const Scan::PatternProgress& progress = m_task.State();
+            const std::uint64_t total = std::max<std::uint64_t>(1, progress.Total.load());
+            if (TaskStatus("Searching " + m_searched + Format("  %d%%", static_cast<int>(std::min<std::uint64_t>(100, progress.Done.load() * 100 / total)))))
+                m_task.Cancel();
         }
         else if (m_result)
         {
             ImGui::AlignTextToFramePadding();
             const std::size_t count = m_result->Hits.size();
-            Muted(Grouped(count) + (count == 1 ? " match" : " matches") + (m_result->Truncated ? " (stopped at the limit)" : "") + "  ·  " + m_searchedPattern + "  ·  " +
+            Muted(Grouped(count) + (count == 1 ? " match" : " matches") + (m_result->Truncated ? " (stopped at the limit)" : m_result->Cancelled ? " (cancelled)" : "") + "  ·  " + m_searchedPattern + "  ·  " +
                   m_searched + "  ·  " + Format("%.2f s", m_result->Seconds));
         }
         ImGui::Spacing();

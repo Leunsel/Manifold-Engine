@@ -84,6 +84,9 @@
     <ClCompile Include="..\Source\Core\Errors.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Core\JobQueue.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Core\RuntimeLog.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
@@ -201,6 +204,9 @@
     <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp">
       <Filter>Source\Templates</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\AddressActions.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\ByteSearch.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -304,6 +310,9 @@
       <Filter>Source\Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Core\Errors.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Core\JobQueue.h">
       <Filter>Source\Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Core\RuntimeLog.h">
@@ -416,6 +425,12 @@
     </ClInclude>
     <ClInclude Include="..\Source\Templates\TemplateLibrary.h">
       <Filter>Source\Templates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\AddressActions.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\BackgroundTask.h">
+      <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\CodeEditor.h">
       <Filter>Source\UI</Filter>

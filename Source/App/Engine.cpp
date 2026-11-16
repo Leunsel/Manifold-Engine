@@ -51,6 +51,7 @@ namespace Manifold
 
     Engine::~Engine()
     {
+        m_jobs.Stop();
         CancelActivations();
         WaitForActivation();
         m_tracer.Stop();
@@ -994,34 +995,81 @@ namespace Manifold
         if (!force && now - m_lastValues < m_settings.UpdateIntervalMs / 1000.0)
             return;
         m_lastValues = now;
-        m_table.ForEach([&](Table::MemoryRecord& record)
+        std::vector<int> ids;
+        if (m_visibleKnown)
+        {
+            ids = m_visibleRecords;
+            const std::vector<int> watched = m_lua->RecordsWithEvent("onvaluechanged");
+            ids.insert(ids.end(), watched.begin(), watched.end());
+            std::sort(ids.begin(), ids.end());
+            ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        }
+        else
+        {
+            m_table.ForEach([&](Table::MemoryRecord& record)
+                {
+                    if (record.Kind == Table::RecordKind::Value)
+                        ids.push_back(record.Id);
+                });
+        }
+        for (int id : ids)
+            RefreshRecord(id, now);
+    }
+
+    void Engine::RefreshRecord(int id, double now)
+    {
+        Table::MemoryRecord* record = m_table.FindById(id);
+        if (!record || record->Kind != Table::RecordKind::Value)
+            return;
+        record->RefreshedAt = now;
+        if (!m_process)
+        {
+            record->ValueText = "??";
+            return;
+        }
+        const std::vector<std::uint8_t> bytes = ReadRecord(*record);
+        if (bytes.empty())
+        {
+            record->ValueText = "??";
+            record->LastBytes.clear();
+            return;
+        }
+        std::string text = FormatRecord(*record, bytes);
+        m_lua->DisplayValue(*record, text);
+        record = m_table.FindById(id);
+        if (!record)
+            return;
+        if (!record->LastBytes.empty() && record->LastBytes != bytes)
+        {
+            record->ValueChanged = true;
+            record->ChangedAt = now;
+            if (m_lua->HasRecordEvent(id, "onvaluechanged"))
             {
-                if (record.Kind != Table::RecordKind::Value)
+                m_lua->ValueChanged(*record, record->ValueText, text);
+                record = m_table.FindById(id);
+                if (!record)
                     return;
-                if (!m_process)
-                {
-                    record.ValueText = "??";
-                    return;
-                }
-                const std::vector<std::uint8_t> bytes = ReadRecord(record);
-                if (bytes.empty())
-                {
-                    record.ValueText = "??";
-                    record.LastBytes.clear();
-                    return;
-                }
-                std::string text = FormatRecord(record, bytes);
-                m_lua->DisplayValue(record, text);
-                if (!record.LastBytes.empty() && record.LastBytes != bytes)
-                {
-                    record.ValueChanged = true;
-                    record.ChangedAt = now;
-                    if (m_lua->HasRecordEvent(record.Id, "onvaluechanged"))
-                        m_lua->ValueChanged(record, record.ValueText, text);
-                }
-                record.LastBytes = bytes;
-                record.ValueText = std::move(text);
-            });
+            }
+        }
+        record->LastBytes = bytes;
+        record->ValueText = std::move(text);
+    }
+
+    void Engine::SetVisibleRecords(std::vector<int> ids)
+    {
+        std::sort(ids.begin(), ids.end());
+        m_visibleRecords = std::move(ids);
+        m_visibleKnown = true;
+    }
+
+    bool Engine::NeedsValue(const Table::MemoryRecord& record) const
+    {
+        return record.Kind == Table::RecordKind::Value && record.RefreshedAt < m_lastValues;
+    }
+
+    void Engine::RefreshRecord(int id)
+    {
+        RefreshRecord(id, Now());
     }
 
     void Engine::UpdateFreezes()
@@ -1334,6 +1382,7 @@ namespace Manifold
     void Engine::Tick()
     {
         const double now = Now();
+        m_jobs.Drain();
         m_scanner.Poll();
 
         if (m_process && now - m_lastAliveCheck > kAliveCheckSeconds)

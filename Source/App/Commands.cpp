@@ -529,6 +529,12 @@ namespace Manifold
         return text.empty() ? nullptr : text.c_str();
     }
 
+    std::string ShortcutLabel(Command command)
+    {
+        const char* text = ShortcutText(command);
+        return text ? std::string(text) : std::string();
+    }
+
     std::string ShortcutsMarkdown()
     {
         std::string text = "# Keyboard shortcuts\n\n";

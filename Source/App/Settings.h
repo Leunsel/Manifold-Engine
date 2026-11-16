@@ -52,6 +52,7 @@ namespace Manifold
 
         bool AutorunEnabled = true;
         bool ScriptWindowsAppLook = true;
+        int ScriptCallbackLimitMs = 2000;
         std::vector<std::string> AutoAttach;
         bool AutoAttachEnabled = false;
         TableScriptPolicy TableScripts = TableScriptPolicy::Ask;

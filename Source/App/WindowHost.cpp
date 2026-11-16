@@ -444,9 +444,9 @@ namespace Manifold
         return false;
     }
 
-    void WindowHost::Wait(unsigned milliseconds) const
+    bool WindowHost::Wait(unsigned milliseconds) const
     {
-        ::MsgWaitForMultipleObjectsEx(0, nullptr, milliseconds, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        return ::MsgWaitForMultipleObjectsEx(0, nullptr, milliseconds, QS_ALLINPUT, MWMO_INPUTAVAILABLE) == WAIT_OBJECT_0;
     }
 
     void WindowHost::NoteInput()

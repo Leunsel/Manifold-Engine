@@ -311,6 +311,7 @@ namespace Manifold::Lua
         void AfterActivation(Table::MemoryRecord& record, bool active, bool succeeded);
         bool DisplayValue(Table::MemoryRecord& record, std::string& text);
         bool HasRecordEvent(int id, std::string_view name);
+        std::vector<int> RecordsWithEvent(std::string_view name);
         void ValueChanged(Table::MemoryRecord& record, const std::string& before, const std::string& after);
         bool AddressListEvent(std::string_view name, Table::MemoryRecord* record);
         void RecordDestroyed(int id);
@@ -334,8 +335,16 @@ namespace Manifold::Lua
         std::optional<std::uint64_t> LookupSymbol(std::string_view name, bool first);
 
         void Tick(double now);
+        void ProcessMessages();
+        void BlockingSleep(std::uint32_t milliseconds);
         using TaskDone = std::function<void(const Status& status, const std::string& output)>;
+        using TaskRead = std::function<void(lua_State* thread, int results)>;
         int StartTask(std::string_view code, std::string_view chunkName, TaskDone done, std::function<void()> enter = {}, std::function<void()> leave = {});
+        int StartCall(int reference, const std::function<int(lua_State*)>& push, std::string_view name, TaskRead read, TaskDone done);
+        void LookupStructureNameLater(std::uint64_t address, std::function<void(std::optional<StructureLookup>)> done);
+        void DissectStructureLater(Table::StructDefinition* definition, std::uint64_t address, std::function<void(bool handled)> done);
+        bool HasStructureNameLookups() const { return !m_structureNameLookups.empty(); }
+        bool HasDissectOverrides() const { return !m_dissectOverrides.empty(); }
         void RunTasks(double budgetSeconds);
         bool TaskAlive(int id) const;
         void StopTask(int id);
@@ -402,8 +411,10 @@ namespace Manifold::Lua
             int Reference = 0;
             std::string Name;
             TaskDone Done;
+            TaskRead Read;
             std::function<void()> Enter;
             std::function<void()> Leave;
+            int Arguments = 0;
             double WakeAt = 0.0;
             double Deadline = 0.0;
             bool Stop = false;
@@ -417,6 +428,8 @@ namespace Manifold::Lua
         void OpenMenu(bool byId, int id, const char* which);
         void FinishTask(Task& task, int status, int results);
         static void TaskHook(lua_State* state, lua_Debug* debug);
+        static void CallHook(lua_State* state, lua_Debug* debug);
+        bool GuardedCall(int arguments, int results, int handler);
 
         Engine& m_engine;
         lua_State* m_state = nullptr;
@@ -446,6 +459,8 @@ namespace Manifold::Lua
         std::thread::id m_thread = std::this_thread::get_id();
         int m_onOpenProcess = 0;
         bool m_inTick = false;
+        double m_callDeadline = 0.0;
+        int m_callLimit = 0;
         std::vector<std::unique_ptr<Task>> m_tasks;
         int m_nextTask = 1;
         std::vector<Task*> m_taskStack;

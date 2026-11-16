@@ -105,6 +105,7 @@ namespace Manifold::Table
             siblings.push_back(std::move(record));
         else
             siblings.insert(siblings.begin() + index, std::move(record));
+        IndexTree(added);
         Touch();
         return added;
     }
@@ -151,6 +152,7 @@ namespace Manifold::Table
                 std::unique_ptr<MemoryRecord> taken = std::move(*it);
                 siblings.erase(it);
                 taken->Parent = nullptr;
+                ForgetTree(*taken);
                 Touch();
                 return taken;
             }
@@ -191,10 +193,12 @@ namespace Manifold::Table
             --index;
         taken->Parent = newParent;
         auto& siblings = newParent ? newParent->Children : m_roots;
+        MemoryRecord& moved = *taken;
         if (index < 0 || index > static_cast<int>(siblings.size()))
             siblings.push_back(std::move(taken));
         else
             siblings.insert(siblings.begin() + index, std::move(taken));
+        IndexTree(moved);
         Touch();
         return true;
     }
@@ -232,6 +236,8 @@ namespace Manifold::Table
     void AddressList::Clear()
     {
         m_roots.clear();
+        m_byId.clear();
+        m_byDescription.clear();
         m_selection.clear();
         TableLuaScript.clear();
         TableComment.clear();
@@ -245,26 +251,55 @@ namespace Manifold::Table
         m_dirty = false;
     }
 
+    void AddressList::IndexTree(MemoryRecord& record)
+    {
+        m_byId.emplace(record.Id, &record);
+        for (const auto& child : record.Children)
+            IndexTree(*child);
+    }
+
+    void AddressList::ForgetTree(const MemoryRecord& record)
+    {
+        if (const auto found = m_byId.find(record.Id); found != m_byId.end() && found->second == &record)
+            m_byId.erase(found);
+        for (const auto& child : record.Children)
+            ForgetTree(*child);
+    }
+
+    void AddressList::IndexDescriptions()
+    {
+        if (m_describedAt == m_generation)
+            return;
+        m_byDescription.clear();
+        ForEach([&](MemoryRecord& record) { m_byDescription.emplace(record.Description, &record); });
+        m_describedAt = m_generation;
+    }
+
     MemoryRecord* AddressList::FindById(int id)
     {
-        MemoryRecord* found = nullptr;
-        ForEach([&](MemoryRecord& record)
-            {
-                if (!found && record.Id == id)
-                    found = &record;
-            });
-        return found;
+        const auto found = m_byId.find(id);
+        if (found == m_byId.end())
+            return nullptr;
+        if (found->second->Id == id)
+            return found->second;
+        m_byId.clear();
+        ForEach([&](MemoryRecord& record) { m_byId.emplace(record.Id, &record); });
+        const auto again = m_byId.find(id);
+        return again == m_byId.end() ? nullptr : again->second;
     }
 
     MemoryRecord* AddressList::FindByDescription(std::string_view description)
     {
-        MemoryRecord* found = nullptr;
-        ForEach([&](MemoryRecord& record)
-            {
-                if (!found && record.Description == description)
-                    found = &record;
-            });
-        return found;
+        IndexDescriptions();
+        const auto found = m_byDescription.find(std::string(description));
+        if (found != m_byDescription.end() && found->second->Description == description)
+            return found->second;
+        if (found == m_byDescription.end())
+            return nullptr;
+        m_describedAt = 0;
+        IndexDescriptions();
+        const auto again = m_byDescription.find(std::string(description));
+        return again == m_byDescription.end() ? nullptr : again->second;
     }
 
     void AddressList::ForEach(const std::function<void(MemoryRecord&)>& visit)

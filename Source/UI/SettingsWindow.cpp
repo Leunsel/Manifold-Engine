@@ -1006,6 +1006,13 @@ namespace Manifold::UI
                 OpenFolder(Paths::AutorunFolder());
             list.EndRow();
         }
+        if (list.Row("Time limit for callbacks",
+                "Timers, hotkeys, menu and form events, structure and symbol lookups and custom types run while the window waits. One that takes longer than this is stopped with an error instead of freezing the program. "
+                "Scripts started with createThread, the table script and the Lua engine window have no limit.", choice))
+        {
+            changed |= Milliseconds("##callbacklimit", settings.ScriptCallbackLimitMs, 250, 60000, choice);
+            list.EndRow();
+        }
         if (list.Row("Script windows in the app's look",
                 "Windows that scripts build with createForm look like Manifold's own: cards, its colors, its font and font size, whatever colors, borders and fonts the script sets. "
                 "Off: the colors, borders and fonts of the script, as Cheat Engine shows them. Pictures that scripts paint keep their colors either way.", toggle))

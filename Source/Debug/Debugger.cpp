@@ -2070,6 +2070,8 @@ namespace Manifold::Debug
             std::uint64_t Address;
         };
         auto shared = std::make_unique<Veh::Watch>();
+        std::uint64_t beat = 0;
+        bool lostReported = false;
         while (!m_vehStop)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
@@ -2079,6 +2081,23 @@ namespace Manifold::Debug
                 for (auto& [id, watch] : m_watches)
                     watch.Running = false;
                 continue;
+            }
+            ++beat;
+            if (!m_beatPaused)
+                m_process->Write(m_vehBlock + offsetof(Veh::Block, HostBeat), &beat, sizeof(beat));
+            if (beat % 32 == 0 && !lostReported)
+            {
+                std::uint32_t lost = 0;
+                if (m_process->ReadExact(m_vehBlock + offsetof(Veh::Block, HostLost), &lost, sizeof(lost)) && lost)
+                {
+                    lostReported = true;
+                    LOG_WARN("Debugger", "The in-process debugger stopped itself because Manifold did not answer for "
+                        + std::to_string(Veh::kHostSilenceMs / 1000) + " seconds. Detach and attach again.");
+                    std::lock_guard lock(m_lock);
+                    for (auto& [id, watch] : m_watches)
+                        watch.Running = false;
+                    ++m_generation;
+                }
             }
             VehCheckBreak();
             std::vector<std::pair<std::uint64_t, int>> counted;

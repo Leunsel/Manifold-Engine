@@ -1755,6 +1755,32 @@ namespace Manifold::Lua
         lua_setfield(state, LUA_REGISTRYINDEX, kListKey);
     }
 
+    std::vector<int> RecordsWithFunction(lua_State* state, std::string_view key)
+    {
+        std::vector<int> ids;
+        lua_getfield(state, LUA_REGISTRYINDEX, kExtrasKey);
+        if (!lua_istable(state, -1))
+        {
+            lua_pop(state, 1);
+            return ids;
+        }
+        lua_pushnil(state);
+        while (lua_next(state, -2))
+        {
+            if (lua_isinteger(state, -2) && lua_istable(state, -1))
+            {
+                lua_pushlstring(state, key.data(), key.size());
+                lua_rawget(state, -2);
+                if (lua_isfunction(state, -1))
+                    ids.push_back(static_cast<int>(lua_tointeger(state, -3)));
+                lua_pop(state, 1);
+            }
+            lua_pop(state, 1);
+        }
+        lua_pop(state, 1);
+        return ids;
+    }
+
     bool PushExtra(lua_State* state, int id, std::string_view key)
     {
         lua_getfield(state, LUA_REGISTRYINDEX, kExtrasKey);

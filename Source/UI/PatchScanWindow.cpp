@@ -3,6 +3,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "UI/AddressActions.h"
 #include "UI/Fonts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
@@ -13,6 +14,11 @@ namespace Manifold::UI
 {
     namespace
     {
+        bool StillOpen(Engine& engine, const std::shared_ptr<Target::Process>& scanned)
+        {
+            return scanned && engine.Process() == scanned && scanned->Alive();
+        }
+
         std::string ShortBytes(std::span<const std::uint8_t> bytes, std::size_t limit)
         {
             std::string text = HexBytes(bytes.first(std::min(bytes.size(), limit)));
@@ -38,19 +44,12 @@ namespace Manifold::UI
     {
     }
 
-    PatchScanWindow::~PatchScanWindow()
-    {
-        if (m_task.valid())
-        {
-            m_progress->Cancel = true;
-            m_task.wait();
-        }
-    }
+    PatchScanWindow::~PatchScanWindow() = default;
 
     void PatchScanWindow::Start()
     {
         Engine& engine = m_workspace.Core();
-        if (!engine.HasProcess() || m_task.valid())
+        if (!engine.HasProcess() || m_task.Running())
             return;
         engine.Process()->RefreshModules();
         std::vector<Target::ModuleInfo> modules;
@@ -63,24 +62,22 @@ namespace Manifold::UI
             }
         }
         m_scanned = engine.Process();
-        m_progress = std::make_unique<Target::PatchScanProgress>();
         m_result.reset();
         m_restore = -1;
-        m_started = ImGui::GetTime();
-        Target::PatchScanProgress* progress = m_progress.get();
         std::shared_ptr<Target::Process> process = m_scanned;
-        m_task = std::async(std::launch::async, [process, modules = std::move(modules), progress]()
+        m_task.Start([process, modules = std::move(modules)](Target::PatchScanProgress& progress)
             {
-                return Target::ScanForPatches(*process, modules, progress);
+                return Target::ScanForPatches(*process, modules, &progress);
             });
     }
 
     void PatchScanWindow::Collect()
     {
-        if (!m_task.valid() || m_task.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        std::optional<Target::PatchScanResult> collected = m_task.Collect();
+        if (!collected)
             return;
-        m_result = m_task.get();
-        m_seconds = ImGui::GetTime() - m_started;
+        m_result = std::move(collected);
+        m_seconds = m_task.Seconds();
         const std::size_t count = m_result->Patches.size();
         LOG_INFO("Patches", std::to_string(count) + (count == 1 ? " patch in " : " patches in ") + std::to_string(m_result->Modules.size()) + " modules");
     }
@@ -144,7 +141,8 @@ namespace Manifold::UI
         Engine& engine = m_workspace.Core();
         const Target::CodePatch& patch = m_result->Patches[index];
         std::vector<std::uint8_t> now(static_cast<std::size_t>(std::min<std::uint64_t>(patch.Size, 64)) + 16);
-        const std::size_t read = engine.HasProcess() ? engine.Process()->Read(patch.Address, now.data(), now.size()) : 0;
+        const bool live = StillOpen(engine, m_scanned);
+        const std::size_t read = live ? m_scanned->Read(patch.Address, now.data(), now.size()) : 0;
         now.resize(read);
         std::vector<std::uint8_t> was(patch.Original.begin(), patch.Original.begin() + static_cast<std::ptrdiff_t>(std::min<std::size_t>(patch.Original.size(), 64)));
         if (now.size() > was.size())
@@ -176,23 +174,18 @@ namespace Manifold::UI
         }
         if (ImGui::BeginPopupContextItem("##patchmenu"))
         {
-            if (ImGui::MenuItem(ICON_FA_CODE "  Show in disassembler"))
-                m_workspace.OpenMemoryViewer(patch.Address);
-            if (ImGui::MenuItem(ICON_FA_TH "  Show in hex view"))
-                m_workspace.OpenMemoryViewer(patch.Address, true);
-            ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
-                ImGui::SetClipboardText(where.c_str());
+            AddressMenuItems(m_workspace, patch.Address, CodeActions);
             if (ImGui::MenuItem(ICON_FA_COPY "  Copy current bytes"))
                 ImGui::SetClipboardText(HexBytes(patch.Current).c_str());
             if (ImGui::MenuItem(ICON_FA_COPY "  Copy original bytes"))
                 ImGui::SetClipboardText(HexBytes(patch.Original).c_str());
             ImGui::Separator();
-            ImGui::BeginDisabled(!patch.Complete() || !engine.HasProcess());
+            ImGui::BeginDisabled(!patch.Complete() || !live);
             if (DangerMenuItem(ICON_FA_UNDO "  Restore the original bytes"))
                 m_restore = static_cast<int>(index);
             ImGui::EndDisabled();
-            ItemTooltip(patch.Complete() ? "Writes the bytes from the file back. If an active script made this change, turn the script off instead." : "This change is too large to restore here.");
+            ItemTooltip(!live ? "The scan belongs to a process that is no longer open. Scan again first."
+                : patch.Complete() ? "Writes the bytes from the file back. If an active script made this change, turn the script off instead." : "This change is too large to restore here.");
             ImGui::EndPopup();
         }
         ImGui::TableNextColumn();
@@ -264,24 +257,16 @@ namespace Manifold::UI
     void PatchScanWindow::Draw()
     {
         Collect();
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_BAND_AID "  Scan for patches###patchscan", &m_open, ImVec2(920.0f, 560.0f), 0, ImVec2(620.0f, 320.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_BAND_AID "  Scan for patches###patchscan", ImVec2(920.0f, 560.0f), 0, ImVec2(620.0f, 320.0f)))
             return;
-        }
         Engine& engine = m_workspace.Core();
-        if (!engine.HasProcess() && !m_result && !m_task.valid())
+        if (!engine.HasProcess() && !m_result && !m_task.Running())
         {
             m_workspace.NoProcessState(ICON_FA_BAND_AID, "Open a process to compare its code with the files on disk.");
             EndToolWindow();
             return;
         }
-        const bool running = m_task.valid();
+        const bool running = m_task.Running();
         ImGui::BeginDisabled(running || !engine.HasProcess());
         if (AccentButton(ICON_FA_SEARCH "  Scan"))
             Start();
@@ -296,13 +281,9 @@ namespace Manifold::UI
         ImGui::SameLine(0.0f, Px(12.0f));
         if (running)
         {
-            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
-            ImGui::SameLine(0.0f, Px(6.0f));
-            ImGui::AlignTextToFramePadding();
-            Muted("Module " + std::to_string(std::min(m_progress->Done.load() + 1, std::max(1, m_progress->Total.load()))) + " of " + std::to_string(m_progress->Total.load()));
-            ImGui::SameLine(0.0f, Px(8.0f));
-            if (ImGui::Button("Cancel"))
-                m_progress->Cancel = true;
+            const Target::PatchScanProgress& progress = m_task.State();
+            if (TaskStatus("Module " + std::to_string(std::min(progress.Done.load() + 1, std::max(1, progress.Total.load()))) + " of " + std::to_string(progress.Total.load())))
+                m_task.Cancel();
         }
         else if (m_result)
         {
@@ -314,6 +295,11 @@ namespace Manifold::UI
             const std::size_t modules = m_result->Modules.size();
             Muted(std::to_string(count) + (count == 1 ? " patch" : " patches") + "  ·  " + std::to_string(modules) + (modules == 1 ? " module  ·  " : " modules  ·  ") +
                   ByteSize(code) + " of code  ·  " + Format("%.2f s", m_seconds));
+            if (m_scanned && !StillOpen(engine, m_scanned))
+            {
+                ImGui::SameLine(0.0f, Px(12.0f));
+                ImGui::TextColored(ManifoldTheme::Warning, ICON_FA_EXCLAMATION_TRIANGLE "  From %s (%u), which is no longer open", m_scanned->Name().c_str(), m_scanned->Id());
+            }
         }
         ImGui::Spacing();
         if (m_result)
@@ -328,10 +314,10 @@ namespace Manifold::UI
                     { { ICON_FA_SEARCH "  Scan", nullptr, true } }, false) == 0)
                 Start();
         }
-        if (m_restore >= 0 && m_result && static_cast<std::size_t>(m_restore) < m_result->Patches.size() && engine.HasProcess())
+        if (m_restore >= 0 && m_result && static_cast<std::size_t>(m_restore) < m_result->Patches.size() && StillOpen(engine, m_scanned))
         {
             const Target::CodePatch patch = m_result->Patches[static_cast<std::size_t>(m_restore)];
-            const Status written = engine.Process()->Write(patch.Address, patch.Original);
+            const Status written = m_scanned->Write(patch.Address, patch.Original);
             m_workspace.Report(written);
             if (written)
             {

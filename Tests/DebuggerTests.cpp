@@ -155,6 +155,40 @@ namespace Manifold::Tests
         CHECK_MSG(process.Alive(), std::string(backend) + ": the target died");
     }
 
+    void CheckHostSilence(Engine& engine)
+    {
+        Debug::Debugger& debugger = engine.Debugger();
+        const Target::Process& process = *engine.Process();
+        const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);
+        const std::uint64_t shared = engine.Evaluate("TestTarget.g_shared").value_or(0);
+        CHECK(work && shared);
+        if (!work || !shared)
+            return;
+        const Status set = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false);
+        CHECK_MSG(set.Ok(), set.Text);
+        const bool broke = set && WaitForBreak(engine, 0, 4000);
+        CHECK_MSG(broke, "in-process: no break to test the heartbeat with");
+        if (!broke)
+        {
+            debugger.RemoveBreakpoint(work);
+            return;
+        }
+        std::int32_t first = 0;
+        process.ReadExact(shared, &first, sizeof(first));
+        debugger.PauseHeartbeat(true);
+        Wait(engine, 2000);
+        std::int32_t held = 0;
+        process.ReadExact(shared, &held, sizeof(held));
+        CHECK_MSG(held == first && debugger.Broken(), "in-process: the break ended before Manifold went silent long enough");
+        Wait(engine, 3500);
+        std::int32_t later = 0;
+        process.ReadExact(shared, &later, sizeof(later));
+        CHECK_MSG(later != first, "in-process: the target stayed stopped after Manifold went silent");
+        CHECK_MSG(!debugger.Broken(), "in-process: still shown as stopped after the agent let go");
+        debugger.PauseHeartbeat(false);
+        CHECK(process.Alive());
+    }
+
     int RunDebuggerCheck(const std::vector<std::string>& arguments)
     {
         bool veh = false;
@@ -184,6 +218,8 @@ namespace Manifold::Tests
             if (attached)
             {
                 CheckBreakActions(engine, veh);
+                if (veh)
+                    CheckHostSilence(engine);
                 engine.Debugger().Detach();
                 Wait(engine, 400);
                 CHECK(engine.Process()->Alive());

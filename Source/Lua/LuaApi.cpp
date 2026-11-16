@@ -209,7 +209,7 @@ namespace Manifold::Lua
                 lua_pushinteger(state, milliseconds);
                 return lua_yield(state, 1);
             }
-            ::Sleep(static_cast<DWORD>(std::clamp<lua_Integer>(milliseconds, 0, 60000)));
+            EngineOf(state).BlockingSleep(static_cast<std::uint32_t>(std::clamp<lua_Integer>(milliseconds, 0, 60000)));
             return 0;
         }
 

@@ -4,6 +4,7 @@
 #include "Templates/TemplateFiles.h"
 #include "Templates/TemplateLibrary.h"
 #include "UI/CodeEditor.h"
+#include "UI/Widgets.h"
 #include "UI/Workspace.h"
 
 #include <map>
@@ -73,10 +74,10 @@ namespace Manifold::UI
         std::string m_pendingId;
         bool m_pendingNew = false;
         std::string m_pendingScript;
-        bool m_askUnsaved = false;
-        bool m_askDelete = false;
-        bool m_openReport = false;
-        bool m_openMessage = false;
+        Dialog m_unsavedDialog;
+        Dialog m_deleteDialog;
+        Dialog m_reportDialog;
+        Dialog m_messageDialog;
         std::string m_message;
         std::vector<Templates::CheckEntry> m_report;
 

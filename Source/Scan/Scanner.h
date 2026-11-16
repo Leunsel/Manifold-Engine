@@ -228,6 +228,13 @@ namespace Manifold::Scan
 
     std::vector<std::uint64_t> FindPattern(const Target::Process& process, const Pattern& pattern, std::uint64_t start, std::uint64_t stop, bool executableOnly,
         std::size_t limit, bool includeReadOnly = true);
+    struct PatternProgress
+    {
+        std::atomic<bool> Cancel{ false };
+        std::atomic<std::uint64_t> Done{ 0 };
+        std::atomic<std::uint64_t> Total{ 0 };
+    };
+
     std::vector<std::uint64_t> FindPattern(const Target::Process& process, const Pattern& pattern, std::uint64_t start, std::uint64_t stop, const PatternFilter& filter,
-        std::size_t limit);
+        std::size_t limit, PatternProgress* progress = nullptr);
 }

@@ -1036,19 +1036,34 @@ namespace Manifold::Target
             }
         }
 
+        auto spans = std::make_shared<std::vector<ModuleSpan>>();
+        spans->reserve(modules->size());
+        for (std::size_t i = 0; i < modules->size(); ++i)
+            spans->push_back({ (*modules)[i].Base, (*modules)[i].Base + (*modules)[i].Size, i });
+        std::sort(spans->begin(), spans->end(), [](const ModuleSpan& a, const ModuleSpan& b) { return a.Base < b.Base; });
         std::lock_guard lock(m_moduleLock);
         m_modules = std::move(modules);
+        m_moduleSpans = std::move(spans);
     }
 
     std::optional<ModuleInfo> Process::ModuleAt(std::uint64_t address) const
     {
-        const ModuleList modules = Modules();
-        for (const ModuleInfo& module : *modules)
+        ModuleList modules;
+        std::shared_ptr<const std::vector<ModuleSpan>> spans;
         {
-            if (module.Contains(address))
-                return module;
+            std::lock_guard lock(m_moduleLock);
+            modules = m_modules;
+            spans = m_moduleSpans;
         }
-        return std::nullopt;
+        if (!modules || !spans)
+            return std::nullopt;
+        auto next = std::upper_bound(spans->begin(), spans->end(), address, [](std::uint64_t value, const ModuleSpan& span) { return value < span.Base; });
+        if (next == spans->begin())
+            return std::nullopt;
+        --next;
+        if (address >= next->End || next->Index >= modules->size())
+            return std::nullopt;
+        return (*modules)[next->Index];
     }
 
     std::optional<ModuleInfo> Process::FindModule(std::string_view name) const

@@ -24,6 +24,45 @@ namespace
         volatile ULONGLONG Tick;
     };
 
+    struct HostWatch
+    {
+        std::uint64_t Beat = 0;
+        ULONGLONG Seen = 0;
+    };
+
+    bool HostGone(Block* block, HostWatch& watch)
+    {
+        const std::uint64_t beat = block->HostBeat;
+        const ULONGLONG now = ::GetTickCount64();
+        if (beat == 0 || beat != watch.Beat || watch.Seen == 0)
+        {
+            watch.Beat = beat;
+            watch.Seen = now;
+            return false;
+        }
+        return now - watch.Seen > kHostSilenceMs;
+    }
+
+    void LetGo(Block* block)
+    {
+        block->HostLost = block->HostLost + 1;
+        block->Stop = 1;
+    }
+
+    void WaitForResume(Block* block)
+    {
+        HostWatch host;
+        while (block->ResumeCmd == ResumeNone && !block->Stop)
+        {
+            if (HostGone(block, host))
+            {
+                LetGo(block);
+                break;
+            }
+            ::Sleep(2);
+        }
+    }
+
     Block* g_block = nullptr;
     PVOID g_handler = nullptr;
     DWORD g_applyThreadId = 0;
@@ -294,8 +333,7 @@ namespace
         SuspendOthers();
         block->BreakSerial = block->BreakSerial + 1;
         block->Broken = 1;
-        while (block->ResumeCmd == ResumeNone && !block->Stop)
-            ::Sleep(2);
+        WaitForResume(block);
         if (block->RegsDirty)
         {
             ApplyRegs(context, block->NewRegs);
@@ -428,8 +466,14 @@ namespace
         g_applyThreadId = ::GetCurrentThreadId();
         Block* block = g_block;
         std::uint32_t lastClear[kMaxWatches] = {};
+        HostWatch host;
         while (block && !block->Stop)
         {
+            if (!block->Broken && HostGone(block, host))
+            {
+                LetGo(block);
+                break;
+            }
             for (int slot = 0; slot < kMaxWatches; ++slot)
             {
                 if (block->Watches[slot].Clear != lastClear[slot])
@@ -463,8 +507,7 @@ namespace
                     block->ResumeCmd = ResumeNone;
                     block->BreakSerial = block->BreakSerial + 1;
                     block->Broken = 1;
-                    while (block->ResumeCmd == ResumeNone && !block->Stop)
-                        ::Sleep(2);
+                    WaitForResume(block);
                     const bool registers = block->RegsDirty != 0;
                     const bool vectors = block->XmmDirty != 0;
                     if (registers)
@@ -489,8 +532,10 @@ namespace
                 std::uint64_t addresses[4] = {};
                 std::uint64_t dr7 = 0;
                 BuildRegisters(block, addresses, dr7);
-                Sweep(addresses, dr7, false);
-                block->Applied = block->Command;
+                const std::uint32_t command = block->Command;
+                if (dr7 != 0 || block->Applied != command)
+                    Sweep(addresses, dr7, false);
+                block->Applied = command;
             }
             ::Sleep(kSweepMs);
         }

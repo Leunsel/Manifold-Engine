@@ -3,6 +3,7 @@
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Target/Mono.h"
+#include "UI/AddressActions.h"
 #include "UI/Theme.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
@@ -175,8 +176,10 @@ namespace Manifold::UI
                         m_workspace.OpenMemoryViewer(address);
                     if (ImGui::BeginPopupContextItem())
                     {
-                        if (ImGui::MenuItem(ICON_FA_CODE "  Show in the disassembler", nullptr, false, address != 0))
-                            m_workspace.OpenMemoryViewer(address);
+                        if (address)
+                            AddressMenuItems(m_workspace, address, ShowCode | ShowHex);
+                        else
+                            ImGui::MenuItem(ICON_FA_CODE "  Show in disassembler", nullptr, false, false);
                         if (ImGui::MenuItem(ICON_FA_CIRCLE "  Set a breakpoint", nullptr, false, address != 0))
                         {
                             Status status = m_engine.EnsureDebugger();

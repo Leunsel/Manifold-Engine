@@ -28,6 +28,7 @@ namespace Manifold::UI
         constexpr float kProcessBarHeight = 40.0f;
         constexpr float kStatusHeight = 24.0f;
         constexpr const char* kRecordDrag = "MANIFOLD_RECORD";
+        constexpr std::size_t kUnclippedRows = 250;
 
         const Scan::Compare kCompares[] = { Scan::Compare::Exact, Scan::Compare::Bigger, Scan::Compare::Smaller, Scan::Compare::Between, Scan::Compare::Unknown,
             Scan::Compare::Increased, Scan::Compare::IncreasedBy, Scan::Compare::Decreased, Scan::Compare::DecreasedBy, Scan::Compare::Changed,
@@ -1643,11 +1644,78 @@ namespace Manifold::UI
             m_spots.clear();
             ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
             const std::vector<ListRow> rows = m_rows;
-            for (const ListRow& entry : rows)
+            std::vector<int> shown;
+            const auto fresh = [&](int id)
+                {
+                    Table::MemoryRecord* record = list.FindById(id);
+                    if (record && engine.NeedsValue(*record))
+                    {
+                        engine.RefreshRecord(id);
+                        record = list.FindById(id);
+                    }
+                    return record;
+                };
+            if (rows.size() <= kUnclippedRows)
             {
-                if (Table::MemoryRecord* record = list.FindById(entry.Id))
-                    RecordRow(*record, entry.Depth, row, entry.Match);
+                for (const ListRow& entry : rows)
+                {
+                    if (Table::MemoryRecord* record = fresh(entry.Id))
+                    {
+                        RecordRow(*record, entry.Depth, row, entry.Match);
+                        shown.push_back(entry.Id);
+                    }
+                }
             }
+            else
+            {
+                const auto indexOf = [&rows](int id)
+                    {
+                        for (std::size_t i = 0; i < rows.size(); ++i)
+                        {
+                            if (rows[i].Id == id)
+                                return static_cast<int>(i);
+                        }
+                        return -1;
+                    };
+                ImGuiListClipper clipper;
+                clipper.Begin(static_cast<int>(rows.size()));
+                if (const int scrollTo = m_scrollToRecord >= 0 ? indexOf(m_scrollToRecord) : -1; scrollTo >= 0)
+                    clipper.IncludeItemByIndex(scrollTo);
+                if (const ImGuiPayload* payload = ImGui::GetDragDropPayload(); payload && payload->IsDataType(kRecordDrag) && payload->DataSize == sizeof(int))
+                {
+                    if (const int dragged = indexOf(*static_cast<const int*>(payload->Data)); dragged >= 0)
+                        clipper.IncludeItemByIndex(dragged);
+                }
+                int firstDrawn = -1;
+                float firstTop = 0.0f;
+                while (clipper.Step())
+                {
+                    for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+                    {
+                        const ListRow& entry = rows[static_cast<std::size_t>(i)];
+                        Table::MemoryRecord* record = fresh(entry.Id);
+                        if (!record)
+                            continue;
+                        const std::size_t before = m_spots.size();
+                        RecordRow(*record, entry.Depth, row, entry.Match);
+                        shown.push_back(entry.Id);
+                        if (firstDrawn < 0 && m_spots.size() > before)
+                        {
+                            firstDrawn = i;
+                            firstTop = m_spots[before].Top;
+                        }
+                    }
+                }
+                const float height = clipper.ItemsHeight;
+                clipper.End();
+                if (firstDrawn >= 0 && height > 0.0f)
+                {
+                    m_spots.clear();
+                    for (std::size_t i = 0; i < rows.size(); ++i)
+                        m_spots.push_back({ rows[i].Id, firstTop + (static_cast<float>(i) - static_cast<float>(firstDrawn)) * height });
+                }
+            }
+            engine.SetVisibleRecords(std::move(shown));
             ImGui::PopItemFlag();
             ImGui::TableNextRow();
             ImGui::TableNextColumn();

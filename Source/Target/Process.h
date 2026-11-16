@@ -150,7 +150,14 @@ namespace Manifold::Target
         std::uint64_t m_highest = 0x7FFFFFFEFFFFull;
 
         mutable std::mutex m_moduleLock;
+        struct ModuleSpan
+        {
+            std::uint64_t Base = 0;
+            std::uint64_t End = 0;
+            std::size_t Index = 0;
+        };
         ModuleList m_modules;
+        std::shared_ptr<const std::vector<ModuleSpan>> m_moduleSpans;
 
         mutable std::mutex m_dryLock;
         mutable std::map<std::uint64_t, std::vector<std::uint8_t>> m_dryAllocations;

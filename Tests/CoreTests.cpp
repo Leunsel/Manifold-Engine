@@ -2,6 +2,7 @@
 
 #include "Asm/AutoAssembler.h"
 #include "Core/Errors.h"
+#include "Core/JobQueue.h"
 #include "Core/Text.h"
 #include "Core/Xml.h"
 #include "Debug/BreakAction.h"
@@ -16,6 +17,9 @@
 #include <fstream>
 #include <set>
 #include <sstream>
+#include <stdexcept>
+#include <thread>
+#include <chrono>
 
 namespace Manifold::Tests
 {
@@ -584,6 +588,70 @@ data:
         }
     }
 
+    void RecordIndex()
+    {
+        Table::AddressList list;
+        Table::MemoryRecord& group = list.AddGroup("Group");
+        Table::MemoryRecord& first = list.AddValue("Health", "1000", Scan::ValueType::FourBytes, &group);
+        Table::MemoryRecord& second = list.AddValue("Ammo", "1004", Scan::ValueType::FourBytes);
+        CHECK(list.FindById(first.Id) == &first && list.FindById(second.Id) == &second && list.FindById(group.Id) == &group);
+        CHECK(list.FindById(12345) == nullptr);
+        CHECK(list.FindByDescription("Ammo") == &second);
+        const int firstId = first.Id;
+        list.Move(first, nullptr, 0);
+        CHECK(list.FindById(firstId) == &first && first.Parent == nullptr);
+        auto copy = std::make_unique<Table::MemoryRecord>();
+        copy->Id = second.Id;
+        copy->Description = "Copy";
+        Table::MemoryRecord& added = list.Add(std::move(copy));
+        CHECK(added.Id != second.Id && list.FindById(added.Id) == &added && list.FindById(second.Id) == &second);
+        second.Description = "Bullets";
+        list.Touch();
+        CHECK(list.FindByDescription("Ammo") == nullptr && list.FindByDescription("Bullets") == &second);
+        const int groupId = group.Id;
+        auto child = std::make_unique<Table::MemoryRecord>();
+        child->Description = "Inner";
+        Table::MemoryRecord& inner = list.Add(std::move(child), &group);
+        const int innerId = inner.Id;
+        list.Remove(group);
+        CHECK(list.FindById(groupId) == nullptr && list.FindById(innerId) == nullptr && list.FindByDescription("Inner") == nullptr);
+        CHECK(list.FindById(firstId) == &first);
+        list.Clear();
+        CHECK(list.FindById(firstId) == nullptr && list.FindByDescription("Health") == nullptr);
+    }
+
+    void Jobs()
+    {
+        JobQueue jobs;
+        int finished = 0;
+        std::thread::id worker;
+        for (int i = 0; i < 3; ++i)
+        {
+            jobs.Post([&worker, &finished, i]() -> JobQueue::Finish
+                {
+                    worker = std::this_thread::get_id();
+                    return [&finished, i]() { finished += i + 1; };
+                });
+        }
+        for (int wait = 0; wait < 200 && jobs.Busy(); ++wait)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        CHECK(!jobs.Busy());
+        CHECK_EQ(finished, 0);
+        jobs.Drain();
+        CHECK_EQ(finished, 6);
+        CHECK(worker != std::thread::id() && worker != std::this_thread::get_id());
+        jobs.Post([]() -> JobQueue::Finish { throw std::runtime_error("job failed on purpose"); });
+        jobs.Post([&finished]() -> JobQueue::Finish { return [&finished]() { finished = 100; }; });
+        for (int wait = 0; wait < 200 && jobs.Busy(); ++wait)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        jobs.Drain();
+        CHECK_EQ(finished, 100);
+        jobs.Stop();
+        jobs.Post([&finished]() -> JobQueue::Finish { return [&finished]() { finished = -1; }; });
+        jobs.Drain();
+        CHECK_EQ(finished, 100);
+    }
+
     int RunCoreTests()
     {
         const int before = Totals().Failures;
@@ -597,6 +665,8 @@ data:
         ScanKinds();
         Conditions();
         BreakExpressions();
+        Jobs();
+        RecordIndex();
         return Totals().Failures - before;
     }
 }

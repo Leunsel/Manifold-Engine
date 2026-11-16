@@ -1732,7 +1732,7 @@ do
   p.icon = new("icon", application)
   p.exename = ""
 end
-Impl.application = { processmessages = noop, terminate = noop, minimize = noop, restore = noop, bringtofront = noop }
+Impl.application = { processmessages = function() if processMessages then return processMessages() end end, terminate = noop, minimize = noop, restore = noop, bringtofront = noop }
 getApplication = getApplication or function() return application end
 
 local luaEngineForm

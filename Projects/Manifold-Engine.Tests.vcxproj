@@ -112,6 +112,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp" />
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
+    <ClCompile Include="..\Source\Core\JobQueue.cpp" />
     <ClCompile Include="..\Source\Core\RuntimeLog.cpp" />
     <ClCompile Include="..\Source\Core\Text.cpp" />
     <ClCompile Include="..\Source\Core\Xml.cpp" />

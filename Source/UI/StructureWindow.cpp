@@ -23,6 +23,16 @@ namespace Manifold::UI
         // Maps a Mono field type (MONO_TYPE_*) to a dissect field. Reference
         // types (string, class, array, object, pointer) become a pointer so they
         // can be expanded; value types without a known size also show as pointer.
+        Table::StructDefinition* LiveStructure(Engine& engine, const Table::StructDefinition* definition)
+        {
+            for (const auto& item : engine.Structures().Items)
+            {
+                if (item.get() == definition)
+                    return item.get();
+            }
+            return nullptr;
+        }
+
         Scan::ValueType MonoFieldType(int code, int& size, Table::FieldDisplay& display)
         {
             using V = Scan::ValueType;
@@ -220,7 +230,7 @@ namespace Manifold::UI
         }
         if (address)
         {
-            m_columns.front().Address = m_engine.Symbols().ModuleOffset(address);
+            m_columns.front().Address.Text = m_engine.Symbols().ModuleOffset(address);
             if (!Current())
             {
                 m_newOpen = true;
@@ -229,49 +239,119 @@ namespace Manifold::UI
         }
     }
 
+    void StructureWindow::LookupName(std::uint64_t address, bool containing, std::function<void(std::optional<Lua::StructureLookup>)> done)
+    {
+        const std::weak_ptr<int> alive = m_alive;
+        Engine& engine = m_engine;
+        auto scripts = [&engine, alive, address, done]()
+            {
+                if (alive.expired())
+                    return;
+                if (!engine.Lua().HasStructureNameLookups())
+                {
+                    done(std::nullopt);
+                    return;
+                }
+                engine.Lua().LookupStructureNameLater(address, [alive, done](std::optional<Lua::StructureLookup> found)
+                    {
+                        if (!alive.expired())
+                            done(std::move(found));
+                    });
+            };
+        if (!engine.MonoPresent())
+        {
+            scripts();
+            return;
+        }
+        engine.Jobs().Post([&engine, alive, address, containing, scripts, done]() -> JobQueue::Finish
+            {
+                std::optional<Lua::StructureLookup> found;
+                if (containing)
+                {
+                    if (const auto instance = engine.Mono().ClassAt(address))
+                        found = Lua::StructureLookup{ instance->Name, instance->Base };
+                }
+                else if (const auto name = engine.Mono().ClassNameAt(address))
+                {
+                    found = Lua::StructureLookup{ *name, address };
+                }
+                return [alive, found, scripts, done]()
+                    {
+                        if (alive.expired())
+                            return;
+                        if (found)
+                            done(found);
+                        else
+                            scripts();
+                    };
+            });
+    }
+
     void StructureWindow::PrepareNew(std::uint64_t address)
     {
         m_newFrom = address;
         m_newStart = address;
         m_newName = address ? "Structure at " + Hex(address) : "Structure";
-        if (!address || !m_engine.HasProcess())
+        m_suggestedName = m_newName;
+        m_lookupRunning = false;
+        const std::uint64_t serial = ++m_lookupSerial;
+        if (!address || !m_engine.HasProcess() || (!m_engine.MonoPresent() && !m_engine.Lua().HasStructureNameLookups()))
             return;
-        if (m_engine.MonoPresent())
-        {
-            if (const auto instance = m_engine.Mono().ClassAt(address))
+        m_lookupRunning = true;
+        LookupName(address, true, [this, serial](std::optional<Lua::StructureLookup> found)
             {
-                m_newName = instance->Name;
-                m_newStart = instance->Base;
-                return;
-            }
-        }
-        if (const auto lookup = m_engine.Lua().LookupStructureName(address))
-        {
-            m_newName = lookup->Name;
-            m_newStart = lookup->Address ? lookup->Address : address;
-        }
+                if (serial != m_lookupSerial)
+                    return;
+                m_lookupRunning = false;
+                if (!found || found->Name.empty())
+                    return;
+                if (m_newName == m_suggestedName)
+                {
+                    m_newName = found->Name;
+                    m_suggestedName = m_newName;
+                }
+                m_newStart = found->Address ? found->Address : m_newFrom;
+            });
     }
 
-    Table::StructDefinition& StructureWindow::ChildFor(const Table::StructDefinition& parent, const Table::StructField& field, std::uint64_t target)
+    void StructureWindow::ExpandPointer(Table::StructDefinition& parent, Table::StructField& field, std::uint64_t target, const std::string& path)
     {
-        if (target && m_engine.HasProcess())
+        const bool lookups = target && m_engine.HasProcess() && (m_engine.MonoPresent() || m_engine.Lua().HasStructureNameLookups());
+        if (!lookups)
         {
-            std::optional<std::string> name;
-            if (m_engine.MonoPresent())
-                name = m_engine.Mono().ClassNameAt(target);
-            if (!name)
-            {
-                if (const auto lookup = m_engine.Lua().LookupStructureName(target); lookup && lookup->Address == target)
-                    name = lookup->Name;
-            }
-            if (name)
-            {
-                if (Table::StructDefinition* existing = m_engine.Structures().Find(*name); existing && existing != &parent)
-                    return *existing;
-                return Guess(*name, target, 256);
-            }
+            field.ChildStructure = Guess(parent.Name + "." + field.Name, target, 256).Name;
+            return;
         }
-        return Guess(parent.Name + "." + field.Name, target, 256);
+        m_childLookups.insert(path);
+        const std::string parentName = parent.Name;
+        const std::string fieldName = field.Name;
+        const int offset = field.Offset;
+        LookupName(target, false, [this, parentName, fieldName, offset, target, path](std::optional<Lua::StructureLookup> found)
+            {
+                m_childLookups.erase(path);
+                Table::StructureStore& store = m_engine.Structures();
+                Table::StructDefinition* owner = store.Find(parentName);
+                if (!owner)
+                    return;
+                const auto slot = std::find_if(owner->Fields.begin(), owner->Fields.end(), [&](const Table::StructField& item) { return item.Offset == offset && item.Name == fieldName; });
+                if (slot == owner->Fields.end() || (!slot->ChildStructure.empty() && store.Find(slot->ChildStructure)))
+                    return;
+                const std::size_t index = static_cast<std::size_t>(slot - owner->Fields.begin());
+                std::string child;
+                if (found && !found->Name.empty() && found->Address == target)
+                {
+                    if (Table::StructDefinition* existing = store.Find(found->Name); existing && existing != owner)
+                        child = existing->Name;
+                    else
+                        child = Guess(found->Name, target, 256).Name;
+                }
+                else
+                {
+                    child = Guess(parentName + "." + fieldName, target, 256).Name;
+                }
+                owner->Fields[index].ChildStructure = child;
+                ++store.Generation;
+            });
     }
 
     std::string StructureWindow::FieldText(const Table::StructField& field, std::span<const std::uint8_t> bytes, std::uint64_t address, int pointerSize)
@@ -326,37 +406,85 @@ namespace Manifold::UI
         Table::StructDefinition& definition = store.Add(unique);
         if (!m_engine.HasProcess())
             return definition;
-        if (address && m_engine.MonoPresent())
+        const bool mono = address && m_engine.MonoPresent();
+        if (mono || (address && m_engine.Lua().HasDissectOverrides()))
         {
-            if (const auto className = m_engine.Mono().ClassNameAt(address))
-            {
-                const std::vector<Target::MonoField> fields = m_engine.Mono().FieldsOf(*className);
-                if (!fields.empty())
-                {
-                    definition.Fields.clear();
-                    for (const Target::MonoField& field : fields)
-                    {
-                        Table::StructField member;
-                        member.Offset = field.Offset;
-                        member.Name = field.Name;
-                        member.Type = MonoFieldType(field.TypeCode, member.Size, member.Display);
-                        definition.Fields.push_back(std::move(member));
-                    }
-                    definition.Sort();
-                    ++store.Generation;
-                    return definition;
-                }
-            }
-        }
-        if (address && m_engine.Lua().DissectStructure(definition, address))
-        {
-            ++store.Generation;
+            Fill(&definition, address, size, mono);
             return definition;
         }
         definition.Fields.clear();
         Table::GuessFields(*m_engine.Process(), definition, address, 0, size);
         ++store.Generation;
         return definition;
+    }
+
+    void StructureWindow::Fill(Table::StructDefinition* definition, std::uint64_t address, int size, bool mono)
+    {
+        m_filling.insert(definition);
+        const std::weak_ptr<int> alive = m_alive;
+        Engine& engine = m_engine;
+        auto finish = [this, &engine, alive, definition, address, size](bool handled)
+            {
+                if (!alive.expired())
+                    m_filling.erase(definition);
+                Table::StructDefinition* live = LiveStructure(engine, definition);
+                if (!live)
+                    return;
+                if (handled)
+                {
+                    live->Sort();
+                }
+                else if (engine.HasProcess())
+                {
+                    live->Fields.clear();
+                    Table::GuessFields(*engine.Process(), *live, address, 0, size);
+                }
+                ++engine.Structures().Generation;
+            };
+        auto scripts = [&engine, definition, address, finish]()
+            {
+                if (!LiveStructure(engine, definition) || !engine.Lua().HasDissectOverrides())
+                {
+                    finish(false);
+                    return;
+                }
+                engine.Lua().DissectStructureLater(definition, address, finish);
+            };
+        if (!mono)
+        {
+            scripts();
+            return;
+        }
+        engine.Jobs().Post([&engine, definition, address, scripts, finish]() -> JobQueue::Finish
+            {
+                std::vector<Target::MonoField> fields;
+                if (const auto className = engine.Mono().ClassNameAt(address))
+                    fields = engine.Mono().FieldsOf(*className);
+                return [&engine, definition, fields, scripts, finish]()
+                    {
+                        if (fields.empty())
+                        {
+                            scripts();
+                            return;
+                        }
+                        Table::StructDefinition* live = LiveStructure(engine, definition);
+                        if (!live)
+                        {
+                            finish(false);
+                            return;
+                        }
+                        live->Fields.clear();
+                        for (const Target::MonoField& field : fields)
+                        {
+                            Table::StructField member;
+                            member.Offset = field.Offset;
+                            member.Name = field.Name;
+                            member.Type = MonoFieldType(field.TypeCode, member.Size, member.Display);
+                            live->Fields.push_back(std::move(member));
+                        }
+                        finish(true);
+                    };
+            });
     }
 
     void StructureWindow::Draw()
@@ -396,14 +524,9 @@ namespace Manifold::UI
         std::vector<std::uint64_t> bases;
         for (Column& column : m_columns)
         {
-            column.Valid = false;
-            if (column.Address.empty())
-                continue;
-            if (const auto value = m_engine.Evaluate(column.Address))
-            {
-                column.Value = *value;
-                column.Valid = true;
-            }
+            const std::optional<std::uint64_t>& value = Resolve(m_engine, column.Address);
+            column.Valid = value.has_value();
+            column.Value = value.value_or(0);
         }
         for (const Column& column : m_columns)
             bases.push_back(column.Valid ? column.Value : 0);
@@ -463,6 +586,13 @@ namespace Manifold::UI
                 Muted("Starts at " + Hex(m_newStart) + ", where the structure that contains " + Hex(m_newFrom) + " begins");
             ImGui::SetNextItemWidth(Px(280.0f));
             InputText("##name", m_newName);
+            if (m_lookupRunning)
+            {
+                ImGui::SameLine(0.0f, Px(8.0f));
+                Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
+                ImGui::SameLine(0.0f, Px(6.0f));
+                Muted("Looking up the name");
+            }
             ImGui::SetNextItemWidth(Px(120.0f));
             ImGui::InputInt("Size (bytes)", &m_guessSize, 64, 1024);
             m_guessSize = std::clamp(m_guessSize, 8, 0x100000);
@@ -470,7 +600,7 @@ namespace Manifold::UI
             {
                 if (moved)
                 {
-                    m_columns.front().Address = m_engine.Symbols().ModuleOffset(m_newStart);
+                    m_columns.front().Address.Text = m_engine.Symbols().ModuleOffset(m_newStart);
                     m_columns.front().Value = m_newStart;
                 }
                 if (!m_columns.empty() && m_columns.front().Valid)
@@ -481,7 +611,7 @@ namespace Manifold::UI
                 }
                 else
                 {
-                    m_workspace.Report(Status::Fail(ErrorCode::ExprSyntax, m_columns.empty() ? "" : m_columns.front().Address));
+                    m_workspace.Report(Status::Fail(ErrorCode::ExprSyntax, m_columns.empty() ? "" : m_columns.front().Address.Text));
                 }
                 ImGui::CloseCurrentPopup();
             }
@@ -705,18 +835,7 @@ namespace Manifold::UI
         for (std::size_t i = 0; i < m_columns.size(); ++i)
         {
             ImGui::PushID(static_cast<int>(i));
-            ImGui::SetNextItemWidth(Px(200.0f));
-            InputTextWithHint("##address", "address of the structure", m_columns[i].Address);
-            if (!m_columns[i].Address.empty())
-            {
-                Status error;
-                if (!m_engine.Evaluate(m_columns[i].Address, &error))
-                {
-                    ImGui::SameLine(0.0f, Px(2.0f));
-                    ImGui::TextColored(ManifoldTheme::Error, ICON_FA_EXCLAMATION_TRIANGLE);
-                    ErrorTooltip(error.Text);
-                }
-            }
+            AddressInput("##address", m_engine, m_columns[i].Address, Px(200.0f), "address of the structure");
             if (m_columns.size() > 1)
             {
                 ImGui::SameLine(0.0f, Px(2.0f));
@@ -786,6 +905,14 @@ namespace Manifold::UI
                 }, "Delete");
         }
         ImGui::EndDisabled();
+        if (!m_filling.empty())
+        {
+            ImGui::SameLine(0.0f, Px(12.0f));
+            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
+            ImGui::SameLine(0.0f, Px(6.0f));
+            ImGui::AlignTextToFramePadding();
+            Muted(m_filling.size() == 1 ? std::string("Filling in the fields") : "Filling in " + std::to_string(m_filling.size()) + " structures");
+        }
     }
 
     void StructureWindow::BuildRows(Table::StructDefinition& definition, std::vector<std::uint64_t> bases, const std::string& path, int depth)
@@ -953,7 +1080,10 @@ namespace Manifold::UI
         const bool expanded = pointer && row.Expanded;
         if (pointer)
         {
-            ImGui::TextColored(ManifoldTheme::Label, "%s", expanded ? ICON_FA_CARET_DOWN : ICON_FA_CARET_RIGHT);
+            if (m_childLookups.count(fieldPath))
+                Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
+            else
+                ImGui::TextColored(ManifoldTheme::Label, "%s", expanded ? ICON_FA_CARET_DOWN : ICON_FA_CARET_RIGHT);
             if (ImGui::IsItemClicked())
             {
                 if (expanded)
@@ -963,13 +1093,12 @@ namespace Manifold::UI
                 else
                 {
                     m_expanded.insert(fieldPath);
-                    if (field.ChildStructure.empty() || !m_engine.Structures().Find(field.ChildStructure))
+                    if ((field.ChildStructure.empty() || !m_engine.Structures().Find(field.ChildStructure)) && !m_childLookups.count(fieldPath))
                     {
                         std::uint64_t target = 0;
                         if (!addresses.empty() && addresses.front() && m_engine.HasProcess())
                             target = m_engine.Process()->ReadPointer(addresses.front()).value_or(0);
-                        Table::StructDefinition& child = ChildFor(definition, field, target);
-                        field.ChildStructure = child.Name;
+                        ExpandPointer(definition, field, target, fieldPath);
                     }
                 }
             }

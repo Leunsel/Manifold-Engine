@@ -3,6 +3,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "UI/AddressActions.h"
 #include "UI/Fonts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
@@ -35,15 +36,6 @@ namespace Manifold::UI
             return out;
         }
 
-        std::string Where(Engine& engine, std::uint64_t address)
-        {
-            if (engine.HasProcess())
-            {
-                if (const auto module = engine.Process()->ModuleAt(address))
-                    return module->Name + "+" + Hex(address - module->Base);
-            }
-            return Hex(address);
-        }
     }
 
     void ModuleScopeCombo(const char* id, Engine& engine, ModuleScope& scope, float width, bool memory)
@@ -129,14 +121,7 @@ namespace Manifold::UI
     {
     }
 
-    CodeDissectWindow::~CodeDissectWindow()
-    {
-        if (m_task.valid())
-        {
-            m_progress->Cancel = true;
-            m_task.wait();
-        }
-    }
+    CodeDissectWindow::~CodeDissectWindow() = default;
 
     void CodeDissectWindow::Show(int tab, std::uint64_t address)
     {
@@ -154,7 +139,7 @@ namespace Manifold::UI
     void CodeDissectWindow::Start()
     {
         Engine& engine = m_workspace.Core();
-        if (!engine.HasProcess() || m_task.valid())
+        if (!engine.HasProcess() || m_task.Running())
             return;
         engine.Process()->RefreshModules();
         std::vector<Target::ModuleInfo> modules = ScopeModules(engine, m_scope);
@@ -163,21 +148,20 @@ namespace Manifold::UI
             engine.Notify(LogLevel::Warning, "No module matches the chosen scope.");
             return;
         }
-        m_progress = std::make_unique<Disasm::DissectProgress>();
         m_generation = engine.ProcessGeneration();
-        Disasm::DissectProgress* progress = m_progress.get();
         std::shared_ptr<Target::Process> process = engine.Process();
-        m_task = std::async(std::launch::async, [process, modules = std::move(modules), progress]()
+        m_task.Start([process, modules = std::move(modules)](Disasm::DissectProgress& progress)
             {
-                return Disasm::DissectCode(*process, modules, progress);
+                return Disasm::DissectCode(*process, modules, &progress);
             });
     }
 
     void CodeDissectWindow::Collect()
     {
-        if (!m_task.valid() || m_task.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        std::optional<std::shared_ptr<Disasm::DissectResult>> collected = m_task.Collect();
+        if (!collected || !*collected)
             return;
-        std::shared_ptr<Disasm::DissectResult> result = m_task.get();
+        std::shared_ptr<Disasm::DissectResult> result = std::move(*collected);
         Engine& engine = m_workspace.Core();
         if (result->Cancelled)
         {
@@ -194,7 +178,7 @@ namespace Manifold::UI
     void CodeDissectWindow::Toolbar()
     {
         Engine& engine = m_workspace.Core();
-        const bool running = m_task.valid();
+        const bool running = m_task.Running();
         ImGui::BeginDisabled(running || !engine.HasProcess());
         ModuleScopeCombo("##dissectscope", engine, m_scope, Px(280.0f));
         ImGui::SameLine();
@@ -205,15 +189,11 @@ namespace Manifold::UI
         ImGui::SameLine(0.0f, Px(12.0f));
         if (running)
         {
-            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
-            ImGui::SameLine(0.0f, Px(6.0f));
-            ImGui::AlignTextToFramePadding();
-            const std::uint64_t total = std::max<std::uint64_t>(1, m_progress->Total.load());
-            const int phase = m_progress->Phase.load();
-            Muted(phase == 0 ? Format("Reading code  %d%%", static_cast<int>(m_progress->Done.load() * 100 / total)) : phase == 1 ? std::string("Sorting references") : std::string("Looking for strings"));
-            ImGui::SameLine(0.0f, Px(8.0f));
-            if (ImGui::Button("Cancel"))
-                m_progress->Cancel = true;
+            const Disasm::DissectProgress& progress = m_task.State();
+            const std::uint64_t total = std::max<std::uint64_t>(1, progress.Total.load());
+            const int phase = progress.Phase.load();
+            if (TaskStatus(phase == 0 ? Format("Reading code  %d%%", static_cast<int>(progress.Done.load() * 100 / total)) : phase == 1 ? std::string("Sorting references") : std::string("Looking for strings")))
+                m_task.Cancel();
             return;
         }
         const auto result = engine.CodeDissect();
@@ -239,47 +219,21 @@ namespace Manifold::UI
         ImGui::TextUnformatted(ICON_FA_LINK);
         ImGui::SameLine(0.0f, Px(6.0f));
         PushMono();
-        ImGui::TextColored(ManifoldTheme::AddressText, "%s", Where(engine, m_selected).c_str());
+        ImGui::TextColored(ManifoldTheme::AddressText, "%s", AddressText(engine, m_selected).c_str());
         PopMono();
         ImGui::SameLine(0.0f, Px(8.0f));
         Muted(refs.empty() ? std::string("no code uses this address") : std::to_string(refs.size()) + (refs.size() == 1 ? " reference" : " references"));
         if (refs.empty())
             return;
-        const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable;
-        if (!ImGui::BeginTable("##refs", 3, flags))
+        if (!BeginDataTable("##refs", { { "From", 1.2f }, { "Kind", 1.0f, 120.0f }, { "Instruction", 2.0f } }))
             return;
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("From", ImGuiTableColumnFlags_WidthStretch, 1.2f);
-        ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, Px(120.0f));
-        ImGui::TableSetupColumn("Instruction", ImGuiTableColumnFlags_WidthStretch, 2.0f);
-        ImGui::TableHeadersRow();
-        ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(refs.size()));
-        while (clipper.Step())
-        {
-            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
+        ClippedRows(static_cast<int>(refs.size()), [&](int row)
             {
                 const Disasm::CodeRef& ref = refs[static_cast<std::size_t>(row)];
                 const std::uint64_t from = ref.From();
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::PushID(row);
-                PushMono();
-                ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::AddressText);
-                if (ImGui::Selectable(Where(engine, from).c_str(), false, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
-                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                    m_workspace.OpenMemoryViewer(from);
-                ImGui::PopStyleColor();
-                PopMono();
-                if (ImGui::BeginPopupContextItem("##refmenu"))
-                {
-                    if (ImGui::MenuItem(ICON_FA_CODE "  Show in disassembler"))
-                        m_workspace.OpenMemoryViewer(from);
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
-                        ImGui::SetClipboardText(engine.Symbols().ModuleOffset(from).c_str());
-                    ImGui::EndPopup();
-                }
-                ImGui::PopID();
+                AddressCell(m_workspace, from, false, CodeActions);
                 ImGui::TableNextColumn();
                 Muted(Disasm::RefKindName(ref.Kind()));
                 ImGui::TableNextColumn();
@@ -287,8 +241,7 @@ namespace Manifold::UI
                 if (engine.HasProcess())
                     ImGui::TextUnformatted(engine.Disassembler().Read(*engine.Process(), from, &engine.Symbols()).Text().c_str());
                 PopMono();
-            }
-        }
+            });
         ImGui::EndTable();
     }
 
@@ -298,7 +251,8 @@ namespace Manifold::UI
         ImGui::SetNextItemWidth(Px(260.0f));
         InputTextWithHint("##stringfilter", ICON_FA_SEARCH " Text", m_filter);
         const std::string key = "s:" + m_filter;
-        if (m_visibleFor != &result || m_visibleFilter != key)
+        const auto current = engine.CodeDissect();
+        if (m_visibleFor != current || m_visibleFilter != key)
         {
             m_visible.clear();
             for (std::size_t i = 0; i < result.Strings.size(); ++i)
@@ -306,7 +260,7 @@ namespace Manifold::UI
                 if (m_filter.empty() || ContainsNoCase(result.Strings[i].Text, m_filter))
                     m_visible.push_back(i);
             }
-            m_visibleFor = &result;
+            m_visibleFor = current;
             m_visibleFilter = key;
         }
         if (result.Strings.empty())
@@ -314,45 +268,20 @@ namespace Manifold::UI
             Muted("No referenced strings were found in this code.");
             return;
         }
-        const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable;
-        if (ImGui::BeginTable("##strings", 3, flags, ImVec2(0.0f, height)))
+        if (BeginDataTable("##strings", { { "Address", 1.0f, 200.0f }, { "Refs", 1.0f, 50.0f }, { "Text", 1.0f } }, ImVec2(0.0f, height)))
         {
-            ImGui::TableSetupScrollFreeze(0, 1);
-            ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, Px(200.0f));
-            ImGui::TableSetupColumn("Refs", ImGuiTableColumnFlags_WidthFixed, Px(50.0f));
-            ImGui::TableSetupColumn("Text", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableHeadersRow();
-            ImGuiListClipper clipper;
-            clipper.Begin(static_cast<int>(m_visible.size()));
-            while (clipper.Step())
-            {
-                for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
+            ClippedRows(static_cast<int>(m_visible.size()), [&](int row)
                 {
                     const Disasm::ReferencedString& entry = result.Strings[m_visible[static_cast<std::size_t>(row)]];
                     ImGui::TableNextRow();
                     ImGui::TableNextColumn();
-                    ImGui::PushID(row);
-                    PushMono();
-                    ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::AddressText);
-                    if (ImGui::Selectable(Where(engine, entry.Address).c_str(), m_selected == entry.Address, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
-                    {
+                    const auto copyText = [&entry]()
+                        {
+                            if (ImGui::MenuItem(ICON_FA_COPY "  Copy text"))
+                                ImGui::SetClipboardText(entry.Text.c_str());
+                        };
+                    if (AddressCell(m_workspace, entry.Address, m_selected == entry.Address, DataActions, false, copyText))
                         m_selected = entry.Address;
-                        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                            m_workspace.OpenMemoryViewer(entry.Address, true);
-                    }
-                    ImGui::PopStyleColor();
-                    PopMono();
-                    if (ImGui::BeginPopupContextItem("##stringmenu"))
-                    {
-                        if (ImGui::MenuItem(ICON_FA_TH "  Show in hex view"))
-                            m_workspace.OpenMemoryViewer(entry.Address, true);
-                        if (ImGui::MenuItem(ICON_FA_COPY "  Copy text"))
-                            ImGui::SetClipboardText(entry.Text.c_str());
-                        if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
-                            ImGui::SetClipboardText(engine.Symbols().ModuleOffset(entry.Address).c_str());
-                        ImGui::EndPopup();
-                    }
-                    ImGui::PopID();
                     ImGui::TableNextColumn();
                     Muted(std::to_string(entry.References));
                     ImGui::TableNextColumn();
@@ -362,8 +291,7 @@ namespace Manifold::UI
                         ImGui::SameLine(0.0f, Px(4.0f));
                     }
                     ImGui::TextUnformatted(Shown(entry.Text, 300).c_str());
-                }
-            }
+                });
             ImGui::EndTable();
         }
     }
@@ -382,7 +310,8 @@ namespace Manifold::UI
         ImGui::SetNextItemWidth(Px(260.0f));
         InputTextWithHint("##functionfilter", ICON_FA_SEARCH " Name or address", m_filter);
         const std::string key = "f:" + m_filter;
-        if (m_visibleFor != &result || m_visibleFilter != key)
+        const auto current = engine.CodeDissect();
+        if (m_visibleFor != current || m_visibleFilter != key)
         {
             m_visible.clear();
             for (std::size_t index : m_byCalls)
@@ -391,21 +320,12 @@ namespace Manifold::UI
                 if (m_filter.empty() || ContainsNoCase(Hex(address), m_filter) || ContainsNoCase(engine.Describe(address), m_filter))
                     m_visible.push_back(index);
             }
-            m_visibleFor = &result;
+            m_visibleFor = current;
             m_visibleFilter = key;
         }
-        const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable;
-        if (ImGui::BeginTable("##functions", 2, flags, ImVec2(0.0f, height)))
+        if (BeginDataTable("##functions", { { "Calls", 1.0f, 60.0f }, { "Function", 1.0f } }, ImVec2(0.0f, height)))
         {
-            ImGui::TableSetupScrollFreeze(0, 1);
-            ImGui::TableSetupColumn("Calls", ImGuiTableColumnFlags_WidthFixed, Px(60.0f));
-            ImGui::TableSetupColumn("Function", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableHeadersRow();
-            ImGuiListClipper clipper;
-            clipper.Begin(static_cast<int>(m_visible.size()));
-            while (clipper.Step())
-            {
-                for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
+            ClippedRows(static_cast<int>(m_visible.size()), [&](int row)
                 {
                     const Disasm::ReferencedFunction& entry = result.Functions[m_visible[static_cast<std::size_t>(row)]];
                     ImGui::TableNextRow();
@@ -419,10 +339,7 @@ namespace Manifold::UI
                     }
                     if (ImGui::BeginPopupContextItem("##functionmenu"))
                     {
-                        if (ImGui::MenuItem(ICON_FA_CODE "  Show in disassembler"))
-                            m_workspace.OpenMemoryViewer(entry.Address);
-                        if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
-                            ImGui::SetClipboardText(engine.Symbols().ModuleOffset(entry.Address).c_str());
+                        AddressMenuItems(m_workspace, entry.Address, CodeActions);
                         ImGui::EndPopup();
                     }
                     ImGui::PopID();
@@ -430,8 +347,7 @@ namespace Manifold::UI
                     PushMono();
                     ImGui::TextColored(ManifoldTheme::AddressText, "%s", engine.Describe(entry.Address).c_str());
                     PopMono();
-                }
-            }
+                });
             ImGui::EndTable();
         }
     }
@@ -457,18 +373,10 @@ namespace Manifold::UI
     void CodeDissectWindow::Draw()
     {
         Collect();
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_PROJECT_DIAGRAM "  Code dissect###codedissect", &m_open, ImVec2(940.0f, 640.0f), 0, ImVec2(640.0f, 400.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_PROJECT_DIAGRAM "  Code dissect###codedissect", ImVec2(940.0f, 640.0f), 0, ImVec2(640.0f, 400.0f)))
             return;
-        }
         Engine& engine = m_workspace.Core();
-        if (!engine.HasProcess() && !m_task.valid())
+        if (!engine.HasProcess() && !m_task.Running())
         {
             m_workspace.NoProcessState(ICON_FA_PROJECT_DIAGRAM, "Open a process to dissect its code.");
             EndToolWindow();
@@ -479,7 +387,7 @@ namespace Manifold::UI
         const auto result = engine.CodeDissect();
         if (!result)
         {
-            if (!m_task.valid() && EmptyState(ICON_FA_PROJECT_DIAGRAM, "Dissect code",
+            if (!m_task.Running() && EmptyState(ICON_FA_PROJECT_DIAGRAM, "Dissect code",
                     "Reads the code of the chosen modules and records every call, jump and data reference. Referenced strings, called functions and who uses an address all come from it.",
                     { { ICON_FA_PLAY "  Dissect", nullptr, true } }, false) == 0)
                 Start();
@@ -534,19 +442,12 @@ namespace Manifold::UI
     {
     }
 
-    AsmSearchWindow::~AsmSearchWindow()
-    {
-        if (m_task.valid())
-        {
-            m_progress->Cancel = true;
-            m_task.wait();
-        }
-    }
+    AsmSearchWindow::~AsmSearchWindow() = default;
 
     void AsmSearchWindow::Start()
     {
         Engine& engine = m_workspace.Core();
-        if (!engine.HasProcess() || m_task.valid())
+        if (!engine.HasProcess() || m_task.Running())
             return;
         const auto pattern = Disasm::ParseAsmPattern(m_pattern);
         if (!pattern)
@@ -558,92 +459,56 @@ namespace Manifold::UI
         const std::vector<Target::ModuleInfo> modules = ScopeModules(engine, m_scope);
         std::vector<Disasm::CodeSpan> spans = Disasm::ExecutableSpans(*engine.Process(), modules);
         m_process = engine.Process();
-        m_progress = std::make_unique<Disasm::AsmSearchProgress>();
         m_result.reset();
         m_searched = ScopeName(engine, m_scope);
-        Disasm::AsmSearchProgress* progress = m_progress.get();
         std::shared_ptr<Target::Process> process = m_process;
         const Disasm::Disassembler* disassembler = &engine.Disassembler();
         const Target::Symbols* symbols = &engine.Symbols();
-        m_task = std::async(std::launch::async, [process, disassembler, symbols, spans = std::move(spans), pattern = *pattern, progress]()
+        m_task.Start([process, disassembler, symbols, spans = std::move(spans), pattern = *pattern](Disasm::AsmSearchProgress& progress)
             {
-                return Disasm::SearchAssembly(*process, *disassembler, symbols, spans, pattern, progress);
+                return Disasm::SearchAssembly(*process, *disassembler, symbols, spans, pattern, &progress);
             });
     }
 
     void AsmSearchWindow::Collect()
     {
-        if (!m_task.valid() || m_task.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        std::optional<Disasm::AsmSearchResult> collected = m_task.Collect();
+        if (!collected)
             return;
-        m_result = m_task.get();
+        m_result = std::move(collected);
         LOG_INFO("Assembly", std::to_string(m_result->Matches.size()) + " matches in " + Grouped(m_result->Instructions) + " instructions");
     }
 
     void AsmSearchWindow::Results()
     {
-        Engine& engine = m_workspace.Core();
         if (m_result->Matches.empty())
         {
             EmptyState(ICON_FA_SEARCH, "Nothing found", "No instruction in " + m_searched + " matches the pattern.", {}, false);
             return;
         }
-        const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable;
-        if (!ImGui::BeginTable("##asmmatches", 2, flags))
+        if (!BeginDataTable("##asmmatches", { { "Address", 1.0f }, { "Code", 2.2f } }))
             return;
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-        ImGui::TableSetupColumn("Code", ImGuiTableColumnFlags_WidthStretch, 2.2f);
-        ImGui::TableHeadersRow();
-        ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(m_result->Matches.size()));
-        while (clipper.Step())
-        {
-            for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
+        ClippedRows(static_cast<int>(m_result->Matches.size()), [&](int row)
             {
                 const Disasm::AsmMatch& match = m_result->Matches[static_cast<std::size_t>(row)];
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::PushID(row);
-                PushMono();
-                ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::AddressText);
-                if (ImGui::Selectable(Where(engine, match.Address).c_str(), false, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
-                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                    m_workspace.OpenMemoryViewer(match.Address);
-                ImGui::PopStyleColor();
-                PopMono();
-                if (ImGui::BeginPopupContextItem("##matchmenu"))
-                {
-                    if (ImGui::MenuItem(ICON_FA_CODE "  Show in disassembler"))
-                        m_workspace.OpenMemoryViewer(match.Address);
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
-                        ImGui::SetClipboardText(engine.Symbols().ModuleOffset(match.Address).c_str());
-                    ImGui::EndPopup();
-                }
-                ImGui::PopID();
+                AddressCell(m_workspace, match.Address, false, CodeActions);
                 ImGui::TableNextColumn();
                 PushMono();
                 ImGui::TextUnformatted(Join(match.Lines, "  ;  ").c_str());
                 PopMono();
-            }
-        }
+            });
         ImGui::EndTable();
     }
 
     void AsmSearchWindow::Draw()
     {
         Collect();
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_SEARCH_LOCATION "  Find assembly code###asmsearch", &m_open, ImVec2(860.0f, 580.0f), 0, ImVec2(560.0f, 360.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_SEARCH_LOCATION "  Find assembly code###asmsearch", ImVec2(860.0f, 580.0f), 0, ImVec2(560.0f, 360.0f)))
             return;
-        }
         Engine& engine = m_workspace.Core();
-        if (!engine.HasProcess() && !m_task.valid() && !m_result)
+        if (!engine.HasProcess() && !m_task.Running() && !m_result)
         {
             m_workspace.NoProcessState(ICON_FA_SEARCH_LOCATION, "Open a process to search its code.");
             EndToolWindow();
@@ -657,7 +522,7 @@ namespace Manifold::UI
         }
         InputMultiline("##asmpattern", m_pattern, ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 3.0f + ImGui::GetStyle().FramePadding.y * 2.0f));
         const bool shortcut = ImGui::IsItemFocused() && ImGui::IsKeyDown(ImGuiMod_Ctrl) && ImGui::IsKeyPressed(ImGuiKey_Enter, false);
-        const bool running = m_task.valid();
+        const bool running = m_task.Running();
         ImGui::BeginDisabled(running || !engine.HasProcess());
         ModuleScopeCombo("##asmscope", engine, m_scope, Px(280.0f));
         ImGui::SameLine();
@@ -668,14 +533,10 @@ namespace Manifold::UI
         ImGui::SameLine(0.0f, Px(12.0f));
         if (running)
         {
-            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
-            ImGui::SameLine(0.0f, Px(6.0f));
-            ImGui::AlignTextToFramePadding();
-            const std::uint64_t total = std::max<std::uint64_t>(1, m_progress->Total.load());
-            Muted(Format("Searching  %d%%", static_cast<int>(m_progress->Done.load() * 100 / total)));
-            ImGui::SameLine(0.0f, Px(8.0f));
-            if (ImGui::Button("Cancel"))
-                m_progress->Cancel = true;
+            const Disasm::AsmSearchProgress& progress = m_task.State();
+            const std::uint64_t total = std::max<std::uint64_t>(1, progress.Total.load());
+            if (TaskStatus(Format("Searching  %d%%", static_cast<int>(progress.Done.load() * 100 / total))))
+                m_task.Cancel();
         }
         else if (m_result)
         {

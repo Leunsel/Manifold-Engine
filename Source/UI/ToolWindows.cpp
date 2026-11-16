@@ -227,7 +227,26 @@ namespace Manifold::UI
     {
         m_editor.ErrorLine = 0;
         m_followOutput = true;
-        const Status status = m_engine.Lua().Run(m_text, "console");
+        Lua::LuaEngine& lua = m_engine.Lua();
+        if (!m_engine.Async())
+        {
+            MarkError(lua.Run(m_text, "console"));
+            return;
+        }
+        if (m_task && lua.TaskAlive(m_task))
+            return;
+        const std::weak_ptr<int> alive = m_alive;
+        m_task = lua.StartTask(m_text, "console", [this, alive](const Status& status, const std::string&)
+            {
+                if (alive.expired())
+                    return;
+                m_task = 0;
+                MarkError(status);
+            });
+    }
+
+    void LuaWindow::MarkError(const Status& status)
+    {
         if (!status)
         {
             const std::size_t colon = status.Text.find("console:");
@@ -383,10 +402,23 @@ namespace Manifold::UI
             m_outputShare = output / available;
         ImGui::SetCursorPos(ImVec2(start.x, start.y + output + Px(6.0f)));
         CodeEditor("##lua", m_text, Language::Lua, ImVec2(ImGui::GetContentRegionAvail().x - functionsWidth, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing()), m_editor);
-        if (AccentButton(ICON_FA_PLAY "  Execute", Px(110.0f, 0.0f)))
+        const bool running = m_task && m_engine.Lua().TaskAlive(m_task);
+        if (running)
+        {
+            if (DangerButton(ICON_FA_STOP "  Stop", Px(110.0f, 0.0f)))
+                m_engine.Lua().StopTask(m_task);
+            ImGui::SameLine();
+            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
+            ImGui::SameLine();
+        }
+        else if (AccentButton(ICON_FA_PLAY "  Execute", Px(110.0f, 0.0f)))
+        {
             Execute();
-        ImGui::SameLine();
-        Muted(std::string(ShortcutText(Command::LuaExecute)) + "  ·  line " + std::to_string(m_editor.CursorLine) + ", column " + std::to_string(m_editor.CursorColumn));
+        }
+        if (!running)
+            ImGui::SameLine();
+        const std::string keys = ShortcutLabel(Command::LuaExecute);
+        Muted((keys.empty() ? std::string() : keys + "  ·  ") + "line " + std::to_string(m_editor.CursorLine) + ", column " + std::to_string(m_editor.CursorColumn));
         ImGui::EndGroup();
 
         if (m_showFunctions)

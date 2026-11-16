@@ -10,6 +10,7 @@ namespace Manifold::Debug::Veh
     constexpr std::uint32_t kVersion = 2;
     constexpr int kMaxWatches = 4;
     constexpr int kMaxEntries = 256;
+    constexpr std::uint64_t kHostSilenceMs = 4000;
 
     struct Registers
     {
@@ -108,5 +109,8 @@ namespace Manifold::Debug::Veh
         volatile std::uint32_t XmmDirty;
         std::uint32_t Pad4;
         Action Actions[kMaxWatches];
+        volatile std::uint64_t HostBeat;
+        volatile std::uint32_t HostLost;
+        std::uint32_t Pad5;
     };
 }

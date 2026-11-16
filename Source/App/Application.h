@@ -51,6 +51,7 @@ namespace Manifold
         void CloseRequested() override;
         void RememberPlacement();
         void FirstFrameWork();
+        void TickWhileWaiting(unsigned milliseconds);
 
         StartOptions m_options;
         Settings m_settings;
