@@ -70,6 +70,11 @@ namespace Manifold::Tests
             const auto className = engine.Mono().ClassNameAt(*object);
             CHECK_MSG(className && *className == "Game.Player", className ? *className : "nil");
             CHECK(!engine.Mono().ClassNameAt(*object + 0x100000).has_value());
+            // A field address (inside the object) still finds the header.
+            const auto fromField = engine.Mono().ClassAt(*object + 0x8);
+            CHECK_MSG(fromField && fromField->Name == "Game.Player" && fromField->Base == *object,
+                fromField ? fromField->Name + " at " + Hex(fromField->Base) : "nil");
+            CHECK(!engine.Mono().ClassAt(*object + 0x100000).has_value());
         }
         CHECK(std::any_of(classes.begin(), classes.end(), [](const Target::MonoClass& c) { return c.Name == "GameManager"; }));
         const std::vector<std::string> managerMethods = engine.Mono().MethodsOf("GameManager");
@@ -184,13 +189,16 @@ namespace Manifold::Tests
         {
             const auto vtable = engine.Process()->ReadPointer(object);
             const auto klass = vtable ? engine.Process()->ReadPointer(*vtable) : std::nullopt;
-            const auto className = engine.Mono().ClassNameAt(object);
-            std::printf("object %s: vtable %s, klass %s -> class %s\n", Hex(object).c_str(),
+            const auto instance = engine.Mono().ClassAt(object);
+            std::printf("object %s: vtable %s, klass %s -> class %s", Hex(object).c_str(),
                 vtable ? Hex(*vtable).c_str() : "unreadable", klass ? Hex(*klass).c_str() : "unreadable",
-                className ? className->c_str() : "not resolved");
-            if (className)
+                instance ? instance->Name.c_str() : "not resolved");
+            if (instance)
+                std::printf(" at %s (%+lld from the address)", Hex(instance->Base).c_str(), static_cast<long long>(instance->Base) - static_cast<long long>(object));
+            std::printf("\n");
+            if (instance)
             {
-                for (const Target::MonoField& field : engine.Mono().FieldsOf(*className))
+                for (const Target::MonoField& field : engine.Mono().FieldsOf(instance->Name))
                     std::printf("  +0x%-4X %s\n", field.Offset, field.Name.c_str());
             }
         }

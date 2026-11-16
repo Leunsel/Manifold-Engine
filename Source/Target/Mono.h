@@ -29,6 +29,12 @@ namespace Manifold::Target
         int TypeCode = 0;  // MONO_TYPE_* of the field
     };
 
+    struct MonoInstance
+    {
+        std::uint64_t Base = 0;   // the object header (where the structure starts)
+        std::string Name;         // its class
+    };
+
     struct MonoClass
     {
         std::string Image;
@@ -65,11 +71,16 @@ namespace Manifold::Target
         std::vector<std::string> MethodsOf(std::string_view className);
         std::vector<MonoField> FieldsOf(std::string_view className);
 
-        // The class of the object at an address, or nullopt when it is not a
-        // known Mono object (checked against the enumerated classes, so a random
-        // address does not pass). This is what makes Structure Dissect name a
-        // Mono instance automatically.
+        // The class of the object whose header is exactly at an address, or
+        // nullopt when it is not a known Mono object (checked against the
+        // enumerated classes, so a random address does not pass).
         std::optional<std::string> ClassNameAt(std::uint64_t address);
+
+        // Like ClassNameAt but also finds the object when the address points
+        // inside it, not at its header: it scans back a little for the enclosing
+        // object and returns that header, so dissecting a field address still
+        // lands on the right class the way Cheat Engine does.
+        std::optional<MonoInstance> ClassAt(std::uint64_t address);
 
         // "Class:Method" or "Namespace.Class:Method"; compiles the method on the
         // first call and caches the address. Returns nullopt when not Mono or not found.
@@ -82,6 +93,7 @@ namespace Manifold::Target
         std::string CallString(const char* name, std::uint64_t handle);
         int FindClass(std::string_view name) const;
         void EnsureMembers(int classIndex);
+        std::optional<std::string> ResolveHead(std::uint64_t header, bool allowRuntimeFallback);
 
         std::shared_ptr<Process> m_process;
         mutable std::recursive_mutex m_lock;

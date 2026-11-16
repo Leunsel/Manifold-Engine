@@ -294,17 +294,14 @@ namespace Manifold::Target
         return m_classes.size();
     }
 
-    std::optional<std::string> MonoBridge::ClassNameAt(std::uint64_t address)
+    std::optional<std::string> MonoBridge::ResolveHead(std::uint64_t header, bool allowRuntimeFallback)
     {
-        std::lock_guard lock(m_lock);
-        if (!m_present || !m_process || !address)
-            return std::nullopt;
         // Read the object -> MonoVTable -> MonoClass chain ourselves with safe
         // reads (both pointers are at offset 0) rather than calling
         // mono_object_get_class in the target, which would dereference a wild
         // pointer and could crash the game when the address is not an object.
-        const auto vtable = m_process->ReadPointer(address);
-        if (!vtable || !*vtable)
+        const auto vtable = m_process->ReadPointer(header);
+        if (!vtable || *vtable < 0x10000)
             return std::nullopt;
         const auto klass = m_process->ReadPointer(*vtable);
         if (!klass || !*klass)
@@ -315,7 +312,8 @@ namespace Manifold::Target
         // Not in the enumerated set (a generic or inflated class). Trust the
         // klass only when it sits in the same pointer span as the known classes
         // and is readable, then ask the runtime for its name and remember it.
-        if (!m_handleMin || *klass < m_handleMin || *klass > m_handleMax || !m_process->IsReadable(*klass))
+        // Only for the exact address the caller gave, not during a back scan.
+        if (!allowRuntimeFallback || !m_handleMin || *klass < m_handleMin || *klass > m_handleMax || !m_process->IsReadable(*klass))
             return std::nullopt;
         const std::string name = CallString("mono_class_get_name", *klass);
         if (name.empty() || name.size() > 256)
@@ -335,6 +333,37 @@ namespace Manifold::Target
         m_handleIndex.emplace(*klass, index);
         m_classes.push_back(std::move(dynamic));
         return full;
+    }
+
+    std::optional<std::string> MonoBridge::ClassNameAt(std::uint64_t address)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_present || !m_process || !address)
+            return std::nullopt;
+        return ResolveHead(address, true);
+    }
+
+    std::optional<MonoInstance> MonoBridge::ClassAt(std::uint64_t address)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_present || !m_process || !address)
+            return std::nullopt;
+        // The address is often a field inside an object, not its header. Try the
+        // address itself first, then step back a little (8-byte aligned) for the
+        // enclosing object's header. The runtime fallback is allowed only for the
+        // exact address; the back scan keeps to the enumerated classes so a stray
+        // field value cannot be mistaken for an object.
+        constexpr std::uint64_t kMaxBack = 0x1000;
+        const std::uint64_t aligned = address & ~std::uint64_t(7);
+        for (std::uint64_t back = 0; back <= kMaxBack; back += 8)
+        {
+            if (aligned < back + 0x10000)
+                break;
+            const std::uint64_t header = aligned - back;
+            if (const auto name = ResolveHead(header, back == 0))
+                return MonoInstance{ header, *name };
+        }
+        return std::nullopt;
     }
 
     std::optional<std::uint64_t> MonoBridge::AddressOf(std::string_view name)

@@ -238,10 +238,10 @@ namespace Manifold::UI
             return;
         if (m_engine.MonoPresent())
         {
-            if (const auto name = m_engine.Mono().ClassNameAt(address))
+            if (const auto instance = m_engine.Mono().ClassAt(address))
             {
-                m_newName = *name;
-                m_newStart = address;
+                m_newName = instance->Name;
+                m_newStart = instance->Base;
                 return;
             }
         }
