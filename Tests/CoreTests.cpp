@@ -2,6 +2,7 @@
 
 #include "Asm/AutoAssembler.h"
 #include "Core/Errors.h"
+#include "App/Sounds.h"
 #include "Core/JobQueue.h"
 #include "Core/Text.h"
 #include "Core/Xml.h"
@@ -15,6 +16,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -620,6 +622,43 @@ data:
         CHECK(list.FindById(firstId) == nullptr && list.FindByDescription("Health") == nullptr);
     }
 
+    void SoundDecoding()
+    {
+        std::filesystem::path at = std::filesystem::current_path();
+        for (int i = 0; i < 8 && !std::filesystem::exists(at / "Assets" / "Sounds" / "Success.mp3"); ++i)
+            at = at.parent_path();
+        const std::filesystem::path file = at / "Assets" / "Sounds" / "Success.mp3";
+        if (!std::filesystem::exists(file))
+        {
+            std::printf("  SKIP Assets/Sounds/Success.mp3 not found\n");
+            return;
+        }
+        std::ifstream input(file, std::ios::binary);
+        const std::vector<std::uint8_t> encoded((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+        const std::vector<std::uint8_t> wave = Sounds::DecodeToWave(encoded);
+        CHECK_MSG(wave.size() > 44, "the MP3 did not decode");
+        if (wave.size() <= 44)
+            return;
+        CHECK(std::memcmp(wave.data(), "RIFF", 4) == 0 && std::memcmp(wave.data() + 8, "WAVE", 4) == 0 && std::memcmp(wave.data() + 12, "fmt ", 4) == 0);
+        std::uint16_t tag = 0;
+        std::uint16_t channels = 0;
+        std::uint32_t rate = 0;
+        std::uint32_t perSecond = 0;
+        std::uint32_t data = 0;
+        std::memcpy(&tag, wave.data() + 20, 2);
+        std::memcpy(&channels, wave.data() + 22, 2);
+        std::memcpy(&rate, wave.data() + 24, 4);
+        std::memcpy(&perSecond, wave.data() + 28, 4);
+        std::memcpy(&data, wave.data() + 40, 4);
+        CHECK_EQ(tag, static_cast<std::uint16_t>(1));
+        CHECK(channels >= 1 && channels <= 2 && rate >= 8000 && rate <= 96000);
+        CHECK_EQ(static_cast<std::size_t>(data) + 44, wave.size());
+        const double seconds = perSecond ? static_cast<double>(data) / perSecond : 0.0;
+        CHECK_MSG(seconds > 0.1 && seconds < 10.0, "decoded length " + std::to_string(seconds) + " s");
+        CHECK(Sounds::DecodeToWave({}).empty());
+        CHECK(Sounds::DecodeToWave({ 1, 2, 3, 4, 5 }).empty());
+    }
+
     void Jobs()
     {
         JobQueue jobs;
@@ -666,6 +705,7 @@ data:
         Conditions();
         BreakExpressions();
         Jobs();
+        SoundDecoding();
         RecordIndex();
         return Totals().Failures - before;
     }

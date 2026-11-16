@@ -5,6 +5,7 @@
 #pragma code_page(65001)
 
 IDR_FONT_FA_SOLID        RCDATA "..\..\Dependencies\Fonts\fa-solid-900.ttf"
+IDR_SOUND_SUCCESS        RCDATA "..\\..\\Assets\\Sounds\\Success.mp3"
 
 IDI_APPICON ICON "icon.ico"
 

@@ -1,5 +1,7 @@
 #include "App/Engine.h"
 
+#include "App/Sounds.h"
+
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
 
@@ -1383,7 +1385,14 @@ namespace Manifold
     {
         const double now = Now();
         m_jobs.Drain();
-        m_scanner.Poll();
+        const int scansBefore = m_scanner.ScanNumber();
+        if (m_scanner.Poll())
+        {
+            if (m_scanner.ScanNumber() != scansBefore)
+                Sounds::Play(Sounds::Cue::Success);
+            else if (!m_scanner.LastError().Ok())
+                Sounds::Play(Sounds::Cue::Error);
+        }
 
         if (m_process && now - m_lastAliveCheck > kAliveCheckSeconds)
         {

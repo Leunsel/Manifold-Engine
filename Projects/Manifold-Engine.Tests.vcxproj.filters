@@ -54,6 +54,9 @@
     <ClCompile Include="..\Source\App\Settings.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\Sounds.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Asm\Assembler.cpp">
       <Filter>Source\Asm</Filter>
     </ClCompile>

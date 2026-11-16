@@ -1,6 +1,7 @@
 #include "UI/Windows.h"
 
 #include "App/Settings.h"
+#include "App/Sounds.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Core/Version.h"
@@ -759,6 +760,40 @@ namespace Manifold::UI
         if (list.Row("Found list", "How often the values in the found list are read again.", slider))
         {
             changed |= Milliseconds("##results", settings.ResultValueRefreshMs, 50, 10000, slider);
+            list.EndRow();
+        }
+
+        list.Section("Sounds");
+        if (list.Row("Play sounds", "A sound plays when a scan finishes, and when a search, a dissect or a patch scan that took longer than two seconds is done. "
+                "A scan that fails plays Error.wav or Error.mp3 from the sounds folder, if there is one.", toggle))
+        {
+            changed |= ToggleSwitch("##playsounds", &settings.PlaySounds);
+            list.EndRow();
+        }
+        const float tryWidth = std::round(Px(100.0f));
+        if (list.Row("Try them", "Plays the sound once, also when sounds are off. Files you put in the sounds folder are read again.", tryWidth * 2.0f + ImGui::GetStyle().ItemSpacing.x))
+        {
+            if (ImGui::Button(ICON_FA_PLAY "  Success", ImVec2(tryWidth, 0.0f)))
+                Sounds::Preview(Sounds::Cue::Success);
+            ImGui::SameLine();
+            const bool error = Sounds::Available(Sounds::Cue::Error);
+            ImGui::BeginDisabled(!error);
+            if (ImGui::Button(ICON_FA_PLAY "  Error", ImVec2(tryWidth, 0.0f)))
+                Sounds::Preview(Sounds::Cue::Error);
+            ImGui::EndDisabled();
+            if (!error)
+                ItemTooltip("There is no error sound yet. Put Error.wav or Error.mp3 into the sounds folder.");
+            list.EndRow();
+        }
+        const float soundsFolder = std::round(Px(130.0f));
+        if (list.Row("Sounds folder", "Success.wav or Success.mp3 here replaces the built-in sound; Error.wav or Error.mp3 adds one for failed scans. " + WideToUtf8(Paths::SoundsFolder().wstring()), soundsFolder))
+        {
+            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open folder", ImVec2(soundsFolder, 0.0f)))
+            {
+                std::error_code error;
+                std::filesystem::create_directories(Paths::SoundsFolder(), error);
+                OpenFolder(Paths::SoundsFolder());
+            }
             list.EndRow();
         }
 

@@ -59,6 +59,7 @@ namespace Manifold
         QuitPolicy ActiveScriptsOnQuit = QuitPolicy::Ask;
 
         bool CompactMode = false;
+        bool PlaySounds = true;
         bool ReleaseMode = false;
 
         bool VerboseLog = false;
@@ -87,6 +88,7 @@ namespace Manifold
         std::filesystem::path LogFile();
         std::filesystem::path LayoutFile();
         std::filesystem::path AutorunFolder();
+        std::filesystem::path SoundsFolder();
         std::filesystem::path TablesFolder();
         std::filesystem::path CrashFolder();
         std::filesystem::path ScanFolder();

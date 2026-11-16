@@ -110,6 +110,7 @@ namespace Manifold
         if (auto v = text("tablescripts")) TableScripts = EqualsNoCase(*v, "always") ? TableScriptPolicy::Always : EqualsNoCase(*v, "never") ? TableScriptPolicy::Never : TableScriptPolicy::Ask;
         if (auto v = text("activescriptsonquit")) ActiveScriptsOnQuit = EqualsNoCase(*v, "disable") ? QuitPolicy::Disable : EqualsNoCase(*v, "leave") ? QuitPolicy::Leave : QuitPolicy::Ask;
         if (auto v = text("compact")) CompactMode = ToBool(*v);
+        if (auto v = text("playsounds")) PlaySounds = ToBool(*v);
         if (auto v = text("mode")) ReleaseMode = EqualsNoCase(*v, "release");
         if (auto v = text("verboselog")) VerboseLog = ToBool(*v);
         if (auto v = text("logdebugstrings")) LogDebugStrings = ToBool(*v);
@@ -146,7 +147,7 @@ namespace Manifold
         out << "TableScripts=" << (TableScripts == TableScriptPolicy::Always ? "always" : TableScripts == TableScriptPolicy::Never ? "never" : "ask") << "\n";
         out << "ActiveScriptsOnQuit=" << (ActiveScriptsOnQuit == QuitPolicy::Disable ? "disable" : ActiveScriptsOnQuit == QuitPolicy::Leave ? "leave" : "ask") << "\n\n";
         out << "[Interface]\n";
-        out << "Mode=" << (ReleaseMode ? "release" : "developer") << "\nCompact=" << (CompactMode ? 1 : 0) << "\n\n";
+        out << "Mode=" << (ReleaseMode ? "release" : "developer") << "\nCompact=" << (CompactMode ? 1 : 0) << "\nPlaySounds=" << (PlaySounds ? 1 : 0) << "\n\n";
         out << "[Debugger]\n";
         out << "VerboseLog=" << (VerboseLog ? 1 : 0) << "\nLogDebugStrings=" << (LogDebugStrings ? 1 : 0) << "\n";
         out << "HardwareExecute=" << (UseHardwareExecuteBreakpoints ? 1 : 0) << "\nRegistersOnBreak=" << (ShowRegistersOnBreak ? 1 : 0) << "\n";
@@ -237,6 +238,11 @@ namespace Manifold
         std::filesystem::path AutorunFolder()
         {
             return ProgramFolder() / L"autorun";
+        }
+
+        std::filesystem::path SoundsFolder()
+        {
+            return ProgramFolder() / L"Sounds";
         }
 
         std::filesystem::path TablesFolder()

@@ -2,6 +2,7 @@
 
 #include "App/Commands.h"
 #include "App/CrashHandler.h"
+#include "App/Sounds.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
 #include "UI/LuaDialogs.h"
@@ -157,6 +158,7 @@ namespace Manifold
 
     void Application::BeforeFrame()
     {
+        Sounds::SetEnabled(m_settings.PlaySounds);
         if (m_engine)
             m_engine->Tick();
     }
@@ -258,6 +260,7 @@ namespace Manifold
             m_host.ApplyPendingResize();
             m_host.RenderFrame();
         }
+        Sounds::Stop();
         RememberPlacement();
         const Status saved = m_settings.Save(Paths::SettingsFile());
         if (!saved)

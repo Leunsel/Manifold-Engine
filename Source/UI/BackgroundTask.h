@@ -1,5 +1,7 @@
 #pragma once
 
+#include "App/Sounds.h"
+
 #include <chrono>
 #include <future>
 #include <memory>
@@ -50,6 +52,8 @@ namespace Manifold::UI
             if (!m_future.valid() || m_future.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
                 return std::nullopt;
             m_seconds = Elapsed();
+            if (m_seconds >= kLongSeconds && !(m_progress && m_progress->Cancel))
+                Sounds::Play(Sounds::Cue::Success);
             return m_future.get();
         }
 
@@ -57,6 +61,8 @@ namespace Manifold::UI
         double Seconds() const { return m_seconds; }
 
     private:
+        static constexpr double kLongSeconds = 2.0;
+
         std::unique_ptr<Progress> m_progress;
         std::future<Result> m_future;
         std::chrono::steady_clock::time_point m_started{};
