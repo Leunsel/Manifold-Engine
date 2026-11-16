@@ -13,8 +13,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <dwmapi.h>
@@ -36,6 +38,60 @@ namespace Manifold
             char text[16];
             std::snprintf(text, sizeof(text), "0x%08X", static_cast<unsigned>(result));
             return text;
+        }
+
+        void (*g_createViewportWindow)(ImGuiViewport*) = nullptr;
+        void (*g_setViewportTitle)(ImGuiViewport*, const char*) = nullptr;
+        HICON g_viewportIcon = nullptr;
+        HICON g_viewportIconSmall = nullptr;
+
+        bool PrivateUse(std::uint32_t codepoint)
+        {
+            return (codepoint >= 0xE000 && codepoint <= 0xF8FF) || codepoint >= 0xF0000;
+        }
+
+        std::string PlainTitle(const char* title)
+        {
+            std::string plain;
+            const std::string_view text(title ? title : "");
+            for (std::size_t at = 0; at < text.size();)
+            {
+                const unsigned char lead = static_cast<unsigned char>(text[at]);
+                const std::size_t length = lead < 0x80 ? 1 : (lead >> 5) == 0x6 ? 2 : (lead >> 4) == 0xE ? 3 : (lead >> 3) == 0x1E ? 4 : 1;
+                std::uint32_t codepoint = length == 1 ? lead : lead & (0xFF >> (length + 1));
+                for (std::size_t i = 1; i < length && at + i < text.size(); ++i)
+                    codepoint = (codepoint << 6) | (static_cast<unsigned char>(text[at + i]) & 0x3F);
+                if (!PrivateUse(codepoint))
+                    plain.append(text.substr(at, std::min(length, text.size() - at)));
+                at += length;
+            }
+            std::string collapsed;
+            for (char c : plain)
+            {
+                if (c == ' ' && (collapsed.empty() || collapsed.back() == ' '))
+                    continue;
+                collapsed += c;
+            }
+            while (!collapsed.empty() && collapsed.back() == ' ')
+                collapsed.pop_back();
+            return collapsed.empty() ? std::string("Manifold Engine") : collapsed;
+        }
+
+        void CreateViewportWindow(ImGuiViewport* viewport)
+        {
+            g_createViewportWindow(viewport);
+            HWND hwnd = static_cast<HWND>(viewport->PlatformHandleRaw);
+            if (!hwnd)
+                return;
+            if (g_viewportIcon)
+                ::SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(g_viewportIcon));
+            if (g_viewportIconSmall)
+                ::SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(g_viewportIconSmall));
+        }
+
+        void SetViewportTitle(ImGuiViewport* viewport, const char* title)
+        {
+            g_setViewportTitle(viewport, PlainTitle(title).c_str());
         }
 
         constexpr DWORD kWindowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME | WS_CLIPCHILDREN;
@@ -416,6 +472,19 @@ namespace Manifold
         {
             PutError(m_error, ARRAYSIZE(m_error), ErrorCode::ImGuiFailed);
             return false;
+        }
+        ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+        g_viewportIcon = static_cast<HICON>(::LoadImageW(m_instance, MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, ::GetSystemMetrics(SM_CXICON), ::GetSystemMetrics(SM_CYICON), LR_SHARED));
+        g_viewportIconSmall = static_cast<HICON>(::LoadImageW(m_instance, MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), LR_SHARED));
+        if (platform.Platform_CreateWindow && platform.Platform_CreateWindow != &CreateViewportWindow)
+        {
+            g_createViewportWindow = platform.Platform_CreateWindow;
+            platform.Platform_CreateWindow = &CreateViewportWindow;
+        }
+        if (platform.Platform_SetWindowTitle && platform.Platform_SetWindowTitle != &SetViewportTitle)
+        {
+            g_setViewportTitle = platform.Platform_SetWindowTitle;
+            platform.Platform_SetWindowTitle = &SetViewportTitle;
         }
         return true;
     }
