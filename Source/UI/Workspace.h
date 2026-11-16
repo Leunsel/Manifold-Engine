@@ -113,9 +113,9 @@ namespace Manifold::UI
         bool CanOpenLastProcess();
         void StartWatch(Debug::WatchKind kind, std::uint64_t address, int size);
         void OpenBreakpoints();
-        void OpenBreakpointEditor(std::uint64_t address, Debug::BreakpointType type, int size);
+        void OpenBreakpointEditor(std::uint64_t address, Debug::BreakpointType type, int size, unsigned int viewport = 0);
         void OpenThreadList();
-        void OpenTrace(std::uint64_t address);
+        void OpenTrace(std::uint64_t address, unsigned int viewport = 0);
         void OpenMono();
         void AddAddress(std::uint64_t address, Scan::ValueType type, std::string description = {});
         void Confirm(std::string title, std::string text, std::function<void()> yes, std::string yesLabel = "Yes");

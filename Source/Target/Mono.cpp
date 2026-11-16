@@ -31,6 +31,20 @@ namespace Manifold::Target
         const char* const kModuleCandidates[] = { "mono-2.0-bdwgc.dll", "mono.dll", "mono-2.0.dll", "monobdwgc-2.0.dll" };
     }
 
+    bool MonoBridge::HasRuntime(const Process& process)
+    {
+        const ModuleList modules = process.Modules();
+        for (const ModuleInfo& module : *modules)
+        {
+            for (const char* candidate : kModuleCandidates)
+            {
+                if (EqualsNoCase(module.Name, candidate))
+                    return true;
+            }
+        }
+        return false;
+    }
+
     std::uint64_t MonoBridge::Fn(const char* name) const
     {
         const auto found = m_functions.find(name);

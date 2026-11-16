@@ -63,6 +63,10 @@ namespace Manifold::Target
         std::string Describe(std::uint64_t address) const;
         std::string ModuleOffset(std::uint64_t address) const;
         std::optional<std::string> ExactName(std::uint64_t address) const;
+        // The closest name at or below an address, at most reach bytes away:
+        // a registered symbol, a module base or an export (what ExactName
+        // names). Gives the function a disassembly line is in.
+        std::optional<std::pair<std::uint64_t, std::string>> Containing(std::uint64_t address, std::uint64_t reach) const;
         std::vector<ExportSymbol> ExportsOf(const ModuleInfo& module) const;
 
         Evaluation Evaluate(std::string_view expression, const ExtraResolver& extra = {}) const;

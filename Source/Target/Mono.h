@@ -59,6 +59,11 @@ namespace Manifold::Target
         Status Start(std::shared_ptr<Process> process);
         void Stop();
         bool Present() const { return m_present; }
+
+        // Whether one of the known Mono runtime DLLs is in the target's module
+        // list. Only looks at the cached list, so it is cheap enough to ask
+        // every frame; Start also finds a renamed or embedded runtime.
+        static bool HasRuntime(const Process& process);
         const std::string& Module() const { return m_module; }
 
         Status Refresh();

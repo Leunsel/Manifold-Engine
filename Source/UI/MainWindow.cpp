@@ -304,12 +304,15 @@ namespace Manifold::UI
         ImGui::PushStyleColor(ImGuiCol_MenuBarBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         const float menusStart = ImGui::GetCursorPosX();
         RefreshScriptMenu();
+        DetectMono();
         float scriptMenusWidth = 0.0f;
         for (const Lua::ScriptMenuItem& root : m_scriptMenu)
         {
             if (!ScriptMenuMerged(root) && root.Caption != "-")
                 scriptMenusWidth += ImGui::CalcTextSize(root.Caption.c_str()).x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
         }
+        if (m_monoDetected && !m_release)
+            scriptMenusWidth += ImGui::CalcTextSize("Mono").x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
         ImGui::BeginChild("##menus", ImVec2(Px(540.0f) + scriptMenusWidth, menuHeight), ImGuiChildFlags_None, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
         ImGui::PopStyleVar();
         float menusEnd = origin.x + menusStart;
@@ -450,6 +453,8 @@ namespace Manifold::UI
             SectionLabel("Code, memory and debugger tools are in the memory viewer's menus");
             ImGui::EndMenu();
         }
+        if (m_monoDetected && !m_release)
+            MonoMenu();
         for (const Lua::ScriptMenuItem& root : m_scriptMenu)
         {
             if (ScriptMenuMerged(root) || root.Caption == "-")
@@ -1749,6 +1754,66 @@ namespace Manifold::UI
             return;
         }
         m_workspace.Confirm("Delete records", "Delete " + std::to_string(ids.size()) + (ids.size() == 1 ? " record" : " records") + " and their children?", remove, "Delete");
+    }
+
+    void MainWindow::DetectMono()
+    {
+        const std::shared_ptr<Target::Process>& process = m_engine.Process();
+        if (!process)
+        {
+            m_monoDetected = false;
+            return;
+        }
+        const double now = ImGui::GetTime();
+        if (m_engine.ProcessGeneration() != m_monoGeneration)
+        {
+            m_monoGeneration = m_engine.ProcessGeneration();
+            m_monoDetected = false;
+            m_monoCheckAt = 0.0;
+            m_monoRefreshAt = now + 5.0;
+        }
+        if (m_engine.MonoPresent())
+        {
+            m_monoDetected = true;
+            return;
+        }
+        if (m_monoDetected || now < m_monoCheckAt)
+            return;
+        // ∑ The cached module list is checked once a second; it is read fresh
+        // only every few seconds, so a game that loads its runtime after the
+        // attach still gets the menu without a module walk every frame.
+        m_monoCheckAt = now + 1.0;
+        if (now >= m_monoRefreshAt)
+        {
+            process->RefreshModules();
+            m_monoRefreshAt = now + 5.0;
+        }
+        m_monoDetected = Target::MonoBridge::HasRuntime(*process);
+    }
+
+    void MainWindow::MonoMenu()
+    {
+        if (!ImGui::BeginMenu("Mono"))
+            return;
+        Target::MonoBridge& mono = m_engine.Mono();
+        if (!m_engine.MonoPresent())
+        {
+            if (ImGui::MenuItem(ICON_FA_PLUG "  Load Mono runtime"))
+                m_workspace.Report(m_engine.EnsureMono());
+            ItemTooltip("Reads the classes and methods of the game's Mono runtime, so method names show in the memory viewer, resolve in addresses and Structure Dissect finds the class of an object.");
+        }
+        else
+        {
+            const std::string loaded = mono.Module() + "  ·  " + std::to_string(mono.ClassCount()) + " classes";
+            SectionLabel(loaded.c_str());
+            if (ImGui::MenuItem(ICON_FA_SYNC "  Reload classes"))
+                m_workspace.Report(mono.Refresh());
+            ItemTooltip("Reads the class list again, for assemblies the game loaded later");
+        }
+        ImGui::Separator();
+        if (CommandItem(ICON_FA_DICE_D6 "  Mono / .NET dissector", Command::OpenMono))
+            m_workspace.OpenMono();
+        ImGui::EndMenu();
     }
 
     void MainWindow::RunRecordCommand(Command command, Table::MemoryRecord* record)

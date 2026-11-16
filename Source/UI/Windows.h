@@ -85,6 +85,8 @@ namespace Manifold::UI
         void UndoValueChange();
         void DeleteSelectedRecords(bool ask);
         void RunRecordCommand(Command command, Table::MemoryRecord* record);
+        void DetectMono();
+        void MonoMenu();
 
         struct ValueUndo
         {
@@ -109,6 +111,10 @@ namespace Manifold::UI
         std::string m_saveResultsName;
         std::vector<Lua::ScriptMenuItem> m_scriptMenu;
         std::uint64_t m_scriptMenuGeneration = 0;
+        bool m_monoDetected = false;
+        std::uint64_t m_monoGeneration = ~0ull;
+        double m_monoCheckAt = 0.0;
+        double m_monoRefreshAt = 0.0;
 
         int m_typeIndex = 2;
         Scan::ScanKind m_scanKind = Scan::ScanKind::Single;
@@ -362,6 +368,7 @@ namespace Manifold::UI
         std::string m_injectPath;
         std::map<std::uint64_t, std::vector<std::uint8_t>> m_nopped;
 
+        ImGuiID m_viewport = 0;
         bool m_commentOpen = false;
         bool m_commentHeader = false;
         std::uint64_t m_commentAddress = 0;
@@ -913,7 +920,7 @@ namespace Manifold::UI
         void Draw() override;
         bool Closed() const override { return !m_open; }
         void Show() { m_open = true; m_bringToFront = true; }
-        void Edit(std::uint64_t address, Debug::BreakpointType type, int size);
+        void Edit(std::uint64_t address, Debug::BreakpointType type, int size, ImGuiID viewport = 0);
 
     private:
         void EditDialog();
@@ -937,6 +944,9 @@ namespace Manifold::UI
         std::string m_editThread;
         bool m_editBreak = true;
         std::string m_editError;
+        ImGuiID m_selfViewport = 0;
+        ImGuiID m_modalViewport = 0;
+        void DrawWindow();
     };
 
     class ThreadListWindow : public ToolWindow
@@ -980,7 +990,7 @@ namespace Manifold::UI
         void Draw() override;
         bool Closed() const override { return !m_open; }
         int Number() const { return m_number; }
-        void Start(std::uint64_t address);
+        void Start(std::uint64_t address, ImGuiID viewport = 0);
 
     private:
         void StartDialog();
@@ -1010,6 +1020,9 @@ namespace Manifold::UI
         std::vector<Debug::TraceStep> m_steps;
         int m_selected = -1;
         std::map<std::uint64_t, std::string> m_text;
+        ImGuiID m_selfViewport = 0;
+        ImGuiID m_modalViewport = 0;
+        void DrawWindow();
     };
 
     class MonoWindow : public ToolWindow

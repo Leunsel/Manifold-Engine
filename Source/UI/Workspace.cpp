@@ -410,10 +410,10 @@ namespace Manifold::UI
         m_breakpoints->Show();
     }
 
-    void Workspace::OpenBreakpointEditor(std::uint64_t address, Debug::BreakpointType type, int size)
+    void Workspace::OpenBreakpointEditor(std::uint64_t address, Debug::BreakpointType type, int size, unsigned int viewport)
     {
         OpenBreakpoints();
-        m_breakpoints->Edit(address, type, size);
+        m_breakpoints->Edit(address, type, size, viewport);
     }
 
     void Workspace::OpenThreadList()
@@ -430,10 +430,10 @@ namespace Manifold::UI
         m_mono->Show();
     }
 
-    void Workspace::OpenTrace(std::uint64_t address)
+    void Workspace::OpenTrace(std::uint64_t address, unsigned int viewport)
     {
         auto window = std::make_unique<TraceWindow>(*this, m_nextTrace++);
-        window->Start(address);
+        window->Start(address, viewport);
         m_traces.push_back(std::move(window));
     }
 

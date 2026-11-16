@@ -70,8 +70,9 @@ namespace Manifold::UI
 
     BreakpointWindow::BreakpointWindow(Workspace& workspace) : m_workspace(workspace), m_engine(workspace.Core()) {}
 
-    void BreakpointWindow::Edit(std::uint64_t address, Debug::BreakpointType type, int size)
+    void BreakpointWindow::Edit(std::uint64_t address, Debug::BreakpointType type, int size, ImGuiID viewport)
     {
+        m_modalViewport = viewport ? viewport : m_selfViewport;
         m_editExisting = false;
         for (const Debug::Breakpoint& breakpoint : m_engine.Debugger().Breakpoints())
         {
@@ -137,7 +138,7 @@ namespace Manifold::UI
     {
         if (m_editOpen && !ImGui::IsPopupOpen("Breakpoint##edit"))
             ImGui::OpenPopup("Breakpoint##edit");
-        if (!BeginModal("Breakpoint##edit", ICON_FA_CIRCLE, m_editExisting ? "Edit breakpoint" : "New breakpoint", ImVec2(460.0f, 0.0f)))
+        if (!BeginModal("Breakpoint##edit", ICON_FA_CIRCLE, m_editExisting ? "Edit breakpoint" : "New breakpoint", ImVec2(460.0f, 0.0f), nullptr, m_modalViewport))
             return;
         if (!m_editOpen)
         {
@@ -190,6 +191,15 @@ namespace Manifold::UI
     {
         if (!m_open)
             return;
+        DrawWindow();
+        // The editor is drawn outside the tool window, so it opens even when the
+        // list is empty or the window is collapsed, and over the window that
+        // asked for it (the memory viewer) rather than the main window.
+        EditDialog();
+    }
+
+    void BreakpointWindow::DrawWindow()
+    {
         if (m_bringToFront)
         {
             ImGui::SetNextWindowFocus();
@@ -200,6 +210,7 @@ namespace Manifold::UI
             EndToolWindow();
             return;
         }
+        m_selfViewport = ImGui::GetWindowViewport()->ID;
         Debug::Debugger& debugger = m_engine.Debugger();
         if (debugger.Generation() != m_generation)
         {
@@ -277,7 +288,6 @@ namespace Manifold::UI
             }
             ImGui::EndTable();
         }
-        EditDialog();
         EndToolWindow();
     }
 
@@ -418,8 +428,9 @@ namespace Manifold::UI
             m_engine.Tracer().Stop();
     }
 
-    void TraceWindow::Start(std::uint64_t address)
+    void TraceWindow::Start(std::uint64_t address, ImGuiID viewport)
     {
+        m_modalViewport = viewport ? viewport : m_selfViewport;
         m_address = address;
         m_addressText = address ? m_engine.Symbols().ModuleOffset(address) : std::string();
         m_startOpen = true;
@@ -494,7 +505,7 @@ namespace Manifold::UI
     {
         if (m_startOpen && !ImGui::IsPopupOpen("Break and trace##start"))
             ImGui::OpenPopup("Break and trace##start");
-        if (!BeginModal("Break and trace##start", ICON_FA_SHOE_PRINTS, "Break and trace", ImVec2(460.0f, 0.0f)))
+        if (!BeginModal("Break and trace##start", ICON_FA_SHOE_PRINTS, "Break and trace", ImVec2(460.0f, 0.0f), nullptr, m_modalViewport))
             return;
         if (!m_startOpen)
         {
@@ -531,6 +542,8 @@ namespace Manifold::UI
         {
             m_startOpen = false;
             ImGui::CloseCurrentPopup();
+            if (m_steps.empty() && !m_running)
+                m_open = false;  // nothing traced yet: do not leave an empty window behind
         }
         EndModal();
     }
@@ -570,17 +583,29 @@ namespace Manifold::UI
     {
         if (!m_open)
             return;
+        Poll();
+        // Before the first trace there is nothing to show, so only the setup
+        // dialog appears (over the memory viewer); the window follows once it runs.
+        if (m_running || !m_steps.empty() || !m_startOpen)
+            DrawWindow();
+        // Drawn outside the tool window so it appears over the memory viewer the
+        // trace was started from, not centred on the main window.
+        StartDialog();
+    }
+
+    void TraceWindow::DrawWindow()
+    {
         if (m_bringToFront)
         {
             ImGui::SetNextWindowFocus();
             m_bringToFront = false;
         }
-        Poll();
         if (!BeginToolWindow(m_title.c_str(), &m_open, ImVec2(680.0f, 460.0f), 0, ImVec2(480.0f, 300.0f)))
         {
             EndToolWindow();
             return;
         }
+        m_selfViewport = ImGui::GetWindowViewport()->ID;
         Debug::Tracer& tracer = m_engine.Tracer();
         const bool mine = tracer.TriggerAddress() == m_address;
         const bool running = m_running && mine && tracer.Running();
@@ -592,6 +617,7 @@ namespace Manifold::UI
         else if (ImGui::Button(ICON_FA_REDO "  Trace again", Px(110.0f, 0.0f)))
         {
             m_startOpen = true;
+            m_modalViewport = m_selfViewport;
             m_error.clear();
         }
         ImGui::SameLine();
@@ -624,7 +650,6 @@ namespace Manifold::UI
             RegisterGrid(m_engine, m_steps[static_cast<std::size_t>(m_selected)].Registers, m_engine.Process() && m_engine.Process()->Is64Bit());
             EndCard();
         }
-        StartDialog();
         EndToolWindow();
     }
 }

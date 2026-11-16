@@ -424,6 +424,7 @@ namespace Manifold::UI
             EndToolWindow();
             return;
         }
+        m_viewport = ImGui::GetWindowViewport()->ID;
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
             PublishSelection();
         MenuBar();
@@ -794,7 +795,42 @@ namespace Manifold::UI
         PopMono();
         const float headerHeight = std::floor(ImGui::GetTextLineHeight() + Px(8.0f));
         const float bodyHeight = std::max(rowHeight, height - headerHeight);
-        m_visibleLines = std::max(4, static_cast<int>(bodyHeight / rowHeight));
+
+        // With symbols shown, a line where a symbol starts (a registered symbol,
+        // an export, or a Mono method) gets a header, and the lines after it show
+        // their offset from that start ("+0", "+3", ...) until the function ends.
+        // Registered symbols and exports have no known end, so their offsets stop
+        // after kSymbolReach bytes; Mono methods stop at their JIT code end.
+        // When the listing starts inside a function, its header stays pinned as
+        // the first row, so the function context does not scroll away.
+        constexpr std::uint64_t kSymbolReach = 0x1000;
+        std::uint64_t functionStart = 0;
+        std::uint64_t functionEnd = 0;
+        std::string functionName;
+        if (showSymbols && m_top)
+        {
+            if (const auto symbol = m_engine.Symbols().Containing(m_top, kSymbolReach))
+            {
+                functionStart = symbol->first;
+                functionEnd = symbol->first + kSymbolReach;
+                functionName = symbol->second;
+            }
+            if (m_engine.MonoPresent())
+            {
+                if (const auto range = m_engine.Mono().MethodRange(m_top); range && range->first > functionStart)
+                {
+                    if (auto name = m_engine.Mono().MethodStartNameAt(range->first))
+                    {
+                        functionStart = range->first;
+                        functionEnd = range->second;
+                        functionName = std::move(*name);
+                    }
+                }
+            }
+        }
+        const bool sticky = functionStart && functionStart < m_top && !functionName.empty();
+        const float stickyHeight = sticky ? rowHeight : 0.0f;
+        m_visibleLines = std::max(4, static_cast<int>((bodyHeight - stickyHeight) / rowHeight));
         {
             std::vector<std::uint8_t> buffer(static_cast<std::size_t>(m_visibleLines + 1) * 15 + 16);
             std::vector<bool> readable(buffer.size(), false);
@@ -840,28 +876,14 @@ namespace Manifold::UI
         const float gutter = Px(18.0f);
         const float arrows = Px(26.0f);
 
-        // With symbols shown, a line where a symbol starts (a registered symbol,
-        // an export, or a Mono method) gets a header, and the lines after it show
-        // their offset from that start ("+0", "+3", ...) until the function ends.
-        // Registered symbols and exports have no known end, so their offsets stop
-        // after kSymbolReach bytes; Mono methods stop at their JIT code end.
-        constexpr std::uint64_t kSymbolReach = 0x1000;
+        const ImVec2 linesOrigin(origin.x, origin.y + stickyHeight);
+        const std::uint64_t stickyStart = functionStart;
         std::vector<std::string> addressTexts;
         std::vector<bool> addressInModule;
         std::vector<std::optional<std::string>> headers;
         addressTexts.reserve(m_lines.size());
         addressInModule.reserve(m_lines.size());
         headers.reserve(m_lines.size());
-        std::uint64_t functionStart = 0;
-        std::uint64_t functionEnd = 0;
-        if (showSymbols && m_engine.MonoPresent() && !m_lines.empty())
-        {
-            if (const auto range = m_engine.Mono().MethodRange(m_lines.front().Address))
-            {
-                functionStart = range->first;
-                functionEnd = range->second;
-            }
-        }
         float widestAddress = 0.0f;
         PushMono();
         for (const Disasm::Instruction& line : m_lines)
@@ -991,7 +1013,19 @@ namespace Manifold::UI
             m_focusCode = true;
         if (ImGui::IsWindowFocused() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !hovered)
             m_focusCode = false;
-        const int hoveredRow = hovered ? static_cast<int>((ImGui::GetIO().MousePos.y - origin.y) / rowHeight) : -1;
+        const float mouseY = ImGui::GetIO().MousePos.y;
+        const bool stickyHovered = hovered && sticky && mouseY < linesOrigin.y;
+        const int hoveredRow = hovered && mouseY >= linesOrigin.y ? static_cast<int>((mouseY - linesOrigin.y) / rowHeight) : -1;
+        if (stickyHovered)
+        {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            ImGui::SetTooltip("Go to the start of %s", functionName.c_str());
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            {
+                m_focusCode = true;
+                Navigate(stickyStart);
+            }
+        }
         if (hovered && hoveredRow >= 0 && hoveredRow < static_cast<int>(m_lines.size()))
         {
             const Disasm::Instruction& line = m_lines[static_cast<std::size_t>(hoveredRow)];
@@ -1039,11 +1073,11 @@ namespace Manifold::UI
         const std::uint64_t selectionLow = std::min(m_selected, m_selectionEnd);
         const std::uint64_t selectionHigh = std::max(m_selected, m_selectionEnd);
         const auto breakpoints = debugger.Breakpoints();
-        drawList->PushClipRect(origin, ImVec2(origin.x + width, origin.y + bodyHeight), true);
+        drawList->PushClipRect(linesOrigin, ImVec2(origin.x + width, origin.y + bodyHeight), true);
         for (std::size_t i = 0; i < m_lines.size(); ++i)
         {
             const Disasm::Instruction& line = m_lines[i];
-            const float y = origin.y + static_cast<float>(i) * rowHeight;
+            const float y = linesOrigin.y + static_cast<float>(i) * rowHeight;
             if (y > origin.y + bodyHeight)
                 break;
             const ImVec2 rowMin(origin.x, y);
@@ -1122,7 +1156,7 @@ namespace Manifold::UI
                     const float depth = Px(6.0f) + static_cast<float>((i * 7 + j * 3) % 4) * Px(4.0f);
                     const float x = addressX - depth;
                     const float y1 = y + rowHeight * 0.5f;
-                    const float y2 = origin.y + static_cast<float>(j) * rowHeight + rowHeight * 0.5f;
+                    const float y2 = linesOrigin.y + static_cast<float>(j) * rowHeight + rowHeight * 0.5f;
                     const ImU32 color = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::FlowJump, focused ? 0.95f : 0.35f));
                     const float thickness = focused ? Px(1.6f) : Px(1.0f);
                     drawList->AddLine(ImVec2(addressX - Px(2.0f), y1), ImVec2(x, y1), color, thickness);
@@ -1134,6 +1168,17 @@ namespace Manifold::UI
             }
         }
         drawList->PopClipRect();
+        if (sticky)
+        {
+            const ImVec2 stickyMin(origin.x, origin.y);
+            const ImVec2 stickyMax(origin.x + width, linesOrigin.y);
+            drawList->AddRectFilled(stickyMin, stickyMax, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, stickyHovered ? 0.16f : 0.08f)));
+            drawList->AddLine(ImVec2(stickyMin.x, stickyMax.y - 1.0f), ImVec2(stickyMax.x, stickyMax.y - 1.0f), ImGui::GetColorU32(ManifoldTheme::RowSeparator));
+            const float textY = origin.y + Px(1.5f);
+            drawList->AddText(ImVec2(origin.x + gutter + Px(2.0f), textY), ImGui::GetColorU32(ManifoldTheme::Accent), ICON_FA_LEVEL_UP_ALT);
+            cell(addressX, bytesX, textY, ImGui::GetColorU32(ManifoldTheme::Muted), Hex(stickyStart, process.Is64Bit() ? 12 : 8));
+            cell(bytesX, rightX + Px(4.0f), textY, ImGui::GetColorU32(ManifoldTheme::Accent), functionName);
+        }
         PopMono();
 
         if (hoveredRow >= 0 && hoveredRow < static_cast<int>(m_lines.size()) && ImGui::IsMouseReleased(ImGuiMouseButton_Right) && hovered)
@@ -1386,12 +1431,12 @@ namespace Manifold::UI
             break;
         case Command::BreakpointList: m_workspace.OpenBreakpoints(); break;
         case Command::ThreadList: m_workspace.OpenThreadList(); break;
-        case Command::EditBreakpoint: m_workspace.OpenBreakpointEditor(m_selected, Debug::BreakpointType::Execute, 1); break;
+        case Command::EditBreakpoint: m_workspace.OpenBreakpointEditor(m_selected, Debug::BreakpointType::Execute, 1, m_viewport); break;
         case Command::BreakAndTrace:
         {
             Status status = m_engine.EnsureDebugger();
             if (status)
-                m_workspace.OpenTrace(m_selected);
+                m_workspace.OpenTrace(m_selected, m_viewport);
             else
                 m_workspace.Report(status);
             break;

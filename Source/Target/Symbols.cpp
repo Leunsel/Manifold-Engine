@@ -580,6 +580,41 @@ namespace Manifold::Target
         return std::nullopt;
     }
 
+    std::optional<std::pair<std::uint64_t, std::string>> Symbols::Containing(std::uint64_t address, std::uint64_t reach) const
+    {
+        std::optional<std::pair<std::uint64_t, std::string>> best;
+        const auto consider = [&](std::uint64_t start, const std::string& name)
+            {
+                // A registered symbol is considered first, so it keeps the name
+                // when an export sits at the same address (as in ExactName).
+                if (start <= address && address - start < reach && (!best || start > best->first))
+                    best = std::make_pair(start, name);
+            };
+        {
+            std::lock_guard lock(m_registeredLock);
+            for (const auto& [key, symbol] : m_registered)
+                consider(symbol.Address, symbol.Name);
+        }
+        if (!m_process)
+            return best;
+        const auto module = m_process->ModuleAt(address);
+        if (!module)
+            return best;
+        consider(module->Base, module->Name);
+        const auto table = Exports(*module);
+        auto found = std::upper_bound(table->ByAddress.begin(), table->ByAddress.end(), address,
+            [](std::uint64_t value, const ExportSymbol& symbol) { return value < symbol.Address; });
+        if (found != table->ByAddress.begin())
+        {
+            --found;
+            std::string moduleName = module->Name;
+            if (const std::size_t dot = moduleName.rfind('.'); dot != std::string::npos)
+                moduleName.resize(dot);
+            consider(found->Address, moduleName + "." + found->Name);
+        }
+        return best;
+    }
+
     std::string Symbols::ModuleOffset(std::uint64_t address) const
     {
         if (m_process)

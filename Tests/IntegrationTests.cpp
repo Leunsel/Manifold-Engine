@@ -319,6 +319,19 @@ namespace Manifold::Tests
         {
             const std::string described = engine.Describe(*sleep);
             CHECK_MSG(described.find("Sleep") != std::string::npos, described);
+            // The function a disassembly line is in: the export itself, a few
+            // bytes into it, and nothing once the reach is used up.
+            const auto at = engine.Symbols().Containing(*sleep, 0x1000);
+            CHECK(at && at->first == *sleep && at->second.find("Sleep") != std::string::npos);
+            const auto inside = engine.Symbols().Containing(*sleep + 4, 0x1000);
+            CHECK(inside && inside->first == *sleep);
+            CHECK(!engine.Symbols().Containing(*sleep + 4, 4));
+        }
+        CHECK(engine.Symbols().Register("containing_test_symbol", damage).Ok());
+        {
+            const auto registered = engine.Symbols().Containing(damage + 2, 0x100);
+            CHECK(registered && registered->first == damage && registered->second == "containing_test_symbol");
+            engine.Symbols().Unregister("containing_test_symbol");
         }
         Status unknown;
         CHECK(!engine.Evaluate("no_such_symbol_here", &unknown) && unknown.Code == ErrorCode::ExprUnknownSymbol);
