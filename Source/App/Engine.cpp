@@ -535,7 +535,10 @@ namespace Manifold
         {
             const Status run = m_lua->Run(script, "table script");
             if (!run)
+            {
                 Notify(Status::Fail(ErrorCode::LuaTableScriptFailed, run.Text));
+                Sounds::Play(Sounds::Cue::Error);
+            }
             return;
         }
         m_tableTaskStarted = Now();
@@ -543,15 +546,19 @@ namespace Manifold
         auto id = std::make_shared<int>(0);
         const int started = m_lua->StartTask(script, "table script", [this, id](const Status& status, const std::string&)
             {
-                const bool current = *id != 0 && m_tableTask == *id;
-                if (current)
+                const bool early = *id == 0;
+                const bool current = early || m_tableTask == *id;
+                if (current && !early)
                     m_tableTask = 0;
                 if (status)
                     LOG_INFO("Table", Format("The table's Lua script finished after %.1f s", Now() - m_tableTaskStarted));
                 else if (current && m_tableTaskStopped)
                     LOG_INFO("Table", "The table's Lua script was stopped");
                 else if (current)
+                {
                     Notify(Status::Fail(ErrorCode::LuaTableScriptFailed, status.Text));
+                    Sounds::Play(Sounds::Cue::Error);
+                }
             });
         *id = started;
         m_tableTask = started;
@@ -572,7 +579,11 @@ namespace Manifold
         {
             const Status status = SetActive(record, active);
             if (!status)
+            {
                 Notify(status);
+                if (!fromScript)
+                    Sounds::Play(Sounds::Cue::Error);
+            }
             return;
         }
         if (!ActivationPending(record.Id) && record.Active == active)
@@ -767,6 +778,8 @@ namespace Manifold
             {
                 m_lua->AfterActivation(*record, active, false);
                 Notify(status);
+                if (!fromScript)
+                    Sounds::Play(Sounds::Cue::Error);
                 return;
             }
             FinishRecordActivation(*record, active, fromScript);
@@ -835,6 +848,8 @@ namespace Manifold
             record->LastError = result.Error.Text;
             m_lua->AfterActivation(*record, running->Active, false);
             Notify(result.Error);
+            if (!running->FromScript)
+                Sounds::Play(Sounds::Cue::Error);
             m_table.Refresh();
             return;
         }

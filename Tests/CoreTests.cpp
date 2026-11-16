@@ -660,7 +660,7 @@ data:
                 CHECK_MSG(seconds > 0.1 && seconds < 10.0, name + " lasts " + std::to_string(seconds) + " s");
             };
         checkWave(Sounds::DecodeToWave(read(file)), "Success.mp3 decoded");
-        checkWave(read(file.parent_path() / "Error.wav"), "Error.wav");
+        checkWave(Sounds::DecodeToWave(read(file.parent_path() / "Error.mp3")), "Error.mp3 decoded");
         CHECK(Sounds::DecodeToWave({}).empty());
         CHECK(Sounds::DecodeToWave({ 1, 2, 3, 4, 5 }).empty());
     }

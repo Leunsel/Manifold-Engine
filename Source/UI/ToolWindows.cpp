@@ -1,5 +1,6 @@
 #include "UI/Windows.h"
 
+#include "App/Sounds.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
@@ -15,6 +16,7 @@
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <utility>
 
 #include <windows.h>
 #include <shellapi.h>
@@ -235,6 +237,7 @@ namespace Manifold::UI
         }
         if (m_task && lua.TaskAlive(m_task))
             return;
+        m_stopped = false;
         const std::weak_ptr<int> alive = m_alive;
         m_task = lua.StartTask(m_text, "console", [this, alive](const Status& status, const std::string&)
             {
@@ -249,6 +252,8 @@ namespace Manifold::UI
     {
         if (!status)
         {
+            if (!std::exchange(m_stopped, false))
+                Sounds::Play(Sounds::Cue::Error);
             const std::size_t colon = status.Text.find("console:");
             if (colon != std::string::npos)
             {
@@ -406,7 +411,10 @@ namespace Manifold::UI
         if (running)
         {
             if (DangerButton(ICON_FA_STOP "  Stop", Px(110.0f, 0.0f)))
+            {
+                m_stopped = true;
                 m_engine.Lua().StopTask(m_task);
+            }
             ImGui::SameLine();
             Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
             ImGui::SameLine();

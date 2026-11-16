@@ -765,7 +765,9 @@ namespace Manifold::UI
 
         list.Section("Sounds");
         if (list.Row("Play sounds", "A sound plays when a scan finishes, and when a search, a dissect or a patch scan that took longer than two seconds is done. "
-                "A scan that fails plays the error sound. Message boxes from scripts play the error sound for errors and warnings, the other sound for the rest.", toggle))
+                "The error sound plays when a scan fails, when a script you switch on or off (with the mouse or a hotkey) fails, and when Execute, the Lua engine window or the table script ends in an error; "
+                "errors in timers and other callbacks stay silent, and it plays at most once a second. "
+                "Message boxes from scripts play the error sound for errors and warnings, the other sound for the rest.", toggle))
         {
             changed |= ToggleSwitch("##playsounds", &settings.PlaySounds);
             list.EndRow();

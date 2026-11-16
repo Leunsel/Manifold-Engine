@@ -6,6 +6,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -177,8 +178,15 @@ namespace Manifold::Sounds
 
     void Play(Cue cue)
     {
-        if (g_enabled)
-            Request(cue, false);
+        if (!g_enabled)
+            return;
+        static std::array<std::chrono::steady_clock::time_point, 2> last{};
+        const auto now = std::chrono::steady_clock::now();
+        std::chrono::steady_clock::time_point& previous = last[Index(cue)];
+        if (previous != std::chrono::steady_clock::time_point{} && now - previous < std::chrono::seconds(1))
+            return;
+        previous = now;
+        Request(cue, false);
     }
 
     void Preview(Cue cue)

@@ -6,7 +6,7 @@
 
 IDR_FONT_FA_SOLID        RCDATA "..\..\Dependencies\Fonts\fa-solid-900.ttf"
 IDR_SOUND_SUCCESS        RCDATA "..\\..\\Assets\\Sounds\\Success.mp3"
-IDR_SOUND_ERROR          RCDATA "..\\..\\Assets\\Sounds\\Error.wav"
+IDR_SOUND_ERROR          RCDATA "..\\..\\Assets\\Sounds\\Error.mp3"
 
 IDI_APPICON ICON "icon.ico"
 

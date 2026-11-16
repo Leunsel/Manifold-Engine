@@ -1,5 +1,6 @@
 #include "UI/Windows.h"
 
+#include "App/Sounds.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <utility>
 #include <sstream>
 
 namespace Manifold::UI
@@ -90,12 +92,15 @@ namespace Manifold::UI
                 const Status status = lua.Run(m_text, name);
                 m_resultOk = status.Ok();
                 m_result = status.Ok() ? "The script ran." : status.Text;
+                if (!status)
+                    Sounds::Play(Sounds::Cue::Error);
                 return;
             }
             if (m_task && lua.TaskAlive(m_task))
                 return;
             m_resultOk = true;
             m_result.clear();
+            m_stopped = false;
             const std::weak_ptr<int> alive = m_alive;
             m_task = lua.StartTask(m_text, name, [this, alive](const Status& status, const std::string&)
                 {
@@ -104,12 +109,16 @@ namespace Manifold::UI
                     m_task = 0;
                     m_resultOk = status.Ok();
                     m_result = status.Ok() ? "The script ran." : status.Text;
+                    if (!status && !std::exchange(m_stopped, false))
+                        Sounds::Play(Sounds::Cue::Error);
                 });
             return;
         }
         const Asm::AaSection section = Asm::HasSections(m_text) ? (disable ? Asm::AaSection::Disable : Asm::AaSection::Enable) : Asm::AaSection::Whole;
         const Asm::AaResult result = m_engine.AutoAssemble(m_text, section, m_engine.ScratchMemory(), false, "window");
         m_resultOk = result.Ok();
+        if (!result.Ok())
+            Sounds::Play(Sounds::Cue::Error);
         if (result.Ok())
         {
             std::size_t bytes = 0;
@@ -327,7 +336,10 @@ namespace Manifold::UI
             Muted("The script is running");
             ImGui::SameLine();
             if (ImGui::SmallButton(ICON_FA_STOP "  Stop"))
+            {
+                m_stopped = true;
                 m_engine.Lua().StopTask(m_task);
+            }
         }
         else if (!m_result.empty())
         {

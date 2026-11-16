@@ -536,6 +536,7 @@ namespace Manifold::UI
         std::string m_result;
         bool m_resultOk = true;
         int m_task = 0;
+        bool m_stopped = false;
         std::shared_ptr<int> m_alive = std::make_shared<int>(0);
         TemplateRunner m_templates;
     };
@@ -581,6 +582,7 @@ namespace Manifold::UI
         bool m_open = true;
         bool m_bringToFront = true;
         int m_task = 0;
+        bool m_stopped = false;
         std::shared_ptr<int> m_alive = std::make_shared<int>(0);
         std::string m_text;
         std::filesystem::path m_path;
