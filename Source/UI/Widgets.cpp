@@ -10,6 +10,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <set>
+
+#include <windows.h>
 
 namespace Manifold::UI
 {
@@ -814,8 +817,60 @@ namespace Manifold::UI
         return clicked;
     }
 
+    namespace
+    {
+        std::set<ImGuiID>& PendingRaises()
+        {
+            static std::set<ImGuiID> pending;
+            return pending;
+        }
+    }
+
+    bool FocusRequested()
+    {
+        const ImGuiContext* context = ImGui::GetCurrentContext();
+        return context && (context->NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasFocus) != 0;
+    }
+
+    void RequestWindowRaise(const char* title)
+    {
+        ImGui::SetWindowFocus(title);
+        PendingRaises().insert(ImHashStr(title));
+    }
+
+    void RaisePlatformWindow(bool requested)
+    {
+        ImGuiWindow* window = ImGui::GetCurrentWindow();
+        if (!window)
+            return;
+        std::set<ImGuiID>& pending = PendingRaises();
+        if (requested)
+            pending.insert(window->RootWindow ? window->RootWindow->ID : window->ID);
+        const ImGuiID id = window->RootWindow ? window->RootWindow->ID : window->ID;
+        if (!pending.count(id))
+            return;
+        ImGuiViewport* viewport = window->Viewport;
+        const ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+        if (!viewport || !platform.Platform_SetWindowFocus)
+        {
+            pending.erase(id);
+            return;
+        }
+        if (!viewport->PlatformWindowCreated || !viewport->PlatformUserData)
+            return;
+        if (HWND hwnd = static_cast<HWND>(viewport->PlatformHandleRaw))
+        {
+            if (::IsIconic(hwnd))
+                ::ShowWindow(hwnd, SW_RESTORE);
+            ::SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+        platform.Platform_SetWindowFocus(viewport);
+        pending.erase(id);
+    }
+
     bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags, ImVec2 minimum)
     {
+        const bool raise = FocusRequested();
         ImGuiWindowClass windowClass;
         windowClass.ViewportFlagsOverrideSet = ImGuiViewportFlags_NoAutoMerge;
         windowClass.ViewportFlagsOverrideClear = ImGuiViewportFlags_NoTaskBarIcon;
@@ -831,6 +886,7 @@ namespace Manifold::UI
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ManifoldTheme::Page);
         const bool visible = ImGui::Begin(title, open, flags);
         ImGui::PopStyleColor();
+        RaisePlatformWindow(raise);
         return visible;
     }
 

@@ -185,7 +185,7 @@ namespace Manifold::UI
     void StructureWindow::Show(std::uint64_t address, const std::string& structure)
     {
         m_open = true;
-        ImGui::SetWindowFocus(m_title.c_str());
+        RequestWindowRaise(m_title.c_str());
         if (!structure.empty() && m_engine.Structures().Find(structure))
         {
             m_structure = structure;

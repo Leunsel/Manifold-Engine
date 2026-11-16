@@ -31,7 +31,7 @@ namespace Manifold::UI
         m_open = true;
         m_focusFilter = true;
         Refresh();
-        ImGui::SetWindowFocus(ICON_FA_DESKTOP "  Processes###processes");
+        RequestWindowRaise(ICON_FA_DESKTOP "  Processes###processes");
     }
 
     void ProcessPicker::Refresh()

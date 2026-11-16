@@ -65,6 +65,9 @@ namespace Manifold::UI
 
     bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags = 0, ImVec2 minimum = ImVec2(260.0f, 160.0f));
     void EndToolWindow();
+    bool FocusRequested();
+    void RequestWindowRaise(const char* title);
+    void RaisePlatformWindow(bool requested);
     bool BeginModal(const char* id, const char* icon, const char* title, ImVec2 size, bool* open = nullptr, ImGuiID viewport = 0);
     ImGuiID CallerViewport();
     void EndModal();
