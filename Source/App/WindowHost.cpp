@@ -23,6 +23,7 @@
 #include <windowsx.h>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandlerEx(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, ImGuiIO& io);
+void ImGui_ImplDX11_SetSwapChainDescs(const DXGI_SWAP_CHAIN_DESC* desc_templates, int desc_templates_count);
 
 namespace Manifold
 {
@@ -473,6 +474,14 @@ namespace Manifold
             PutError(m_error, ARRAYSIZE(m_error), ErrorCode::ImGuiFailed);
             return false;
         }
+        DXGI_SWAP_CHAIN_DESC viewportChain = {};
+        viewportChain.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        viewportChain.SampleDesc.Count = 1;
+        viewportChain.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        viewportChain.BufferCount = 2;
+        viewportChain.Windowed = TRUE;
+        viewportChain.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        ImGui_ImplDX11_SetSwapChainDescs(&viewportChain, 1);
         ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
         g_viewportIcon = static_cast<HICON>(::LoadImageW(m_instance, MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, ::GetSystemMetrics(SM_CXICON), ::GetSystemMetrics(SM_CYICON), LR_SHARED));
         g_viewportIconSmall = static_cast<HICON>(::LoadImageW(m_instance, MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), LR_SHARED));
