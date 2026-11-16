@@ -414,6 +414,11 @@ namespace Manifold::Target
             return *cached;
         if (m_jitMisses.count(address))
             return std::nullopt;
+        // JIT code is never inside the game's native modules, so those (the game
+        // executable and its DLLs) are answered here without a remote call. The
+        // runtime's own module is still asked, for a runtime embedded in the exe.
+        if (const auto module = m_process->ModuleAt(address); module && !EqualsNoCase(module->Name, m_module))
+            return std::nullopt;
         // A miss costs one remote lookup. mono_jit_info_table_find reports null
         // for any address that is not JITed Mono code, so it is safe on the wild
         // pointers the disassembler hands it.
@@ -459,6 +464,22 @@ namespace Manifold::Target
             [](const JitRange& range, std::uint64_t value) { return range.Start < value; });
         if (it != m_jitRanges.end() && it->Start == address)
             return it->Name;
+        return std::nullopt;
+    }
+
+    std::optional<std::pair<std::uint64_t, std::uint64_t>> MonoBridge::MethodRange(std::uint64_t address)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_present || !m_process || !address)
+            return std::nullopt;
+        MethodNameAt(address);  // resolve and cache the containing method's range
+        auto it = std::upper_bound(m_jitRanges.begin(), m_jitRanges.end(), address,
+            [](std::uint64_t value, const JitRange& range) { return value < range.Start; });
+        if (it == m_jitRanges.begin())
+            return std::nullopt;
+        --it;
+        if (address >= it->Start && address < it->End)
+            return std::make_pair(it->Start, it->End);
         return std::nullopt;
     }
 

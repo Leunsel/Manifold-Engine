@@ -99,6 +99,10 @@ namespace Manifold::Target
         // labelling every line inside it.
         std::optional<std::string> MethodStartNameAt(std::uint64_t address);
 
+        // The [start, end) code range of the method containing an address, so a
+        // listing can show offsets from the method start and stop at its end.
+        std::optional<std::pair<std::uint64_t, std::uint64_t>> MethodRange(std::uint64_t address);
+
         // "Class:Method" or "Namespace.Class:Method"; compiles the method on the
         // first call and caches the address. Returns nullopt when not Mono or not found.
         std::optional<std::uint64_t> AddressOf(std::string_view name);

@@ -65,6 +65,7 @@ namespace Manifold
         bool UseHardwareExecuteBreakpoints = false;
         bool UseInProcessDebugger = false;
         bool ShowRegistersOnBreak = true;
+        bool ShowSymbols = true;
         int DisassemblerRows = 0;
 
         std::vector<std::string> RecentTables;

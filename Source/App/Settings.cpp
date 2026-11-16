@@ -115,6 +115,7 @@ namespace Manifold
         if (auto v = text("hardwareexecute")) UseHardwareExecuteBreakpoints = ToBool(*v);
         if (auto v = text("inprocess")) UseInProcessDebugger = ToBool(*v);
         if (auto v = text("registersonbreak")) ShowRegistersOnBreak = ToBool(*v);
+        if (auto v = text("showsymbols")) ShowSymbols = ToBool(*v);
         if (auto v = text("lastprocess")) LastProcess = *v;
         RecentTables.clear();
         for (std::size_t i = 0; i < kRecentTables; ++i)
@@ -147,7 +148,7 @@ namespace Manifold
         out << "[Debugger]\n";
         out << "VerboseLog=" << (VerboseLog ? 1 : 0) << "\nLogDebugStrings=" << (LogDebugStrings ? 1 : 0) << "\n";
         out << "HardwareExecute=" << (UseHardwareExecuteBreakpoints ? 1 : 0) << "\nRegistersOnBreak=" << (ShowRegistersOnBreak ? 1 : 0) << "\n";
-        out << "InProcess=" << (UseInProcessDebugger ? 1 : 0) << "\n\n";
+        out << "InProcess=" << (UseInProcessDebugger ? 1 : 0) << "\nShowSymbols=" << (ShowSymbols ? 1 : 0) << "\n\n";
         out << "[Recent]\n";
         out << "LastProcess=" << LastProcess << "\n";
         for (std::size_t i = 0; i < RecentTables.size() && i < kRecentTables; ++i)

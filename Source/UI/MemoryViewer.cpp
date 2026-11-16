@@ -539,6 +539,10 @@ namespace Manifold::UI
                 m_engine.LoadSymbols(false);
             if (ImGui::MenuItem(ICON_FA_GLOBE "  Load Windows symbols", nullptr, false, process))
                 m_engine.LoadSymbols(true);
+            if (ImGui::MenuItem(m_engine.MonoPresent() ? ICON_FA_DICE_D6 "  Mono runtime loaded" : ICON_FA_DICE_D6 "  Load Mono runtime", nullptr, false,
+                    process && !m_engine.MonoPresent()))
+                m_workspace.Report(m_engine.EnsureMono());
+            ItemTooltip("Reads the classes and methods of a Mono-based Unity game so method names show here and resolve in addresses. IL2CPP games have no Mono runtime.");
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_TIMES "  Close"))
                 m_open = false;
@@ -573,6 +577,8 @@ namespace Manifold::UI
                 ImGui::EndMenu();
             }
             ImGui::MenuItem(ICON_FA_CROSSHAIRS "  Follow breaks", nullptr, &m_followBreaks);
+            ImGui::MenuItem(ICON_FA_TAGS "  Show symbols", nullptr, &m_engine.Options().ShowSymbols);
+            ItemTooltip("Names in the code: function headers with offsets below them, symbol names in operands, module+offset addresses. Off shows plain addresses.");
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Debug", process))
@@ -779,6 +785,8 @@ namespace Manifold::UI
         const Disasm::Disassembler& disassembler = m_engine.Disassembler();
         Debug::Debugger& debugger = m_engine.Debugger();
         const Debug::BreakInfo info = ShownBreak();
+        const bool showSymbols = m_engine.Options().ShowSymbols;
+        const Target::Symbols* symbols = showSymbols ? &m_engine.Symbols() : nullptr;
 
         PushMono();
         const float rowHeight = std::floor(ImGui::GetTextLineHeight() + Px(3.0f));
@@ -805,7 +813,7 @@ namespace Manifold::UI
                 const std::size_t sel = static_cast<std::size_t>(m_selected - m_top);
                 m_lines.clear();
                 m_lines.reserve(static_cast<std::size_t>(m_visibleLines + 1));
-                for (const Disasm::Instruction& line : disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, &m_engine.Symbols()))
+                for (const Disasm::Instruction& line : disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, symbols))
                 {
                     if (line.Address + (line.Length ? line.Length : 1) > m_selected)
                         break;
@@ -814,12 +822,12 @@ namespace Manifold::UI
                 const std::vector<std::uint8_t> sub(buffer.begin() + static_cast<std::ptrdiff_t>(sel), buffer.end());
                 const std::vector<bool> subReadable(readable.begin() + static_cast<std::ptrdiff_t>(sel), readable.end());
                 const int remaining = std::max(1, m_visibleLines + 1 - static_cast<int>(m_lines.size()));
-                for (const Disasm::Instruction& line : disassembler.DecodeMany(sub, subReadable, m_selected, remaining, &m_engine.Symbols()))
+                for (const Disasm::Instruction& line : disassembler.DecodeMany(sub, subReadable, m_selected, remaining, symbols))
                     m_lines.push_back(line);
             }
             else
             {
-                m_lines = disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, &m_engine.Symbols());
+                m_lines = disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, symbols);
             }
         }
 
@@ -832,18 +840,72 @@ namespace Manifold::UI
         const float gutter = Px(18.0f);
         const float arrows = Px(26.0f);
 
+        // With symbols shown, a line where a symbol starts (a registered symbol,
+        // an export, or a Mono method) gets a header, and the lines after it show
+        // their offset from that start ("+0", "+3", ...) until the function ends.
+        // Registered symbols and exports have no known end, so their offsets stop
+        // after kSymbolReach bytes; Mono methods stop at their JIT code end.
+        constexpr std::uint64_t kSymbolReach = 0x1000;
         std::vector<std::string> addressTexts;
         std::vector<bool> addressInModule;
+        std::vector<std::optional<std::string>> headers;
         addressTexts.reserve(m_lines.size());
         addressInModule.reserve(m_lines.size());
+        headers.reserve(m_lines.size());
+        std::uint64_t functionStart = 0;
+        std::uint64_t functionEnd = 0;
+        if (showSymbols && m_engine.MonoPresent() && !m_lines.empty())
+        {
+            if (const auto range = m_engine.Mono().MethodRange(m_lines.front().Address))
+            {
+                functionStart = range->first;
+                functionEnd = range->second;
+            }
+        }
         float widestAddress = 0.0f;
         PushMono();
         for (const Disasm::Instruction& line : m_lines)
         {
-            const std::string address = m_engine.Symbols().ModuleOffset(line.Address);
-            const bool inModule = address.front() == '"';
-            addressTexts.push_back(inModule ? ReplaceAll(address, "\"", "") : Hex(line.Address, process.Is64Bit() ? 12 : 8));
-            addressInModule.push_back(inModule);
+            std::optional<std::string> header;
+            if (showSymbols)
+            {
+                header = m_engine.Symbols().ExactName(line.Address);
+                if (header)
+                {
+                    functionStart = line.Address;
+                    functionEnd = line.Address + kSymbolReach;
+                }
+                else if (m_engine.MonoPresent())
+                {
+                    header = m_engine.Mono().MethodStartNameAt(line.Address);
+                    if (header)
+                    {
+                        const auto range = m_engine.Mono().MethodRange(line.Address);
+                        functionStart = line.Address;
+                        functionEnd = range ? range->second : line.Address + kSymbolReach;
+                    }
+                }
+            }
+            std::string text;
+            bool symbolic = false;
+            if (!showSymbols)
+            {
+                text = Hex(line.Address, process.Is64Bit() ? 12 : 8);
+            }
+            else if (functionStart && line.Address >= functionStart && line.Address < functionEnd)
+            {
+                text = "+" + Hex(line.Address - functionStart);
+                symbolic = true;
+            }
+            else
+            {
+                const std::string address = m_engine.Symbols().ModuleOffset(line.Address);
+                symbolic = address.front() == '"';
+                text = symbolic ? ReplaceAll(address, "\"", "") : Hex(line.Address, process.Is64Bit() ? 12 : 8);
+            }
+            headers.push_back(std::move(header));
+            addressTexts.push_back(std::move(text));
+            addressInModule.push_back(symbolic);
             widestAddress = std::max(widestAddress, ImGui::CalcTextSize(addressTexts.back().c_str()).x);
         }
         PopMono();
@@ -1013,9 +1075,7 @@ namespace Manifold::UI
                     AsmOperands(drawList, font, fontSize, ImVec2(operandX, textY), operandClip, line.Operands);
             }
 
-            std::optional<std::string> methodHeader;
-            if (m_engine.MonoPresent())
-                methodHeader = m_engine.Mono().MethodStartNameAt(line.Address);
+            const std::optional<std::string>& methodHeader = headers[i];
             if (methodHeader && i != 0)
                 drawList->AddLine(ImVec2(origin.x, y), ImVec2(origin.x + width, y), ImGui::GetColorU32(ManifoldTheme::RowSeparator));
 
@@ -1033,8 +1093,6 @@ namespace Manifold::UI
                 comment = *methodHeader;
                 commentColor = ImGui::GetColorU32(ManifoldTheme::Accent);
             }
-            else if (const auto name = m_engine.Symbols().ExactName(line.Address))
-                comment = *name + ":";
             else if (line.Memory.Present && line.Memory.Absolute)
             {
                 std::uint8_t value[8]{};
