@@ -1006,6 +1006,13 @@ namespace Manifold::UI
                 OpenFolder(Paths::AutorunFolder());
             list.EndRow();
         }
+        if (list.Row("Script windows in the app's look",
+                "Windows that scripts build with createForm look like Manifold's own: cards, its colors, its font and font size, whatever colors, borders and fonts the script sets. "
+                "Off: the colors, borders and fonts of the script, as Cheat Engine shows them. Pictures that scripts paint keep their colors either way.", toggle))
+        {
+            changed |= ToggleSwitch("##scriptapplook", &settings.ScriptWindowsAppLook);
+            list.EndRow();
+        }
 
         list.Section("Tables");
         if (list.Row("Lua script in a table", "What happens when a loaded table carries a Lua script.", choice))

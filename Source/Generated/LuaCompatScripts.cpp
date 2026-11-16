@@ -2495,10 +2495,10 @@ Set.listitems = {
 IndexGet.listitems = function(self, d, i) return d.items[i + 1] end
 Indexed.listitems = { item = { get = function(self, d, i) return d.items[(tonumber(i) or -1) + 1] end, len = function(self, d) return #d.items end } }
 Impl.listitems = {
-  add = function(self) local d = D[self] local item = newListItem(self) d.items[#d.items + 1] = item return item end,
-  insert = function(self, index) local d = D[self] local item = newListItem(self) table.insert(d.items, math.max(1, math.min((index or 0) + 1, #d.items + 1)), item) return item end,
-  clear = function(self) D[self].items = {} end,
-  delete = function(self, index) table.remove(D[self].items, (tonumber(index) or -1) + 1) end,
+  add = function(self) touchForms() local d = D[self] local item = newListItem(self) d.items[#d.items + 1] = item return item end,
+  insert = function(self, index) touchForms() local d = D[self] local item = newListItem(self) table.insert(d.items, math.max(1, math.min((index or 0) + 1, #d.items + 1)), item) return item end,
+  clear = function(self) touchForms() D[self].items = {} end,
+  delete = function(self, index) touchForms() table.remove(D[self].items, (tonumber(index) or -1) + 1) end,
   beginupdate = noop,
   endupdate = noop,
   getitem = function(self, i) return D[self].items[(tonumber(i) or -1) + 1] end,
@@ -2575,7 +2575,7 @@ Set.listview = {
   end,
 }
 Impl.listview = {
-  clear = function(self) self.Items.clear() D[self].props.itemindex = -1 end,
+  clear = function(self) touchForms() self.Items.clear() D[self].props.itemindex = -1 end,
   getitemat = function() return nil end,
   beginupdate = noop,
   endupdate = noop,
@@ -3032,6 +3032,7 @@ do
     local item = new("menuitem", mainForm)
     D[item].props.name = entry[1]
     D[item].props.caption = entry[2]
+    D[item].builtin = true
     menu.Items.add(item)
   end
   local tableMenu = findOwned(mainForm, "mitable", false)
@@ -3040,6 +3041,7 @@ do
     local item = new("menuitem", mainForm)
     D[item].props.name = entry[1]
     D[item].props.caption = entry[2]
+    D[item].builtin = true
     tableMenu.add(item)
     fixed[#fixed + 1] = item
   end
@@ -3053,6 +3055,7 @@ do
     for _, name in ipairs(__manifoldTableFileNames()) do
       local item = new("menuitem", mainForm)
       D[item].props.caption = name
+      D[item].builtin = true
       tableMenu.add(item)
       fileItems[#fileItems + 1] = item
     end
@@ -3120,10 +3123,10 @@ getMemoryViewForm = getMemoryViewForm or function()
   if memoryView then
     return memoryView
   end
-  memoryView = new("memoryview")
-  local p = D[memoryView].props
 )MLUA"),
-            std::string_view(R"MLUA(  p.name = "MemoryBrowser"
+            std::string_view(R"MLUA(  memoryView = new("memoryview")
+  local p = D[memoryView].props
+  p.name = "MemoryBrowser"
   p.caption = "Memory Viewer"
   local view = construct("disassemblerview", memoryView)
   D[view].props.name = "DisassemblerView"
@@ -3253,6 +3256,9 @@ local function scriptMenu(which)
     local menu = live(which)
     return menu
   end
+  if which == "main" then
+    return D[mainForm].props.menu
+  end
   if not memoryView then
     return nil
   end
@@ -3262,10 +3268,50 @@ local function scriptMenu(which)
   return D[memoryView].props.menu
 end
 
+local function mainMenuEntries(menu)
+  local out = {}
+  local d = D[menu.Items]
+  if not d or not d.items then
+    return out
+  end
+  for _, item in ipairs(d.items) do
+    local child = D[item]
+    if child and not child.destroyed and item.Visible ~= false then
+      if child.builtin then
+        local added = menuEntries(item, true)
+        if #added > 0 then
+          local name = tostring(rawget(child.props, "name") or "")
+          out[#out + 1] = {
+            id = uidOf(item),
+            caption = plainCaption(item.Caption),
+            merge = (string.lower(name):gsub("^mi", "")),
+            enabled = true,
+            checked = false,
+            children = added,
+          }
+        end
+      else
+        out[#out + 1] = {
+          id = uidOf(item),
+          caption = plainCaption(item.Caption),
+          shortcut = shortcutText(rawget(child.props, "shortcut")),
+          enabled = item.Enabled ~= false,
+          checked = item.Checked == true,
+          children = menuEntries(item, false),
+        }
+      end
+    end
+  end
+  return out
+end
+
 __manifoldMenuSnapshot = function(which)
   local menu = scriptMenu(which)
   if not menu then
     return {}
+  end
+  if which == "main" then
+    return mainMenuEntries(menu)
   end
   return menuEntries(menu.Items, which == "menu")
 end
@@ -3295,7 +3341,7 @@ local layoutNames = { tltop = 0, tlcenter = 1, tlbottom = 2 }
 local drawnKinds = {
   label = true, button = true, edit = true, memo = true, checkbox = true, togglebox = true, listbox = true,
   panel = true, groupbox = true, splitter = true, combobox = true, treeview = true, cecustombutton = true,
-  paintbox = true, image = true,
+  paintbox = true, image = true, listview = true,
 }
 local defaultSizes = {
   panel = { 170, 50 }, label = { 65, 17 }, edit = { 80, 23 }, memo = { 150, 90 }, button = { 75, 25 },
@@ -3495,7 +3541,8 @@ local function alignList(parent, pd, align, start)
   end
   for _, control in ipairs(pd.alignOrder or pd.controls) do
     local cd = D[control]
-    if not rawequal(control, start) and cd and not cd.destroyed and rawequal(cd.parent, parent) and alignOf(control) == align and shown(control) then
+)MLUA"),
+            std::string_view(R"MLUA(    if not rawequal(control, start) and cd and not cd.destroyed and rawequal(cd.parent, parent) and alignOf(control) == align and shown(control) then
       local at = 1
       while at <= #list and not insertBefore(control, list[at], align) do
         at = at + 1
@@ -3545,8 +3592,7 @@ local function place(control, d, align, rect)
     d.paintDirty = true
     d.resizePending = true
     realign(control, nil)
-)MLUA"),
-            std::string_view(R"MLUA(  end
+  end
 end
 
 local aligning = setmetatable({}, { __mode = "k" })
@@ -3878,7 +3924,8 @@ for _, name in ipairs({ "repaint", "invalidate", "refresh", "update" }) do
 end
 
 layout.canvasFreed = function(d)
-  local free = rawget(_G, "__manifoldCanvasFree")
+)MLUA"),
+            std::string_view(R"MLUA(  local free = rawget(_G, "__manifoldCanvasFree")
   if free then
     free(d.serial)
   end
@@ -3926,8 +3973,7 @@ local function splitterTarget(splitter, sd)
         end
       elseif align == 4 then
         edge = num(p.left)
-)MLUA"),
-            std::string_view(R"MLUA(        if edge >= num(sp.left) + num(sp.width) - 1 and (not bestEdge or edge < bestEdge) then
+        if edge >= num(sp.left) + num(sp.width) - 1 and (not bestEdge or edge < bestEdge) then
           best, bestEdge = control, edge
         end
       elseif align == 1 then
@@ -4065,6 +4111,28 @@ local function controlEntry(control, form)
     entry.rightclickselect = p.rightclickselect == true
     entry.autoexpand = p.autoexpand == true
     entry.frame = enum(p.borderstyle, { bsnone = 0, bssingle = 1 }, 1) ~= 0
+  elseif kind == "listview" then
+    entry.viewstyle = enum(p.viewstyle, { vsicon = 0, vssmallicon = 1, vslist = 2, vsreport = 3 }, 0)
+    entry.itemindex = tonumber(p.itemindex) or -1
+    entry.gridlines = p.gridlines == true
+    entry.checkboxes = p.checkboxes == true
+    entry.headers = p.showcolumnheaders ~= false
+    entry.frame = enum(p.borderstyle, { bsnone = 0, bssingle = 1 }, 1) ~= 0
+    entry.columns = {}
+    for i, column in ipairs(D[control.Columns].items) do
+      local cp = D[column].props
+      entry.columns[i] = {
+        caption = plainCaption(cp.caption or ""),
+        width = tonumber(cp.width) or 50,
+        alignment = enum(cp.alignment, alignmentNames, 0),
+        visible = cp.visible ~= false,
+      }
+    end
+    entry.rows = {}
+    for i, item in ipairs(D[control.Items].items) do
+      local ip = D[item].props
+      entry.rows[i] = { id = uidOf(item), text = tostring(ip.caption or ""), sub = stringItems(ip.subitems), checked = ip.checked == true }
+    end
   else
     entry.text = plainCaption(controlText(control, d))
   end
@@ -4179,6 +4247,20 @@ __manifoldFormFire = function(id, event, a, b, c)
   elseif event == "nodechange" then
     call(p.onchange, control, p.selected)
     call(p.onselectionchanged, control)
+  elseif event == "itemselect" then
+    local old = D[control.Items].items[(tonumber(a) or -1) + 1]
+    if old then
+      call(p.onselectitem, control, old, false)
+    end
+    local item = control.Selected
+    if item then
+      call(p.onselectitem, control, item, true)
+      call(p.onchange, control, item, 2)
+    end
+  elseif event == "itemcheck" then
+    call(p.onitemchecked, control, (live(a)))
+  elseif event == "columnclick" then
+    call(p.oncolumnclick, control, D[control.Columns].items[(tonumber(a) or -1) + 1])
   elseif event == "dblclick" then
     call(p.ondblclick, control)
   elseif event == "change" then
@@ -4200,7 +4282,8 @@ __manifoldFormFire = function(id, event, a, b, c)
     call(p.onmouseup, control, a, b, c)
   elseif event == "mousemove" then
     call(p.onmousemove, control, a, b)
-  elseif event == "wheelup" or event == "wheeldown" then
+)MLUA"),
+            std::string_view(R"MLUA(  elseif event == "wheelup" or event == "wheeldown" then
     local named = event == "wheelup" and p.onmousewheelup or p.onmousewheeldown
     if type(named) == "function" then
       named(control, a, b)
@@ -4285,8 +4368,7 @@ showSelectionList = showSelectionList or function(title, caption, list, allowCus
   return __manifoldShowSelectionList(title, caption, items, allowCustom)
 end
 
-)MLUA"),
-            std::string_view(R"MLUA(__manifoldNewThreadObject = function()
+__manifoldNewThreadObject = function()
   return new("thread")
 end
 

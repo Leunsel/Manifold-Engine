@@ -82,6 +82,7 @@ namespace Manifold::Lua
             ScriptMenuItem item;
             item.Id = IntField(state, index, "id", 0);
             item.Caption = StringField(state, index, "caption");
+            item.Merge = StringField(state, index, "merge");
             item.Shortcut = StringField(state, index, "shortcut");
             item.Enabled = BoolField(state, index, "enabled", true);
             item.Checked = BoolField(state, index, "checked", false);
@@ -98,6 +99,48 @@ namespace Manifold::Lua
             node.HasChildren = BoolField(state, index, "haschildren", false);
             node.Children = ListField<ScriptNode>(state, index, "children", &ReadNode);
             return node;
+        }
+
+        std::vector<std::string> StringList(lua_State* state, int index, const char* name)
+        {
+            std::vector<std::string> out;
+            lua_getfield(state, index, name);
+            if (lua_istable(state, -1))
+            {
+                const int list = lua_gettop(state);
+                const lua_Integer count = static_cast<lua_Integer>(lua_rawlen(state, list));
+                out.reserve(static_cast<std::size_t>(count));
+                for (lua_Integer i = 1; i <= count; ++i)
+                {
+                    lua_rawgeti(state, list, i);
+                    std::size_t length = 0;
+                    const char* raw = lua_tolstring(state, -1, &length);
+                    out.emplace_back(raw ? std::string(raw, length) : std::string());
+                    lua_pop(state, 1);
+                }
+            }
+            lua_pop(state, 1);
+            return out;
+        }
+
+        ScriptColumn ReadColumn(lua_State* state, int index)
+        {
+            ScriptColumn column;
+            column.Caption = StringField(state, index, "caption");
+            column.Width = IntField(state, index, "width", 50);
+            column.Alignment = IntField(state, index, "alignment", 0);
+            column.Visible = BoolField(state, index, "visible", true);
+            return column;
+        }
+
+        ScriptRow ReadRow(lua_State* state, int index)
+        {
+            ScriptRow row;
+            row.Id = IntField(state, index, "id", 0);
+            row.Text = StringField(state, index, "text");
+            row.Sub = StringList(state, index, "sub");
+            row.Checked = BoolField(state, index, "checked", false);
+            return row;
         }
 
         ScriptFont ReadFont(lua_State* state, int index)
@@ -163,6 +206,12 @@ namespace Manifold::Lua
             control.Nodes = ListField<ScriptNode>(state, index, "nodes", &ReadNode);
             control.Selected = IntField(state, index, "selected", 0);
             control.RightClickSelect = BoolField(state, index, "rightclickselect", false);
+            control.ViewStyle = IntField(state, index, "viewstyle", 0);
+            control.GridLines = BoolField(state, index, "gridlines", false);
+            control.CheckBoxes = BoolField(state, index, "checkboxes", false);
+            control.Headers = BoolField(state, index, "headers", true);
+            control.Columns = ListField<ScriptColumn>(state, index, "columns", &ReadColumn);
+            control.Rows = ListField<ScriptRow>(state, index, "rows", &ReadRow);
             control.Canvas = IntField(state, index, "canvas", 0);
             control.Mouse = BoolField(state, index, "mouse", false);
             control.Wheel = BoolField(state, index, "wheel", false);
@@ -283,9 +332,22 @@ namespace Manifold::Lua
         lua_settop(m_state, top);
     }
 
+    namespace
+    {
+        const char* MenuName(ScriptMenu menu)
+        {
+            switch (menu)
+            {
+            case ScriptMenu::MemoryViewPopup: return "popup";
+            case ScriptMenu::MainMenu: return "main";
+            default: return "menu";
+            }
+        }
+    }
+
     std::vector<ScriptMenuItem> LuaEngine::MenuItems(ScriptMenu menu)
     {
-        return ReadMenu(false, 0, menu == ScriptMenu::MemoryViewPopup ? "popup" : "menu");
+        return ReadMenu(false, 0, MenuName(menu));
     }
 
     std::vector<ScriptMenuItem> LuaEngine::MenuItemsOf(int menu)
@@ -295,7 +357,7 @@ namespace Manifold::Lua
 
     void LuaEngine::MenuOpening(ScriptMenu menu)
     {
-        OpenMenu(false, 0, menu == ScriptMenu::MemoryViewPopup ? "popup" : "menu");
+        OpenMenu(false, 0, MenuName(menu));
     }
 
     void LuaEngine::MenuOpeningOf(int menu)

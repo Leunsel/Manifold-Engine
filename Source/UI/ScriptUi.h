@@ -70,6 +70,7 @@ namespace Manifold::UI
         void DrawEdit(const Lua::ScriptControl& control, ImVec2 min, ImVec2 max);
         void DrawList(const Lua::ScriptControl& control, ImVec2 min, ImVec2 size);
         void DrawTree(const Lua::ScriptControl& control, ImVec2 min, ImVec2 size, int popup);
+        void DrawListView(const Lua::ScriptControl& control, ImVec2 min, ImVec2 size, int popup);
         void DrawNodes(const Lua::ScriptControl& tree, const std::vector<Lua::ScriptNode>& nodes, std::vector<const Lua::ScriptNode*>& visible, bool scroll, int popup);
         void DrawSplitter(const Lua::ScriptControl& control, ImVec2 min, ImVec2 size);
         void DrawCanvas(int id, ImVec2 origin, Clip clip, int depth);
@@ -98,5 +99,9 @@ namespace Manifold::UI
         ImGuiID m_background = 0;
         FormState* m_state = nullptr;
         float m_scale = 1.0f;
+        bool m_cards = true;
+        bool m_appLook = true;
+
+        bool Carded(const Lua::ScriptControl& control) const { return m_cards && control.Color < 0 && control.Font.Color < 0; }
     };
 }

@@ -622,6 +622,7 @@ namespace Manifold::UI
             m_scriptMenu = lua.MenuItems(Lua::ScriptMenu::MemoryViewMenu);
         }
         int clicked = 0;
+        int opened = 0;
         for (const Lua::ScriptMenuItem& root : m_scriptMenu)
         {
             if (root.Caption == "-")
@@ -635,16 +636,19 @@ namespace Manifold::UI
             }
             if (ImGui::BeginMenu(label.c_str(), root.Enabled))
             {
+                if (ImGui::IsWindowAppearing())
+                    opened = root.Id;
                 if (const int inner = DrawScriptMenuItems(root.Children))
                     clicked = inner;
                 ImGui::EndMenu();
             }
         }
-        if (clicked)
-        {
+        if (opened || clicked)
             PublishSelection();
+        if (opened)
+            lua.ClickMenuItem(opened);
+        if (clicked)
             lua.ClickMenuItem(clicked);
-        }
     }
 
     void MemoryViewer::ScriptShortcuts(std::vector<ImGuiKeyChord>& taken)

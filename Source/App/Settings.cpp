@@ -103,6 +103,7 @@ namespace Manifold
         if (auto v = text("alltypes")) AllTypes = static_cast<std::uint32_t>(std::clamp(ToInt(*v, 0x3F), 0, 0x3F));
         if (auto v = text("resultrefresh")) ResultValueRefreshMs = std::clamp(ToInt(*v, ResultValueRefreshMs), 50, 10000);
         if (auto v = text("autorun")) AutorunEnabled = ToBool(*v);
+        if (auto v = text("scriptwindowsapplook")) ScriptWindowsAppLook = ToBool(*v);
         if (auto v = text("autoattach")) AutoAttach = Split(*v, ';');
         if (auto v = text("autoattachenabled")) AutoAttachEnabled = ToBool(*v);
         if (auto v = text("tablescripts")) TableScripts = EqualsNoCase(*v, "always") ? TableScriptPolicy::Always : EqualsNoCase(*v, "never") ? TableScriptPolicy::Never : TableScriptPolicy::Ask;
@@ -138,6 +139,7 @@ namespace Manifold
         out << "ResultRefresh=" << ResultValueRefreshMs << "\n\n";
         out << "[Scripts]\n";
         out << "Autorun=" << (AutorunEnabled ? 1 : 0) << "\nAutoAttach=" << Join(AutoAttach, ";") << "\nAutoAttachEnabled=" << (AutoAttachEnabled ? 1 : 0) << "\n";
+        out << "ScriptWindowsAppLook=" << (ScriptWindowsAppLook ? 1 : 0) << "\n";
         out << "TableScripts=" << (TableScripts == TableScriptPolicy::Always ? "always" : TableScripts == TableScriptPolicy::Never ? "never" : "ask") << "\n";
         out << "ActiveScriptsOnQuit=" << (ActiveScriptsOnQuit == QuitPolicy::Disable ? "disable" : ActiveScriptsOnQuit == QuitPolicy::Leave ? "leave" : "ask") << "\n\n";
         out << "[Interface]\n";

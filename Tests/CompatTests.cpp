@@ -343,6 +343,100 @@ namespace Manifold::Tests
             const auto renamed = lua.MenuItems(Lua::ScriptMenu::MemoryViewMenu);
             CHECK(renamed.size() == 1 && renamed[0].Caption == "Renamed");
 
+            const std::size_t before = lua.MenuItems(Lua::ScriptMenu::MainMenu).size();
+            LuaCheck(engine, "main menu", R"LUA(
+                local menu = MainForm.Menu
+                mainOpened, mainClicks = 0, 0
+                local root = createMenuItem(menu)
+                root.Caption = "Unreal &Engine"
+                root.OnClick = function() mainOpened = mainOpened + 1 end
+                menu.Items.add(root)
+                local entry = createMenuItem(menu)
+                entry.Caption = "Inspector..."
+                entry.Shortcut = "Ctrl+Alt+U"
+                entry.OnClick = function() mainClicks = mainClicks + 1 end
+                root.add(entry)
+                local extra = createMenuItem(menu)
+                extra.Caption = "Script help"
+                MainForm.miHelp.add(extra)
+                return "ok")LUA");
+            const auto main = lua.MenuItems(Lua::ScriptMenu::MainMenu);
+            CHECK_MSG(main.size() == before + 2, std::to_string(main.size()));
+            const auto help = std::find_if(main.begin(), main.end(), [](const Lua::ScriptMenuItem& item) { return item.Merge == "help"; });
+            CHECK(help != main.end() && help->Children.size() == 1 && help->Children[0].Caption == "Script help");
+            const auto unreal = std::find_if(main.begin(), main.end(), [](const Lua::ScriptMenuItem& item) { return item.Caption == "Unreal Engine"; });
+            CHECK(unreal != main.end() && unreal->Merge.empty() && unreal->Children.size() == 1);
+            CHECK(std::none_of(main.begin(), main.end(), [](const Lua::ScriptMenuItem& item) { return item.Caption == "File" || item.Caption == "Table"; }));
+            if (unreal != main.end() && unreal->Children.size() == 1)
+            {
+                CHECK_EQ(unreal->Children[0].Shortcut, std::string("Ctrl+Alt+U"));
+                lua.ClickMenuItem(unreal->Id);
+                lua.ClickMenuItem(unreal->Children[0].Id);
+            }
+            LuaCheck(engine, "main menu clicks", R"LUA(
+                if mainOpened ~= 1 then return "opened " .. mainOpened end
+                if mainClicks ~= 1 then return "clicks " .. mainClicks end
+                return "ok")LUA");
+
+            LuaCheck(engine, "list view", R"LUA(
+                local form = createForm(false)
+                form.Caption = "List view test"
+                listForm = form
+                local view = createListView(form)
+                view.Align, view.ViewStyle, view.RowSelect, view.Checkboxes = alClient, "vsReport", true, true
+                for _, column in ipairs({ { "Offset", 70 }, { "Name", 200 }, { "Type", 120 } }) do
+                    local c = view.Columns.add()
+                    c.Caption, c.Width = column[1], column[2]
+                end
+                view.Columns[2].Alignment = taRightJustify or 1
+                for i = 1, 3 do
+                    local item = view.Items.add()
+                    item.Caption = string.format("%04X", i * 8)
+                    item.SubItems.add("field" .. i)
+                    item.SubItems.add("int32")
+                end
+                listView = view
+                listEvents = {}
+                view.OnSelectItem = function(sender, item, selected) listEvents[#listEvents + 1] = item.Caption .. (selected and "+" or "-") end
+                view.OnColumnClick = function(sender, column) listEvents[#listEvents + 1] = "column " .. column.Caption end
+                view.OnItemChecked = function(sender, item) listEvents[#listEvents + 1] = "checked " .. item.Caption .. tostring(item.Checked) end
+                form.show()
+                return "ok")LUA");
+            const auto forms = lua.ShownForms();
+            const auto form = std::find_if(forms.begin(), forms.end(), [](const Lua::ScriptForm& item) { return item.Caption == "List view test"; });
+            CHECK(form != forms.end());
+            if (form != forms.end())
+            {
+                CHECK(form->Unsupported.empty());
+                CHECK_EQ(form->Controls.size(), 1u);
+                if (form->Controls.size() == 1)
+                {
+                    const Lua::ScriptControl& view = form->Controls[0];
+                    CHECK_EQ(view.Kind, std::string("listview"));
+                    CHECK(view.Unsupported.empty() && view.ViewStyle == 3 && view.CheckBoxes);
+                    CHECK(view.Columns.size() == 3 && view.Columns[1].Caption == "Name" && view.Columns[1].Width == 200 && view.Columns[2].Alignment == 1);
+                    CHECK(view.Rows.size() == 3 && view.Rows[1].Text == "0010" && view.Rows[1].Sub == std::vector<std::string>({ "field2", "int32" }));
+                    CHECK_EQ(view.ItemIndex, -1);
+                    if (view.Rows.size() == 3)
+                    {
+                        lua.SetFormValue(view.Id, "itemindex", "0");
+                        lua.FireFormEvent(view.Id, "itemselect", { -1 });
+                        lua.SetFormValue(view.Id, "itemindex", "2");
+                        lua.FireFormEvent(view.Id, "itemselect", { 0 });
+                        lua.FireFormEvent(view.Id, "columnclick", { 1 });
+                        lua.SetFormValue(view.Rows[1].Id, "checked", "1");
+                        lua.FireFormEvent(view.Id, "itemcheck", { view.Rows[1].Id });
+                    }
+                }
+            }
+            LuaCheck(engine, "list view events", R"LUA(
+                local text = table.concat(listEvents, ",")
+                if text ~= "0008+,0008-,0018+,column Name,checked 0010true" then return text end
+                if listView.Selected == nil or listView.Selected.Caption ~= "0018" or listView.ItemIndex ~= 2 then return "selected" end
+                listView.Items.clear()
+                listForm.destroy()
+                return "ok")LUA");
+
             engine.TakeRequests();
             LuaCheck(engine, "memory view bridge", R"LUA(
                 local view = getMemoryViewForm()
@@ -385,7 +479,7 @@ namespace Manifold::Tests
                 form.show()
                 scriptForm, scriptList = form, list
                 local odd = createForm(true)
-                createListView(odd)
+                createTrackBar(odd)
                 odd.Caption = "Odd"
                 oddForm = odd
                 return "ok")LUA");
@@ -395,7 +489,7 @@ namespace Manifold::Tests
             CHECK_EQ(forms.size(), static_cast<std::size_t>(2));
             const auto hits = std::find_if(forms.begin(), forms.end(), [](const Lua::ScriptForm& form) { return form.Caption == "Hits"; });
             const auto odd = std::find_if(forms.begin(), forms.end(), [](const Lua::ScriptForm& form) { return form.Caption == "Odd"; });
-            CHECK(odd != forms.end() && odd->Unsupported == "TListView");
+            CHECK(odd != forms.end() && odd->Unsupported == "TTrackBar");
             CHECK(hits != forms.end());
             if (hits == forms.end())
                 return;

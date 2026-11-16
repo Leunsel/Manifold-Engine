@@ -4,6 +4,7 @@
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
 #include "UI/Fonts.h"
+#include "UI/ScriptUi.h"
 #include "UI/Shortcuts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
@@ -219,6 +220,7 @@ namespace Manifold::UI
             NewScan();
         if (Pressed(Command::UndoScan) && scannerShown && !scanner.Busy() && scanner.CanUndo())
             scanner.Undo();
+        ScriptMenuShortcuts();
         if (m_release)
             return;
         if (Pressed(Command::TableLuaScript))
@@ -301,7 +303,14 @@ namespace Manifold::UI
         ImGui::PushStyleColor(ImGuiCol_Header, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.18f));
         ImGui::PushStyleColor(ImGuiCol_MenuBarBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         const float menusStart = ImGui::GetCursorPosX();
-        ImGui::BeginChild("##menus", ImVec2(Px(540.0f), menuHeight), ImGuiChildFlags_None, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
+        RefreshScriptMenu();
+        float scriptMenusWidth = 0.0f;
+        for (const Lua::ScriptMenuItem& root : m_scriptMenu)
+        {
+            if (!ScriptMenuMerged(root) && root.Caption != "-")
+                scriptMenusWidth += ImGui::CalcTextSize(root.Caption.c_str()).x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+        }
+        ImGui::BeginChild("##menus", ImVec2(Px(540.0f) + scriptMenusWidth, menuHeight), ImGuiChildFlags_None, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
         ImGui::PopStyleVar();
         float menusEnd = origin.x + menusStart;
 
@@ -309,6 +318,8 @@ namespace Manifold::UI
         Workspace& workspace = m_workspace;
         const bool hasProcess = engine.HasProcess();
         Table::AddressList& list = engine.Table();
+        int scriptOpened = 0;
+        int scriptClicked = 0;
         ImGui::BeginMenuBar();
         if (ImGui::BeginMenu("File"))
         {
@@ -332,6 +343,7 @@ namespace Manifold::UI
                 workspace.SaveTable(false);
             if (CommandItem(ICON_FA_SAVE "  Save as...", Command::SaveTableAs))
                 workspace.SaveTable(true);
+            ScriptMenuInto("file", scriptOpened, scriptClicked);
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_SIGN_OUT_ALT "  Exit"))
                 workspace.RequestQuit();
@@ -361,6 +373,7 @@ namespace Manifold::UI
             }
             if (CommandItem(ICON_FA_COG "  Settings", Command::OpenSettings))
                 workspace.OpenSettings();
+            ScriptMenuInto("edit", scriptOpened, scriptClicked);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Process"))
@@ -394,6 +407,7 @@ namespace Manifold::UI
             }
             if (CommandItem(ICON_FA_TOGGLE_OFF "  Deactivate all records", Command::DeactivateAll))
                 workspace.TurnOffEverything();
+            ScriptMenuInto("table", scriptOpened, scriptClicked);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View"))
@@ -434,6 +448,26 @@ namespace Manifold::UI
             SectionLabel("Code, memory and debugger tools are in the memory viewer's menus");
             ImGui::EndMenu();
         }
+        for (const Lua::ScriptMenuItem& root : m_scriptMenu)
+        {
+            if (ScriptMenuMerged(root) || root.Caption == "-")
+                continue;
+            const std::string label = root.Caption + "##mainscript" + std::to_string(root.Id);
+            if (root.Children.empty())
+            {
+                if (ImGui::MenuItem(label.c_str(), nullptr, root.Checked, root.Enabled))
+                    scriptClicked = root.Id;
+                continue;
+            }
+            if (ImGui::BeginMenu(label.c_str(), root.Enabled))
+            {
+                if (ImGui::IsWindowAppearing())
+                    scriptOpened = root.Id;
+                if (const int inner = DrawScriptMenuItems(root.Children))
+                    scriptClicked = inner;
+                ImGui::EndMenu();
+            }
+        }
         if (ImGui::BeginMenu("Help"))
         {
             if (CommandItem(ICON_FA_KEYBOARD "  Keyboard shortcuts", Command::OpenShortcuts))
@@ -445,11 +479,16 @@ namespace Manifold::UI
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_INFO_CIRCLE "  About"))
                 workspace.OpenAbout();
+            ScriptMenuInto("help", scriptOpened, scriptClicked);
             ImGui::EndMenu();
         }
         menusEnd = ImGui::GetItemRectMax().x;
         ImGui::EndMenuBar();
         ImGui::EndChild();
+        if (scriptOpened)
+            engine.Lua().ClickMenuItem(scriptOpened);
+        if (scriptClicked)
+            engine.Lua().ClickMenuItem(scriptClicked);
         ImGui::PopStyleColor(2);
         ImGui::PopStyleVar(2);
 
@@ -1052,6 +1091,67 @@ namespace Manifold::UI
         default:
             m_workspace.AddAddress(record.Address, scanner.Type());
             return;
+        }
+    }
+
+    void MainWindow::RefreshScriptMenu()
+    {
+        Lua::LuaEngine& lua = m_engine.Lua();
+        if (lua.MenuGeneration() == m_scriptMenuGeneration)
+            return;
+        m_scriptMenuGeneration = lua.MenuGeneration();
+        m_scriptMenu = lua.MenuItems(Lua::ScriptMenu::MainMenu);
+    }
+
+    bool MainWindow::ScriptMenuMerged(const Lua::ScriptMenuItem& item) const
+    {
+        return item.Merge == "file" || item.Merge == "edit" || item.Merge == "table" || item.Merge == "help";
+    }
+
+    void MainWindow::ScriptMenuInto(const char* merge, int& opened, int& clicked)
+    {
+        for (const Lua::ScriptMenuItem& root : m_scriptMenu)
+        {
+            if (root.Merge != merge || root.Children.empty())
+                continue;
+            if (ImGui::IsWindowAppearing())
+                opened = root.Id;
+            ImGui::Separator();
+            if (const int inner = DrawScriptMenuItems(root.Children))
+                clicked = inner;
+        }
+    }
+
+    void MainWindow::ScriptMenuShortcuts()
+    {
+        std::vector<ImGuiKeyChord> own;
+        for (const CommandInfo& info : AllCommands())
+        {
+            if (info.Scope != CommandScope::Global && info.Scope != CommandScope::Main && info.Scope != CommandScope::AddressList && info.Scope != CommandScope::ScanResults)
+                continue;
+            const Binding binding = CurrentBinding(info.Id);
+            if (binding.Chord)
+                own.push_back(binding.Chord);
+            if (binding.Alternate)
+                own.push_back(binding.Alternate);
+        }
+        std::vector<const Lua::ScriptMenuItem*> pending;
+        for (const Lua::ScriptMenuItem& root : m_scriptMenu)
+            pending.push_back(&root);
+        while (!pending.empty())
+        {
+            const Lua::ScriptMenuItem* item = pending.back();
+            pending.pop_back();
+            for (const Lua::ScriptMenuItem& child : item->Children)
+                pending.push_back(&child);
+            const ImGuiKeyChord chord = ScriptChord(item->Shortcut);
+            if (!chord || !item->Enabled || !item->Children.empty() || std::find(own.begin(), own.end(), chord) != own.end())
+                continue;
+            if (ChordPressed(chord, CommandScope::Main))
+            {
+                m_engine.Lua().ClickMenuItem(item->Id);
+                return;
+            }
         }
     }
 

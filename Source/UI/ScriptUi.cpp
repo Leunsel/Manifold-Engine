@@ -52,6 +52,58 @@ namespace Manifold::UI
             return 4;
         }
 
+        constexpr float kCardCorner = 6.0f;
+
+        float ScriptPixels(float points)
+        {
+            return std::max(6.0f, points * 96.0f / 72.0f);
+        }
+
+        int PushListColors(const Lua::ScriptControl& control, ImGuiCol background, bool card)
+        {
+            if (card)
+            {
+                ImGui::PushStyleColor(background, ManifoldTheme::Card);
+                ImGui::PushStyleColor(ImGuiCol_Border, ManifoldTheme::CardBorder);
+                return 2;
+            }
+            if (control.Color >= 0)
+            {
+                ImGui::PushStyleColor(background, BgrVec(control.Color));
+                return 1;
+            }
+            if (background != ImGuiCol_FrameBg)
+            {
+                ImGui::PushStyleColor(background, ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+                return 1;
+            }
+            return 0;
+        }
+
+        constexpr float kUiPoints = Fonts::kSize * 72.0f / 96.0f;
+
+        void StripColors(Lua::ScriptControl& control)
+        {
+            control.Font.Points = kUiPoints;
+            if (control.Kind != "paintbox" && control.Kind != "image")
+            {
+                control.Color = -1;
+                control.BevelColor = -1;
+            }
+            control.Font.Color = -1;
+            if (control.Kind != "memo" && control.Kind != "synedit")
+                control.Font.Mono = false;
+            for (Lua::ScriptControl& child : control.Children)
+                StripColors(child);
+        }
+
+        void DrawCard(ImVec2 min, ImVec2 max)
+        {
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            draw->AddRectFilled(min, max, ImGui::GetColorU32(ManifoldTheme::Card), Px(kCardCorner));
+            draw->AddRect(min, max, ImGui::GetColorU32(ManifoldTheme::CardBorder), Px(kCardCorner));
+        }
+
         bool Passive(const std::string& kind)
         {
             return kind == "panel" || kind == "label" || kind == "groupbox" || kind == "image" || kind == "paintbox" || kind == "radiogroup";
@@ -105,7 +157,7 @@ namespace Manifold::UI
             ImFont* font = mono ? Fonts::Mono() : bold ? Fonts::Bold() : (atlas && !atlas->Fonts.empty() ? atlas->Fonts[0] : nullptr);
             if (!font)
                 return false;
-            const float px = std::max(6.0f, points * 96.0f / 72.0f);
+            const float px = ScriptPixels(points);
             const ImVec2 size = font->CalcTextSizeA(px, FLT_MAX, 0.0f, text.data(), text.data() + text.size());
             width = size.x + (bold && mono ? 1.0f : 0.0f);
             height = std::max(size.y, px);
@@ -158,7 +210,7 @@ namespace Manifold::UI
     void ScriptForms::PushScriptFont(const Lua::ScriptFont& font)
     {
         ImFont* face = font.Mono ? Fonts::Mono() : font.Bold ? Fonts::Bold() : nullptr;
-        ImGui::PushFont(face, std::max(6.0f, font.Points * 96.0f / 72.0f));
+        ImGui::PushFont(face, ScriptPixels(font.Points));
     }
 
     void ScriptForms::Draw()
@@ -173,12 +225,26 @@ namespace Manifold::UI
             return;
         }
         const double now = ImGui::GetTime();
-        if (lua.FormsGeneration() != m_generation || now - m_snapshotAt > 0.5)
+        const bool appLook = m_engine.Options().ScriptWindowsAppLook;
+        if (lua.FormsGeneration() != m_generation || now - m_snapshotAt > 0.5 || appLook != m_appLook)
         {
             m_byId.clear();
             m_forms = lua.ShownForms();
             m_generation = lua.FormsGeneration();
             m_snapshotAt = now;
+            m_appLook = appLook;
+            if (appLook)
+            {
+                for (Lua::ScriptForm& form : m_forms)
+                {
+                    form.Color = -1;
+                    form.Font.Color = -1;
+                    form.Font.Mono = false;
+                    form.Font.Points = kUiPoints;
+                    for (Lua::ScriptControl& control : form.Controls)
+                        StripColors(control);
+                }
+            }
             for (const Lua::ScriptForm& form : m_forms)
                 IndexControls(form.Controls);
         }
@@ -275,8 +341,10 @@ namespace Manifold::UI
         ImGuiWindowFlags flags = ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
         if (form.Menu)
             flags |= ImGuiWindowFlags_MenuBar;
+        const bool raise = FocusRequested();
         const bool visible = ImGui::Begin(label.c_str(), &open, flags);
         ImGui::PopStyleColor();
+        RaisePlatformWindow(raise);
         ImVec2 client = state.Client;
         if (visible)
         {
@@ -290,6 +358,7 @@ namespace Manifold::UI
             m_hitPopup = 0;
             m_hitWheel = 0;
             m_surfaces.clear();
+            m_cards = form.Color < 0;
             ImGui::SetCursorScreenPos(origin);
             ImGui::SetNextItemAllowOverlap();
             ImGui::InvisibleButton("##background", ImVec2(std::max(1.0f, available.x), std::max(1.0f, available.y)), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
@@ -611,29 +680,50 @@ namespace Manifold::UI
         }
         else if (kind == "panel" || kind == "groupbox" || kind == "radiogroup")
         {
-            if (control.Color >= 0)
-                draw->AddRectFilled(min, max, Bgr(control.Color));
-            if (kind == "panel" && control.Bevel != 0)
+            const bool card = Carded(control) && control.BevelColor < 0 && control.Font.Color < 0;
+            if (card)
             {
-                const float width = std::max(1.0f, static_cast<float>(control.BevelWidth) * m_scale);
-                const ImU32 color = control.BevelColor >= 0 ? Bgr(control.BevelColor) : ImGui::GetColorU32(ManifoldTheme::Border);
-                draw->AddRect(ImVec2(min.x + width * 0.5f, min.y + width * 0.5f), ImVec2(max.x - width * 0.5f, max.y - width * 0.5f), color, 0.0f, 0, width);
+                if (kind != "panel" || control.Bevel != 0)
+                    DrawCard(min, max);
+                if (kind == "panel")
+                {
+                    DrawCaption(control.Text, control.Font, control.Enabled, 2, 1, false, min, max);
+                }
+                else if (!control.Text.empty())
+                {
+                    PushScriptFont(control.Font);
+                    draw->AddText(ImVec2(min.x + Px(10.0f), min.y + Px(2.0f)), ImGui::GetColorU32(ManifoldTheme::Muted), control.Text.c_str());
+                    ImGui::PopFont();
+                }
             }
-            if (kind == "panel")
-                DrawCaption(control.Text, control.Font, control.Enabled, 2, 1, false, min, max);
             else
             {
-                PushScriptFont(control.Font);
-                const float text = ImGui::GetTextLineHeight();
-                draw->AddRect(ImVec2(min.x, min.y + text * 0.5f), max, ImGui::GetColorU32(ManifoldTheme::Border), Px(3.0f));
-                if (!control.Text.empty())
+                if (control.Color >= 0)
+                    draw->AddRectFilled(min, max, Bgr(control.Color));
+                if (kind == "panel" && control.Bevel != 0)
                 {
-                    const ImVec2 at(min.x + Px(9.0f), min.y);
-                    const ImVec2 extent = ImGui::CalcTextSize(control.Text.c_str());
-                    draw->AddRectFilled(ImVec2(at.x - Px(3.0f), at.y), ImVec2(at.x + extent.x + Px(3.0f), at.y + text), ImGui::GetColorU32(ManifoldTheme::Page));
-                    draw->AddText(at, control.Font.Color >= 0 ? Bgr(control.Font.Color) : ImGui::GetColorU32(ImGuiCol_Text), control.Text.c_str());
+                    const float width = std::max(1.0f, static_cast<float>(control.BevelWidth) * m_scale);
+                    const ImU32 color = control.BevelColor >= 0 ? Bgr(control.BevelColor) : ImGui::GetColorU32(ManifoldTheme::Border);
+                    draw->AddRect(ImVec2(min.x + width * 0.5f, min.y + width * 0.5f), ImVec2(max.x - width * 0.5f, max.y - width * 0.5f), color, 0.0f, 0, width);
                 }
-                ImGui::PopFont();
+                if (kind == "panel")
+                {
+                    DrawCaption(control.Text, control.Font, control.Enabled, 2, 1, false, min, max);
+                }
+                else
+                {
+                    PushScriptFont(control.Font);
+                    const float text = ImGui::GetTextLineHeight();
+                    draw->AddRect(ImVec2(min.x, min.y + text * 0.5f), max, ImGui::GetColorU32(ManifoldTheme::Border), Px(3.0f));
+                    if (!control.Text.empty())
+                    {
+                        const ImVec2 at(min.x + Px(9.0f), min.y);
+                        const ImVec2 extent = ImGui::CalcTextSize(control.Text.c_str());
+                        draw->AddRectFilled(ImVec2(at.x - Px(3.0f), at.y), ImVec2(at.x + extent.x + Px(3.0f), at.y + text), ImGui::GetColorU32(ManifoldTheme::Page));
+                        draw->AddText(at, control.Font.Color >= 0 ? Bgr(control.Font.Color) : ImGui::GetColorU32(ImGuiCol_Text), control.Text.c_str());
+                    }
+                    ImGui::PopFont();
+                }
             }
             DrawControls(control.Children, min, inner, popup, wheel);
         }
@@ -696,7 +786,8 @@ namespace Manifold::UI
         }
         else if (kind == "listbox")
         {
-            DrawList(control, min, size);
+            const float inset = control.Frame && Carded(control) ? std::round(Px(2.0f)) : 0.0f;
+            DrawList(control, ImVec2(min.x + inset, min.y + inset), ImVec2(std::max(1.0f, size.x - 2.0f * inset), std::max(1.0f, size.y - 2.0f * inset)));
         }
         else if (kind == "combobox")
         {
@@ -720,9 +811,15 @@ namespace Manifold::UI
             }
             ImGui::PopFont();
         }
-        else if (kind == "treeview")
+        else if (kind == "treeview" || kind == "listview")
         {
-            DrawTree(control, min, size, popup);
+            const float inset = control.Frame && Carded(control) ? std::round(Px(2.0f)) : 0.0f;
+            const ImVec2 at(min.x + inset, min.y + inset);
+            const ImVec2 room(std::max(1.0f, size.x - 2.0f * inset), std::max(1.0f, size.y - 2.0f * inset));
+            if (kind == "treeview")
+                DrawTree(control, at, room, popup);
+            else
+                DrawListView(control, at, room, popup);
         }
         else if (kind == "splitter")
         {
@@ -800,30 +897,46 @@ namespace Manifold::UI
                 lua.FireFormEvent(control.Id, "select");
             };
         PushScriptFont(control.Font);
+        const bool card = Carded(control);
         int colors = PushScrollColors(control);
-        if (control.Color >= 0)
-        {
-            ImGui::PushStyleColor(ImGuiCol_FrameBg, BgrVec(control.Color));
-            ++colors;
-        }
+        colors += PushListColors(control, ImGuiCol_FrameBg, card);
         if (control.Font.Color >= 0)
         {
             ImGui::PushStyleColor(ImGuiCol_Text, BgrVec(control.Font.Color));
             ++colors;
         }
+        int vars = 0;
+        if (card)
+        {
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, control.Frame ? Px(kCardCorner) : 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, control.Frame ? 1.0f : 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, PxWhole(8.0f, 6.0f));
+            vars = 3;
+        }
         ImGui::SetCursorScreenPos(min);
-        if (ImGui::BeginListBox("##list", size))
+        const bool open = ImGui::BeginListBox("##list", size);
+        ImGui::PopStyleVar(vars);
+        if (open)
         {
             ImGuiListClipper clipper;
             clipper.Begin(count);
             if (scroll && index >= 0 && index < count)
                 clipper.IncludeItemByIndex(index);
+            const ImU32 stripe = ImGui::GetColorU32(ImGuiCol_TableRowBgAlt);
             while (clipper.Step())
             {
                 for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
                 {
                     ImGui::PushID(i);
                     const bool selected = i == index;
+                    if (card && i % 2 == 1)
+                    {
+                        const ImVec2 rowMin = ImGui::GetCursorScreenPos();
+                        const float rowHeight = ImGui::GetTextLineHeightWithSpacing();
+                        const float edge = ImGui::GetCurrentWindow()->WindowPadding.x;
+                        ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(rowMin.x - edge, rowMin.y - ImGui::GetStyle().ItemSpacing.y * 0.5f),
+                            ImVec2(rowMin.x + ImGui::GetContentRegionAvail().x + edge, rowMin.y + rowHeight - ImGui::GetStyle().ItemSpacing.y * 0.5f), stripe);
+                    }
                     if (ImGui::Selectable(control.Items[static_cast<std::size_t>(i)].c_str(), selected, ImGuiSelectableFlags_AllowDoubleClick))
                     {
                         pick(i);
@@ -919,16 +1032,26 @@ namespace Manifold::UI
         const bool scroll = state.Selected != control.Selected || state.Scroll;
         state.Selected = control.Selected;
         state.Scroll = false;
+        const bool card = Carded(control);
         int colors = PushScrollColors(control);
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, control.Color >= 0 ? BgrVec(control.Color) : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
-        ++colors;
+        colors += PushListColors(control, ImGuiCol_ChildBg, card);
         if (control.Font.Color >= 0)
         {
             ImGui::PushStyleColor(ImGuiCol_Text, BgrVec(control.Font.Color));
             ++colors;
         }
         ImGui::SetCursorScreenPos(min);
-        if (ImGui::BeginChild("##tree", size, control.Frame ? ImGuiChildFlags_Borders : ImGuiChildFlags_None))
+        ImGuiChildFlags childFlags = control.Frame ? ImGuiChildFlags_Borders : ImGuiChildFlags_None;
+        if (card)
+        {
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, control.Frame ? Px(kCardCorner) : 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, PxWhole(8.0f, 6.0f));
+            childFlags |= ImGuiChildFlags_AlwaysUseWindowPadding;
+        }
+        const bool open = ImGui::BeginChild("##tree", size, childFlags);
+        if (card)
+            ImGui::PopStyleVar(2);
+        if (open)
         {
             PushScriptFont(control.Font);
             std::vector<const Lua::ScriptNode*> visible;
@@ -975,6 +1098,205 @@ namespace Manifold::UI
         }
         ImGui::EndChild();
         ImGui::PopStyleColor(colors);
+    }
+
+    void ScriptForms::DrawListView(const Lua::ScriptControl& control, ImVec2 min, ImVec2 size, int popup)
+    {
+        Lua::LuaEngine& lua = m_engine.Lua();
+        ControlState& state = m_controls[control.Id];
+        const int count = static_cast<int>(control.Rows.size());
+        int index = control.ItemIndex;
+        const bool scroll = index != state.ItemIndex || state.Scroll;
+        state.Scroll = false;
+        const auto pick = [&](int next)
+            {
+                if (next == index || next < 0 || next >= count)
+                    return;
+                const int old = index;
+                index = next;
+                lua.SetFormValue(control.Id, "itemindex", std::to_string(next));
+                lua.FireFormEvent(control.Id, "itemselect", { old });
+            };
+        std::vector<int> columns;
+        for (int c = 0; c < static_cast<int>(control.Columns.size()); ++c)
+        {
+            if (control.Columns[static_cast<std::size_t>(c)].Visible)
+                columns.push_back(c);
+        }
+        const bool report = control.ViewStyle == 3 && !columns.empty() && columns.size() <= 64;
+
+        const bool card = Carded(control);
+        int colors = PushScrollColors(control);
+        colors += PushListColors(control, ImGuiCol_ChildBg, card);
+        if (control.Font.Color >= 0)
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, BgrVec(control.Font.Color));
+            ++colors;
+        }
+        ImGui::SetCursorScreenPos(min);
+        ImGuiChildFlags childFlags = control.Frame ? ImGuiChildFlags_Borders : ImGuiChildFlags_None;
+        if (card)
+        {
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, control.Frame ? Px(kCardCorner) : 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, PxWhole(8.0f, 6.0f));
+            childFlags |= ImGuiChildFlags_AlwaysUseWindowPadding;
+        }
+        const bool open = ImGui::BeginChild("##listview", size, childFlags, report ? ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse : ImGuiWindowFlags_None);
+        if (card)
+            ImGui::PopStyleVar(2);
+        if (open)
+        {
+            PushScriptFont(control.Font);
+            const auto row = [&](int i)
+                {
+                    const Lua::ScriptRow& entry = control.Rows[static_cast<std::size_t>(i)];
+                    ImGui::PushID(entry.Id ? entry.Id : i);
+                    const bool selected = i == index;
+                    const ImGuiSelectableFlags flags = ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap | (report ? ImGuiSelectableFlags_SpanAllColumns : 0);
+                    const float startX = ImGui::GetCursorPosX();
+                    const bool clicked = ImGui::Selectable("##row", selected, flags);
+                    const bool rightClicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+                    const bool doubleClicked = clicked && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+                    if (selected && scroll)
+                        ImGui::SetScrollHereY();
+                    ImGui::SameLine();
+                    ImGui::SetCursorPosX(startX);
+                    if (control.CheckBoxes)
+                    {
+                        bool checked = entry.Checked;
+                        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+                        if (ImGui::Checkbox("##check", &checked))
+                        {
+                            lua.SetFormValue(entry.Id, "checked", checked ? "1" : "0");
+                            lua.FireFormEvent(control.Id, "itemcheck", { entry.Id });
+                        }
+                        ImGui::PopStyleVar();
+                        ImGui::SameLine();
+                    }
+                    const auto cell = [&](const std::string& text, int alignment)
+                        {
+                            if (alignment != 0)
+                            {
+                                const float room = ImGui::GetContentRegionAvail().x;
+                                const float width = ImGui::CalcTextSize(text.c_str()).x;
+                                if (width < room)
+                                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (alignment == 1 ? room - width : (room - width) * 0.5f));
+                            }
+                            ImGui::TextUnformatted(text.c_str());
+                        };
+                    cell(entry.Text, report ? control.Columns[static_cast<std::size_t>(columns.front())].Alignment : 0);
+                    if (report)
+                    {
+                        for (std::size_t shown = 1; shown < columns.size(); ++shown)
+                        {
+                            const int source = columns[shown] - 1;
+                            ImGui::TableSetColumnIndex(static_cast<int>(shown));
+                            if (source >= 0 && source < static_cast<int>(entry.Sub.size()))
+                                cell(entry.Sub[static_cast<std::size_t>(source)], control.Columns[static_cast<std::size_t>(columns[shown])].Alignment);
+                        }
+                    }
+                    if (clicked)
+                    {
+                        pick(i);
+                        lua.FireFormEvent(control.Id, "click");
+                        if (doubleClicked)
+                            lua.FireFormEvent(control.Id, "dblclick");
+                    }
+                    if (rightClicked)
+                    {
+                        pick(i);
+                        RequestPopup(popup);
+                    }
+                    ImGui::PopID();
+                };
+
+            if (report)
+            {
+                ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_RowBg |
+                                        ImGuiTableFlags_SizingStretchProp;
+                if (control.GridLines)
+                    flags |= ImGuiTableFlags_BordersInnerH;
+                if (ImGui::BeginTable("##rows", static_cast<int>(columns.size()), flags, ImGui::GetContentRegionAvail()))
+                {
+                    ImGui::TableSetupScrollFreeze(0, control.Headers ? 1 : 0);
+                    for (std::size_t shown = 0; shown < columns.size(); ++shown)
+                    {
+                        const Lua::ScriptColumn& column = control.Columns[static_cast<std::size_t>(columns[shown])];
+                        const std::string label = column.Caption + "##column" + std::to_string(columns[shown]);
+                        ImGui::TableSetupColumn(label.c_str(), ImGuiTableColumnFlags_WidthStretch, std::max(1.0f, static_cast<float>(column.Width)));
+                    }
+                    if (control.Headers)
+                    {
+                        ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+                        for (std::size_t shown = 0; shown < columns.size(); ++shown)
+                        {
+                            ImGui::TableSetColumnIndex(static_cast<int>(shown));
+                            ImGui::TableHeader(ImGui::TableGetColumnName(static_cast<int>(shown)));
+                            if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+                                lua.FireFormEvent(control.Id, "columnclick", { columns[shown] });
+                        }
+                    }
+                    ImGuiListClipper clipper;
+                    clipper.Begin(count);
+                    if (scroll && index >= 0 && index < count)
+                        clipper.IncludeItemByIndex(index);
+                    while (clipper.Step())
+                    {
+                        for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+                        {
+                            ImGui::TableNextRow();
+                            ImGui::TableSetColumnIndex(0);
+                            row(i);
+                        }
+                    }
+                    ImGui::EndTable();
+                }
+            }
+            else
+            {
+                ImGuiListClipper clipper;
+                clipper.Begin(count);
+                if (scroll && index >= 0 && index < count)
+                    clipper.IncludeItemByIndex(index);
+                while (clipper.Step())
+                {
+                    for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+                        row(i);
+                }
+            }
+
+            if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && !ImGui::IsAnyItemHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+                RequestPopup(popup);
+            if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput && count > 0)
+            {
+                const int page = std::max(1, static_cast<int>(size.y / std::max(1.0f, ImGui::GetTextLineHeightWithSpacing())) - 2);
+                int next = index;
+                if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
+                    next = index < 0 ? 0 : std::min(index + 1, count - 1);
+                if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
+                    next = index < 0 ? 0 : std::max(index - 1, 0);
+                if (ImGui::IsKeyPressed(ImGuiKey_PageDown))
+                    next = std::min(std::max(index, 0) + page, count - 1);
+                if (ImGui::IsKeyPressed(ImGuiKey_PageUp))
+                    next = std::max(std::max(index, 0) - page, 0);
+                if (ImGui::IsKeyPressed(ImGuiKey_Home, false))
+                    next = 0;
+                if (ImGui::IsKeyPressed(ImGuiKey_End, false))
+                    next = count - 1;
+                if (next != index)
+                {
+                    pick(next);
+                    lua.FireFormEvent(control.Id, "click");
+                    state.Scroll = true;
+                }
+                if (index >= 0 && ImGui::IsKeyPressed(ImGuiKey_Enter, false))
+                    lua.FireFormEvent(control.Id, "dblclick");
+            }
+            ImGui::PopFont();
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleColor(colors);
+        state.ItemIndex = index;
     }
 
     void ScriptForms::DrawSplitter(const Lua::ScriptControl& control, ImVec2 min, ImVec2 size)

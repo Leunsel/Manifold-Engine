@@ -117,13 +117,15 @@ namespace Manifold::Lua
     enum class ScriptMenu
     {
         MemoryViewPopup,
-        MemoryViewMenu
+        MemoryViewMenu,
+        MainMenu
     };
 
     struct ScriptMenuItem
     {
         int Id = 0;
         std::string Caption;
+        std::string Merge;
         std::string Shortcut;
         bool Enabled = true;
         bool Checked = false;
@@ -190,6 +192,22 @@ namespace Manifold::Lua
         std::uint64_t Generation = 0;
     };
 
+    struct ScriptColumn
+    {
+        std::string Caption;
+        int Width = 50;
+        int Alignment = 0;
+        bool Visible = true;
+    };
+
+    struct ScriptRow
+    {
+        int Id = 0;
+        std::string Text;
+        std::vector<std::string> Sub;
+        bool Checked = false;
+    };
+
     struct ScriptControl
     {
         int Id = 0;
@@ -227,6 +245,12 @@ namespace Manifold::Lua
         std::vector<ScriptNode> Nodes;
         int Selected = 0;
         bool RightClickSelect = false;
+        int ViewStyle = 0;
+        bool GridLines = false;
+        bool CheckBoxes = false;
+        bool Headers = true;
+        std::vector<ScriptColumn> Columns;
+        std::vector<ScriptRow> Rows;
         int Canvas = 0;
         bool Mouse = false;
         bool Wheel = false;
