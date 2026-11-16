@@ -433,6 +433,8 @@ namespace Manifold::UI
                 workspace.OpenScript(Asm::CheatTableTemplate());
             if (CommandItem(ICON_FA_MOON "  Lua engine", Command::OpenLuaEngine))
                 workspace.OpenLua();
+            if (CommandItem(ICON_FA_DICE_D6 "  Mono / .NET dissector", Command::OpenMono))
+                workspace.OpenMono();
             if (CommandItem(ICON_FA_STREAM "  Log", Command::OpenLog))
                 workspace.OpenLog();
             ImGui::Separator();

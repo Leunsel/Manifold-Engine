@@ -168,6 +168,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\UI\LuaDialogs.cpp" />
     <ClCompile Include="..\Source\UI\MainWindow.cpp" />
     <ClCompile Include="..\Source\UI\MemoryViewer.cpp" />
+    <ClCompile Include="..\Source\UI\MonoWindow.cpp" />
     <ClCompile Include="..\Source\UI\PatchScanWindow.cpp" />
     <ClCompile Include="..\Source\UI\RecordEditor.cpp" />
     <ClCompile Include="..\Source\UI\ScriptUi.cpp" />

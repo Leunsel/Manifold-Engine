@@ -20,6 +20,7 @@ namespace Manifold::Target
         constexpr std::uint32_t kRequestOffset = 0x00;
         constexpr std::uint32_t kFuncOffset = 0x08;
         constexpr std::uint32_t kResultOffset = 0x30;
+        constexpr std::uint32_t kStoppedOffset = 0x38;
         constexpr std::uint32_t kControlSize = 0x40;
         constexpr std::uint32_t kCollectorOffset = 0x200;
         constexpr std::uint64_t kScratchSize = 0x10000;
@@ -87,6 +88,7 @@ namespace Manifold::Target
             e.Bytes({ 0x48, 0x89, 0x06 });             // mov [rsi], rax     request = 0
             e.Jump(0xE9, "loop");                      // jmp loop
             e.Label("stop");
+            e.Bytes({ 0x48, 0xC7, 0x46, 0x38, 0x01, 0x00, 0x00, 0x00 }); // mov qword [rsi+0x38], 1  (Stopped)
             e.Bytes({ 0x48, 0x89, 0xFC });             // mov rsp, rdi
             e.Bytes({ 0x5F });                         // pop rdi
             e.Bytes({ 0x5E });                         // pop rsi
@@ -160,17 +162,31 @@ namespace Manifold::Target
 
     void RemoteCall::Stop()
     {
+        bool stopped = false;
         if (m_process && m_thread && m_control)
         {
             const std::uint64_t stop = 2;
             m_process->Write(m_control + kRequestOffset, &stop, sizeof(stop));
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            // Wait until the worker has left its loop (it writes Stopped right
+            // before returning) so freeing its pages cannot pull memory out from
+            // under a running call.
+            for (int tries = 0; tries < 100 && !stopped; ++tries)
+            {
+                std::uint64_t value = 0;
+                if (!m_process->ReadExact(m_control + kStoppedOffset, &value, sizeof(value)))
+                    break;
+                stopped = value != 0;
+                if (!stopped)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
         }
-        if (m_process)
+        if (m_process && (stopped || !m_thread))
         {
+            // The code page is left allocated on purpose: the worker thread is
+            // still executing its last few instructions there. Leaking one small
+            // page is cheaper than risking an execute-after-free in the target.
             if (m_data) m_process->Free(m_data);
             if (m_control) m_process->Free(m_control);
-            if (m_code) m_process->Free(m_code);
         }
         m_code = m_control = m_data = m_collector = 0;
         m_dataUsed = 0;

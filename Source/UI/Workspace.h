@@ -67,6 +67,7 @@ namespace Manifold::UI
     class BreakpointWindow;
     class ThreadListWindow;
     class TraceWindow;
+    class MonoWindow;
 
     struct FileFilter
     {
@@ -115,6 +116,7 @@ namespace Manifold::UI
         void OpenBreakpointEditor(std::uint64_t address, Debug::BreakpointType type, int size);
         void OpenThreadList();
         void OpenTrace(std::uint64_t address);
+        void OpenMono();
         void AddAddress(std::uint64_t address, Scan::ValueType type, std::string description = {});
         void Confirm(std::string title, std::string text, std::function<void()> yes, std::string yesLabel = "Yes");
         void Report(const Status& status);
@@ -174,6 +176,7 @@ namespace Manifold::UI
         std::unique_ptr<ScriptForms> m_scriptForms;
         std::unique_ptr<BreakpointWindow> m_breakpoints;
         std::unique_ptr<ThreadListWindow> m_threadList;
+        std::unique_ptr<MonoWindow> m_mono;
         std::vector<std::unique_ptr<TraceWindow>> m_traces;
         int m_nextTrace = 1;
         MemoryViewer& ActiveMemoryViewer();

@@ -225,6 +225,9 @@
     <ClCompile Include="..\Source\UI\MemoryViewer.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\MonoWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\PatchScanWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>

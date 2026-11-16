@@ -1011,4 +1011,35 @@ namespace Manifold::UI
         int m_selected = -1;
         std::map<std::uint64_t, std::string> m_text;
     };
+
+    class MonoWindow : public ToolWindow
+    {
+    public:
+        explicit MonoWindow(Workspace& workspace);
+        void Draw() override;
+        bool Closed() const override { return !m_open; }
+        void Show() { m_open = true; m_bringToFront = true; }
+
+    private:
+        void RebuildFilter();
+        void SelectClass(int index);
+        void MethodsPane();
+        void FieldsPane();
+
+        Workspace& m_workspace;
+        Engine& m_engine;
+        bool m_open = true;
+        bool m_bringToFront = true;
+        std::uint64_t m_generation = ~0ull;
+        std::vector<Target::MonoClass> m_classes;
+        std::vector<int> m_filtered;
+        std::string m_filter;
+        std::string m_lastFilter = "\x01";
+        int m_selected = -1;
+        std::string m_selectedName;
+        std::vector<std::string> m_methods;
+        std::vector<Target::MonoField> m_fields;
+        std::map<std::string, std::uint64_t> m_resolved;
+        float m_listWidth = 0.0f;
+    };
 }

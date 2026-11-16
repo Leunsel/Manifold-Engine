@@ -53,6 +53,7 @@ namespace Manifold
         StructureDissect,
         AutoAssembler,
         LuaEngine,
+        Mono,
         Quit
     };
 

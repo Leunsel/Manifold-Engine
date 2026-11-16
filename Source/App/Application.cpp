@@ -120,6 +120,8 @@ namespace Manifold
                 m_workspace->OpenScript(Asm::CheatTableTemplate());
             else if (window == "lua")
                 m_workspace->OpenLua();
+            else if (window == "mono")
+                m_workspace->OpenMono();
             else if (window == "log")
                 m_workspace->OpenLog();
             else if (window == "settings")

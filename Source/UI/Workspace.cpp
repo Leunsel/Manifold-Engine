@@ -121,6 +121,8 @@ namespace Manifold::UI
             m_breakpoints->Draw();
         if (m_threadList && !m_threadList->Closed())
             m_threadList->Draw();
+        if (m_mono && !m_mono->Closed())
+            m_mono->Draw();
         for (std::size_t i = 0; i < m_traces.size(); ++i)
             m_traces[i]->Draw();
         if (m_shortcuts && !m_shortcuts->Closed())
@@ -150,6 +152,7 @@ namespace Manifold::UI
             case UiRequestKind::StructureDissect: OpenStructure(request.Address, request.Text); break;
             case UiRequestKind::AutoAssembler: OpenScript(request.Text); break;
             case UiRequestKind::LuaEngine: OpenLua(); break;
+            case UiRequestKind::Mono: OpenMono(); break;
             case UiRequestKind::Quit: RequestQuit(); break;
             }
         }
@@ -418,6 +421,13 @@ namespace Manifold::UI
         if (!m_threadList)
             m_threadList = std::make_unique<ThreadListWindow>(*this);
         m_threadList->Show();
+    }
+
+    void Workspace::OpenMono()
+    {
+        if (!m_mono)
+            m_mono = std::make_unique<MonoWindow>(*this);
+        m_mono->Show();
     }
 
     void Workspace::OpenTrace(std::uint64_t address)

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 
 namespace Manifold::Target
 {
@@ -21,6 +22,7 @@ namespace Manifold::Target
             "mono_image_get_name", "mono_image_get_table_info", "mono_table_info_get_rows", "mono_class_get",
             "mono_class_get_name", "mono_class_get_namespace", "mono_class_get_methods", "mono_method_get_name",
             "mono_compile_method", "mono_class_get_fields", "mono_field_get_name", "mono_field_get_offset",
+            "mono_field_get_type", "mono_type_get_type", "mono_field_get_flags", "mono_object_get_class",
         };
 
         const char* const kModuleCandidates[] = { "mono-2.0-bdwgc.dll", "mono.dll", "mono-2.0.dll", "monobdwgc-2.0.dll" };
@@ -134,6 +136,7 @@ namespace Manifold::Target
         m_functions.clear();
         m_classes.clear();
         m_classIndex.clear();
+        m_handleIndex.clear();
         m_present = false;
         m_domain = 0;
         m_module.clear();
@@ -148,6 +151,8 @@ namespace Manifold::Target
             return Status::Fail(ErrorCode::MonoNotFound);
         m_classes.clear();
         m_classIndex.clear();
+        m_handleIndex.clear();
+        m_handleMin = m_handleMax = 0;
         m_call.ResetScratch();
 
         // mono_assembly_foreach collects each assembly pointer into an array.
@@ -195,6 +200,11 @@ namespace Manifold::Target
                 m_classIndex.emplace(info.Name, classIndex);
                 if (!info.Namespace.empty())
                     m_classIndex.emplace(info.FullName(), classIndex);
+                m_handleIndex.emplace(info.Handle, classIndex);
+                if (m_handleMin == 0 || info.Handle < m_handleMin)
+                    m_handleMin = info.Handle;
+                if (info.Handle > m_handleMax)
+                    m_handleMax = info.Handle;
                 m_classes.push_back(std::move(info));
             }
             m_call.ResetScratch();
@@ -236,9 +246,14 @@ namespace Manifold::Target
             const auto field = CallFn("mono_class_get_fields", info.Handle, fieldIter);
             if (!field || !*field)
                 break;
+            const std::uint32_t flags = static_cast<std::uint32_t>(CallFn("mono_field_get_flags", *field).value_or(0) & 0xFFFFFFFFu);
+            if (flags & 0x10u)  // FIELD_ATTRIBUTE_STATIC: not part of an instance
+                continue;
             MonoField entry;
             entry.Name = CallString("mono_field_get_name", *field);
             entry.Offset = static_cast<int>(CallFn("mono_field_get_offset", *field).value_or(0) & 0xFFFFFFFFu);
+            if (const auto type = CallFn("mono_field_get_type", *field); type && *type)
+                entry.TypeCode = static_cast<int>(CallFn("mono_type_get_type", *type).value_or(0) & 0xFFFFFFFFu);
             info.Fields.push_back(std::move(entry));
         }
         m_call.ResetScratch();
@@ -277,6 +292,49 @@ namespace Manifold::Target
     {
         std::lock_guard lock(m_lock);
         return m_classes.size();
+    }
+
+    std::optional<std::string> MonoBridge::ClassNameAt(std::uint64_t address)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_present || !m_process || !address)
+            return std::nullopt;
+        // Read the object -> MonoVTable -> MonoClass chain ourselves with safe
+        // reads (both pointers are at offset 0) rather than calling
+        // mono_object_get_class in the target, which would dereference a wild
+        // pointer and could crash the game when the address is not an object.
+        const auto vtable = m_process->ReadPointer(address);
+        if (!vtable || !*vtable)
+            return std::nullopt;
+        const auto klass = m_process->ReadPointer(*vtable);
+        if (!klass || !*klass)
+            return std::nullopt;
+        const auto found = m_handleIndex.find(*klass);
+        if (found != m_handleIndex.end())
+            return m_classes[static_cast<std::size_t>(found->second)].FullName();
+        // Not in the enumerated set (a generic or inflated class). Trust the
+        // klass only when it sits in the same pointer span as the known classes
+        // and is readable, then ask the runtime for its name and remember it.
+        if (!m_handleMin || *klass < m_handleMin || *klass > m_handleMax || !m_process->IsReadable(*klass))
+            return std::nullopt;
+        const std::string name = CallString("mono_class_get_name", *klass);
+        if (name.empty() || name.size() > 256)
+            return std::nullopt;
+        const char first = name.front();
+        if (!(std::isalpha(static_cast<unsigned char>(first)) || first == '_' || first == '<'))
+            return std::nullopt;
+        MonoClass dynamic;
+        dynamic.Handle = *klass;
+        dynamic.Name = name;
+        dynamic.Namespace = CallString("mono_class_get_namespace", *klass);
+        const std::string full = dynamic.FullName();
+        const int index = static_cast<int>(m_classes.size());
+        m_classIndex.emplace(dynamic.Name, index);
+        if (!dynamic.Namespace.empty())
+            m_classIndex.emplace(full, index);
+        m_handleIndex.emplace(*klass, index);
+        m_classes.push_back(std::move(dynamic));
+        return full;
     }
 
     std::optional<std::uint64_t> MonoBridge::AddressOf(std::string_view name)

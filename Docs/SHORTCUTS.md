@@ -23,6 +23,7 @@ Works in every window, unless the focused window uses the same keys for somethin
 | `Ctrl+,` | Settings | `OpenSettings` | Manifold |
 | `F1` | Keyboard shortcuts | `OpenShortcuts` | Manifold |
 | `Ctrl+Shift+L` | Log | `OpenLog` | Manifold |
+| `Ctrl+Alt+M` | Mono / .NET dissector | `OpenMono` | Manifold |
 
 ## Main window
 

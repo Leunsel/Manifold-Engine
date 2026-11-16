@@ -56,8 +56,21 @@ namespace Manifold::Tests
         const std::vector<std::string> playerMethods = engine.Mono().MethodsOf("Player");
         CHECK(playerMethods.size() == 2 && playerMethods[0] == "TakeDamage" && playerMethods[1] == "Heal");
         const std::vector<Target::MonoField> playerFields = engine.Mono().FieldsOf("Player");
-        CHECK(playerFields.size() == 2 && playerFields[0].Name == "health" && playerFields[0].Offset == 0x10);
-        CHECK(playerFields.size() == 2 && playerFields[1].Name == "ammo" && playerFields[1].Offset == 0x1C);
+        CHECK_MSG(playerFields.size() == 2, "static field should be skipped, got " + std::to_string(playerFields.size()));
+        if (playerFields.size() == 2)
+        {
+            CHECK(playerFields[0].Name == "health" && playerFields[0].Offset == 0x10 && playerFields[0].TypeCode == 0x08);
+            CHECK(playerFields[1].Name == "ammo" && playerFields[1].Offset == 0x1C && playerFields[1].TypeCode == 0x08);
+        }
+        // Class-from-address, the Structure Dissect lookup.
+        const auto object = engine.Evaluate("TestTarget.g_fakePlayer");
+        CHECK(object.has_value());
+        if (object)
+        {
+            const auto className = engine.Mono().ClassNameAt(*object);
+            CHECK_MSG(className && *className == "Game.Player", className ? *className : "nil");
+            CHECK(!engine.Mono().ClassNameAt(*object + 0x100000).has_value());
+        }
         CHECK(std::any_of(classes.begin(), classes.end(), [](const Target::MonoClass& c) { return c.Name == "GameManager"; }));
         const std::vector<std::string> managerMethods = engine.Mono().MethodsOf("GameManager");
         CHECK(managerMethods.size() == 1 && managerMethods[0] == "Update");
@@ -104,12 +117,15 @@ namespace Manifold::Tests
     {
         std::string name = "CloverPit";
         std::uint32_t pid = 0;
+        std::uint64_t object = 0;
         for (const std::string& argument : arguments)
         {
             if (argument.rfind("--process=", 0) == 0)
                 name = argument.substr(10);
             else if (argument.rfind("--pid=", 0) == 0)
                 pid = static_cast<std::uint32_t>(ParseDecimal(argument.substr(6)).value_or(0));
+            else if (argument.rfind("--object=", 0) == 0)
+                object = ParseHex(argument.substr(9)).value_or(0);
         }
         std::setvbuf(stdout, nullptr, _IONBF, 0);
         Settings settings;
@@ -163,6 +179,20 @@ namespace Manifold::Tests
                 std::printf("field %s:%s offset 0x%X\n", c.FullName().c_str(), classFields.front().Name.c_str(),
                     engine.Mono().FieldOffset(c.FullName(), classFields.front().Name).value_or(-1));
             break;
+        }
+        if (object)
+        {
+            const auto vtable = engine.Process()->ReadPointer(object);
+            const auto klass = vtable ? engine.Process()->ReadPointer(*vtable) : std::nullopt;
+            const auto className = engine.Mono().ClassNameAt(object);
+            std::printf("object %s: vtable %s, klass %s -> class %s\n", Hex(object).c_str(),
+                vtable ? Hex(*vtable).c_str() : "unreadable", klass ? Hex(*klass).c_str() : "unreadable",
+                className ? className->c_str() : "not resolved");
+            if (className)
+            {
+                for (const Target::MonoField& field : engine.Mono().FieldsOf(*className))
+                    std::printf("  +0x%-4X %s\n", field.Offset, field.Name.c_str());
+            }
         }
         std::printf("done; detaching\n");
         return 0;

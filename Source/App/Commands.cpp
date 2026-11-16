@@ -34,6 +34,7 @@ namespace Manifold
             { OpenSettings, "OpenSettings", Scope::Global, "Settings", Ctrl | ImGuiKey_Comma, 0, Own },
             { OpenShortcuts, "OpenShortcuts", Scope::Global, "Keyboard shortcuts", ImGuiKey_F1, 0, Own },
             { OpenLog, "OpenLog", Scope::Global, "Log", Ctrl | Shift | ImGuiKey_L, 0, Own },
+            { OpenMono, "OpenMono", Scope::Global, "Mono / .NET dissector", Ctrl | Alt | ImGuiKey_M, 0, Own },
 
             { NewTable, "NewTable", Scope::Main, "New table", Ctrl | ImGuiKey_N, 0, Own },
             { OpenLastProcess, "OpenLastProcess", Scope::Main, "Open the process from last time", Ctrl | Shift | ImGuiKey_P, 0, Own },

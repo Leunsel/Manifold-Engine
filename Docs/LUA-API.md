@@ -172,6 +172,9 @@ For a Mono-based Unity game (one with `mono-2.0-bdwgc.dll` or `mono.dll`), the r
 | `mono_class_getMethods(class)` | A list of the method names of the class (`"Player"` or `"Game.Player"`), or `nil` when the class is unknown. |
 | `mono_class_getFieldOffset(class, field)` | The byte offset of a field, or `nil`. |
 | `mono_getAddress(class, method)` or `mono_getAddress("Class:Method")` | The JIT-compiled address of the method (compiling it if needed), or `nil`. The same names resolve in address expressions and the Auto Assembler, e.g. `Assembly-CSharp:Player:TakeDamage`. |
+| `mono_showDissector()` | Opens the Mono / .NET window (class list, methods with their address, field offsets), so an autorun script can offer it from its own menu the way the Unreal Engine script does. |
+
+When Mono is loaded, Structure Dissect uses it automatically: dissecting the address of a Mono object names the structure by its class and fills the fields (names, offsets and types) from the runtime, and following a pointer to another object looks that one up too. No script or manual structure is needed.
 
 ## Checking a table without the program window
 

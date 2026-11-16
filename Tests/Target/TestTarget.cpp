@@ -61,7 +61,7 @@ extern "C" __declspec(dllexport) __declspec(align(64)) volatile long long g_stre
 namespace
 {
     struct FakeMethod { const char* Name; void* Address; };
-    struct FakeField { const char* Name; int Offset; };
+    struct FakeField { const char* Name; int Offset; int TypeCode; int Flags; };
     struct FakeClass { const char* Namespace; const char* Name; const FakeMethod* Methods; int MethodCount; const FakeField* Fields; int FieldCount; };
     struct FakeImage { const char* Name; const FakeClass* Classes; int ClassCount; };
 
@@ -69,15 +69,22 @@ namespace
     long long FakeSub(long long a) { return a - 1; }
 
     const FakeMethod kPlayerMethods[] = { { "TakeDamage", reinterpret_cast<void*>(&FakeAdd) }, { "Heal", reinterpret_cast<void*>(&FakeSub) } };
-    const FakeField kPlayerFields[] = { { "health", 0x10 }, { "ammo", 0x1C } };
+    // health and ammo are instance I4 fields; s_instances is static and must be skipped.
+    const FakeField kPlayerFields[] = { { "health", 0x10, 0x08, 0 }, { "ammo", 0x1C, 0x08, 0 }, { "s_instances", 0x00, 0x12, 0x10 } };
     const FakeMethod kGameMethods[] = { { "Update", reinterpret_cast<void*>(&FakeAdd) } };
     const FakeClass kClasses[] = {
-        { "Game", "Player", kPlayerMethods, 2, kPlayerFields, 2 },
+        { "Game", "Player", kPlayerMethods, 2, kPlayerFields, 3 },
         { "Game", "GameManager", kGameMethods, 1, nullptr, 0 },
     };
     const FakeImage kImage = { "Assembly-CSharp", kClasses, 2 };
     int g_domain = 0xD0;
+
+    struct FakeVTable { const FakeClass* Klass; };
+    FakeVTable g_playerVT = { &kClasses[0] };
+    struct FakeObject { FakeVTable* VTable; int Health; int Ammo; };
 }
+
+extern "C" __declspec(dllexport) FakeObject g_fakePlayer = { &g_playerVT, 1000, 30 };
 
 extern "C"
 {
@@ -118,6 +125,10 @@ extern "C"
     }
     __declspec(dllexport) const char* mono_field_get_name(void* field) { return static_cast<FakeField*>(field)->Name; }
     __declspec(dllexport) int mono_field_get_offset(void* field) { return static_cast<FakeField*>(field)->Offset; }
+    __declspec(dllexport) void* mono_field_get_type(void* field) { return &static_cast<FakeField*>(field)->TypeCode; }
+    __declspec(dllexport) int mono_type_get_type(void* type) { return *static_cast<int*>(type); }
+    __declspec(dllexport) int mono_field_get_flags(void* field) { return static_cast<FakeField*>(field)->Flags; }
+    __declspec(dllexport) void* mono_object_get_class(void* object) { return const_cast<FakeClass*>(static_cast<FakeObject*>(object)->VTable->Klass); }
 }
 
 extern "C" __declspec(dllexport) __declspec(noinline) long long Touch(volatile long long* value)

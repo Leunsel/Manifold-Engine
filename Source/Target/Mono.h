@@ -26,6 +26,7 @@ namespace Manifold::Target
     {
         std::string Name;
         int Offset = 0;
+        int TypeCode = 0;  // MONO_TYPE_* of the field
     };
 
     struct MonoClass
@@ -64,6 +65,12 @@ namespace Manifold::Target
         std::vector<std::string> MethodsOf(std::string_view className);
         std::vector<MonoField> FieldsOf(std::string_view className);
 
+        // The class of the object at an address, or nullopt when it is not a
+        // known Mono object (checked against the enumerated classes, so a random
+        // address does not pass). This is what makes Structure Dissect name a
+        // Mono instance automatically.
+        std::optional<std::string> ClassNameAt(std::uint64_t address);
+
         // "Class:Method" or "Namespace.Class:Method"; compiles the method on the
         // first call and caches the address. Returns nullopt when not Mono or not found.
         std::optional<std::uint64_t> AddressOf(std::string_view name);
@@ -85,6 +92,9 @@ namespace Manifold::Target
         std::map<std::string, std::uint64_t> m_functions;
         std::vector<MonoClass> m_classes;
         std::map<std::string, int> m_classIndex;  // name and full name -> class
+        std::map<std::uint64_t, int> m_handleIndex;  // MonoClass* -> class
+        std::uint64_t m_handleMin = 0;  // span of known MonoClass* pointers, to
+        std::uint64_t m_handleMax = 0;  // vet a klass before asking the runtime
         std::uint64_t m_generation = 0;
     };
 }

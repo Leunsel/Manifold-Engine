@@ -3,6 +3,7 @@
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
+#include "Target/Mono.h"
 #include "UI/Fonts.h"
 #include "UI/Shortcuts.h"
 #include "UI/UiScale.h"
@@ -17,6 +18,32 @@
 
 namespace Manifold::UI
 {
+    namespace
+    {
+        // Maps a Mono field type (MONO_TYPE_*) to a dissect field. Reference
+        // types (string, class, array, object, pointer) become a pointer so they
+        // can be expanded; value types without a known size also show as pointer.
+        Scan::ValueType MonoFieldType(int code, int& size, Table::FieldDisplay& display)
+        {
+            using V = Scan::ValueType;
+            display = Table::FieldDisplay::Unsigned;
+            switch (code)
+            {
+            case 0x04: size = 1; display = Table::FieldDisplay::Signed; return V::Byte;      // I1
+            case 0x02: case 0x05: size = 1; return V::Byte;                                  // bool, U1
+            case 0x06: size = 2; display = Table::FieldDisplay::Signed; return V::TwoBytes;  // I2
+            case 0x03: case 0x07: size = 2; return V::TwoBytes;                              // char, U2
+            case 0x08: size = 4; display = Table::FieldDisplay::Signed; return V::FourBytes; // I4
+            case 0x09: size = 4; return V::FourBytes;                                        // U4
+            case 0x0a: case 0x18: size = 8; display = Table::FieldDisplay::Signed; return V::EightBytes;  // I8, I
+            case 0x0b: case 0x19: size = 8; return V::EightBytes;                            // U8, U
+            case 0x0c: size = 4; return V::Float;                                            // R4
+            case 0x0d: size = 8; return V::Double;                                           // R8
+            default: size = 8; return V::Pointer;                                            // string/class/array/object/ptr/valuetype
+            }
+        }
+    }
+
     namespace
     {
         std::string FieldKey(const std::string& path, int offset, int twin)
@@ -209,6 +236,15 @@ namespace Manifold::UI
         m_newName = address ? "Structure at " + Hex(address) : "Structure";
         if (!address || !m_engine.HasProcess())
             return;
+        if (m_engine.MonoPresent())
+        {
+            if (const auto name = m_engine.Mono().ClassNameAt(address))
+            {
+                m_newName = *name;
+                m_newStart = address;
+                return;
+            }
+        }
         if (const auto lookup = m_engine.Lua().LookupStructureName(address))
         {
             m_newName = lookup->Name;
@@ -220,11 +256,19 @@ namespace Manifold::UI
     {
         if (target && m_engine.HasProcess())
         {
-            if (const auto lookup = m_engine.Lua().LookupStructureName(target); lookup && lookup->Address == target)
+            std::optional<std::string> name;
+            if (m_engine.MonoPresent())
+                name = m_engine.Mono().ClassNameAt(target);
+            if (!name)
             {
-                if (Table::StructDefinition* existing = m_engine.Structures().Find(lookup->Name); existing && existing != &parent)
+                if (const auto lookup = m_engine.Lua().LookupStructureName(target); lookup && lookup->Address == target)
+                    name = lookup->Name;
+            }
+            if (name)
+            {
+                if (Table::StructDefinition* existing = m_engine.Structures().Find(*name); existing && existing != &parent)
                     return *existing;
-                return Guess(lookup->Name, target, 256);
+                return Guess(*name, target, 256);
             }
         }
         return Guess(parent.Name + "." + field.Name, target, 256);
@@ -282,6 +326,28 @@ namespace Manifold::UI
         Table::StructDefinition& definition = store.Add(unique);
         if (!m_engine.HasProcess())
             return definition;
+        if (address && m_engine.MonoPresent())
+        {
+            if (const auto className = m_engine.Mono().ClassNameAt(address))
+            {
+                const std::vector<Target::MonoField> fields = m_engine.Mono().FieldsOf(*className);
+                if (!fields.empty())
+                {
+                    definition.Fields.clear();
+                    for (const Target::MonoField& field : fields)
+                    {
+                        Table::StructField member;
+                        member.Offset = field.Offset;
+                        member.Name = field.Name;
+                        member.Type = MonoFieldType(field.TypeCode, member.Size, member.Display);
+                        definition.Fields.push_back(std::move(member));
+                    }
+                    definition.Sort();
+                    ++store.Generation;
+                    return definition;
+                }
+            }
+        }
         if (address && m_engine.Lua().DissectStructure(definition, address))
         {
             ++store.Generation;

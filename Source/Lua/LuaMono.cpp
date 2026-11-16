@@ -112,6 +112,12 @@ namespace Manifold::Lua
             return 1;
         }
 
+        int MonoShowDissector(lua_State* state)
+        {
+            Owner(state).Request(UiRequest{ UiRequestKind::Mono });
+            return 0;
+        }
+
         int MonoGetAddress(lua_State* state)
         {
             Engine& engine = Owner(state);
@@ -136,6 +142,7 @@ namespace Manifold::Lua
             { "mono_class_getMethods", &MonoClassGetMethods },
             { "mono_class_getFieldOffset", &MonoClassGetFieldOffset },
             { "mono_getAddress", &MonoGetAddress },
+            { "mono_showDissector", &MonoShowDissector },
         };
     }
 
