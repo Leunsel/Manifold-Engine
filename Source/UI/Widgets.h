@@ -54,6 +54,7 @@ namespace Manifold::UI
     bool InputText(const char* label, std::string& value, ImGuiInputTextFlags flags = 0, ImGuiInputTextCallback callback = nullptr, void* user = nullptr);
     bool InputTextWithHint(const char* label, const char* hint, std::string& value, ImGuiInputTextFlags flags = 0, ImGuiInputTextCallback callback = nullptr, void* user = nullptr);
     bool InputMultiline(const char* label, std::string& value, ImVec2 size, ImGuiInputTextFlags flags = 0, ImGuiInputTextCallback callback = nullptr, void* user = nullptr);
+    void SkipEditMenu();
 
     bool Splitter(const char* id, bool vertical, float thickness, float* first, float* second, float minFirst, float minSecond);
     void Spinner(float size, ImVec4 color);

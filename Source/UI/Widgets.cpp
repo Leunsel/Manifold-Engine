@@ -11,6 +11,8 @@
 #include <cctype>
 #include <cmath>
 #include <set>
+#include <string_view>
+#include <utility>
 
 #include <windows.h>
 
@@ -539,24 +541,182 @@ namespace Manifold::UI
         ImGui::PopStyleColor();
     }
 
+    namespace
+    {
+        struct PendingSelection
+        {
+            ImGuiID Id = 0;
+            int Start = 0;
+            int End = 0;
+            int Frame = 0;
+        };
+
+        PendingSelection& Pending()
+        {
+            static PendingSelection pending;
+            return pending;
+        }
+
+        void Refocus(ImGuiID id, int start, int end)
+        {
+            Pending() = { id, start, end, ImGui::GetFrameCount() };
+            ImGui::ActivateItemByID(id);
+        }
+
+        void ApplyPendingSelection(ImGuiID id)
+        {
+            PendingSelection& pending = Pending();
+            if (pending.Id != id)
+                return;
+            if (ImGui::GetFrameCount() - pending.Frame > 3)
+            {
+                pending = {};
+                return;
+            }
+            if (ImGui::GetActiveID() != id)
+                return;
+            if (ImGuiInputTextState* state = ImGui::GetInputTextState(id))
+            {
+                state->ReloadSelectionStart = pending.Start;
+                state->ReloadSelectionEnd = pending.End;
+                state->WantReloadUserBuf = true;
+            }
+            pending = {};
+        }
+
+        std::string FilterPasted(std::string_view text, ImGuiInputTextFlags flags, bool multiline)
+        {
+            std::string out;
+            out.reserve(text.size());
+            for (char c : text)
+            {
+                if (c == '\r' || (!multiline && (c == '\n' || (c == '\t' && !(flags & ImGuiInputTextFlags_AllowTabInput)))))
+                    continue;
+                if ((flags & ImGuiInputTextFlags_CharsNoBlank) && (c == ' ' || c == '\t'))
+                    continue;
+                if ((flags & ImGuiInputTextFlags_CharsHexadecimal) && !std::isxdigit(static_cast<unsigned char>(c)))
+                    continue;
+                if ((flags & (ImGuiInputTextFlags_CharsDecimal | ImGuiInputTextFlags_CharsScientific)) && !std::isdigit(static_cast<unsigned char>(c)) &&
+                    std::string_view((flags & ImGuiInputTextFlags_CharsScientific) ? ".+-*/eE" : ".+-*/").find(c) == std::string_view::npos)
+                    continue;
+                if (flags & ImGuiInputTextFlags_CharsUppercase)
+                    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                out += c;
+            }
+            return out;
+        }
+
+        bool& SkipNextEditMenu()
+        {
+            static bool skip = false;
+            return skip;
+        }
+
+        bool EditMenu(std::string& value, ImGuiInputTextFlags flags, bool multiline)
+        {
+            const bool skip = std::exchange(SkipNextEditMenu(), false);
+            const ImGuiID id = ImGui::GetItemID();
+            if (!id)
+                return false;
+            ApplyPendingSelection(id);
+            if (skip)
+                return false;
+            if (!ImGui::BeginPopupContextItem(nullptr))
+                return false;
+            static ImGuiID trustedField = 0;
+            if (ImGui::IsWindowAppearing())
+            {
+                const ImGuiContext& context = *ImGui::GetCurrentContext();
+                trustedField = (context.ActiveId == id || context.ActiveIdPreviousFrame == id) ? id : 0;
+            }
+            const bool readOnly = (flags & ImGuiInputTextFlags_ReadOnly) != 0;
+            const bool hidden = (flags & ImGuiInputTextFlags_Password) != 0;
+            const int length = static_cast<int>(value.size());
+            int start = length;
+            int end = length;
+            const ImGuiInputTextState* state = trustedField == id ? ImGui::GetInputTextState(id) : nullptr;
+            if (state)
+            {
+                start = std::clamp(std::min(state->GetSelectionStart(), state->GetSelectionEnd()), 0, length);
+                end = std::clamp(std::max(state->GetSelectionStart(), state->GetSelectionEnd()), 0, length);
+                if (start == end)
+                    start = end = std::clamp(state->GetCursorPos(), 0, length);
+            }
+            const bool selection = start != end;
+            const std::size_t from = static_cast<std::size_t>(start);
+            const std::size_t count = static_cast<std::size_t>(end - start);
+            const char* clipboard = ImGui::GetClipboardText();
+            bool changed = false;
+            if (ImGui::MenuItem(ICON_FA_CUT "  Cut", "Ctrl+X", false, selection && !readOnly && !hidden))
+            {
+                ImGui::SetClipboardText(value.substr(from, count).c_str());
+                value.erase(from, count);
+                changed = true;
+                Refocus(id, start, start);
+            }
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy", "Ctrl+C", false, !hidden && !value.empty()))
+            {
+                ImGui::SetClipboardText((selection ? value.substr(from, count) : value).c_str());
+                if (state)
+                    Refocus(id, start, end);
+            }
+            if (ImGui::MenuItem(ICON_FA_PASTE "  Paste", "Ctrl+V", false, !readOnly && clipboard && *clipboard))
+            {
+                const std::string text = FilterPasted(clipboard, flags, multiline);
+                value.replace(from, count, text);
+                changed = true;
+                const int caret = start + static_cast<int>(text.size());
+                Refocus(id, caret, caret);
+            }
+            if (ImGui::MenuItem(ICON_FA_BACKSPACE "  Delete", "Del", false, selection && !readOnly))
+            {
+                value.erase(from, count);
+                changed = true;
+                Refocus(id, start, start);
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Select all", "Ctrl+A", false, !value.empty()))
+                Refocus(id, 0, static_cast<int>(value.size()));
+            ImGui::EndPopup();
+            return changed && !(flags & ImGuiInputTextFlags_EnterReturnsTrue);
+        }
+    }
+
+    void SkipEditMenu()
+    {
+        SkipNextEditMenu() = true;
+    }
+
     bool InputText(const char* label, std::string& value, ImGuiInputTextFlags flags, ImGuiInputTextCallback callback, void* user)
     {
         ChainedCallback chain{ &value, callback, user };
-        return ImGui::InputText(label, value.data(), value.capacity() + 1, flags | ImGuiInputTextFlags_CallbackResize, &ChainCallback, &chain);
+        bool changed = ImGui::InputText(label, value.data(), value.capacity() + 1, flags | ImGuiInputTextFlags_CallbackResize, &ChainCallback, &chain);
+        changed |= EditMenu(value, flags, false);
+        return changed;
     }
 
     bool InputTextWithHint(const char* label, const char* hint, std::string& value, ImGuiInputTextFlags flags, ImGuiInputTextCallback callback, void* user)
     {
+        bool changed = false;
         if (!callback)
-            return ImGui::InputTextWithHint(label, hint, value.data(), value.capacity() + 1, flags | ImGuiInputTextFlags_CallbackResize, &ResizeCallback, &value);
-        ChainedCallback chain{ &value, callback, user };
-        return ImGui::InputTextWithHint(label, hint, value.data(), value.capacity() + 1, flags | ImGuiInputTextFlags_CallbackResize, &ChainCallback, &chain);
+        {
+            changed = ImGui::InputTextWithHint(label, hint, value.data(), value.capacity() + 1, flags | ImGuiInputTextFlags_CallbackResize, &ResizeCallback, &value);
+        }
+        else
+        {
+            ChainedCallback chain{ &value, callback, user };
+            changed = ImGui::InputTextWithHint(label, hint, value.data(), value.capacity() + 1, flags | ImGuiInputTextFlags_CallbackResize, &ChainCallback, &chain);
+        }
+        changed |= EditMenu(value, flags, false);
+        return changed;
     }
 
     bool InputMultiline(const char* label, std::string& value, ImVec2 size, ImGuiInputTextFlags flags, ImGuiInputTextCallback callback, void* user)
     {
         ChainedCallback chain{ &value, callback, user };
-        return ImGui::InputTextMultiline(label, value.data(), value.capacity() + 1, size, flags | ImGuiInputTextFlags_CallbackResize, &ChainCallback, &chain);
+        bool changed = ImGui::InputTextMultiline(label, value.data(), value.capacity() + 1, size, flags | ImGuiInputTextFlags_CallbackResize, &ChainCallback, &chain);
+        changed |= EditMenu(value, flags, true);
+        return changed;
     }
 
     bool Splitter(const char* id, bool vertical, float thickness, float* first, float* second, float minFirst, float minSecond)

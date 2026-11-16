@@ -384,8 +384,8 @@ namespace Manifold::UI
         if (!m_previewDialog.Begin())
             return;
         ImGui::TextUnformatted(m_previewCaption.c_str());
-        const float footer = ImGui::GetFrameHeightWithSpacing() + Px(6.0f);
-        ImGui::InputTextMultiline("##preview", m_preview.data(), m_preview.size() + 1, ImVec2(-FLT_MIN, -footer), ImGuiInputTextFlags_ReadOnly);
+        const float footer = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y + Px(6.0f);
+        InputMultiline("##preview", m_preview, ImVec2(-FLT_MIN, -footer), ImGuiInputTextFlags_ReadOnly);
         if (m_previewDialog.Buttons("Insert", true, false) == DialogChoice::Ok)
         {
             m_ready = m_preview;

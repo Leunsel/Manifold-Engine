@@ -861,6 +861,8 @@ namespace Manifold::UI
         ImGuiInputTextFlags flags = control.ReadOnly ? ImGuiInputTextFlags_ReadOnly : 0;
         if (control.Password)
             flags |= ImGuiInputTextFlags_Password;
+        if (control.Popup)
+            SkipEditMenu();
         bool changed = false;
         if (memo)
         {

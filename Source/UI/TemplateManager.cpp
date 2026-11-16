@@ -954,7 +954,7 @@ namespace Manifold::UI
             return;
         }
         ImGui::PushFont(Fonts::Mono());
-        ImGui::InputTextMultiline("##previewtext", m_previewText.data(), m_previewText.size() + 1, ImVec2(-FLT_MIN, -FLT_MIN), ImGuiInputTextFlags_ReadOnly);
+        InputMultiline("##previewtext", m_previewText, ImVec2(-FLT_MIN, -FLT_MIN), ImGuiInputTextFlags_ReadOnly);
         ImGui::PopFont();
     }
 
