@@ -765,7 +765,7 @@ namespace Manifold::UI
 
         list.Section("Sounds");
         if (list.Row("Play sounds", "A sound plays when a scan finishes, and when a search, a dissect or a patch scan that took longer than two seconds is done. "
-                "A scan that fails plays the error sound.", toggle))
+                "A scan that fails plays the error sound. Message boxes from scripts play the error sound for errors and warnings, the other sound for the rest.", toggle))
         {
             changed |= ToggleSwitch("##playsounds", &settings.PlaySounds);
             list.EndRow();
