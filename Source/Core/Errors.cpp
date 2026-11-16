@@ -219,6 +219,12 @@ namespace Manifold
             { ErrorCode::DebugTraceFailed, "The trace could not be started: {}.",
                 "A trace runs from a breakpoint and needs the debugger and a free breakpoint.",
                 "Attach the debugger, free a debug register or remove the breakpoint at that address first." },
+            { ErrorCode::MonoNotFound, "No Mono runtime was found in this process{}.",
+                "The .NET/Mono features need a Mono-based Unity game (one with mono-2.0-bdwgc.dll or mono.dll). IL2CPP games have no Mono runtime.",
+                "Open a Mono game, or check that the process is really Mono and not IL2CPP." },
+            { ErrorCode::MonoCallFailed, "A Mono call into the process failed: {}.",
+                "The in-process helper could not call a mono function, or the call did not return.",
+                "The process may have closed, or the Mono runtime may be an unexpected version." },
 
             { ErrorCode::WindowClassFailed, "The window class could not be registered.",
                 "Windows refused to register the program's window class.",

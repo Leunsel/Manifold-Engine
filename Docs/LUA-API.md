@@ -159,6 +159,20 @@ The memory viewer is `getMemoryViewForm()`:
 - The same goes for `MainForm.Menu`: root items that scripts add appear in the main window's menu bar before Help, and items added to Cheat Engine's own menus (`MainForm.miFile`, `miEdit`, `miTable`, `miHelp`) appear at the end of Manifold's File, Edit, Table and Help menus. Their shortcuts work in the main window unless one of its own commands uses the same keys.
 - The `Shortcut` of a menu bar item works while the memory viewer has the focus. When the key is one of the viewer's own keys that Cheat Engine 7.5 also uses, the viewer's command keeps it and the log says so; over the viewer's other keys (such as `Ctrl+Shift+F` for Find assembly code) the script's item wins, as it would in Cheat Engine.
 
+## Mono / .NET
+
+For a Mono-based Unity game (one with `mono-2.0-bdwgc.dll` or `mono.dll`), the runtime is read through a small in-process worker, without injecting a DLL. IL2CPP games have no Mono runtime and report as absent.
+
+| Function | Result |
+| --- | --- |
+| `mono_isPresent()` | `true` when a Mono runtime is attached. |
+| `mono_initialize()` | Finds and attaches the Mono runtime of the open process; `true` on success. The other functions call it on demand, so it rarely needs calling directly. |
+| `mono_refresh()` | Reads the classes again (after the game has loaded more assemblies). |
+| `mono_enumClasses()` | A list of `{ namespace, name, fullname, image }`, one per class. |
+| `mono_class_getMethods(class)` | A list of the method names of the class (`"Player"` or `"Game.Player"`), or `nil` when the class is unknown. |
+| `mono_class_getFieldOffset(class, field)` | The byte offset of a field, or `nil`. |
+| `mono_getAddress(class, method)` or `mono_getAddress("Class:Method")` | The JIT-compiled address of the method (compiling it if needed), or `nil`. The same names resolve in address expressions and the Auto Assembler, e.g. `Assembly-CSharp:Player:TakeDamage`. |
+
 ## Checking a table without the program window
 
 The test program runs a table the way the program does, without a window, and prints every Lua error:

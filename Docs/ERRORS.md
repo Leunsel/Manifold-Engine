@@ -81,6 +81,8 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-4010 | The expression could not be read: …. | Conditions and register changes are small Lua expressions: registers (RAX, EAX, AL, ZF), numbers (decimal, or hex as 0x10, $10 or with letters like 7FF6A000), memory reads (readInteger(RCX+0x10), [RSP+8]), comparisons and and/or/not. | Fix the part the message names. Put module addresses in quotes, as in RIP == "game.exe+1234". |
 | ME-4011 | The in-process debugger in this process is from another version of the program. | The process still has the debugger library of an earlier program version loaded, and the two cannot talk to each other. | Detach the in-process debugger in the old program, or restart the process. |
 | ME-4012 | The trace could not be started: …. | A trace runs from a breakpoint and needs the debugger and a free breakpoint. | Attach the debugger, free a debug register or remove the breakpoint at that address first. |
+| ME-4101 | No Mono runtime was found in this process…. | The .NET/Mono features need a Mono-based Unity game (one with mono-2.0-bdwgc.dll or mono.dll). IL2CPP games have no Mono runtime. | Open a Mono game, or check that the process is really Mono and not IL2CPP. |
+| ME-4102 | A Mono call into the process failed: …. | The in-process helper could not call a mono function, or the call did not return. | The process may have closed, or the Mono runtime may be an unexpected version. |
 
 ## The program
 

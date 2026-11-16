@@ -18,6 +18,7 @@
 namespace Manifold::Tests
 {
     void CheckBreakActions(Engine& engine, bool veh);
+    void CheckMono(Engine& engine);
 
     namespace
     {
@@ -670,6 +671,7 @@ namespace Manifold::Tests
             CHECK(process.ReadExact(damage, &afterBreakpoints, 1) && afterBreakpoints == original[0]);
             CheckBreakActions(engine, false);
             CHECK(process.ReadExact(damage, &afterBreakpoints, 1) && afterBreakpoints == original[0]);
+            CheckMono(engine);
 
             const std::uint64_t shared = engine.Evaluate("TestTarget.g_shared").value_or(0);
             const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);

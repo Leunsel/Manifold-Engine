@@ -130,6 +130,7 @@ namespace Manifold::Lua
     void LuaEngine::Register()
     {
         RegisterApi(*this, m_state);
+        RegisterMonoApi(*this, m_state);
         RegisterCompat(*this, m_state);
         RunCompatScripts(*this);
     }

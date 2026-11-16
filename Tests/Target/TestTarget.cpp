@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -52,6 +53,72 @@ extern "C" __declspec(dllexport) __declspec(noinline) void Work(volatile long* v
 }
 
 extern "C" __declspec(dllexport) __declspec(align(64)) volatile long long g_stress[4] = {};
+
+// A tiny stand-in for the Mono runtime: enough exported mono_* functions, with
+// the same shapes the real ones have, to exercise the remote-call worker and
+// the enumeration path headlessly. Not a real Mono ABI, just the accessors the
+// bridge calls. MONO_TABLE_TYPEDEF = 2, MONO_TOKEN_TYPE_DEF = 0x02000000.
+namespace
+{
+    struct FakeMethod { const char* Name; void* Address; };
+    struct FakeField { const char* Name; int Offset; };
+    struct FakeClass { const char* Namespace; const char* Name; const FakeMethod* Methods; int MethodCount; const FakeField* Fields; int FieldCount; };
+    struct FakeImage { const char* Name; const FakeClass* Classes; int ClassCount; };
+
+    long long FakeAdd(long long a) { return a + 1; }
+    long long FakeSub(long long a) { return a - 1; }
+
+    const FakeMethod kPlayerMethods[] = { { "TakeDamage", reinterpret_cast<void*>(&FakeAdd) }, { "Heal", reinterpret_cast<void*>(&FakeSub) } };
+    const FakeField kPlayerFields[] = { { "health", 0x10 }, { "ammo", 0x1C } };
+    const FakeMethod kGameMethods[] = { { "Update", reinterpret_cast<void*>(&FakeAdd) } };
+    const FakeClass kClasses[] = {
+        { "Game", "Player", kPlayerMethods, 2, kPlayerFields, 2 },
+        { "Game", "GameManager", kGameMethods, 1, nullptr, 0 },
+    };
+    const FakeImage kImage = { "Assembly-CSharp", kClasses, 2 };
+    int g_domain = 0xD0;
+}
+
+extern "C"
+{
+    __declspec(dllexport) void* mono_get_root_domain() { return &g_domain; }
+    __declspec(dllexport) void* mono_thread_attach(void* domain) { return domain; }
+    __declspec(dllexport) void mono_assembly_foreach(void (*fn)(void*, void*), void* user) { fn(const_cast<FakeImage*>(&kImage), user); }
+    __declspec(dllexport) void* mono_assembly_get_image(void* assembly) { return assembly; }
+    __declspec(dllexport) const char* mono_image_get_name(void* image) { return static_cast<FakeImage*>(image)->Name; }
+    __declspec(dllexport) void* mono_image_get_table_info(void* image, int) { return image; }
+    __declspec(dllexport) int mono_table_info_get_rows(void* tableinfo) { return static_cast<FakeImage*>(tableinfo)->ClassCount; }
+    __declspec(dllexport) void* mono_class_get(void* image, unsigned int token)
+    {
+        FakeImage* img = static_cast<FakeImage*>(image);
+        const unsigned int index = (token & 0x00FFFFFFu) - 1u;
+        return index < static_cast<unsigned int>(img->ClassCount) ? const_cast<FakeClass*>(&img->Classes[index]) : nullptr;
+    }
+    __declspec(dllexport) const char* mono_class_get_name(void* klass) { return static_cast<FakeClass*>(klass)->Name; }
+    __declspec(dllexport) const char* mono_class_get_namespace(void* klass) { return static_cast<FakeClass*>(klass)->Namespace; }
+    __declspec(dllexport) void* mono_class_get_methods(void* klass, void** iter)
+    {
+        FakeClass* c = static_cast<FakeClass*>(klass);
+        const std::size_t i = reinterpret_cast<std::size_t>(*iter);
+        if (i >= static_cast<std::size_t>(c->MethodCount))
+            return nullptr;
+        *iter = reinterpret_cast<void*>(i + 1);
+        return const_cast<FakeMethod*>(&c->Methods[i]);
+    }
+    __declspec(dllexport) const char* mono_method_get_name(void* method) { return static_cast<FakeMethod*>(method)->Name; }
+    __declspec(dllexport) void* mono_compile_method(void* method) { return static_cast<FakeMethod*>(method)->Address; }
+    __declspec(dllexport) void* mono_class_get_fields(void* klass, void** iter)
+    {
+        FakeClass* c = static_cast<FakeClass*>(klass);
+        const std::size_t i = reinterpret_cast<std::size_t>(*iter);
+        if (i >= static_cast<std::size_t>(c->FieldCount))
+            return nullptr;
+        *iter = reinterpret_cast<void*>(i + 1);
+        return const_cast<FakeField*>(&c->Fields[i]);
+    }
+    __declspec(dllexport) const char* mono_field_get_name(void* field) { return static_cast<FakeField*>(field)->Name; }
+    __declspec(dllexport) int mono_field_get_offset(void* field) { return static_cast<FakeField*>(field)->Offset; }
+}
 
 extern "C" __declspec(dllexport) __declspec(noinline) long long Touch(volatile long long* value)
 {

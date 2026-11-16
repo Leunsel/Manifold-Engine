@@ -14,6 +14,7 @@
 #include "Table/Structures.h"
 #include "Target/Process.h"
 #include "Target/PdbSymbols.h"
+#include "Target/Mono.h"
 #include "Target/Symbols.h"
 
 #include <cstdint>
@@ -106,6 +107,9 @@ namespace Manifold
         Debug::Tracer& Tracer() { return m_tracer; }
         bool Tracing() const { return m_tracer.Running(); }
         Status EnsureDebugger();
+        Status EnsureMono();
+        Target::MonoBridge& Mono() { return m_mono; }
+        bool MonoPresent() const { return m_mono.Present(); }
         Table::AddressList& Table() { return m_table; }
         Table::StructureStore& Structures() { return m_structures; }
         Lua::LuaEngine& Lua() { return *m_lua; }
@@ -198,6 +202,9 @@ namespace Manifold
         std::uint64_t m_processGeneration = 0;
         Target::Symbols m_symbols;
         Target::PdbSymbols m_pdbSymbols;
+        Target::MonoBridge m_mono;
+        bool m_pdbActive = false;
+        void RefreshSymbolProvider();
         std::unique_ptr<Disasm::Disassembler> m_disassembler64;
         std::unique_ptr<Disasm::Disassembler> m_disassembler32;
         Scan::Scanner m_scanner;

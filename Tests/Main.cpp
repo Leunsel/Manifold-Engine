@@ -23,6 +23,8 @@ namespace Manifold::Tests
     int RunTemplateTests();
     int RunWatchStress(const std::vector<std::string>& arguments);
     int RunDebuggerCheck(const std::vector<std::string>& arguments);
+    int RunMonoCheck(const std::vector<std::string>& arguments);
+    int RunMonoDump(const std::vector<std::string>& arguments);
 
     Counter& Totals()
     {
@@ -44,6 +46,10 @@ int main(int argc, char** argv)
             return Manifold::Tests::RunWatchStress(arguments);
         if (argument == "--debugger-check")
             return Manifold::Tests::RunDebuggerCheck(arguments);
+        if (argument == "--mono-check")
+            return Manifold::Tests::RunMonoCheck(arguments);
+        if (argument == "--mono-dump")
+            return Manifold::Tests::RunMonoDump(arguments);
     }
     for (int i = 1; i < argc; ++i)
     {

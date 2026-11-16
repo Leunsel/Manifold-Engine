@@ -135,6 +135,9 @@
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaMono.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -162,6 +165,9 @@
     <ClCompile Include="..\Source\Table\Structures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\Mono.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\PatchScan.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -169,6 +175,9 @@
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Process.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\RemoteCall.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Symbols.cpp">
@@ -363,6 +372,9 @@
     <ClInclude Include="..\Source\Table\Structures.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Target\Mono.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Target\PatchScan.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
@@ -370,6 +382,9 @@
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\Process.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\RemoteCall.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\Symbols.h">

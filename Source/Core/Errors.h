@@ -66,6 +66,8 @@
     X(DebugBadExpression, 4010) \
     X(DebugAgentVersion, 4011) \
     X(DebugTraceFailed, 4012) \
+    X(MonoNotFound, 4101) \
+    X(MonoCallFailed, 4102) \
     X(WindowClassFailed, 5001) \
     X(WindowFailed, 5002) \
     X(DeviceFailed, 5003) \

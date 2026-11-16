@@ -53,6 +53,7 @@ namespace Manifold
         CancelActivations();
         WaitForActivation();
         m_tracer.Stop();
+        m_mono.Stop();
         m_debugger.Detach();
         m_scanner.Reset();
         m_lua.reset();
@@ -118,6 +119,7 @@ namespace Manifold
         CancelActivations();
         WaitForActivation();
         m_tracer.Stop();
+        m_mono.Stop();
         m_debugger.Detach();
         m_scanner.Reset();
         m_table.ForEach([](Table::MemoryRecord& record)
@@ -131,6 +133,8 @@ namespace Manifold
                 record.ValueText = "??";
             });
         LOG_INFO("Process", "Closed " + m_process->Name());
+        m_mono.Stop();
+        m_pdbActive = false;
         m_symbols.SetSymbolProvider({}, {});
         m_pdbSymbols.End();
         m_symbols.Detach();
@@ -149,9 +153,8 @@ namespace Manifold
             list.assign(modules->begin(), modules->end());
         if (!m_pdbSymbols.Begin(m_process->Handle(), std::move(list), windowsSymbols))
             return;
-        m_symbols.SetSymbolProvider(
-            [this](std::string_view name) { return m_pdbSymbols.Resolve(name); },
-            [this](std::uint64_t address) { return m_pdbSymbols.Describe(address); });
+        m_pdbActive = true;
+        RefreshSymbolProvider();
         LOG_INFO("Symbols", windowsSymbols ? "Loading symbols (incl. Windows symbol server)" : "Loading symbols");
     }
 
@@ -165,6 +168,45 @@ namespace Manifold
         m_debugger.SetPreferHardware(m_settings.UseHardwareExecuteBreakpoints);
         m_debugger.SetBackend(m_settings.UseInProcessDebugger ? Debug::Backend::Veh : Debug::Backend::Windows);
         return m_debugger.Attach(m_process);
+    }
+
+    Status Engine::EnsureMono()
+    {
+        if (m_mono.Present())
+            return Status::Success();
+        if (!m_process)
+            return Status::Fail(ErrorCode::NoProcess);
+        const Status started = m_mono.Start(m_process);
+        if (started)
+            RefreshSymbolProvider();
+        return started;
+    }
+
+    void Engine::RefreshSymbolProvider()
+    {
+        const bool pdb = m_pdbActive;
+        if (!pdb && !m_mono.Present())
+        {
+            m_symbols.SetSymbolProvider({}, {});
+            return;
+        }
+        m_symbols.SetSymbolProvider(
+            [this, pdb](std::string_view name) -> std::optional<std::uint64_t>
+            {
+                if (pdb)
+                    if (const auto address = m_pdbSymbols.Resolve(name))
+                        return address;
+                if (m_mono.Present())
+                    if (const auto address = m_mono.AddressOf(name))
+                        return address;
+                return std::nullopt;
+            },
+            [this, pdb](std::uint64_t address) -> std::optional<std::string>
+            {
+                if (pdb)
+                    return m_pdbSymbols.Describe(address);
+                return std::nullopt;
+            });
     }
 
     std::optional<std::uint64_t> Engine::Evaluate(std::string_view expression, Status* error) const

@@ -21,6 +21,7 @@ namespace Manifold::Lua
     LuaEngine& EngineOf(lua_State* state);
 
     void RegisterApi(LuaEngine& engine, lua_State* state);
+    void RegisterMonoApi(LuaEngine& engine, lua_State* state);
     void RegisterObjects(LuaEngine& engine, lua_State* state);
     void RegisterCompat(LuaEngine& engine, lua_State* state);
     void RunCompatScripts(LuaEngine& engine);
