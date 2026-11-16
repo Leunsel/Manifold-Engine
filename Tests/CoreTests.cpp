@@ -633,28 +633,34 @@ data:
             std::printf("  SKIP Assets/Sounds/Success.mp3 not found\n");
             return;
         }
-        std::ifstream input(file, std::ios::binary);
-        const std::vector<std::uint8_t> encoded((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-        const std::vector<std::uint8_t> wave = Sounds::DecodeToWave(encoded);
-        CHECK_MSG(wave.size() > 44, "the MP3 did not decode");
-        if (wave.size() <= 44)
-            return;
-        CHECK(std::memcmp(wave.data(), "RIFF", 4) == 0 && std::memcmp(wave.data() + 8, "WAVE", 4) == 0 && std::memcmp(wave.data() + 12, "fmt ", 4) == 0);
-        std::uint16_t tag = 0;
-        std::uint16_t channels = 0;
-        std::uint32_t rate = 0;
-        std::uint32_t perSecond = 0;
-        std::uint32_t data = 0;
-        std::memcpy(&tag, wave.data() + 20, 2);
-        std::memcpy(&channels, wave.data() + 22, 2);
-        std::memcpy(&rate, wave.data() + 24, 4);
-        std::memcpy(&perSecond, wave.data() + 28, 4);
-        std::memcpy(&data, wave.data() + 40, 4);
-        CHECK_EQ(tag, static_cast<std::uint16_t>(1));
-        CHECK(channels >= 1 && channels <= 2 && rate >= 8000 && rate <= 96000);
-        CHECK_EQ(static_cast<std::size_t>(data) + 44, wave.size());
-        const double seconds = perSecond ? static_cast<double>(data) / perSecond : 0.0;
-        CHECK_MSG(seconds > 0.1 && seconds < 10.0, "decoded length " + std::to_string(seconds) + " s");
+        const auto read = [](const std::filesystem::path& path)
+            {
+                std::ifstream input(path, std::ios::binary);
+                return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+            };
+        const auto checkWave = [](const std::vector<std::uint8_t>& wave, const std::string& name)
+            {
+                CHECK_MSG(wave.size() > 44, name + " is not a sound");
+                if (wave.size() <= 44)
+                    return;
+                CHECK_MSG(std::memcmp(wave.data(), "RIFF", 4) == 0 && std::memcmp(wave.data() + 8, "WAVE", 4) == 0 && std::memcmp(wave.data() + 12, "fmt ", 4) == 0, name);
+                std::uint16_t tag = 0;
+                std::uint16_t channels = 0;
+                std::uint32_t rate = 0;
+                std::uint32_t perSecond = 0;
+                std::uint32_t data = 0;
+                std::memcpy(&tag, wave.data() + 20, 2);
+                std::memcpy(&channels, wave.data() + 22, 2);
+                std::memcpy(&rate, wave.data() + 24, 4);
+                std::memcpy(&perSecond, wave.data() + 28, 4);
+                std::memcpy(&data, wave.data() + 40, 4);
+                CHECK_MSG(tag == 1 && channels >= 1 && channels <= 2 && rate >= 8000 && rate <= 96000, name);
+                CHECK_MSG(static_cast<std::size_t>(data) + 44 == wave.size(), name);
+                const double seconds = perSecond ? static_cast<double>(data) / perSecond : 0.0;
+                CHECK_MSG(seconds > 0.1 && seconds < 10.0, name + " lasts " + std::to_string(seconds) + " s");
+            };
+        checkWave(Sounds::DecodeToWave(read(file)), "Success.mp3 decoded");
+        checkWave(read(file.parent_path() / "Error.wav"), "Error.wav");
         CHECK(Sounds::DecodeToWave({}).empty());
         CHECK(Sounds::DecodeToWave({ 1, 2, 3, 4, 5 }).empty());
     }

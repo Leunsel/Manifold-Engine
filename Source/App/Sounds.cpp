@@ -61,10 +61,8 @@ namespace Manifold::Sounds
 
         std::vector<std::uint8_t> Embedded(Cue cue)
         {
-            if (cue != Cue::Success)
-                return {};
             HMODULE module = ::GetModuleHandleW(nullptr);
-            HRSRC resource = ::FindResourceW(module, MAKEINTRESOURCEW(IDR_SOUND_SUCCESS), RT_RCDATA);
+            HRSRC resource = ::FindResourceW(module, MAKEINTRESOURCEW(cue == Cue::Success ? IDR_SOUND_SUCCESS : IDR_SOUND_ERROR), RT_RCDATA);
             if (!resource)
                 return {};
             HGLOBAL handle = ::LoadResource(module, resource);
@@ -97,6 +95,8 @@ namespace Manifold::Sounds
                 LOG_WARN("Sounds", "Could not read " + path.string() + "; the built-in sound is used instead");
             }
             const std::vector<std::uint8_t> embedded = Embedded(cue);
+            if (IsWave(embedded))
+                return embedded;
             std::vector<std::uint8_t> wave = DecodeToWave(embedded);
             if (!embedded.empty() && wave.empty())
                 LOG_WARN("Sounds", "The built-in sound could not be decoded. Windows needs its media features (Media Foundation) for MP3; a Success.wav in the sounds folder works without them.");
@@ -173,15 +173,6 @@ namespace Manifold::Sounds
     const char* FileName(Cue cue)
     {
         return cue == Cue::Success ? "Success" : "Error";
-    }
-
-    bool Available(Cue cue)
-    {
-        if (cue == Cue::Success)
-            return true;
-        std::error_code error;
-        const std::filesystem::path folder = Paths::SoundsFolder();
-        return std::filesystem::exists(folder / "Error.wav", error) || std::filesystem::exists(folder / "Error.mp3", error);
     }
 
     void Play(Cue cue)

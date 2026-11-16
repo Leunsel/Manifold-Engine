@@ -17,7 +17,6 @@ namespace Manifold::Sounds
     void Play(Cue cue);
     void Preview(Cue cue);
     void Stop();
-    bool Available(Cue cue);
     const char* FileName(Cue cue);
 
     std::vector<std::uint8_t> DecodeToWave(const std::vector<std::uint8_t>& encoded);

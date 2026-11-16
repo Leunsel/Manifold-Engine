@@ -765,7 +765,7 @@ namespace Manifold::UI
 
         list.Section("Sounds");
         if (list.Row("Play sounds", "A sound plays when a scan finishes, and when a search, a dissect or a patch scan that took longer than two seconds is done. "
-                "A scan that fails plays Error.wav or Error.mp3 from the sounds folder, if there is one.", toggle))
+                "A scan that fails plays the error sound.", toggle))
         {
             changed |= ToggleSwitch("##playsounds", &settings.PlaySounds);
             list.EndRow();
@@ -776,17 +776,12 @@ namespace Manifold::UI
             if (ImGui::Button(ICON_FA_PLAY "  Success", ImVec2(tryWidth, 0.0f)))
                 Sounds::Preview(Sounds::Cue::Success);
             ImGui::SameLine();
-            const bool error = Sounds::Available(Sounds::Cue::Error);
-            ImGui::BeginDisabled(!error);
             if (ImGui::Button(ICON_FA_PLAY "  Error", ImVec2(tryWidth, 0.0f)))
                 Sounds::Preview(Sounds::Cue::Error);
-            ImGui::EndDisabled();
-            if (!error)
-                ItemTooltip("There is no error sound yet. Put Error.wav or Error.mp3 into the sounds folder.");
             list.EndRow();
         }
         const float soundsFolder = std::round(Px(130.0f));
-        if (list.Row("Sounds folder", "Success.wav or Success.mp3 here replaces the built-in sound; Error.wav or Error.mp3 adds one for failed scans. " + WideToUtf8(Paths::SoundsFolder().wstring()), soundsFolder))
+        if (list.Row("Sounds folder", "Success.wav or .mp3 and Error.wav or .mp3 here replace the built-in sounds. " + WideToUtf8(Paths::SoundsFolder().wstring()), soundsFolder))
         {
             if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open folder", ImVec2(soundsFolder, 0.0f)))
             {
