@@ -1013,6 +1013,12 @@ namespace Manifold::UI
                     AsmOperands(drawList, font, fontSize, ImVec2(operandX, textY), operandClip, line.Operands);
             }
 
+            std::optional<std::string> methodHeader;
+            if (m_engine.MonoPresent())
+                methodHeader = m_engine.Mono().MethodStartNameAt(line.Address);
+            if (methodHeader && i != 0)
+                drawList->AddLine(ImVec2(origin.x, y), ImVec2(origin.x + width, y), ImGui::GetColorU32(ManifoldTheme::RowSeparator));
+
             std::string comment;
             ImU32 commentColor = ImGui::GetColorU32(ManifoldTheme::Muted);
             const auto note = m_engine.Table().DisasmNotes.find(m_engine.Symbols().ModuleOffset(line.Address));
@@ -1021,6 +1027,11 @@ namespace Manifold::UI
             {
                 comment = note->second.Comment;
                 commentColor = ImGui::GetColorU32(ManifoldTheme::CodeComment);
+            }
+            else if (methodHeader)
+            {
+                comment = *methodHeader;
+                commentColor = ImGui::GetColorU32(ManifoldTheme::Accent);
             }
             else if (const auto name = m_engine.Symbols().ExactName(line.Address))
                 comment = *name + ":";

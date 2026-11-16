@@ -94,6 +94,11 @@ namespace Manifold::Target
         // otherwise show as a raw address (JIT code lives outside every module).
         std::optional<std::string> MethodNameAt(std::uint64_t address);
 
+        // The method name only when the address is exactly its first instruction,
+        // so the disassembler can draw a header at each method start without
+        // labelling every line inside it.
+        std::optional<std::string> MethodStartNameAt(std::uint64_t address);
+
         // "Class:Method" or "Namespace.Class:Method"; compiles the method on the
         // first call and caches the address. Returns nullopt when not Mono or not found.
         std::optional<std::uint64_t> AddressOf(std::string_view name);

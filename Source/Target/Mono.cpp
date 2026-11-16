@@ -449,6 +449,19 @@ namespace Manifold::Target
         return full;
     }
 
+    std::optional<std::string> MonoBridge::MethodStartNameAt(std::uint64_t address)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_present || !m_process || !address)
+            return std::nullopt;
+        MethodNameAt(address);  // resolve and cache the containing method's range
+        auto it = std::lower_bound(m_jitRanges.begin(), m_jitRanges.end(), address,
+            [](const JitRange& range, std::uint64_t value) { return range.Start < value; });
+        if (it != m_jitRanges.end() && it->Start == address)
+            return it->Name;
+        return std::nullopt;
+    }
+
     std::optional<std::uint64_t> MonoBridge::AddressOf(std::string_view name)
     {
         std::lock_guard lock(m_lock);
