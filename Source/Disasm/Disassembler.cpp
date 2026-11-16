@@ -366,8 +366,23 @@ namespace Manifold::Disasm
                 replace(*result.Memory.Absolute);
             for (ZyanU8 i = 0; i < instruction.operand_count_visible; ++i)
             {
-                if (operands[i].type == ZYDIS_OPERAND_TYPE_IMMEDIATE && operands[i].imm.is_relative && result.Target)
-                    replace(*result.Target);
+                if (operands[i].type != ZYDIS_OPERAND_TYPE_IMMEDIATE)
+                    continue;
+                if (operands[i].imm.is_relative)
+                {
+                    if (result.Target)
+                        replace(*result.Target);
+                    continue;
+                }
+                // An absolute immediate that lands on a user-space address may be
+                // a function pointer loaded before an indirect call, as Mono does
+                // with "mov r11, <method>; call r11". Replace it when it resolves
+                // to a known symbol; the value gate skips small constants and the
+                // sign-extended negatives of ordinary arithmetic, and replace()
+                // itself only substitutes when a name is actually found.
+                const std::uint64_t value = operands[i].imm.value.u;
+                if (value >= 0x10000 && value < 0x0000800000000000ull)
+                    replace(value);
             }
         }
         return result;

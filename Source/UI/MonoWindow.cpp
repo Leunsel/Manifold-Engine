@@ -149,53 +149,54 @@ namespace Manifold::UI
             ImGui::TableSetupColumn("Method", ImGuiTableColumnFlags_WidthStretch, 2.0f);
             ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 1.4f);
             ImGui::TableHeadersRow();
-            for (const std::string& method : m_methods)
+            // Resolve (and so JIT-compile) only the methods that are on screen,
+            // through the clipper, and cache the result (0 = compile failed) so a
+            // class with hundreds of methods does not compile them all at once.
+            const auto resolve = [&](const std::string& method) -> std::uint64_t
+                {
+                    auto it = m_resolved.find(method);
+                    if (it == m_resolved.end())
+                        it = m_resolved.emplace(method, m_engine.Mono().AddressOf(m_selectedName + ":" + method).value_or(0)).first;
+                    return it->second;
+                };
+            ImGuiListClipper clipper;
+            clipper.Begin(static_cast<int>(m_methods.size()));
+            while (clipper.Step())
             {
-                ImGui::TableNextRow();
-                ImGui::PushID(method.c_str());
-                ImGui::TableNextColumn();
-                const bool activated = ImGui::Selectable(method.c_str(), false, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick);
-                const auto resolved = m_resolved.find(method);
-                if ((activated && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) || (activated && resolved == m_resolved.end()))
+                for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
                 {
-                    if (const auto address = m_engine.Mono().AddressOf(m_selectedName + ":" + method))
+                    const std::string& method = m_methods[static_cast<std::size_t>(i)];
+                    const std::uint64_t address = resolve(method);
+                    ImGui::TableNextRow();
+                    ImGui::PushID(i);
+                    ImGui::TableNextColumn();
+                    if (ImGui::Selectable(method.c_str(), false, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
+                        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && address)
+                        m_workspace.OpenMemoryViewer(address);
+                    if (ImGui::BeginPopupContextItem())
                     {
-                        m_resolved[method] = *address;
-                        if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                            m_workspace.OpenMemoryViewer(*address);
-                    }
-                }
-                if (ImGui::BeginPopupContextItem())
-                {
-                    if (ImGui::MenuItem(ICON_FA_CODE "  Show in the disassembler"))
-                        if (const auto address = m_engine.Mono().AddressOf(m_selectedName + ":" + method))
+                        if (ImGui::MenuItem(ICON_FA_CODE "  Show in the disassembler", nullptr, false, address != 0))
+                            m_workspace.OpenMemoryViewer(address);
+                        if (ImGui::MenuItem(ICON_FA_CIRCLE "  Set a breakpoint", nullptr, false, address != 0))
                         {
-                            m_resolved[method] = *address;
-                            m_workspace.OpenMemoryViewer(*address);
-                        }
-                    if (ImGui::MenuItem(ICON_FA_CIRCLE "  Set a breakpoint"))
-                    {
-                        if (const auto address = m_engine.Mono().AddressOf(m_selectedName + ":" + method))
-                        {
-                            m_resolved[method] = *address;
                             Status status = m_engine.EnsureDebugger();
                             if (status)
-                                status = m_engine.Debugger().SetBreakpoint(*address, Debug::BreakpointType::Execute, 1, false);
+                                status = m_engine.Debugger().SetBreakpoint(address, Debug::BreakpointType::Execute, 1, false);
                             m_workspace.Report(status);
                         }
+                        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the name"))
+                            ImGui::SetClipboardText((m_selectedName + ":" + method).c_str());
+                        ImGui::EndPopup();
                     }
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the name"))
-                        ImGui::SetClipboardText((m_selectedName + ":" + method).c_str());
-                    ImGui::EndPopup();
+                    ImGui::TableNextColumn();
+                    PushMono();
+                    if (address)
+                        ImGui::TextColored(ManifoldTheme::AddressText, "%s", Hex(address).c_str());
+                    else
+                        Muted("--");
+                    PopMono();
+                    ImGui::PopID();
                 }
-                ImGui::TableNextColumn();
-                PushMono();
-                if (resolved != m_resolved.end())
-                    ImGui::TextColored(ManifoldTheme::AddressText, "%s", Hex(resolved->second).c_str());
-                else
-                    Muted("double click");
-                PopMono();
-                ImGui::PopID();
             }
             ImGui::EndTable();
         }
