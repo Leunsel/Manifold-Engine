@@ -9,6 +9,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace Manifold::Target
@@ -82,6 +83,17 @@ namespace Manifold::Target
         // lands on the right class the way Cheat Engine does.
         std::optional<MonoInstance> ClassAt(std::uint64_t address);
 
+        // The JIT-compiled Mono method whose code contains an address, as
+        // "Namespace.Class:Method" (or "Class:Method" without a namespace), or
+        // nullopt when the address is not inside a Mono method. Safe for ANY
+        // address: mono_jit_info_table_find reports null off the JIT code, unlike
+        // mono_object_get_class which would dereference a wild pointer. Resolved
+        // ranges and a bounded set of misses are cached so the disassembler can
+        // ask per line every frame without a remote call each time. This is the
+        // reverse of AddressOf and names Mono code the memory viewer would
+        // otherwise show as a raw address (JIT code lives outside every module).
+        std::optional<std::string> MethodNameAt(std::uint64_t address);
+
         // "Class:Method" or "Namespace.Class:Method"; compiles the method on the
         // first call and caches the address. Returns nullopt when not Mono or not found.
         std::optional<std::uint64_t> AddressOf(std::string_view name);
@@ -94,6 +106,9 @@ namespace Manifold::Target
         int FindClass(std::string_view name) const;
         void EnsureMembers(int classIndex);
         std::optional<std::string> ResolveHead(std::uint64_t header, bool allowRuntimeFallback);
+        const std::string* FindJitName(std::uint64_t address) const;
+        void RememberJitRange(std::uint64_t start, std::uint64_t end, std::string name);
+        void RememberJitMiss(std::uint64_t address);
 
         std::shared_ptr<Process> m_process;
         mutable std::recursive_mutex m_lock;
@@ -108,5 +123,17 @@ namespace Manifold::Target
         std::uint64_t m_handleMin = 0;  // span of known MonoClass* pointers, to
         std::uint64_t m_handleMax = 0;  // vet a klass before asking the runtime
         std::uint64_t m_generation = 0;
+
+        // Reverse-resolution cache for MethodNameAt. Resolved method code ranges
+        // sorted by Start (non-overlapping), plus the addresses already known not
+        // to be Mono code, so the hot per-line lookup almost never hits the runtime.
+        struct JitRange
+        {
+            std::uint64_t Start = 0;
+            std::uint64_t End = 0;
+            std::string Name;
+        };
+        std::vector<JitRange> m_jitRanges;
+        std::unordered_set<std::uint64_t> m_jitMisses;
     };
 }

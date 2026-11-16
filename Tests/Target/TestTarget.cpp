@@ -82,6 +82,14 @@ namespace
     struct FakeVTable { const FakeClass* Klass; };
     FakeVTable g_playerVT = { &kClasses[0] };
     struct FakeObject { FakeVTable* VTable; int Health; int Ammo; };
+
+    // A tiny JIT-info table so MethodNameAt (reverse resolution) has something to
+    // find: the code of FakeAdd (= Game.Player:TakeDamage's compiled address)
+    // maps back to that method. mono_jit_info_table_find reports null outside the
+    // range, exactly like the real runtime off the JIT code.
+    struct FakeJitInfo { const FakeMethod* Method; void* CodeStart; int CodeSize; };
+    const FakeJitInfo kTakeDamageJit = { &kPlayerMethods[0], reinterpret_cast<void*>(&FakeAdd), 0x20 };
+    const FakeJitInfo* const kJitTable[] = { &kTakeDamageJit };
 }
 
 extern "C" __declspec(dllexport) FakeObject g_fakePlayer = { &g_playerVT, 1000, 30 };
@@ -129,6 +137,28 @@ extern "C"
     __declspec(dllexport) int mono_type_get_type(void* type) { return *static_cast<int*>(type); }
     __declspec(dllexport) int mono_field_get_flags(void* field) { return static_cast<FakeField*>(field)->Flags; }
     __declspec(dllexport) void* mono_object_get_class(void* object) { return const_cast<FakeClass*>(static_cast<FakeObject*>(object)->VTable->Klass); }
+    __declspec(dllexport) void* mono_jit_info_table_find(void* /*domain*/, void* addr)
+    {
+        const std::size_t a = reinterpret_cast<std::size_t>(addr);
+        for (const FakeJitInfo* ji : kJitTable)
+        {
+            const std::size_t start = reinterpret_cast<std::size_t>(ji->CodeStart);
+            if (a >= start && a < start + static_cast<std::size_t>(ji->CodeSize))
+                return const_cast<FakeJitInfo*>(ji);
+        }
+        return nullptr;
+    }
+    __declspec(dllexport) void* mono_jit_info_get_method(void* ji) { return const_cast<FakeMethod*>(static_cast<FakeJitInfo*>(ji)->Method); }
+    __declspec(dllexport) void* mono_jit_info_get_code_start(void* ji) { return static_cast<FakeJitInfo*>(ji)->CodeStart; }
+    __declspec(dllexport) int mono_jit_info_get_code_size(void* ji) { return static_cast<FakeJitInfo*>(ji)->CodeSize; }
+    __declspec(dllexport) void* mono_method_get_class(void* method)
+    {
+        for (const FakeClass& c : kClasses)
+            for (int i = 0; i < c.MethodCount; ++i)
+                if (static_cast<const void*>(&c.Methods[i]) == method)
+                    return const_cast<FakeClass*>(&c);
+        return nullptr;
+    }
 }
 
 extern "C" __declspec(dllexport) __declspec(noinline) long long Touch(volatile long long* value)

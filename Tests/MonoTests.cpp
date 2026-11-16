@@ -93,6 +93,19 @@ namespace Manifold::Tests
         CHECK(engine.Mono().FieldOffset("Player", "ammo") == 0x1C);
         CHECK(engine.Mono().FieldOffset("Game.Player", "health") == 0x10);
 
+        // Reverse resolution: an address inside a Mono method's JIT code names
+        // the method, which is what labels Mono code in the memory viewer. The
+        // fake maps TakeDamage's compiled address to a 0x20-byte code range.
+        if (take && *take)
+        {
+            const auto atStart = engine.Mono().MethodNameAt(*take);
+            CHECK_MSG(atStart && *atStart == "Game.Player:TakeDamage", atStart ? *atStart : "nil");
+            const auto inside = engine.Mono().MethodNameAt(*take + 4);
+            CHECK_MSG(inside && *inside == "Game.Player:TakeDamage", inside ? *inside : "nil");
+            CHECK(!engine.Mono().MethodNameAt(*take + 0x1000).has_value());
+            CHECK(!engine.Mono().MethodNameAt(0).has_value());
+        }
+
         // The combined symbol provider resolves Mono names too.
         Status error;
         const auto viaSymbols = engine.Evaluate("Player:TakeDamage", &error);
@@ -123,6 +136,7 @@ namespace Manifold::Tests
         std::string name = "CloverPit";
         std::uint32_t pid = 0;
         std::uint64_t object = 0;
+        std::uint64_t method = 0;
         for (const std::string& argument : arguments)
         {
             if (argument.rfind("--process=", 0) == 0)
@@ -131,6 +145,8 @@ namespace Manifold::Tests
                 pid = static_cast<std::uint32_t>(ParseDecimal(argument.substr(6)).value_or(0));
             else if (argument.rfind("--object=", 0) == 0)
                 object = ParseHex(argument.substr(9)).value_or(0);
+            else if (argument.rfind("--mono-method=", 0) == 0)
+                method = ParseHex(argument.substr(14)).value_or(0);
         }
         std::setvbuf(stdout, nullptr, _IONBF, 0);
         Settings settings;
@@ -179,6 +195,13 @@ namespace Manifold::Tests
                 std::printf("  (%s)", module ? module->Name.c_str() : "not in a module");
             }
             std::printf("\n");
+            if (address)
+            {
+                // Round-trip the JIT address back to a name; this is what labels
+                // Mono code in the memory viewer (reverse of AddressOf).
+                const auto reverse = engine.Mono().MethodNameAt(*address);
+                std::printf("reverse %s -> %s\n", Hex(*address).c_str(), reverse ? reverse->c_str() : "not resolved");
+            }
             const std::vector<Target::MonoField> classFields = engine.Mono().FieldsOf(c.FullName());
             if (!classFields.empty())
                 std::printf("field %s:%s offset 0x%X\n", c.FullName().c_str(), classFields.front().Name.c_str(),
@@ -201,6 +224,11 @@ namespace Manifold::Tests
                 for (const Target::MonoField& field : engine.Mono().FieldsOf(instance->Name))
                     std::printf("  +0x%-4X %s\n", field.Offset, field.Name.c_str());
             }
+        }
+        if (method)
+        {
+            const auto reverse = engine.Mono().MethodNameAt(method);
+            std::printf("method at %s: %s\n", Hex(method).c_str(), reverse ? reverse->c_str() : "not resolved");
         }
         std::printf("done; detaching\n");
         return 0;

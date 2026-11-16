@@ -603,27 +603,32 @@ namespace Manifold::Target
         if (!m_process)
             return Hex(address);
         const auto module = m_process->ModuleAt(address);
-        if (!module)
-            return Hex(address);
-        if (address == module->Base)
-            return module->Name;
-        const auto table = Exports(*module);
-        auto found = std::upper_bound(table->ByAddress.begin(), table->ByAddress.end(), address,
-            [](std::uint64_t value, const ExportSymbol& symbol) { return value < symbol.Address; });
-        if (found != table->ByAddress.begin())
+        if (module)
         {
-            --found;
-            if (address - found->Address < kExportReach)
+            if (address == module->Base)
+                return module->Name;
+            const auto table = Exports(*module);
+            auto found = std::upper_bound(table->ByAddress.begin(), table->ByAddress.end(), address,
+                [](std::uint64_t value, const ExportSymbol& symbol) { return value < symbol.Address; });
+            if (found != table->ByAddress.begin())
             {
-                std::string moduleName = module->Name;
-                if (const std::size_t dot = moduleName.rfind('.'); dot != std::string::npos)
-                    moduleName.resize(dot);
-                std::string text = moduleName + "." + found->Name;
-                if (address != found->Address)
-                    text += "+" + Hex(address - found->Address);
-                return text;
+                --found;
+                if (address - found->Address < kExportReach)
+                {
+                    std::string moduleName = module->Name;
+                    if (const std::size_t dot = moduleName.rfind('.'); dot != std::string::npos)
+                        moduleName.resize(dot);
+                    std::string text = moduleName + "." + found->Name;
+                    if (address != found->Address)
+                        text += "+" + Hex(address - found->Address);
+                    return text;
+                }
             }
         }
+        // No export matched. Ask the symbol provider: for an in-module address
+        // that is the PDB describe; for an address in no module at all it is
+        // where JIT-compiled Mono methods get their Namespace.Class:Method name
+        // (such code lives outside every loaded module).
         if (m_hasProvider.load())
         {
             SymbolReverse reverse;
@@ -637,7 +642,7 @@ namespace Manifold::Target
                     return *name;
             }
         }
-        return module->Name + "+" + Hex(address - module->Base);
+        return module ? module->Name + "+" + Hex(address - module->Base) : Hex(address);
     }
 
     Evaluation Symbols::Evaluate(std::string_view expression, const ExtraResolver& extra) const

@@ -16,6 +16,7 @@ namespace Manifold::Target
         constexpr unsigned int kTokenTypeDef = 0x02000000u;
         constexpr int kMaxClasses = 200000;
         constexpr int kMaxMembers = 65536;
+        constexpr std::size_t kMaxJitMisses = 8192;
 
         const char* const kFunctions[] = {
             "mono_get_root_domain", "mono_thread_attach", "mono_assembly_foreach", "mono_assembly_get_image",
@@ -23,6 +24,8 @@ namespace Manifold::Target
             "mono_class_get_name", "mono_class_get_namespace", "mono_class_get_methods", "mono_method_get_name",
             "mono_compile_method", "mono_class_get_fields", "mono_field_get_name", "mono_field_get_offset",
             "mono_field_get_type", "mono_type_get_type", "mono_field_get_flags", "mono_object_get_class",
+            "mono_jit_info_table_find", "mono_jit_info_get_method", "mono_jit_info_get_code_start",
+            "mono_jit_info_get_code_size", "mono_method_get_class",
         };
 
         const char* const kModuleCandidates[] = { "mono-2.0-bdwgc.dll", "mono.dll", "mono-2.0.dll", "monobdwgc-2.0.dll" };
@@ -137,6 +140,8 @@ namespace Manifold::Target
         m_classes.clear();
         m_classIndex.clear();
         m_handleIndex.clear();
+        m_jitRanges.clear();
+        m_jitMisses.clear();
         m_present = false;
         m_domain = 0;
         m_module.clear();
@@ -153,6 +158,8 @@ namespace Manifold::Target
         m_classIndex.clear();
         m_handleIndex.clear();
         m_handleMin = m_handleMax = 0;
+        m_jitRanges.clear();
+        m_jitMisses.clear();
         m_call.ResetScratch();
 
         // mono_assembly_foreach collects each assembly pointer into an array.
@@ -364,6 +371,82 @@ namespace Manifold::Target
                 return MonoInstance{ header, *name };
         }
         return std::nullopt;
+    }
+
+    const std::string* MonoBridge::FindJitName(std::uint64_t address) const
+    {
+        // m_jitRanges is sorted by Start and non-overlapping: step back to the
+        // last range that begins at or before the address and test its end.
+        auto it = std::upper_bound(m_jitRanges.begin(), m_jitRanges.end(), address,
+            [](std::uint64_t value, const JitRange& range) { return value < range.Start; });
+        if (it == m_jitRanges.begin())
+            return nullptr;
+        --it;
+        return address >= it->Start && address < it->End ? &it->Name : nullptr;
+    }
+
+    void MonoBridge::RememberJitRange(std::uint64_t start, std::uint64_t end, std::string name)
+    {
+        auto it = std::lower_bound(m_jitRanges.begin(), m_jitRanges.end(), start,
+            [](const JitRange& range, std::uint64_t value) { return range.Start < value; });
+        if (it != m_jitRanges.end() && it->Start == start)
+            return;  // already cached
+        m_jitRanges.insert(it, JitRange{ start, end, std::move(name) });
+    }
+
+    void MonoBridge::RememberJitMiss(std::uint64_t address)
+    {
+        // Bound the negative cache: scrolling through non-Mono code must not grow
+        // it without limit, and dropping it only re-probes a few addresses later.
+        if (m_jitMisses.size() >= kMaxJitMisses)
+            m_jitMisses.clear();
+        m_jitMisses.insert(address);
+    }
+
+    std::optional<std::string> MonoBridge::MethodNameAt(std::uint64_t address)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_present || !m_process || !address)
+            return std::nullopt;
+        // The disassembler asks per line every frame, so the cache answers first:
+        // a resolved range, or a known miss, both without touching the runtime.
+        if (const std::string* cached = FindJitName(address))
+            return *cached;
+        if (m_jitMisses.count(address))
+            return std::nullopt;
+        // A miss costs one remote lookup. mono_jit_info_table_find reports null
+        // for any address that is not JITed Mono code, so it is safe on the wild
+        // pointers the disassembler hands it.
+        const auto info = CallFn("mono_jit_info_table_find", m_domain, address);
+        if (!info || !*info)
+        {
+            RememberJitMiss(address);
+            return std::nullopt;
+        }
+        const auto method = CallFn("mono_jit_info_get_method", *info);
+        const auto codeStart = CallFn("mono_jit_info_get_code_start", *info);
+        const auto codeSize = CallFn("mono_jit_info_get_code_size", *info);
+        if (!method || !*method || !codeStart || !*codeStart || !codeSize)
+        {
+            RememberJitMiss(address);
+            return std::nullopt;
+        }
+        const std::string methodName = CallString("mono_method_get_name", *method);
+        std::string className;
+        if (const auto klass = CallFn("mono_method_get_class", *method); klass && *klass)
+        {
+            const std::string ns = CallString("mono_class_get_namespace", *klass);
+            const std::string name = CallString("mono_class_get_name", *klass);
+            className = ns.empty() ? name : ns + "." + name;
+        }
+        if (methodName.empty() && className.empty())
+        {
+            RememberJitMiss(address);
+            return std::nullopt;
+        }
+        std::string full = className.empty() ? methodName : className + ":" + methodName;
+        RememberJitRange(*codeStart, *codeStart + (*codeSize & 0xFFFFFFFFu), full);
+        return full;
     }
 
     std::optional<std::uint64_t> MonoBridge::AddressOf(std::string_view name)

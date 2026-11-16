@@ -204,7 +204,16 @@ namespace Manifold
             [this, pdb](std::uint64_t address) -> std::optional<std::string>
             {
                 if (pdb)
-                    return m_pdbSymbols.Describe(address);
+                    if (const auto name = m_pdbSymbols.Describe(address))
+                        return name;
+                // JIT-compiled Mono methods live outside every loaded PE module
+                // (the runtime allocates its own code pages), so only for an
+                // address in no module is a Mono lookup worth the remote-call
+                // cost; the common in-module path never touches the runtime, and
+                // MethodNameAt caches so repeat lines are free.
+                if (MonoPresent() && m_process && !m_process->ModuleAt(address))
+                    if (const auto name = m_mono.MethodNameAt(address))
+                        return name;
                 return std::nullopt;
             });
     }
