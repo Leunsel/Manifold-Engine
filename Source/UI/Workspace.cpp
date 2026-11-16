@@ -117,6 +117,12 @@ namespace Manifold::UI
             m_asmSearch->Draw();
         if (m_byteSearch && !m_byteSearch->Closed())
             m_byteSearch->Draw();
+        if (m_breakpoints && !m_breakpoints->Closed())
+            m_breakpoints->Draw();
+        if (m_threadList && !m_threadList->Closed())
+            m_threadList->Draw();
+        for (std::size_t i = 0; i < m_traces.size(); ++i)
+            m_traces[i]->Draw();
         if (m_shortcuts && !m_shortcuts->Closed())
             m_shortcuts->Draw();
         if (m_templateManager && !m_templateManager->Closed())
@@ -128,6 +134,7 @@ namespace Manifold::UI
         Prune(m_scripts);
         Prune(m_watches);
         Prune(m_editors);
+        Prune(m_traces);
     }
 
     void Workspace::HandleRequests()
@@ -391,6 +398,33 @@ namespace Manifold::UI
         viewer.ShowHex(address, address, address + std::max<std::uint64_t>(length, 1) - 1);
         if (raise)
             viewer.Raise();
+    }
+
+    void Workspace::OpenBreakpoints()
+    {
+        if (!m_breakpoints)
+            m_breakpoints = std::make_unique<BreakpointWindow>(*this);
+        m_breakpoints->Show();
+    }
+
+    void Workspace::OpenBreakpointEditor(std::uint64_t address, Debug::BreakpointType type, int size)
+    {
+        OpenBreakpoints();
+        m_breakpoints->Edit(address, type, size);
+    }
+
+    void Workspace::OpenThreadList()
+    {
+        if (!m_threadList)
+            m_threadList = std::make_unique<ThreadListWindow>(*this);
+        m_threadList->Show();
+    }
+
+    void Workspace::OpenTrace(std::uint64_t address)
+    {
+        auto window = std::make_unique<TraceWindow>(*this, m_nextTrace++);
+        window->Start(address);
+        m_traces.push_back(std::move(window));
     }
 
     void Workspace::OpenPatchScan()

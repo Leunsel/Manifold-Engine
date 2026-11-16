@@ -25,6 +25,7 @@ namespace Manifold::Table
         std::vector<TableSymbol> Symbols;
         std::string LuaScript;
         std::string Comments;
+        std::map<std::string, AddressList::DisasmNote> DisasmNotes;
         std::vector<std::unique_ptr<StructDefinition>> Structures;
         std::vector<TableFile> Files;
         std::vector<std::string> ExtraXml;

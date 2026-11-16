@@ -503,6 +503,7 @@ namespace Manifold::UI
         Shortcuts();
 
         GotoDialog();
+        CommentDialog();
         AssembleDialog();
         FindDialog();
         AllocateDialog();
@@ -583,7 +584,12 @@ namespace Manifold::UI
             item(ICON_FA_PAUSE "  Break", Command::DebugBreak, !broken);
             ImGui::Separator();
             item(ICON_FA_CIRCLE "  Toggle breakpoint", Command::ToggleBreakpoint);
+            item(ICON_FA_SLIDERS_H "  Breakpoint with a condition...", Command::EditBreakpoint);
             item(ICON_FA_MAP_MARKER_ALT "  Set the instruction pointer here", Command::SetInstructionPointer, broken);
+            ImGui::Separator();
+            item(ICON_FA_LIST "  Breakpoint list", Command::BreakpointList);
+            item(ICON_FA_SHOE_PRINTS "  Break and trace from here...", Command::BreakAndTrace);
+            item(ICON_FA_STREAM "  Thread list", Command::ThreadList, process);
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_BUG "  Attach debugger", nullptr, false, !debugger.Attached()))
                 m_workspace.Report(m_engine.EnsureDebugger());
@@ -1008,7 +1014,15 @@ namespace Manifold::UI
             }
 
             std::string comment;
-            if (const auto name = m_engine.Symbols().ExactName(line.Address))
+            ImU32 commentColor = ImGui::GetColorU32(ManifoldTheme::Muted);
+            const auto note = m_engine.Table().DisasmNotes.find(m_engine.Symbols().ModuleOffset(line.Address));
+            const bool userComment = note != m_engine.Table().DisasmNotes.end() && !note->second.Comment.empty();
+            if (userComment)
+            {
+                comment = note->second.Comment;
+                commentColor = ImGui::GetColorU32(ManifoldTheme::CodeComment);
+            }
+            else if (const auto name = m_engine.Symbols().ExactName(line.Address))
                 comment = *name + ":";
             else if (line.Memory.Present && line.Memory.Absolute)
             {
@@ -1027,7 +1041,7 @@ namespace Manifold::UI
                     comment = "-> " + m_engine.Describe(*effective);
             }
             if (!comment.empty())
-                cell(commentX, rightX + Px(4.0f), textY, ImGui::GetColorU32(ManifoldTheme::Muted), comment);
+                cell(commentX, rightX + Px(4.0f), textY, commentColor, comment);
 
             if (line.Target && (line.Kind == Disasm::Flow::Jump || line.Kind == Disasm::Flow::ConditionalJump))
             {
@@ -1301,6 +1315,28 @@ namespace Manifold::UI
                 debugger.SetRegisters(registers);
             }
             break;
+        case Command::BreakpointList: m_workspace.OpenBreakpoints(); break;
+        case Command::ThreadList: m_workspace.OpenThreadList(); break;
+        case Command::EditBreakpoint: m_workspace.OpenBreakpointEditor(m_selected, Debug::BreakpointType::Execute, 1); break;
+        case Command::BreakAndTrace:
+        {
+            Status status = m_engine.EnsureDebugger();
+            if (status)
+                m_workspace.OpenTrace(m_selected);
+            else
+                m_workspace.Report(status);
+            break;
+        }
+        case Command::CommentInstruction:
+        {
+            m_commentAddress = m_selected;
+            m_commentHeader = false;
+            const std::string key = m_engine.Symbols().ModuleOffset(m_selected);
+            const auto found = m_engine.Table().DisasmNotes.find(key);
+            m_commentText = found == m_engine.Table().DisasmNotes.end() ? std::string() : found->second.Comment;
+            m_commentOpen = true;
+            break;
+        }
         case Command::FollowInstruction:
         {
             const Disasm::Instruction instruction = disassembler.Read(process, m_selected, nullptr);
@@ -1392,6 +1428,15 @@ namespace Manifold::UI
         }
         case Command::HexAccesses: m_workspace.StartWatch(Debug::WatchKind::Accesses, hexAddress, watchSize); break;
         case Command::HexWrites: m_workspace.StartWatch(Debug::WatchKind::Writes, hexAddress, watchSize); break;
+        case Command::HexBreakOnWrite:
+        case Command::HexBreakOnAccess:
+        {
+            Status status = m_engine.EnsureDebugger();
+            if (status)
+                status = debugger.SetBreakpoint(hexAddress, command == Command::HexBreakOnAccess ? Debug::BreakpointType::Access : Debug::BreakpointType::Write, watchSize, true);
+            m_workspace.Report(status);
+            break;
+        }
         case Command::HexAddToList: m_workspace.AddAddress(hexAddress, HexValueType()); break;
         case Command::HexBytes: m_hexDisplay = 0; break;
         case Command::HexTwoBytes: m_hexDisplay = 1; break;
@@ -1642,7 +1687,11 @@ namespace Manifold::UI
             ImGui::EndMenu();
         }
         ImGui::Separator();
+        item(ICON_FA_COMMENT "  Comment...", Command::CommentInstruction);
+        ImGui::Separator();
         item(ICON_FA_CIRCLE "  Toggle breakpoint", Command::ToggleBreakpoint);
+        item(ICON_FA_SLIDERS_H "  Breakpoint with a condition or register change...", Command::EditBreakpoint);
+        item(ICON_FA_SHOE_PRINTS "  Break and trace from here...", Command::BreakAndTrace);
         item(ICON_FA_LIST_UL "  Find out what addresses this instruction accesses", Command::InstructionAccesses, instruction.Memory.Present);
         if (ImGui::MenuItem(ICON_FA_PHONE "  Find out what calls this address"))
             m_workspace.StartWatch(Debug::WatchKind::Calls, instruction.Address, 1);
@@ -2434,7 +2483,6 @@ namespace Manifold::UI
 
     void MemoryViewer::HexMenu(std::uint64_t address)
     {
-        const int size = HexValueSize();
         const auto item = [&](const char* label, Command command, bool enabled = true)
             {
                 if (CommandItem(label, command, false, enabled))
@@ -2453,13 +2501,8 @@ namespace Manifold::UI
         ImGui::Separator();
         item(ICON_FA_EYE "  Find out what accesses this address", Command::HexAccesses);
         item(ICON_FA_PEN "  Find out what writes to this address", Command::HexWrites);
-        if (ImGui::MenuItem(ICON_FA_CIRCLE "  Break when written"))
-        {
-            Status status = m_engine.EnsureDebugger();
-            if (status)
-                status = m_engine.Debugger().SetBreakpoint(address, Debug::BreakpointType::Write, size == 1 ? 4 : size, true);
-            m_workspace.Report(status);
-        }
+        item(ICON_FA_CIRCLE "  Break when written", Command::HexBreakOnWrite);
+        item(ICON_FA_CIRCLE "  Break when read or written", Command::HexBreakOnAccess);
         ImGui::Separator();
         item(ICON_FA_PLUS "  Add this address to the address list", Command::HexAddToList);
         if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
@@ -2512,6 +2555,42 @@ namespace Manifold::UI
             }
             else
                 m_gotoError = error.Text;
+        }
+        ImGui::EndPopup();
+    }
+
+    void MemoryViewer::CommentDialog()
+    {
+        if (m_commentOpen && !ImGui::IsPopupOpen("##comment"))
+            ImGui::OpenPopup("##comment");
+        if (!ImGui::BeginPopup("##comment"))
+        {
+            m_commentOpen = false;
+            return;
+        }
+        ImGui::TextUnformatted(m_commentHeader ? "Header above" : "Comment at");
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", m_engine.Describe(m_commentAddress).c_str());
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(Px(360.0f));
+        const bool enter = InputText("##commenttext", m_commentText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+        if (enter || ImGui::Button("Save", Px(80.0f, 0.0f)))
+        {
+            const std::string key = m_engine.Symbols().ModuleOffset(m_commentAddress);
+            Table::AddressList::DisasmNote& note = m_engine.Table().DisasmNotes[key];
+            (m_commentHeader ? note.Header : note.Comment) = Trim(m_commentText);
+            if (note.Comment.empty() && note.Header.empty())
+                m_engine.Table().DisasmNotes.erase(key);
+            m_engine.Table().Touch();
+            m_commentOpen = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", Px(80.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        {
+            m_commentOpen = false;
+            ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
     }

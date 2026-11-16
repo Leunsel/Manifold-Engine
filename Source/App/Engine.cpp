@@ -52,6 +52,7 @@ namespace Manifold
     {
         CancelActivations();
         WaitForActivation();
+        m_tracer.Stop();
         m_debugger.Detach();
         m_scanner.Reset();
         m_lua.reset();
@@ -116,6 +117,7 @@ namespace Manifold
             return;
         CancelActivations();
         WaitForActivation();
+        m_tracer.Stop();
         m_debugger.Detach();
         m_scanner.Reset();
         m_table.ForEach([](Table::MemoryRecord& record)
@@ -1159,6 +1161,7 @@ namespace Manifold
             m_table.FilePath = WideToUtf8(path.wstring());
             m_table.TableLuaScript = loaded.LuaScript;
             m_table.TableComment = loaded.Comments;
+            m_table.DisasmNotes = std::move(loaded.DisasmNotes);
             m_table.Files = std::move(loaded.Files);
             m_table.ExtraXml = std::move(loaded.ExtraXml);
             m_table.LoadedVersion = loaded.Version;

@@ -93,7 +93,13 @@
     <ClCompile Include="..\Source\Core\Xml.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Debug\BreakAction.cpp">
+      <Filter>Source\Debug</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Debug\Debugger.cpp">
+      <Filter>Source\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Debug\Trace.cpp">
       <Filter>Source\Debug</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp">
@@ -190,6 +196,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\CodeTools.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\DebugWindows.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\DialogHost.cpp">
@@ -294,7 +303,16 @@
     <ClInclude Include="..\Source\Core\Xml.h">
       <Filter>Source\Core</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Debug\BreakAction.h">
+      <Filter>Source\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Debug\BreakProgram.h">
+      <Filter>Source\Debug</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Debug\Debugger.h">
+      <Filter>Source\Debug</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Debug\Trace.h">
       <Filter>Source\Debug</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Debug\VehProtocol.h">

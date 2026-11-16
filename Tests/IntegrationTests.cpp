@@ -17,6 +17,8 @@
 
 namespace Manifold::Tests
 {
+    void CheckBreakActions(Engine& engine, bool veh);
+
     namespace
     {
         struct TargetProgram
@@ -665,6 +667,8 @@ namespace Manifold::Tests
                 engine.Debugger().Resume(Debug::ResumeMode::Continue);
             }
             std::uint8_t afterBreakpoints = 0;
+            CHECK(process.ReadExact(damage, &afterBreakpoints, 1) && afterBreakpoints == original[0]);
+            CheckBreakActions(engine, false);
             CHECK(process.ReadExact(damage, &afterBreakpoints, 1) && afterBreakpoints == original[0]);
 
             const std::uint64_t shared = engine.Evaluate("TestTarget.g_shared").value_or(0);

@@ -30,6 +30,7 @@ namespace
     HINSTANCE g_module = nullptr;
     volatile LONG g_started = 0;
     volatile LONG g_breaking = 0;
+    volatile DWORD g_breakOwner = 0;
     DWORD g_suspended[kMaxThreads];
     int g_suspendedCount = 0;
     Recent g_recent[kRecentSlots] = {};
@@ -54,10 +55,62 @@ namespace
     {
         switch (mode)
         {
-        case 1: return 1;
-        case 0: return 3;
+        case ModeWrite:
+        case ModeBreakWrite: return 1;
+        case ModeAccess:
+        case ModeBreakAccess: return 3;
         default: return 0;
         }
+    }
+
+    bool Breaks(std::uint32_t mode)
+    {
+        return mode == ModeBreak || mode == ModeBreakWrite || mode == ModeBreakAccess;
+    }
+
+    struct SelfReader
+    {
+        bool operator()(std::uint64_t address, void* out, std::uint32_t size) const
+        {
+            SIZE_T done = 0;
+            return ::ReadProcessMemory(::GetCurrentProcess(), reinterpret_cast<LPCVOID>(address), out, size, &done) && done == size;
+        }
+    };
+
+    void ToArray(const CONTEXT& c, std::uint64_t (&r)[Manifold::Debug::Program::kRegisterCount])
+    {
+        r[0] = c.Rax; r[1] = c.Rbx; r[2] = c.Rcx; r[3] = c.Rdx; r[4] = c.Rsi; r[5] = c.Rdi; r[6] = c.Rbp; r[7] = c.Rsp;
+        r[8] = c.R8; r[9] = c.R9; r[10] = c.R10; r[11] = c.R11; r[12] = c.R12; r[13] = c.R13; r[14] = c.R14; r[15] = c.R15;
+        r[16] = c.Rip;
+        r[17] = c.EFlags;
+    }
+
+    void FromArray(CONTEXT& c, const std::uint64_t (&r)[Manifold::Debug::Program::kRegisterCount])
+    {
+        c.Rax = r[0]; c.Rbx = r[1]; c.Rcx = r[2]; c.Rdx = r[3]; c.Rsi = r[4]; c.Rdi = r[5]; c.Rbp = r[6]; c.Rsp = r[7];
+        c.R8 = r[8]; c.R9 = r[9]; c.R10 = r[10]; c.R11 = r[11]; c.R12 = r[12]; c.R13 = r[13]; c.R14 = r[14]; c.R15 = r[15];
+        c.Rip = r[16];
+        c.EFlags = static_cast<DWORD>(r[17]);
+    }
+
+    // The condition and the register changes run here, inside the hit, so a
+    // breakpoint whose condition fails costs one exception and never stops the
+    // other threads.
+    bool RunAction(Action& action, CONTEXT& context, DWORD threadId)
+    {
+        if (action.ThreadId != 0 && action.ThreadId != threadId)
+            return false;
+        _InterlockedIncrement64(reinterpret_cast<long long volatile*>(&action.Seen));
+        std::uint64_t registers[Manifold::Debug::Program::kRegisterCount];
+        ToArray(context, registers);
+        SelfReader reader;
+        const std::uint32_t length = action.ConditionLength <= static_cast<std::uint32_t>(Manifold::Debug::Program::kMaxCode) ? action.ConditionLength : 0u;
+        if (!Manifold::Debug::Program::Holds(action.Condition, length, registers, threadId, reader))
+            return false;
+        _InterlockedIncrement64(reinterpret_cast<long long volatile*>(&action.Hits));
+        if (action.ChangeCount > 0 && Manifold::Debug::Program::Apply(action.Changes, static_cast<int>(action.ChangeCount), registers, threadId, reader) > 0)
+            FromArray(context, registers);
+        return action.Break != 0;
     }
 
     void BuildRegisters(Block* block, std::uint64_t (&addresses)[4], std::uint64_t& dr7)
@@ -70,10 +123,11 @@ namespace
             if (!watch.Active)
                 continue;
             const bool execute = watch.Mode == ModeInstruction || watch.Mode == ModeCalls || watch.Mode == ModeBreak;
+            const bool data = !execute;
             addresses[slot] = watch.Address;
             dr7 |= 1ull << (slot * 2);
-            dr7 |= (execute ? 0ull : TypeBits(watch.Mode)) << (16 + slot * 4);
-            dr7 |= (execute ? 0ull : LengthBits(watch.Size)) << (18 + slot * 4);
+            dr7 |= (data ? TypeBits(watch.Mode) : 0ull) << (16 + slot * 4);
+            dr7 |= (data ? LengthBits(watch.Size) : 0ull) << (18 + slot * 4);
         }
         if (dr7 != 0)
             dr7 |= (1ull << 8) | (1ull << 9);
@@ -219,18 +273,22 @@ namespace
         g_suspendedCount = 0;
     }
 
-    void EnterBreak(Block* block, CONTEXT& context, std::uint64_t address)
+    void EnterBreak(Block* block, CONTEXT& context, std::uint64_t address, std::uint32_t slot)
     {
         if (_InterlockedCompareExchange(&g_breaking, 1, 0) != 0)
         {
+            for (int wait = 0; wait < 50 && g_breaking && !block->Broken && !block->Stop; ++wait)
+                ::Sleep(1);
             while (block->Broken && !block->Stop)
                 ::Sleep(1);
             return;
         }
+        g_breakOwner = ::GetCurrentThreadId();
         CaptureRegs(block->BreakRegs, context);
         CaptureVectors(block->BreakXmm, context);
         block->XmmDirty = 0;
         block->BreakAddress = address;
+        block->BreakSlot = slot;
         block->BrokenThread = ::GetCurrentThreadId();
         block->ResumeCmd = ResumeNone;
         SuspendOthers();
@@ -251,6 +309,7 @@ namespace
         block->ResumeCmd = ResumeNone;
         block->Broken = 0;
         ResumeOthers();
+        g_breakOwner = 0;
         _InterlockedExchange(&g_breaking, 0);
     }
 
@@ -266,8 +325,15 @@ namespace
         const std::uint64_t dr6 = context.Dr6;
         const DWORD tid = ::GetCurrentThreadId();
         MarkActive(tid);
+        // A thread that traps while another one is stopping the process waits
+        // here instead of running on until SuspendOthers reaches it. The wait
+        // is short on purpose: this thread may hold a lock (the heap's) that
+        // the stopping thread needs for its thread snapshot.
+        for (int wait = 0; wait < 50 && g_breaking && g_breakOwner != tid && !block->Broken && !block->Stop; ++wait)
+            ::Sleep(1);
         bool breakHit = false;
         std::uint64_t breakAddr = 0;
+        std::uint32_t breakSlot = 0;
         for (int slot = 0; slot < kMaxWatches; ++slot)
         {
             const Watch& watch = block->Watches[slot];
@@ -275,10 +341,15 @@ namespace
                 continue;
             if (dr6 & (1ull << slot))
             {
-                if (watch.Mode == ModeBreak)
+                if (Breaks(watch.Mode))
                 {
-                    breakHit = true;
-                    breakAddr = context.Rip;
+                    const std::uint64_t at = context.Rip;
+                    if (RunAction(block->Actions[slot], context, tid) && !breakHit)
+                    {
+                        breakHit = true;
+                        breakAddr = at;
+                        breakSlot = static_cast<std::uint32_t>(slot);
+                    }
                 }
                 else
                 {
@@ -288,7 +359,7 @@ namespace
             }
         }
         if (breakHit)
-            EnterBreak(block, context, breakAddr);
+            EnterBreak(block, context, breakAddr, breakSlot);
         std::uint64_t addresses[4] = {};
         std::uint64_t dr7 = 0;
         BuildRegisters(block, addresses, dr7);
@@ -373,6 +444,7 @@ namespace
             }
             if (block->BreakNow && !block->Broken && _InterlockedCompareExchange(&g_breaking, 1, 0) == 0)
             {
+                g_breakOwner = ::GetCurrentThreadId();
                 block->BreakNow = 0;
                 SuspendOthers();
                 const DWORD target = g_suspendedCount > 0 ? g_suspended[0] : 0;
@@ -386,6 +458,7 @@ namespace
                     block->XmmDirty = 0;
                     block->BreakRegs.GsBase = 0;
                     block->BreakAddress = ctx.Rip;
+                    block->BreakSlot = 0xFFFFFFFFu;
                     block->BrokenThread = target;
                     block->ResumeCmd = ResumeNone;
                     block->BreakSerial = block->BreakSerial + 1;
@@ -408,6 +481,7 @@ namespace
                 if (thread)
                     ::CloseHandle(thread);
                 ResumeOthers();
+                g_breakOwner = 0;
                 _InterlockedExchange(&g_breaking, 0);
             }
             if (!block->Broken)

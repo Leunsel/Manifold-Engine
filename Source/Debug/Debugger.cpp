@@ -791,26 +791,74 @@ namespace Manifold::Debug
         return ids;
     }
 
-    Status Debugger::SetBreakpoint(std::uint64_t address, BreakpointType type, int size, bool hardware)
+    Status Debugger::SetBreakpoint(std::uint64_t address, BreakpointType type, int size, bool hardware, BreakAction action)
     {
-        if (m_backend == Backend::Veh)
+        if (type != BreakpointType::Execute)
         {
-            if (type != BreakpointType::Execute)
-                return Status::Fail(ErrorCode::DebugBreakpointFailed,
-                    "the in-process debugger breaks on code only; use find out what writes or accesses for data");
-            return VehSetBreakpoint(address);
+            if (size != 1 && size != 2 && size != 4 && size != 8)
+                size = size > 4 ? 8 : size > 2 ? 4 : size > 1 ? 2 : 1;
+            if (!m_is64Bit && size == 8)
+                size = 4;
+            if (address % static_cast<std::uint64_t>(size) != 0)
+                return Status::Fail(ErrorCode::DebugBadSize, std::to_string(size) + " at " + Hex(address));
         }
+        else
+        {
+            size = 1;
+        }
+        if (m_backend == Backend::Veh)
+            return VehSetBreakpoint(address, type, size, action);
         if (type != BreakpointType::Execute)
             hardware = true;
-        return Post([=, this]() -> Status
+        return Post([this, address, type, size, hardware, action]() -> Status
             {
                 Breakpoint breakpoint;
                 breakpoint.Address = address;
                 breakpoint.Type = type;
                 breakpoint.Size = size;
                 breakpoint.Hardware = hardware || (m_preferHardware && TakeSlot() >= 0);
+                breakpoint.Action = action;
                 return AddBreakpointInternal(breakpoint);
             });
+    }
+
+    Status Debugger::SetBreakpointAction(std::uint64_t address, BreakAction action)
+    {
+        if (m_backend == Backend::Veh)
+        {
+            std::lock_guard lock(m_lock);
+            auto found = m_breakpoints.find(address);
+            if (found == m_breakpoints.end() || found->second.WatchId || found->second.Temporary)
+                return Status::Fail(ErrorCode::DebugBreakpointFailed, Hex(address) + " has no breakpoint");
+            found->second.Action = action;
+            VehWriteAction(found->second.Slot, &found->second.Action, 0, true);
+            ++m_generation;
+            return Status::Success();
+        }
+        return Post([this, address, action]() -> Status
+            {
+                auto found = m_breakpoints.find(address);
+                if (found == m_breakpoints.end() || found->second.WatchId || found->second.Temporary)
+                    return Status::Fail(ErrorCode::DebugBreakpointFailed, Hex(address) + " has no breakpoint");
+                found->second.Action = action;
+                ++m_generation;
+                return Status::Success();
+            });
+    }
+
+    Debugger::HitOutcome Debugger::RunBreakAction(Breakpoint& breakpoint, Disasm::RegisterValues& registers, std::uint32_t threadId, bool& changed)
+    {
+        changed = false;
+        if (breakpoint.Action.Plain())
+        {
+            ++breakpoint.Hits;
+            return HitOutcome::Stop;
+        }
+        if (!ConditionHolds(breakpoint.Action, registers, threadId, *m_process))
+            return HitOutcome::Skip;
+        ++breakpoint.Hits;
+        changed = ApplyChanges(breakpoint.Action, registers, threadId, *m_process);
+        return breakpoint.Action.Break ? HitOutcome::Stop : HitOutcome::Run;
     }
 
     Status Debugger::RemoveBreakpoint(std::uint64_t address)
@@ -1094,13 +1142,31 @@ namespace Manifold::Debug
                 }
                 if (breakpoint.Temporary)
                 {
+                    if (breakpoint.OwnerThread && breakpoint.OwnerThread != event.dwThreadId)
+                    {
+                        thread.Reinsert = at;
+                        context.SetFlags(context.Flags() | kTrapFlag);
+                        context.Write();
+                        return DBG_CONTINUE;
+                    }
                     m_breakpoints.erase(found);
                     context.Write();
                     enterBreak = true;
                     reason = "Stepped over";
                     return DBG_CONTINUE;
                 }
+                Disasm::RegisterValues values = context.Values();
+                bool changed = false;
+                const HitOutcome outcome = RunBreakAction(breakpoint, values, event.dwThreadId, changed);
+                if (changed)
+                    context.Apply(values);
                 thread.Reinsert = at;
+                if (outcome != HitOutcome::Stop)
+                {
+                    context.SetFlags(context.Flags() | kTrapFlag);
+                    context.Write();
+                    return DBG_CONTINUE;
+                }
                 context.Write();
                 enterBreak = true;
                 reason = "Breakpoint";
@@ -1158,7 +1224,7 @@ namespace Manifold::Debug
                 auto found = std::find_if(m_breakpoints.begin(), m_breakpoints.end(), [&](const auto& item) { return item.second.Hardware && item.second.Slot == slot; });
                 if (found == m_breakpoints.end())
                     continue;
-                const Breakpoint& breakpoint = found->second;
+                Breakpoint& breakpoint = found->second;
                 const Disasm::RegisterValues values = context.Values();
                 if (breakpoint.Type == BreakpointType::Execute)
                 {
@@ -1187,10 +1253,21 @@ namespace Manifold::Debug
                     }
                     else
                     {
-                        enterBreak = true;
-                        reason = "Hardware breakpoint";
-                        breakpointAddress = breakpoint.Address;
-                        thread.ResumeFlag = true;
+                        Disasm::RegisterValues current = values;
+                        bool changed = false;
+                        const HitOutcome outcome = RunBreakAction(breakpoint, current, event.dwThreadId, changed);
+                        if (changed)
+                        {
+                            context.Apply(current);
+                            context.SetFlags(context.Flags() | kResumeFlag);
+                        }
+                        if (outcome == HitOutcome::Stop && !enterBreak)
+                        {
+                            enterBreak = true;
+                            reason = "Hardware breakpoint";
+                            breakpointAddress = breakpoint.Address;
+                            thread.ResumeFlag = true;
+                        }
                     }
                 }
                 else
@@ -1204,9 +1281,20 @@ namespace Manifold::Debug
                     }
                     else
                     {
-                        enterBreak = true;
-                        reason = std::string(BreakpointTypeName(breakpoint.Type)) + " breakpoint on " + Hex(breakpoint.Address);
-                        breakpointAddress = breakpoint.Address;
+                        Disasm::RegisterValues current = values;
+                        bool changed = false;
+                        const HitOutcome outcome = RunBreakAction(breakpoint, current, event.dwThreadId, changed);
+                        if (changed)
+                        {
+                            context.Apply(current);
+                            write = true;
+                        }
+                        if (outcome == HitOutcome::Stop && !enterBreak)
+                        {
+                            enterBreak = true;
+                            reason = std::string(BreakpointTypeName(breakpoint.Type)) + " breakpoint on " + Hex(breakpoint.Address);
+                            breakpointAddress = breakpoint.Address;
+                        }
                     }
                 }
             }
@@ -1418,6 +1506,7 @@ namespace Manifold::Debug
                                 Breakpoint temporary;
                                 temporary.Address = current.Next();
                                 temporary.Temporary = true;
+                                temporary.OwnerThread = thread.Id;
                                 if (!m_breakpoints.count(temporary.Address) && InsertSoftware(temporary))
                                     m_breakpoints[temporary.Address] = temporary;
                                 else
@@ -1533,30 +1622,72 @@ namespace Manifold::Debug
         shared->Size = static_cast<std::uint32_t>(size);
         shared->Slot = static_cast<std::uint32_t>(slot);
         const std::uint64_t slotAddress = m_vehBlock + offsetof(Veh::Block, Watches) + static_cast<std::uint64_t>(slot) * sizeof(Veh::Watch);
-        m_process->Write(slotAddress, shared.get(), sizeof(Veh::Watch));
+        m_process->Write(slotAddress, shared.get(), offsetof(Veh::Watch, Entries));
         VehBump();
     }
 
-    Status Debugger::VehSetBreakpoint(std::uint64_t address)
+    void Debugger::VehWriteAction(int slot, const BreakAction* action, std::uint32_t threadId, bool keepCounts)
+    {
+        if (!m_vehBlock || !m_process || slot < 0 || slot >= Veh::kMaxWatches)
+            return;
+        auto shared = std::make_unique<Veh::Action>();
+        std::memset(shared.get(), 0, sizeof(Veh::Action));
+        shared->Break = action ? (action->Break ? 1u : 0u) : 1u;
+        shared->ThreadId = threadId ? threadId : (action ? action->ThreadId : 0u);
+        if (action)
+        {
+            const std::size_t length = std::min<std::size_t>(action->ConditionCode.size(), static_cast<std::size_t>(Program::kMaxCode));
+            std::memcpy(shared->Condition, action->ConditionCode.data(), length);
+            shared->ConditionLength = static_cast<std::uint32_t>(length);
+            const std::size_t count = std::min<std::size_t>(action->ChangeCode.size(), static_cast<std::size_t>(Program::kMaxChanges));
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                const RegisterChange& change = action->ChangeCode[i];
+                Program::Change& out = shared->Changes[i];
+                out.Target = change.Target;
+                out.Part = change.Part;
+                const std::size_t codeLength = std::min<std::size_t>(change.Code.size(), static_cast<std::size_t>(Program::kMaxCode));
+                out.Length = static_cast<std::uint8_t>(codeLength);
+                std::memcpy(out.Code, change.Code.data(), codeLength);
+            }
+            shared->ChangeCount = static_cast<std::uint32_t>(count);
+        }
+        const std::uint64_t actionAddress = m_vehBlock + offsetof(Veh::Block, Actions) + static_cast<std::uint64_t>(slot) * sizeof(Veh::Action);
+        if (!keepCounts)
+        {
+            m_process->Write(actionAddress, shared.get(), sizeof(Veh::Action));
+            return;
+        }
+        const auto* bytes = reinterpret_cast<const std::uint8_t*>(shared.get());
+        m_process->Write(actionAddress, bytes, offsetof(Veh::Action, Hits));
+        m_process->Write(actionAddress + offsetof(Veh::Action, Condition), bytes + offsetof(Veh::Action, Condition), sizeof(Veh::Action) - offsetof(Veh::Action, Condition));
+    }
+
+    Status Debugger::VehSetBreakpoint(std::uint64_t address, BreakpointType type, int size, const BreakAction& action)
     {
         std::lock_guard lock(m_lock);
         if (!m_attached || !m_vehBlock)
             return Status::Fail(ErrorCode::DebugNotAttached);
         if (m_breakpoints.count(address))
-            return Status::Success();
+            return Status::Fail(ErrorCode::DebugBreakpointFailed, Hex(address) + " has a breakpoint already");
         const int slot = VehFreeSlot();
         if (slot < 0)
             return Status::Fail(ErrorCode::DebugNoFreeSlot);
-        VehWriteSlot(slot, Veh::ModeBreak, address, 1, true);
+        const std::uint32_t mode = type == BreakpointType::Write ? Veh::ModeBreakWrite : type == BreakpointType::Access ? Veh::ModeBreakAccess : Veh::ModeBreak;
         Breakpoint breakpoint;
         breakpoint.Address = address;
-        breakpoint.Type = BreakpointType::Execute;
+        breakpoint.Type = type;
+        breakpoint.Size = size;
         breakpoint.Hardware = true;
         breakpoint.Slot = slot;
         breakpoint.Inserted = false;
+        breakpoint.Action = action;
+        VehWriteAction(slot, &breakpoint.Action, 0, false);
+        VehWriteSlot(slot, mode, address, size, true);
         m_breakpoints[address] = breakpoint;
         ++m_generation;
-        LOG_INFO("Debugger", "Breakpoint at " + Hex(address) + " (in-process, debug register " + std::to_string(slot) + ")");
+        LOG_INFO("Debugger", std::string(type == BreakpointType::Execute ? "Breakpoint" : std::string(BreakpointTypeName(type)) + " breakpoint") + " at " + Hex(address) +
+            " (in-process, debug register " + std::to_string(slot) + ")");
         return Status::Success();
     }
 
@@ -1644,6 +1775,7 @@ namespace Manifold::Debug
                 if (slot < 0)
                     break;
                 m_vehTempSlots.push_back(slot);
+                VehWriteAction(slot, nullptr, m_break.ThreadId, false);
                 VehWriteSlot(slot, Veh::ModeBreak, target, 1, true);
             }
             if (m_vehTempSlots.empty())
@@ -1652,6 +1784,7 @@ namespace Manifold::Debug
                 if (slot >= 0)
                 {
                     m_vehTempSlots.push_back(slot);
+                    VehWriteAction(slot, nullptr, m_break.ThreadId, false);
                     VehWriteSlot(slot, Veh::ModeBreak, current.Next(), 1, true);
                 }
             }
@@ -1686,13 +1819,32 @@ namespace Manifold::Debug
     {
         if (!m_vehBlock || !m_process)
             return;
-        struct { std::uint32_t Broken, ResumeCmd, BrokenThread, RegsDirty, BreakNow, Pad3; std::uint64_t BreakSerial, BreakAddress; Veh::Registers Regs; } head{};
+        struct { std::uint32_t Broken, ResumeCmd, BrokenThread, RegsDirty, BreakNow, BreakSlot; std::uint64_t BreakSerial, BreakAddress; Veh::Registers Regs; } head{};
         if (!m_process->ReadExact(m_vehBlock + offsetof(Veh::Block, Broken), &head, sizeof(head)))
             return;
         std::lock_guard lock(m_lock);
         if (head.Broken && head.BreakSerial != m_vehBreakSerial)
         {
             m_vehBreakSerial = head.BreakSerial;
+            std::string reason = "Breakpoint";
+            std::uint64_t breakpointAddress = head.BreakAddress;
+            const int breakSlot = static_cast<int>(head.BreakSlot);
+            if (head.BreakSlot == 0xFFFFFFFFu)
+                reason = "Break";
+            else if (std::find(m_vehTempSlots.begin(), m_vehTempSlots.end(), breakSlot) != m_vehTempSlots.end())
+                reason = "Step";
+            else
+            {
+                for (const auto& [address, breakpoint] : m_breakpoints)
+                {
+                    if (breakpoint.Slot != breakSlot || breakpoint.WatchId)
+                        continue;
+                    breakpointAddress = breakpoint.Address;
+                    if (breakpoint.Type != BreakpointType::Execute)
+                        reason = std::string(BreakpointTypeName(breakpoint.Type)) + " breakpoint on " + Hex(breakpoint.Address);
+                    break;
+                }
+            }
             VehClearTempSlots();
             Disasm::RegisterValues regs;
             regs.Rax = head.Regs.Rax; regs.Rbx = head.Regs.Rbx; regs.Rcx = head.Regs.Rcx; regs.Rdx = head.Regs.Rdx;
@@ -1713,9 +1865,9 @@ namespace Manifold::Debug
             m_break.Broken = true;
             m_break.ThreadId = head.BrokenThread;
             m_break.Address = head.BreakAddress;
-            m_break.BreakpointAddress = head.BreakAddress;
+            m_break.BreakpointAddress = breakpointAddress;
             m_break.Registers = regs;
-            m_break.Reason = "Breakpoint";
+            m_break.Reason = reason;
             m_break.Serial = ++m_breakSerial;
             m_break.Is64Bit = m_is64Bit;
             ++m_generation;
@@ -1749,6 +1901,7 @@ namespace Manifold::Debug
             m_process->Free(block);
             return written;
         }
+        const bool loadedBefore = m_process->FindModule("ManifoldAgent.dll").has_value();
         if (Status injected = m_process->InjectLibrary(agent); !injected)
         {
             m_process->Free(block);
@@ -1778,6 +1931,8 @@ namespace Manifold::Debug
             std::uint32_t lastError = 0;
             m_process->ReadExact(block + offsetof(Veh::Block, LastError), &lastError, sizeof(lastError));
             m_process->Free(block);
+            if (loadedBefore && !lastError)
+                return Status::Fail(ErrorCode::DebugAgentVersion);
             return Status::Fail(ErrorCode::InjectFailed, "the agent did not start" + (lastError ? " (" + ErrorText(lastError) + ")" : std::string()));
         }
         {
@@ -1926,6 +2081,26 @@ namespace Manifold::Debug
                 continue;
             }
             VehCheckBreak();
+            std::vector<std::pair<std::uint64_t, int>> counted;
+            {
+                std::lock_guard lock(m_lock);
+                for (const auto& [address, breakpoint] : m_breakpoints)
+                {
+                    if (!breakpoint.WatchId && breakpoint.Slot >= 0 && breakpoint.Slot < Veh::kMaxWatches)
+                        counted.emplace_back(address, breakpoint.Slot);
+                }
+            }
+            for (const auto& [address, slot] : counted)
+            {
+                std::uint64_t hits = 0;
+                const std::uint64_t actionAddress = m_vehBlock + offsetof(Veh::Block, Actions) + static_cast<std::uint64_t>(slot) * sizeof(Veh::Action);
+                if (!m_process->ReadExact(actionAddress + offsetof(Veh::Action, Hits), &hits, sizeof(hits)))
+                    continue;
+                std::lock_guard lock(m_lock);
+                auto found = m_breakpoints.find(address);
+                if (found != m_breakpoints.end() && found->second.Slot == slot)
+                    found->second.Hits = hits;
+            }
             std::vector<Target> targets;
             {
                 std::lock_guard lock(m_lock);

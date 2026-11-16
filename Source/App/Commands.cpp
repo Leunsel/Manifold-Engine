@@ -112,6 +112,10 @@ namespace Manifold
             { DebugBreak, "DebugBreak", Scope::MemoryViewer, "Break into the process", ImGuiKey_F12, 0, Own },
             { ToggleBreakpoint, "ToggleBreakpoint", Scope::MemoryViewer, "Toggle a breakpoint on the selected instruction", ImGuiKey_F5, 0, CE },
             { SetInstructionPointer, "SetInstructionPointer", Scope::MemoryViewer, "Set the instruction pointer to the selected instruction", Ctrl | ImGuiKey_F4, 0, CE },
+            { BreakpointList, "BreakpointList", Scope::MemoryViewer, "Breakpoint list", Ctrl | Alt | ImGuiKey_B, 0, Own },
+            { EditBreakpoint, "EditBreakpoint", Scope::MemoryViewer, "Set a breakpoint with a condition or register changes", Shift | ImGuiKey_F5, 0, Own },
+            { BreakAndTrace, "BreakAndTrace", Scope::MemoryViewer, "Break and trace from the selected instruction", Ctrl | ImGuiKey_T, 0, Own },
+            { ThreadList, "ThreadList", Scope::MemoryViewer, "Thread list", Ctrl | Shift | ImGuiKey_T, 0, Own },
 
             { FollowInstruction, "FollowInstruction", Scope::Disassembler, "Follow the jump or call", ImGuiKey_Space, 0, CE },
             { NavigateBack, "NavigateBack", Scope::Disassembler, "Back", ImGuiKey_Backspace, 0, CE },
@@ -124,6 +128,7 @@ namespace Manifold
             { AddInstructionToList, "AddInstructionToList", Scope::Disassembler, "Add this address to the address list", Ctrl | ImGuiKey_KeypadAdd, 0, CE },
             { SetBookmark, "SetBookmark", Scope::Disassembler, "Set a bookmark", Ctrl | Alt | ImGuiKey_0, 0, CE, true },
             { GotoBookmark, "GotoBookmark", Scope::Disassembler, "Go to a bookmark", Ctrl | ImGuiKey_0, 0, CE, true },
+            { CommentInstruction, "CommentInstruction", Scope::Disassembler, "Add or change the comment", Ctrl | Shift | ImGuiKey_C, 0, Own },
 
             { HexFollow, "HexFollow", Scope::HexView, "Follow the pointer", ImGuiKey_Space, 0, CE },
             { HexBack, "HexBack", Scope::HexView, "Back", ImGuiKey_Backspace, 0, CE },
@@ -132,6 +137,8 @@ namespace Manifold
             { HexPaste, "HexPaste", Scope::HexView, "Paste bytes", Ctrl | ImGuiKey_P, Ctrl | ImGuiKey_V, CE },
             { HexAccesses, "HexAccesses", Scope::HexView, "Find out what accesses this address", ImGuiKey_F5, 0, Own },
             { HexWrites, "HexWrites", Scope::HexView, "Find out what writes to this address", ImGuiKey_F6, 0, Own },
+            { HexBreakOnWrite, "HexBreakOnWrite", Scope::HexView, "Break when this address is written", Ctrl | Shift | ImGuiKey_F6, 0, Own },
+            { HexBreakOnAccess, "HexBreakOnAccess", Scope::HexView, "Break when this address is read or written", Ctrl | Shift | ImGuiKey_F5, 0, Own },
             { HexAddToList, "HexAddToList", Scope::HexView, "Add this address to the address list", Ctrl | ImGuiKey_KeypadAdd, 0, CE },
             { HexBytes, "HexBytes", Scope::HexView, "Show bytes", Ctrl | ImGuiKey_1, 0, CE },
             { HexTwoBytes, "HexTwoBytes", Scope::HexView, "Show 2 bytes (hex)", Ctrl | ImGuiKey_3, 0, CE },

@@ -16,7 +16,7 @@ namespace Manifold::Table
     {
         constexpr const char* kScriptType = "Auto Assembler Script";
         constexpr std::string_view kBase85 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%()*+,-./:;=?@[]^_{}";
-        constexpr const char* kKnownTopLevel[] = { "CheatEntries", "UserdefinedSymbols", "Structures", "LuaScript", "Comments", "Files", "Signature", "CheatCodes" };
+        constexpr const char* kKnownTopLevel[] = { "CheatEntries", "UserdefinedSymbols", "Structures", "LuaScript", "Comments", "Files", "Signature", "CheatCodes", "DisassemblerComments" };
 
         struct OptionName
         {
@@ -429,6 +429,19 @@ namespace Manifold::Table
                 table.Files.push_back(std::move(entry));
             }
         }
+        if (const Xml::Node* comments = root.Child("DisassemblerComments"))
+        {
+            for (const Xml::Node* entry : comments->ChildrenNamed("Comment"))
+            {
+                const std::string address = entry->Attribute("Address").value_or("");
+                if (address.empty())
+                    continue;
+                AddressList::DisasmNote note;
+                note.Comment = entry->Text;
+                note.Header = entry->Attribute("Header").value_or("");
+                table.DisasmNotes[address] = std::move(note);
+            }
+        }
         for (const auto& child : root.Children)
         {
             const bool known = std::any_of(std::begin(kKnownTopLevel), std::end(kKnownTopLevel), [&](const char* name) { return child->Name == name; });
@@ -517,6 +530,19 @@ namespace Manifold::Table
             Xml::ParseResult parsed = Xml::Parse(extra);
             if (parsed.Root)
                 root.Children.push_back(std::move(parsed.Root));
+        }
+        if (!list.DisasmNotes.empty())
+        {
+            Xml::Node& node = root.Add("DisassemblerComments");
+            for (const auto& [address, note] : list.DisasmNotes)
+            {
+                if (note.Comment.empty() && note.Header.empty())
+                    continue;
+                Xml::Node& entry = node.Add("Comment", note.Comment);
+                entry.SetAttribute("Address", address);
+                if (!note.Header.empty())
+                    entry.SetAttribute("Header", note.Header);
+            }
         }
         if (!list.TableLuaScript.empty())
             root.Add("LuaScript", list.TableLuaScript);

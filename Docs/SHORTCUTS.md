@@ -125,6 +125,10 @@ While a memory viewer window has the focus.
 | `F12` | Break into the process | `DebugBreak` | Manifold |
 | `F5` | Toggle a breakpoint on the selected instruction | `ToggleBreakpoint` | CE |
 | `Ctrl+F4` | Set the instruction pointer to the selected instruction | `SetInstructionPointer` | CE |
+| `Ctrl+Alt+B` | Breakpoint list | `BreakpointList` | Manifold |
+| `Shift+F5` | Set a breakpoint with a condition or register changes | `EditBreakpoint` | Manifold |
+| `Ctrl+T` | Break and trace from the selected instruction | `BreakAndTrace` | Manifold |
+| `Ctrl+Shift+T` | Thread list | `ThreadList` | Manifold |
 
 ## Memory viewer: disassembler
 
@@ -143,6 +147,7 @@ While the disassembler pane has the focus. The keys act on the selected instruct
 | `Ctrl+Num +` | Add this address to the address list | `AddInstructionToList` | CE |
 | `Ctrl+Alt+0-9` | Set a bookmark | `SetBookmark` | CE |
 | `Ctrl+0-9` | Go to a bookmark | `GotoBookmark` | CE |
+| `Ctrl+Shift+C` | Add or change the comment | `CommentInstruction` | Manifold |
 
 ## Memory viewer: hex view
 
@@ -157,6 +162,8 @@ While the hex view pane has the focus. The keys act on the selected byte.
 | `Ctrl+P` or `Ctrl+V` | Paste bytes | `HexPaste` | CE |
 | `F5` | Find out what accesses this address | `HexAccesses` | Manifold |
 | `F6` | Find out what writes to this address | `HexWrites` | Manifold |
+| `Ctrl+Shift+F6` | Break when this address is written | `HexBreakOnWrite` | Manifold |
+| `Ctrl+Shift+F5` | Break when this address is read or written | `HexBreakOnAccess` | Manifold |
 | `Ctrl+Num +` | Add this address to the address list | `HexAddToList` | CE |
 | `Ctrl+1` | Show bytes | `HexBytes` | CE |
 | `Ctrl+3` | Show 2 bytes (hex) | `HexTwoBytes` | CE |

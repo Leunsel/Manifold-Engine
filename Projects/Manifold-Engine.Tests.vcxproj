@@ -115,7 +115,9 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Core\RuntimeLog.cpp" />
     <ClCompile Include="..\Source\Core\Text.cpp" />
     <ClCompile Include="..\Source\Core\Xml.cpp" />
+    <ClCompile Include="..\Source\Debug\BreakAction.cpp" />
     <ClCompile Include="..\Source\Debug\Debugger.cpp" />
+    <ClCompile Include="..\Source\Debug\Trace.cpp" />
     <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp" />
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
@@ -152,6 +154,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Tests\CompatHarness.cpp" />
     <ClCompile Include="..\Tests\CompatTests.cpp" />
     <ClCompile Include="..\Tests\CoreTests.cpp" />
+    <ClCompile Include="..\Tests\DebuggerTests.cpp" />
     <ClCompile Include="..\Tests\IntegrationTests.cpp" />
     <ClCompile Include="..\Tests\Main.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />

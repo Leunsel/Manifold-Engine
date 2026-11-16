@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -169,6 +170,13 @@ namespace Manifold::Table
         bool Selected(int id) const;
         void Select(int id, bool add);
         void ClearSelection() { m_selection.clear(); }
+
+        struct DisasmNote
+        {
+            std::string Comment;
+            std::string Header;
+        };
+        std::map<std::string, DisasmNote> DisasmNotes;
 
         std::string TableLuaScript;
         std::string TableComment;

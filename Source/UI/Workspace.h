@@ -64,6 +64,9 @@ namespace Manifold::UI
     class ShortcutsWindow;
     class TemplateManager;
     class ScriptForms;
+    class BreakpointWindow;
+    class ThreadListWindow;
+    class TraceWindow;
 
     struct FileFilter
     {
@@ -108,6 +111,10 @@ namespace Manifold::UI
         void OpenLastProcess();
         bool CanOpenLastProcess();
         void StartWatch(Debug::WatchKind kind, std::uint64_t address, int size);
+        void OpenBreakpoints();
+        void OpenBreakpointEditor(std::uint64_t address, Debug::BreakpointType type, int size);
+        void OpenThreadList();
+        void OpenTrace(std::uint64_t address);
         void AddAddress(std::uint64_t address, Scan::ValueType type, std::string description = {});
         void Confirm(std::string title, std::string text, std::function<void()> yes, std::string yesLabel = "Yes");
         void Report(const Status& status);
@@ -165,6 +172,10 @@ namespace Manifold::UI
         std::unique_ptr<ShortcutsWindow> m_shortcuts;
         std::unique_ptr<TemplateManager> m_templateManager;
         std::unique_ptr<ScriptForms> m_scriptForms;
+        std::unique_ptr<BreakpointWindow> m_breakpoints;
+        std::unique_ptr<ThreadListWindow> m_threadList;
+        std::vector<std::unique_ptr<TraceWindow>> m_traces;
+        int m_nextTrace = 1;
         MemoryViewer& ActiveMemoryViewer();
         int m_nextWindow = 1;
 

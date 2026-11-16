@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Errors.h"
+#include "Debug/BreakAction.h"
 #include "Disasm/Disassembler.h"
 
 #include <array>
@@ -73,6 +74,9 @@ namespace Manifold::Debug
         int WatchId = 0;
         std::uint8_t Original = 0;
         bool Inserted = false;
+        std::uint32_t OwnerThread = 0;
+        BreakAction Action;
+        std::uint64_t Hits = 0;
     };
 
     enum class ResumeMode
@@ -142,7 +146,8 @@ namespace Manifold::Debug
         bool CopyWatch(int id, Watch& out) const;
         std::vector<int> WatchIds() const;
 
-        Status SetBreakpoint(std::uint64_t address, BreakpointType type, int size, bool hardware);
+        Status SetBreakpoint(std::uint64_t address, BreakpointType type, int size, bool hardware, BreakAction action = {});
+        Status SetBreakpointAction(std::uint64_t address, BreakAction action);
         Status RemoveBreakpoint(std::uint64_t address);
         Status ToggleBreakpoint(std::uint64_t address);
         bool HasBreakpoint(std::uint64_t address) const;
@@ -193,7 +198,15 @@ namespace Manifold::Debug
         void VehBump();
         void VehPollLoop();
         int VehFreeSlot() const;
-        Status VehSetBreakpoint(std::uint64_t address);
+        Status VehSetBreakpoint(std::uint64_t address, BreakpointType type, int size, const BreakAction& action);
+        void VehWriteAction(int slot, const BreakAction* action, std::uint32_t threadId, bool keepCounts);
+        enum class HitOutcome
+        {
+            Skip,
+            Run,
+            Stop
+        };
+        HitOutcome RunBreakAction(Breakpoint& breakpoint, Disasm::RegisterValues& registers, std::uint32_t threadId, bool& changed);
         void VehRemoveBreakpoint(std::uint64_t address);
         void VehResume(ResumeMode mode);
         void VehSetRegisters(const Disasm::RegisterValues& registers);

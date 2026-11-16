@@ -117,6 +117,10 @@ namespace Manifold
         DebugBreak,
         ToggleBreakpoint,
         SetInstructionPointer,
+        BreakpointList,
+        EditBreakpoint,
+        BreakAndTrace,
+        ThreadList,
 
         FollowInstruction,
         NavigateBack,
@@ -129,6 +133,7 @@ namespace Manifold
         AddInstructionToList,
         SetBookmark,
         GotoBookmark,
+        CommentInstruction,
 
         HexFollow,
         HexBack,
@@ -137,6 +142,8 @@ namespace Manifold
         HexPaste,
         HexAccesses,
         HexWrites,
+        HexBreakOnWrite,
+        HexBreakOnAccess,
         HexAddToList,
         HexBytes,
         HexTwoBytes,

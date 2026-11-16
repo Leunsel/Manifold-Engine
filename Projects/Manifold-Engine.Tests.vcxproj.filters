@@ -78,7 +78,13 @@
     <ClCompile Include="..\Source\Core\Xml.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Debug\BreakAction.cpp">
+      <Filter>Source\Debug</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Debug\Debugger.cpp">
+      <Filter>Source\Debug</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Debug\Trace.cpp">
       <Filter>Source\Debug</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp">
@@ -181,6 +187,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\CoreTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\DebuggerTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\IntegrationTests.cpp">

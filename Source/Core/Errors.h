@@ -63,6 +63,9 @@
     X(DebugNotAttached, 4007) \
     X(DebugBadSize, 4008) \
     X(DebugTargetExited, 4009) \
+    X(DebugBadExpression, 4010) \
+    X(DebugAgentVersion, 4011) \
+    X(DebugTraceFailed, 4012) \
     X(WindowClassFailed, 5001) \
     X(WindowFailed, 5002) \
     X(DeviceFailed, 5003) \

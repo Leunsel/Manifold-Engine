@@ -1,11 +1,13 @@
 #pragma once
 
+#include "Debug/BreakProgram.h"
+
 #include <cstdint>
 
 namespace Manifold::Debug::Veh
 {
     constexpr std::uint32_t kMagic = 0x56454830u;
-    constexpr std::uint32_t kVersion = 1;
+    constexpr std::uint32_t kVersion = 2;
     constexpr int kMaxWatches = 4;
     constexpr int kMaxEntries = 256;
 
@@ -53,7 +55,21 @@ namespace Manifold::Debug::Veh
         ModeWrite = 1,
         ModeInstruction = 2,
         ModeCalls = 3,
-        ModeBreak = 4
+        ModeBreak = 4,
+        ModeBreakWrite = 5,
+        ModeBreakAccess = 6
+    };
+
+    struct Action
+    {
+        std::uint32_t Break;
+        std::uint32_t ThreadId;
+        std::uint32_t ConditionLength;
+        std::uint32_t ChangeCount;
+        volatile std::uint64_t Hits;
+        volatile std::uint64_t Seen;
+        std::uint8_t Condition[Program::kMaxCode];
+        Program::Change Changes[Program::kMaxChanges];
     };
 
     enum Resume : std::uint32_t
@@ -81,7 +97,7 @@ namespace Manifold::Debug::Veh
         volatile std::uint32_t BrokenThread;
         volatile std::uint32_t RegsDirty;
         volatile std::uint32_t BreakNow;
-        volatile std::uint32_t Pad3;
+        volatile std::uint32_t BreakSlot;
         volatile std::uint64_t BreakSerial;
         volatile std::uint64_t BreakAddress;
         Registers BreakRegs;
@@ -91,5 +107,6 @@ namespace Manifold::Debug::Veh
         Vectors NewXmm;
         volatile std::uint32_t XmmDirty;
         std::uint32_t Pad4;
+        Action Actions[kMaxWatches];
     };
 }

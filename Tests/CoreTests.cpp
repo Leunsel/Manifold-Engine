@@ -4,6 +4,7 @@
 #include "Core/Errors.h"
 #include "Core/Text.h"
 #include "Core/Xml.h"
+#include "Debug/BreakAction.h"
 #include "Disasm/AssemblySearch.h"
 #include "Disasm/Disassembler.h"
 #include "Scan/Scanner.h"
@@ -140,6 +141,8 @@ namespace Manifold::Tests
             name.DropDownLink = "Player";
             list.AddScript("God mode", "[ENABLE]\nnop\n[DISABLE]\n// <restore & end>\n");
             list.TableLuaScript = "print('hi')";
+            list.DisasmNotes["game.exe+1234"] = { "the damage subtraction", "" };
+            list.DisasmNotes["game.exe+20A0"] = { "", "Combat" };
             Table::StructureStore structures;
             Table::StructDefinition& definition = structures.Add("Player");
             definition.Fields.push_back({ 0x10, "Health", Scan::ValueType::FourBytes, 4, Table::FieldDisplay::Signed, false, "" });
@@ -190,6 +193,9 @@ namespace Manifold::Tests
                 CHECK(high.Type == Scan::ValueType::Binary && high.BitStart == 5 && high.BitLength == 6 && high.Size == 2 && high.Display == Table::FieldDisplay::Binary);
                 CHECK(loaded.Structures[0]->Fields[0].Name == "Health" && high.Name == "Flags");
             }
+            CHECK_EQ(loaded.DisasmNotes.size(), 2u);
+            CHECK(loaded.DisasmNotes.count("game.exe+1234") && loaded.DisasmNotes["game.exe+1234"].Comment == "the damage subtraction");
+            CHECK(loaded.DisasmNotes.count("game.exe+20A0") && loaded.DisasmNotes["game.exe+20A0"].Header == "Combat");
 
             const char* cheatEngine = R"(<?xml version="1.0" encoding="utf-8"?>
 <CheatTable CheatEngineTableVersion="45">
@@ -454,6 +460,130 @@ data:
         }
     }
 
+    namespace
+    {
+        struct FakeMemory
+        {
+            std::uint8_t Bytes[16] = {};
+            bool operator()(std::uint64_t address, void* out, std::uint32_t size) const
+            {
+                if (address < 0x5000 || address + size > 0x5000 + sizeof(Bytes))
+                    return false;
+                std::memcpy(out, Bytes + (address - 0x5000), size);
+                return true;
+            }
+        };
+
+        void BreakExpressions()
+        {
+            using namespace Debug;
+            const SymbolResolver resolve = [](std::string_view name) -> std::optional<std::uint64_t>
+                {
+                    if (EqualsNoCase(name, "game.exe+10"))
+                        return 0x140000010ull;
+                    if (EqualsNoCase(name, "player"))
+                        return 0x5000ull;
+                    return std::nullopt;
+                };
+            std::uint64_t registers[Program::kRegisterCount] = {};
+            registers[0] = 0x1122334455667788ull;
+            registers[1] = 5;
+            registers[2] = 0x5000;
+            registers[Program::kRip] = 0x140000010ull;
+            registers[Program::kFlags] = 0x246;
+            FakeMemory memory;
+            const std::int32_t health = 100;
+            const float speed = 2.5f;
+            std::memcpy(memory.Bytes, &health, 4);
+            std::memcpy(memory.Bytes + 4, &speed, 4);
+            const auto eval = [&](std::string_view text, bool is64Bit = true) -> std::optional<Program::Value>
+                {
+                    std::vector<std::uint8_t> code;
+                    if (!CompileExpression(text, is64Bit, resolve, code))
+                        return std::nullopt;
+                    Program::Value value;
+                    if (!Program::Run(code.data(), static_cast<std::uint32_t>(code.size()), registers, 77, memory, value))
+                        return std::nullopt;
+                    return value;
+                };
+            const auto truth = [&](std::string_view text)
+                {
+                    const auto value = eval(text);
+                    return value && Program::Truthy(*value);
+                };
+            CHECK(truth("EAX == 0x55667788"));
+            CHECK(truth("AL == 0x88 and AH == 0x77"));
+            CHECK(truth("AX = 30600"));
+            CHECK(truth("readInteger(RCX) == 100"));
+            CHECK(truth("readFloat(RCX+4) > 2 && readFloat(RCX+4) < 3"));
+            CHECK(truth("[RCX] ~= 0"));
+            CHECK(truth("ZF and not CF"));
+            CHECK(truth("!(SF or OF)"));
+            CHECK(truth("THREADID == 77"));
+            CHECK(truth("RCX == player"));
+            CHECK(truth("RIP == \"game.exe+10\""));
+            CHECK(truth("readInteger(RCX, true) - 101 < 0"));
+            CHECK(!truth("readInteger(RCX+0x100) == 0"));
+            CHECK(!truth("readInteger(RCX) == 101"));
+            const auto integer = [&](std::string_view text) { const auto value = eval(text); return value && !value->IsFloat ? value->Int : -999999; };
+            CHECK_EQ(integer("7 // 2"), 3);
+            CHECK_EQ(integer("-7 // 2"), -4);
+            CHECK_EQ(integer("-7 % 3"), 2);
+            CHECK_EQ(integer("1 << 4 | 1"), 17);
+            CHECK_EQ(integer("0x10 >> 4"), 1);
+            CHECK_EQ(integer("$FF"), 255);
+            CHECK_EQ(integer("7FF"), 0x7FF);
+            CHECK_EQ(integer("10"), 10);
+            CHECK_EQ(integer("~0 & 0xF"), 15);
+            CHECK_EQ(integer("6 ~ 3"), 5);
+            CHECK_EQ(integer("RBX * 2 + 1"), 11);
+            CHECK_EQ(integer("0x7FFFFFFFFFFFFFFF + 1 < 0"), 1);
+            const auto half = eval("1 / 2");
+            CHECK(half && half->IsFloat && half->Float == 0.5);
+            CHECK(!eval("EAX =="));
+            CHECK(!eval("(EAX"));
+            CHECK(!eval("foo == 1"));
+            CHECK(!eval("readThing(RCX)"));
+            CHECK(!eval("R8 == 1", false));
+            CHECK(eval("EAX == 1", false).has_value());
+            std::vector<std::uint8_t> code;
+            const Status bad = CompileExpression("RAX + ", true, resolve, code);
+            CHECK(!bad && bad.Code == ErrorCode::DebugBadExpression && code.empty());
+
+            std::vector<RegisterChange> changes;
+            const Status compiled = CompileChanges("RAX = RBX; RBX = RAX\nZF = 0 -- clear it\nAL = 0x12; ECX = -1", true, resolve, changes);
+            CHECK_MSG(compiled.Ok(), compiled.Text);
+            CHECK_EQ(changes.size(), static_cast<std::size_t>(5));
+            Program::Change shared[Program::kMaxChanges] = {};
+            for (std::size_t i = 0; i < changes.size() && i < static_cast<std::size_t>(Program::kMaxChanges); ++i)
+            {
+                shared[i].Target = changes[i].Target;
+                shared[i].Part = changes[i].Part;
+                shared[i].Length = static_cast<std::uint8_t>(changes[i].Code.size());
+                std::memcpy(shared[i].Code, changes[i].Code.data(), changes[i].Code.size());
+            }
+            const std::uint64_t oldRax = registers[0];
+            CHECK_EQ(Program::Apply(shared, static_cast<int>(changes.size()), registers, 77, memory), 5);
+            CHECK_EQ(registers[0], 0x12ull);
+            CHECK_EQ(registers[1], oldRax);
+            CHECK_EQ(registers[2], 0xFFFFFFFFull);
+            CHECK_EQ(registers[Program::kFlags] & 0x40, 0ull);
+            CHECK(!CompileChanges("RAX == 1", true, resolve, changes));
+            CHECK(!CompileChanges("XYZ = 1", true, resolve, changes));
+            CHECK(!CompileChanges("R9 = 1", false, resolve, changes));
+
+            BreakAction action;
+            action.Condition = "  ";
+            action.Changes = "";
+            CHECK(CompileAction(action, true, resolve).Ok() && action.Plain());
+            action.Condition = "RAX == 1";
+            action.Changes = "RBX = 2";
+            action.Break = false;
+            CHECK(CompileAction(action, true, resolve).Ok() && !action.Plain());
+            CHECK_EQ(DescribeAction(action), std::string("if RAX == 1  \u00b7  set RBX = 2  \u00b7  keeps running"));
+        }
+    }
+
     int RunCoreTests()
     {
         const int before = Totals().Failures;
@@ -466,6 +596,7 @@ data:
         CodeSearchHelpers();
         ScanKinds();
         Conditions();
+        BreakExpressions();
         return Totals().Failures - before;
     }
 }

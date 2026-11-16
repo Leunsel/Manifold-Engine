@@ -22,6 +22,7 @@ namespace Manifold::Tests
     int RunCompatTests();
     int RunTemplateTests();
     int RunWatchStress(const std::vector<std::string>& arguments);
+    int RunDebuggerCheck(const std::vector<std::string>& arguments);
 
     Counter& Totals()
     {
@@ -41,6 +42,8 @@ int main(int argc, char** argv)
             return Manifold::Tests::RunCompatHarness(arguments);
         if (argument == "--watch-stress")
             return Manifold::Tests::RunWatchStress(arguments);
+        if (argument == "--debugger-check")
+            return Manifold::Tests::RunDebuggerCheck(arguments);
     }
     for (int i = 1; i < argc; ++i)
     {

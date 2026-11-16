@@ -5,6 +5,7 @@
 #include "Core/Errors.h"
 #include "Core/RuntimeLog.h"
 #include "Debug/Debugger.h"
+#include "Debug/Trace.h"
 #include "Disasm/CodeDissect.h"
 #include "Disasm/Disassembler.h"
 #include "Scan/Scanner.h"
@@ -102,6 +103,8 @@ namespace Manifold
         void SetCodeDissect(std::shared_ptr<const Disasm::DissectResult> result) { m_codeDissect = std::move(result); }
         Scan::Scanner& Scanner() { return m_scanner; }
         Debug::Debugger& Debugger() { return m_debugger; }
+        Debug::Tracer& Tracer() { return m_tracer; }
+        bool Tracing() const { return m_tracer.Running(); }
         Status EnsureDebugger();
         Table::AddressList& Table() { return m_table; }
         Table::StructureStore& Structures() { return m_structures; }
@@ -199,6 +202,7 @@ namespace Manifold
         std::unique_ptr<Disasm::Disassembler> m_disassembler32;
         Scan::Scanner m_scanner;
         Debug::Debugger m_debugger;
+        Debug::Tracer m_tracer{ m_debugger };
         Table::AddressList m_table;
         Table::StructureStore m_structures;
         std::unique_ptr<Lua::LuaEngine> m_lua;

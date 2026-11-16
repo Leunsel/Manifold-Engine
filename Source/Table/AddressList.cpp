@@ -238,6 +238,7 @@ namespace Manifold::Table
         FilePath.clear();
         Files.clear();
         ExtraXml.clear();
+        DisasmNotes.clear();
         LoadedVersion = 0;
         m_nextId = 0;
         Touch();

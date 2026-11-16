@@ -78,6 +78,9 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-4007 | The debugger is not attached. | This needs the debugger. | Attach it from the Debug menu, or start a watch: that attaches it. |
 | ME-4008 | A hardware breakpoint cannot watch … bytes. | Debug registers watch 1, 2, 4 or 8 bytes at an address aligned to that size. | Watch fewer bytes, or an aligned address. |
 | ME-4009 | The debugged process ended. | The process closed while the debugger was attached. | Open it again. |
+| ME-4010 | The expression could not be read: …. | Conditions and register changes are small Lua expressions: registers (RAX, EAX, AL, ZF), numbers (decimal, or hex as 0x10, $10 or with letters like 7FF6A000), memory reads (readInteger(RCX+0x10), [RSP+8]), comparisons and and/or/not. | Fix the part the message names. Put module addresses in quotes, as in RIP == "game.exe+1234". |
+| ME-4011 | The in-process debugger in this process is from another version of the program. | The process still has the debugger library of an earlier program version loaded, and the two cannot talk to each other. | Detach the in-process debugger in the old program, or restart the process. |
+| ME-4012 | The trace could not be started: …. | A trace runs from a breakpoint and needs the debugger and a free breakpoint. | Attach the debugger, free a debug register or remove the breakpoint at that address first. |
 
 ## The program
 

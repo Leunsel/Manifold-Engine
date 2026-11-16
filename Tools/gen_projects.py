@@ -365,7 +365,7 @@ def main():
   </ItemDefinitionGroup>
 """ + CLANG_OPTIONS
     agent += items("ClCompile", agent_sources)
-    agent += items("ClInclude", ["Source/Debug/VehProtocol.h"])
+    agent += items("ClInclude", ["Source/Debug/VehProtocol.h", "Source/Debug/BreakProgram.h"])
     agent += tail()
     write("ManifoldAgent.vcxproj", agent)
 
