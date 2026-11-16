@@ -16,6 +16,23 @@ namespace Manifold::Disasm
     namespace
     {
         constexpr std::uint64_t kLookBack = 48;
+        // How far below an address a known instruction start may sit and still
+        // be swept forward from when backing up (a long Mono method or a big
+        // native function fits; beyond that the backward guess takes over).
+        constexpr std::uint64_t kSweepReach = 0x10000;
+
+        void ReadSpan(const Target::Process& process, std::uint64_t address, std::vector<std::uint8_t>& buffer, std::vector<bool>& readable)
+        {
+            readable.assign(buffer.size(), false);
+            for (std::size_t page = 0; page < buffer.size();)
+            {
+                const std::uint64_t at = address + page;
+                const std::size_t chunk = std::min<std::size_t>(buffer.size() - page, 0x1000 - static_cast<std::size_t>(at & 0xFFF));
+                if (process.ReadExact(at, buffer.data() + page, chunk))
+                    std::fill(readable.begin() + static_cast<std::ptrdiff_t>(page), readable.begin() + static_cast<std::ptrdiff_t>(page + chunk), true);
+                page += chunk;
+            }
+        }
 
         std::uint64_t Value(const RegisterValues& r, ZydisRegister reg)
         {
@@ -403,25 +420,36 @@ namespace Manifold::Disasm
         return Decode(address, bytes, got, symbols);
     }
 
-    std::vector<Instruction> Disassembler::ReadMany(const Target::Process& process, std::uint64_t address, int count, const Target::Symbols* symbols) const
+    std::vector<Instruction> Disassembler::ReadMany(const Target::Process& process, std::uint64_t address, int count, const Target::Symbols* symbols,
+        const CodeHints* hints) const
     {
         if (count <= 0)
             return {};
         std::vector<std::uint8_t> buffer(static_cast<std::size_t>(count) * 15 + 16);
-        std::vector<bool> readable(buffer.size(), false);
-        for (std::size_t page = 0; page < buffer.size();)
+        std::vector<bool> readable;
+        ReadSpan(process, address, buffer, readable);
+        return DecodeMany(buffer, readable, address, count, symbols, hints);
+    }
+
+    std::size_t Disassembler::Window(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::size_t offset, std::uint64_t at,
+        const CodeHints* hints) const
+    {
+        std::size_t available = 0;
+        while (offset + available < buffer.size() && readable[offset + available] && available < 16)
+            ++available;
+        // An instruction that would run across a known start is wrong: the bytes
+        // in front of it are padding or data. Decoding only up to that start
+        // turns them into short lines (or db) and the next line begins exactly there.
+        if (hints && available > 1)
         {
-            const std::uint64_t at = address + page;
-            const std::size_t chunk = std::min<std::size_t>(buffer.size() - page, 0x1000 - static_cast<std::size_t>(at & 0xFFF));
-            if (process.ReadExact(at, buffer.data() + page, chunk))
-                std::fill(readable.begin() + static_cast<std::ptrdiff_t>(page), readable.begin() + static_cast<std::ptrdiff_t>(page + chunk), true);
-            page += chunk;
+            if (const auto boundary = hints->BoundaryIn(at, at + available); boundary && *boundary > at && *boundary < at + available)
+                available = static_cast<std::size_t>(*boundary - at);
         }
-        return DecodeMany(buffer, readable, address, count, symbols);
+        return available;
     }
 
     std::vector<Instruction> Disassembler::DecodeMany(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::uint64_t address, int count,
-        const Target::Symbols* symbols) const
+        const Target::Symbols* symbols, const CodeHints* hints) const
     {
         std::vector<Instruction> list;
         list.reserve(static_cast<std::size_t>(std::max(0, count)));
@@ -439,14 +467,37 @@ namespace Manifold::Disasm
                 ++offset;
                 continue;
             }
-            std::size_t available = 0;
-            while (offset + available < buffer.size() && readable[offset + available] && available < 16)
-                ++available;
+            const std::size_t available = Window(buffer, readable, offset, at, hints);
             Instruction instruction = Decode(at, buffer.data() + offset, available, symbols);
             offset += instruction.Length ? instruction.Length : 1;
             list.push_back(std::move(instruction));
         }
         return list;
+    }
+
+    std::vector<std::uint64_t> Disassembler::Starts(const Target::Process& process, std::uint64_t from, std::uint64_t to, const CodeHints* hints) const
+    {
+        std::vector<std::uint64_t> starts;
+        if (to <= from)
+            return starts;
+        std::vector<std::uint8_t> buffer(static_cast<std::size_t>(to - from) + 16);
+        std::vector<bool> readable;
+        ReadSpan(process, from, buffer, readable);
+        std::size_t offset = 0;
+        while (from + offset < to)
+        {
+            starts.push_back(from + offset);
+            std::size_t length = 1;
+            if (readable[offset])
+            {
+                const std::size_t available = Window(buffer, readable, offset, from + offset, hints);
+                ZydisDecodedInstruction instruction{};
+                if (ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(&m_state->Decoder, nullptr, buffer.data() + offset, available, &instruction)) && instruction.length)
+                    length = instruction.length;
+            }
+            offset += length;
+        }
+        return starts;
     }
 
     std::optional<std::uint64_t> Disassembler::EffectiveAddress(const Instruction& instruction, const RegisterValues& registers) const
@@ -515,21 +566,35 @@ namespace Manifold::Disasm
         return best;
     }
 
-    std::uint64_t Disassembler::BackUp(const Target::Process& process, std::uint64_t address, int lines) const
+    std::uint64_t Disassembler::BackUp(const Target::Process& process, std::uint64_t address, int lines, const CodeHints* hints) const
     {
-        const auto region = process.RegionAt(address);
-        const std::uint64_t floor = region ? region->Base : 0;
         std::uint64_t at = address;
-        for (int i = 0; i < lines && at > floor; ++i)
+        while (lines > 0 && at > 0)
         {
-            const auto previous = PreviousStart(process, at);
-            const std::uint64_t next = previous ? *previous : (at > 0 ? at - 1 : at);
-            if (next < floor)
-            {
-                at = floor;
+            // Only unreadable memory ends the listing: an allocation with nothing
+            // mapped in front of it (fresh injection memory) still starts at its
+            // first byte, while the readable neighbour of a code chunk or section
+            // stays reachable with the functions around it.
+            if (!process.IsReadable(at - 1))
                 break;
+            if (hints)
+            {
+                // From a known start the instructions are decoded, not guessed:
+                // inside a function from its first byte, in padding from the end
+                // of the function before it.
+                if (const auto anchor = hints->StartBelow(at, kSweepReach); anchor && *anchor < at && at - *anchor <= kSweepReach)
+                {
+                    const std::vector<std::uint64_t> starts = Starts(process, *anchor, at, hints);
+                    if (starts.size() >= static_cast<std::size_t>(lines))
+                        return starts[starts.size() - static_cast<std::size_t>(lines)];
+                    lines -= static_cast<int>(starts.size());
+                    at = *anchor;
+                    continue;
+                }
             }
-            at = next;
+            const auto previous = PreviousStart(process, at);
+            at = previous ? *previous : at - 1;
+            --lines;
         }
         return at;
     }

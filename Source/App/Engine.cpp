@@ -46,6 +46,7 @@ namespace Manifold
         m_lua = std::make_unique<Lua::LuaEngine>(*this);
         m_debugger.SetLogDebugStrings(settings.LogDebugStrings);
         m_debugger.SetPreferHardware(settings.UseHardwareExecuteBreakpoints);
+        m_mono.SetPauseCheck([this] { return m_debugger.Attached() && m_debugger.Broken(); });
     }
 
     Engine::~Engine()
@@ -76,6 +77,7 @@ namespace Manifold
         {
             m_process->RefreshModules();
             m_symbols.Attach(m_process);
+            m_codeMap.Attach(m_process, &m_mono);
             LOG_INFO("Process", Format("%s (pid %u) is already open; scripts and symbols stay as they are", m_process->Name().c_str(), id));
             m_lua->OnProcessOpened();
             return Status::Success();
@@ -91,6 +93,7 @@ namespace Manifold
             CloseProcess();
         m_process = std::move(process);
         m_symbols.Attach(m_process);
+        m_codeMap.Attach(m_process, &m_mono);
         for (const Table::TableSymbol& symbol : m_tableSymbols)
         {
             if (const auto value = Evaluate(symbol.Address))
@@ -138,6 +141,7 @@ namespace Manifold
         m_symbols.SetSymbolProvider({}, {});
         m_pdbSymbols.End();
         m_symbols.Detach();
+        m_codeMap.Detach();
         m_process.reset();
         m_codeDissect.reset();
         ++m_processGeneration;

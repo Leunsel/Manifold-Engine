@@ -148,6 +148,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Table\AddressList.cpp" />
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
+    <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\Mono.cpp" />
     <ClCompile Include="..\Source\Target\PatchScan.cpp" />
     <ClCompile Include="..\Source\Target\PdbSymbols.cpp" />
@@ -220,6 +221,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClInclude Include="..\Source\Table\AddressList.h" />
     <ClInclude Include="..\Source\Table\CheatTable.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
+    <ClInclude Include="..\Source\Target\CodeMap.h" />
     <ClInclude Include="..\Source\Target\Mono.h" />
     <ClInclude Include="..\Source\Target\PatchScan.h" />
     <ClInclude Include="..\Source\Target\PdbSymbols.h" />

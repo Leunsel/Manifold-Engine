@@ -12,6 +12,7 @@
 #include "Table/AddressList.h"
 #include "Table/CheatTable.h"
 #include "Table/Structures.h"
+#include "Target/CodeMap.h"
 #include "Target/Process.h"
 #include "Target/PdbSymbols.h"
 #include "Target/Mono.h"
@@ -101,6 +102,9 @@ namespace Manifold
         int SymbolsModulesDone() const { return m_pdbSymbols.ModulesDone(); }
         int SymbolsModulesTotal() const { return m_pdbSymbols.ModulesTotal(); }
         const Disasm::Disassembler& Disassembler() const;
+        // Known function starts and ends for the disassembler (unwind tables,
+        // Mono methods, allocation starts); null without a process.
+        const Target::CodeMap* CodeMap() const { return m_process ? &m_codeMap : nullptr; }
         std::shared_ptr<const Disasm::DissectResult> CodeDissect() const { return m_codeDissect; }
         void SetCodeDissect(std::shared_ptr<const Disasm::DissectResult> result) { m_codeDissect = std::move(result); }
         Scan::Scanner& Scanner() { return m_scanner; }
@@ -204,6 +208,7 @@ namespace Manifold
         Target::Symbols m_symbols;
         Target::PdbSymbols m_pdbSymbols;
         Target::MonoBridge m_mono;
+        Target::CodeMap m_codeMap;
         bool m_pdbActive = false;
         void RefreshSymbolProvider();
         std::unique_ptr<Disasm::Disassembler> m_disassembler64;

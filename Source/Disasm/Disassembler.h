@@ -85,6 +85,21 @@ namespace Manifold::Disasm
 
     ConditionInfo EvaluateCondition(std::string_view mnemonic, const RegisterValues& registers, bool is64Bit);
 
+    // Instruction starts known from outside the bytes: where functions begin and
+    // end (a runtime's method table, a module's unwind data) and where an
+    // allocation begins. Decoding never lets an instruction run across one, and
+    // backing up sweeps forward from one instead of guessing, so padding or data
+    // in front of a function cannot swallow its first instructions.
+    class CodeHints
+    {
+    public:
+        virtual ~CodeHints() = default;
+        // The lowest known instruction start strictly between from and to.
+        virtual std::optional<std::uint64_t> BoundaryIn(std::uint64_t from, std::uint64_t to) const = 0;
+        // The closest known instruction start below an address, at most reach bytes away.
+        virtual std::optional<std::uint64_t> StartBelow(std::uint64_t address, std::uint64_t reach) const = 0;
+    };
+
     class Disassembler
     {
     public:
@@ -98,18 +113,28 @@ namespace Manifold::Disasm
 
         Instruction Decode(std::uint64_t address, const std::uint8_t* bytes, std::size_t available, const Target::Symbols* symbols = nullptr) const;
         Instruction Read(const Target::Process& process, std::uint64_t address, const Target::Symbols* symbols = nullptr) const;
-        std::vector<Instruction> ReadMany(const Target::Process& process, std::uint64_t address, int count, const Target::Symbols* symbols = nullptr) const;
+        std::vector<Instruction> ReadMany(const Target::Process& process, std::uint64_t address, int count, const Target::Symbols* symbols = nullptr,
+            const CodeHints* hints = nullptr) const;
         std::vector<Instruction> DecodeMany(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::uint64_t address, int count,
-            const Target::Symbols* symbols = nullptr) const;
+            const Target::Symbols* symbols = nullptr, const CodeHints* hints = nullptr) const;
 
         std::optional<std::uint64_t> EffectiveAddress(const Instruction& instruction, const RegisterValues& registers) const;
         std::optional<std::uint64_t> PreviousStart(const Target::Process& process, std::uint64_t address) const;
         std::optional<std::uint64_t> PreviousStart(const std::uint8_t* buffer, std::size_t size, std::uint64_t base, std::uint64_t address) const;
-        std::uint64_t BackUp(const Target::Process& process, std::uint64_t address, int lines) const;
+        // The address the given number of lines above an address. Stops only
+        // where the memory above is unreadable, so a listing can be scrolled from
+        // one allocation into the readable one in front of it.
+        std::uint64_t BackUp(const Target::Process& process, std::uint64_t address, int lines, const CodeHints* hints = nullptr) const;
+        // Where the instructions between from and to start when decoding begins
+        // at from, cut at the hints the same way DecodeMany cuts them.
+        std::vector<std::uint64_t> Starts(const Target::Process& process, std::uint64_t from, std::uint64_t to, const CodeHints* hints = nullptr) const;
 
         static std::string RegisterName(int zydisRegister);
 
     private:
+        std::size_t Window(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::size_t offset, std::uint64_t at,
+            const CodeHints* hints) const;
+
         struct State;
         State* m_state = nullptr;
         bool m_is64Bit = true;

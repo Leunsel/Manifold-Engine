@@ -475,7 +475,7 @@ return setmetatable(env, { __index = index })
                         m_aob = std::make_pair(HexBytes(pattern), back ? "+" + Hex(back) : std::string());
                         return *m_aob;
                     }
-                    const std::uint64_t previous = m_engine.Disassembler().BackUp(Process(), start, 1);
+                    const std::uint64_t previous = m_engine.Disassembler().BackUp(Process(), start, 1, m_engine.CodeMap());
                     if (previous >= start)
                         break;
                     start = previous;
@@ -545,7 +545,7 @@ return setmetatable(env, { __index = index })
                 const int lines = std::max(0, m_options.InjectionInfoLines);
                 std::uint64_t current = static_cast<std::uint64_t>(Integer("AddressValue"));
                 if (lines / 2 > 0)
-                    current = m_engine.Disassembler().BackUp(Process(), current, lines / 2);
+                    current = m_engine.Disassembler().BackUp(Process(), current, lines / 2, m_engine.CodeMap());
                 std::vector<std::string> out;
                 for (int index = 0; index < lines; ++index)
                 {
@@ -567,10 +567,10 @@ return setmetatable(env, { __index = index })
                 const std::uint64_t address = static_cast<std::uint64_t>(Integer("AddressValue"));
                 const std::uint64_t done = address + static_cast<std::uint64_t>(Integer("JumpSize"));
                 const auto& disassembler = m_engine.Disassembler();
-                const std::uint64_t start = disassembler.BackUp(Process(), address, 8);
+                const std::uint64_t start = disassembler.BackUp(Process(), address, 8, m_engine.CodeMap());
                 const int count = 16 + static_cast<int>(Span().size());
                 std::vector<std::string> out;
-                for (const Disasm::Instruction& instruction : disassembler.ReadMany(Process(), start, count, &m_engine.Symbols()))
+                for (const Disasm::Instruction& instruction : disassembler.ReadMany(Process(), start, count, &m_engine.Symbols(), m_engine.CodeMap()))
                 {
                     if (instruction.Address == address)
                         out.push_back("// ---------- INJECTING HERE ----------");

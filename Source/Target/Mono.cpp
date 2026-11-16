@@ -433,6 +433,9 @@ namespace Manifold::Target
         // runtime's own module is still asked, for a runtime embedded in the exe.
         if (const auto module = m_process->ModuleAt(address); module && !EqualsNoCase(module->Name, m_module))
             return std::nullopt;
+        // Not remembered as a miss: after the break the address is asked again.
+        if (m_paused && m_paused())
+            return std::nullopt;
         // A miss costs one remote lookup. mono_jit_info_table_find reports null
         // for any address that is not JITed Mono code, so it is safe on the wild
         // pointers the disassembler hands it.

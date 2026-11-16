@@ -4,6 +4,7 @@
 #include "Target/RemoteCall.h"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -108,6 +109,11 @@ namespace Manifold::Target
         // listing can show offsets from the method start and stop at its end.
         std::optional<std::pair<std::uint64_t, std::uint64_t>> MethodRange(std::uint64_t address);
 
+        // While this answers true (the debugger holds the target at a break, so
+        // the worker thread is frozen too), address lookups answer from the cache
+        // only instead of waiting for a remote call that cannot finish.
+        void SetPauseCheck(std::function<bool()> paused) { m_paused = std::move(paused); }
+
         // "Class:Method" or "Namespace.Class:Method"; compiles the method on the
         // first call and caches the address. Returns nullopt when not Mono or not found.
         std::optional<std::uint64_t> AddressOf(std::string_view name);
@@ -125,6 +131,7 @@ namespace Manifold::Target
         void RememberJitMiss(std::uint64_t address);
 
         std::shared_ptr<Process> m_process;
+        std::function<bool()> m_paused;
         mutable std::recursive_mutex m_lock;
         RemoteCall m_call;
         bool m_present = false;

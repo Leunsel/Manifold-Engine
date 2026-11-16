@@ -165,6 +165,9 @@
     <ClCompile Include="..\Source\Table\Structures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\CodeMap.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\Mono.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -374,6 +377,9 @@
     </ClInclude>
     <ClInclude Include="..\Source\Table\Structures.h">
       <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\CodeMap.h">
+      <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\Mono.h">
       <Filter>Source\Target</Filter>

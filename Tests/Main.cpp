@@ -16,6 +16,8 @@ namespace Manifold::Tests
 {
     int RunAssemblerTests();
     int RunCoreTests();
+    int RunDisasmTests();
+    int RunDisasmLive(const std::vector<std::string>& arguments);
     int RunCommandTests();
     int RunIntegrationTests(const std::filesystem::path& target);
     int RunCompatHarness(const std::vector<std::string>& arguments);
@@ -50,6 +52,17 @@ int main(int argc, char** argv)
             return Manifold::Tests::RunMonoCheck(arguments);
         if (argument == "--mono-dump")
             return Manifold::Tests::RunMonoDump(arguments);
+        if (argument == "--disasm-check")
+        {
+            for (const std::string& other : arguments)
+            {
+                if (other.rfind("--process=", 0) == 0)
+                    return Manifold::Tests::RunDisasmLive(arguments);
+            }
+            const int failed = Manifold::Tests::RunDisasmTests();
+            std::printf("%d checks, %d failed\n", Manifold::Tests::Totals().Checks, failed);
+            return failed;
+        }
     }
     for (int i = 1; i < argc; ++i)
     {
@@ -82,6 +95,8 @@ int main(int argc, char** argv)
         return assembler;
     std::printf("Core\n");
     Manifold::Tests::RunCoreTests();
+    std::printf("Disassembler\n");
+    Manifold::Tests::RunDisasmTests();
     std::printf("Commands and shortcuts\n");
     Manifold::Tests::RunCommandTests();
     std::printf("Compatibility\n");

@@ -150,6 +150,9 @@
     <ClCompile Include="..\Source\Table\Structures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\CodeMap.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\Mono.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -199,6 +202,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\DebuggerTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\DisasmTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\IntegrationTests.cpp">

@@ -378,7 +378,7 @@ namespace Manifold::UI
         }
         m_selected = address;
         m_selectionEnd = address;
-        m_top = m_engine.HasProcess() ? m_engine.Disassembler().BackUp(*m_engine.Process(), address, 4) : address;
+        m_top = m_engine.HasProcess() ? m_engine.Disassembler().BackUp(*m_engine.Process(), address, 4, m_engine.CodeMap()) : address;
         m_workspace.LastCodeAddress = address;
     }
 
@@ -849,7 +849,7 @@ namespace Manifold::UI
                 const std::size_t sel = static_cast<std::size_t>(m_selected - m_top);
                 m_lines.clear();
                 m_lines.reserve(static_cast<std::size_t>(m_visibleLines + 1));
-                for (const Disasm::Instruction& line : disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, symbols))
+                for (const Disasm::Instruction& line : disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, symbols, m_engine.CodeMap()))
                 {
                     if (line.Address + (line.Length ? line.Length : 1) > m_selected)
                         break;
@@ -858,12 +858,12 @@ namespace Manifold::UI
                 const std::vector<std::uint8_t> sub(buffer.begin() + static_cast<std::ptrdiff_t>(sel), buffer.end());
                 const std::vector<bool> subReadable(readable.begin() + static_cast<std::ptrdiff_t>(sel), readable.end());
                 const int remaining = std::max(1, m_visibleLines + 1 - static_cast<int>(m_lines.size()));
-                for (const Disasm::Instruction& line : disassembler.DecodeMany(sub, subReadable, m_selected, remaining, symbols))
+                for (const Disasm::Instruction& line : disassembler.DecodeMany(sub, subReadable, m_selected, remaining, symbols, m_engine.CodeMap()))
                     m_lines.push_back(line);
             }
             else
             {
-                m_lines = disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, symbols);
+                m_lines = disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, symbols, m_engine.CodeMap());
             }
         }
 
@@ -1065,7 +1065,7 @@ namespace Manifold::UI
         {
             const int steps = static_cast<int>(std::round(ImGui::GetIO().MouseWheel * 3.0f));
             if (steps > 0)
-                m_top = disassembler.BackUp(process, m_top, steps);
+                m_top = disassembler.BackUp(process, m_top, steps, m_engine.CodeMap());
             else if (-steps < static_cast<int>(m_lines.size()))
                 m_top = m_lines[static_cast<std::size_t>(-steps)].Address;
         }
@@ -1210,7 +1210,7 @@ namespace Manifold::UI
                 const bool visible = !m_lines.empty() && m_selected >= m_lines.front().Address && static_cast<int>(m_lines.size()) > 2 &&
                                      m_selected < m_lines[std::min<std::size_t>(m_lines.size() - 2, static_cast<std::size_t>(m_visibleLines - 1))].Address;
                 if (!visible)
-                    m_top = disassembler.BackUp(process, m_selected, std::max(1, m_visibleLines / 3));
+                    m_top = disassembler.BackUp(process, m_selected, std::max(1, m_visibleLines / 3), m_engine.CodeMap());
             };
         if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
         {
@@ -1221,8 +1221,7 @@ namespace Manifold::UI
         }
         if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
         {
-            const auto previous = disassembler.PreviousStart(process, m_selected);
-            m_selected = previous.value_or(m_selected - 1);
+            m_selected = disassembler.BackUp(process, m_selected, 1, m_engine.CodeMap());
             if (!io.KeyShift)
                 m_selectionEnd = m_selected;
             ensureVisible();
@@ -1234,7 +1233,7 @@ namespace Manifold::UI
         }
         if (ImGui::IsKeyPressed(ImGuiKey_PageUp))
         {
-            m_top = disassembler.BackUp(process, m_top, std::max(1, m_visibleLines - 1));
+            m_top = disassembler.BackUp(process, m_top, std::max(1, m_visibleLines - 1), m_engine.CodeMap());
             m_selected = m_selectionEnd = m_top;
         }
     }

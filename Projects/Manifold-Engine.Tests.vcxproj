@@ -141,6 +141,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Table\AddressList.cpp" />
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
+    <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\Mono.cpp" />
     <ClCompile Include="..\Source\Target\PatchScan.cpp" />
     <ClCompile Include="..\Source\Target\PdbSymbols.cpp" />
@@ -158,6 +159,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Tests\CompatTests.cpp" />
     <ClCompile Include="..\Tests\CoreTests.cpp" />
     <ClCompile Include="..\Tests\DebuggerTests.cpp" />
+    <ClCompile Include="..\Tests\DisasmTests.cpp" />
     <ClCompile Include="..\Tests\IntegrationTests.cpp" />
     <ClCompile Include="..\Tests\Main.cpp" />
     <ClCompile Include="..\Tests\MonoTests.cpp" />
