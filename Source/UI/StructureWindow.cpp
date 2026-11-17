@@ -211,6 +211,32 @@ namespace Manifold::UI
         {
             return base ? base + static_cast<std::uint64_t>(static_cast<std::int64_t>(offset)) : 0;
         }
+
+        Table::MemoryRecord& StructureToAddressList(Engine& engine, const Table::StructDefinition& definition, std::uint64_t base)
+        {
+            Table::AddressList& table = engine.Table();
+            Table::MemoryRecord& group = table.AddGroup(definition.Name.empty() ? "Structure" : definition.Name);
+            group.AddressGroupHeader = true;
+            if (base)
+                group.Address = engine.Symbols().ModuleOffset(base);
+            for (const Table::StructField& field : definition.Fields)
+            {
+                const std::int64_t offset = field.Offset;
+                std::string address = offset < 0 ? "-" + Hex(static_cast<std::uint64_t>(-offset)) : "+" + Hex(static_cast<std::uint64_t>(offset));
+                Table::MemoryRecord& record = table.AddValue(field.Name, std::move(address), field.Type, &group);
+                record.Length = field.Size;
+                record.Unicode = field.Unicode;
+                record.ShowHex = field.Display == Table::FieldDisplay::Hex;
+                record.CustomTypeName = field.CustomType;
+                if (field.Type == Scan::ValueType::Binary)
+                {
+                    record.BitStart = field.BitStart;
+                    record.BitLength = field.BitLength;
+                }
+            }
+            engine.RefreshValues(true);
+            return group;
+        }
     }
 
     StructureWindow::StructureWindow(Workspace& workspace, int number) : m_workspace(workspace), m_engine(workspace.Core()), m_number(number)
@@ -712,6 +738,11 @@ namespace Manifold::UI
                 m_renameOpen = true;
                 m_renameText = current->Name;
             }
+            if (ImGui::MenuItem(ICON_FA_LIST "  Add to the address list", nullptr, false, current != nullptr && !current->Fields.empty()))
+            {
+                const std::uint64_t base = !m_columns.empty() && m_columns.front().Valid ? m_columns.front().Value : 0;
+                StructureToAddressList(m_engine, *current, base);
+            }
             if (DangerMenuItem(ICON_FA_TRASH "  Delete the structure", nullptr, current != nullptr))
             {
                 const std::string name = current->Name;
@@ -879,6 +910,15 @@ namespace Manifold::UI
             m_renameOpen = true;
             m_renameText = current->Name;
         }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!current || current->Fields.empty());
+        if (ImGui::Button(ICON_FA_LIST "  To address list") && current && !current->Fields.empty())
+        {
+            const std::uint64_t base = !m_columns.empty() && m_columns.front().Valid ? m_columns.front().Value : 0;
+            StructureToAddressList(m_engine, *current, base);
+        }
+        ImGui::EndDisabled();
+        ItemTooltip("Add the whole structure to the address list: a group header at the base address with one entry per field at its offset");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(Px(80.0f));
         InputTextWithHint("##addoffset", "offset", m_addOffset, ImGuiInputTextFlags_CharsHexadecimal);
