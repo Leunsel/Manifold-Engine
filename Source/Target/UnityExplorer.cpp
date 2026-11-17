@@ -376,11 +376,10 @@ namespace Manifold::Target
             for (auto& entry : m_inspectionPins)
                 Unpin(entry.second);
             // m_args is deliberately NOT freed: its addresses were passed to
-            // the runtime as argument and out-parameter pointers and still sit
-            // in the attached worker's registers and stack frames, which the
-            // game's garbage collector scans conservatively. Freeing it made
-            // the next collection read a block header from an unmapped page and
-            // kill the game. See the note in RemoteCall::Stop.
+            // the runtime as argument and out-parameter pointers, and one page
+            // per session is not worth any doubt. (The detach crash once
+            // blamed on freeing it was the truncated GC handle, see
+            // PointerHandles.)
         }
         m_visiting = false;
         m_args = 0;
@@ -391,6 +390,7 @@ namespace Manifold::Target
         m_unhook = 0;
         m_dontDestroyHandle = 0;
         m_originalRunInBackground.reset();
+        m_handleApi.reset();
         m_methods.clear();
         m_typeObjects.clear();
         m_types.clear();
@@ -787,7 +787,7 @@ namespace Manifold::Target
             // GC handle, to tell allocation and handle apart.
             if (m_probeLevel > 1)
             {
-                if (const std::uint32_t pin = Pin(object))
+                if (const MonoGcHandle pin = Pin(object))
                     m_keepPins.push_back(pin);
             }
             m_typeObjects[klass] = object;
@@ -795,19 +795,45 @@ namespace Manifold::Target
         return object;
     }
 
-    std::uint32_t UnityExplorer::Pin(std::uint64_t object)
+    bool UnityExplorer::PointerHandles()
+    {
+        // ∑ Newer Mono hands out pointer-sized GC handles. On Unity 6's
+        // mono-2.0-bdwgc a handle IS the address of an 8-byte slot in an 8 KB
+        // handle page (0x30 header, the handle type at +0x28), and those pages
+        // live on the process heap far above 4 GB. The legacy pair cannot carry
+        // that: mono_gchandle_new is declared guint32, and mono_gchandle_free
+        // starts with `mov ecx, ecx` before jumping into the very same free as
+        // _v2. Freeing a handle that lost its high half rounds down to a page
+        // that does not exist, and the game dies inside that call -- every one
+        // of the CloverPit crash dumps was exactly this, called from our worker.
+        // Decided once per runtime so a handle is always freed by the pair that
+        // made it.
+        if (!m_handleApi)
+        {
+            std::lock_guard bridge(m_mono.m_lock);
+            m_handleApi = m_mono.Fn("mono_gchandle_new_v2") && m_mono.Fn("mono_gchandle_free_v2");
+        }
+        return *m_handleApi;
+    }
+
+    MonoGcHandle UnityExplorer::Pin(std::uint64_t object)
     {
         if (!object || !m_pinning)
             return 0;
-        return static_cast<std::uint32_t>(Worker("mono_gchandle_new", object, 0).value_or(0) & 0xFFFFFFFFu);
+        if (PointerHandles())
+            return Worker("mono_gchandle_new_v2", object, 0).value_or(0);
+        // An older runtime: the handle is a 32-bit index and the upper half of
+        // RAX is not part of the result.
+        return Worker("mono_gchandle_new", object, 0).value_or(0) & 0xFFFFFFFFu;
     }
 
-    void UnityExplorer::Unpin(std::vector<std::uint32_t>& pins)
+    void UnityExplorer::Unpin(std::vector<MonoGcHandle>& pins)
     {
-        for (const std::uint32_t pin : pins)
+        const char* const free = PointerHandles() ? "mono_gchandle_free_v2" : "mono_gchandle_free";
+        for (const MonoGcHandle pin : pins)
         {
             if (pin)
-                Worker("mono_gchandle_free", pin);
+                Worker(free, pin);
         }
         pins.clear();
     }
@@ -1465,8 +1491,8 @@ namespace Manifold::Target
                 "mono_class_get_parent", "mono_class_get_type", "mono_type_get_object", "mono_type_get_name", "mono_class_from_mono_type",
                 "mono_runtime_invoke", "mono_class_get_method_from_name", "mono_method_signature", "mono_signature_get_param_count",
                 "mono_signature_get_params", "mono_signature_get_return_type", "mono_class_get_properties", "mono_property_get_name",
-                "mono_property_get_get_method", "mono_property_get_set_method", "mono_method_get_flags", "mono_gchandle_new",
-                "mono_gchandle_free", "mono_string_new", "mono_object_to_string", "mono_free", "mono_class_vtable",
+                "mono_property_get_get_method", "mono_property_get_set_method", "mono_method_get_flags",
+                "mono_string_new", "mono_object_to_string", "mono_free", "mono_class_vtable",
                 "mono_vtable_get_static_field_data", "mono_field_static_get_value", "mono_field_set_value", "mono_method_get_param_names",
             };
             std::vector<std::string> missing;
@@ -1524,7 +1550,7 @@ namespace Manifold::Target
         const Invoked made = Invoke(false, wrap, Arg::Ref(0), { Arg::Value<std::uint64_t>(stub), Arg::Ref(delegateType) });
         if (!made.Ok || !made.Result)
             return Status::Fail(ErrorCode::MonoCallFailed, "could not wrap the per-frame callback: " + made.Error);
-        const std::uint32_t pin = Pin(made.Result);
+        const MonoGcHandle pin = Pin(made.Result);
         if (m_probeLevel < 3)
         {
             // Probe: the delegate exists and is pinned, but nothing in the game
@@ -1538,7 +1564,7 @@ namespace Manifold::Target
         const Invoked added = Invoke(false, add, Arg::Ref(0), { Arg::Ref(made.Result) });
         if (!added.Ok)
         {
-            std::vector<std::uint32_t> pins = { pin };
+            std::vector<MonoGcHandle> pins = { pin };
             Unpin(pins);
             return Status::Fail(ErrorCode::MonoCallFailed, "could not register the per-frame callback on " + hookName + ": " + added.Error);
         }
@@ -1606,7 +1632,7 @@ namespace Manifold::Target
             LOG_INFO("Unity", "Took the main-thread callback out of the game");
         if (m_delegatePin)
         {
-            std::vector<std::uint32_t> pins = { m_delegatePin };
+            std::vector<MonoGcHandle> pins = { m_delegatePin };
             Unpin(pins);
         }
         m_hooked = false;
@@ -1697,7 +1723,7 @@ namespace Manifold::Target
         dontDestroy.Loaded = true;
         tree.Scenes.push_back(std::move(dontDestroy));
 
-        std::vector<std::uint32_t> old;
+        std::vector<MonoGcHandle> old;
         {
             std::lock_guard state(m_stateLock);
             tree.Generation = m_tree.Generation + 1;
@@ -1739,7 +1765,7 @@ namespace Manifold::Target
         if (!gameObject)
             return false;
         node.Object = gameObject;
-        const std::uint32_t pin = Pin(gameObject);
+        const MonoGcHandle pin = Pin(gameObject);
         if (pin)
             m_treePins.push_back(pin);
         const Arg self = Arg::Ref(gameObject);
@@ -1747,7 +1773,7 @@ namespace Manifold::Target
         node.Active = CallValue<std::uint8_t>(true, Method("UnityEngine.GameObject", "get_activeSelf", 0), self).value_or(0) != 0;
         node.Transform = knownTransform ? knownTransform : CallObject(true, Method("UnityEngine.GameObject", "get_transform", 0), self);
         if (node.Transform && !knownTransform)
-            if (const std::uint32_t transformPin = Pin(node.Transform))
+            if (const MonoGcHandle transformPin = Pin(node.Transform))
                 m_treePins.push_back(transformPin);
         node.ChildCount = node.Transform ? CallValue<std::int32_t>(true, Method("UnityEngine.Transform", "get_childCount", 0), Arg::Ref(node.Transform)).value_or(0) : 0;
         return true;
@@ -1794,7 +1820,7 @@ namespace Manifold::Target
         const Invoked roots = Invoke(true, Method("UnityEngine.SceneManagement.Scene", "GetRootGameObjects", 0), Arg::Value<std::int32_t>(handle), {});
         if (!roots.Ok)
             return finish("Could not read the scene's objects: " + roots.Error);
-        std::vector<std::uint32_t> arrayPin = { Pin(roots.Result) };
+        std::vector<MonoGcHandle> arrayPin = { Pin(roots.Result) };
         std::size_t total = 0;
         const std::vector<std::uint64_t> objects = ReadArray(roots.Result, kMaxChildren, &total);
         std::vector<UnityNode> batch;
@@ -1860,7 +1886,7 @@ namespace Manifold::Target
                 const std::uint64_t child = CallObject(true, Method("UnityEngine.Transform", "GetChild", 1), Arg::Ref(parent.Transform), { Arg::Value<std::int32_t>(i) });
                 if (!child)
                     continue;
-                if (const std::uint32_t pin = Pin(child))
+                if (const MonoGcHandle pin = Pin(child))
                     m_treePins.push_back(pin);
                 const std::uint64_t gameObject = CallObject(true, Method("UnityEngine.Component", "get_gameObject", 0), Arg::Ref(child));
                 UnityNode node;
@@ -1974,7 +2000,7 @@ namespace Manifold::Target
                 Publish();
                 return;
             }
-            std::vector<std::uint32_t> arrayPin = { Pin(found.Result) };
+            std::vector<MonoGcHandle> arrayPin = { Pin(found.Result) };
             const std::vector<std::uint64_t> objects = ReadArray(found.Result, kMaxArray, &result.Total);
             const std::uint64_t getName = Method("UnityEngine.Object", "get_name", 0);
             const std::string filter = Trim(request.NameFilter);
@@ -1990,7 +2016,7 @@ namespace Manifold::Target
                 if (!filter.empty() && !ContainsNoCase(hit.Name, filter))
                     continue;
                 hit.Class = ClassNameOf(objects[i]);
-                if (const std::uint32_t pin = Pin(objects[i]))
+                if (const MonoGcHandle pin = Pin(objects[i]))
                     m_searchPins.push_back(pin);
                 result.Hits.push_back(std::move(hit));
                 if (result.Hits.size() % 100 == 0)
@@ -2180,7 +2206,7 @@ namespace Manifold::Target
         return info.Read;
     }
 
-    void UnityExplorer::ReadGameObject(std::uint64_t gameObject, UnityGameObject& info, std::vector<std::uint32_t>& pins)
+    void UnityExplorer::ReadGameObject(std::uint64_t gameObject, UnityGameObject& info, std::vector<MonoGcHandle>& pins)
     {
         info.Object = gameObject;
         const Arg self = Arg::Ref(gameObject);
@@ -2241,7 +2267,7 @@ namespace Manifold::Target
         }
     }
 
-    MonoReadValue UnityExplorer::ReadResult(const MonoTypeInfo& type, const Invoked& call, std::vector<std::uint32_t>& pins)
+    MonoReadValue UnityExplorer::ReadResult(const MonoTypeInfo& type, const Invoked& call, std::vector<MonoGcHandle>& pins)
     {
         MonoReadValue value;
         if (!call.Ok)
@@ -2274,7 +2300,7 @@ namespace Manifold::Target
         return value;
     }
 
-    void UnityExplorer::ReadProperties(UnityInspection& inspection, std::vector<std::uint32_t>& pins)
+    void UnityExplorer::ReadProperties(UnityInspection& inspection, std::vector<MonoGcHandle>& pins)
     {
         if (!inspection.Layout || inspection.FromScan)
             return;
@@ -2311,7 +2337,7 @@ namespace Manifold::Target
             inspection.Layout = LoadLayout(inspection.Klass);
             inspection.Title = inspection.Layout->Name;
         }
-        std::vector<std::uint32_t> pins;
+        std::vector<MonoGcHandle> pins;
         if (inspection.Layout && inspection.Object && !inspection.FromScan)
         {
             pins.push_back(Pin(inspection.Object));
@@ -2398,7 +2424,7 @@ namespace Manifold::Target
         if (readProperties)
             ReadProperties(inspection, pins);
         inspection.Loading = false;
-        std::vector<std::uint32_t> old;
+        std::vector<MonoGcHandle> old;
         bool alive = false;
         {
             std::lock_guard state(m_stateLock);
@@ -2468,7 +2494,7 @@ namespace Manifold::Target
                 if (Status hooked = EnsureHook(); !hooked)
                     return Fail(hooked.Text);
                 const std::uint64_t text = NewString(name);
-                std::vector<std::uint32_t> pins = { Pin(text) };
+                std::vector<MonoGcHandle> pins = { Pin(text) };
                 const Invoked done = text ? Invoke(true, Method("UnityEngine.Object", "set_name", 1), Arg::Ref(object), { Arg::Ref(text) }) : Invoked{ false, 0, "could not make the string" };
                 Unpin(pins);
                 if (!done.Ok)
@@ -2619,7 +2645,7 @@ namespace Manifold::Target
                 const auto arg = ArgumentFor(member.Type, text, error);
                 if (!arg)
                     return Fail(member.Name + ": " + error);
-                std::vector<std::uint32_t> pins = { Pin(arg->Pointer) };
+                std::vector<MonoGcHandle> pins = { Pin(arg->Pointer) };
                 const std::size_t mark = m_argsUsed;
                 const std::uint64_t slot = ArgSpace(8);
                 bool done = false;
@@ -2647,7 +2673,7 @@ namespace Manifold::Target
             const auto arg = ArgumentFor(member.Type, text, error);
             if (!arg)
                 return Fail(member.Name + ": " + error);
-            std::vector<std::uint32_t> pins = { Pin(arg->Pointer) };
+            std::vector<MonoGcHandle> pins = { Pin(arg->Pointer) };
             const Invoked done = Invoke(true, member.Setter, Arg::Ref(member.Static ? 0 : inspection->Object), { *arg });
             Unpin(pins);
             if (!done.Ok)
@@ -2672,7 +2698,7 @@ namespace Manifold::Target
         if (!member.Static && !inspection->Object)
             return Fail(member.Name + " needs an object");
         MonoReadValue value;
-        std::vector<std::uint32_t> pins;
+        std::vector<MonoGcHandle> pins;
         std::vector<Arg> args;
         std::string error;
         for (std::size_t i = 0; i < member.Params.size() && error.empty(); ++i)
@@ -2694,7 +2720,7 @@ namespace Manifold::Target
         else
         {
             const Invoked call = Invoke(true, member.Handle, Arg::Ref(member.Static ? 0 : inspection->Object), args);
-            std::vector<std::uint32_t>& kept = m_inspectionPins[id];
+            std::vector<MonoGcHandle>& kept = m_inspectionPins[id];
             value = ReadResult(member.Type, call, kept);
             if (call.Ok)
                 LOG_INFO("Unity", "Called " + member.Declaring + ":" + member.Name);

@@ -775,7 +775,10 @@ namespace Manifold::Tests
         std::string searchClass = "UnityEngine.Camera";
         int idleSeconds = 0;
         int probe = 4;
-        bool pinning = true;
+        // Same default as the explorer: no GC handles unless asked for. With
+        // pins on by default a probe run freed the delegate's handle at detach,
+        // which is the crash the probes were meant to find elsewhere.
+        bool pinning = false;
         for (const std::string& argument : arguments)
         {
             if (argument.rfind("--process=", 0) == 0)
@@ -788,6 +791,8 @@ namespace Manifold::Tests
                 idleSeconds = static_cast<int>(ParseDecimal(argument.substr(15)).value_or(0));
             else if (argument.rfind("--probe=", 0) == 0)
                 probe = static_cast<int>(ParseDecimal(argument.substr(8)).value_or(4));
+            else if (argument == "--pin")
+                pinning = true;
             else if (argument == "--no-pin")
                 pinning = false;
         }
@@ -836,8 +841,7 @@ namespace Manifold::Tests
         unity.SetEnabled(true);
         unity.SetProbeLevel(probe);
         unity.SetPinning(pinning);
-        if (!pinning)
-            std::printf("GC handles are switched OFF for this run\n");
+        std::printf("GC handles are switched %s for this run\n", pinning ? "ON (--pin)" : "OFF");
         unity.ReadScenes();  // the first real request installs the hook and enters main
         if (probe < 4)
         {

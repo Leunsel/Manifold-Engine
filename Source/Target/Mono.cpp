@@ -32,7 +32,8 @@ namespace Manifold::Target
             // loads, the explorer then reports what is missing.
             "mono_class_get_method_from_name", "mono_method_signature", "mono_signature_get_param_count",
             "mono_signature_get_params", "mono_signature_get_return_type", "mono_type_get_name", "mono_class_from_mono_type",
-            "mono_class_get_type", "mono_type_get_object", "mono_gchandle_new", "mono_gchandle_free", "mono_runtime_invoke",
+            "mono_class_get_type", "mono_type_get_object", "mono_gchandle_new", "mono_gchandle_free",
+            "mono_gchandle_new_v2", "mono_gchandle_free_v2", "mono_runtime_invoke",
             "mono_object_new", "mono_string_new", "mono_class_get_parent", "mono_class_get_properties", "mono_property_get_name",
             "mono_property_get_get_method", "mono_property_get_set_method", "mono_method_get_flags", "mono_class_vtable",
             "mono_vtable_get_static_field_data", "mono_field_static_get_value", "mono_field_set_value", "mono_field_static_set_value",

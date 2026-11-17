@@ -30,6 +30,12 @@ namespace Manifold::Target
                       Class = 0x12, Array = 0x14, GenericInst = 0x15, I = 0x18, U = 0x19, FnPtr = 0x1B, Object = 0x1C, SzArray = 0x1D;
     }
 
+    // A Mono GC handle as the explorer keeps it. Pointer-sized on purpose:
+    // newer runtimes hand out the address of a slot in a handle page, and
+    // cutting that to 32 bits is what crashed Unity 6 games (see
+    // UnityExplorer::PointerHandles).
+    using MonoGcHandle = std::uint64_t;
+
     struct MonoTypeInfo
     {
         int Code = 0;               // MONO_TYPE_*; an enum keeps its own code and sets Enum
@@ -276,8 +282,8 @@ namespace Manifold::Target
         // dislikes. 2 = create the delegate but do not register it, 3 = also
         // register it but never enter the main thread, 4 (default) = normal.
         void SetProbeLevel(int level) { m_probeLevel = level; }
-        // Diagnostics: run without taking any GC handle, to tell whether the
-        // handles themselves are what a game cannot survive.
+        // Diagnostics: take GC handles on the objects the explorer refers to
+        // (off by default, see m_pinning).
         void SetPinning(bool on) { m_pinning = on; }
 
         UnityStatus State() const;
@@ -372,8 +378,9 @@ namespace Manifold::Target
         std::uint64_t FindClass(std::string_view name);
         std::uint64_t Method(std::string_view klass, std::string_view name, int params, std::string_view firstParam = {});
         std::uint64_t TypeObject(std::uint64_t klass);
-        std::uint32_t Pin(std::uint64_t object);
-        void Unpin(std::vector<std::uint32_t>& pins);
+        bool PointerHandles();
+        MonoGcHandle Pin(std::uint64_t object);
+        void Unpin(std::vector<MonoGcHandle>& pins);
         std::string WorkerString(const char* function, std::uint64_t handle);
         std::string TypeName(std::uint64_t type);
         MonoTypeInfo TypeInfo(std::uint64_t type);
@@ -398,10 +405,10 @@ namespace Manifold::Target
         bool ReadNode(std::uint64_t gameObject, std::uint64_t knownTransform, UnityNode& node);
         void DoSearch(UnitySearch request);
         void DoInspect(int id, bool properties);
-        void ReadGameObject(std::uint64_t gameObject, UnityGameObject& info, std::vector<std::uint32_t>& pins);
+        void ReadGameObject(std::uint64_t gameObject, UnityGameObject& info, std::vector<MonoGcHandle>& pins);
         bool ReadTransform(std::uint64_t transform, UnityTransform& info);
-        void ReadProperties(UnityInspection& inspection, std::vector<std::uint32_t>& pins);
-        MonoReadValue ReadResult(const MonoTypeInfo& type, const Invoked& call, std::vector<std::uint32_t>& pins);
+        void ReadProperties(UnityInspection& inspection, std::vector<MonoGcHandle>& pins);
+        MonoReadValue ReadResult(const MonoTypeInfo& type, const Invoked& call, std::vector<MonoGcHandle>& pins);
         void DoSetMember(int id, int member, const std::string& text);
         void DoInvokeMethod(int id, int member, const std::vector<std::string>& arguments);
         std::optional<Arg> ArgumentFor(const MonoTypeInfo& type, const std::string& text, std::string& error);
@@ -436,34 +443,33 @@ namespace Manifold::Target
         std::chrono::steady_clock::time_point m_visitStart{};
         bool m_visiting = false;
         std::uint64_t m_delegate = 0;
-        std::uint32_t m_delegatePin = 0;
+        MonoGcHandle m_delegatePin = 0;
         std::uint64_t m_unhook = 0;               // remove_* method of the event
         bool m_hooked = false;
         int m_dontDestroyHandle = 0;
         std::atomic<bool> m_enabled{ false };
         int m_probeLevel = 4;
-        // OFF by default, and it must stay that way: taking GC handles through
-        // mono_gchandle_new/_free from this side corrupted the target's handle
-        // table and killed Unity 6 games a few seconds later (a bisection
-        // against CloverPit pinned it to exactly these two calls -- creating
-        // managed objects and the callback delegate are both fine without
-        // them). Newer Mono moved to pointer-sized handles (..._v2), so the
-        // legacy 32-bit handle this code took back is not something
-        // mono_gchandle_free can be trusted with here.
+        // GC handles stay OFF by default. They used to kill Unity 6 games: the
+        // handle was cut to 32 bits and mono_gchandle_free then read a page
+        // that does not exist (PointerHandles has the details). Handles are
+        // pointer-sized and go through the _v2 pair now, but that has not run
+        // against a live game yet, so nothing turns them on except the harness
+        // (--pin).
         //
         // Nothing needs them: a registered delegate is rooted by the event's
         // subscriber list, scene objects by their scene, assets by Unity. Only
         // values handed back by a call (strings, boxed results) are unrooted,
         // and those are read immediately.
         bool m_pinning = false;
+        std::optional<bool> m_handleApi;          // _v2 pair present; decided once per runtime
         std::optional<bool> m_originalRunInBackground;
         std::map<std::string, std::uint64_t> m_methods;
         std::map<std::uint64_t, std::uint64_t> m_typeObjects;
         std::map<std::uint64_t, MonoTypeInfo> m_types;
         std::map<std::uint64_t, std::vector<std::string>> m_chains;
-        std::vector<std::uint32_t> m_treePins;
-        std::vector<std::uint32_t> m_searchPins;
-        std::vector<std::uint32_t> m_keepPins;    // type objects
-        std::map<int, std::vector<std::uint32_t>> m_inspectionPins;
+        std::vector<MonoGcHandle> m_treePins;
+        std::vector<MonoGcHandle> m_searchPins;
+        std::vector<MonoGcHandle> m_keepPins;    // type objects
+        std::map<int, std::vector<MonoGcHandle>> m_inspectionPins;
     };
 }

@@ -421,16 +421,12 @@ namespace Manifold::Target
             }
         }
         // Nothing here is freed, on purpose. The code page still holds the
-        // worker's last instructions, and the control block and the scratch
-        // arena are worse: the worker is attached to the target's Mono runtime
-        // (mono_thread_attach), so its stack and registers are scanned
-        // CONSERVATIVELY by the garbage collector. rsi holds the control block
-        // for the worker's whole life and scratch addresses stay in its frames,
-        // so after a free the next collection takes such a leftover value for an
-        // object candidate, rounds it down to its 8 KB block and reads the block
-        // header out of the unmapped page -- an access violation inside the
-        // game's GC, which is exactly how this crashed Unity games on detach.
-        // Three small pages per attach are far cheaper than that.
+        // worker's last instructions (it pops and returns after it wrote
+        // Stopped), rsi holds the control block for the worker's whole life,
+        // and scratch addresses were handed to the target as pointers. Three
+        // small pages per attach are cheaper than proving each one is no longer
+        // reachable. (The Unity detach crash once blamed on freeing these was a
+        // GC handle cut to 32 bits, see UnityExplorer::PointerHandles.)
         if (m_wake)
             ::CloseHandle(m_wake);
         m_wake = nullptr;
