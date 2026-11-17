@@ -416,6 +416,7 @@ namespace Manifold::Lua
         std::vector<std::string> FunctionNames() const;
         std::vector<LuaCompletion> Complete(std::string_view chain, std::string_view prefix, bool method);
         std::vector<std::string> CallSignatures(std::string_view chain, bool method);
+        std::vector<std::string> CallArgumentChoices(std::string_view chain, bool method, int argument);
         static std::vector<std::string> DocumentedSignatures(std::string_view name);
         static std::string DocumentedText(std::string_view name);
 

@@ -338,7 +338,14 @@ local function bind(owner, path, members, name, spec, body)
   local params = prepare(spec.params or {})
   local wrapper = guard(path, owner, params, spec.varargs, body)
   rawset(members, name, wrapper)
-  docs[wrapper] = { path = path, params = paramText(params, spec.varargs), returns = spec.returns, text = spec.doc }
+  local choices
+  for index, param in ipairs(params) do
+    if param.oneOf then
+      choices = choices or {}
+      choices[index] = param.oneOf
+    end
+  end
+  docs[wrapper] = { path = path, params = paramText(params, spec.varargs), returns = spec.returns, text = spec.doc, choices = choices }
   return wrapper, params
 end
 

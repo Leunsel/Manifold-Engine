@@ -786,6 +786,38 @@ namespace Manifold::Lua
         return doc;
     }
 
+    std::vector<std::string> ManifoldArgumentChoices(lua_State* state, int index, int argument)
+    {
+        std::vector<std::string> result;
+        if (argument < 0 || !lua_isfunction(state, index))
+            return result;
+        index = lua_absindex(state, index);
+        const int top = lua_gettop(state);
+        if (lua_getfield(state, LUA_REGISTRYINDEX, kDocsKey) != LUA_TTABLE)
+        {
+            lua_settop(state, top);
+            return result;
+        }
+        lua_pushvalue(state, index);
+        if (lua_rawget(state, -2) != LUA_TTABLE)
+        {
+            lua_settop(state, top);
+            return result;
+        }
+        if (lua_getfield(state, -1, "choices") == LUA_TTABLE && lua_rawgeti(state, -1, argument + 1) == LUA_TTABLE)
+        {
+            const lua_Integer count = luaL_len(state, -1);
+            for (lua_Integer i = 1; i <= count; ++i)
+            {
+                if (lua_rawgeti(state, -1, i) == LUA_TSTRING)
+                    result.emplace_back(lua_tostring(state, -1));
+                lua_pop(state, 1);
+            }
+        }
+        lua_settop(state, top);
+        return result;
+    }
+
     std::string ManifoldApiMarkdown(LuaEngine& engine)
     {
         lua_State* state = engine.State();

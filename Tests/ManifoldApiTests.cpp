@@ -469,6 +469,11 @@ namespace Manifold::Tests
             Lua::LuaEngine& lua = engine.Lua();
             const std::vector<std::string> signatures = lua.CallSignatures("manifold.memory.read", false);
             CHECK_MSG(signatures.size() == 1 && signatures.front() == "read(address, type, options?)", signatures.empty() ? "none" : signatures.front());
+            const std::vector<std::string> types = lua.CallArgumentChoices("manifold.memory.read", false, 1);
+            CHECK_MSG(types.size() == 14 && types.front() == "i8" && types.back() == "string",
+                types.empty() ? "none" : types.front() + ".." + std::to_string(types.size()));
+            CHECK(lua.CallArgumentChoices("manifold.memory.read", false, 0).empty());
+            CHECK(lua.CallArgumentChoices("manifold.memory.read", false, 2).empty());
             bool found = false;
             for (const Lua::LuaCompletion& item : lua.Complete("manifold.log", "inf", false))
                 found = found || (item.Name == "info" && item.Signature == "(message, fields?)" && !item.Text.empty());

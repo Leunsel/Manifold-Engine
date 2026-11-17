@@ -847,6 +847,15 @@ namespace Manifold::UI
                 }
                 if (assist.Hints.size() > shown)
                     ImGui::TextColored(ManifoldTheme::Muted, "+%zu more", assist.Hints.size() - shown);
+                if (!assist.HintChoices.empty())
+                {
+                    std::string choices;
+                    for (const std::string& value : assist.HintChoices)
+                        choices += (choices.empty() ? "\"" : "  \"") + value + "\"";
+                    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + Px(360.0f));
+                    ImGui::TextColored(ManifoldTheme::CodeString, "%s", choices.c_str());
+                    ImGui::PopTextWrapPos();
+                }
                 ImGui::PopFont();
             }
             ImGui::End();
@@ -957,6 +966,9 @@ namespace Manifold::UI
                 assist.Open = false;
                 assist.Hints.clear();
                 assist.HintChain.clear();
+                assist.HintChoices.clear();
+                assist.HintChoiceChain.clear();
+                assist.HintChoiceArgument = -1;
             }
             else
             {
@@ -1009,11 +1021,20 @@ namespace Manifold::UI
                         }
                     }
                     assist.HintArgument = call.Argument;
+                    if (call.Chain != assist.HintChoiceChain || call.Argument != assist.HintChoiceArgument)
+                    {
+                        assist.HintChoiceChain = call.Chain;
+                        assist.HintChoiceArgument = call.Argument;
+                        assist.HintChoices = state.Assist->Choices ? state.Assist->Choices(call.Chain, call.Method, call.Argument) : std::vector<std::string>{};
+                    }
                 }
                 else
                 {
                     assist.Hints.clear();
                     assist.HintChain.clear();
+                    assist.HintChoices.clear();
+                    assist.HintChoiceChain.clear();
+                    assist.HintChoiceArgument = -1;
                     if (!call.Valid)
                         assist.DismissedParen = static_cast<std::size_t>(-1);
                 }

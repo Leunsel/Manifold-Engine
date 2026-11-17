@@ -549,6 +549,36 @@ namespace Manifold::Lua
         return result;
     }
 
+    std::vector<std::string> LuaEngine::CallArgumentChoices(std::string_view chain, bool, int argument)
+    {
+        lua_State* state = m_state;
+        const int top = lua_gettop(state);
+        const std::string text(TrimView(chain));
+        const std::size_t dot = text.rfind('.');
+        const std::string objectChain = dot == std::string::npos ? std::string() : text.substr(0, dot);
+        const std::string name = dot == std::string::npos ? text : text.substr(dot + 1);
+        std::vector<std::string> result;
+        if (name.empty() || argument < 0)
+            return result;
+        if (objectChain.empty())
+        {
+            lua_getglobal(state, name.c_str());
+        }
+        else if (PushChain(state, objectChain))
+        {
+            PushIndexed(state, -1, name);
+            lua_remove(state, -2);
+        }
+        else
+        {
+            lua_settop(state, top);
+            return result;
+        }
+        result = ManifoldArgumentChoices(state, -1, argument);
+        lua_settop(state, top);
+        return result;
+    }
+
     std::vector<std::string> LuaEngine::DocumentedSignatures(std::string_view name)
     {
         const auto* docs = Docs("", name);

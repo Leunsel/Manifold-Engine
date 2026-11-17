@@ -169,6 +169,7 @@ namespace Manifold::UI
                 return result;
             };
         m_assist.Signatures = [this](const std::string& chain, bool method) { return m_engine.Lua().CallSignatures(chain, method); };
+        m_assist.Choices = [this](const std::string& chain, bool method, int argument) { return m_engine.Lua().CallArgumentChoices(chain, method, argument); };
         m_editor.Assist = &m_assist;
         m_editor.Focus = true;
     }

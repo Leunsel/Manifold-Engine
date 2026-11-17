@@ -28,6 +28,7 @@ namespace Manifold::UI
     {
         std::function<std::vector<CodeSuggestion>(const std::string& chain, const std::string& prefix, bool method)> Complete;
         std::function<std::vector<std::string>(const std::string& chain, bool method)> Signatures;
+        std::function<std::vector<std::string>(const std::string& chain, bool method, int argument)> Choices;
     };
 
     struct CodeAssistState
@@ -50,6 +51,9 @@ namespace Manifold::UI
         bool HintMethod = false;
         std::vector<std::string> Hints;
         int HintArgument = 0;
+        std::vector<std::string> HintChoices;
+        std::string HintChoiceChain;
+        int HintChoiceArgument = -1;
         std::size_t HintParen = static_cast<std::size_t>(-1);
         std::size_t DismissedParen = static_cast<std::size_t>(-1);
     };

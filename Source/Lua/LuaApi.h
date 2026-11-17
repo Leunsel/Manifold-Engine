@@ -37,6 +37,7 @@ namespace Manifold::Lua
     };
 
     std::optional<ManifoldFunctionDoc> ManifoldDocOf(lua_State* state, int index);
+    std::vector<std::string> ManifoldArgumentChoices(lua_State* state, int index, int argument);
     std::string ManifoldApiMarkdown(LuaEngine& engine);
     std::vector<std::string> ApiFunctionNames();
     void NoteFunction(const char* name);
