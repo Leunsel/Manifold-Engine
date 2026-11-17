@@ -4865,7 +4865,14 @@ local function bind(owner, path, members, name, spec, body)
   local params = prepare(spec.params or {})
   local wrapper = guard(path, owner, params, spec.varargs, body)
   rawset(members, name, wrapper)
-  docs[wrapper] = { path = path, params = paramText(params, spec.varargs), returns = spec.returns, text = spec.doc }
+  local choices
+  for index, param in ipairs(params) do
+    if param.oneOf then
+      choices = choices or {}
+      choices[index] = param.oneOf
+    end
+  end
+  docs[wrapper] = { path = path, params = paramText(params, spec.varargs), returns = spec.returns, text = spec.doc, choices = choices }
   return wrapper, params
 end
 
@@ -4934,7 +4941,8 @@ local function inspect(value, options)
     local meta = getmetatable(item)
     if isError(item) or meta == false or (type(meta) == "table" and meta.__tostring) then
       return tostring(item)
-    end
+)MLUA"),
+            std::string_view(R"MLUA(    end
     if seen[item] then
       return "<cycle>"
     end
@@ -4943,8 +4951,7 @@ local function inspect(value, options)
     end
     seen[item] = true
     local parts = {}
-)MLUA"),
-            std::string_view(R"MLUA(    local length = rawlen(item)
+    local length = rawlen(item)
     local skipped = 0
     for index = 1, length do
       if #parts >= MAX_ITEMS then
@@ -5260,13 +5267,13 @@ do
       if options == nil and SIMPLE_READS[kind] then
         local value, code, message = nativeRead(address, kind, 0, 256, false)
         if value == nil and code ~= nil then
-          return nil, makeError(code, message)
+)MLUA"),
+            std::string_view(R"MLUA(          return nil, makeError(code, message)
         end
         return value
       end
       if kind == "raw" and type(options) == "table" and next(options, next(options)) == nil then
-)MLUA"),
-            std::string_view(R"MLUA(        local count = rawget(options, "count")
+        local count = rawget(options, "count")
         if math.type(count) == "integer" and count >= 1 and count <= MAX_BYTES then
           local value, code, message = nativeRead(address, "raw", count, 0, false)
           if value == nil and code ~= nil then
