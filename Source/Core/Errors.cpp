@@ -81,6 +81,9 @@ namespace Manifold
             { ErrorCode::ModuleFileDifferent, "The module file does not match the loaded module: {}.",
                 "The file on disk is not a valid program image, or it was replaced by a different version after the process started.",
                 "Restart the process so it loads the file on disk, then scan again." },
+            { ErrorCode::ModuleNotFound, "No module named {} is loaded in the process.",
+                "The name matches none of the modules the process has loaded.",
+                "Check the spelling, or wait until the game has loaded the module. manifold.process.modules() lists them." },
 
             { ErrorCode::ScanNoValue, "Enter a value to scan for.",
                 "This scan type compares memory with a value, and the value field is empty.",
@@ -303,6 +306,9 @@ namespace Manifold
             { ErrorCode::LuaBadArgument, "Lua: {}.",
                 "A Manifold function got an argument of the wrong type or value.",
                 "See Docs/LUA-API.md for the arguments." },
+            { ErrorCode::LuaApiMisuse, "The manifold API was called the wrong way: {}.",
+                "A manifold function was called with a colon, got a missing, extra or wrong argument or an unknown option, or a name that does not exist was read.",
+                "The message names the function and the argument. Docs/MANIFOLD-API.md has the rules and every function." },
 
             { ErrorCode::ExprSyntax, "\"{}\" is not a valid address.",
                 "The address expression could not be read.",

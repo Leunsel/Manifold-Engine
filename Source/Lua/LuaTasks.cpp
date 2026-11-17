@@ -171,8 +171,19 @@ namespace Manifold::Lua
         }
         else
         {
-            const char* text = lua_tostring(task.Thread, -1);
-            luaL_traceback(m_state, task.Thread, text ? text : "error", 0);
+            std::string text = lua_tostring(task.Thread, -1) ? lua_tostring(task.Thread, -1) : "";
+            if (text.empty())
+            {
+                if (luaL_callmeta(task.Thread, -1, "__tostring"))
+                {
+                    if (lua_type(task.Thread, -1) == LUA_TSTRING)
+                        text = lua_tostring(task.Thread, -1);
+                    lua_pop(task.Thread, 1);
+                }
+                if (text.empty())
+                    text = "error";
+            }
+            luaL_traceback(m_state, task.Thread, text.c_str(), 0);
             const std::string message = lua_tostring(m_state, -1) ? lua_tostring(m_state, -1) : "error";
             lua_pop(m_state, 1);
             Print(OutputKind::Error, message);

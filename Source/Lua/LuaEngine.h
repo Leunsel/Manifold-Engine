@@ -39,13 +39,19 @@ namespace Manifold::Lua
     {
         Print,
         Error,
-        Info
+        Info,
+        Debug,
+        Success,
+        Warning
     };
 
     struct OutputLine
     {
         OutputKind Kind = OutputKind::Print;
         std::string Text;
+        std::uint16_t TimeEnd = 0;
+        std::uint16_t TagEnd = 0;
+        std::uint16_t HeadEnd = 0;
     };
 
     struct Timer
@@ -358,6 +364,11 @@ namespace Manifold::Lua
         void OnProcessOpened();
 
         void Print(OutputKind kind, std::string text);
+        void PrintEntry(OutputKind kind, std::string_view time, std::string_view tag, std::string_view channel, std::string text);
+        bool ShowOnPrint() const;
+        void SetShowOnPrint(bool show) { m_showOnPrintOverride = show ? 1 : 0; }
+        void RememberShowOnPrint(bool show);
+        std::uint64_t PrintSignal() const { return m_printSignal.load(); }
         std::vector<OutputLine> Output() const;
         std::size_t OutputCount() const;
         std::uint64_t OutputDropped() const;
@@ -440,6 +451,8 @@ namespace Manifold::Lua
         std::size_t m_outputBytes = 0;
         std::uint64_t m_outputDropped = 0;
         std::atomic<std::uint64_t> m_outputGeneration{ 1 };
+        std::atomic<std::uint64_t> m_printSignal{ 0 };
+        std::atomic<int> m_showOnPrintOverride{ -1 };
         std::map<int, Timer> m_timers;
         int m_nextTimer = 1;
         std::map<int, LuaHotkey> m_hotkeys;

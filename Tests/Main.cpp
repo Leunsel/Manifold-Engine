@@ -23,6 +23,8 @@ namespace Manifold::Tests
     int RunIntegrationTests(const std::filesystem::path& target);
     int RunCompatHarness(const std::vector<std::string>& arguments);
     int RunCompatTests();
+    int RunManifoldApiTests();
+    std::string ManifoldMarkdown();
     int RunTemplateTests();
     int RunWatchStress(const std::vector<std::string>& arguments);
     int RunDebuggerCheck(const std::vector<std::string>& arguments);
@@ -78,6 +80,11 @@ int main(int argc, char** argv)
             std::fputs(Manifold::ShortcutsMarkdown().c_str(), stdout);
             return 0;
         }
+        if (argument == "--manifold-markdown")
+        {
+            std::fputs(Manifold::Tests::ManifoldMarkdown().c_str(), stdout);
+            return 0;
+        }
         if (argument.rfind("--target=", 0) == 0)
             target = argument.substr(9);
         if (argument == "--assembler")
@@ -104,6 +111,8 @@ int main(int argc, char** argv)
     Manifold::Tests::RunCommandTests();
     std::printf("Compatibility\n");
     Manifold::Tests::RunCompatTests();
+    std::printf("Manifold Lua API\n");
+    Manifold::Tests::RunManifoldApiTests();
     std::printf("Templates\n");
     Manifold::Tests::RunTemplateTests();
     std::printf("Integration (%ls)\n", target.c_str());

@@ -2,6 +2,8 @@
 
 Manifold Engine runs Lua 5.4 with the standard libraries and the functions below. Names follow Cheat Engine where a function exists there, so most table scripts run unchanged. Addresses can be numbers or address expressions such as `"game.exe+10"` or `"[[base]+8]+4"`.
 
+Manifold Engine's own API, with one fixed naming and calling schema that every call is checked against, is the `manifold` namespace in [MANIFOLD-API.md](MANIFOLD-API.md): coloured log levels, process and typed memory helpers that report failures as error objects, and protected calls.
+
 Scripts run on the program's main thread: in the Lua engine window (Ctrl+L), in `{$lua}` blocks of Auto Assembler scripts, from the table's Lua script, and from `.lua` files in the `autorun` folder at start. Errors end in `ME-7xxx`; see [ERRORS.md](ERRORS.md).
 
 ## Process
@@ -162,6 +164,8 @@ The memory viewer is `getMemoryViewForm()`:
 - Menu items added to the `debuggerpopup` menu appear at the end of the disassembler's context menu; its `OnPopup` runs before the menu opens. Root items added to the form's `Menu` appear in the viewer's menu bar after Tools, with their sub-items. `Caption` (`-` is a separator), `Visible`, `Enabled`, `Checked`, `AutoCheck`, `Shortcut` and `OnClick` are honoured; a root item's `OnClick` runs when its menu opens, as in Cheat Engine.
 - The same goes for `MainForm.Menu`: root items that scripts add appear in the main window's menu bar before Help, and items added to Cheat Engine's own menus (`MainForm.miFile`, `miEdit`, `miTable`, `miHelp`) appear at the end of Manifold's File, Edit, Table and Help menus. Their shortcuts work in the main window unless one of its own commands uses the same keys.
 - The `Shortcut` of a menu bar item works while the memory viewer has the focus. When the key is one of the viewer's own keys that Cheat Engine 7.5 also uses, the viewer's command keeps it and the log says so; over the viewer's other keys (such as `Ctrl+Shift+F` for Find assembly code) the script's item wins, as it would in Cheat Engine.
+
+The Lua engine is `getLuaEngine()`: `cbShowOnPrint.Checked` (and `State`) is the window's *Show on print* switch. Setting it from a script, as many tables do to keep the window closed, lasts until the program closes; the saved setting stays as the user left it.
 
 ## Mono / .NET
 

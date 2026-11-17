@@ -141,6 +141,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Lua\LuaAssist.cpp" />
     <ClCompile Include="..\Source\Lua\LuaCompat.cpp" />
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaManifold.cpp" />
     <ClCompile Include="..\Source\Lua\LuaMono.cpp" />
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp" />
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp" />

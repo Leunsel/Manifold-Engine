@@ -21,6 +21,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-1013 | The library could not be loaded into the process: …. | LoadLibrary in the target failed: the file is missing, has the wrong bitness, or its imports are missing. | Use a library built for the same bitness as the target and keep its dependencies beside it. |
 | ME-1014 | The module file on disk could not be read: …. | The file was moved or deleted after the process loaded it, or another program holds it locked. | Check that the file still exists at that path, then scan again. |
 | ME-1015 | The module file does not match the loaded module: …. | The file on disk is not a valid program image, or it was replaced by a different version after the process started. | Restart the process so it loads the file on disk, then scan again. |
+| ME-1016 | No module named … is loaded in the process. | The name matches none of the modules the process has loaded. | Check the spelling, or wait until the game has loaded the module. manifold.process.modules() lists them. |
 
 ## Scanner
 
@@ -123,6 +124,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-7004 | A Lua timer was stopped after an error: …. | The timer's function raised an error, so the timer was disabled to stop the error repeating. | Fix the function and enable the timer again. |
 | ME-7005 | The table's Lua script failed: …. | The script stored in the table raised an error when the table was loaded. | Open Table > Show table Lua script and fix it. |
 | ME-7006 | Lua: …. | A Manifold function got an argument of the wrong type or value. | See Docs/LUA-API.md for the arguments. |
+| ME-7007 | The manifold API was called the wrong way: …. | A manifold function was called with a colon, got a missing, extra or wrong argument or an unknown option, or a name that does not exist was read. | The message names the function and the argument. Docs/MANIFOLD-API.md has the rules and every function. |
 
 ## Addresses and symbols
 

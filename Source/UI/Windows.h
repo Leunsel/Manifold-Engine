@@ -576,6 +576,7 @@ namespace Manifold::UI
         void MarkError(const Status& status);
         void FunctionList();
         void RunCommand(Command command);
+        void RememberShowOnPrint(bool show);
 
         Workspace& m_workspace;
         Engine& m_engine;

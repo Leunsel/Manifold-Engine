@@ -166,6 +166,13 @@ namespace Manifold::UI
             case UiRequestKind::Quit: RequestQuit(); break;
             }
         }
+        const std::uint64_t printed = m_engine.Lua().PrintSignal();
+        if (printed != m_seenPrints)
+        {
+            m_seenPrints = printed;
+            if (!m_engine.Options().ReleaseMode && (!m_lua || m_lua->Closed()))
+                OpenLua();
+        }
     }
 
     void Workspace::HandleShortcuts()

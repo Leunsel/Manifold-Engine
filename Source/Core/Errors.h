@@ -21,6 +21,7 @@
     X(InjectFailed, 1013) \
     X(ModuleFileUnreadable, 1014) \
     X(ModuleFileDifferent, 1015) \
+    X(ModuleNotFound, 1016) \
     X(ScanNoValue, 2001) \
     X(ScanBadValue, 2002) \
     X(ScanBadPattern, 2003) \
@@ -93,6 +94,7 @@
     X(LuaTimerFailed, 7004) \
     X(LuaTableScriptFailed, 7005) \
     X(LuaBadArgument, 7006) \
+    X(LuaApiMisuse, 7007) \
     X(ExprSyntax, 8001) \
     X(ExprUnknownSymbol, 8002) \
     X(ExprPointerUnreadable, 8003) \

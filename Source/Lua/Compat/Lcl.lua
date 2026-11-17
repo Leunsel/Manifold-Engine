@@ -884,8 +884,35 @@ Impl.listbox = { clear = function(self) self.Items.clear() D[self].props.itemind
 
 Defaults.radiogroup = { items = function(self) return new("stringlist", self) end, itemindex = -1, columns = 1 }
 Defaults.checkbox = { checked = false, state = 0, allowgrayed = false }
+local function luaShowOnPrint()
+  return manifold and manifold.output.getShowOnPrint() or false
+end
+Get.checkbox = {
+  checked = function(self, d)
+    if d.showOnPrint then
+      return luaShowOnPrint()
+    end
+    return false
+  end,
+  state = function(self, d)
+    if d.showOnPrint then
+      return luaShowOnPrint() and 1 or 0
+    end
+    return 0
+  end,
+}
 Set.checkbox = {
   checked = function(self, d, value)
+    if d.showOnPrint then
+      local before = luaShowOnPrint()
+      if manifold then
+        manifold.output.setShowOnPrint(value and true or false)
+      end
+      if before ~= (value and true or false) then
+        call(d.props.onchange, self)
+      end
+      return
+    end
     local changed = (d.props.checked or false) ~= (value and true or false)
     d.props.checked = value and true or false
     d.props.state = value and 1 or 0
@@ -894,6 +921,10 @@ Set.checkbox = {
     end
   end,
   state = function(self, d, value)
+    if d.showOnPrint then
+      Set.checkbox.checked(self, d, value == 1 or value == "cbChecked")
+      return
+    end
     d.props.state = value
     d.props.checked = value == 1 or value == "cbChecked"
   end,
@@ -1757,6 +1788,9 @@ getLuaEngine = getLuaEngine or function()
   child("mOutput", "memo", panel1)
   child("mScript", "synedit")
   child("btnExecute", "button")
+  local showOnPrint = child("cbShowOnPrint", "checkbox")
+  D[showOnPrint].showOnPrint = true
+  D[showOnPrint].props.caption = "Show on print"
   local menu = new("mainmenu", luaEngineForm)
   D[luaEngineForm].props.menu = menu
   addForm(luaEngineForm)

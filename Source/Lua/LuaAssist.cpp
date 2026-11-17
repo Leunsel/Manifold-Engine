@@ -1,6 +1,7 @@
 #include "Lua/LuaEngine.h"
 
 #include "Core/Text.h"
+#include "Lua/LuaApi.h"
 #include "Lua/LuaDocs.h"
 
 #include "lua.hpp"
@@ -337,7 +338,12 @@ namespace Manifold::Lua
                 completion.Kind = KindOf(m_state, index, m_method);
                 if (lua_isfunction(m_state, index))
                 {
-                    if (const auto* docs = Docs(owner, name))
+                    if (const auto manifold = ManifoldDocOf(m_state, index))
+                    {
+                        completion.Signature = "(" + manifold->Params + ")";
+                        completion.Text = manifold->Text + (manifold->Returns.empty() ? "" : " Returns " + manifold->Returns + ".");
+                    }
+                    else if (const auto* docs = Docs(owner, name))
                     {
                         completion.Signature = "(" + docs->front().Params + ")";
                         completion.Text = docs->front().Text;
@@ -530,7 +536,9 @@ namespace Manifold::Lua
             return result;
         }
 
-        if (const auto* docs = Docs(owner, name); docs && (lua_isfunction(state, -1) || lua_isnil(state, -1)))
+        if (const auto manifold = ManifoldDocOf(state, -1))
+            result.push_back(name + "(" + manifold->Params + ")");
+        else if (const auto* docs = Docs(owner, name); docs && (lua_isfunction(state, -1) || lua_isnil(state, -1)))
             result = FromDocs(*docs, name);
         else if (lua_isfunction(state, -1))
         {

@@ -134,6 +134,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Lua\LuaAssist.cpp" />
     <ClCompile Include="..\Source\Lua\LuaCompat.cpp" />
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaManifold.cpp" />
     <ClCompile Include="..\Source\Lua\LuaMono.cpp" />
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp" />
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp" />
@@ -167,6 +168,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Tests\DisasmTests.cpp" />
     <ClCompile Include="..\Tests\IntegrationTests.cpp" />
     <ClCompile Include="..\Tests\Main.cpp" />
+    <ClCompile Include="..\Tests\ManifoldApiTests.cpp" />
     <ClCompile Include="..\Tests\MonoTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
     <ClCompile Include="..\Tests\WatchStress.cpp" />

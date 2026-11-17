@@ -169,6 +169,7 @@ namespace Manifold::UI
         std::vector<std::unique_ptr<WatchWindow>> m_watches;
         std::vector<std::unique_ptr<RecordEditor>> m_editors;
         std::unique_ptr<LuaWindow> m_lua;
+        std::uint64_t m_seenPrints = 0;
         std::unique_ptr<LogWindow> m_log;
         std::unique_ptr<SettingsWindow> m_settings;
         std::unique_ptr<ProcessPicker> m_picker;

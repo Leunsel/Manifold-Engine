@@ -23,6 +23,28 @@
 
 namespace Manifold::UI
 {
+    namespace
+    {
+        ImVec4 OutputColor(Lua::OutputKind kind)
+        {
+            switch (kind)
+            {
+            case Lua::OutputKind::Error: return ManifoldTheme::Error;
+            case Lua::OutputKind::Warning: return ManifoldTheme::Warning;
+            case Lua::OutputKind::Success: return ManifoldTheme::Accent;
+            case Lua::OutputKind::Debug: return ManifoldTheme::Muted;
+            case Lua::OutputKind::Info:
+            case Lua::OutputKind::Print: break;
+            }
+            return ManifoldTheme::Text;
+        }
+
+        ImVec4 OutputTagColor(Lua::OutputKind kind)
+        {
+            return kind == Lua::OutputKind::Info ? ManifoldTheme::AddressText : OutputColor(kind);
+        }
+    }
+
     ProcessPicker::ProcessPicker(Workspace& workspace) : m_workspace(workspace)
     {
         Refresh();
@@ -264,6 +286,12 @@ namespace Manifold::UI
         }
     }
 
+    void LuaWindow::RememberShowOnPrint(bool show)
+    {
+        m_engine.Lua().RememberShowOnPrint(show);
+        m_workspace.Report(m_engine.Options().Save(Paths::SettingsFile()));
+    }
+
     void LuaWindow::RunCommand(Command command)
     {
         switch (command)
@@ -336,6 +364,10 @@ namespace Manifold::UI
             {
                 item(ICON_FA_BOOK "  Functions", Command::LuaFunctions, m_showFunctions);
                 item(ICON_FA_ERASER "  Clear output", Command::LuaClearOutput);
+                ImGui::Separator();
+                if (ImGui::MenuItem(ICON_FA_EYE "  Show on print", nullptr, m_engine.Lua().ShowOnPrint()))
+                    RememberShowOnPrint(!m_engine.Lua().ShowOnPrint());
+                ItemTooltip("Opens this window when a script prints or logs while it is closed.");
                 ImGui::EndMenu();
             }
             item(ICON_FA_PLAY "  Execute", Command::LuaExecute);
@@ -372,9 +404,30 @@ namespace Manifold::UI
         {
             lua.VisitOutput(static_cast<std::size_t>(clipper.DisplayStart), static_cast<std::size_t>(clipper.DisplayEnd), [](std::size_t, const Lua::OutputLine& line)
                 {
-                    ImGui::PushStyleColor(ImGuiCol_Text, line.Kind == Lua::OutputKind::Error ? ManifoldTheme::Error : line.Kind == Lua::OutputKind::Info ? ManifoldTheme::Muted : ManifoldTheme::Text);
-                    ImGui::TextUnformatted(line.Text.data(), line.Text.data() + line.Text.size());
-                    ImGui::PopStyleColor();
+                    const char* text = line.Text.data();
+                    const char* end = text + line.Text.size();
+                    const ImVec4 message = OutputColor(line.Kind);
+                    if (line.HeadEnd == 0 || line.HeadEnd > line.Text.size())
+                    {
+                        ImGui::PushStyleColor(ImGuiCol_Text, message);
+                        ImGui::TextUnformatted(text, end);
+                        ImGui::PopStyleColor();
+                        return;
+                    }
+                    const auto segment = [](const char* from, const char* to, const ImVec4& color, bool more)
+                        {
+                            ImGui::PushStyleColor(ImGuiCol_Text, color);
+                            ImGui::TextUnformatted(from, to);
+                            ImGui::PopStyleColor();
+                            if (more)
+                                ImGui::SameLine(0.0f, 0.0f);
+                        };
+                    const std::size_t timeEnd = std::min<std::size_t>(line.TimeEnd, line.HeadEnd);
+                    const std::size_t tagEnd = std::clamp<std::size_t>(line.TagEnd, timeEnd, line.HeadEnd);
+                    segment(text, text + timeEnd, ManifoldTheme::Muted, true);
+                    segment(text + timeEnd, text + tagEnd, OutputTagColor(line.Kind), true);
+                    segment(text + tagEnd, text + line.HeadEnd, ManifoldTheme::Label, true);
+                    segment(text + line.HeadEnd, end, message, false);
                 });
         }
         if (m_seenOutput != generation)
@@ -427,6 +480,18 @@ namespace Manifold::UI
             ImGui::SameLine();
         const std::string keys = ShortcutLabel(Command::LuaExecute);
         Muted((keys.empty() ? std::string() : keys + "  ·  ") + "line " + std::to_string(m_editor.CursorLine) + ", column " + std::to_string(m_editor.CursorColumn));
+        {
+            bool show = m_engine.Lua().ShowOnPrint();
+            const ImGuiStyle& style = ImGui::GetStyle();
+            const float width = ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + ImGui::CalcTextSize("Show on print").x;
+            ImGui::SameLine();
+            const float right = origin.x + total - functionsWidth - width;
+            if (right > ImGui::GetCursorPosX())
+                ImGui::SetCursorPosX(right);
+            if (ImGui::Checkbox("Show on print", &show))
+                RememberShowOnPrint(show);
+            ItemTooltip("Opens this window when a script prints or logs while it is closed. Saved with the settings.");
+        }
         ImGui::EndGroup();
 
         if (m_showFunctions)

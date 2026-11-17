@@ -150,6 +150,9 @@
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaManifold.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaMono.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>

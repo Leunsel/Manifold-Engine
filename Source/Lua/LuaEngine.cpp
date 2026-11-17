@@ -36,8 +36,9 @@ namespace Manifold::Lua
             if (!message)
             {
                 if (luaL_callmeta(state, 1, "__tostring") && lua_type(state, -1) == LUA_TSTRING)
-                    return 1;
-                message = lua_pushfstring(state, "(error object is a %s value)", luaL_typename(state, 1));
+                    message = lua_tostring(state, -1);
+                else
+                    message = lua_pushfstring(state, "(error object is a %s value)", luaL_typename(state, 1));
             }
             luaL_traceback(state, state, message, 1);
             return 1;
@@ -172,24 +173,77 @@ namespace Manifold::Lua
         RegisterApi(*this, m_state);
         RegisterMonoApi(*this, m_state);
         RegisterCompat(*this, m_state);
+        RegisterManifoldApi(*this, m_state);
         RunCompatScripts(*this);
     }
 
     void LuaEngine::Print(OutputKind kind, std::string text)
     {
-        std::lock_guard lock(m_outputLock);
-        for (std::string& line : SplitLines(text))
+        PrintEntry(kind, {}, {}, {}, std::move(text));
+    }
+
+    void LuaEngine::PrintEntry(OutputKind kind, std::string_view time, std::string_view tag, std::string_view channel, std::string text)
+    {
+        std::string head;
+        if (!time.empty() || !tag.empty())
         {
-            m_outputBytes += line.size();
-            m_output.push_back({ kind, std::move(line) });
+            head.append(time);
+            head += ' ';
+            head.append(tag);
+            head += ' ';
         }
-        while (m_output.size() > 1 && (m_output.size() > kMaxOutputLines || m_outputBytes > kMaxOutputBytes))
+        const std::size_t timeEnd = time.empty() ? 0 : time.size() + 1;
+        const std::size_t tagEnd = head.size();
+        if (!channel.empty() && !head.empty())
         {
-            m_outputBytes -= m_output.front().Text.size();
-            m_output.pop_front();
-            ++m_outputDropped;
+            head += '[';
+            head.append(channel);
+            head += "] ";
         }
-        ++m_outputGeneration;
+        const bool show = ShowOnPrint();
+        {
+            std::lock_guard lock(m_outputLock);
+            bool first = true;
+            for (std::string& line : SplitLines(text))
+            {
+                OutputLine entry{ kind, {} };
+                if (head.empty())
+                    entry.Text = std::move(line);
+                else if (first)
+                {
+                    entry.Text = head + line;
+                    entry.TimeEnd = static_cast<std::uint16_t>(std::min<std::size_t>(timeEnd, 0xFFFF));
+                    entry.TagEnd = static_cast<std::uint16_t>(std::min<std::size_t>(tagEnd, 0xFFFF));
+                    entry.HeadEnd = static_cast<std::uint16_t>(std::min<std::size_t>(head.size(), 0xFFFF));
+                }
+                else
+                    entry.Text = std::string(std::min<std::size_t>(head.size(), 64), ' ') + line;
+                first = false;
+                m_outputBytes += entry.Text.size();
+                m_output.push_back(std::move(entry));
+            }
+            while (m_output.size() > 1 && (m_output.size() > kMaxOutputLines || m_outputBytes > kMaxOutputBytes))
+            {
+                m_outputBytes -= m_output.front().Text.size();
+                m_output.pop_front();
+                ++m_outputDropped;
+            }
+            ++m_outputGeneration;
+        }
+        if (show)
+            ++m_printSignal;
+    }
+
+    bool LuaEngine::ShowOnPrint() const
+    {
+        const int chosen = m_showOnPrintOverride.load();
+        return chosen < 0 ? m_engine.Options().LuaShowOnPrint : chosen != 0;
+    }
+
+    void LuaEngine::RememberShowOnPrint(bool show)
+    {
+        m_showOnPrintOverride = -1;
+        m_engine.Options().LuaShowOnPrint = show;
     }
 
     std::vector<OutputLine> LuaEngine::Output() const

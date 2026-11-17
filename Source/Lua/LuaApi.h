@@ -2,6 +2,7 @@
 
 #include "Disasm/Disassembler.h"
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -24,7 +25,19 @@ namespace Manifold::Lua
     void RegisterMonoApi(LuaEngine& engine, lua_State* state);
     void RegisterObjects(LuaEngine& engine, lua_State* state);
     void RegisterCompat(LuaEngine& engine, lua_State* state);
+    void RegisterManifoldApi(LuaEngine& engine, lua_State* state);
     void RunCompatScripts(LuaEngine& engine);
+
+    struct ManifoldFunctionDoc
+    {
+        std::string Path;
+        std::string Params;
+        std::string Returns;
+        std::string Text;
+    };
+
+    std::optional<ManifoldFunctionDoc> ManifoldDocOf(lua_State* state, int index);
+    std::string ManifoldApiMarkdown(LuaEngine& engine);
     std::vector<std::string> ApiFunctionNames();
     void NoteFunction(const char* name);
 
