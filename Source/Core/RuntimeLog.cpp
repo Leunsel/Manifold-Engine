@@ -94,6 +94,8 @@ namespace Manifold::RuntimeLog
             return;
 
         std::error_code ignored;
+        if (path.has_parent_path())
+            std::filesystem::create_directories(path.parent_path(), ignored);
         std::filesystem::rename(path, std::filesystem::path(path).replace_extension(L".previous.log"), ignored);
         g_file = ::_wfsopen(path.c_str(), L"a", _SH_DENYNO);
     }

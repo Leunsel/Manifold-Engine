@@ -47,9 +47,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE, _In_ LPWSTR, 
 {
     InitSysCalls();
     ::SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS | LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
-    Manifold::Paths::AdoptEarlierFiles();
-    Manifold::RuntimeLog::OpenFile(Manifold::Paths::LogFile());
-    Manifold::CrashHandler::Install(Manifold::Paths::CrashFolder());
+    {
+        const Manifold::Paths::Migration migration = Manifold::Paths::AdoptEarlierFiles(Manifold::Paths::ProgramFolder());
+        Manifold::RuntimeLog::OpenFile(Manifold::Paths::LogFile());
+        Manifold::CrashHandler::Install(Manifold::Paths::CrashFolder());
+        for (const std::string& line : migration.Moved)
+            LOG_INFO("Program", line);
+        for (const std::string& line : migration.Problems)
+            LOG_WARN("Program", line);
+    }
 
     int result = 0;
     {

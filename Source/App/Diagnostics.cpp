@@ -1285,7 +1285,10 @@ namespace Manifold::Diagnostics
         build.Rows.push_back({ "Dear ImGui", IMGUI_VERSION });
         build.Rows.push_back({ "Lua", LUA_RELEASE });
         build.Rows.push_back({ "Program folder", WideToUtf8(Paths::ProgramFolder().wstring()) });
+        build.Rows.push_back({ "Configs folder", WideToUtf8(Paths::ConfigFolder().wstring()) });
         build.Rows.push_back({ "Settings file", WideToUtf8(Paths::SettingsFile().wstring()) });
+        build.Rows.push_back({ "Tables folder", WideToUtf8(Paths::TablesFolder().wstring()) });
+        build.Rows.push_back({ "Log file", WideToUtf8(Paths::LogFile().wstring()) });
         groups.push_back(std::move(build));
 
         InfoGroup system{ "System", {} };
@@ -1495,13 +1498,29 @@ namespace Manifold::Diagnostics
         {
             PROFILE_ZONE("Checks: program folder");
             writable = FolderWritable(Paths::ProgramFolder());
+            for (const std::filesystem::path& folder : { Paths::ConfigFolder(), Paths::LogFolder() })
+            {
+                std::error_code missing;
+                if (writable && std::filesystem::is_directory(folder, missing))
+                    writable = FolderWritable(folder);
+            }
         }
         if (writable)
-            Add(checks, Level::Ok, "Files", "The program folder is writable", "Settings, layout, log and tables can be saved next to the program.");
+            Add(checks, Level::Ok, "Files", "The program folder is writable", "Settings and layout (configs folder), tables (tables folder) and the log (logs folder) can be saved next to the program.");
         else
             Add(checks, Level::Problem, "Files", "The program folder is not writable",
-                "Settings, the window layout, the log and saved tables are written next to the program, in " + WideToUtf8(Paths::ProgramFolder().wstring()) + ".",
+                "Settings and the window layout are written into the configs folder, saved tables into the tables folder and the log into the logs folder, next to the program in " + WideToUtf8(Paths::ProgramFolder().wstring()) + ".",
                 "Move the program to a folder you can write to, such as one in your user folder, or run it as administrator.");
+        const std::vector<std::string> leftovers = Paths::LeftoverFiles(Paths::ProgramFolder());
+        if (!leftovers.empty())
+        {
+            std::string names;
+            for (const std::string& name : leftovers)
+                names += (names.empty() ? "" : ", ") + name;
+            Add(checks, Level::Info, "Files", leftovers.size() == 1 ? "An old settings file is left next to the program" : "Old settings files are left next to the program",
+                names + (leftovers.size() == 1 ? " is" : " are") + " in " + WideToUtf8(Paths::ProgramFolder().wstring()) + " and in the configs folder. The program reads only the one in configs.",
+                "Copy what you still need from the old file into the one in configs, then remove the old file. An older version of the program started from this folder writes it again.");
+        }
 
         const GraphicsInfo& gpu = Graphics();
         bool crossAdapter = false;

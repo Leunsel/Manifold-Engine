@@ -61,6 +61,8 @@ namespace Manifold
         {
             Settings settings;
             settings.Load(Paths::SettingsFile());
+            for (std::string& recent : settings.RecentTables)
+                recent = Paths::CurrentTablePath(recent, Paths::ProgramFolder());
             ManifoldTheme::Configure(settings.Theme.Colors, settings.Theme.Sizes);
             ApplyShortcutSettings(settings.Shortcuts);
             return settings;

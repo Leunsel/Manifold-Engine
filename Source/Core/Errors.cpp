@@ -16,7 +16,7 @@ namespace Manifold
         constexpr std::string_view kCheckAddress = "Check the address in the memory viewer: unreadable pages show as ??.";
         constexpr std::string_view kCheckScript = "Fix the line named in the message and run the script again.";
         constexpr std::string_view kDriver = "Update the graphics driver. Over Remote Desktop, start the program on the computer itself once.";
-        constexpr std::string_view kReport = "Start the program again. If it stays, report the code with the log file next to the program.";
+        constexpr std::string_view kReport = "Start the program again. If it stays, report the code with the log file from the logs folder next to the program.";
 
         struct Area
         {
@@ -257,7 +257,7 @@ namespace Manifold
                 "The interface library did not start with the window or the device.",
                 kReport },
             { ErrorCode::SettingsNotSaved, "The settings could not be saved to {}.",
-                "The folder of the program is not writable.",
+                "The configs folder next to the program is not writable.",
                 "Move the program to a folder you can write to, or run it as administrator." },
             { ErrorCode::Crashed, "The program crashed ({}).",
                 "An unexpected error stopped the program.",

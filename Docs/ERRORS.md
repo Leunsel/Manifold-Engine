@@ -8,7 +8,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | --- | --- | --- | --- |
 | ME-1001 | No process with this id or name runs: …. | The process ended, or the name was written differently. | Pick the process again from the process list. |
 | ME-1002 | Windows refused access to the process: …. | The process runs with higher rights than this program, or it is protected. | Start Manifold Engine as administrator. Protected processes (anti-cheat, system services) cannot be opened at all. |
-| ME-1003 | The process could not be opened: …. | OpenProcess failed for a reason other than missing rights. | Start the program again. If it stays, report the code with the log file next to the program. |
+| ME-1003 | The process could not be opened: …. | OpenProcess failed for a reason other than missing rights. | Start the program again. If it stays, report the code with the log file from the logs folder next to the program. |
 | ME-1004 | The process has ended. | The opened process closed or crashed. Its addresses mean nothing any more. | Start it again and open it from the process list. Tables keep their records. |
 | ME-1005 | No process is open. | This needs a process to read from or write to. | Open a process first: the computer button at the top left, or Ctrl+P. |
 | ME-1006 | Memory at … could not be read. | The address is not mapped in the process, or the page does not allow reading. | Check the address in the memory viewer: unreadable pages show as ??. |
@@ -76,7 +76,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-4003 | All four hardware breakpoints are in use. | x86 has four debug registers; each watch or hardware breakpoint takes one. | Stop another watch or remove a breakpoint first. |
 | ME-4004 | The breakpoint at … could not be set. | The code page could not be written, or a thread context could not be changed. | Check the address in the memory viewer: unreadable pages show as ??. |
 | ME-4005 | The registers of thread … could not be read or written. | The thread ended or does not allow context access. | Usually harmless; the thread is skipped. |
-| ME-4006 | The debugger could not detach: …. | DebugActiveProcessStop failed. The process ends when this program closes. | Start the program again. If it stays, report the code with the log file next to the program. |
+| ME-4006 | The debugger could not detach: …. | DebugActiveProcessStop failed. The process ends when this program closes. | Start the program again. If it stays, report the code with the log file from the logs folder next to the program. |
 | ME-4007 | The debugger is not attached. | This needs the debugger. | Attach it from the Debug menu, or start a watch: that attaches it. |
 | ME-4008 | A hardware breakpoint cannot watch … bytes. | Debug registers watch 1, 2, 4 or 8 bytes at an address aligned to that size. | Watch fewer bytes, or an aligned address. |
 | ME-4009 | The debugged process ended. | The process closed while the debugger was attached. | Open it again. |
@@ -90,17 +90,17 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 
 | Code | Message | Cause | Help |
 | --- | --- | --- | --- |
-| ME-5001 | The window class could not be registered. | Windows refused to register the program's window class. | Start the program again. If it stays, report the code with the log file next to the program. |
-| ME-5002 | The window could not be created. | Windows did not create the main window. | Start the program again. If it stays, report the code with the log file next to the program. |
+| ME-5001 | The window class could not be registered. | Windows refused to register the program's window class. | Start the program again. If it stays, report the code with the log file from the logs folder next to the program. |
+| ME-5002 | The window could not be created. | Windows did not create the main window. | Start the program again. If it stays, report the code with the log file from the logs folder next to the program. |
 | ME-5003 | Direct3D 11 could not be started (…). | No graphics device with Direct3D 11 support was found. | Update the graphics driver. Over Remote Desktop, start the program on the computer itself once. |
 | ME-5004 | The graphics device gave no DXGI factory (…). | The driver did not hand out the objects for drawing. | Update the graphics driver. Over Remote Desktop, start the program on the computer itself once. |
 | ME-5005 | The swap chain could not be created (…). | The driver did not create the surface the window draws on. | Update the graphics driver. Over Remote Desktop, start the program on the computer itself once. |
 | ME-5006 | The icon font is missing from the program. | The program file is damaged. | Download the program again. |
 | ME-5007 | The fonts could not be prepared. | No usable font was found in the Windows fonts folder. | Repair the Windows fonts (Tahoma, Segoe UI, Consolas). |
-| ME-5008 | The user interface could not be started. | The interface library did not start with the window or the device. | Start the program again. If it stays, report the code with the log file next to the program. |
-| ME-5009 | The settings could not be saved to …. | The folder of the program is not writable. | Move the program to a folder you can write to, or run it as administrator. |
-| ME-5010 | The program crashed (…). | An unexpected error stopped the program. | Start the program again. If it stays, report the code with the log file next to the program. |
-| ME-5011 | The last run crashed. A report is in …. | The program ended through an unexpected error last time. | Start the program again. If it stays, report the code with the log file next to the program. |
+| ME-5008 | The user interface could not be started. | The interface library did not start with the window or the device. | Start the program again. If it stays, report the code with the log file from the logs folder next to the program. |
+| ME-5009 | The settings could not be saved to …. | The configs folder next to the program is not writable. | Move the program to a folder you can write to, or run it as administrator. |
+| ME-5010 | The program crashed (…). | An unexpected error stopped the program. | Start the program again. If it stays, report the code with the log file from the logs folder next to the program. |
+| ME-5011 | The last run crashed. A report is in …. | The program ended through an unexpected error last time. | Start the program again. If it stays, report the code with the log file from the logs folder next to the program. |
 | ME-5012 | The program runs without administrator rights. | Many games run elevated or protect their memory, and then they cannot be opened. | Restart as administrator from the Help menu if a process cannot be opened. |
 | ME-5013 | The diagnostics report could not be written to …. | The folder does not exist or is not writable. | Save it somewhere else, or copy it to the clipboard instead. |
 

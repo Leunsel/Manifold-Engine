@@ -13,5 +13,7 @@ Manifold-Engine.ini.tmp
 Manifold-Engine.layout.ini
 Manifold-Engine.log
 Manifold-Engine.previous.log
+configs/
 crashes/
+logs/
 __pycache__/

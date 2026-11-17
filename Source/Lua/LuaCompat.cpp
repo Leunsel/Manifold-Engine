@@ -2127,7 +2127,10 @@ namespace Manifold::Lua
                     text += key + "=" + EscapeSetting(entry) + "\r\n";
                 text += "\r\n";
             }
-            std::ofstream file(Paths::ScriptSettingsFile(), std::ios::binary | std::ios::trunc);
+            const std::filesystem::path path = Paths::ScriptSettingsFile();
+            std::error_code ignored;
+            std::filesystem::create_directories(path.parent_path(), ignored);
+            std::ofstream file(path, std::ios::binary | std::ios::trunc);
             file.write(text.data(), static_cast<std::streamsize>(text.size()));
             lua_pushboolean(state, static_cast<bool>(file));
             return 1;

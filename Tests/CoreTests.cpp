@@ -795,6 +795,132 @@ data:
         Profiler::SetEnabled(false);
     }
 
+    void FolderMigration()
+    {
+        const std::filesystem::path root = std::filesystem::temp_directory_path() / ("Manifold-Migration-Tests-" + std::to_string(::GetCurrentProcessId()));
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+        const auto write = [](const std::filesystem::path& path, const std::string& text)
+            {
+                std::error_code error;
+                std::filesystem::create_directories(path.parent_path(), error);
+                std::ofstream file(path, std::ios::binary | std::ios::trunc);
+                file << text;
+            };
+        const auto read = [](const std::filesystem::path& path)
+            {
+                std::ifstream file(path, std::ios::binary);
+                return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            };
+        const auto nameOnDisk = [](const std::filesystem::path& path)
+            {
+                WIN32_FIND_DATAW data{};
+                const HANDLE find = ::FindFirstFileW(path.c_str(), &data);
+                if (find == INVALID_HANDLE_VALUE)
+                    return std::wstring();
+                ::FindClose(find);
+                return std::wstring(data.cFileName);
+            };
+        const auto exists = [](const std::filesystem::path& path) { return ::GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; };
+        const auto first = [](const std::vector<std::string>& lines) { return lines.empty() ? std::string() : lines.front(); };
+
+        const std::filesystem::path current = root / "current";
+        write(current / "Manifold-Engine.ini", "[Interface]\nCompact=1\n");
+        write(current / "Manifold-Engine.layout.ini", "[Window][Main]\n");
+        write(current / "Manifold-Engine.scripts.ini", "[Test]\r\nKey=Value\r\n");
+        write(current / "Manifold-CheatEngine.ini", "[Interface]\nCompact=0\n");
+        write(current / "Manifold-CheatEngine.layout.ini", "earlier layout");
+        write(current / "Tables" / "Game.CT", "<CheatTable/>");
+        write(current / "Sounds" / "Success.wav", "RIFF");
+        write(current / "Manifold-Engine.log", "last run");
+        write(current / "Manifold-Engine.previous.log", "run before");
+        const Paths::Migration moved = Paths::AdoptEarlierFiles(current);
+        CHECK_MSG(moved.Problems.empty(), first(moved.Problems));
+        CHECK_EQ(moved.Moved.size(), static_cast<std::size_t>(7));
+        CHECK_EQ(read(current / "logs" / "Manifold-Engine.log"), "last run");
+        CHECK_EQ(read(current / "logs" / "Manifold-Engine.previous.log"), "run before");
+        CHECK(!exists(current / "Manifold-Engine.log") && !exists(current / "Manifold-Engine.previous.log"));
+        CHECK_EQ(read(current / "configs" / "Manifold-Engine.ini"), "[Interface]\nCompact=1\n");
+        CHECK_EQ(read(current / "configs" / "Manifold-Engine.layout.ini"), "[Window][Main]\n");
+        CHECK_EQ(read(current / "configs" / "Manifold-Engine.scripts.ini"), "[Test]\r\nKey=Value\r\n");
+        CHECK(!exists(current / "Manifold-Engine.ini") && !exists(current / "Manifold-Engine.layout.ini") && !exists(current / "Manifold-Engine.scripts.ini"));
+        CHECK_EQ(read(current / "Manifold-CheatEngine.ini"), "[Interface]\nCompact=0\n");
+        CHECK_EQ(read(current / "Manifold-CheatEngine.layout.ini"), "earlier layout");
+        CHECK(nameOnDisk(current / "tables") == L"tables");
+        CHECK(nameOnDisk(current / "sounds") == L"sounds");
+        CHECK_EQ(read(current / "tables" / "Game.CT"), "<CheatTable/>");
+        CHECK_EQ(read(current / "sounds" / "Success.wav"), "RIFF");
+        CHECK(!exists(current / "tables.renaming") && !exists(current / "sounds.renaming"));
+        Settings loaded;
+        CHECK(loaded.Load(current / "configs" / "Manifold-Engine.ini") && loaded.CompactMode);
+
+        const Paths::Migration again = Paths::AdoptEarlierFiles(current);
+        CHECK_MSG(again.Moved.empty() && again.Problems.empty(), first(again.Moved) + first(again.Problems));
+        CHECK(Paths::LeftoverFiles(current).empty());
+
+        write(current / "Manifold-Engine.ini", "[Interface]\nCompact=0\n");
+        write(current / "Manifold-Engine.log", "older program");
+        const Paths::Migration collision = Paths::AdoptEarlierFiles(current);
+        CHECK(collision.Moved.empty());
+        CHECK_EQ(read(current / "configs" / "Manifold-Engine.ini"), "[Interface]\nCompact=1\n");
+        CHECK_EQ(read(current / "Manifold-Engine.ini"), "[Interface]\nCompact=0\n");
+        CHECK_EQ(read(current / "logs" / "Manifold-Engine.log"), "last run");
+        CHECK_EQ(read(current / "Manifold-Engine.log"), "older program");
+        CHECK(Paths::LeftoverFiles(current) == std::vector<std::string>{ "Manifold-Engine.ini" });
+
+        const std::filesystem::path earlier = root / "earlier";
+        write(earlier / "Manifold-CheatEngine.ini", "[Interface]\nCompact=1\n");
+        write(earlier / "Manifold-CheatEngine.layout.ini", "[Window][Main]\n");
+        write(earlier / "Manifold-CheatEngine.log", "earlier run");
+        write(earlier / "Manifold-CheatEngine.previous.log", "earlier run before");
+        const Paths::Migration copied = Paths::AdoptEarlierFiles(earlier);
+        CHECK_MSG(copied.Problems.empty(), first(copied.Problems));
+        CHECK_EQ(read(earlier / "logs" / "Manifold-CheatEngine.log"), "earlier run");
+        CHECK_EQ(read(earlier / "logs" / "Manifold-CheatEngine.previous.log"), "earlier run before");
+        CHECK(!exists(earlier / "Manifold-CheatEngine.log") && !exists(earlier / "Manifold-CheatEngine.previous.log"));
+        CHECK_EQ(read(earlier / "configs" / "Manifold-Engine.ini"), "[Interface]\nCompact=1\n");
+        CHECK_EQ(read(earlier / "configs" / "Manifold-Engine.layout.ini"), "[Window][Main]\n");
+        CHECK_EQ(read(earlier / "Manifold-CheatEngine.ini"), "[Interface]\nCompact=1\n");
+        CHECK(!exists(earlier / "Manifold-Engine.ini") && !exists(earlier / "tables") && !exists(earlier / "sounds"));
+
+        const std::filesystem::path odd = root / "odd";
+        write(odd / "Tables", "not a folder");
+        write(odd / "Sounds" / "Error.wav", "RIFF");
+        write(odd / "sounds.renaming" / "keep.txt", "keep");
+        const Paths::Migration file = Paths::AdoptEarlierFiles(odd);
+        CHECK_EQ(file.Problems.size(), static_cast<std::size_t>(1));
+        CHECK(nameOnDisk(odd / "Tables") == L"Tables");
+        CHECK_EQ(read(odd / "Tables"), "not a folder");
+        CHECK(nameOnDisk(odd / "sounds") == L"sounds");
+        CHECK_EQ(read(odd / "sounds" / "Error.wav"), "RIFF");
+        CHECK_EQ(read(odd / "sounds.renaming" / "keep.txt"), "keep");
+        CHECK(!exists(odd / "sounds.renaming1"));
+
+        const std::filesystem::path locked = root / "locked";
+        write(locked / "Tables" / "Game.CT", "<CheatTable/>");
+        const HANDLE holder = ::CreateFileW((locked / "Tables").c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        CHECK(holder != INVALID_HANDLE_VALUE);
+        const Paths::Migration busy = Paths::AdoptEarlierFiles(locked);
+        if (holder != INVALID_HANDLE_VALUE)
+            ::CloseHandle(holder);
+        CHECK_EQ(busy.Problems.size(), static_cast<std::size_t>(1));
+        CHECK(nameOnDisk(locked / "Tables") == L"Tables");
+        CHECK(!exists(locked / "tables.renaming"));
+        const Paths::Migration later = Paths::AdoptEarlierFiles(locked);
+        CHECK_MSG(later.Problems.empty(), first(later.Problems));
+        CHECK(nameOnDisk(locked / "tables") == L"tables");
+        CHECK_EQ(read(locked / "tables" / "Game.CT"), "<CheatTable/>");
+
+        const std::filesystem::path program = L"C:\\Games\\Manifold";
+        CHECK_EQ(Paths::CurrentTablePath("C:\\Games\\Manifold\\Tables\\Game.CT", program), "C:\\Games\\Manifold\\tables\\Game.CT");
+        CHECK_EQ(Paths::CurrentTablePath("c:\\games\\manifold\\TABLES\\Sub\\Game.CT", program), "C:\\Games\\Manifold\\tables\\Sub\\Game.CT");
+        CHECK_EQ(Paths::CurrentTablePath("C:\\Games\\Manifold\\TablesOld\\Game.CT", program), "C:\\Games\\Manifold\\TablesOld\\Game.CT");
+        CHECK_EQ(Paths::CurrentTablePath("D:\\Tables\\Game.CT", program), "D:\\Tables\\Game.CT");
+        CHECK_EQ(Paths::CurrentTablePath("C:\\Games\\Manifold\\Tables\\", program), "C:\\Games\\Manifold\\Tables\\");
+
+        std::filesystem::remove_all(root, ignored);
+    }
+
     void DiagnosticsInfo()
     {
         CHECK_EQ(Diagnostics::Milliseconds(12.345), "12.3 ms");
@@ -896,6 +1022,7 @@ data:
         BreakExpressions();
         Jobs();
         SoundDecoding();
+        FolderMigration();
         RecordIndex();
         ProfilerZones();
         DiagnosticsInfo();

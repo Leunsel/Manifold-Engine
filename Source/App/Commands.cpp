@@ -546,7 +546,7 @@ namespace Manifold
         text += "Keys without Ctrl or Alt do nothing while a text field has the focus. ";
         text += "In the app, **Help > Keyboard shortcuts** (`F1`) shows the same list with a search.\n\n";
         text += "This file lists the defaults. **Settings > Keyboard** changes any of them: click the keys and press new ones, right-click to remove them. ";
-        text += "Changed keys are stored in `Manifold-Engine.ini` under `[Shortcuts]` as `Key.<Command>=Ctrl+Shift+O` (a second shortcut after `;`, `none` for no keys), ";
+        text += "Changed keys are stored in `configs\\Manifold-Engine.ini` under `[Shortcuts]` as `Key.<Command>=Ctrl+Shift+O` (a second shortcut after `;`, `none` for no keys), ";
         text += "using the command names below.\n";
         for (int scope = 0; scope < static_cast<int>(CommandScope::Count); ++scope)
         {

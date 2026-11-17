@@ -140,7 +140,7 @@ Tables and autorun scripts written for Cheat Engine 7.5 run here. Beyond the fun
   - `saveCurrentResults(name)` keeps the current results under a name and `getSavedResultList()` returns the names. `nextScan` compares with saved results when its 10th argument (after `ispercentagescan`) is such a name.
 - Files and system: `lfs` (`attributes`, `dir`, `mkdir`, `rmdir`, `currentdir`, `chdir`, `touch`), `getFileList`, `getDirectoryList`, `extractFileName`, `extractFileNameWithoutExt`, `extractFilePath`, `extractFileExt`, `getFileVersion`, `md5file`, `md5memory`, `stringToMD5String`, `writeToClipboard`, `readFromClipboard`, `getInternet()` with `getURL(url)` and `postURL(url, data)`, `shellExecute(command, parameters, folder, show)` (also spelled `ShellExecute`), `getScreenWidth`, `getScreenHeight`, `getWorkAreaWidth`, `getWorkAreaHeight`, `getScreenDPI`, `getMousePos`, `getTempFolder`, `cheatEngineIs64Bit`, `pause`, `unpause`, `closeCE`, `enumMemoryRegions`, `inModule`, `inSystemModule`, `deleteAllRegisteredSymbols`.
 - The string helpers `split` (the parts as several values), `startsWith` and `endsWith`.
-- Stored settings: `getSettings(path)` returns an object whose `Value[name]` reads and writes text, `""` when nothing is stored. Cheat Engine keeps these in the registry; here they go into `Manifold-Engine.scripts.ini` next to the program, one section per path.
+- Stored settings: `getSettings(path)` returns an object whose `Value[name]` reads and writes text, `""` when nothing is stored. Cheat Engine keeps these in the registry; here they go into `configs\Manifold-Engine.scripts.ini` next to the program, one section per path.
 
 ### Forms
 
