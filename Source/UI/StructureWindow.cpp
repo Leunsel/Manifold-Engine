@@ -743,6 +743,7 @@ namespace Manifold::UI
                 const std::uint64_t base = !m_columns.empty() && m_columns.front().Valid ? m_columns.front().Value : 0;
                 StructureToAddressList(m_engine, *current, base);
             }
+            ImGui::Separator();
             if (DangerMenuItem(ICON_FA_TRASH "  Delete the structure", nullptr, current != nullptr))
             {
                 const std::string name = current->Name;
@@ -753,6 +754,16 @@ namespace Manifold::UI
                         if (m_structure == name)
                             m_structure.clear();
                     }, "Delete");
+            }
+            if (DangerMenuItem(ICON_FA_BROOM "  Delete all structures", nullptr, !m_engine.Structures().Items.empty()))
+            {
+                const std::size_t count = m_engine.Structures().Items.size();
+                m_workspace.Confirm("Delete all structures", "Delete all " + std::to_string(count) + (count == 1 ? " structure?" : " structures?"), [this]()
+                    {
+                        m_engine.Structures().Clear();
+                        m_structure.clear();
+                        m_expanded.clear();
+                    }, "Delete all");
             }
             ImGui::EndMenu();
         }
@@ -882,6 +893,7 @@ namespace Manifold::UI
         }
         if (IconButton(ICON_FA_PLUS, WithKeys("Add a column to compare another address", Command::AddStructureColumn).c_str()))
             m_columns.push_back({});
+
         ImGui::SetNextItemWidth(Px(240.0f));
         if (ImGui::BeginCombo("##structure", m_structure.empty() ? "No structure" : m_structure.c_str()))
         {
@@ -895,35 +907,29 @@ namespace Manifold::UI
             }
             ImGui::EndCombo();
         }
-        ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_MAGIC "  Guess new"))
+        Table::StructDefinition* current = Current();
+
+        ImGui::SameLine(0.0f, Px(14.0f));
+        if (IconButton(ICON_FA_MAGIC, WithKeys("Guess a new structure from the memory at the first address", Command::DefineStructure).c_str()))
         {
             m_newOpen = true;
             PrepareNew(m_columns.front().Valid ? m_columns.front().Value : 0);
         }
-        ItemTooltip(WithKeys("Read the memory at the first address and guess pointers, floats, strings and integers", Command::DefineStructure).c_str());
-        Table::StructDefinition* current = Current();
-        ImGui::BeginDisabled(!current);
         ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_I_CURSOR "  Rename") && current)
+        ImGui::BeginDisabled(!current);
+        if (IconButton(ICON_FA_I_CURSOR, "Rename the structure") && current)
         {
             m_renameOpen = true;
             m_renameText = current->Name;
         }
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!current || current->Fields.empty());
-        if (ImGui::Button(ICON_FA_LIST "  To address list") && current && !current->Fields.empty())
-        {
-            const std::uint64_t base = !m_columns.empty() && m_columns.front().Valid ? m_columns.front().Value : 0;
-            StructureToAddressList(m_engine, *current, base);
-        }
         ImGui::EndDisabled();
-        ItemTooltip("Add the whole structure to the address list: a group header at the base address with one entry per field at its offset");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(Px(80.0f));
+
+        ImGui::SameLine(0.0f, Px(14.0f));
+        ImGui::SetNextItemWidth(Px(72.0f));
         InputTextWithHint("##addoffset", "offset", m_addOffset, ImGuiInputTextFlags_CharsHexadecimal);
-        ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_PLUS "  Field") && current)
+        ImGui::SameLine(0.0f, Px(4.0f));
+        ImGui::BeginDisabled(!current);
+        if (IconButton(ICON_FA_PLUS, "Add a field at that offset, or at the end of the structure when it is blank") && current)
         {
             Table::StructField field;
             field.Offset = static_cast<int>(ParseHex(m_addOffset).value_or(static_cast<std::uint64_t>(current->Size())));
@@ -932,8 +938,25 @@ namespace Manifold::UI
             current->Sort();
             m_engine.Table().Touch();
         }
+        ImGui::EndDisabled();
         ImGui::SameLine();
-        if (DangerButton(ICON_FA_TRASH "  Delete") && current)
+        ImGui::BeginDisabled(!current || current->Fields.empty());
+        if (IconButton(ICON_FA_LIST, "Add the whole structure to the address list: a group header at the base, one entry per field at its offset") && current && !current->Fields.empty())
+        {
+            const std::uint64_t base = !m_columns.empty() && m_columns.front().Valid ? m_columns.front().Value : 0;
+            StructureToAddressList(m_engine, *current, base);
+        }
+        ImGui::EndDisabled();
+
+        ImGui::SameLine(0.0f, Px(14.0f));
+        ImGui::BeginDisabled(m_expanded.empty());
+        if (IconButton(ICON_FA_COMPRESS_ALT, WithKeys("Collapse all pointers", Command::CollapseStructure).c_str()))
+            m_expanded.clear();
+        ImGui::EndDisabled();
+
+        ImGui::SameLine(0.0f, Px(14.0f));
+        ImGui::BeginDisabled(!current);
+        if (IconButton(ICON_FA_TRASH, "Delete the structure", true) && current)
         {
             const std::string name = current->Name;
             m_workspace.Confirm("Delete structure", "Delete the structure \"" + name + "\"?", [this, name]()
@@ -945,9 +968,23 @@ namespace Manifold::UI
                 }, "Delete");
         }
         ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(m_engine.Structures().Items.empty());
+        if (IconButton(ICON_FA_BROOM, "Delete all structures", true))
+        {
+            const std::size_t count = m_engine.Structures().Items.size();
+            m_workspace.Confirm("Delete all structures", "Delete all " + std::to_string(count) + (count == 1 ? " structure?" : " structures?"), [this]()
+                {
+                    m_engine.Structures().Clear();
+                    m_structure.clear();
+                    m_expanded.clear();
+                }, "Delete all");
+        }
+        ImGui::EndDisabled();
+
         if (!m_filling.empty())
         {
-            ImGui::SameLine(0.0f, Px(12.0f));
+            ImGui::SameLine(0.0f, Px(14.0f));
             Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
             ImGui::SameLine(0.0f, Px(6.0f));
             ImGui::AlignTextToFramePadding();
