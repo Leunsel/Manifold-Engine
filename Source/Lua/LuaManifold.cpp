@@ -43,7 +43,7 @@ namespace Manifold::Lua
 #undef MANIFOLD_NAMED_CODE
         };
 
-        constexpr const char* kTags[] = { "DEBUG  ", "INFO   ", "SUCCESS", "WARNING", "ERROR  " };
+        constexpr const char* kTags[] = { "DBG", "INF", "OK ", "WRN", "ERR" };
         constexpr OutputKind kKinds[] = { OutputKind::Debug, OutputKind::Info, OutputKind::Success, OutputKind::Warning, OutputKind::Error };
         constexpr LogLevel kLevels[] = { LogLevel::Debug, LogLevel::Info, LogLevel::Success, LogLevel::Warning, LogLevel::Error };
 

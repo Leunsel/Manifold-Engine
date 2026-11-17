@@ -131,7 +131,11 @@ namespace Manifold::Tests
             const Lua::OutputLine* line = LastLine(engine, keep);
             CHECK(line && line->Kind == Lua::OutputKind::Info);
             CHECK(line && line->HeadEnd == line->TagEnd && line->TagEnd > line->TimeEnd && line->TimeEnd == 9);
-            CHECK_MSG(line && line->Text.find("INFO") == 9 && line->Text.substr(line->HeadEnd) == "hello  {a = \"x\", b = 2, list = {1, 2}}", line ? line->Text : "no line");
+            CHECK_MSG(line && line->Text.find("INF ") == 9 && line->Text.substr(line->HeadEnd) == "hello  {a = \"x\", b = 2, list = {1, 2}}", line ? line->Text : "no line");
+            CHECK(line && line->Indent == 13 && line->Columns == line->Text.size());
+            lua.Run("print('Gr\\xC3\\xB6\\xC3\\x9Fe')", "columns");
+            line = LastLine(engine, keep);
+            CHECK(line && line->Columns == 5 && line->Indent == 0);
 
             const std::size_t before = lua.OutputCount();
             LuaCheck(engine, "log debug hidden", R"LUA(

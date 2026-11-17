@@ -578,6 +578,8 @@ namespace Manifold::UI
         void FunctionList();
         void RunCommand(Command command);
         void RememberShowOnPrint(bool show);
+        void DrawOutput(Lua::LuaEngine& lua);
+        void WrapRows(Lua::LuaEngine& lua, std::uint32_t columns);
 
         Workspace& m_workspace;
         Engine& m_engine;
@@ -593,6 +595,11 @@ namespace Manifold::UI
         float m_outputShare = 0.35f;
         std::uint64_t m_seenOutput = 0;
         bool m_followOutput = true;
+        std::vector<std::size_t> m_wrapRows;
+        std::size_t m_wrapTotal = 0;
+        std::uint32_t m_wrapColumns = 0;
+        std::uint64_t m_wrapEpoch = ~0ull;
+        std::uint64_t m_wrapDropped = 0;
         bool m_showFunctions = false;
         float m_functionsWidth = 0.0f;
         std::string m_functionFilter;

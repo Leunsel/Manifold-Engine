@@ -12,6 +12,7 @@
 #include "imgui_internal.h"
 
 #include <algorithm>
+#include <climits>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -42,6 +43,67 @@ namespace Manifold::UI
         ImVec4 OutputTagColor(Lua::OutputKind kind)
         {
             return kind == Lua::OutputKind::Info ? ManifoldTheme::AddressText : OutputColor(kind);
+        }
+
+        std::uint32_t WrappedIndent(const Lua::OutputLine& line, std::uint32_t columns)
+        {
+            return std::min<std::uint32_t>(line.Indent, columns / 2);
+        }
+
+        std::uint32_t RowsOf(const Lua::OutputLine& line, std::uint32_t columns)
+        {
+            if (line.Columns <= columns)
+                return 1;
+            const std::uint32_t rest = std::max<std::uint32_t>(1, columns - WrappedIndent(line, columns));
+            return 1 + (line.Columns - columns + rest - 1) / rest;
+        }
+
+        std::size_t ByteAfterColumns(std::string_view text, std::size_t from, std::uint32_t columns)
+        {
+            std::size_t at = from;
+            while (at < text.size() && columns > 0)
+            {
+                ++at;
+                while (at < text.size() && (static_cast<unsigned char>(text[at]) & 0xC0) == 0x80)
+                    ++at;
+                --columns;
+            }
+            return at;
+        }
+
+        void DrawSpan(const Lua::OutputLine& line, std::size_t from, std::size_t to)
+        {
+            const std::size_t head = line.HeadEnd <= line.Text.size() ? line.HeadEnd : 0;
+            const std::size_t timeEnd = std::min<std::size_t>(line.TimeEnd, head);
+            const std::size_t tagEnd = std::clamp<std::size_t>(line.TagEnd, timeEnd, head);
+            const struct
+            {
+                std::size_t End;
+                ImVec4 Color;
+            } parts[] = {
+                { timeEnd, ManifoldTheme::Muted },
+                { tagEnd, OutputTagColor(line.Kind) },
+                { head, ManifoldTheme::Label },
+                { line.Text.size(), OutputColor(line.Kind) },
+            };
+            const char* text = line.Text.data();
+            std::size_t at = from;
+            bool drawn = false;
+            for (const auto& part : parts)
+            {
+                const std::size_t end = std::min(part.End, to);
+                if (end <= at)
+                    continue;
+                if (drawn)
+                    ImGui::SameLine(0.0f, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_Text, part.Color);
+                ImGui::TextUnformatted(text + at, text + end);
+                ImGui::PopStyleColor();
+                drawn = true;
+                at = end;
+            }
+            if (!drawn)
+                ImGui::TextUnformatted("");
         }
     }
 
@@ -287,6 +349,96 @@ namespace Manifold::UI
         }
     }
 
+    void LuaWindow::WrapRows(Lua::LuaEngine& lua, std::uint32_t columns)
+    {
+        const std::uint64_t epoch = lua.OutputEpoch();
+        const std::uint64_t dropped = lua.OutputDropped();
+        const std::size_t count = lua.OutputCount();
+        if (columns != m_wrapColumns || epoch != m_wrapEpoch || dropped != m_wrapDropped || count < m_wrapRows.size())
+        {
+            m_wrapRows.clear();
+            m_wrapTotal = 0;
+            m_wrapColumns = columns;
+            m_wrapEpoch = epoch;
+            m_wrapDropped = dropped;
+        }
+        if (m_wrapRows.size() >= count)
+            return;
+        lua.VisitOutput(m_wrapRows.size(), count, [&](std::size_t, const Lua::OutputLine& line)
+            {
+                m_wrapRows.push_back(m_wrapTotal);
+                m_wrapTotal += RowsOf(line, columns);
+            });
+    }
+
+    void LuaWindow::DrawOutput(Lua::LuaEngine& lua)
+    {
+        const bool atBottom = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - ImGui::GetTextLineHeightWithSpacing();
+        const std::uint64_t generation = lua.OutputGeneration();
+        if (const std::uint64_t dropped = lua.OutputDropped())
+            Muted(Grouped(dropped) + (dropped == 1 ? " earlier line is" : " earlier lines are") + " no longer kept");
+        PushMono();
+        ImGuiListClipper clipper;
+        if (!m_engine.Options().LuaWrapOutput)
+        {
+            clipper.Begin(static_cast<int>(lua.OutputCount()));
+            while (clipper.Step())
+            {
+                lua.VisitOutput(static_cast<std::size_t>(clipper.DisplayStart), static_cast<std::size_t>(clipper.DisplayEnd), [](std::size_t, const Lua::OutputLine& line)
+                    {
+                        DrawSpan(line, 0, line.Text.size());
+                    });
+            }
+        }
+        else
+        {
+            const float glyph = std::max(1.0f, ImGui::CalcTextSize("M").x);
+            const std::uint32_t columns = static_cast<std::uint32_t>(std::max(16.0f, std::floor(ImGui::GetContentRegionAvail().x / glyph)));
+            WrapRows(lua, columns);
+            clipper.Begin(static_cast<int>(std::min<std::size_t>(m_wrapTotal, INT_MAX)));
+            while (clipper.Step())
+            {
+                if (m_wrapRows.empty())
+                    continue;
+                const auto lineOf = [&](std::size_t row)
+                    {
+                        return static_cast<std::size_t>(std::upper_bound(m_wrapRows.begin(), m_wrapRows.end(), row) - m_wrapRows.begin()) - 1;
+                    };
+                const std::size_t displayStart = static_cast<std::size_t>(clipper.DisplayStart);
+                const std::size_t displayEnd = static_cast<std::size_t>(clipper.DisplayEnd);
+                lua.VisitOutput(lineOf(displayStart), lineOf(displayEnd - 1) + 1, [&](std::size_t index, const Lua::OutputLine& line)
+                    {
+                        if (index >= m_wrapRows.size())
+                            return;
+                        const std::uint32_t indent = WrappedIndent(line, columns);
+                        const std::uint32_t rest = std::max<std::uint32_t>(1, columns - indent);
+                        const std::uint32_t rows = RowsOf(line, columns);
+                        std::size_t from = 0;
+                        for (std::uint32_t k = 0; k < rows; ++k)
+                        {
+                            const std::size_t to = ByteAfterColumns(line.Text, from, k == 0 ? columns : rest);
+                            const std::size_t row = m_wrapRows[index] + k;
+                            if (row >= displayStart && row < displayEnd)
+                            {
+                                if (k > 0)
+                                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + static_cast<float>(indent) * glyph);
+                                DrawSpan(line, from, to);
+                            }
+                            from = to;
+                        }
+                    });
+            }
+        }
+        if (m_seenOutput != generation)
+        {
+            m_seenOutput = generation;
+            if (atBottom || m_followOutput)
+                ImGui::SetScrollHereY(1.0f);
+            m_followOutput = false;
+        }
+        PopMono();
+    }
+
     void LuaWindow::RememberShowOnPrint(bool show)
     {
         m_engine.Lua().RememberShowOnPrint(show);
@@ -369,6 +521,12 @@ namespace Manifold::UI
                 if (ImGui::MenuItem(ICON_FA_EYE "  Show on print", nullptr, m_engine.Lua().ShowOnPrint()))
                     RememberShowOnPrint(!m_engine.Lua().ShowOnPrint());
                 ItemTooltip("Opens this window when a script prints or logs while it is closed.");
+                if (ImGui::MenuItem(ICON_FA_ALIGN_LEFT "  Wrap lines", nullptr, m_engine.Options().LuaWrapOutput))
+                {
+                    m_engine.Options().LuaWrapOutput = !m_engine.Options().LuaWrapOutput;
+                    m_workspace.Report(m_engine.Options().Save(Paths::SettingsFile()));
+                }
+                ItemTooltip("Breaks long output lines at the window's edge; without it the output scrolls sideways.");
                 ImGui::EndMenu();
             }
             item(ICON_FA_PLAY "  Execute", Command::LuaExecute);
@@ -392,53 +550,17 @@ namespace Manifold::UI
         float output = std::floor(available * m_outputShare);
         float editor = available - output - Px(6.0f);
         const ImVec2 start = ImGui::GetCursorPos();
-        BeginCard("##output", nullptr, ImVec2(ImGui::GetContentRegionAvail().x - functionsWidth, output));
         Lua::LuaEngine& lua = m_engine.Lua();
-        const bool atBottom = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - ImGui::GetTextLineHeightWithSpacing();
-        const std::uint64_t generation = lua.OutputGeneration();
-        if (const std::uint64_t dropped = lua.OutputDropped())
-            Muted(Grouped(dropped) + (dropped == 1 ? " earlier line is" : " earlier lines are") + " no longer kept");
-        PushMono();
-        ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(lua.OutputCount()));
-        while (clipper.Step())
+        const bool wrap = m_engine.Options().LuaWrapOutput;
+        if (!wrap)
         {
-            lua.VisitOutput(static_cast<std::size_t>(clipper.DisplayStart), static_cast<std::size_t>(clipper.DisplayEnd), [](std::size_t, const Lua::OutputLine& line)
-                {
-                    const char* text = line.Text.data();
-                    const char* end = text + line.Text.size();
-                    const ImVec4 message = OutputColor(line.Kind);
-                    if (line.HeadEnd == 0 || line.HeadEnd > line.Text.size())
-                    {
-                        ImGui::PushStyleColor(ImGuiCol_Text, message);
-                        ImGui::TextUnformatted(text, end);
-                        ImGui::PopStyleColor();
-                        return;
-                    }
-                    const auto segment = [](const char* from, const char* to, const ImVec4& color, bool more)
-                        {
-                            ImGui::PushStyleColor(ImGuiCol_Text, color);
-                            ImGui::TextUnformatted(from, to);
-                            ImGui::PopStyleColor();
-                            if (more)
-                                ImGui::SameLine(0.0f, 0.0f);
-                        };
-                    const std::size_t timeEnd = std::min<std::size_t>(line.TimeEnd, line.HeadEnd);
-                    const std::size_t tagEnd = std::clamp<std::size_t>(line.TagEnd, timeEnd, line.HeadEnd);
-                    segment(text, text + timeEnd, ManifoldTheme::Muted, true);
-                    segment(text + timeEnd, text + tagEnd, OutputTagColor(line.Kind), true);
-                    segment(text + tagEnd, text + line.HeadEnd, ManifoldTheme::Label, true);
-                    segment(text + line.HeadEnd, end, message, false);
-                });
+            PushMono();
+            const float glyph = ImGui::CalcTextSize("M").x;
+            PopMono();
+            ImGui::SetNextWindowContentSize(ImVec2(static_cast<float>(lua.OutputMaxColumns()) * glyph + Px(4.0f), 0.0f));
         }
-        if (m_seenOutput != generation)
-        {
-            m_seenOutput = generation;
-            if (atBottom || m_followOutput)
-                ImGui::SetScrollHereY(1.0f);
-            m_followOutput = false;
-        }
-        PopMono();
+        BeginCard("##output", nullptr, ImVec2(ImGui::GetContentRegionAvail().x - functionsWidth, output), wrap ? 0 : ImGuiWindowFlags_HorizontalScrollbar);
+        DrawOutput(lua);
         if (ImGui::BeginPopupContextWindow())
         {
             if (ImGui::MenuItem("Clear"))

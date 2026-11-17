@@ -50,6 +50,17 @@ namespace Manifold::Lua
             return end == std::string::npos ? text : text.substr(0, end);
         }
 
+        std::uint32_t CountColumns(std::string_view text)
+        {
+            std::uint32_t columns = 0;
+            for (const char c : text)
+            {
+                if ((static_cast<unsigned char>(c) & 0xC0) != 0x80)
+                    ++columns;
+            }
+            return columns;
+        }
+
         std::vector<std::string> GlobalFunctionNames(lua_State* state)
         {
             std::vector<std::string> names;
@@ -218,6 +229,11 @@ namespace Manifold::Lua
                 }
                 else
                     entry.Text = std::string(std::min<std::size_t>(head.size(), 64), ' ') + line;
+                entry.Columns = CountColumns(entry.Text);
+                entry.Indent = static_cast<std::uint16_t>(entry.HeadEnd ? CountColumns(std::string_view(entry.Text).substr(0, entry.HeadEnd))
+                                                                        : std::min<std::size_t>(entry.Text.find_first_not_of(' ') == std::string::npos ? 0 : entry.Text.find_first_not_of(' '), 64));
+                if (entry.Columns > m_outputMaxColumns.load())
+                    m_outputMaxColumns = entry.Columns;
                 first = false;
                 m_outputBytes += entry.Text.size();
                 m_output.push_back(std::move(entry));
@@ -278,6 +294,8 @@ namespace Manifold::Lua
         m_output.clear();
         m_outputBytes = 0;
         m_outputDropped = 0;
+        m_outputMaxColumns = 0;
+        ++m_outputEpoch;
         ++m_outputGeneration;
     }
 

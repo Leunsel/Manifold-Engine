@@ -52,6 +52,8 @@ namespace Manifold::Lua
         std::uint16_t TimeEnd = 0;
         std::uint16_t TagEnd = 0;
         std::uint16_t HeadEnd = 0;
+        std::uint16_t Indent = 0;
+        std::uint32_t Columns = 0;
     };
 
     struct Timer
@@ -377,6 +379,8 @@ namespace Manifold::Lua
         std::uint64_t OutputDropped() const;
         void VisitOutput(std::size_t first, std::size_t last, const std::function<void(std::size_t, const OutputLine&)>& visit) const;
         std::uint64_t OutputGeneration() const { return m_outputGeneration.load(); }
+        std::uint64_t OutputEpoch() const { return m_outputEpoch.load(); }
+        std::uint32_t OutputMaxColumns() const { return m_outputMaxColumns.load(); }
         void ClearOutput();
 
         lua_State* State() const { return m_state; }
@@ -456,6 +460,8 @@ namespace Manifold::Lua
         std::uint64_t m_outputDropped = 0;
         std::atomic<std::uint64_t> m_outputGeneration{ 1 };
         std::atomic<std::uint64_t> m_printSignal{ 0 };
+        std::atomic<std::uint64_t> m_outputEpoch{ 0 };
+        std::atomic<std::uint32_t> m_outputMaxColumns{ 0 };
         std::atomic<int> m_showOnPrintOverride{ -1 };
         std::map<int, Timer> m_timers;
         int m_nextTimer = 1;
