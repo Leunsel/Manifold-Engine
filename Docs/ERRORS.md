@@ -126,6 +126,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-7005 | The table's Lua script failed: …. | The script stored in the table raised an error when the table was loaded. | Open Table > Show table Lua script and fix it. |
 | ME-7006 | Lua: …. | A Manifold function got an argument of the wrong type or value. | See Docs/LUA-API.md for the arguments. |
 | ME-7007 | The manifold API was called the wrong way: …. | A manifold function was called with a colon, got a missing, extra or wrong argument or an unknown option, or a name that does not exist was read. | The message names the function and the argument. Docs/MANIFOLD-API.md has the rules and every function. |
+| ME-7008 | There is no documentation for …. | Nothing documents the function or name: no Manifold, Cheat Engine or Lua entry, no manifold.doc.register call and no LuaLS annotation above its definition. | Check the name, or document it with manifold.doc.register, or with ---@param annotations and manifold.doc.registerModule. |
 
 ## Addresses and symbols
 

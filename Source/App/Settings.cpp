@@ -201,6 +201,10 @@ namespace Manifold
         if (auto v = text("scriptcallbacklimit")) ScriptCallbackLimitMs = std::clamp(ToInt(*v, ScriptCallbackLimitMs), 250, 60000);
         if (auto v = text("showonprint")) LuaShowOnPrint = ToBool(*v);
         if (auto v = text("wrapoutput")) LuaWrapOutput = ToBool(*v);
+        if (auto v = text("legacyeditor")) LegacyCodeEditor = ToBool(*v);
+        if (auto v = text("consoletime")) LuaConsoleTime = ToBool(*v);
+        if (auto v = text("consolehex")) LuaConsoleHex = ToBool(*v);
+        if (auto v = text("docspanel")) LuaDocsPanel = ToBool(*v);
         if (auto v = text("autoattach")) AutoAttach = Split(*v, ';');
         if (auto v = text("autoattachenabled")) AutoAttachEnabled = ToBool(*v);
         if (auto v = text("tablescripts")) TableScripts = EqualsNoCase(*v, "always") ? TableScriptPolicy::Always : EqualsNoCase(*v, "never") ? TableScriptPolicy::Never : TableScriptPolicy::Ask;
@@ -246,6 +250,9 @@ namespace Manifold
         out << "ScriptCallbackLimit=" << ScriptCallbackLimitMs << "\n";
         out << "ShowOnPrint=" << (LuaShowOnPrint ? 1 : 0) << "\n";
         out << "WrapOutput=" << (LuaWrapOutput ? 1 : 0) << "\n";
+        if (LegacyCodeEditor)
+            out << "LegacyEditor=1\n";
+        out << "ConsoleTime=" << (LuaConsoleTime ? 1 : 0) << "\nConsoleHex=" << (LuaConsoleHex ? 1 : 0) << "\nDocsPanel=" << (LuaDocsPanel ? 1 : 0) << "\n";
         out << "TableScripts=" << (TableScripts == TableScriptPolicy::Always ? "always" : TableScripts == TableScriptPolicy::Never ? "never" : "ask") << "\n";
         out << "ActiveScriptsOnQuit=" << (ActiveScriptsOnQuit == QuitPolicy::Disable ? "disable" : ActiveScriptsOnQuit == QuitPolicy::Leave ? "leave" : "ask") << "\n\n";
         out << "[Interface]\n";

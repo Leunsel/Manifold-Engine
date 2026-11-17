@@ -1,20 +1,26 @@
 #pragma once
 
+#include "Text/Highlight.h"
+#include "Text/TextBuffer.h"
+
 #include "imgui.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
+namespace Manifold::Lua
+{
+    struct DocRecord;
+    struct AnnotatedFile;
+}
+
 namespace Manifold::UI
 {
-    enum class Language
-    {
-        AutoAssembler,
-        Lua,
-        Plain
-    };
+    using Language = Text::Language;
 
     struct CodeSuggestion
     {
@@ -22,6 +28,7 @@ namespace Manifold::UI
         std::string Kind;
         std::string Signature;
         std::string Text;
+        std::shared_ptr<const Lua::DocRecord> Doc;
     };
 
     struct CodeAssist
@@ -29,6 +36,7 @@ namespace Manifold::UI
         std::function<std::vector<CodeSuggestion>(const std::string& chain, const std::string& prefix, bool method)> Complete;
         std::function<std::vector<std::string>(const std::string& chain, bool method)> Signatures;
         std::function<std::vector<std::string>(const std::string& chain, bool method, int argument)> Choices;
+        std::function<std::shared_ptr<const Lua::DocRecord>(const std::string& chain, bool method)> Describe;
     };
 
     struct CodeAssistState
@@ -56,6 +64,33 @@ namespace Manifold::UI
         int HintChoiceArgument = -1;
         std::size_t HintParen = static_cast<std::size_t>(-1);
         std::size_t DismissedParen = static_cast<std::size_t>(-1);
+        std::shared_ptr<const Lua::DocRecord> HintDoc;
+        int HintSignature = 0;
+        bool HintSignatureChosen = false;
+        std::size_t HoverOffset = static_cast<std::size_t>(-1);
+        double HoverSince = 0.0;
+        bool HoverResolved = false;
+        std::shared_ptr<const Lua::DocRecord> HoverDoc;
+        std::shared_ptr<const Lua::AnnotatedFile> BufferDocs;
+        std::size_t BufferDocsHash = 0;
+        bool PopupClicked = false;
+    };
+
+    struct EditorViewState
+    {
+        Text::TextBuffer Buffer;
+        bool Synced = false;
+        bool Dragging = false;
+        int ClickMode = 0;
+        std::size_t DragStart = 0;
+        std::size_t DragEnd = 0;
+        bool ScrollToCaret = false;
+        double LastInput = 0.0;
+        bool GotoOpen = false;
+        std::string GotoText;
+        std::vector<Text::LineState> States;
+        int StatesValid = 0;
+        Text::Language StatesLanguage = Text::Language::Plain;
     };
 
     struct CodeEditorState
@@ -75,7 +110,15 @@ namespace Manifold::UI
         std::string Insert;
         CodeAssist* Assist = nullptr;
         CodeAssistState Assisting;
+        EditorViewState View;
+        bool Console = false;
+        int ConsoleMaxLines = 8;
+        std::string Placeholder;
+        bool Submitted = false;
+        int HistoryStep = 0;
     };
 
     bool CodeEditor(const char* id, std::string& text, Language language, ImVec2 size, CodeEditorState& state);
+    void SetLegacyCodeEditor(bool legacy);
+    bool LegacyCodeEditor();
 }

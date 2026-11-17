@@ -154,6 +154,9 @@ local host = Host:New({
 
 _G[HOST_KEY] = host
 _G[Host.FacadeKey] = host
+if manifold.has("doc.registerModule") then
+    manifold.doc.registerModule(Host.FacadeKey, host, { doc = "The signature maker: a unique byte pattern for an address, the hits of a pattern in the opened process, and copying and going to them. Call its functions with a colon." })
+end
 if type(registerLuaFunctionHighlight) == "function" then
     registerLuaFunctionHighlight(Host.FacadeKey)
 end

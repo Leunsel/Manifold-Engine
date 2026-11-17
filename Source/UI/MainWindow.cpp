@@ -135,6 +135,7 @@ namespace Manifold::UI
 
     void MainWindow::Draw()
     {
+        SetLegacyCodeEditor(m_engine.Options().LegacyCodeEditor);
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->Pos);
         ImGui::SetNextWindowSize(viewport->Size);

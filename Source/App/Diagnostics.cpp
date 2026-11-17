@@ -1461,7 +1461,7 @@ namespace Manifold::Diagnostics
         }
         lua.Rows.push_back({ "Timers running", std::to_string(timers) + (timers ? " (fastest every " + std::to_string(fastest) + " ms)" : std::string()) });
         lua.Rows.push_back({ "Tasks", std::to_string(engine.Lua().TaskCount()) });
-        lua.Rows.push_back({ "Output lines", std::to_string(engine.Lua().OutputCount()) });
+        lua.Rows.push_back({ "Output lines", std::to_string(engine.Lua().Console().Count()) });
         lua.Rows.push_back({ "Autorun", settings.AutorunEnabled ? std::to_string(CountFiles(Paths::AutorunFolder())) + " files in the autorun folder" : std::string("off") });
         groups.push_back(std::move(lua));
 

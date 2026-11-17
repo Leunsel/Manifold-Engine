@@ -4528,7 +4528,7 @@ end
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 3
+local API_VERSION = 4
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -4846,48 +4846,43 @@ local function guard(path, owner, params, varargs, body)
   end
 end
 
-local docs = setmetatable({}, { __mode = "k" })
 local entries = {}
 local areas = {}
 local manifold, rootMembers = strict("manifold")
 
-local root = { path = "manifold", functions = {}, constants = {} }
+native.docDefine(nil, "manifold", { kind = "table" })
 
 local function area(name, summary)
   local proxy, members = strict("manifold." .. name)
-  local section = { path = "manifold." .. name, name = name, summary = summary, proxy = proxy, members = members, functions = {}, objects = {} }
+  local section = { path = "manifold." .. name, name = name, proxy = proxy, members = members }
   areas[#areas + 1] = section
   rawset(rootMembers, name, proxy)
+  native.docDefine(nil, section.path, { kind = "table", doc = summary })
   return section
 end
 
-local function bind(owner, path, members, name, spec, body)
+local function bind(owner, path, members, name, spec, body, docPath)
   local params = prepare(spec.params or {})
   local wrapper = guard(path, owner, params, spec.varargs, body)
   rawset(members, name, wrapper)
-  local choices
-  for index, param in ipairs(params) do
-    if param.oneOf then
-      choices = choices or {}
-      choices[index] = param.oneOf
-    end
+  if docPath then
+    native.docBind(wrapper, docPath)
+  else
+    native.docDefine(wrapper, path, spec)
   end
-  docs[wrapper] = { path = path, params = paramText(params, spec.varargs), returns = spec.returns, text = spec.doc, choices = choices }
   return wrapper, params
 end
 
 local function define(section, name, spec, body)
   local path = section.path .. "." .. name
-  local _, params = bind(section.proxy, path, section.members, name, spec, body)
-  local entry = { path = path, name = name, params = paramText(params, spec.varargs), returns = spec.returns, doc = spec.doc }
-  section.functions[#section.functions + 1] = entry
-  entries[path:sub(#"manifold." + 1)] = entry
+  bind(section.proxy, path, section.members, name, spec, body)
+  entries[path:sub(#"manifold." + 1)] = true
 end
 
-local function constant(name, value, doc)
+local function constant(name, value, doc, shown)
   rawset(rootMembers, name, value)
-  root.constants[#root.constants + 1] = { path = "manifold." .. name, name = name, doc = doc, value = value }
-  entries[name] = root.constants[#root.constants]
+  native.docDefine(nil, "manifold." .. name, { kind = "constant", value = shown or tostring(value), doc = doc })
+  entries[name] = true
 end
 
 local function quote(text)
@@ -4941,8 +4936,7 @@ local function inspect(value, options)
     local meta = getmetatable(item)
     if isError(item) or meta == false or (type(meta) == "table" and meta.__tostring) then
       return tostring(item)
-)MLUA"),
-            std::string_view(R"MLUA(    end
+    end
     if seen[item] then
       return "<cycle>"
     end
@@ -4961,7 +4955,8 @@ local function inspect(value, options)
       end
     end
     local keys = {}
-    for key in next, item do
+)MLUA"),
+            std::string_view(R"MLUA(    for key in next, item do
       if not (math.type(key) == "integer" and key >= 1 and key <= length) then
         keys[#keys + 1] = key
       end
@@ -4989,23 +4984,21 @@ local function emit(level, channel, message, fields)
   if RANK[level] < RANK[currentLevel] then
     return
   end
-  local text, traceback
+  local text, traceback, code, where
   if isError(message) then
-    text = errorText(message)
+    text = tostring(rawget(message, "message"))
     traceback = rawget(message, "traceback")
+    code = rawget(message, "code")
+    where = rawget(message, "where")
   elseif type(message) == "string" then
     text = message
   else
     text = inspect(message)
   end
-  if fields ~= nil then
-    text = text .. "  " .. inspect(fields)
-  end
-  if type(traceback) == "string" and traceback ~= "" then
-    text = text .. "\n" .. traceback
-  end
   local info = callerFrame()
-  native.writeLine(RANK[level] - 1, text, channel or "", info and chunkName(info) or "", info and info.name or "", info and info.currentline or 0)
+  native.logRecord(RANK[level] - 1, text, channel or "", fields ~= nil and inspect(fields) or "", type(fields) == "table" and fields or nil,
+    type(traceback) == "string" and traceback or "", code ~= nil and tostring(code) or "", type(where) == "string" and where or "",
+    info and chunkName(info) or "", info and info.name or "", info and info.currentline or 0)
 end
 
 local LEVEL_DOCS = {
@@ -5033,19 +5026,15 @@ local function channelObject(name)
   for _, level in ipairs(LEVELS) do
     bind(proxy, prefix .. "." .. level, members, level, {
       params = MESSAGE_PARAMS,
-      returns = "nothing",
-      doc = LEVEL_DOCS[level],
     }, function(message, fields)
       emit(level, name, message, fields)
-    end)
+    end, "manifold.log.Channel." .. level)
   end
   bind(proxy, prefix .. ".channel", members, "channel", {
     params = { { name = "name", type = "string" } },
-    returns = "channel",
-    doc = "A sub-channel named `parent/name`.",
   }, function(sub)
     return channelObject(name .. "/" .. sub)
-  end)
+  end, "manifold.log.Channel.channel")
   rawset(members, "name", name)
   channels[name] = proxy
   return proxy
@@ -5103,15 +5092,24 @@ define(log, "inspect", {
   return inspect(value, options)
 end)
 
-log.objects[#log.objects + 1] = {
+native.docDefine(nil, "manifold.log.Channel", {
+  kind = "class",
   title = "Channel objects",
-  summary = "`manifold.log.channel(name)` returns an object that follows the same rules: dot calls only, read-only, unknown names raise.",
-  rows = {
-    { signature = "channel.debug(message, fields?)` … `channel.error(message, fields?)", returns = "nothing", doc = "Like the `manifold.log` functions, tagged with `[name]`." },
-    { signature = "channel.channel(name)", returns = "channel", doc = "A sub-channel named `parent/name`." },
-    { signature = "channel.name", returns = "string", doc = "The channel's name." },
-  },
-}
+  doc = "`manifold.log.channel(name)` returns an object that follows the same rules: dot calls only, read-only, unknown names raise.",
+})
+for _, level in ipairs(LEVELS) do
+  native.docDefine(nil, "manifold.log.Channel." .. level, {
+    params = MESSAGE_PARAMS,
+    returns = "nothing",
+    doc = "Like `manifold.log." .. level .. "`, tagged with `[name]`.",
+  })
+end
+native.docDefine(nil, "manifold.log.Channel.channel", {
+  params = { { name = "name", type = "string" } },
+  returns = "channel",
+  doc = "A sub-channel named `parent/name`.",
+})
+native.docDefine(nil, "manifold.log.Channel.name", { kind = "field", type = "string", doc = "The channel's name." })
 
 local output = area("output", "The Lua engine window and its output. With *Show on print* on (the default), every printed or logged line opens the window when it is closed. The checkbox in the window is saved with the settings; a script can change it for the running session only.")
 
@@ -5267,13 +5265,13 @@ do
       if options == nil and SIMPLE_READS[kind] then
         local value, code, message = nativeRead(address, kind, 0, 256, false)
         if value == nil and code ~= nil then
-)MLUA"),
-            std::string_view(R"MLUA(          return nil, makeError(code, message)
+          return nil, makeError(code, message)
         end
         return value
       end
       if kind == "raw" and type(options) == "table" and next(options, next(options)) == nil then
-        local count = rawget(options, "count")
+)MLUA"),
+            std::string_view(R"MLUA(        local count = rawget(options, "count")
         if math.type(count) == "integer" and count >= 1 and count <= MAX_BYTES then
           local value, code, message = nativeRead(address, "raw", count, 0, false)
           if value == nil and code ~= nil then
@@ -5289,7 +5287,7 @@ do
     return slow(address, kind, options, extra)
   end
   rawset(memory.members, "read", fast)
-  docs[fast] = docs[slow]
+  native.docBind(fast, "manifold.memory.read")
 end
 
 local function checkWrite(kind, value, options)
@@ -5742,8 +5740,118 @@ define(structure, "dissect", {
   return false
 end)
 
+local MISUSE_CODE = native.fail("LuaApiMisuse")
+
+local function docResult(value, code, message)
+  if value == nil and code == MISUSE_CODE then
+    misuse(message)
+  end
+  return result(value, code, message)
+end
+
+local DOC_SPEC = {
+  path = "string",
+  kind = "string",
+  summary = "string",
+  doc = "string",
+  title = "string",
+  type = "string",
+  value = "any",
+  params = "table",
+  varargs = "boolean",
+  returns = "string",
+  returnsDoc = "string",
+  overloads = "table",
+  deprecated = "any",
+  hidden = "boolean",
+  see = "table",
+}
+
+local doc = area("doc", "The documentation behind completion, signature help, hover tooltips and the docs panel. Manifold, Cheat Engine and Lua functions are documented already. A module documents its own functions with `register`, or writes LuaLS annotations (`---@param name type`) above them and calls `registerModule`. A script never replaces Manifold's own documentation.")
+
+define(doc, "register", {
+  params = {
+    { name = "target", type = "function|string" },
+    { name = "spec", type = "table", keys = DOC_SPEC },
+  },
+  returns = "true, or nil, error",
+  doc = "Documents a function, or a name such as `\"MyModule.run\"`. `spec.doc` is the text, `spec.params` a list of `{ name, type, optional, doc, oneOf }`, `spec.returns` what comes back and `spec.overloads` more `{ params, returns }`. A function without `spec.path` is documented wherever the help reaches it.",
+}, function(target, spec)
+  return docResult(native.docRegister(target, spec))
+end)
+
+define(doc, "registerModule", {
+  params = {
+    { name = "path", type = "string" },
+    { name = "module", type = "table" },
+    { name = "options", type = "table", optional = true, keys = { doc = "string" } },
+  },
+  returns = "number of registered functions, or nil, error",
+  doc = "Documents every function of a module table under `path` (such as `\"ManifoldUE\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
+}, function(path, module, options)
+  return docResult(native.docRegisterModule(path, module, options))
+end)
+
+define(doc, "inherit", {
+  params = {
+    { name = "target", type = "function" },
+    { name = "source", type = "function|string" },
+  },
+  returns = "true, or nil, error",
+  doc = "Gives a wrapper the documentation of what it wraps, so a `function(...)` wrapper keeps the parameters and text of the original in the help.",
+}, function(target, source)
+  return docResult(native.docInherit(target, source))
+end)
+
+define(doc, "unregister", {
+  params = { { name = "target", type = "function|string" } },
+  returns = "true, or nil, error",
+  doc = "Removes documentation that a script registered. Manifold's, Cheat Engine's and Lua's own documentation stays.",
+}, function(target)
+  return docResult(native.docUnregister(target))
+end)
+
+define(doc, "entry", {
+  params = { { name = "target", type = "function|string" } },
+  returns = "`{ path, name, kind, origin, summary, text, signatures, … }`, or nil, error",
+  doc = "The documentation of a function or name, as the help shows it. `signatures` is a list of `{ text, params, returns }`; each param is `{ name, type, text, optional, variadic, choices }`. Without documentation the error is `ME-7008`.",
+}, function(target)
+  return docResult(native.docEntry(target))
+end)
+
+define(doc, "find", {
+  params = {
+    { name = "query", type = "string" },
+    { name = "options", type = "table", optional = true, keys = { limit = "integer", kind = "string" } },
+  },
+  returns = "list of `{ path, kind, summary }`",
+  doc = "Searches names and texts, best matches first. `options.limit` (default 50) caps the list; `options.kind` keeps one kind, such as `\"function\"` or `\"table\"`.",
+}, function(query, options)
+  options = options or EMPTY
+  if options.limit ~= nil and options.limit < 0 then
+    misuse("manifold.doc.find: options.limit must be 0 or more")
+  end
+  return docResult(native.docFind(query, options.limit or 50, options.kind or ""))
+end)
+
+define(doc, "annotations", {
+  params = { { name = "fn", type = "function" } },
+  returns = "`{ … }` like `entry`, or nil, error",
+  doc = "Reads the LuaLS annotations above a function's definition without registering anything.",
+}, function(fn)
+  return docResult(native.docAnnotations(fn))
+end)
+
+define(doc, "markdown", {
+  params = { { name = "prefix", type = "string" } },
+  returns = "string, or nil, error",
+  doc = "Markdown tables of everything documented under `prefix`, the way Docs/MANIFOLD-API.md is written.",
+}, function(prefix)
+  return docResult(native.docMarkdown(prefix))
+end)
+
 constant("apiVersion", API_VERSION, "The API version, an integer. It grows when functions are added; names keep their meaning.")
-constant("version", native.version(), "The program version, such as `\"0.1.0\"`.")
+constant("version", native.version(), "The program version, such as `\"0.1.0\"`.", "string")
 
 do
   local path = "manifold.has"
@@ -5752,7 +5860,7 @@ do
     returns = "boolean",
     doc = "Whether the API has a name, such as `\"log.channel\"`, `\"memory\"` or `\"apiVersion\"`. Use it instead of reading a name that may not exist, which raises.",
   }
-  local _, params = bind(manifold, path, rootMembers, "has", spec, function(name)
+  bind(manifold, path, rootMembers, "has", spec, function(name)
     local short = name:gsub("^manifold%.", "")
     if entries[short] or short == "has" then
       return true
@@ -5764,7 +5872,6 @@ do
     end
     return false
   end)
-  root.functions[#root.functions + 1] = { path = path, name = "has", params = paramText(params), returns = spec.returns, doc = spec.doc }
 end
 
 rawset(_G, "manifold", manifold)
@@ -5772,7 +5879,8 @@ rawset(_G, "manifold", manifold)
 local INTRO = [[
 # Manifold Lua API
 
-`manifold` is Manifold Engine's own Lua API. It lives beside the Cheat Engine functions in [LUA-API.md](LUA-API.md). Those keep Cheat Engine's names and habits for compatibility; `manifold` follows one fixed schema instead, and every call is checked against it.
+)MLUA"),
+            std::string_view(R"MLUA(`manifold` is Manifold Engine's own Lua API. It lives beside the Cheat Engine functions in [LUA-API.md](LUA-API.md). Those keep Cheat Engine's names and habits for compatibility; `manifold` follows one fixed schema instead, and every call is checked against it.
 
 This file is generated from the API itself (`Manifold-Engine.Tests.exe --manifold-markdown`), and the tests fail when it is out of date.
 ]]
@@ -5807,55 +5915,560 @@ end
 ```
 ]]
 
-local function cell(text)
-  return (tostring(text or ""):gsub("|", "\\|"))
-end
-
-local function functionRows(out, functions)
-  out[#out + 1] = "| Function | Returns | |"
-  out[#out + 1] = "| --- | --- | --- |"
-  for _, entry in ipairs(functions) do
-    out[#out + 1] = ("| `%s(%s)` | %s | %s |"):format(entry.path, entry.params, cell(entry.returns), cell(entry.doc))
-  end
-end
-
 local function markdown()
-  local out = { INTRO, RULES, "## manifold", "" }
-  out[#out + 1] = "| Name | Value | |"
-  out[#out + 1] = "| --- | --- | --- |"
-  for _, entry in ipairs(root.constants) do
-    local value = entry.name == "version" and "string" or tostring(entry.value)
-    out[#out + 1] = ("| `%s` | %s | %s |"):format(entry.path, value, cell(entry.doc))
-  end
-  for _, entry in ipairs(root.functions) do
-    out[#out + 1] = ("| `%s(%s)` | %s | %s |"):format(entry.path, entry.params, cell(entry.returns), cell(entry.doc))
-  end
-  for _, section in ipairs(areas) do
-    out[#out + 1] = ""
-    out[#out + 1] = "## " .. section.path
-    out[#out + 1] = ""
-    out[#out + 1] = section.summary
-    out[#out + 1] = ""
-    functionRows(out, section.functions)
-    for _, object in ipairs(section.objects) do
-      out[#out + 1] = ""
-      out[#out + 1] = "### " .. object.title
-      out[#out + 1] = ""
-      out[#out + 1] = object.summary
-)MLUA"),
-            std::string_view(R"MLUA(      out[#out + 1] = ""
-      out[#out + 1] = "| Name | Returns | |"
-      out[#out + 1] = "| --- | --- | --- |"
-      for _, row in ipairs(object.rows) do
-        out[#out + 1] = ("| `%s` | %s | %s |"):format(row.signature, cell(row.returns), cell(row.doc))
-      end
-    end
-  end
-  out[#out + 1] = ""
-  return table.concat(out, "\n")
+  return table.concat({ INTRO, RULES, native.docMarkdown("manifold") }, "\n")
 end
 
-return docs, markdown
+return markdown
+)MLUA"),
+        };
+        constexpr std::array<std::string_view, 2> kDoc0 = {
+            std::string_view(R"MLUA(---@meta
+
+---Writes the values to the Lua output, separated by tabs.
+---@param ... any
+function print(...) end
+
+---Iterates over all keys and values of a table, in no particular order.
+---@param table table
+---@return function, table, nil
+function pairs(table) end
+
+---Iterates over the array part of a table, from 1 up to the first nil.
+---@param table table
+---@return function, table, integer
+function ipairs(table) end
+
+---Returns the next key and value of a table, or nil after the last one.
+---@param table table
+---@param key? any
+---@return any, any
+function next(table, key) end
+
+---Returns the type name of the value.
+---@param value any
+---@return "nil"|"number"|"string"|"boolean"|"table"|"function"|"thread"|"userdata"
+function type(value) end
+
+---Converts the value to a string, through `__tostring` when it has one.
+---@param value any
+---@return string
+function tostring(value) end
+
+---Converts the value to a number, or nil when it is not one.
+---@param value any
+---@param base? integer # 2 to 36; the value must then be a string
+---@return number|nil
+function tonumber(value, base) end
+
+---Returns the arguments after index, or their count for "#".
+---@param index integer|"#"
+---@param ... any
+---@return any
+function select(index, ...) end
+
+---Calls the function in protected mode and returns whether it succeeded, then its results or the error.
+---@param f function
+---@param ... any
+---@return boolean, any
+function pcall(f, ...) end
+
+---Like pcall, with a message handler that gets the error first.
+---@param f function
+---@param handler function
+---@param ... any
+---@return boolean, any
+function xpcall(f, handler, ...) end
+
+---Raises an error.
+---@param message any
+---@param level? integer # 1 (the default) blames the caller, 2 its caller, 0 adds no position
+function error(message, level) end
+
+---Raises an error when the value is false or nil, and returns all arguments otherwise.
+---@param value any
+---@param message? any
+---@return any
+function assert(value, message) end
+
+---Sets the metatable of a table and returns the table.
+---@param table table
+---@param metatable table|nil
+---@return table
+function setmetatable(table, metatable) end
+
+---Returns the metatable of a value, or its `__metatable` field.
+---@param value any
+---@return table|nil
+function getmetatable(value) end
+
+---Reads a field without metamethods.
+---@param table table
+---@param key any
+---@return any
+function rawget(table, key) end
+
+---Writes a field without metamethods.
+---@param table table
+---@param key any
+---@param value any
+---@return table
+function rawset(table, key, value) end
+
+---Compares two values without metamethods.
+---@param a any
+---@param b any
+---@return boolean
+function rawequal(a, b) end
+
+---The length of a table or string without metamethods.
+---@param value table|string
+---@return integer
+function rawlen(value) end
+
+---Loads a module and returns what it returned.
+---@param name string
+---@return any
+function require(name) end
+
+---Compiles a chunk and returns it as a function, or nil and the error.
+---@param chunk string|function
+---@param name? string
+---@param mode? "b"|"t"|"bt"
+---@param env? table
+---@return function|nil, string|nil
+function load(chunk, name, mode, env) end
+
+---Compiles a file and returns it as a function, or nil and the error.
+---@param filename? string
+---@param mode? "b"|"t"|"bt"
+---@param env? table
+---@return function|nil, string|nil
+function loadfile(filename, mode, env) end
+
+---Runs a file and returns its results.
+---@param filename? string
+---@return any
+function dofile(filename) end
+
+---Controls the garbage collector.
+---@param option? "collect"|"stop"|"restart"|"count"|"step"|"isrunning"|"incremental"|"generational"
+---@param ... any
+---@return any
+function collectgarbage(option, ...) end
+
+---Formats the values like C's printf: %d %i %u %c %x %X %o %e %E %f %g %G %q %s %a %A %%.
+---@param format string
+---@param ... any
+---@return string
+function string.format(format, ...) end
+
+---Returns the part from i to j; negative positions count from the end.
+---@param s string
+---@param i integer
+---@param j? integer
+---@return string
+function string.sub(s, i, j) end
+
+---Finds the first match of a pattern and returns its start, end and captures.
+---@param s string
+---@param pattern string
+---@param init? integer
+---@param plain? boolean # true searches for the text itself, without pattern characters
+---@return integer|nil, integer|nil, any
+function string.find(s, pattern, init, plain) end
+
+---Returns the captures of the first match, or the whole match.
+---@param s string
+---@param pattern string
+---@param init? integer
+---@return any
+function string.match(s, pattern, init) end
+
+---Iterates over all matches of a pattern.
+---@param s string
+---@param pattern string
+---@param init? integer
+---@return function
+function string.gmatch(s, pattern, init) end
+
+---Replaces the matches of a pattern and returns the text and the number of replacements.
+---@param s string
+---@param pattern string
+---@param replacement string|table|function
+---@param n? integer
+---@return string, integer
+function string.gsub(s, pattern, replacement, n) end
+
+---Repeats a string n times.
+---@param s string
+---@param n integer
+---@param separator? string
+---@return string
+function string.rep(s, n, separator) end
+
+---Returns the character codes of s from i to j.
+---@param s string
+---@param i? integer
+---@param j? integer
+---@return integer
+function string.byte(s, i, j) end
+
+---Builds a string from character codes.
+---@param ... integer
+---@return string
+function string.char(...) end
+
+---Converts to upper case.
+---@param s string
+---@return string
+function string.upper(s) end
+
+---Converts to lower case.
+---@param s string
+---@return string
+function string.lower(s) end
+
+---Returns the length in bytes.
+---@param s string
+---@return integer
+function string.len(s) end
+
+---Reverses a string.
+---@param s string
+---@return string
+function string.reverse(s) end
+
+---Packs the values into a binary string, such as "<I4" for a little-endian 32-bit integer.
+---@param format string
+---@param ... any
+---@return string
+function string.pack(format, ...) end
+
+---Unpacks values from a binary string; the last result is the position after them.
+---@param format string
+---@param s string
+---@param position? integer
+---@return any
+function string.unpack(format, s, position) end
+
+---The size of a packed format in bytes.
+---@param format string
+---@return integer
+function string.packsize(format) end
+
+---Inserts a value at the end, or at a position.
+---@param table table
+---@param position? integer
+---@param value any
+function table.insert(table, position, value) end
+
+---Removes the value at a position, or the last one, and returns it.
+---@param table table
+---@param position? integer
+---@return any
+function table.remove(table, position) end
+
+---Joins the values from i to j into a string.
+---@param table table
+---@param separator? string
+---@param i? integer
+---@param j? integer
+---@return string
+function table.concat(table, separator, i, j) end
+
+---Sorts the table in place.
+---@param table table
+---@param compare? fun(a: any, b: any): boolean
+function table.sort(table, compare) end
+
+---Returns the values from i to j as separate results.
+---@param table table
+---@param i? integer
+---@param j? integer
+---@return any
+function table.unpack(table, i, j) end
+
+---Returns the arguments as a table with the field n.
+---@param ... any
+---@return table
+function table.pack(...) end
+
+---Moves the elements f to e of a1 to position t of a2 (or a1) and returns a2.
+---@param a1 table
+---@param f integer
+---@param e integer
+---@param t integer
+---@param a2? table
+---@return table
+function table.move(a1, f, e, t, a2) end
+
+---The largest integer not above x.
+---@param x number
+---@return integer
+function math.floor(x) end
+
+---The smallest integer not below x.
+---@param x number
+---@return integer
+function math.ceil(x) end
+
+---The absolute value.
+---@param x number
+---@return number
+function math.abs(x) end
+
+---The largest value.
+---@param x number
+---@param ... number
+---@return number
+function math.max(x, ...) end
+
+---The smallest value.
+---@param x number
+---@param ... number
+---@return number
+function math.min(x, ...) end
+
+---A random float in [0, 1), or a random integer in [1, m] or [m, n].
+---@param m? integer
+---@param n? integer
+---@return number
+function math.random(m, n) end
+
+---Seeds the random generator.
+---@param x? integer
+---@param y? integer
+function math.randomseed(x, y) end
+
+---The square root.
+---@param x number
+---@return number
+function math.sqrt(x) end
+
+---The remainder of x / y, rounded towards zero.
+---@param x number
+---@param y number
+---@return number
+function math.fmod(x, y) end
+
+---The integral and the fractional part.
+---@param x number
+---@return number, number
+function math.modf(x) end
+
+---Converts to an integer, or nil when the value has no exact integer.
+---@param x any
+---@return integer|nil
+function math.tointeger(x) end
+
+---"integer", "float", or nil for anything that is not a number.
+---@param x any
+---@return "integer"|"float"|nil
+function math.type(x) end
+
+---e to the power of x.
+---@param x number
+---@return number
+function math.exp(x) end
+
+---The logarithm, natural or to a base.
+---@param x number
+---@param base? number
+---@return number
+function math.log(x, base) end
+
+---The sine, in radians.
+---@param x number
+---@return number
+function math.sin(x) end
+
+---The cosine, in radians.
+---@param x number
+---@return number
+function math.cos(x) end
+
+---The tangent, in radians.
+---@param x number
+---@return number
+function math.tan(x) end
+
+---The arc tangent of y / x, in radians.
+---@param y number
+---@param x? number
+---@return number
+function math.atan(y, x) end
+
+---The current time, or the time described by the table.
+---@param table? table
+---@return integer
+function os.time(table) end
+
+---Formats a date; "*t" returns a table and a leading "!" uses UTC.
+---@param format? string
+---@param time? integer
+---@return string|table
+function os.date(format, time) end
+
+---The CPU time of the program in seconds.
+---@return number
+function os.clock() end
+
+---The seconds between two times.
+---@param t2 integer
+---@param t1 integer
+---@return number
+function os.difftime(t2, t1) end
+
+---The value of an environment variable, or nil.
+---@param name string
+---@return string|nil
+function os.getenv(name) end
+
+---Runs a shell command.
+---@param command? string
+---@return boolean|nil, string, integer
+function os.execute(command) end
+
+---Deletes a file.
+---@param filename string
+---@return boolean|nil, string|nil
+function os.remove(filename) end
+
+---Renames a file.
+---@param old string
+---@param new string
+---@return boolean|nil, string|nil
+function os.rename(old, new) end
+
+---Opens a file, or returns nil and the error.
+---@param filename string
+---@param mode? "r"|"w"|"a"|"r+"|"w+"|"a+"|"rb"|"wb"|"ab"|"r+b"|"w+b"|"a+b"
+---@return file*|nil, string|nil
+function io.open(filename, mode) end
+
+---Reads from the default input.
+---@param ... "n"|"l"|"L"|"a"|integer
+---@return any
+function io.read(...) end
+
+---Writes to the default output.
+---@param ... string|number
+---@return file*
+function io.write(...) end
+
+---Iterates over the lines of a file, or of the default input.
+---@param filename? string
+---@param ... "n"|"l"|"L"|"a"|integer
+---@return function
+function io.lines(filename, ...) end
+
+---Closes a file, or the default output.
+---@param file? file*
+---@return boolean|nil
+function io.close(file) end
+
+---Creates a coroutine from a function.
+---@param f function
+---@return thread
+function coroutine.create(f) end
+
+---Starts or continues a coroutine; returns true and its values, or false and the error.
+---@param co thread
+---@param ... any
+---@return boolean, any
+function coroutine.resume(co, ...) end
+
+---Suspends the running coroutine and hands the values to resume.
+---@param ... any
+---@return any
+function coroutine.yield(...) end
+
+---Creates a coroutine that is called like a function.
+---@param f function
+---@return function
+)MLUA"),
+            std::string_view(R"MLUA(function coroutine.wrap(f) end
+
+---The status of a coroutine.
+---@param co thread
+---@return "running"|"suspended"|"normal"|"dead"
+function coroutine.status(co) end
+
+---The running coroutine and whether it is the main one.
+---@return thread, boolean
+function coroutine.running() end
+
+---Information about a function or a stack level.
+---@param thread? thread
+---@param f function|integer
+---@param what? string # letters of the fields: "n" "S" "l" "t" "u" "f" "L"
+---@return table|nil
+function debug.getinfo(thread, f, what) end
+
+---A stack traceback as a string.
+---@param thread? thread
+---@param message? any
+---@param level? integer
+---@return string
+function debug.traceback(thread, message, level) end
+
+---The name and value of a local variable.
+---@param thread? thread
+---@param level integer
+---@param index integer
+---@return string|nil, any
+function debug.getlocal(thread, level, index) end
+
+---The name and value of an upvalue.
+---@param f function
+---@param index integer
+---@return string|nil, any
+function debug.getupvalue(f, index) end
+
+---Sets an upvalue and returns its name.
+---@param f function
+---@param index integer
+---@param value any
+---@return string|nil
+function debug.setupvalue(f, index, value) end
+
+---Sets a debug hook.
+---@param thread? thread
+---@param hook function
+---@param mask string # "c" calls, "r" returns, "l" lines
+---@param count? integer
+function debug.sethook(thread, hook, mask, count) end
+
+---The metatable of a value, without `__metatable` protection.
+---@param value any
+---@return table|nil
+function debug.getmetatable(value) end
+
+---Sets the metatable of any value.
+---@param value any
+---@param table table|nil
+---@return any
+function debug.setmetatable(value, table) end
+
+---Builds a UTF-8 string from code points.
+---@param ... integer
+---@return string
+function utf8.char(...) end
+
+---The number of UTF-8 characters from i to j, or nil and the position of the first invalid byte.
+---@param s string
+---@param i? integer
+---@param j? integer
+---@return integer|nil
+function utf8.len(s, i, j) end
+
+---The code points of the characters from i to j.
+---@param s string
+---@param i? integer
+---@param j? integer
+---@return integer
+function utf8.codepoint(s, i, j) end
 )MLUA"),
         };
 
@@ -5868,6 +6481,10 @@ return docs, markdown
 
         const std::array<CompatScript, 1> kManifoldScripts = {
             CompatScript{ "Manifold.lua", std::span<const std::string_view>(kManifold0) },
+        };
+
+        const std::array<CompatScript, 1> kDocScripts = {
+            CompatScript{ "Standard.lua", std::span<const std::string_view>(kDoc0) },
         };
     }
 
@@ -5887,5 +6504,10 @@ return docs, markdown
     std::span<const CompatScript> ManifoldScripts()
     {
         return kManifoldScripts;
+    }
+
+    std::span<const CompatScript> DocScripts()
+    {
+        return kDocScripts;
     }
 }

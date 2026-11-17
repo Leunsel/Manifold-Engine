@@ -40,6 +40,9 @@
     <Filter Include="Source\Templates">
       <UniqueIdentifier>{D2560125-9330-506A-806B-029D8F6DBB4F}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Text">
+      <UniqueIdentifier>{B272C644-346B-520C-AB38-71241C5D4210}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Tests">
       <UniqueIdentifier>{08C95972-B402-5B3A-A3B9-36F843A24550}</UniqueIdentifier>
     </Filter>
@@ -120,6 +123,18 @@
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp">
       <Filter>Source\Generated</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\ConsoleHistory.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\DocAnnotations.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\DocRegistry.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\DocText.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\InputBox.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -130,6 +145,12 @@
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaCompat.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaConsole.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp">
@@ -144,7 +165,13 @@
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaRepl.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp">
@@ -204,6 +231,15 @@
     <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp">
       <Filter>Source\Templates</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Text\Highlight.cpp">
+      <Filter>Source\Text</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Text\LuaContext.cpp">
+      <Filter>Source\Text</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Text\TextBuffer.cpp">
+      <Filter>Source\Text</Filter>
+    </ClCompile>
     <ClCompile Include="..\Tests\AssemblerTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
@@ -219,6 +255,9 @@
     <ClCompile Include="..\Tests\CompatTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
+    <ClCompile Include="..\Tests\ConsoleTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
     <ClCompile Include="..\Tests\CoreTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
@@ -226,6 +265,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\DisasmTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\DocTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\IntegrationTests.cpp">
@@ -241,6 +283,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\TemplateTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\TextTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\WatchStress.cpp">

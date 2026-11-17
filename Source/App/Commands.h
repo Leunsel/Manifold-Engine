@@ -23,6 +23,7 @@ namespace Manifold
         Structure,
         ScriptEditor,
         LuaEngine,
+        CodeEditor,
         Count
     };
 
@@ -187,6 +188,18 @@ namespace Manifold
         LuaExecute,
         LuaClearOutput,
         LuaFunctions,
+        LuaStop,
+        LuaConsoleTab,
+        LuaScriptTab,
+        LuaFind,
+
+        EditorComplete,
+        EditorToggleComment,
+        EditorDuplicateLines,
+        EditorMoveLinesUp,
+        EditorMoveLinesDown,
+        EditorDeleteLines,
+        EditorGotoLine,
 
         Count
     };

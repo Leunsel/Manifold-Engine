@@ -43,6 +43,9 @@
     <Filter Include="Source\Templates">
       <UniqueIdentifier>{D2560125-9330-506A-806B-029D8F6DBB4F}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Text">
+      <UniqueIdentifier>{B272C644-346B-520C-AB38-71241C5D4210}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source\UI">
       <UniqueIdentifier>{041FB265-57A2-5EC0-B136-25B380A66EBC}</UniqueIdentifier>
     </Filter>
@@ -135,6 +138,18 @@
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp">
       <Filter>Source\Generated</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\ConsoleHistory.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\DocAnnotations.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\DocRegistry.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\DocText.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\InputBox.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -145,6 +160,12 @@
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaCompat.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaConsole.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp">
@@ -159,7 +180,13 @@
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaRepl.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp">
@@ -219,6 +246,15 @@
     <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp">
       <Filter>Source\Templates</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Text\Highlight.cpp">
+      <Filter>Source\Text</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Text\LuaContext.cpp">
+      <Filter>Source\Text</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Text\TextBuffer.cpp">
+      <Filter>Source\Text</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\AddressActions.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -231,10 +267,25 @@
     <ClCompile Include="..\Source\UI\CodeTools.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\ConsoleView.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\DebugWindows.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\DialogHost.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\DocBrowser.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\DocView.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\EditorShared.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\EditorView.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\Fonts.cpp">
@@ -244,6 +295,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\LuaDialogs.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\LuaWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\MainWindow.cpp">
@@ -393,6 +447,21 @@
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h">
       <Filter>Source\Generated</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Lua\ConsoleHistory.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\DocAnnotations.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\DocRecord.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\DocRegistry.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\DocText.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Lua\InputBox.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
@@ -402,10 +471,19 @@
     <ClInclude Include="..\Source\Lua\LuaCompatScripts.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaConsole.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaDocBinding.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Lua\LuaDocs.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Lua\LuaEngine.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaSnapshot.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Scan\Scanner.h">
@@ -465,6 +543,15 @@
     <ClInclude Include="..\Source\Templates\TemplateLibrary.h">
       <Filter>Source\Templates</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Text\Highlight.h">
+      <Filter>Source\Text</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Text\LuaContext.h">
+      <Filter>Source\Text</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Text\TextBuffer.h">
+      <Filter>Source\Text</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\UI\AddressActions.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
@@ -474,7 +561,22 @@
     <ClInclude Include="..\Source\UI\CodeEditor.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\UI\ConsoleView.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\UI\DialogHost.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\DocBrowser.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\DocView.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\EditorShared.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\EditorView.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Fonts.h">
@@ -484,6 +586,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\LuaDialogs.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\LuaWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\NopSled.h">

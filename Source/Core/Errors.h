@@ -96,6 +96,7 @@
     X(LuaTableScriptFailed, 7005) \
     X(LuaBadArgument, 7006) \
     X(LuaApiMisuse, 7007) \
+    X(LuaDocMissing, 7008) \
     X(ExprSyntax, 8001) \
     X(ExprUnknownSymbol, 8002) \
     X(ExprPointerUnreadable, 8003) \

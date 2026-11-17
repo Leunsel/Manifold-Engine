@@ -3,8 +3,10 @@
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/Text.h"
+#include "Lua/DocRegistry.h"
 #include "Lua/LuaEngine.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -23,20 +25,27 @@ namespace Manifold::Tests
             return at / "Autorun";
         }
 
-        std::vector<std::string> ProblemLines(Lua::LuaEngine& lua, std::size_t from)
+        std::uint64_t Mark(Lua::LuaEngine& lua)
+        {
+            const auto last = lua.Console().Last();
+            return last ? last->Id : 0;
+        }
+
+        std::vector<std::string> ProblemLines(Lua::LuaEngine& lua, std::uint64_t from)
         {
             std::vector<std::string> problems;
-            const std::vector<Lua::OutputLine> output = lua.Output();
-            for (std::size_t i = from; i < output.size(); ++i)
+            for (const Lua::ConsoleEntry& entry : lua.Console().Entries())
             {
-                const Lua::OutputLine& line = output[i];
-                if (line.Kind == Lua::OutputKind::Error || line.Text.find("ME-7007") != std::string::npos)
-                    problems.push_back(line.Text);
+                if (entry.Id <= from)
+                    continue;
+                const std::string text = entry.PlainText();
+                if (entry.Kind == Lua::EntryKind::Error || entry.Level == LogLevel::Error || text.find("ME-7007") != std::string::npos)
+                    problems.push_back(text);
             }
             return problems;
         }
 
-        void CheckQuiet(Lua::LuaEngine& lua, std::size_t from, const char* step)
+        void CheckQuiet(Lua::LuaEngine& lua, std::uint64_t from, const char* step)
         {
             const std::vector<std::string> problems = ProblemLines(lua, from);
             CHECK_MSG(problems.empty(), std::string(step) + ": " + (problems.empty() ? "" : problems.front()));
@@ -59,19 +68,27 @@ namespace Manifold::Tests
         lua.Run("__manifoldHeadless = true", "headless");
         lua.Run("getAutorunPath = function() return [==[" + WideToUtf8(folder.wstring()) + "\\]==] end", "autorun path");
 
-        std::size_t mark = lua.OutputCount();
+        std::uint64_t mark = Mark(lua);
         CHECK_MSG(lua.RunAutorun(folder).Ok(), "first run");
         CheckQuiet(lua, mark, "first run");
+        for (const auto& [module, least] : { std::pair<const char*, std::size_t>{ "ManifoldRTTI", 8 }, { "ManifoldGodot", 20 }, { "ManifoldSigMaker", 4 } })
+        {
+            const std::vector<Lua::DocPtr> members = lua.Docs().Members(module);
+            const std::size_t annotated = static_cast<std::size_t>(std::count_if(members.begin(), members.end(), [](const Lua::DocPtr& member) { return member->Origin != Lua::DocOrigin::Reflection; }));
+            CHECK_MSG(members.size() >= least, std::string(module) + " documents " + std::to_string(members.size()) + " functions");
+            CHECK_MSG(lua.Docs().Find(module) && !lua.Docs().Find(module)->Text.empty(), std::string(module) + " has no module text");
+            std::printf("  %s: %zu functions documented, %zu with annotations\n", module, members.size(), annotated);
+        }
 
-        mark = lua.OutputCount();
+        mark = Mark(lua);
         CHECK_MSG(lua.RunAutorun(folder).Ok(), "second run");
         CheckQuiet(lua, mark, "second run");
 
-        mark = lua.OutputCount();
+        mark = Mark(lua);
         CHECK(engine.OpenProcess(::GetCurrentProcessId()).Ok());
         CheckQuiet(lua, mark, "process opened");
 
-        mark = lua.OutputCount();
+        mark = Mark(lua);
         std::string result;
         const Status probed = lua.RunWithResult(R"LUA(
             for _, name in ipairs({ "UE", "Godot" }) do
@@ -86,7 +103,7 @@ namespace Manifold::Tests
         CHECK_MSG(probed.Ok() && result == "ok", probed.Ok() ? result : probed.Text);
         CheckQuiet(lua, mark, "claims");
 
-        mark = lua.OutputCount();
+        mark = Mark(lua);
         engine.CloseProcess();
         CheckQuiet(lua, mark, "process closed");
         return Totals().Failures - before;

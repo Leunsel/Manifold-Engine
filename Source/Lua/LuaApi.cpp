@@ -109,17 +109,32 @@ namespace Manifold::Lua
         int Print(lua_State* state)
         {
             const int count = lua_gettop(state);
-            std::string line;
+            ConsoleEntry entry;
+            bool structured = false;
             for (int i = 1; i <= count; ++i)
             {
                 std::size_t length = 0;
                 const char* text = luaL_tolstring(state, i, &length);
                 if (i > 1)
-                    line += '\t';
-                line.append(text, length);
+                    entry.Text += '\t';
+                entry.Text.append(text, length);
                 lua_pop(state, 1);
+                structured = structured || lua_type(state, i) == LUA_TTABLE || lua_type(state, i) == LUA_TUSERDATA;
             }
-            EngineOf(state).Print(OutputKind::Print, line);
+            lua_Debug info{};
+            if (lua_getstack(state, 1, &info) && lua_getinfo(state, "Sln", &info))
+            {
+                entry.Source.Chunk = ChunkLabel(info.source ? info.source : "", info.short_src);
+                entry.Source.Function = info.name ? info.name : "";
+                entry.Source.Line = info.currentline;
+            }
+            LuaEngine& engine = EngineOf(state);
+            if (structured)
+            {
+                for (int i = 1; i <= count; ++i)
+                    entry.Values.push_back(engine.Snapshot(state, i));
+            }
+            engine.AddEntry(std::move(entry));
             return 0;
         }
 
@@ -253,7 +268,7 @@ namespace Manifold::Lua
             else
                 status = Owner(state).OpenProcessByName(luaL_checkstring(state, 1));
             if (!status)
-                EngineOf(state).Print(OutputKind::Error, status.Text);
+                EngineOf(state).PrintError(status.Text);
             lua_pushboolean(state, status.Ok());
             return 1;
         }
@@ -600,7 +615,7 @@ namespace Manifold::Lua
             const auto process = NeedProcess(state);
             const Status status = process->InjectLibrary(Utf8ToWide(luaL_checkstring(state, 1)));
             if (!status)
-                EngineOf(state).Print(OutputKind::Error, status.Text);
+                EngineOf(state).PrintError(status.Text);
             lua_pushboolean(state, status.Ok());
             return 1;
         }

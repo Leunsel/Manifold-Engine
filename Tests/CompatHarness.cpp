@@ -99,23 +99,23 @@ end
 
         struct Printer
         {
-            std::size_t Lines = 0;
             int Errors = 0;
             std::size_t NoticeCount = 0;
 
             void Flush(Engine& engine)
             {
-                const std::vector<Lua::OutputLine> output = engine.Lua().Output();
-                for (std::size_t i = Lines; i < output.size(); ++i)
+                for (const Lua::ConsoleEntry& entry : engine.Lua().Console().Entries())
                 {
-                    const Lua::OutputLine& line = output[i];
-                    if (line.Kind == Lua::OutputKind::Error && !line.Text.empty() && line.Text[0] != '\t' && line.Text != "stack traceback:" && line.Text.rfind("...\"]", 0) != 0)
+                    const bool error = entry.Kind == Lua::EntryKind::Error || entry.Level == LogLevel::Error;
+                    if (error)
                         ++Errors;
-                    std::printf("%s %s\n", line.Kind == Lua::OutputKind::Error ? "LUA-ERROR" : "lua      ", line.Text.c_str());
+                    std::string text = entry.PlainText();
+                    if (!entry.Source.Chunk.empty() && entry.Kind == Lua::EntryKind::Error)
+                        text = entry.Source.Chunk + ":" + std::to_string(entry.Source.Line) + ": " + text;
+                    for (std::uint32_t repeat = 0; repeat < entry.Repeat; ++repeat)
+                        std::printf("%s %s\n", error ? "LUA-ERROR" : "lua      ", text.c_str());
                 }
-                Lines = output.size();
                 engine.Lua().ClearOutput();
-                Lines = 0;
                 for (const Notice& notice : engine.Notices())
                 {
                     if (notice.Id <= static_cast<int>(NoticeCount))

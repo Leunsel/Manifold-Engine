@@ -4,6 +4,7 @@ import os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = os.path.join(ROOT, "Source", "Lua", "Compat")
 MANIFOLD = os.path.join(ROOT, "Source", "Lua", "Manifold")
+DOCS = os.path.join(ROOT, "Source", "Lua", "Docs")
 OUT = os.path.join(ROOT, "Source", "Generated", "LuaCompatScripts.cpp")
 ORDER = ("Defines.lua", "Classes.lua", "Lcl.lua")
 CHUNK = 12000
@@ -68,8 +69,10 @@ def main():
     ]
     compat = embed(lines, SOURCE, script_names(SOURCE, ORDER), "Script")
     manifold = embed(lines, MANIFOLD, script_names(MANIFOLD), "Manifold")
+    docs = embed(lines, DOCS, script_names(DOCS), "Doc")
     table(lines, "kScripts", "Script", compat)
     table(lines, "kManifoldScripts", "Manifold", manifold)
+    table(lines, "kDocScripts", "Doc", docs)
     lines += [
         "    }",
         "",
@@ -90,6 +93,11 @@ def main():
         "    {",
         "        return kManifoldScripts;",
         "    }",
+        "",
+        "    std::span<const CompatScript> DocScripts()",
+        "    {",
+        "        return kDocScripts;",
+        "    }",
         "}",
         "",
     ]
@@ -100,7 +108,7 @@ def main():
         return
     with open(OUT, "w", encoding="utf-8", newline="\n") as file:
         file.write(content)
-    print(len(compat) + len(manifold), "scripts embedded into", os.path.relpath(OUT, ROOT))
+    print(len(compat) + len(manifold) + len(docs), "scripts embedded into", os.path.relpath(OUT, ROOT))
 
 
 if __name__ == "__main__":

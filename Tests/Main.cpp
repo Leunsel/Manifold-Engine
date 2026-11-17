@@ -20,6 +20,9 @@ namespace Manifold::Tests
     int RunDisasmTests();
     int RunDisasmLive(const std::vector<std::string>& arguments);
     int RunCommandTests();
+    int RunTextTests();
+    int RunDocTests();
+    int RunConsoleTests();
     int RunIntegrationTests(const std::filesystem::path& target);
     int RunCompatHarness(const std::vector<std::string>& arguments);
     int RunCompatTests();
@@ -110,6 +113,12 @@ int main(int argc, char** argv)
     Manifold::Tests::RunDisasmTests();
     std::printf("Commands and shortcuts\n");
     Manifold::Tests::RunCommandTests();
+    std::printf("Text\n");
+    Manifold::Tests::RunTextTests();
+    std::printf("Documentation\n");
+    Manifold::Tests::RunDocTests();
+    std::printf("Lua console\n");
+    Manifold::Tests::RunConsoleTests();
     std::printf("Compatibility\n");
     Manifold::Tests::RunCompatTests();
     std::printf("Manifold Lua API\n");

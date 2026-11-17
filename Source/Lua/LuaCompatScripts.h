@@ -16,4 +16,5 @@ namespace Manifold::Lua
 
     std::span<const CompatScript> CompatScripts();
     std::span<const CompatScript> ManifoldScripts();
+    std::span<const CompatScript> DocScripts();
 }

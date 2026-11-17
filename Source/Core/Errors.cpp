@@ -312,6 +312,9 @@ namespace Manifold
             { ErrorCode::LuaApiMisuse, "The manifold API was called the wrong way: {}.",
                 "A manifold function was called with a colon, got a missing, extra or wrong argument or an unknown option, or a name that does not exist was read.",
                 "The message names the function and the argument. Docs/MANIFOLD-API.md has the rules and every function." },
+            { ErrorCode::LuaDocMissing, "There is no documentation for {}.",
+                "Nothing documents the function or name: no Manifold, Cheat Engine or Lua entry, no manifold.doc.register call and no LuaLS annotation above its definition.",
+                "Check the name, or document it with manifold.doc.register, or with ---@param annotations and manifold.doc.registerModule." },
 
             { ErrorCode::ExprSyntax, "\"{}\" is not a valid address.",
                 "The address expression could not be read.",

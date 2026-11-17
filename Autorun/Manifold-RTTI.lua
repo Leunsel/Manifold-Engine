@@ -1534,6 +1534,9 @@ local function Main()
     manifold.event.subscribe("processOpened", OnProcessOpened, { key = KEY .. ".opened" })
     manifold.event.subscribe("processClosed", OnProcessClosed, { key = KEY .. ".closed" })
     InstallMenu()
+    if manifold.has("doc.registerModule") then
+        manifold.doc.registerModule("ManifoldRTTI", RTTI, { doc = "MSVC run-time type information in the opened process: class names, base classes, vtables and instances, the names Structure Dissect shows, and a demangler." })
+    end
     log.debug("Version " .. VERSION .. " ready. Structure Dissect names C++ objects; the " .. MENU_CAPTION .. " menu finds them.")
 end
 

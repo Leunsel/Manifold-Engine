@@ -3,6 +3,7 @@
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/RuntimeLog.h"
+#include "Lua/DocRegistry.h"
 #include "Lua/LuaApi.h"
 #include "Lua/LuaEngine.h"
 
@@ -12,6 +13,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -35,18 +37,26 @@ namespace Manifold::Tests
             CHECK_MSG(status.Ok() && result == "ok", std::string(name) + ": " + (status.Ok() ? result : status.Text));
         }
 
-        const Lua::OutputLine* LastLine(Engine& engine, std::vector<Lua::OutputLine>& keep)
+        std::optional<Lua::ConsoleEntry> LastEntry(Engine& engine)
         {
-            keep = engine.Lua().Output();
-            return keep.empty() ? nullptr : &keep.back();
+            return engine.Lua().Console().Last();
+        }
+
+        std::size_t CountEntries(Engine& engine, LogLevel level, std::string_view text)
+        {
+            std::size_t count = 0;
+            for (const Lua::ConsoleEntry& entry : engine.Lua().Console().Entries())
+            {
+                if (entry.Level == level && entry.PlainText().find(text) != std::string::npos)
+                    count += entry.Repeat;
+            }
+            return count;
         }
 
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 3 or type(manifold.version) ~= "string" then return "constants" end
-                local docs = debug.getregistry()["Manifold.Docs"]
-                if type(docs) ~= "table" then return "no docs table" end
+                if manifold.apiVersion ~= 4 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 for areaName, members in pairs(manifold) do
                   if type(members) == "table" then
@@ -55,9 +65,11 @@ namespace Manifold::Tests
                     for name, value in pairs(members) do
                       if type(value) ~= "function" then return "non-function " .. areaName .. "." .. name end
                       if not name:match("^%l%w*$") then return "function name " .. areaName .. "." .. name end
-                      local doc = docs[value]
-                      if not doc or doc.text == nil or doc.text == "" or doc.returns == nil then return "undocumented " .. areaName .. "." .. name end
-                      if (name:match("^is%u") or name:match("^has%u")) and doc.returns ~= "boolean" then return "predicate " .. name .. " returns " .. doc.returns end
+                      local doc = manifold.doc.entry(value)
+                      local returns = doc and doc.signatures and doc.signatures[1] and doc.signatures[1].returns
+                      if not doc or doc.origin ~= "manifold" or doc.text == "" or returns == nil then return "undocumented " .. areaName .. "." .. name end
+                      if doc.path ~= "manifold." .. areaName .. "." .. name then return "documented as " .. doc.path end
+                      if (name:match("^is%u") or name:match("^has%u")) and returns ~= "boolean" then return "predicate " .. name .. " returns " .. returns end
                       functions[name] = true
                       count = count + 1
                     end
@@ -123,39 +135,41 @@ namespace Manifold::Tests
         void Output(Engine& engine)
         {
             Lua::LuaEngine& lua = engine.Lua();
-            std::vector<Lua::OutputLine> keep;
             lua.ClearOutput();
             LuaCheck(engine, "log info", R"LUA(
                 manifold.log.info("hello", { b = 2, a = "x", list = { 1, 2 } })
                 return "ok")LUA");
-            const Lua::OutputLine* line = LastLine(engine, keep);
-            CHECK(line && line->Kind == Lua::OutputKind::Info);
-            CHECK(line && line->HeadEnd == line->TagEnd && line->TagEnd > line->TimeEnd && line->TimeEnd == 9);
-            CHECK_MSG(line && line->Text.find("INF ") == 9 && line->Text.substr(line->HeadEnd) == "hello  {a = \"x\", b = 2, list = {1, 2}}", line ? line->Text : "no line");
-            CHECK(line && line->Indent == 13 && line->Columns == line->Text.size());
-            lua.Run("print('Gr\\xC3\\xB6\\xC3\\x9Fe')", "columns");
-            line = LastLine(engine, keep);
-            CHECK(line && line->Columns == 5 && line->Indent == 0);
+            auto entry = LastEntry(engine);
+            CHECK(entry && entry->Kind == Lua::EntryKind::Log && entry->Level == LogLevel::Info && entry->TimeMs > 0);
+            CHECK_MSG(entry && entry->Text == "hello" && entry->FieldsText == "{a = \"x\", b = 2, list = {1, 2}}", entry ? entry->Text + " | " + entry->FieldsText : "no entry");
+            CHECK(entry && entry->Fields && entry->Fields->Nodes.size() == 6 && entry->Fields->Nodes[0].Total == 3 && entry->Fields->Nodes[1].Key == "a");
+            CHECK_MSG(entry && entry->Source.Chunk == "log info" && entry->Source.Line == 2, entry ? entry->Source.Chunk + ":" + std::to_string(entry->Source.Line) : "");
+            lua.Run("print('Gr\\xC3\\xB6\\xC3\\x9Fe', 7)", "columns");
+            entry = LastEntry(engine);
+            CHECK(entry && entry->Kind == Lua::EntryKind::Print && entry->Text == "Gr\xC3\xB6\xC3\x9F" "e\t7" && entry->Source.Chunk == "columns" && entry->Source.Line == 1 && entry->Values.empty());
+            lua.Run("print('t', { 1, 2 })", "values");
+            entry = LastEntry(engine);
+            CHECK(entry && entry->Values.size() == 2 && entry->Values[1] && entry->Values[1]->Nodes.front().Total == 2);
 
-            const std::size_t before = lua.OutputCount();
+            const std::size_t before = lua.Console().Count();
             LuaCheck(engine, "log debug hidden", R"LUA(
                 manifold.log.debug("hidden")
                 if manifold.log.getLevel() ~= "info" then return "default level" end
                 return "ok")LUA");
-            CHECK(lua.OutputCount() == before);
+            CHECK(lua.Console().Count() == before);
             LuaCheck(engine, "log debug shown", R"LUA(
                 manifold.log.setLevel("debug")
                 manifold.log.debug("shown")
                 manifold.log.setLevel("info")
                 return "ok")LUA");
-            line = LastLine(engine, keep);
-            CHECK(line && line->Kind == Lua::OutputKind::Debug && line->Text.ends_with("shown"));
+            entry = LastEntry(engine);
+            CHECK(entry && entry->Level == LogLevel::Debug && entry->Text == "shown");
 
             LuaCheck(engine, "log channel", R"LUA(
                 manifold.log.channel("Teleporter").success("ready")
                 return "ok")LUA");
-            line = LastLine(engine, keep);
-            CHECK_MSG(line && line->Kind == Lua::OutputKind::Success && line->Text.substr(line->TagEnd) == "[Teleporter] ready", line ? line->Text : "no line");
+            entry = LastEntry(engine);
+            CHECK_MSG(entry && entry->Level == LogLevel::Success && entry->Channel == "Teleporter" && entry->Text == "ready", entry ? entry->PlainText() : "no entry");
 
             LuaCheck(engine, "log warning", R"LUA(
                 manifold.log.channel("Probe").warning("careful")
@@ -168,18 +182,10 @@ namespace Manifold::Tests
                 local ok, problem = manifold.error.try(function() error("boom") end)
                 manifold.log.error(problem)
                 return "ok")LUA");
-            keep = lua.Output();
-            bool sawMessage = false;
-            bool sawTrace = false;
-            for (const Lua::OutputLine& entry : keep)
-            {
-                if (entry.Kind != Lua::OutputKind::Error)
-                    continue;
-                sawMessage = sawMessage || entry.Text.find("log error object:2: boom (ME-7002)") != std::string::npos;
-                sawTrace = sawTrace || (entry.HeadEnd == 0 && entry.Text.find("stack traceback:") != std::string::npos && entry.Text.starts_with("    "));
-            }
-            CHECK(sawMessage);
-            CHECK(sawTrace);
+            entry = LastEntry(engine);
+            CHECK_MSG(entry && entry->Level == LogLevel::Error && entry->Text.find("boom") != std::string::npos && entry->Code == "ME-7002", entry ? entry->PlainText() : "no entry");
+            CHECK(entry && entry->Source.Chunk == "log error object" && entry->Source.Line == 2);
+            CHECK(entry && entry->Traceback.find("stack traceback:") != std::string::npos);
 
             LuaCheck(engine, "inspect", R"LUA(
                 local cycle = {}
@@ -417,10 +423,11 @@ namespace Manifold::Tests
                 if manifold.process.address("dynamicProbe") ~= nil then return "still resolves" end
                 return "ok")LUA");
             std::size_t brokenLines = 0;
-            for (const Lua::OutputLine& line : lua.Output())
+            for (const Lua::ConsoleEntry& entry : lua.Console().Entries())
             {
-                if (line.Kind == Lua::OutputKind::Error && line.Text.find("[manifold.symbol]") != std::string::npos && line.Text.find("resolver broke") != std::string::npos)
-                    ++brokenLines;
+                const std::string text = entry.PlainText();
+                if (entry.Level == LogLevel::Error && text.find("[manifold.symbol]") != std::string::npos && text.find("resolver broke") != std::string::npos)
+                    brokenLines += entry.Repeat;
             }
             CHECK_MSG(brokenLines == 1, "broken resolver logged " + std::to_string(brokenLines) + " times");
 
@@ -444,10 +451,7 @@ namespace Manifold::Tests
                 if ok then return "unknown event" end
                 return "ok")LUA");
             engine.CloseProcess();
-            bool sawHandlerError = false;
-            for (const Lua::OutputLine& line : lua.Output())
-                sawHandlerError = sawHandlerError || (line.Kind == Lua::OutputKind::Error && line.Text.find("[manifold.event]") != std::string::npos && line.Text.find("handler broke") != std::string::npos);
-            CHECK(sawHandlerError);
+            CHECK(CountEntries(engine, LogLevel::Error, "[manifold.event]") > 0 && CountEntries(engine, LogLevel::Error, "handler broke") > 0);
 
             LuaCheck(engine, "v2 structure", R"LUA(
                 local id = manifold.structure.addNameResolver(function(address) if address == 0x1234 then return "ProbeClass", 0x1200 end end, { key = "probe" })
@@ -484,6 +488,107 @@ namespace Manifold::Tests
             CHECK(found);
             const std::vector<Lua::LuaCompletion> areas = lua.Complete("manifold", "", false);
             CHECK(std::any_of(areas.begin(), areas.end(), [](const Lua::LuaCompletion& item) { return item.Name == "process"; }));
+        }
+
+        void DocApi(Engine& engine)
+        {
+            Lua::LuaEngine& lua = engine.Lua();
+            LuaCheck(engine, "doc entries", R"LUA(
+                local read = manifold.doc.entry(manifold.memory.read)
+                if not read or read.path ~= "manifold.memory.read" or read.origin ~= "manifold" or read.kind ~= "function" then return "entry read" end
+                local signature = read.signatures[1]
+                if signature.text ~= "read(address, type, options?)" or #signature.params ~= 3 then return "read signature " .. tostring(signature.text) end
+                if #signature.params[2].choices ~= 14 or not signature.params[3].optional or signature.params[3].keys.count ~= "integer" then return "read params" end
+                if manifold.doc.entry("manifold.memory.read").path ~= "manifold.memory.read" then return "entry by name" end
+                local ce = manifold.doc.entry("readInteger")
+                if not ce or ce.origin ~= "cheatengine" or ce.signatures[1].text ~= "readInteger(address)" then return "cheat engine entry" end
+                local standard = manifold.doc.entry("string.format")
+                if not standard or standard.origin ~= "standard" or standard.signatures[1].text ~= "format(format, ...)" then return "standard entry" end
+                local channel = manifold.doc.entry(manifold.log.channel("Probe").info)
+                if not channel or channel.path ~= "manifold.log.Channel.info" then return "channel entry" end
+                local missing, problem = manifold.doc.entry("NoSuch.thing")
+                if missing ~= nil or problem.code ~= "ME-7008" then return "missing entry" end
+                return "ok")LUA");
+            LuaCheck(engine, "doc register", R"LUA(
+                local function teleport(x, y) end
+                local done = manifold.doc.register(teleport, {
+                  path = "DocProbe.teleport",
+                  doc = "Moves the player. Then waits.",
+                  params = { { name = "x", type = "number", doc = "Across." }, { name = "y", type = "number", optional = true } },
+                  returns = "boolean",
+                  overloads = { { params = { { name = "target", type = "string" } }, returns = "boolean" } },
+                })
+                if done ~= true then return "register result" end
+                local entry = manifold.doc.entry(teleport)
+                if entry.path ~= "DocProbe.teleport" or entry.origin ~= "script" or entry.summary ~= "Moves the player." then return "register entry" end
+                if entry.signatures[1].text ~= "teleport(x, y?)" or entry.signatures[1].params[1].text ~= "Across." or entry.signatures[2].text ~= "teleport(target)" then return "register signatures" end
+                if manifold.doc.entry("DocProbe.teleport").path ~= "DocProbe.teleport" then return "register by name" end
+                local ok, bad = pcall(manifold.doc.register, teleport, { params = { { type = "number" } } })
+                if ok or not manifold.error.is(bad) or bad.code ~= "ME-7007" then return "bad spec" end
+                ok, bad = pcall(manifold.doc.register, teleport, { colour = "red" })
+                if ok or bad.code ~= "ME-7007" then return "unknown spec key" end
+                ok, bad = pcall(manifold.doc.register, "manifold.memory.read", { doc = "mine" })
+                if ok or bad.code ~= "ME-7007" then return "replaced manifold" end
+                if manifold.doc.unregister(teleport) ~= true then return "unregister" end
+                local gone, why = manifold.doc.unregister(teleport)
+                if gone ~= nil or why.code ~= "ME-7008" then return "unregister twice" end
+                ok, bad = pcall(manifold.doc.unregister, "readInteger")
+                if ok or bad.code ~= "ME-7007" or manifold.doc.entry("readInteger") == nil then return "unregistered cheat engine" end
+                local function original(address, size) end
+                local wrapper = function(...) return original(...) end
+                if manifold.doc.inherit(wrapper, original) ~= true then return "inherit" end
+                local inherited = manifold.doc.entry(wrapper)
+                if #inherited.signatures[1].params ~= 2 or inherited.signatures[1].params[1].name ~= "address" then return "inherited params" end
+                local named = function(...) end
+                manifold.doc.inherit(named, "manifold.memory.read")
+                if manifold.doc.entry(named).path ~= "manifold.memory.read" then return "inherit by name" end
+                local found = manifold.doc.find("memory.read", { limit = 3 })
+                if #found < 1 or found[1].path ~= "manifold.memory.read" then return "find " .. tostring(found[1] and found[1].path) end
+                local areas = manifold.doc.find("manifold.", { kind = "table", limit = 100 })
+                if #areas < 9 then return "find tables " .. #areas end
+                for _, item in ipairs(areas) do
+                  if item.kind ~= "table" then return "find kind" end
+                end
+                local markdown = manifold.doc.markdown("manifold.doc")
+                if not markdown:find("## manifold.doc", 1, true) or not markdown:find("`manifold.doc.register(target, spec)`", 1, true) then return "markdown" end
+                return "ok")LUA");
+            LuaCheck(engine, "doc annotations", R"LUA(
+                local chunk = [==[
+local M = {}
+
+---Adds two numbers.
+---@param a integer The first
+---@param b? integer
+---@return integer
+function M.add(a, b) return a + (b or 0) end
+
+function M.plain(x, ...) end
+
+return M
+]==]
+                local M = load(chunk)()
+                local parsed = manifold.doc.annotations(M.add)
+                if not parsed or parsed.summary ~= "Adds two numbers." or parsed.signatures[1].text ~= "add(a, b?)" then return "annotations" end
+                if parsed.signatures[1].params[1].type ~= "integer" or parsed.signatures[1].params[1].text ~= "The first" or parsed.signatures[1].returns ~= "integer" then return "annotation params" end
+                local none, problem = manifold.doc.annotations(M.plain)
+                if none ~= nil or problem.code ~= "ME-7008" then return "plain annotations" end
+                local count = manifold.doc.registerModule("DocModule", M, { doc = "A probe module." })
+                if count ~= 2 then return "registerModule count " .. tostring(count) end
+                local added = manifold.doc.entry("DocModule.add")
+                if added.origin ~= "annotation" or added.text ~= "Adds two numbers." then return "module add" end
+                local plain = manifold.doc.entry("DocModule.plain")
+                if plain.origin ~= "reflection" or plain.signatures[1].text ~= "plain(x, ...)" then return "module plain" end
+                if manifold.doc.entry(M.add).path ~= "DocModule.add" then return "module binding" end
+                if manifold.doc.entry("DocModule").text ~= "A probe module." then return "module table" end
+                DocModuleProbe = M
+                return "ok")LUA");
+            const std::vector<std::string> added = lua.CallSignatures("DocModuleProbe.add", false);
+            CHECK_MSG(added.size() == 1 && added.front() == "add(a, b?)", added.empty() ? "none" : added.front());
+            const auto described = lua.Describe("DocModuleProbe.add", false);
+            CHECK(described && described->Path == "DocModule.add");
+            const std::size_t before = lua.Docs().Size();
+            LuaCheck(engine, "doc anchors", "for i = 1, 50 do manifold.doc.register(function() end, { doc = 'temporary' }) end collectgarbage() collectgarbage() return 'ok'");
+            CHECK_MSG(lua.Docs().Size() <= before + 2, std::to_string(lua.Docs().Size()) + " after " + std::to_string(before));
         }
 
         void Documentation(Engine& engine)
@@ -527,6 +632,7 @@ namespace Manifold::Tests
         OwnProcess(engine);
         Version2(engine);
         Assist(engine);
+        DocApi(engine);
         Documentation(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

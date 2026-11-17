@@ -222,6 +222,24 @@ While the Lua engine window has the focus.
 | `Ctrl+O` | Open a script | `LuaOpen` | CE |
 | `Ctrl+S` | Save the script | `LuaSave` | CE |
 | `Ctrl+Alt+S` | Save the script under a new name | `LuaSaveAs` | CE |
-| `Ctrl+Enter` | Execute | `LuaExecute` | Manifold |
+| `Ctrl+Enter` | Run the console input, or the script on the script tab | `LuaExecute` | Manifold |
 | `Ctrl+L` | Clear the output | `LuaClearOutput` | Manifold |
-| `Ctrl+Shift+F` | Show the function list | `LuaFunctions` | Manifold |
+| `Ctrl+Shift+F` | Show the documentation | `LuaFunctions` | Manifold |
+| `Shift+F5` | Stop the running script or input | `LuaStop` | Manifold |
+| `Ctrl+1` | Show the console | `LuaConsoleTab` | Manifold |
+| `Ctrl+2` | Show the script | `LuaScriptTab` | Manifold |
+| `Ctrl+F` | Search the console | `LuaFind` | Manifold |
+
+## Code editors
+
+While the cursor is in a code editor: the Lua engine, Auto Assembler and script windows, the template manager and table files.
+
+| Keys | Command | Name in the settings | Origin |
+|---|---|---|---|
+| `Ctrl+Space` | Show the completions | `EditorComplete` | Manifold |
+| `Ctrl+Slash` or `Ctrl+Shift+7` | Comment or uncomment the lines | `EditorToggleComment` | Manifold |
+| `Ctrl+D` | Duplicate the lines | `EditorDuplicateLines` | Manifold |
+| `Alt+Up` | Move the lines up | `EditorMoveLinesUp` | Manifold |
+| `Alt+Down` | Move the lines down | `EditorMoveLinesDown` | Manifold |
+| `Ctrl+Shift+K` | Delete the lines | `EditorDeleteLines` | Manifold |
+| `Ctrl+G` | Go to a line | `EditorGotoLine` | Manifold |

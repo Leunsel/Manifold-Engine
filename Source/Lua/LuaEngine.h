@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Errors.h"
+#include "Lua/LuaConsole.h"
 
 #include <array>
 #include <atomic>
@@ -35,26 +36,8 @@ namespace Manifold::Table
 
 namespace Manifold::Lua
 {
-    enum class OutputKind
-    {
-        Print,
-        Error,
-        Info,
-        Debug,
-        Success,
-        Warning
-    };
-
-    struct OutputLine
-    {
-        OutputKind Kind = OutputKind::Print;
-        std::string Text;
-        std::uint16_t TimeEnd = 0;
-        std::uint16_t TagEnd = 0;
-        std::uint16_t HeadEnd = 0;
-        std::uint16_t Indent = 0;
-        std::uint32_t Columns = 0;
-    };
+    class DocRegistry;
+    struct DocRecord;
 
     struct Timer
     {
@@ -112,6 +95,7 @@ namespace Manifold::Lua
         std::string Kind;
         std::string Signature;
         std::string Text;
+        std::shared_ptr<const DocRecord> Doc;
     };
 
     struct LuaHotkey
@@ -347,7 +331,8 @@ namespace Manifold::Lua
         void BlockingSleep(std::uint32_t milliseconds);
         using TaskDone = std::function<void(const Status& status, const std::string& output)>;
         using TaskRead = std::function<void(lua_State* thread, int results)>;
-        int StartTask(std::string_view code, std::string_view chunkName, TaskDone done, std::function<void()> enter = {}, std::function<void()> leave = {});
+        int StartTask(std::string_view code, std::string_view chunkName, TaskDone done, std::function<void()> enter = {}, std::function<void()> leave = {}, TaskRead read = {},
+            std::uint64_t inputId = 0);
         int StartCall(int reference, const std::function<int(lua_State*)>& push, std::string_view name, TaskRead read, TaskDone done);
         void LookupStructureNameLater(std::uint64_t address, std::function<void(std::optional<StructureLookup>)> done);
         void DissectStructureLater(Table::StructDefinition* definition, std::uint64_t address, std::function<void(bool handled)> done);
@@ -368,20 +353,20 @@ namespace Manifold::Lua
         void OnProcessClosed();
         void DispatchEvent(const char* name);
 
-        void Print(OutputKind kind, std::string text);
-        void PrintEntry(OutputKind kind, std::string_view time, std::string_view tag, std::string_view channel, std::string text);
+        std::uint64_t AddEntry(ConsoleEntry entry);
+        void PrintError(const std::string& message, std::uint64_t inputId = 0);
+        void PrintText(std::string text);
+        ConsoleLog& Console() { return m_console; }
+        const ConsoleLog& Console() const { return m_console; }
+        std::shared_ptr<const ValueSnapshot> Snapshot(lua_State* state, int index);
+        ConsoleEntry ErrorEntry(lua_State* state, int index, std::string traceback, std::uint64_t inputId);
+        std::uint64_t Evaluate(const std::string& code, std::function<void(const Status&)> done = {}, int* task = nullptr);
+        static bool Incomplete(lua_State* state, const std::string& code);
         bool ShowOnPrint() const;
         void SetShowOnPrint(bool show) { m_showOnPrintOverride = show ? 1 : 0; }
         void RememberShowOnPrint(bool show);
         std::uint64_t PrintSignal() const { return m_printSignal.load(); }
-        std::vector<OutputLine> Output() const;
-        std::size_t OutputCount() const;
-        std::uint64_t OutputDropped() const;
-        void VisitOutput(std::size_t first, std::size_t last, const std::function<void(std::size_t, const OutputLine&)>& visit) const;
-        std::uint64_t OutputGeneration() const { return m_outputGeneration.load(); }
-        std::uint64_t OutputEpoch() const { return m_outputEpoch.load(); }
-        std::uint32_t OutputMaxColumns() const { return m_outputMaxColumns.load(); }
-        void ClearOutput();
+        void ClearOutput() { m_console.Clear(); }
 
         lua_State* State() const { return m_state; }
         Engine& Owner() { return m_engine; }
@@ -418,6 +403,11 @@ namespace Manifold::Lua
         void SetFormBounds(int form, int left, int top, int width, int height, int clientWidth, int clientHeight);
 
         std::vector<std::string> FunctionNames() const;
+        DocRegistry& Docs() { return *m_docs; }
+        std::shared_ptr<DocRegistry> SharedDocs() const { return m_docs; }
+        void RememberChunk(std::string name, std::string text);
+        std::string ChunkText(std::string_view name) const;
+        std::shared_ptr<const DocRecord> Describe(std::string_view chain, bool method);
         std::vector<LuaCompletion> Complete(std::string_view chain, std::string_view prefix, bool method);
         std::vector<std::string> CallSignatures(std::string_view chain, bool method);
         std::vector<std::string> CallArgumentChoices(std::string_view chain, bool method, int argument);
@@ -438,6 +428,7 @@ namespace Manifold::Lua
             int Arguments = 0;
             double WakeAt = 0.0;
             double Deadline = 0.0;
+            std::uint64_t InputId = 0;
             bool Stop = false;
             bool Running = false;
         };
@@ -454,14 +445,12 @@ namespace Manifold::Lua
 
         Engine& m_engine;
         lua_State* m_state = nullptr;
-        mutable std::mutex m_outputLock;
-        std::deque<OutputLine> m_output;
-        std::size_t m_outputBytes = 0;
-        std::uint64_t m_outputDropped = 0;
-        std::atomic<std::uint64_t> m_outputGeneration{ 1 };
+        std::shared_ptr<DocRegistry> m_docs;
+        std::unordered_map<std::string, std::string> m_chunks;
+        std::deque<std::string> m_chunkOrder;
+        ConsoleLog m_console;
+        std::uint64_t m_inputCounter = 0;
         std::atomic<std::uint64_t> m_printSignal{ 0 };
-        std::atomic<std::uint64_t> m_outputEpoch{ 0 };
-        std::atomic<std::uint32_t> m_outputMaxColumns{ 0 };
         std::atomic<int> m_showOnPrintOverride{ -1 };
         std::map<int, Timer> m_timers;
         int m_nextTimer = 1;

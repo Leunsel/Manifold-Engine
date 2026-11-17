@@ -5,6 +5,7 @@
 #include "Core/Version.h"
 #include "Lua/LuaApi.h"
 #include "Lua/LuaCompatScripts.h"
+#include "Lua/LuaDocBinding.h"
 #include "Lua/LuaEngine.h"
 #include "Scan/Scanner.h"
 #include "Target/Process.h"
@@ -28,7 +29,6 @@ namespace Manifold::Lua
 {
     namespace
     {
-        constexpr const char* kDocsKey = "Manifold.Docs";
         constexpr const char* kMarkdownKey = "Manifold.Markdown";
 
         struct NamedCode
@@ -43,8 +43,6 @@ namespace Manifold::Lua
 #undef MANIFOLD_NAMED_CODE
         };
 
-        constexpr const char* kTags[] = { "DBG", "INF", "OK ", "WRN", "ERR" };
-        constexpr OutputKind kKinds[] = { OutputKind::Debug, OutputKind::Info, OutputKind::Success, OutputKind::Warning, OutputKind::Error };
         constexpr LogLevel kLevels[] = { LogLevel::Debug, LogLevel::Info, LogLevel::Success, LogLevel::Warning, LogLevel::Error };
 
         enum class MemoryType
@@ -190,32 +188,44 @@ namespace Manifold::Lua
             SetString(state, "path", WideToUtf8(module.Path));
         }
 
-        std::string ClockText()
-        {
-            SYSTEMTIME now{};
-            ::GetLocalTime(&now);
-            char text[16] = {};
-            std::snprintf(text, sizeof(text), "%02u:%02u:%02u", static_cast<unsigned>(now.wHour), static_cast<unsigned>(now.wMinute), static_cast<unsigned>(now.wSecond));
-            return text;
-        }
-
-        int Write(lua_State* state)
+        int LogRecord(lua_State* state)
         {
             const int level = std::clamp(static_cast<int>(luaL_checkinteger(state, 1)), 0, 4);
+            LuaEngine& engine = EngineOf(state);
+            ConsoleEntry entry;
+            entry.Kind = EntryKind::Log;
+            entry.Level = kLevels[level];
             std::size_t length = 0;
             const char* text = luaL_checklstring(state, 2, &length);
-            const std::string channel = luaL_optstring(state, 3, "");
-            const std::string file = luaL_optstring(state, 4, "");
-            const std::string function = luaL_optstring(state, 5, "");
-            const int line = static_cast<int>(luaL_optinteger(state, 6, 0));
-            std::string message(text, length);
+            entry.Text.assign(text, length);
+            entry.Channel = luaL_optstring(state, 3, "");
+            entry.FieldsText = luaL_optstring(state, 4, "");
+            if (lua_istable(state, 5))
+                entry.Fields = engine.Snapshot(state, 5);
+            entry.Traceback = luaL_optstring(state, 6, "");
+            entry.Code = luaL_optstring(state, 7, "");
+            const std::string where = luaL_optstring(state, 8, "");
+            entry.Source.Chunk = luaL_optstring(state, 9, "");
+            entry.Source.Function = luaL_optstring(state, 10, "");
+            entry.Source.Line = static_cast<int>(luaL_optinteger(state, 11, 0));
+            if (const std::size_t colon = where.rfind(':'); colon != std::string::npos && colon + 1 < where.size())
+            {
+                entry.Source.Chunk = where.substr(0, colon);
+                entry.Source.Line = std::atoi(where.c_str() + colon + 1);
+                entry.Source.Function.clear();
+            }
             if (level >= 3)
             {
-                const std::string first = message.substr(0, message.find('\n'));
-                RuntimeLog::Write(kLevels[level], "Lua", file.empty() ? "lua" : file.c_str(), function.empty() ? "chunk" : function.c_str(), line,
-                    channel.empty() ? first : "[" + channel + "] " + first);
+                std::string first = entry.Text.substr(0, entry.Text.find('\n'));
+                if (!where.empty())
+                    first = where + ": " + first;
+                if (!entry.Code.empty())
+                    first += " (" + entry.Code + ")";
+                const std::string chunk = entry.Source.Chunk.empty() ? std::string("lua") : entry.Source.Chunk;
+                const std::string function = entry.Source.Function.empty() ? std::string("chunk") : entry.Source.Function;
+                RuntimeLog::Write(kLevels[level], "Lua", chunk.c_str(), function.c_str(), entry.Source.Line, entry.Channel.empty() ? first : "[" + entry.Channel + "] " + first);
             }
-            EngineOf(state).PrintEntry(kKinds[level], ClockText(), kTags[level], channel, std::move(message));
+            engine.AddEntry(std::move(entry));
             return 0;
         }
 
@@ -689,13 +699,6 @@ namespace Manifold::Lua
             return 1;
         }
 
-        std::string FieldText(lua_State* state, int index, const char* key)
-        {
-            lua_getfield(state, index, key);
-            std::string text = lua_type(state, -1) == LUA_TSTRING ? lua_tostring(state, -1) : "";
-            lua_pop(state, 1);
-            return text;
-        }
     }
 
     void RegisterManifoldApi(LuaEngine& engine, lua_State* state)
@@ -703,7 +706,7 @@ namespace Manifold::Lua
         (void)engine;
         const luaL_Reg natives[] = {
             { "fail", &Fail },
-            { "writeLine", &Write },
+            { "logRecord", &LogRecord },
             { "showOutput", &ShowOutput },
             { "clearOutput", &ClearOutput },
             { "showOnPrint", &ShowOnPrint },
@@ -739,9 +742,10 @@ namespace Manifold::Lua
                 lua_settop(state, top);
                 continue;
             }
-            lua_createtable(state, 0, static_cast<int>(std::size(natives)));
+            lua_createtable(state, 0, static_cast<int>(std::size(natives)) + 10);
             luaL_setfuncs(state, natives, 0);
-            if (lua_pcall(state, 1, 2, 0) != LUA_OK)
+            RegisterDocNatives(state, -1);
+            if (lua_pcall(state, 1, 1, 0) != LUA_OK)
             {
                 std::string message = lua_tostring(state, -1) ? lua_tostring(state, -1) : "";
                 if (message.empty() && luaL_callmeta(state, -1, "__tostring") && lua_type(state, -1) == LUA_TSTRING)
@@ -752,70 +756,8 @@ namespace Manifold::Lua
             }
             if (lua_isfunction(state, -1))
                 lua_setfield(state, LUA_REGISTRYINDEX, kMarkdownKey);
-            else
-                lua_pop(state, 1);
-            if (lua_istable(state, -1))
-                lua_setfield(state, LUA_REGISTRYINDEX, kDocsKey);
             lua_settop(state, top);
         }
-    }
-
-    std::optional<ManifoldFunctionDoc> ManifoldDocOf(lua_State* state, int index)
-    {
-        if (!lua_isfunction(state, index))
-            return std::nullopt;
-        index = lua_absindex(state, index);
-        const int top = lua_gettop(state);
-        if (lua_getfield(state, LUA_REGISTRYINDEX, kDocsKey) != LUA_TTABLE)
-        {
-            lua_settop(state, top);
-            return std::nullopt;
-        }
-        lua_pushvalue(state, index);
-        if (lua_rawget(state, -2) != LUA_TTABLE)
-        {
-            lua_settop(state, top);
-            return std::nullopt;
-        }
-        ManifoldFunctionDoc doc;
-        doc.Path = FieldText(state, -1, "path");
-        doc.Params = FieldText(state, -1, "params");
-        doc.Returns = FieldText(state, -1, "returns");
-        doc.Text = FieldText(state, -1, "text");
-        lua_settop(state, top);
-        return doc;
-    }
-
-    std::vector<std::string> ManifoldArgumentChoices(lua_State* state, int index, int argument)
-    {
-        std::vector<std::string> result;
-        if (argument < 0 || !lua_isfunction(state, index))
-            return result;
-        index = lua_absindex(state, index);
-        const int top = lua_gettop(state);
-        if (lua_getfield(state, LUA_REGISTRYINDEX, kDocsKey) != LUA_TTABLE)
-        {
-            lua_settop(state, top);
-            return result;
-        }
-        lua_pushvalue(state, index);
-        if (lua_rawget(state, -2) != LUA_TTABLE)
-        {
-            lua_settop(state, top);
-            return result;
-        }
-        if (lua_getfield(state, -1, "choices") == LUA_TTABLE && lua_rawgeti(state, -1, argument + 1) == LUA_TTABLE)
-        {
-            const lua_Integer count = luaL_len(state, -1);
-            for (lua_Integer i = 1; i <= count; ++i)
-            {
-                if (lua_rawgeti(state, -1, i) == LUA_TSTRING)
-                    result.emplace_back(lua_tostring(state, -1));
-                lua_pop(state, 1);
-            }
-        }
-        lua_settop(state, top);
-        return result;
     }
 
     std::string ManifoldApiMarkdown(LuaEngine& engine)

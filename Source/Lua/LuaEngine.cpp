@@ -4,6 +4,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Lua/LuaApi.h"
+#include "Lua/LuaDocBinding.h"
 #include "Table/Structures.h"
 
 #include "lua.hpp"
@@ -20,8 +21,6 @@ namespace Manifold::Lua
 {
     namespace
     {
-        constexpr std::size_t kMaxOutputLines = 100000;
-        constexpr std::size_t kMaxOutputBytes = 32u * 1024u * 1024u;
         constexpr const char* kEngineKey = "Manifold.Engine";
         constexpr int kCallHookInstructions = 10000;
 
@@ -48,17 +47,6 @@ namespace Manifold::Lua
         {
             const std::size_t end = text.find('\n');
             return end == std::string::npos ? text : text.substr(0, end);
-        }
-
-        std::uint32_t CountColumns(std::string_view text)
-        {
-            std::uint32_t columns = 0;
-            for (const char c : text)
-            {
-                if ((static_cast<unsigned char>(c) & 0xC0) != 0x80)
-                    ++columns;
-            }
-            return columns;
         }
 
         std::vector<std::string> GlobalFunctionNames(lua_State* state)
@@ -137,6 +125,7 @@ namespace Manifold::Lua
 
     void LuaEngine::Open()
     {
+        m_docs = std::make_shared<DocRegistry>(BuiltinDocs());
         m_state = luaL_newstate();
         luaL_openlibs(m_state);
         const std::vector<std::string> standard = GlobalFunctionNames(m_state);
@@ -188,66 +177,43 @@ namespace Manifold::Lua
         RunCompatScripts(*this);
     }
 
-    void LuaEngine::Print(OutputKind kind, std::string text)
+    std::uint64_t LuaEngine::AddEntry(ConsoleEntry entry)
     {
-        PrintEntry(kind, {}, {}, {}, std::move(text));
-    }
-
-    void LuaEngine::PrintEntry(OutputKind kind, std::string_view time, std::string_view tag, std::string_view channel, std::string text)
-    {
-        std::string head;
-        if (!time.empty() || !tag.empty())
-        {
-            head.append(time);
-            head += ' ';
-            head.append(tag);
-            head += ' ';
-        }
-        const std::size_t timeEnd = time.empty() ? 0 : time.size() + 1;
-        const std::size_t tagEnd = head.size();
-        if (!channel.empty() && !head.empty())
-        {
-            head += '[';
-            head.append(channel);
-            head += "] ";
-        }
-        const bool show = ShowOnPrint();
-        {
-            std::lock_guard lock(m_outputLock);
-            bool first = true;
-            for (std::string& line : SplitLines(text))
-            {
-                OutputLine entry{ kind, {} };
-                if (head.empty())
-                    entry.Text = std::move(line);
-                else if (first)
-                {
-                    entry.Text = head + line;
-                    entry.TimeEnd = static_cast<std::uint16_t>(std::min<std::size_t>(timeEnd, 0xFFFF));
-                    entry.TagEnd = static_cast<std::uint16_t>(std::min<std::size_t>(tagEnd, 0xFFFF));
-                    entry.HeadEnd = static_cast<std::uint16_t>(std::min<std::size_t>(head.size(), 0xFFFF));
-                }
-                else
-                    entry.Text = std::string(std::min<std::size_t>(head.size(), 64), ' ') + line;
-                entry.Columns = CountColumns(entry.Text);
-                entry.Indent = static_cast<std::uint16_t>(entry.HeadEnd ? CountColumns(std::string_view(entry.Text).substr(0, entry.HeadEnd))
-                                                                        : std::min<std::size_t>(entry.Text.find_first_not_of(' ') == std::string::npos ? 0 : entry.Text.find_first_not_of(' '), 64));
-                if (entry.Columns > m_outputMaxColumns.load())
-                    m_outputMaxColumns = entry.Columns;
-                first = false;
-                m_outputBytes += entry.Text.size();
-                m_output.push_back(std::move(entry));
-            }
-            while (m_output.size() > 1 && (m_output.size() > kMaxOutputLines || m_outputBytes > kMaxOutputBytes))
-            {
-                m_outputBytes -= m_output.front().Text.size();
-                m_output.pop_front();
-                ++m_outputDropped;
-            }
-            ++m_outputGeneration;
-        }
+        if (entry.TimeMs == 0)
+            entry.TimeMs = ConsoleClock();
+        const bool show = ShowOnPrint() && entry.Kind != EntryKind::Input;
+        const std::uint64_t id = m_console.Add(std::move(entry));
         if (show)
             ++m_printSignal;
+        return id;
+    }
+
+    void LuaEngine::PrintText(std::string text)
+    {
+        ConsoleEntry entry;
+        entry.Kind = EntryKind::System;
+        entry.Text = std::move(text);
+        AddEntry(std::move(entry));
+    }
+
+    void LuaEngine::PrintError(const std::string& message, std::uint64_t inputId)
+    {
+        ConsoleEntry entry;
+        entry.Kind = EntryKind::Error;
+        entry.Level = LogLevel::Error;
+        entry.InputId = inputId;
+        std::string text;
+        SplitTraceback(message, text, entry.Traceback);
+        std::string_view rest;
+        entry.Source = ParseSource(text, &rest);
+        entry.Text = std::string(rest);
+        const std::size_t code = entry.Text.rfind(" (ME-");
+        if (code != std::string::npos && !entry.Text.empty() && entry.Text.back() == ')')
+        {
+            entry.Code = entry.Text.substr(code + 2, entry.Text.size() - code - 3);
+            entry.Text.resize(code);
+        }
+        AddEntry(std::move(entry));
     }
 
     bool LuaEngine::ShowOnPrint() const
@@ -262,43 +228,6 @@ namespace Manifold::Lua
         m_engine.Options().LuaShowOnPrint = show;
     }
 
-    std::vector<OutputLine> LuaEngine::Output() const
-    {
-        std::lock_guard lock(m_outputLock);
-        return { m_output.begin(), m_output.end() };
-    }
-
-    std::size_t LuaEngine::OutputCount() const
-    {
-        std::lock_guard lock(m_outputLock);
-        return m_output.size();
-    }
-
-    std::uint64_t LuaEngine::OutputDropped() const
-    {
-        std::lock_guard lock(m_outputLock);
-        return m_outputDropped;
-    }
-
-    void LuaEngine::VisitOutput(std::size_t first, std::size_t last, const std::function<void(std::size_t, const OutputLine&)>& visit) const
-    {
-        std::lock_guard lock(m_outputLock);
-        last = std::min(last, m_output.size());
-        for (std::size_t i = first; i < last; ++i)
-            visit(i, m_output[i]);
-    }
-
-    void LuaEngine::ClearOutput()
-    {
-        std::lock_guard lock(m_outputLock);
-        m_output.clear();
-        m_outputBytes = 0;
-        m_outputDropped = 0;
-        m_outputMaxColumns = 0;
-        ++m_outputEpoch;
-        ++m_outputGeneration;
-    }
-
     Status LuaEngine::RunWithResult(std::string_view code, std::string_view chunkName, std::string& result)
     {
         result.clear();
@@ -309,7 +238,7 @@ namespace Manifold::Lua
         {
             const std::string message = lua_tostring(m_state, -1) ? lua_tostring(m_state, -1) : "unknown error";
             lua_settop(m_state, top);
-            Print(OutputKind::Error, message);
+            PrintError(message);
             LOG_ERROR("Lua", ErrorMessage(ErrorCode::LuaSyntax, message));
             return Status::Fail(ErrorCode::LuaSyntax, message);
         }
@@ -317,7 +246,7 @@ namespace Manifold::Lua
         {
             const std::string message = lua_tostring(m_state, -1) ? lua_tostring(m_state, -1) : "unknown error";
             lua_settop(m_state, top);
-            Print(OutputKind::Error, message);
+            PrintError(message);
             LOG_ERROR("Lua", ErrorMessage(ErrorCode::LuaRuntime, FirstLine(message)));
             return Status::Fail(ErrorCode::LuaRuntime, FirstLine(message));
         }
@@ -393,7 +322,7 @@ namespace Manifold::Lua
         {
             error = lua_tostring(m_state, -1) ? lua_tostring(m_state, -1) : "unknown error";
             lua_settop(m_state, base);
-            Print(OutputKind::Error, error);
+            PrintError(error);
             return false;
         }
         lua_remove(m_state, base + 1);
@@ -409,7 +338,7 @@ namespace Manifold::Lua
         {
             error = lua_tostring(m_state, -1) ? lua_tostring(m_state, -1) : "unknown error";
             lua_settop(m_state, base);
-            Print(OutputKind::Error, error);
+            PrintError(error);
             return false;
         }
         lua_remove(m_state, base + 1);

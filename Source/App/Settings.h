@@ -55,6 +55,10 @@ namespace Manifold
         int ScriptCallbackLimitMs = 2000;
         bool LuaShowOnPrint = true;
         bool LuaWrapOutput = true;
+        bool LegacyCodeEditor = false;
+        bool LuaConsoleTime = true;
+        bool LuaConsoleHex = false;
+        bool LuaDocsPanel = false;
         std::vector<std::string> AutoAttach;
         bool AutoAttachEnabled = false;
         TableScriptPolicy TableScripts = TableScriptPolicy::Ask;

@@ -802,22 +802,22 @@ namespace Manifold::Tests
             Lua::LuaEngine& lua = engine.Lua();
             lua.ClearOutput();
             CHECK(lua.Run("for i = 1, 20000 do print('entry ' .. i .. '\\nsecond line\\nthird line') end", "output").Ok());
-            CHECK_EQ(lua.OutputCount(), static_cast<std::size_t>(60000));
-            CHECK_EQ(lua.OutputDropped(), static_cast<std::uint64_t>(0));
+            CHECK_EQ(lua.Console().Count(), static_cast<std::size_t>(20000));
+            CHECK_EQ(lua.Console().Dropped(), static_cast<std::uint64_t>(0));
             std::string first;
             std::string last;
-            lua.VisitOutput(0, 1, [&](std::size_t, const Lua::OutputLine& line) { first = line.Text; });
-            lua.VisitOutput(lua.OutputCount() - 1, lua.OutputCount(), [&](std::size_t, const Lua::OutputLine& line) { last = line.Text; });
-            CHECK_EQ(first, std::string("entry 1"));
-            CHECK_EQ(last, std::string("third line"));
-            CHECK(lua.Run("for i = 1, 50000 do print('more ' .. i) end", "overflow").Ok());
-            CHECK_EQ(lua.OutputCount(), static_cast<std::size_t>(100000));
-            CHECK_EQ(lua.OutputDropped(), static_cast<std::uint64_t>(10000));
-            lua.VisitOutput(2, 3, [&](std::size_t, const Lua::OutputLine& line) { first = line.Text; });
-            CHECK_EQ(first, std::string("entry 3335"));
+            lua.Console().Visit(0, 1, [&](std::size_t, const Lua::ConsoleEntry& entry) { first = entry.Text; });
+            lua.Console().Visit(lua.Console().Count() - 1, lua.Console().Count(), [&](std::size_t, const Lua::ConsoleEntry& entry) { last = entry.Text; });
+            CHECK_EQ(first, std::string("entry 1\nsecond line\nthird line"));
+            CHECK_EQ(last, std::string("entry 20000\nsecond line\nthird line"));
+            CHECK(lua.Run("for i = 1, 90000 do print('more ' .. i) end", "overflow").Ok());
+            CHECK_EQ(lua.Console().Count(), static_cast<std::size_t>(100000));
+            CHECK_EQ(lua.Console().Dropped(), static_cast<std::uint64_t>(10000));
+            lua.Console().Visit(2, 3, [&](std::size_t, const Lua::ConsoleEntry& entry) { first = entry.Text; });
+            CHECK_EQ(first, std::string("entry 10003\nsecond line\nthird line"));
             lua.ClearOutput();
-            CHECK_EQ(lua.OutputCount(), static_cast<std::size_t>(0));
-            CHECK_EQ(lua.OutputDropped(), static_cast<std::uint64_t>(0));
+            CHECK_EQ(lua.Console().Count(), static_cast<std::size_t>(0));
+            CHECK_EQ(lua.Console().Dropped(), static_cast<std::uint64_t>(0));
         }
 
         void WaitingLoops(Engine& engine)

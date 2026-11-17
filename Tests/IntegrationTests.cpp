@@ -601,8 +601,8 @@ namespace Manifold::Tests
             {
                 const Status on = engine.SetActive(*luaRecord, true);
                 CHECK_MSG(on.Ok(), on.Text);
-                const auto output = engine.Lua().Output();
-                CHECK(!output.empty() && output.back().Text.rfind("Health is ", 0) == 0);
+                const auto last = engine.Lua().Console().Last();
+                CHECK(last && last->Text.rfind("Health is ", 0) == 0);
                 CHECK(engine.SetActive(*luaRecord, false).Ok());
             }
             const std::string saved = Table::WriteTable(engine.Table(), engine.Structures(), engine.TableSymbols());

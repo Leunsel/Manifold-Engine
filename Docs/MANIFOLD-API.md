@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 3 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 4 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -62,7 +62,11 @@ Coloured, levelled lines in the Lua engine output. Each line shows the time, the
 
 | Name | Returns | |
 | --- | --- | --- |
-| `channel.debug(message, fields?)` … `channel.error(message, fields?)` | nothing | Like the `manifold.log` functions, tagged with `[name]`. |
+| `channel.debug(message, fields?)` | nothing | Like `manifold.log.debug`, tagged with `[name]`. |
+| `channel.info(message, fields?)` | nothing | Like `manifold.log.info`, tagged with `[name]`. |
+| `channel.success(message, fields?)` | nothing | Like `manifold.log.success`, tagged with `[name]`. |
+| `channel.warning(message, fields?)` | nothing | Like `manifold.log.warning`, tagged with `[name]`. |
+| `channel.error(message, fields?)` | nothing | Like `manifold.log.error`, tagged with `[name]`. |
 | `channel.channel(name)` | channel | A sub-channel named `parent/name`. |
 | `channel.name` | string | The channel's name. |
 
@@ -149,3 +153,18 @@ Hooks into Structure Dissect. Hooks are asked in the order they were added, and 
 | `manifold.structure.removeDissector(id)` | boolean | Removes a dissector; false when the id is unknown. |
 | `manifold.structure.resolveName(address)` | name and start, nil when no resolver answers, or nil, error | Asks the name resolvers in order, as Structure Dissect does, and returns the first answer: the name and the address where the object starts (the given address when the resolver names none). Resolvers that Cheat Engine scripts registered are asked too; the program's own Mono lookup is not. |
 | `manifold.structure.dissect(structure, address)` | boolean, or nil, error | Asks the dissectors in order, as Structure Dissect does before it guesses, to fill `structure` (a Cheat Engine structure object, e.g. from `createStructure`) for the object at `address`. True when one of them filled it. |
+
+## manifold.doc
+
+The documentation behind completion, signature help, hover tooltips and the docs panel. Manifold, Cheat Engine and Lua functions are documented already. A module documents its own functions with `register`, or writes LuaLS annotations (`---@param name type`) above them and calls `registerModule`. A script never replaces Manifold's own documentation.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.doc.register(target, spec)` | true, or nil, error | Documents a function, or a name such as `"MyModule.run"`. `spec.doc` is the text, `spec.params` a list of `{ name, type, optional, doc, oneOf }`, `spec.returns` what comes back and `spec.overloads` more `{ params, returns }`. A function without `spec.path` is documented wherever the help reaches it. |
+| `manifold.doc.registerModule(path, module, options?)` | number of registered functions, or nil, error | Documents every function of a module table under `path` (such as `"ManifoldUE"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions. |
+| `manifold.doc.inherit(target, source)` | true, or nil, error | Gives a wrapper the documentation of what it wraps, so a `function(...)` wrapper keeps the parameters and text of the original in the help. |
+| `manifold.doc.unregister(target)` | true, or nil, error | Removes documentation that a script registered. Manifold's, Cheat Engine's and Lua's own documentation stays. |
+| `manifold.doc.entry(target)` | `{ path, name, kind, origin, summary, text, signatures, … }`, or nil, error | The documentation of a function or name, as the help shows it. `signatures` is a list of `{ text, params, returns }`; each param is `{ name, type, text, optional, variadic, choices }`. Without documentation the error is `ME-7008`. |
+| `manifold.doc.find(query, options?)` | list of `{ path, kind, summary }` | Searches names and texts, best matches first. `options.limit` (default 50) caps the list; `options.kind` keeps one kind, such as `"function"` or `"table"`. |
+| `manifold.doc.annotations(fn)` | `{ … }` like `entry`, or nil, error | Reads the LuaLS annotations above a function's definition without registering anything. |
+| `manifold.doc.markdown(prefix)` | string, or nil, error | Markdown tables of everything documented under `prefix`, the way Docs/MANIFOLD-API.md is written. |

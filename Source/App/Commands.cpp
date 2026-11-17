@@ -179,9 +179,21 @@ namespace Manifold
             { LuaOpen, "LuaOpen", Scope::LuaEngine, "Open a script", Ctrl | ImGuiKey_O, 0, CE },
             { LuaSave, "LuaSave", Scope::LuaEngine, "Save the script", Ctrl | ImGuiKey_S, 0, CE },
             { LuaSaveAs, "LuaSaveAs", Scope::LuaEngine, "Save the script under a new name", Ctrl | Alt | ImGuiKey_S, 0, CE },
-            { LuaExecute, "LuaExecute", Scope::LuaEngine, "Execute", Ctrl | ImGuiKey_Enter, 0, Own },
+            { LuaExecute, "LuaExecute", Scope::LuaEngine, "Run the console input, or the script on the script tab", Ctrl | ImGuiKey_Enter, 0, Own },
             { LuaClearOutput, "LuaClearOutput", Scope::LuaEngine, "Clear the output", Ctrl | ImGuiKey_L, 0, Own },
-            { LuaFunctions, "LuaFunctions", Scope::LuaEngine, "Show the function list", Ctrl | Shift | ImGuiKey_F, 0, Own },
+            { LuaFunctions, "LuaFunctions", Scope::LuaEngine, "Show the documentation", Ctrl | Shift | ImGuiKey_F, 0, Own },
+            { LuaStop, "LuaStop", Scope::LuaEngine, "Stop the running script or input", Shift | ImGuiKey_F5, 0, Own },
+            { LuaConsoleTab, "LuaConsoleTab", Scope::LuaEngine, "Show the console", Ctrl | ImGuiKey_1, 0, Own },
+            { LuaScriptTab, "LuaScriptTab", Scope::LuaEngine, "Show the script", Ctrl | ImGuiKey_2, 0, Own },
+            { LuaFind, "LuaFind", Scope::LuaEngine, "Search the console", Ctrl | ImGuiKey_F, 0, Own },
+
+            { EditorComplete, "EditorComplete", Scope::CodeEditor, "Show the completions", Ctrl | ImGuiKey_Space, 0, Own },
+            { EditorToggleComment, "EditorToggleComment", Scope::CodeEditor, "Comment or uncomment the lines", Ctrl | ImGuiKey_Slash, Ctrl | Shift | ImGuiKey_7, Own },
+            { EditorDuplicateLines, "EditorDuplicateLines", Scope::CodeEditor, "Duplicate the lines", Ctrl | ImGuiKey_D, 0, Own },
+            { EditorMoveLinesUp, "EditorMoveLinesUp", Scope::CodeEditor, "Move the lines up", Alt | ImGuiKey_UpArrow, 0, Own },
+            { EditorMoveLinesDown, "EditorMoveLinesDown", Scope::CodeEditor, "Move the lines down", Alt | ImGuiKey_DownArrow, 0, Own },
+            { EditorDeleteLines, "EditorDeleteLines", Scope::CodeEditor, "Delete the lines", Ctrl | Shift | ImGuiKey_K, 0, Own },
+            { EditorGotoLine, "EditorGotoLine", Scope::CodeEditor, "Go to a line", Ctrl | ImGuiKey_G, 0, Own },
         };
 
         static_assert(std::size(kCommands) == static_cast<std::size_t>(Command::Count));
@@ -446,6 +458,7 @@ namespace Manifold
         case CommandScope::Structure: return "Structure dissect";
         case CommandScope::ScriptEditor: return "Auto Assembler and script editor";
         case CommandScope::LuaEngine: return "Lua engine";
+        case CommandScope::CodeEditor: return "Code editors";
         case CommandScope::Count: break;
         }
         return "";
@@ -465,6 +478,7 @@ namespace Manifold
         case CommandScope::Structure: return "While a structure dissect window has the focus. Field keys act on the selected field.";
         case CommandScope::ScriptEditor: return "While an Auto Assembler or script window has the focus. Template keys come from each template's Shortcut setting; the ones listed are the built-in templates.";
         case CommandScope::LuaEngine: return "While the Lua engine window has the focus.";
+        case CommandScope::CodeEditor: return "While the cursor is in a code editor: the Lua engine, Auto Assembler and script windows, the template manager and table files.";
         case CommandScope::Count: break;
         }
         return "";

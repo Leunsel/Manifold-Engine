@@ -2392,8 +2392,10 @@ local function Finish(name, ok, ...)
     return nil, err
 end
 
+local documented = manifold.has("doc.inherit")
 for name, fn in pairs(Api) do
     Godot[name] = function(...) return Finish(name, manifold.error.try(fn, ...)) end
+    if documented then manifold.doc.inherit(Godot[name], fn) end
 end
 
 -- ∑ claims keeps the contract Manifold-RTTI's EngineOwns relies on: a
@@ -2404,6 +2406,11 @@ function Godot.claims(address)
     if ok then return claimed == true end
     Channel.API.debug("claims answered false after an error", { reason = claimed.message })
     return false
+end
+
+if documented then
+    manifold.doc.inherit(Godot.claims, Api.claims)
+    manifold.doc.registerModule("ManifoldGodot", Godot, { doc = "Godot objects, classes, methods and the node tree of the opened process. A failed call logs the error and returns nil and the error object." })
 end
 
 ----------------------------------------

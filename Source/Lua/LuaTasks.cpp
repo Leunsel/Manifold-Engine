@@ -28,7 +28,8 @@ namespace Manifold::Lua
         }
     }
 
-    int LuaEngine::StartTask(std::string_view code, std::string_view chunkName, TaskDone done, std::function<void()> enter, std::function<void()> leave)
+    int LuaEngine::StartTask(std::string_view code, std::string_view chunkName, TaskDone done, std::function<void()> enter, std::function<void()> leave, TaskRead read,
+        std::uint64_t inputId)
     {
         lua_State* thread = lua_newthread(m_state);
         const int reference = luaL_ref(m_state, LUA_REGISTRYINDEX);
@@ -37,7 +38,9 @@ namespace Manifold::Lua
         {
             const std::string message = lua_tostring(thread, -1) ? lua_tostring(thread, -1) : "unknown error";
             luaL_unref(m_state, LUA_REGISTRYINDEX, reference);
-            Print(OutputKind::Error, message);
+            ConsoleEntry entry = ErrorEntry(thread, -1, {}, inputId);
+            entry.Code = ErrorName(ErrorCode::LuaSyntax);
+            AddEntry(std::move(entry));
             LOG_ERROR("Lua", ErrorMessage(ErrorCode::LuaSyntax, message));
             if (done)
                 done(Status::Fail(ErrorCode::LuaSyntax, message), {});
@@ -52,6 +55,8 @@ namespace Manifold::Lua
         task->Done = std::move(done);
         task->Enter = std::move(enter);
         task->Leave = std::move(leave);
+        task->Read = std::move(read);
+        task->InputId = inputId;
         const int id = task->Id;
         m_tasks.push_back(std::move(task));
         return id;
@@ -183,12 +188,13 @@ namespace Manifold::Lua
                 if (text.empty())
                     text = "error";
             }
-            luaL_traceback(m_state, task.Thread, text.c_str(), 0);
-            const std::string message = lua_tostring(m_state, -1) ? lua_tostring(m_state, -1) : "error";
+            luaL_traceback(m_state, task.Thread, nullptr, 0);
+            std::string traceback = lua_tostring(m_state, -1) ? lua_tostring(m_state, -1) : "";
             lua_pop(m_state, 1);
-            Print(OutputKind::Error, message);
-            LOG_ERROR("Lua", ErrorMessage(ErrorCode::LuaRuntime, FirstLine(message)));
-            outcome = Status::Fail(ErrorCode::LuaRuntime, FirstLine(message));
+            const std::string message = text + (traceback.empty() ? std::string() : "\n" + traceback);
+            AddEntry(ErrorEntry(task.Thread, -1, std::move(traceback), task.InputId));
+            LOG_ERROR("Lua", ErrorMessage(ErrorCode::LuaRuntime, FirstLine(text)));
+            outcome = Status::Fail(ErrorCode::LuaRuntime, FirstLine(text));
         }
         TaskDone done = std::move(task.Done);
         const int id = task.Id;

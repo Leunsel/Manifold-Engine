@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 3
+local API_VERSION = 4
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -319,48 +319,43 @@ local function guard(path, owner, params, varargs, body)
   end
 end
 
-local docs = setmetatable({}, { __mode = "k" })
 local entries = {}
 local areas = {}
 local manifold, rootMembers = strict("manifold")
 
-local root = { path = "manifold", functions = {}, constants = {} }
+native.docDefine(nil, "manifold", { kind = "table" })
 
 local function area(name, summary)
   local proxy, members = strict("manifold." .. name)
-  local section = { path = "manifold." .. name, name = name, summary = summary, proxy = proxy, members = members, functions = {}, objects = {} }
+  local section = { path = "manifold." .. name, name = name, proxy = proxy, members = members }
   areas[#areas + 1] = section
   rawset(rootMembers, name, proxy)
+  native.docDefine(nil, section.path, { kind = "table", doc = summary })
   return section
 end
 
-local function bind(owner, path, members, name, spec, body)
+local function bind(owner, path, members, name, spec, body, docPath)
   local params = prepare(spec.params or {})
   local wrapper = guard(path, owner, params, spec.varargs, body)
   rawset(members, name, wrapper)
-  local choices
-  for index, param in ipairs(params) do
-    if param.oneOf then
-      choices = choices or {}
-      choices[index] = param.oneOf
-    end
+  if docPath then
+    native.docBind(wrapper, docPath)
+  else
+    native.docDefine(wrapper, path, spec)
   end
-  docs[wrapper] = { path = path, params = paramText(params, spec.varargs), returns = spec.returns, text = spec.doc, choices = choices }
   return wrapper, params
 end
 
 local function define(section, name, spec, body)
   local path = section.path .. "." .. name
-  local _, params = bind(section.proxy, path, section.members, name, spec, body)
-  local entry = { path = path, name = name, params = paramText(params, spec.varargs), returns = spec.returns, doc = spec.doc }
-  section.functions[#section.functions + 1] = entry
-  entries[path:sub(#"manifold." + 1)] = entry
+  bind(section.proxy, path, section.members, name, spec, body)
+  entries[path:sub(#"manifold." + 1)] = true
 end
 
-local function constant(name, value, doc)
+local function constant(name, value, doc, shown)
   rawset(rootMembers, name, value)
-  root.constants[#root.constants + 1] = { path = "manifold." .. name, name = name, doc = doc, value = value }
-  entries[name] = root.constants[#root.constants]
+  native.docDefine(nil, "manifold." .. name, { kind = "constant", value = shown or tostring(value), doc = doc })
+  entries[name] = true
 end
 
 local function quote(text)
@@ -461,23 +456,21 @@ local function emit(level, channel, message, fields)
   if RANK[level] < RANK[currentLevel] then
     return
   end
-  local text, traceback
+  local text, traceback, code, where
   if isError(message) then
-    text = errorText(message)
+    text = tostring(rawget(message, "message"))
     traceback = rawget(message, "traceback")
+    code = rawget(message, "code")
+    where = rawget(message, "where")
   elseif type(message) == "string" then
     text = message
   else
     text = inspect(message)
   end
-  if fields ~= nil then
-    text = text .. "  " .. inspect(fields)
-  end
-  if type(traceback) == "string" and traceback ~= "" then
-    text = text .. "\n" .. traceback
-  end
   local info = callerFrame()
-  native.writeLine(RANK[level] - 1, text, channel or "", info and chunkName(info) or "", info and info.name or "", info and info.currentline or 0)
+  native.logRecord(RANK[level] - 1, text, channel or "", fields ~= nil and inspect(fields) or "", type(fields) == "table" and fields or nil,
+    type(traceback) == "string" and traceback or "", code ~= nil and tostring(code) or "", type(where) == "string" and where or "",
+    info and chunkName(info) or "", info and info.name or "", info and info.currentline or 0)
 end
 
 local LEVEL_DOCS = {
@@ -505,19 +498,15 @@ local function channelObject(name)
   for _, level in ipairs(LEVELS) do
     bind(proxy, prefix .. "." .. level, members, level, {
       params = MESSAGE_PARAMS,
-      returns = "nothing",
-      doc = LEVEL_DOCS[level],
     }, function(message, fields)
       emit(level, name, message, fields)
-    end)
+    end, "manifold.log.Channel." .. level)
   end
   bind(proxy, prefix .. ".channel", members, "channel", {
     params = { { name = "name", type = "string" } },
-    returns = "channel",
-    doc = "A sub-channel named `parent/name`.",
   }, function(sub)
     return channelObject(name .. "/" .. sub)
-  end)
+  end, "manifold.log.Channel.channel")
   rawset(members, "name", name)
   channels[name] = proxy
   return proxy
@@ -575,15 +564,24 @@ define(log, "inspect", {
   return inspect(value, options)
 end)
 
-log.objects[#log.objects + 1] = {
+native.docDefine(nil, "manifold.log.Channel", {
+  kind = "class",
   title = "Channel objects",
-  summary = "`manifold.log.channel(name)` returns an object that follows the same rules: dot calls only, read-only, unknown names raise.",
-  rows = {
-    { signature = "channel.debug(message, fields?)` … `channel.error(message, fields?)", returns = "nothing", doc = "Like the `manifold.log` functions, tagged with `[name]`." },
-    { signature = "channel.channel(name)", returns = "channel", doc = "A sub-channel named `parent/name`." },
-    { signature = "channel.name", returns = "string", doc = "The channel's name." },
-  },
-}
+  doc = "`manifold.log.channel(name)` returns an object that follows the same rules: dot calls only, read-only, unknown names raise.",
+})
+for _, level in ipairs(LEVELS) do
+  native.docDefine(nil, "manifold.log.Channel." .. level, {
+    params = MESSAGE_PARAMS,
+    returns = "nothing",
+    doc = "Like `manifold.log." .. level .. "`, tagged with `[name]`.",
+  })
+end
+native.docDefine(nil, "manifold.log.Channel.channel", {
+  params = { { name = "name", type = "string" } },
+  returns = "channel",
+  doc = "A sub-channel named `parent/name`.",
+})
+native.docDefine(nil, "manifold.log.Channel.name", { kind = "field", type = "string", doc = "The channel's name." })
 
 local output = area("output", "The Lua engine window and its output. With *Show on print* on (the default), every printed or logged line opens the window when it is closed. The checkbox in the window is saved with the settings; a script can change it for the running session only.")
 
@@ -760,7 +758,7 @@ do
     return slow(address, kind, options, extra)
   end
   rawset(memory.members, "read", fast)
-  docs[fast] = docs[slow]
+  native.docBind(fast, "manifold.memory.read")
 end
 
 local function checkWrite(kind, value, options)
@@ -1212,8 +1210,118 @@ define(structure, "dissect", {
   return false
 end)
 
+local MISUSE_CODE = native.fail("LuaApiMisuse")
+
+local function docResult(value, code, message)
+  if value == nil and code == MISUSE_CODE then
+    misuse(message)
+  end
+  return result(value, code, message)
+end
+
+local DOC_SPEC = {
+  path = "string",
+  kind = "string",
+  summary = "string",
+  doc = "string",
+  title = "string",
+  type = "string",
+  value = "any",
+  params = "table",
+  varargs = "boolean",
+  returns = "string",
+  returnsDoc = "string",
+  overloads = "table",
+  deprecated = "any",
+  hidden = "boolean",
+  see = "table",
+}
+
+local doc = area("doc", "The documentation behind completion, signature help, hover tooltips and the docs panel. Manifold, Cheat Engine and Lua functions are documented already. A module documents its own functions with `register`, or writes LuaLS annotations (`---@param name type`) above them and calls `registerModule`. A script never replaces Manifold's own documentation.")
+
+define(doc, "register", {
+  params = {
+    { name = "target", type = "function|string" },
+    { name = "spec", type = "table", keys = DOC_SPEC },
+  },
+  returns = "true, or nil, error",
+  doc = "Documents a function, or a name such as `\"MyModule.run\"`. `spec.doc` is the text, `spec.params` a list of `{ name, type, optional, doc, oneOf }`, `spec.returns` what comes back and `spec.overloads` more `{ params, returns }`. A function without `spec.path` is documented wherever the help reaches it.",
+}, function(target, spec)
+  return docResult(native.docRegister(target, spec))
+end)
+
+define(doc, "registerModule", {
+  params = {
+    { name = "path", type = "string" },
+    { name = "module", type = "table" },
+    { name = "options", type = "table", optional = true, keys = { doc = "string" } },
+  },
+  returns = "number of registered functions, or nil, error",
+  doc = "Documents every function of a module table under `path` (such as `\"ManifoldUE\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
+}, function(path, module, options)
+  return docResult(native.docRegisterModule(path, module, options))
+end)
+
+define(doc, "inherit", {
+  params = {
+    { name = "target", type = "function" },
+    { name = "source", type = "function|string" },
+  },
+  returns = "true, or nil, error",
+  doc = "Gives a wrapper the documentation of what it wraps, so a `function(...)` wrapper keeps the parameters and text of the original in the help.",
+}, function(target, source)
+  return docResult(native.docInherit(target, source))
+end)
+
+define(doc, "unregister", {
+  params = { { name = "target", type = "function|string" } },
+  returns = "true, or nil, error",
+  doc = "Removes documentation that a script registered. Manifold's, Cheat Engine's and Lua's own documentation stays.",
+}, function(target)
+  return docResult(native.docUnregister(target))
+end)
+
+define(doc, "entry", {
+  params = { { name = "target", type = "function|string" } },
+  returns = "`{ path, name, kind, origin, summary, text, signatures, … }`, or nil, error",
+  doc = "The documentation of a function or name, as the help shows it. `signatures` is a list of `{ text, params, returns }`; each param is `{ name, type, text, optional, variadic, choices }`. Without documentation the error is `ME-7008`.",
+}, function(target)
+  return docResult(native.docEntry(target))
+end)
+
+define(doc, "find", {
+  params = {
+    { name = "query", type = "string" },
+    { name = "options", type = "table", optional = true, keys = { limit = "integer", kind = "string" } },
+  },
+  returns = "list of `{ path, kind, summary }`",
+  doc = "Searches names and texts, best matches first. `options.limit` (default 50) caps the list; `options.kind` keeps one kind, such as `\"function\"` or `\"table\"`.",
+}, function(query, options)
+  options = options or EMPTY
+  if options.limit ~= nil and options.limit < 0 then
+    misuse("manifold.doc.find: options.limit must be 0 or more")
+  end
+  return docResult(native.docFind(query, options.limit or 50, options.kind or ""))
+end)
+
+define(doc, "annotations", {
+  params = { { name = "fn", type = "function" } },
+  returns = "`{ … }` like `entry`, or nil, error",
+  doc = "Reads the LuaLS annotations above a function's definition without registering anything.",
+}, function(fn)
+  return docResult(native.docAnnotations(fn))
+end)
+
+define(doc, "markdown", {
+  params = { { name = "prefix", type = "string" } },
+  returns = "string, or nil, error",
+  doc = "Markdown tables of everything documented under `prefix`, the way Docs/MANIFOLD-API.md is written.",
+}, function(prefix)
+  return docResult(native.docMarkdown(prefix))
+end)
+
 constant("apiVersion", API_VERSION, "The API version, an integer. It grows when functions are added; names keep their meaning.")
-constant("version", native.version(), "The program version, such as `\"0.1.0\"`.")
+constant("version", native.version(), "The program version, such as `\"0.1.0\"`.", "string")
 
 do
   local path = "manifold.has"
@@ -1222,7 +1330,7 @@ do
     returns = "boolean",
     doc = "Whether the API has a name, such as `\"log.channel\"`, `\"memory\"` or `\"apiVersion\"`. Use it instead of reading a name that may not exist, which raises.",
   }
-  local _, params = bind(manifold, path, rootMembers, "has", spec, function(name)
+  bind(manifold, path, rootMembers, "has", spec, function(name)
     local short = name:gsub("^manifold%.", "")
     if entries[short] or short == "has" then
       return true
@@ -1234,7 +1342,6 @@ do
     end
     return false
   end)
-  root.functions[#root.functions + 1] = { path = path, name = "has", params = paramText(params), returns = spec.returns, doc = spec.doc }
 end
 
 rawset(_G, "manifold", manifold)
@@ -1277,51 +1384,8 @@ end
 ```
 ]]
 
-local function cell(text)
-  return (tostring(text or ""):gsub("|", "\\|"))
-end
-
-local function functionRows(out, functions)
-  out[#out + 1] = "| Function | Returns | |"
-  out[#out + 1] = "| --- | --- | --- |"
-  for _, entry in ipairs(functions) do
-    out[#out + 1] = ("| `%s(%s)` | %s | %s |"):format(entry.path, entry.params, cell(entry.returns), cell(entry.doc))
-  end
-end
-
 local function markdown()
-  local out = { INTRO, RULES, "## manifold", "" }
-  out[#out + 1] = "| Name | Value | |"
-  out[#out + 1] = "| --- | --- | --- |"
-  for _, entry in ipairs(root.constants) do
-    local value = entry.name == "version" and "string" or tostring(entry.value)
-    out[#out + 1] = ("| `%s` | %s | %s |"):format(entry.path, value, cell(entry.doc))
-  end
-  for _, entry in ipairs(root.functions) do
-    out[#out + 1] = ("| `%s(%s)` | %s | %s |"):format(entry.path, entry.params, cell(entry.returns), cell(entry.doc))
-  end
-  for _, section in ipairs(areas) do
-    out[#out + 1] = ""
-    out[#out + 1] = "## " .. section.path
-    out[#out + 1] = ""
-    out[#out + 1] = section.summary
-    out[#out + 1] = ""
-    functionRows(out, section.functions)
-    for _, object in ipairs(section.objects) do
-      out[#out + 1] = ""
-      out[#out + 1] = "### " .. object.title
-      out[#out + 1] = ""
-      out[#out + 1] = object.summary
-      out[#out + 1] = ""
-      out[#out + 1] = "| Name | Returns | |"
-      out[#out + 1] = "| --- | --- | --- |"
-      for _, row in ipairs(object.rows) do
-        out[#out + 1] = ("| `%s` | %s | %s |"):format(row.signature, cell(row.returns), cell(row.doc))
-      end
-    end
-  end
-  out[#out + 1] = ""
-  return table.concat(out, "\n")
+  return table.concat({ INTRO, RULES, native.docMarkdown("manifold") }, "\n")
 end
 
-return docs, markdown
+return markdown

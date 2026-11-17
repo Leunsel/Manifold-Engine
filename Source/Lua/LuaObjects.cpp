@@ -636,7 +636,7 @@ namespace Manifold::Lua
                 const std::string text = TextArgument(state, 3);
                 const Status status = engine.WriteRecord(record, text);
                 if (!status)
-                    EngineOf(state).Print(OutputKind::Error, status.Text);
+                    EngineOf(state).PrintError(status.Text);
                 engine.Table().Refresh();
                 return 0;
             }
@@ -656,7 +656,7 @@ namespace Manifold::Lua
                 }
                 const Status status = engine.SetActive(record, wanted);
                 if (!status)
-                    EngineOf(state).Print(OutputKind::Error, status.Text);
+                    EngineOf(state).PrintError(status.Text);
                 return 0;
             }
             else if (key == "script")
@@ -1462,7 +1462,7 @@ namespace Manifold::Lua
         {
             const Status status = Owner(state).EnsureDebugger();
             if (!status)
-                EngineOf(state).Print(OutputKind::Error, status.Text);
+                EngineOf(state).PrintError(status.Text);
             lua_pushboolean(state, status.Ok());
             return 1;
         }
@@ -1506,7 +1506,7 @@ namespace Manifold::Lua
             }
             if (!status)
             {
-                EngineOf(state).Print(OutputKind::Error, status.Text);
+                EngineOf(state).PrintError(status.Text);
                 lua_pushboolean(state, 0);
                 return 1;
             }
@@ -1951,7 +1951,7 @@ namespace Manifold::Lua
             {
                 const char* message = lua_tostring(thread, -1);
                 luaL_traceback(state, thread, message ? message : "error", 0);
-                engine.Print(OutputKind::Error, std::string("thread: ") + (lua_tostring(state, -1) ? lua_tostring(state, -1) : "error"));
+                engine.PrintError(std::string("thread: ") + (lua_tostring(state, -1) ? lua_tostring(state, -1) : "error"));
                 lua_pop(state, 1);
             }
             lua_pushthread(thread);
