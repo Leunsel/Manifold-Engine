@@ -6,7 +6,9 @@
 #include "Lua/LuaApi.h"
 #include "Lua/LuaCompatScripts.h"
 #include "Lua/LuaEngine.h"
+#include "Scan/Scanner.h"
 #include "Target/Process.h"
+#include "Target/Symbols.h"
 
 #include "lua.hpp"
 
@@ -59,6 +61,7 @@ namespace Manifold::Lua
             Double,
             Pointer,
             Bytes,
+            Raw,
             String
         };
 
@@ -66,7 +69,7 @@ namespace Manifold::Lua
             { "i8", MemoryType::I8 }, { "u8", MemoryType::U8 }, { "i16", MemoryType::I16 }, { "u16", MemoryType::U16 },
             { "i32", MemoryType::I32 }, { "u32", MemoryType::U32 }, { "i64", MemoryType::I64 }, { "u64", MemoryType::U64 },
             { "float", MemoryType::Float }, { "double", MemoryType::Double }, { "pointer", MemoryType::Pointer },
-            { "bytes", MemoryType::Bytes }, { "string", MemoryType::String },
+            { "bytes", MemoryType::Bytes }, { "raw", MemoryType::Raw }, { "string", MemoryType::String },
         };
 
         Engine& Owner(lua_State* state)
@@ -462,6 +465,21 @@ namespace Manifold::Lua
                 }
                 return 1;
             }
+            case MemoryType::Raw:
+            {
+                const lua_Integer count = luaL_checkinteger(state, 3);
+                if (count < 1 || count > 0x1000000)
+                    return luaL_argerror(state, 3, "count out of range");
+                luaL_Buffer buffer;
+                char* data = luaL_buffinitsize(state, &buffer, static_cast<std::size_t>(count));
+                if (!process->ReadExact(address, data, static_cast<std::size_t>(count)))
+                {
+                    lua_pop(state, 1);
+                    return Failed(state, ErrorCode::ReadFailed, Hex(address));
+                }
+                luaL_pushresultsize(&buffer, static_cast<std::size_t>(count));
+                return 1;
+            }
             case MemoryType::String:
             {
                 const lua_Integer length = std::clamp<lua_Integer>(luaL_optinteger(state, 4, 256), 1, 0x100000);
@@ -511,6 +529,7 @@ namespace Manifold::Lua
                     AppendValue(bytes, static_cast<std::uint32_t>(integer()));
                 break;
             case MemoryType::Bytes:
+            case MemoryType::Raw:
                 if (lua_type(state, 3) == LUA_TSTRING)
                 {
                     std::size_t length = 0;
@@ -571,6 +590,105 @@ namespace Manifold::Lua
             return 1;
         }
 
+        Scan::Tristate TristateArgument(lua_State* state, int index)
+        {
+            if (lua_isnoneornil(state, index))
+                return Scan::Tristate::Any;
+            return lua_toboolean(state, index) ? Scan::Tristate::Yes : Scan::Tristate::No;
+        }
+
+        int ScanMemory(lua_State* state)
+        {
+            Status error;
+            const auto process = Opened(state, error);
+            if (!process)
+                return Failed(state, error);
+            const std::string text = luaL_checkstring(state, 1);
+            const auto pattern = Scan::ParsePattern(text);
+            if (!pattern)
+                return Failed(state, ErrorCode::ScanBadPattern, text);
+            std::uint64_t start = 0;
+            std::uint64_t stop = ~0ull;
+            if (!lua_isnoneornil(state, 2))
+            {
+                const std::string name = luaL_checkstring(state, 2);
+                const auto module = process->FindModule(name);
+                if (!module)
+                    return Failed(state, ErrorCode::ModuleNotFound, name);
+                start = module->Base;
+                stop = module->Base + module->Size;
+            }
+            Scan::PatternFilter filter;
+            filter.Executable = TristateArgument(state, 3);
+            filter.Writable = TristateArgument(state, 4);
+            filter.Divisor = static_cast<std::uint64_t>(std::max<lua_Integer>(luaL_optinteger(state, 5, 0), 0));
+            const auto limit = static_cast<std::size_t>(std::clamp<lua_Integer>(luaL_optinteger(state, 6, 100000), 1, 1000000));
+            const std::vector<std::uint64_t> hits = Scan::FindPattern(*process, *pattern, start, stop, filter, limit);
+            lua_createtable(state, static_cast<int>(hits.size()), 0);
+            for (std::size_t i = 0; i < hits.size(); ++i)
+            {
+                lua_pushinteger(state, static_cast<lua_Integer>(hits[i]));
+                lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
+            }
+            return 1;
+        }
+
+        int ModuleAt(lua_State* state)
+        {
+            Status error;
+            const auto process = Opened(state, error);
+            if (!process)
+                return Failed(state, error);
+            std::uint64_t address = 0;
+            if (!Resolve(state, 1, address, error))
+                return Failed(state, error);
+            const auto module = process->ModuleAt(address);
+            if (!module)
+                return Failed(state, ErrorCode::NoModuleAt, Hex(address));
+            PushModule(state, *module);
+            return 1;
+        }
+
+        int RegisterSymbol(lua_State* state)
+        {
+            Status error;
+            const auto process = Opened(state, error);
+            if (!process)
+                return Failed(state, error);
+            const std::string name = luaL_checkstring(state, 1);
+            std::uint64_t address = 0;
+            if (!Resolve(state, 2, address, error))
+                return Failed(state, error);
+            const Status status = Owner(state).Symbols().Register(name, address, "lua");
+            if (!status)
+                return Failed(state, status);
+            lua_pushboolean(state, 1);
+            return 1;
+        }
+
+        int UnregisterSymbol(lua_State* state)
+        {
+            const std::string name = luaL_checkstring(state, 1);
+            if (!Owner(state).Symbols().Unregister(name))
+                return Failed(state, ErrorCode::ExprUnknownSymbol, name);
+            lua_pushboolean(state, 1);
+            return 1;
+        }
+
+        int StructureHooks(lua_State* state)
+        {
+            const StructureCallback kind = luaL_checkinteger(state, 1) == 0 ? StructureCallback::NameLookup : StructureCallback::DissectOverride;
+            const std::vector<int> references = EngineOf(state).StructureCallbackReferences(kind);
+            lua_createtable(state, static_cast<int>(references.size()), 0);
+            lua_Integer index = 1;
+            for (const int reference : references)
+            {
+                lua_rawgeti(state, LUA_REGISTRYINDEX, reference);
+                lua_rawseti(state, -2, index++);
+            }
+            return 1;
+        }
+
         std::string FieldText(lua_State* state, int index, const char* key)
         {
             lua_getfield(state, index, key);
@@ -604,6 +722,11 @@ namespace Manifold::Lua
             { "read", &Read },
             { "writeMemory", &WriteMemory },
             { "isReadable", &IsReadable },
+            { "scan", &ScanMemory },
+            { "moduleAt", &ModuleAt },
+            { "registerSymbol", &RegisterSymbol },
+            { "unregisterSymbol", &UnregisterSymbol },
+            { "structureHooks", &StructureHooks },
             { nullptr, nullptr },
         };
         for (const CompatScript& script : ManifoldScripts())

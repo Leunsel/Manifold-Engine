@@ -22,6 +22,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-1014 | The module file on disk could not be read: …. | The file was moved or deleted after the process loaded it, or another program holds it locked. | Check that the file still exists at that path, then scan again. |
 | ME-1015 | The module file does not match the loaded module: …. | The file on disk is not a valid program image, or it was replaced by a different version after the process started. | Restart the process so it loads the file on disk, then scan again. |
 | ME-1016 | No module named … is loaded in the process. | The name matches none of the modules the process has loaded. | Check the spelling, or wait until the game has loaded the module. manifold.process.modules() lists them. |
+| ME-1017 | No module contains the address …. | The address lies outside every loaded module: on the heap, on a stack, or in code the game allocated itself. | That is normal for objects and JIT code. Check the address in the memory viewer when a module was expected. |
 
 ## Scanner
 

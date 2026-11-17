@@ -207,6 +207,9 @@
     <ClCompile Include="..\Tests\AssemblerTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
+    <ClCompile Include="..\Tests\AutorunTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
     <ClCompile Include="..\Tests\CommandTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>

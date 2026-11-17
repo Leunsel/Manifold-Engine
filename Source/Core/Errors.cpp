@@ -84,6 +84,9 @@ namespace Manifold
             { ErrorCode::ModuleNotFound, "No module named {} is loaded in the process.",
                 "The name matches none of the modules the process has loaded.",
                 "Check the spelling, or wait until the game has loaded the module. manifold.process.modules() lists them." },
+            { ErrorCode::NoModuleAt, "No module contains the address {}.",
+                "The address lies outside every loaded module: on the heap, on a stack, or in code the game allocated itself.",
+                "That is normal for objects and JIT code. Check the address in the memory viewer when a module was expected." },
 
             { ErrorCode::ScanNoValue, "Enter a value to scan for.",
                 "This scan type compares memory with a value, and the value field is empty.",

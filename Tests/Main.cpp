@@ -24,6 +24,7 @@ namespace Manifold::Tests
     int RunCompatHarness(const std::vector<std::string>& arguments);
     int RunCompatTests();
     int RunManifoldApiTests();
+    int RunAutorunTests();
     std::string ManifoldMarkdown();
     int RunTemplateTests();
     int RunWatchStress(const std::vector<std::string>& arguments);
@@ -113,6 +114,8 @@ int main(int argc, char** argv)
     Manifold::Tests::RunCompatTests();
     std::printf("Manifold Lua API\n");
     Manifold::Tests::RunManifoldApiTests();
+    std::printf("Autorun modules\n");
+    Manifold::Tests::RunAutorunTests();
     std::printf("Templates\n");
     Manifold::Tests::RunTemplateTests();
     std::printf("Integration (%ls)\n", target.c_str());

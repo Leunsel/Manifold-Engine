@@ -26,6 +26,7 @@ namespace Manifold::Tests
         volatile float g_probeFloat = 2.5f;
         volatile std::uint8_t g_probeBytes[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
         volatile char g_probeText[16] = "manifold";
+        volatile std::uint8_t g_probeScan[8] = { 0x4D, 0x41, 0x4E, 0x49, 0xF0, 0x1D, 0x5C, 0xA9 };
 
         void LuaCheck(Engine& engine, const char* name, const std::string& code)
         {
@@ -43,7 +44,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 1 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 3 or type(manifold.version) ~= "string" then return "constants" end
                 local docs = debug.getregistry()["Manifold.Docs"]
                 if type(docs) ~= "table" then return "no docs table" end
                 local count = 0
@@ -285,6 +286,12 @@ namespace Manifold::Tests
                 if manifold.memory.isReadable(0x1000) then return "readable" end
                 local modules, missing = manifold.process.modules()
                 if modules ~= nil or missing.code ~= "ME-1005" then return "modules" end
+                local hits, noScan = manifold.memory.scan("90 90")
+                if hits ~= nil or noScan.code ~= "ME-1005" then return "scan" end
+                local registered, noSymbol = manifold.symbol.register("x", 1)
+                if registered ~= nil or noSymbol.code ~= "ME-1005" then return "symbol" end
+                local fast, noFast = manifold.memory.read(0x1000, "u64")
+                if fast ~= nil or noFast.code ~= "ME-1005" or noFast.where ~= "no process:14" then return "fast read " .. tostring(noFast) end
                 if #manifold.process.find() < 10 or #manifold.process.find("CSRSS") < 1 then return "find" end
                 if #manifold.process.find("no-such-process-name") ~= 0 then return "find filter" end
                 return "ok")LUA");
@@ -344,6 +351,119 @@ namespace Manifold::Tests
                 return "ok")LUA");
         }
 
+        void Version2(Engine& engine)
+        {
+            Lua::LuaEngine& lua = engine.Lua();
+            lua_State* state = lua.State();
+            lua_pushinteger(state, static_cast<lua_Integer>(reinterpret_cast<std::uintptr_t>(&g_probeScan)));
+            lua_setglobal(state, "probeScan");
+            LuaCheck(engine, "v2 memory", R"LUA(
+                local read = manifold.memory.read
+                if read(probeBytes, "raw", { count = 4 }) ~= "\9\8\3\4" then return "raw fast" end
+                if string.unpack("<I2", read(probeBytes, "raw", { count = 2 })) ~= 0x0809 then return "unpack" end
+                local ok, problem = pcall(read, probeBytes, "raw")
+                if ok or not problem.message:find('type "raw" needs options.count', 1, true) then return "raw count " .. tostring(problem) end
+                ok, problem = pcall(read, probeBytes, "raw", { count = 2, extra = 1 })
+                if ok or not problem.message:find("options.extra is not an option", 1, true) then return "raw option" end
+                ok, problem = pcall(read, probeBytes, "u8", nil, 1)
+                if ok or not problem.message:find("takes 3 arguments, got 4", 1, true) then return "fast extra argument" end
+                ok, problem = pcall(function() manifold.memory:read(probeBytes, "u8") end)
+                if ok or not problem.message:find("with a dot", 1, true) then return "fast colon" end
+                local value, failure = read(0x10, "u64")
+                if value ~= nil or failure.code ~= "ME-1006" or failure.where ~= "v2 memory:13" then return "fast failure " .. tostring(failure) end
+                value, failure = read(0x10, "raw", { count = 8 })
+                if value ~= nil or failure.code ~= "ME-1006" then return "raw failure" end
+                if read(probeValue + 0.0, "i32") ~= -2 then return "float address" end
+                if manifold.memory.write(probeBytes, "raw", "\1\2") ~= true or read(probeBytes, "u16") ~= 0x0201 then return "write raw" end
+                ok = pcall(manifold.memory.write, probeBytes, "raw", { 1 })
+                if ok then return "write raw table" end
+                local own = manifold.process.mainModule().name
+                local hits = manifold.memory.scan("4D 41 4E 49 F0 1D 5C A9", { module = own })
+                if #hits ~= 1 or hits[1] ~= probeScan then return "scan " .. manifold.log.inspect(hits, { hex = true }) end
+                if #manifold.memory.scan("4D 41 4E 49 F0 1D 5C A9", { module = own, executable = true }) ~= 0 then return "scan executable" end
+                if #manifold.memory.scan("4D 41 4E 49 F0 1D 5C A9", { module = own, writable = true, alignment = 8 }) ~= (probeScan % 8 == 0 and 1 or 0) then return "scan alignment" end
+                local bad, badPattern = manifold.memory.scan("4D ZZ")
+                if bad ~= nil or badPattern.code ~= "ME-2003" then return "bad pattern " .. tostring(badPattern) end
+                local none, noModule = manifold.memory.scan("90", { module = "nothing.dll" })
+                if none ~= nil or noModule.code ~= "ME-1016" then return "scan module" end
+                ok = pcall(manifold.memory.scan, "90", { alignment = 0 })
+                if ok then return "alignment 0" end
+                if not manifold.process.moduleAt(probeValue).name:find("Tests") then return "moduleAt" end
+                local outside, noModuleAt = manifold.process.moduleAt(0x10)
+                if outside ~= nil or noModuleAt.code ~= "ME-1017" then return "moduleAt outside" end
+                return "ok")LUA");
+            LuaCheck(engine, "v2 symbols", R"LUA(
+                if manifold.symbol.register("probeSymbol", probeValue) ~= true then return "register" end
+                if manifold.process.address("probeSymbol") ~= probeValue or manifold.memory.read("probeSymbol", "i32") ~= -2 then return "resolve" end
+                if manifold.symbol.unregister("probeSymbol") ~= true then return "unregister" end
+                local again, missing = manifold.symbol.unregister("probeSymbol")
+                if again ~= nil or missing.code ~= "ME-8002" then return "unregister twice" end
+                local calls = 0
+                local first = manifold.symbol.addResolver(function(name) calls = calls + 1 if name == "dynamicProbe" then return probeValue end end, { key = "probe" })
+                local second = manifold.symbol.addResolver(function(name) calls = calls + 100 if name == "dynamicProbe" then return probeValue end end, { key = "probe" })
+                if first == second then return "same id" end
+                if manifold.process.address("dynamicProbe") ~= probeValue then return "resolver" end
+                if calls == 0 or calls % 100 ~= 0 then return "key did not replace: " .. calls end
+                if manifold.symbol.removeResolver(first) then return "old id still removable" end
+                local broken = manifold.symbol.addResolver(function() error("resolver broke") end)
+                manifold.process.address("anotherUnknownName")
+                manifold.process.address("yetAnotherUnknownName")
+                manifold.symbol.removeResolver(broken)
+                if not manifold.symbol.removeResolver(second) then return "remove" end
+                if manifold.process.address("dynamicProbe") ~= nil then return "still resolves" end
+                return "ok")LUA");
+            std::size_t brokenLines = 0;
+            for (const Lua::OutputLine& line : lua.Output())
+            {
+                if (line.Kind == Lua::OutputKind::Error && line.Text.find("[manifold.symbol]") != std::string::npos && line.Text.find("resolver broke") != std::string::npos)
+                    ++brokenLines;
+            }
+            CHECK_MSG(brokenLines == 1, "broken resolver logged " + std::to_string(brokenLines) + " times");
+
+            LuaCheck(engine, "v2 events", R"LUA(
+                openedWith, closedCount, laterRan = nil, 0, false
+                manifold.event.subscribe("processOpened", function(info) openedWith = info and info.id end, { key = "probe" })
+                manifold.event.subscribe("processOpened", function(info) openedWith = "replaced:" .. info.id end, { key = "probe" })
+                manifold.event.subscribe("processOpened", function() error("handler broke") end, { key = "broken" })
+                manifold.event.subscribe("processOpened", function() laterRan = true end, { key = "later" })
+                closedId = manifold.event.subscribe("processClosed", function() closedCount = closedCount + 1 end)
+                manifold.process.open(probePid)
+                if openedWith ~= "replaced:" .. probePid then return "opened " .. tostring(openedWith) end
+                if not laterRan then return "error stopped later handlers" end
+                return "ok")LUA");
+            engine.CloseProcess();
+            LuaCheck(engine, "v2 closed", R"LUA(
+                if closedCount ~= 1 then return "closed " .. closedCount end
+                if manifold.process.isOpen() then return "still open" end
+                if not manifold.event.unsubscribe(closedId) or manifold.event.unsubscribe(closedId) then return "unsubscribe" end
+                local ok = pcall(manifold.event.subscribe, "processExploded", function() end)
+                if ok then return "unknown event" end
+                return "ok")LUA");
+            engine.CloseProcess();
+            bool sawHandlerError = false;
+            for (const Lua::OutputLine& line : lua.Output())
+                sawHandlerError = sawHandlerError || (line.Kind == Lua::OutputKind::Error && line.Text.find("[manifold.event]") != std::string::npos && line.Text.find("handler broke") != std::string::npos);
+            CHECK(sawHandlerError);
+
+            LuaCheck(engine, "v2 structure", R"LUA(
+                local id = manifold.structure.addNameResolver(function(address) if address == 0x1234 then return "ProbeClass", 0x1200 end end, { key = "probe" })
+                local dissector = manifold.structure.addDissector(function() return false end, { key = "probe" })
+                manifold.structure.addNameResolver(function(address) if address == 0x1234 then return "ProbeClass", 0x1200 end end, { key = "probe" })
+                if manifold.structure.removeNameResolver(id) then return "key did not replace" end
+                if not manifold.structure.removeDissector(dissector) or manifold.structure.removeDissector(dissector) then return "dissector" end
+                local name, start = manifold.structure.resolveName(0x1234)
+                if name ~= "ProbeClass" or start ~= 0x1200 then return "resolveName " .. tostring(name) end
+                if manifold.structure.resolveName(0x9999) ~= nil then return "resolveName miss" end
+                local filled = manifold.structure.addDissector(function(target, address) target.filledAt = address return true end)
+                local fake = {}
+                if manifold.structure.dissect(fake, 0x4000) ~= true or fake.filledAt ~= 0x4000 then return "dissect" end
+                manifold.structure.removeDissector(filled)
+                if manifold.structure.dissect(fake, 0x4000) ~= false then return "dissect without dissectors" end
+                return "ok")LUA");
+            const auto looked = lua.LookupStructureName(0x1234);
+            CHECK_MSG(looked && looked->Name == "ProbeClass" && looked->Address == 0x1200, looked ? looked->Name : "no lookup");
+        }
+
         void Assist(Engine& engine)
         {
             Lua::LuaEngine& lua = engine.Lua();
@@ -396,6 +516,7 @@ namespace Manifold::Tests
         Errors(engine);
         WithoutProcess(engine);
         OwnProcess(engine);
+        Version2(engine);
         Assist(engine);
         Documentation(engine);
         engine.CloseProcess();

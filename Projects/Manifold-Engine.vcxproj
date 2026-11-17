@@ -81,6 +81,13 @@ python "$(ProjectDir)..\Tools\embed_lua.py"
 python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
       <Message>Embedding the Lua compatibility scripts and the built-in templates</Message>
     </PreBuildEvent>
+    <PostBuildEvent>
+      <Command>if not exist "$(ProjectDir)..\Autorun\*" exit /b 0
+xcopy "$(ProjectDir)..\Autorun" "$(OutDir)autorun" /D /E /I /Y /Q &gt;nul
+if errorlevel 2 exit /b 1
+exit /b 0</Command>
+      <Message>Copying the Autorun modules that are newer than the ones next to the program</Message>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>

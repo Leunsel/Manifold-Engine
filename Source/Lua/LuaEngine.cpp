@@ -834,6 +834,14 @@ namespace Manifold::Lua
         return id;
     }
 
+    std::vector<int> LuaEngine::StructureCallbackReferences(StructureCallback kind) const
+    {
+        std::vector<int> references;
+        for (const auto& [id, reference] : kind == StructureCallback::NameLookup ? m_structureNameLookups : m_dissectOverrides)
+            references.push_back(reference);
+        return references;
+    }
+
     bool LuaEngine::RemoveStructureCallback(StructureCallback kind, int id)
     {
         auto& callbacks = kind == StructureCallback::NameLookup ? m_structureNameLookups : m_dissectOverrides;
@@ -1249,6 +1257,29 @@ namespace Manifold::Lua
         lua_pushinteger(m_state, static_cast<lua_Integer>(reinterpret_cast<std::uintptr_t>(process->Handle())));
         lua_pushstring(m_state, Format("%08X-%s", id, process->Name().c_str()).c_str());
         if (!CallStack(3, 0, error))
+            m_engine.Notify(Status::Fail(ErrorCode::LuaRuntime, FirstLine(error)));
+        DispatchEvent("processOpened");
+    }
+
+    void LuaEngine::OnProcessClosed()
+    {
+        lua_pushnil(m_state);
+        lua_setglobal(m_state, "process");
+        DispatchEvent("processClosed");
+    }
+
+    void LuaEngine::DispatchEvent(const char* name)
+    {
+        if (std::this_thread::get_id() != m_thread)
+            return;
+        if (lua_getfield(m_state, LUA_REGISTRYINDEX, "Manifold.Dispatch") != LUA_TFUNCTION)
+        {
+            lua_pop(m_state, 1);
+            return;
+        }
+        lua_pushstring(m_state, name);
+        std::string error;
+        if (!CallStack(1, 0, error))
             m_engine.Notify(Status::Fail(ErrorCode::LuaRuntime, FirstLine(error)));
     }
 

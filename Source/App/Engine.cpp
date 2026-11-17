@@ -152,6 +152,8 @@ namespace Manifold
         m_process.reset();
         m_codeDissect.reset();
         ++m_processGeneration;
+        if (m_lua)
+            m_lua->OnProcessClosed();
     }
 
     void Engine::LoadSymbols(bool windowsSymbols)

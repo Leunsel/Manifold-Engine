@@ -350,6 +350,7 @@ namespace Manifold::Lua
         void LookupStructureNameLater(std::uint64_t address, std::function<void(std::optional<StructureLookup>)> done);
         void DissectStructureLater(Table::StructDefinition* definition, std::uint64_t address, std::function<void(bool handled)> done);
         bool HasStructureNameLookups() const { return !m_structureNameLookups.empty(); }
+        std::vector<int> StructureCallbackReferences(StructureCallback kind) const;
         bool HasDissectOverrides() const { return !m_dissectOverrides.empty(); }
         void RunTasks(double budgetSeconds);
         bool TaskAlive(int id) const;
@@ -362,6 +363,8 @@ namespace Manifold::Lua
         void SetBreakpointCallback(std::uint64_t address, int reference);
         void ClearBreakpointCallback(std::uint64_t address);
         void OnProcessOpened();
+        void OnProcessClosed();
+        void DispatchEvent(const char* name);
 
         void Print(OutputKind kind, std::string text);
         void PrintEntry(OutputKind kind, std::string_view time, std::string_view tag, std::string_view channel, std::string text);

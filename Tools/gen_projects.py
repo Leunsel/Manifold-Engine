@@ -232,8 +232,22 @@ python "$(ProjectDir)..\\Tools\\embed_templates.py"</Command>
 """
 
 
+POSTBUILD = """    <PostBuildEvent>
+      <Command>if not exist "$(ProjectDir)..\\Autorun\\*" exit /b 0
+xcopy "$(ProjectDir)..\\Autorun" "$(OutDir)autorun" /D /E /I /Y /Q &gt;nul
+if errorlevel 2 exit /b 1
+exit /b 0</Command>
+      <Message>Copying the Autorun modules that are newer than the ones next to the program</Message>
+    </PostBuildEvent>
+"""
+
+
 def with_prebuild(project):
     return project.replace("  </ItemDefinitionGroup>\n", PREBUILD + "  </ItemDefinitionGroup>\n", 1)
+
+
+def with_postbuild(project):
+    return project.replace(PREBUILD, PREBUILD + POSTBUILD, 1)
 
 
 def main():
@@ -272,6 +286,7 @@ def main():
     app += tail()
     app = disable_jmc_for(app, "Source/Syscalls/Syscall.cpp")
     app = with_prebuild(app)
+    app = with_postbuild(app)
     write("Manifold-Engine.vcxproj", app)
     write("Manifold-Engine.vcxproj.filters", filters(app_sources, app_headers, (("ResourceCompile", ["Source/Resources/App.rc"]), ("Image", ["Source/Resources/icon.ico"]))))
 

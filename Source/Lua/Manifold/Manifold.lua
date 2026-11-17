@@ -1,7 +1,8 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 1
+local API_VERSION = 3
+local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
 local LEVELS = { "debug", "info", "success", "warning", "error" }
@@ -10,7 +11,8 @@ for index, name in ipairs(LEVELS) do
   RANK[name] = index
 end
 
-local MEMORY_TYPES = { "i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "float", "double", "pointer", "bytes", "string" }
+local MEMORY_TYPES = { "i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "float", "double", "pointer", "bytes", "raw", "string" }
+local SIMPLE_READS = { i8 = true, u8 = true, i16 = true, u16 = true, i32 = true, u32 = true, i64 = true, u64 = true, float = true, double = true, pointer = true, string = true }
 local INTEGER_RANGES = {
   i8 = { -0x80, 0x7F },
   u8 = { 0, 0xFF },
@@ -654,6 +656,14 @@ define(process, "module", {
   return result(native.module(name))
 end)
 
+define(process, "moduleAt", {
+  params = { { name = "address", type = "address" } },
+  returns = "`{ name, base, size, path }`, or nil, error",
+  doc = "The module that contains the address. `ME-1017` for addresses outside every module: the heap, stacks and code the game allocated itself.",
+}, function(address)
+  return result(native.moduleAt(address))
+end)
+
 define(process, "modules", {
   returns = "list of `{ name, base, size, path }`, or nil, error",
   doc = "All loaded modules.",
@@ -677,19 +687,19 @@ define(process, "describe", {
   return result(native.describe(address))
 end)
 
-local memory = area("memory", "Typed reads and writes in the opened process. Types: `i8` `u8` `i16` `u16` `i32` `u32` `i64` `u64` (integers; `u64` above 2^63 comes back negative, as Lua integers are signed), `float`, `double`, `pointer` (8 or 4 bytes by the process), `bytes` (a list of byte values) and `string` (UTF-8 in Lua, UTF-16 in memory with `wide`). A write checks that the value fits the type before it touches memory.")
+local memory = area("memory", "Typed reads and writes in the opened process. Types: `i8` `u8` `i16` `u16` `i32` `u32` `i64` `u64` (integers; `u64` above 2^63 comes back negative, as Lua integers are signed), `float`, `double`, `pointer` (8 or 4 bytes by the process), `bytes` (a list of byte values), `raw` (the bytes as one Lua string, made for `string.unpack`) and `string` (UTF-8 in Lua, UTF-16 in memory with `wide`). A write checks that the value fits the type before it touches memory. Reads of the plain types and of `raw` take a fast path, so they suit loops over many objects.")
 
 local function readOptions(kind, options)
-  options = options or {}
-  if kind == "bytes" then
+  options = options or EMPTY
+  if kind == "bytes" or kind == "raw" then
     if options.count == nil then
-      misuse("manifold.memory.read: type \"bytes\" needs options.count")
+      misuse(("manifold.memory.read: type %q needs options.count"):format(kind))
     end
     if options.count < 1 or options.count > MAX_BYTES then
       misuse("manifold.memory.read: options.count must be 1 to " .. MAX_BYTES)
     end
   elseif options.count ~= nil then
-    misuse("manifold.memory.read: options.count is for type \"bytes\"")
+    misuse("manifold.memory.read: options.count is for types \"bytes\" and \"raw\"")
   end
   if kind == "string" then
     if options.length ~= nil and (options.length < 1 or options.length > MAX_STRING) then
@@ -708,14 +718,46 @@ define(memory, "read", {
     { name = "options", type = "table", optional = true, keys = { count = "integer", length = "integer", wide = "boolean" } },
   },
   returns = "value, or nil, error",
-  doc = "Reads one value. `bytes` needs `options.count`; `string` reads up to `options.length` characters (default 256) and stops at the first zero.",
+  doc = "Reads one value. `bytes` and `raw` need `options.count`; `string` reads up to `options.length` characters (default 256) and stops at the first zero.",
 }, function(address, kind, options)
   options = readOptions(kind, options)
   return result(native.read(address, kind, options.count or 0, options.length or 256, options.wide or false))
 end)
 
+do
+  local slow = rawget(memory.members, "read")
+  local nativeRead = native.read
+  local function fast(address, kind, options, extra)
+    if extra == nil and math.type(address) == "integer" then
+      if options == nil and SIMPLE_READS[kind] then
+        local value, code, message = nativeRead(address, kind, 0, 256, false)
+        if value == nil and code ~= nil then
+          return nil, makeError(code, message)
+        end
+        return value
+      end
+      if kind == "raw" and type(options) == "table" and next(options, next(options)) == nil then
+        local count = rawget(options, "count")
+        if math.type(count) == "integer" and count >= 1 and count <= MAX_BYTES then
+          local value, code, message = nativeRead(address, "raw", count, 0, false)
+          if value == nil and code ~= nil then
+            return nil, makeError(code, message)
+          end
+          return value
+        end
+      end
+    end
+    if extra == nil then
+      return slow(address, kind, options)
+    end
+    return slow(address, kind, options, extra)
+  end
+  rawset(memory.members, "read", fast)
+  docs[fast] = docs[slow]
+end
+
 local function checkWrite(kind, value, options)
-  options = options or {}
+  options = options or EMPTY
   local range = INTEGER_RANGES[kind]
   if range then
     if not isInteger(value) then
@@ -750,6 +792,10 @@ local function checkWrite(kind, value, options)
     elseif type(value) ~= "string" then
       misuse("manifold.memory.write: argument 3 (value) must be a list of byte values or a string for bytes, got " .. kindOf(value))
     end
+  elseif kind == "raw" then
+    if type(value) ~= "string" then
+      misuse("manifold.memory.write: argument 3 (value) must be a string for raw, got " .. kindOf(value))
+    end
   elseif kind == "string" then
     if type(value) ~= "string" then
       misuse("manifold.memory.write: argument 3 (value) must be a string for string, got " .. kindOf(value))
@@ -773,6 +819,24 @@ define(memory, "write", {
 }, function(address, kind, value, options)
   options = checkWrite(kind, value, options)
   return result(native.writeMemory(address, kind, value, options.wide or false, options.terminate ~= false))
+end)
+
+define(memory, "scan", {
+  params = {
+    { name = "pattern", type = "string" },
+    { name = "options", type = "table", optional = true, keys = { module = "string", executable = "boolean", writable = "boolean", alignment = "integer", limit = "integer" } },
+  },
+  returns = "list of integers, or nil, error",
+  doc = "Finds a byte pattern such as `\"48 8B 05 ?? ?? ?? ??\"` (`??` is any byte) in the whole process, or only in `options.module`. `options.executable` and `options.writable` set to true keep only such memory, set to false only memory without it, and left out take both. `options.alignment` keeps addresses divisible by it; `options.limit` (1 to 1000000, default 100000) stops after that many hits. The list is in address order, so with a limit it holds the lowest hits. No hit is an empty list, not an error.",
+}, function(pattern, options)
+  options = options or EMPTY
+  if options.alignment ~= nil and options.alignment < 1 then
+    misuse("manifold.memory.scan: options.alignment must be 1 or more")
+  end
+  if options.limit ~= nil and (options.limit < 1 or options.limit > 1000000) then
+    misuse("manifold.memory.scan: options.limit must be 1 to 1000000")
+  end
+  return result(native.scan(pattern, options.module, options.executable, options.writable, options.alignment or 0, options.limit or 100000))
 end)
 
 define(memory, "isReadable", {
@@ -877,6 +941,268 @@ define(errors, "check", {
     error(makeError(RUNTIME_CODE, problem), 0)
   end
   error(makeError(RUNTIME_CODE, "manifold.error.check got " .. tostring(value)), 0)
+end)
+
+local function raisedHandler(problem)
+  return fromRaised(problem, tracebackOf(3))
+end
+
+local function protect(kind, fn)
+  local reported = false
+  local function finish(ok, first, ...)
+    if ok then
+      return first, ...
+    end
+    if not reported then
+      reported = true
+      emit("error", "manifold." .. kind, first)
+    end
+    return nil
+  end
+  return function(...)
+    return finish(xpcall(fn, raisedHandler, ...))
+  end
+end
+
+local function keyedRegistry(add, remove)
+  local byKey = {}
+  local keyOf = {}
+  local function drop(id)
+    local removed = remove(id) and true or false
+    local key = keyOf[id]
+    if key ~= nil then
+      byKey[key] = nil
+      keyOf[id] = nil
+    end
+    return removed
+  end
+  local function register(fn, options)
+    local key = options and options.key
+    if key ~= nil and byKey[key] ~= nil then
+      drop(byKey[key])
+    end
+    local id = add(fn)
+    if key ~= nil then
+      byKey[key] = id
+      keyOf[id] = key
+    end
+    return id
+  end
+  return register, drop
+end
+
+local KEY_OPTION = { name = "options", type = "table", optional = true, keys = { key = "string" } }
+local KEY_TEXT = " `options.key` replaces an earlier registration with the same key, so a module that runs again does not register twice."
+
+local ceSymbolLookup = rawget(_G, "registerSymbolLookupCallback")
+local ceSymbolUnlookup = rawget(_G, "unregisterSymbolLookupCallback")
+local ceNameLookup = rawget(_G, "registerStructureNameLookup")
+local ceNameUnlookup = rawget(_G, "unregisterStructureNameLookup")
+local ceDissector = rawget(_G, "registerStructureDissectOverride")
+local ceUndissector = rawget(_G, "unregisterStructureDissectOverride")
+
+local symbol = area("symbol", "Symbols that address expressions, the disassembler and Auto Assembler scripts know. A registered symbol belongs to the opened process: closing it or opening another one removes it, so a module registers its symbols again from a `processOpened` handler or when it resolves.")
+
+define(symbol, "register", {
+  params = {
+    { name = "name", type = "string" },
+    { name = "address", type = "address" },
+  },
+  returns = "true, or nil, error",
+  doc = "Registers `name` for `address`, replacing an earlier symbol of that name.",
+}, function(name, address)
+  if name == "" then
+    misuse("manifold.symbol.register: argument 1 (name) must not be empty")
+  end
+  return result(native.registerSymbol(name, address))
+end)
+
+define(symbol, "unregister", {
+  params = { { name = "name", type = "string" } },
+  returns = "true, or nil, error",
+  doc = "Removes a registered symbol. `ME-8002` when there is none of that name.",
+}, function(name)
+  return result(native.unregisterSymbol(name))
+end)
+
+local addSymbolResolver, removeSymbolResolver = keyedRegistry(function(resolver)
+  local guarded = protect("symbol", resolver)
+  return ceSymbolLookup(function(name)
+    local value = guarded(name)
+    if math.type(value) == "integer" then
+      return value
+    end
+    return nil
+  end, 5)
+end, ceSymbolUnlookup)
+
+define(symbol, "addResolver", {
+  params = { { name = "resolver", type = "function" }, KEY_OPTION },
+  returns = "id",
+  doc = "Calls `resolver(name)` for a name that is neither a module, an export nor a registered symbol; it returns an address or nil. Resolvers are asked in the order they were added, and the first address wins. An error in a resolver is logged once." .. KEY_TEXT,
+}, function(resolver, options)
+  return addSymbolResolver(resolver, options)
+end)
+
+define(symbol, "removeResolver", {
+  params = { { name = "id", type = "integer" } },
+  returns = "boolean",
+  doc = "Removes a resolver; false when the id is unknown.",
+}, function(id)
+  return removeSymbolResolver(id)
+end)
+
+local EVENTS = { "processOpened", "processClosed" }
+local subscribers = { processOpened = {}, processClosed = {} }
+local subscriberNames = {}
+local nextSubscriber = 1
+
+local subscribe, unsubscribe = keyedRegistry(function(entry)
+  local id = nextSubscriber
+  nextSubscriber = nextSubscriber + 1
+  entry.id = id
+  local list = subscribers[entry.name]
+  list[#list + 1] = entry
+  subscriberNames[id] = entry.name
+  return id
+end, function(id)
+  local name = subscriberNames[id]
+  if not name then
+    return false
+  end
+  subscriberNames[id] = nil
+  local list = subscribers[name]
+  for index, entry in ipairs(list) do
+    if entry.id == id then
+      table.remove(list, index)
+      return true
+    end
+  end
+  return false
+end)
+
+local event = area("event", "Notifications from the program. Handlers run in the order they subscribed; an error in one is logged with its traceback and does not stop the others. Handlers run while the program waits, so they should only reset state: long work belongs in a thread or happens on first use.")
+
+define(event, "subscribe", {
+  params = {
+    { name = "name", type = "string", oneOf = EVENTS },
+    { name = "handler", type = "function" },
+    KEY_OPTION,
+  },
+  returns = "id",
+  doc = "Calls `handler` on an event. `processOpened` passes the process as `manifold.process.info()` gives it, also when the same process is opened again; `processClosed` passes nothing and comes before the next `processOpened`." .. KEY_TEXT,
+}, function(name, handler, options)
+  return subscribe({ name = name, handler = handler }, options)
+end)
+
+define(event, "unsubscribe", {
+  params = { { name = "id", type = "integer" } },
+  returns = "boolean",
+  doc = "Removes a handler; false when the id is unknown.",
+}, function(id)
+  return unsubscribe(id)
+end)
+
+debug.getregistry()["Manifold.Dispatch"] = function(name)
+  local list = subscribers[name]
+  if not list or #list == 0 then
+    return
+  end
+  local argument = nil
+  if name == "processOpened" then
+    argument = native.processInfo()
+  end
+  local snapshot = table.move(list, 1, #list, 1, {})
+  for _, entry in ipairs(snapshot) do
+    local ok, problem = xpcall(entry.handler, raisedHandler, argument)
+    if not ok then
+      emit("error", "manifold.event", problem)
+    end
+  end
+end
+
+local structure = area("structure", "Hooks into Structure Dissect. Hooks are asked in the order they were added, and the first answer wins. An error in a hook is logged once and counts as no answer.")
+
+local addNameResolver, removeNameResolver = keyedRegistry(function(resolver)
+  return ceNameLookup(protect("structure", resolver))
+end, ceNameUnlookup)
+
+local addDissector, removeDissector = keyedRegistry(function(dissector)
+  local guarded = protect("structure", dissector)
+  return ceDissector(function(target, address)
+    return guarded(target, address) == true
+  end)
+end, ceUndissector)
+
+define(structure, "addNameResolver", {
+  params = { { name = "resolver", type = "function" }, KEY_OPTION },
+  returns = "id",
+  doc = "Calls `resolver(address)` when Structure Dissect needs a name for a new structure or for a pointer it expands. It returns a name and, optionally, the address where the object starts, or nil." .. KEY_TEXT,
+}, function(resolver, options)
+  return addNameResolver(resolver, options)
+end)
+
+define(structure, "removeNameResolver", {
+  params = { { name = "id", type = "integer" } },
+  returns = "boolean",
+  doc = "Removes a name resolver; false when the id is unknown.",
+}, function(id)
+  return removeNameResolver(id)
+end)
+
+define(structure, "addDissector", {
+  params = { { name = "dissector", type = "function" }, KEY_OPTION },
+  returns = "id",
+  doc = "Calls `dissector(structure, address)` before Structure Dissect guesses fields. It fills the structure (the Cheat Engine structure object: `addElement`, `autoGuess`, …) and returns true, or returns false to leave it to the next dissector and the guess." .. KEY_TEXT,
+}, function(dissector, options)
+  return addDissector(dissector, options)
+end)
+
+define(structure, "removeDissector", {
+  params = { { name = "id", type = "integer" } },
+  returns = "boolean",
+  doc = "Removes a dissector; false when the id is unknown.",
+}, function(id)
+  return removeDissector(id)
+end)
+
+define(structure, "resolveName", {
+  params = { { name = "address", type = "address" } },
+  returns = "name and start, nil when no resolver answers, or nil, error",
+  doc = "Asks the name resolvers in order, as Structure Dissect does, and returns the first answer: the name and the address where the object starts (the given address when the resolver names none). Resolvers that Cheat Engine scripts registered are asked too; the program's own Mono lookup is not.",
+}, function(address)
+  local at, problem = result(native.address(address))
+  if at == nil then
+    return nil, problem
+  end
+  for _, hook in ipairs(native.structureHooks(0)) do
+    local ok, name, start = pcall(hook, at)
+    if ok and type(name) == "string" and name ~= "" then
+      return name, math.type(start) == "integer" and start or at
+    end
+  end
+  return nil
+end)
+
+define(structure, "dissect", {
+  params = {
+    { name = "structure", type = "any" },
+    { name = "address", type = "address" },
+  },
+  returns = "boolean, or nil, error",
+  doc = "Asks the dissectors in order, as Structure Dissect does before it guesses, to fill `structure` (a Cheat Engine structure object, e.g. from `createStructure`) for the object at `address`. True when one of them filled it.",
+}, function(target, address)
+  local at, problem = result(native.address(address))
+  if at == nil then
+    return nil, problem
+  end
+  for _, hook in ipairs(native.structureHooks(1)) do
+    local ok, handled = pcall(hook, target, at)
+    if ok and handled == true then
+      return true
+    end
+  end
+  return false
 end)
 
 constant("apiVersion", API_VERSION, "The API version, an integer. It grows when functions are added; names keep their meaning.")

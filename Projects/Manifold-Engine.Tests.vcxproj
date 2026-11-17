@@ -160,6 +160,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Templates\TemplateGenerator.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp" />
     <ClCompile Include="..\Tests\AssemblerTests.cpp" />
+    <ClCompile Include="..\Tests\AutorunTests.cpp" />
     <ClCompile Include="..\Tests\CommandTests.cpp" />
     <ClCompile Include="..\Tests\CompatHarness.cpp" />
     <ClCompile Include="..\Tests\CompatTests.cpp" />
