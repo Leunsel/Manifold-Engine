@@ -65,6 +65,7 @@ namespace Manifold::UI
     bool TriStateCheckbox(const char* label, int& state);
     bool ColorDot(const char* id, ImVec4 color, float size);
 
+    bool KeepOutOfCentralDock(const char* title);
     bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags = 0, ImVec2 minimum = ImVec2(260.0f, 160.0f));
     void EndToolWindow();
     bool FocusRequested();

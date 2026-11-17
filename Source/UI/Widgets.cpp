@@ -1,6 +1,8 @@
 #include "UI/Widgets.h"
 
 #include "Core/Errors.h"
+#include "Core/RuntimeLog.h"
+#include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "UI/Fonts.h"
 #include "UI/Loading.h"
@@ -1030,6 +1032,27 @@ namespace Manifold::UI
         pending.erase(id);
     }
 
+    bool KeepOutOfCentralDock(const char* title)
+    {
+        ImGuiID dockId = 0;
+        if (const ImGuiWindow* window = ImGui::FindWindowByName(title))
+            dockId = window->DockId;
+        else if (const ImGuiWindowSettings* settings = ImGui::FindWindowSettingsByID(ImHashStr(title)))
+            dockId = settings->DockId;
+        if (dockId == 0)
+            return false;
+        const ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockId);
+        if (!node || !node->IsCentralNode())
+            return false;
+        ImGui::SetNextWindowDockID(0);
+        std::string_view name(title);
+        name = name.substr(0, name.find("###"));
+        while (!name.empty() && static_cast<unsigned char>(name.front()) >= 0x80)
+            name.remove_prefix(1);
+        LOG_INFO("Interface", "\"" + Trim(name) + "\" was docked into the middle of the main window, under its panes; it opens as its own window again");
+        return true;
+    }
+
     bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags, ImVec2 minimum)
     {
         const bool raise = FocusRequested();
@@ -1038,12 +1061,13 @@ namespace Manifold::UI
         windowClass.ViewportFlagsOverrideClear = ImGuiViewportFlags_NoTaskBarIcon;
         ImGui::SetNextWindowClass(&windowClass);
         const ImGuiViewport* main = ImGui::GetMainViewport();
-        if (!ImGui::FindWindowByName(title))
+        const bool undocked = KeepOutOfCentralDock(title);
+        if (!ImGui::FindWindowByName(title) || undocked)
         {
             const float step = Px(28.0f) * static_cast<float>(g_toolWindowCount++ % 8);
-            ImGui::SetNextWindowPos(ImVec2(main->Pos.x + Px(80.0f) + step, main->Pos.y + Px(70.0f) + step), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowPos(ImVec2(main->Pos.x + Px(80.0f) + step, main->Pos.y + Px(70.0f) + step), undocked ? ImGuiCond_Always : ImGuiCond_FirstUseEver);
         }
-        ImGui::SetNextWindowSize(ImVec2(Px(size.x), Px(size.y)), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(Px(size.x), Px(size.y)), undocked ? ImGuiCond_Always : ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSizeConstraints(Px(minimum.x, minimum.y), ImVec2(FLT_MAX, FLT_MAX));
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ManifoldTheme::Page);
         const bool visible = ImGui::Begin(title, open, flags);

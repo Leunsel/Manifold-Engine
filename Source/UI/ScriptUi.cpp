@@ -336,6 +336,7 @@ namespace Manifold::UI
         const ImVec2 minimum(std::max(Px(160.0f), static_cast<float>(form.MinWidth) * s), std::max(Px(90.0f), static_cast<float>(form.MinHeight) * s));
         ImGui::SetNextWindowSizeConstraints(minimum, ImVec2(FLT_MAX, FLT_MAX));
         const std::string label = (form.Caption.empty() ? std::string(" ") : form.Caption) + "###scriptform" + std::to_string(form.Id);
+        KeepOutOfCentralDock(label.c_str());
         bool open = true;
         ImGui::PushStyleColor(ImGuiCol_WindowBg, form.Color >= 0 ? BgrVec(form.Color) : ManifoldTheme::Page);
         ImGuiWindowFlags flags = ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
