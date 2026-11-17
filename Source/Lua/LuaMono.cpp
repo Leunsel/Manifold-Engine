@@ -13,11 +13,43 @@ namespace Manifold::Lua
     {
         Engine& Owner(lua_State* state) { return EngineOf(state).Owner(); }
 
+        bool Cooperative(lua_State* state)
+        {
+            const Engine& engine = Owner(state);
+            return engine.Async() && engine.OnMainThread() && lua_isyieldable(state) && EngineOf(state).IsCooperative(state);
+        }
+
+        template <lua_CFunction Body>
+        int AfterMonoWork(lua_State* state, int, lua_KContext)
+        {
+            if (Owner(state).MonoLoading())
+                return lua_yieldk(state, 0, 0, &AfterMonoWork<Body>);
+            return Body(state);
+        }
+
+        template <lua_CFunction Body>
+        int WithMono(lua_State* state)
+        {
+            Engine& engine = Owner(state);
+            if (!engine.MonoPresent() || engine.MonoLoading())
+            {
+                if (Cooperative(state))
+                {
+                    engine.LoadMono(true);
+                    if (engine.MonoLoading())
+                        return lua_yieldk(state, 0, 0, &AfterMonoWork<Body>);
+                }
+                else
+                    engine.EnsureMono();
+            }
+            return Body(state);
+        }
+
         // All of these report "not Mono" by returning false/nil rather than
         // raising, so a table on a non-Mono game degrades quietly.
-        int MonoInitialize(lua_State* state)
+        int MonoInitializeBody(lua_State* state)
         {
-            lua_pushboolean(state, Owner(state).EnsureMono().Ok() ? 1 : 0);
+            lua_pushboolean(state, Owner(state).MonoPresent() ? 1 : 0);
             return 1;
         }
 
@@ -27,23 +59,31 @@ namespace Manifold::Lua
             return 1;
         }
 
-        int MonoRefresh(lua_State* state)
+        int MonoRefreshBody(lua_State* state)
         {
-            Engine& engine = Owner(state);
-            if (!engine.MonoPresent() && !engine.EnsureMono())
-            {
-                lua_pushboolean(state, 0);
-                return 1;
-            }
-            lua_pushboolean(state, engine.Mono().Refresh().Ok() ? 1 : 0);
+            lua_pushboolean(state, Owner(state).MonoPresent() ? 1 : 0);
             return 1;
         }
 
-        int MonoEnumClasses(lua_State* state)
+        int MonoRefresh(lua_State* state)
         {
             Engine& engine = Owner(state);
+            if (Cooperative(state) && engine.MonoPresent())
+            {
+                engine.ReloadMono(true);
+                if (engine.MonoLoading())
+                    return lua_yieldk(state, 0, 0, &AfterMonoWork<MonoRefreshBody>);
+                return MonoRefreshBody(state);
+            }
             if (!engine.MonoPresent())
-                engine.EnsureMono();
+                return WithMono<MonoRefreshBody>(state);
+            lua_pushboolean(state, engine.ReloadMonoNow().Ok() ? 1 : 0);
+            return 1;
+        }
+
+        int MonoEnumClassesBody(lua_State* state)
+        {
+            Engine& engine = Owner(state);
             const std::vector<Target::MonoClass> classes = engine.Mono().Classes();
             lua_createtable(state, static_cast<int>(classes.size()), 0);
             int index = 1;
@@ -65,8 +105,6 @@ namespace Manifold::Lua
 
         const Target::MonoClass* FindClass(Engine& engine, const std::string& name, std::vector<Target::MonoClass>& storage)
         {
-            if (!engine.MonoPresent())
-                engine.EnsureMono();
             storage = engine.Mono().Classes();
             for (const Target::MonoClass& info : storage)
             {
@@ -76,7 +114,7 @@ namespace Manifold::Lua
             return nullptr;
         }
 
-        int MonoClassGetMethods(lua_State* state)
+        int MonoClassGetMethodsBody(lua_State* state)
         {
             Engine& engine = Owner(state);
             const std::string name = luaL_checkstring(state, 1);
@@ -97,13 +135,11 @@ namespace Manifold::Lua
             return 1;
         }
 
-        int MonoClassGetFieldOffset(lua_State* state)
+        int MonoClassGetFieldOffsetBody(lua_State* state)
         {
             Engine& engine = Owner(state);
             const std::string klass = luaL_checkstring(state, 1);
             const std::string field = luaL_checkstring(state, 2);
-            if (!engine.MonoPresent())
-                engine.EnsureMono();
             const auto offset = engine.Mono().FieldOffset(klass, field);
             if (!offset)
                 lua_pushnil(state);
@@ -118,14 +154,12 @@ namespace Manifold::Lua
             return 0;
         }
 
-        int MonoGetAddress(lua_State* state)
+        int MonoGetAddressBody(lua_State* state)
         {
             Engine& engine = Owner(state);
             std::string name = luaL_checkstring(state, 1);
             if (lua_gettop(state) >= 2 && lua_isstring(state, 2))
                 name += ":" + std::string(lua_tostring(state, 2));
-            if (!engine.MonoPresent())
-                engine.EnsureMono();
             const auto address = engine.Mono().AddressOf(name);
             if (!address)
                 lua_pushnil(state);
@@ -135,13 +169,13 @@ namespace Manifold::Lua
         }
 
         const struct { const char* Name; lua_CFunction Call; } kMonoFunctions[] = {
-            { "mono_initialize", &MonoInitialize },
+            { "mono_initialize", &WithMono<MonoInitializeBody> },
             { "mono_isPresent", &MonoIsPresent },
             { "mono_refresh", &MonoRefresh },
-            { "mono_enumClasses", &MonoEnumClasses },
-            { "mono_class_getMethods", &MonoClassGetMethods },
-            { "mono_class_getFieldOffset", &MonoClassGetFieldOffset },
-            { "mono_getAddress", &MonoGetAddress },
+            { "mono_enumClasses", &WithMono<MonoEnumClassesBody> },
+            { "mono_class_getMethods", &WithMono<MonoClassGetMethodsBody> },
+            { "mono_class_getFieldOffset", &WithMono<MonoClassGetFieldOffsetBody> },
+            { "mono_getAddress", &WithMono<MonoGetAddressBody> },
             { "mono_showDissector", &MonoShowDissector },
         };
     }

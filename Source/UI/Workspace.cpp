@@ -7,6 +7,7 @@
 #include "Lua/LuaEngine.h"
 #include "Table/CheatTable.h"
 #include "Target/Process.h"
+#include "UI/Loading.h"
 #include "UI/NopSled.h"
 #include "UI/ProfilerWindow.h"
 #include "UI/ScriptUi.h"
@@ -228,17 +229,27 @@ namespace Manifold::UI
             OpenTable(*path, merge);
     }
 
-    bool Workspace::CanOpenLastProcess()
+    void Workspace::RefreshLastProcess()
     {
         const std::string& last = m_engine.Options().LastProcess;
-        if (last.empty())
-            return false;
         const double now = ImGui::GetTime();
-        if (now - m_lastProcessCheckedAt > 2.0)
-        {
-            m_lastProcessCheckedAt = now;
-            m_lastProcessId = Target::FindProcessId(last).value_or(0);
-        }
+        if (last.empty() || m_lastProcessLookup || now - m_lastProcessCheckedAt <= 2.0)
+            return;
+        m_lastProcessCheckedAt = now;
+        m_lastProcessLookup = true;
+        m_engine.LookUpProcessLater(last, [this, last](std::uint32_t id)
+            {
+                m_lastProcessLookup = false;
+                if (last == m_engine.Options().LastProcess)
+                    m_lastProcessId = id;
+            });
+    }
+
+    bool Workspace::CanOpenLastProcess()
+    {
+        if (m_engine.Options().LastProcess.empty())
+            return false;
+        RefreshLastProcess();
         return m_lastProcessId != 0 && (!m_engine.HasProcess() || m_engine.Process()->Id() != m_lastProcessId);
     }
 
@@ -367,12 +378,7 @@ namespace Manifold::UI
     void Workspace::NoProcessState(const char* icon, std::string_view text)
     {
         const std::string& last = m_engine.Options().LastProcess;
-        const double now = ImGui::GetTime();
-        if (!last.empty() && now - m_lastProcessCheckedAt > 2.0)
-        {
-            m_lastProcessCheckedAt = now;
-            m_lastProcessId = Target::FindProcessId(last).value_or(0);
-        }
+        RefreshLastProcess();
 
         const bool release = m_engine.Options().ReleaseMode;
         std::vector<EmptyAction> actions;
@@ -483,7 +489,12 @@ namespace Manifold::UI
 
     bool Workspace::Animating() const
     {
-        return m_nopSled && m_nopSled->Animating();
+        return (m_nopSled && m_nopSled->Animating()) || AnimationShown();
+    }
+
+    bool Workspace::OnlySpinnersAnimating() const
+    {
+        return AnimationShown() && !(m_nopSled && m_nopSled->Animating());
     }
 
     void Workspace::OpenTrace(std::uint64_t address, unsigned int viewport)
@@ -898,10 +909,10 @@ namespace Manifold::UI
         auto& notices = m_engine.Notices();
         const double now = m_engine.Now();
         notices.erase(std::remove_if(notices.begin(), notices.end(), [&](const Notice& notice) { return now - notice.At > kNoticeSeconds; }), notices.end());
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        float y = DrawWorkToasts(m_engine, viewport->Pos.y + viewport->Size.y - Px(40.0f));
         if (notices.empty())
             return;
-        const ImGuiViewport* viewport = ImGui::GetMainViewport();
-        float y = viewport->Pos.y + viewport->Size.y - Px(40.0f);
         const float width = std::min(Px(440.0f), viewport->Size.x - Px(40.0f));
         for (auto it = notices.rbegin(); it != notices.rend(); ++it)
         {

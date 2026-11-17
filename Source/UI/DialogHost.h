@@ -21,6 +21,7 @@ namespace Manifold::UI
         DialogHost& operator=(const DialogHost&) = delete;
 
         bool Available() const;
+        void SetBeforeShow(std::function<void()> callback) { m_beforeShow = std::move(callback); }
         bool Run(const std::string& title, const char* icon, float width, const std::function<bool()>& body);
 
     private:
@@ -30,6 +31,7 @@ namespace Manifold::UI
         bool DrawFrame(const std::string& title, const char* icon, const std::function<bool()>& body, float& contentHeight);
         static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 
+        std::function<void()> m_beforeShow;
         HWND m_owner = nullptr;
         ID3D11Device* m_device = nullptr;
         ID3D11DeviceContext* m_deviceContext = nullptr;

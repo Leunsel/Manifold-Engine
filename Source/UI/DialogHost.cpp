@@ -255,6 +255,8 @@ namespace Manifold::UI
     {
         if (!Available())
             return false;
+        if (m_beforeShow)
+            m_beforeShow();
         if (!Create())
         {
             m_failed = true;

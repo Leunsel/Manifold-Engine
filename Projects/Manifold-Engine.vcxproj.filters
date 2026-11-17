@@ -84,6 +84,9 @@
     <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp">
       <Filter>Source\Asm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Core\BackgroundWork.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Core\Deflate.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
@@ -234,6 +237,9 @@
     <ClCompile Include="..\Source\UI\Fonts.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\Loading.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\LuaDialogs.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -268,6 +274,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\Shortcuts.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\SplashScreen.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\StructureWindow.cpp">
@@ -326,6 +335,9 @@
     </ClInclude>
     <ClInclude Include="..\Source\Asm\AutoAssembler.h">
       <Filter>Source\Asm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Core\BackgroundWork.h">
+      <Filter>Source\Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Core\Deflate.h">
       <Filter>Source\Core</Filter>
@@ -465,6 +477,9 @@
     <ClInclude Include="..\Source\UI\Fonts.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\UI\Loading.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\UI\LuaDialogs.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
@@ -478,6 +493,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Shortcuts.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\SplashScreen.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\TemplateManager.h">

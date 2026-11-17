@@ -16,6 +16,7 @@ namespace Manifold::Tests
 {
     int RunAssemblerTests();
     int RunCoreTests();
+    int RunWorkTests();
     int RunDisasmTests();
     int RunDisasmLive(const std::vector<std::string>& arguments);
     int RunCommandTests();
@@ -95,6 +96,8 @@ int main(int argc, char** argv)
         return assembler;
     std::printf("Core\n");
     Manifold::Tests::RunCoreTests();
+    std::printf("Background work\n");
+    Manifold::Tests::RunWorkTests();
     std::printf("Disassembler\n");
     Manifold::Tests::RunDisasmTests();
     std::printf("Commands and shortcuts\n");

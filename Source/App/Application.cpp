@@ -32,6 +32,7 @@ namespace Manifold
         constexpr unsigned kIdleFrameMilliseconds = 100;
         constexpr unsigned kHiddenMilliseconds = 50;
         constexpr unsigned kIdleTickMilliseconds = 15;
+        constexpr unsigned long long kSplashMilliseconds = 2000;
 
         WindowHost::Setup HostSetup()
         {
@@ -42,6 +43,18 @@ namespace Manifold
             setup.MinimumHeight = kMinimumHeight;
             setup.LayoutFile = Paths::LayoutFile();
             return setup;
+        }
+
+        unsigned long long MillisecondsSinceStart()
+        {
+            FILETIME created{};
+            FILETIME ignored{};
+            if (!::GetProcessTimes(::GetCurrentProcess(), &created, &ignored, &ignored, &ignored))
+                return 0;
+            FILETIME now{};
+            ::GetSystemTimePreciseAsFileTime(&now);
+            const auto ticks = [](const FILETIME& time) { return (static_cast<unsigned long long>(time.dwHighDateTime) << 32) | time.dwLowDateTime; };
+            return (ticks(now) - ticks(created)) / 10000ull;
         }
 
         Settings LoadSettings()
@@ -61,6 +74,7 @@ namespace Manifold
 
     Application::~Application()
     {
+        m_splash.reset();
         UI::RemoveLuaDialogs();
         m_dialogs.reset();
         m_workspace.reset();
@@ -79,16 +93,31 @@ namespace Manifold
         placement.Placed = m_settings.Placed;
         placement.Maximised = m_settings.Maximised;
         m_host.Place(placement);
+        const bool minimised = showCommand == SW_SHOWMINIMIZED || showCommand == SW_SHOWMINNOACTIVE || showCommand == SW_MINIMIZE;
+        if (m_settings.ShowSplash && !minimised)
+        {
+            m_splash = UI::SplashScreen::Show(instance, m_host.Window(), m_settings.Maximised);
+            m_splashSince = ::GetTickCount64();
+        }
+        SplashStatus("Preparing the graphics");
         if (!m_host.StartRendering())
+        {
+            m_splash.reset();
             return false;
+        }
 
+        SplashStatus("Starting Lua");
         m_engine = std::make_unique<Engine>(m_settings);
         m_engine->SetAsync(true);
+        SplashStatus("Building the interface");
         m_workspace = std::make_unique<UI::Workspace>(*m_engine, *this);
         m_dialogs = std::make_unique<UI::DialogHost>(m_host.Window(), m_host.Device(), m_host.Context());
         UI::InstallLuaDialogs(*m_dialogs);
+        m_dialogs->SetBeforeShow([this]() { m_host.Reveal(); });
 
-        const bool minimised = showCommand == SW_SHOWMINIMIZED || showCommand == SW_SHOWMINNOACTIVE || showCommand == SW_MINIMIZE;
+        SplashStatus("Opening the window");
+        if (!minimised)
+            m_host.HideUntilFirstFrame();
         ::ShowWindow(m_host.Window(), m_settings.Maximised && !minimised ? SW_SHOWMAXIMIZED : showCommand);
         ::UpdateWindow(m_host.Window());
         m_host.NoteInput();
@@ -105,18 +134,24 @@ namespace Manifold
             m_engine->Notify(LogLevel::Warning, ErrorMessage(ErrorCode::LastRunCrashed, WideToUtf8(crash->wstring())));
         if (m_settings.AutorunEnabled)
         {
+            SplashStatus("Running the autorun scripts");
             const Status status = m_engine->Lua().RunAutorun(Paths::AutorunFolder());
             if (!status)
                 m_engine->Notify(status);
         }
         if (!m_options.Process.empty())
         {
+            SplashStatus("Opening " + m_options.Process);
             const Status status = m_engine->OpenProcessByName(m_options.Process);
             if (!status)
                 m_engine->Notify(status);
         }
         if (!m_options.Table.empty())
+        {
+            SplashStatus("Loading " + WideToUtf8(m_options.Table.filename().wstring()));
             m_workspace->OpenTable(m_options.Table, false);
+        }
+        SplashStatus("Ready");
         for (const std::string& window : m_options.Open)
         {
             if (window == "memory")
@@ -199,8 +234,33 @@ namespace Manifold
             m_workspace->RequestQuit();
     }
 
+    void Application::SplashStatus(const std::string& text)
+    {
+        if (m_splash)
+            m_splash->SetStatus(text);
+    }
+
+    void Application::FirstFrameReady()
+    {
+        m_firstFrameReady = true;
+        LOG_INFO("Program", Format("The first frame was ready %llu ms after the start", MillisecondsSinceStart()));
+        if (!m_splash)
+            m_host.RequestReveal();
+    }
+
+    void Application::Revealed()
+    {
+        if (m_splash)
+            m_splash->Close();
+        LOG_INFO("Program", Format("The main window appeared %llu ms after the start", MillisecondsSinceStart()));
+    }
+
     void Application::BeforeFrame()
     {
+        if (m_host.Cloaked() && m_firstFrameReady && (!m_splash || ::GetTickCount64() - m_splashSince >= kSplashMilliseconds))
+            m_host.RequestReveal();
+        if (m_splash && m_splash->Finished())
+            m_splash.reset();
         Sounds::SetEnabled(m_settings.PlaySounds);
         Profiler::SetEnabled(m_settings.ProfilerEnabled || !m_options.ProfileReport.empty());
         if (m_engine)
@@ -315,6 +375,7 @@ namespace Manifold
                 TickWhileWaiting(kIdleFrameMilliseconds);
             else if (!animating && busy && m_host.InputAge() > kBusyMilliseconds)
                 TickWhileWaiting(33);
+            m_host.SetRelaxedPacing(m_workspace->OnlySpinnersAnimating() && m_host.InputAge() > kBusyMilliseconds);
             m_host.ApplyPendingResize();
             m_host.RenderFrame();
         }

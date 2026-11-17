@@ -1,9 +1,12 @@
 #include <windows.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -90,6 +93,34 @@ namespace
     struct FakeJitInfo { const FakeMethod* Method; void* CodeStart; int CodeSize; };
     const FakeJitInfo kTakeDamageJit = { &kPlayerMethods[0], reinterpret_cast<void*>(&FakeAdd), 0x20 };
     const FakeJitInfo* const kJitTable[] = { &kTakeDamageJit };
+
+    struct SyntheticModel
+    {
+        std::vector<std::string> Names;
+        std::vector<FakeClass> Classes;
+        FakeImage Image = { "Assembly-Synthetic", nullptr, 0 };
+    };
+
+    const SyntheticModel& Synthetic()
+    {
+        static const SyntheticModel model = []
+            {
+                SyntheticModel built;
+                wchar_t buffer[16] = L"";
+                if (::GetEnvironmentVariableW(L"MANIFOLD_FAKE_MONO_CLASSES", buffer, 16) == 0)
+                    return built;
+                const int count = std::clamp(_wtoi(buffer), 0, 200000);
+                built.Names.reserve(static_cast<std::size_t>(count));
+                for (int i = 0; i < count; ++i)
+                    built.Names.push_back("Generated" + std::to_string(i));
+                for (const std::string& name : built.Names)
+                    built.Classes.push_back({ "Synthetic", name.c_str(), nullptr, 0, nullptr, 0 });
+                built.Image.Classes = built.Classes.data();
+                built.Image.ClassCount = count;
+                return built;
+            }();
+        return model;
+    }
 }
 
 extern "C" __declspec(dllexport) FakeObject g_fakePlayer = { &g_playerVT, 1000, 30 };
@@ -98,7 +129,12 @@ extern "C"
 {
     __declspec(dllexport) void* mono_get_root_domain() { return &g_domain; }
     __declspec(dllexport) void* mono_thread_attach(void* domain) { return domain; }
-    __declspec(dllexport) void mono_assembly_foreach(void (*fn)(void*, void*), void* user) { fn(const_cast<FakeImage*>(&kImage), user); }
+    __declspec(dllexport) void mono_assembly_foreach(void (*fn)(void*, void*), void* user)
+    {
+        fn(const_cast<FakeImage*>(&kImage), user);
+        if (Synthetic().Image.ClassCount > 0)
+            fn(const_cast<FakeImage*>(&Synthetic().Image), user);
+    }
     __declspec(dllexport) void* mono_assembly_get_image(void* assembly) { return assembly; }
     __declspec(dllexport) const char* mono_image_get_name(void* image) { return static_cast<FakeImage*>(image)->Name; }
     __declspec(dllexport) void* mono_image_get_table_info(void* image, int) { return image; }

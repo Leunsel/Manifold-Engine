@@ -31,6 +31,8 @@ namespace Manifold
         public:
             virtual void BeforeFrame() {}
             virtual void DrawFrame() = 0;
+            virtual void FirstFrameReady() {}
+            virtual void Revealed() {}
             virtual bool HandleMessage(UINT, WPARAM, LPARAM, LRESULT&) { return false; }
             virtual void CloseRequested() = 0;
 
@@ -60,6 +62,10 @@ namespace Manifold
         void Place(const WindowPlacement& placement);
         std::optional<WindowPlacement> Placement() const;
         bool StartRendering();
+        void HideUntilFirstFrame();
+        bool Cloaked() const { return m_cloaked; }
+        void RequestReveal() { m_revealRequested = true; }
+        void Reveal();
 
         bool PumpMessages();
         bool Hidden();
@@ -69,6 +75,7 @@ namespace Manifold
         unsigned long long InputAge() const;
         void ApplyPendingResize();
         void RenderFrame();
+        void SetRelaxedPacing(bool relaxed) { m_relaxedPacing = relaxed; }
 
         HWND Window() const { return m_hwnd; }
         ID3D11Device* Device() const { return m_device; }
@@ -113,6 +120,13 @@ namespace Manifold
         UINT m_pendingWidth = 0;
         UINT m_pendingHeight = 0;
         bool m_occluded = false;
+        bool m_cloaked = false;
+        bool m_presentedCloaked = false;
+        bool m_revealRequested = false;
+        bool m_relaxedPacing = false;
+        UINT RefreshRate();
+        UINT m_refreshRate = 0;
+        ULONGLONG m_refreshCheckedAt = 0;
         bool m_inSizeMove = false;
         bool m_inFrame = false;
         UINT m_dpi = 96;

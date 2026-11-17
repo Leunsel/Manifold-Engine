@@ -551,9 +551,9 @@ namespace Manifold::UI
                 m_engine.LoadSymbols(false);
             if (ImGui::MenuItem(ICON_FA_GLOBE "  Load Windows symbols", nullptr, false, process))
                 m_engine.LoadSymbols(true);
-            if (ImGui::MenuItem(m_engine.MonoPresent() ? ICON_FA_DICE_D6 "  Mono runtime loaded" : ICON_FA_DICE_D6 "  Load Mono runtime", nullptr, false,
-                    process && !m_engine.MonoPresent()))
-                m_workspace.Report(m_engine.EnsureMono());
+            if (ImGui::MenuItem(m_engine.MonoPresent() ? ICON_FA_DICE_D6 "  Mono runtime loaded" : m_engine.MonoLoading() ? ICON_FA_DICE_D6 "  Loading the Mono runtime..." : ICON_FA_DICE_D6 "  Load Mono runtime",
+                    nullptr, false, process && !m_engine.MonoPresent() && !m_engine.MonoLoading()))
+                m_engine.LoadMono();
             ItemTooltip("Reads the classes and methods of a Mono-based Unity game so method names show here and resolve in addresses. IL2CPP games have no Mono runtime.");
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_TIMES "  Close"))

@@ -1903,16 +1903,16 @@ namespace Manifold::UI
         Target::MonoBridge& mono = m_engine.Mono();
         if (!m_engine.MonoPresent())
         {
-            if (ImGui::MenuItem(ICON_FA_PLUG "  Load Mono runtime"))
-                m_workspace.Report(m_engine.EnsureMono());
+            if (ImGui::MenuItem(m_engine.MonoLoading() ? ICON_FA_PLUG "  Loading the Mono runtime..." : ICON_FA_PLUG "  Load Mono runtime", nullptr, false, !m_engine.MonoLoading()))
+                m_engine.LoadMono();
             ItemTooltip("Reads the classes and methods of the game's Mono runtime, so method names show in the memory viewer, resolve in addresses and Structure Dissect finds the class of an object.");
         }
         else
         {
             const std::string loaded = mono.Module() + "  ·  " + std::to_string(mono.ClassCount()) + " classes";
             SectionLabel(loaded.c_str());
-            if (ImGui::MenuItem(ICON_FA_SYNC "  Reload classes"))
-                m_workspace.Report(mono.Refresh());
+            if (ImGui::MenuItem(ICON_FA_SYNC "  Reload classes", nullptr, false, !m_engine.MonoLoading()))
+                m_engine.ReloadMono();
             ItemTooltip("Reads the class list again, for assemblies the game loaded later");
         }
         ImGui::Separator();

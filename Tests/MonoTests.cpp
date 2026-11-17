@@ -293,6 +293,90 @@ namespace Manifold::Tests
         }
     }
 
+    void SettleMono(Engine& engine, int milliseconds)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+        while (engine.MonoLoading() && std::chrono::steady_clock::now() < until)
+        {
+            engine.Tick();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        engine.Tick();
+    }
+
+    void CheckMonoInBackground(Engine& engine)
+    {
+        const std::uint64_t generation = engine.Mono().Generation();
+        engine.ReloadMono(true);
+        CHECK(engine.MonoLoading());
+        CHECK(engine.MonoPresent());
+        SettleMono(engine, 5000);
+        CHECK(!engine.MonoLoading());
+        CHECK(engine.Mono().Generation() != generation);
+        CHECK_EQ(engine.Mono().ClassCount(), 2u);
+
+        WorkProgress stopped;
+        stopped.Cancel();
+        const std::uint64_t before = engine.Mono().Generation();
+        const Status refused = engine.Mono().Refresh(&stopped);
+        CHECK(!refused.Ok());
+        CHECK_EQ(engine.Mono().Generation(), before);
+        CHECK_EQ(engine.Mono().ClassCount(), 2u);
+        CHECK(engine.MonoPresent());
+
+        engine.Mono().Stop();
+        CHECK(!engine.MonoPresent());
+        const Status cancelled = engine.Mono().Start(engine.Process(), &stopped);
+        CHECK(!cancelled.Ok());
+        CHECK(!engine.MonoPresent());
+        CHECK_EQ(engine.Mono().ClassCount(), 0u);
+
+        engine.LoadMono(true);
+        CHECK(engine.MonoLoading());
+        CHECK(engine.MonoWork() != 0);
+        SettleMono(engine, 5000);
+        CHECK(!engine.MonoLoading());
+        CHECK(engine.MonoPresent());
+        CHECK_EQ(engine.Mono().ClassCount(), 2u);
+        Status error;
+        CHECK_MSG(engine.Evaluate("Player:TakeDamage", &error).has_value(), error.Text);
+
+        engine.Mono().Stop();
+        engine.LoadMono(true);
+        engine.CancelWork(engine.MonoWork());
+        SettleMono(engine, 5000);
+        CHECK(!engine.MonoLoading());
+        CHECK(engine.MonoPresent() == (engine.Mono().ClassCount() == 2u));
+
+        engine.Mono().Stop();
+        engine.LoadMono(true);
+        const Status ensured = engine.EnsureMono();
+        CHECK_MSG(ensured.Ok(), ensured.Text);
+        CHECK(!engine.MonoLoading());
+        CHECK(engine.MonoPresent());
+
+        engine.Mono().Stop();
+        engine.SetAsync(true);
+        const Status started = engine.Lua().Run("__monoWait = nil; createThread(function() __monoWait = tostring(mono_initialize()) .. ',' .. tostring(#mono_enumClasses()) end)", "mono wait");
+        CHECK_MSG(started.Ok(), started.Text);
+        bool sawLoading = false;
+        std::string waited;
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (std::chrono::steady_clock::now() < until)
+        {
+            engine.Tick();
+            sawLoading = sawLoading || engine.MonoLoading();
+            const Status read = engine.Lua().RunWithResult("return __monoWait or ''", "mono wait result", waited);
+            if (!read || !waited.empty())
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        engine.SetAsync(false);
+        CHECK(sawLoading);
+        CHECK_EQ(waited, std::string("true,2"));
+        CHECK(engine.MonoPresent());
+    }
+
     void CheckMono(Engine& engine)
     {
         const Target::Process& process = *engine.Process();
@@ -454,6 +538,7 @@ namespace Manifold::Tests
             const std::string expected = "2,2," + Hex(*take) + ",28";
             CHECK_EQ(luaResult, expected);
         }
+        CheckMonoInBackground(engine);
     }
 
     // Attaches to an already-running process and lists its Mono runtime. Only

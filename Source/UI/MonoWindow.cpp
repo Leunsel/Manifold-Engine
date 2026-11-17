@@ -4,11 +4,13 @@
 #include "Generated/IconsFontAwesome5.h"
 #include "Target/Mono.h"
 #include "UI/AddressActions.h"
+#include "UI/Loading.h"
 #include "UI/Theme.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
 #include <algorithm>
+#include <optional>
 
 namespace Manifold::UI
 {
@@ -61,16 +63,20 @@ namespace Manifold::UI
         }
 
         Target::MonoBridge& mono = m_engine.Mono();
+        const std::optional<WorkInfo> work = m_engine.Work().Info("mono");
         if (!mono.Present())
         {
+            if (work)
+            {
+                if (LoadingCard(ICON_FA_DICE_D6, *work, "You can keep working while the classes are read."))
+                    m_engine.CancelWork(work->Id);
+                EndToolWindow();
+                return;
+            }
             std::vector<EmptyAction> actions = { { ICON_FA_PLUG "  Load the Mono runtime", nullptr, true } };
             if (EmptyState(ICON_FA_DICE_D6, "No Mono runtime loaded",
                     "This reads the game's Mono runtime by running a small helper inside it. IL2CPP games are not supported.", actions, true) == 0)
-            {
-                const Status status = m_engine.EnsureMono();
-                if (!status)
-                    m_workspace.Report(status);
-            }
+                m_engine.LoadMono();
             EndToolWindow();
             return;
         }
@@ -90,11 +96,13 @@ namespace Manifold::UI
         ImGui::AlignTextToFramePadding();
         Muted(mono.Module() + "  ·  " + std::to_string(m_classes.size()) + " classes");
         ImGui::SameLine();
-        if (ImGui::SmallButton(ICON_FA_SYNC "  Reload"))
+        if (work)
         {
-            mono.Refresh();
-            m_generation = ~0ull;
+            if (LoadingLine(*work))
+                m_engine.CancelWork(work->Id);
         }
+        else if (ImGui::SmallButton(ICON_FA_SYNC "  Reload"))
+            m_engine.ReloadMono();
         ImGui::SetNextItemWidth(-1.0f);
         InputTextWithHint("##monofilter", "filter classes (name or assembly)", m_filter);
         if (m_filter != m_lastFilter)

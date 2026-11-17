@@ -2,6 +2,7 @@
 
 #include "App/Settings.h"
 #include "Asm/AutoAssembler.h"
+#include "Core/BackgroundWork.h"
 #include "Core/Errors.h"
 #include "Core/JobQueue.h"
 #include "Core/RuntimeLog.h"
@@ -88,6 +89,9 @@ namespace Manifold
 
         Settings& Options() { return m_settings; }
         JobQueue& Jobs() { return m_jobs; }
+        BackgroundWork& Work() { return m_work; }
+        std::vector<WorkInfo> BusyWork() const;
+        void CancelWork(int id);
         double Now() const;
 
         Status OpenProcess(std::uint32_t id);
@@ -115,8 +119,15 @@ namespace Manifold
         bool Tracing() const { return m_tracer.Running(); }
         Status EnsureDebugger();
         Status EnsureMono();
+        Status ReloadMonoNow();
+        void LoadMono(bool fromScript = false);
+        void ReloadMono(bool fromScript = false);
+        bool MonoLoading() const { return m_work.Busy(kMonoWork); }
+        int MonoWork() const { return m_work.Find(kMonoWork); }
         Target::MonoBridge& Mono() { return m_mono; }
         bool MonoPresent() const { return m_mono.Present(); }
+        void LookUpProcessLater(std::string name, std::function<void(std::uint32_t)> found);
+        static constexpr int kSymbolsWork = -100;
         Table::AddressList& Table() { return m_table; }
         Table::StructureStore& Structures() { return m_structures; }
         Lua::LuaEngine& Lua() { return *m_lua; }
@@ -217,6 +228,8 @@ namespace Manifold
         Target::CodeMap m_codeMap;
         bool m_pdbActive = false;
         void RefreshSymbolProvider();
+        void FinishMono(const Status& status, bool cancelled, bool starting, bool fromScript, std::uint64_t generation);
+        static constexpr const char* kMonoWork = "mono";
         std::unique_ptr<Disasm::Disassembler> m_disassembler64;
         std::unique_ptr<Disasm::Disassembler> m_disassembler32;
         Scan::Scanner m_scanner;
@@ -257,6 +270,9 @@ namespace Manifold
         double m_tableTaskStarted = 0.0;
         std::vector<int> m_visibleRecords;
         bool m_visibleKnown = false;
+        bool m_attachLookup = false;
+        double m_symbolsStarted = 0.0;
         JobQueue m_jobs;
+        BackgroundWork m_work;
     };
 }

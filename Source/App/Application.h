@@ -4,6 +4,7 @@
 #include "App/Settings.h"
 #include "App/WindowHost.h"
 #include "UI/DialogHost.h"
+#include "UI/SplashScreen.h"
 #include "UI/Workspace.h"
 
 #include <filesystem>
@@ -50,6 +51,9 @@ namespace Manifold
     private:
         void BeforeFrame() override;
         void DrawFrame() override;
+        void FirstFrameReady() override;
+        void Revealed() override;
+        void SplashStatus(const std::string& text);
         void CloseRequested() override;
         void RememberPlacement();
         void FirstFrameWork();
@@ -62,6 +66,9 @@ namespace Manifold
         std::unique_ptr<Engine> m_engine;
         std::unique_ptr<UI::Workspace> m_workspace;
         std::unique_ptr<UI::DialogHost> m_dialogs;
+        std::unique_ptr<UI::SplashScreen> m_splash;
+        unsigned long long m_splashSince = 0;
+        bool m_firstFrameReady = false;
         bool m_running = false;
         bool m_started = false;
         int m_frames = 0;

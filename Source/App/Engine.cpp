@@ -55,6 +55,7 @@ namespace Manifold
     Engine::~Engine()
     {
         m_jobs.Stop();
+        m_work.Stop();
         CancelActivations();
         WaitForActivation();
         m_tracer.Stop();
@@ -125,6 +126,8 @@ namespace Manifold
             return;
         CancelActivations();
         WaitForActivation();
+        m_work.CancelGroup(kMonoWork);
+        m_work.CompleteGroup(kMonoWork);
         m_tracer.Stop();
         m_mono.Stop();
         m_debugger.Detach();
@@ -161,6 +164,7 @@ namespace Manifold
             list.assign(modules->begin(), modules->end());
         if (!m_pdbSymbols.Begin(m_process->Handle(), std::move(list), windowsSymbols))
             return;
+        m_symbolsStarted = Now();
         m_pdbActive = true;
         RefreshSymbolProvider();
         LOG_INFO("Symbols", windowsSymbols ? "Loading symbols (incl. Windows symbol server)" : "Loading symbols");
@@ -180,6 +184,7 @@ namespace Manifold
 
     Status Engine::EnsureMono()
     {
+        m_work.CompleteGroup(kMonoWork);
         if (m_mono.Present())
             return Status::Success();
         if (!m_process)
@@ -188,6 +193,114 @@ namespace Manifold
         if (started)
             RefreshSymbolProvider();
         return started;
+    }
+
+    Status Engine::ReloadMonoNow()
+    {
+        m_work.CompleteGroup(kMonoWork);
+        if (!m_mono.Present())
+            return EnsureMono();
+        return m_mono.Refresh();
+    }
+
+    void Engine::LoadMono(bool fromScript)
+    {
+        if (m_mono.Present() || MonoLoading())
+            return;
+        if (!m_process)
+        {
+            if (!fromScript)
+                Notify(Status::Fail(ErrorCode::NoProcess));
+            return;
+        }
+        const std::shared_ptr<Target::Process> process = m_process;
+        const std::uint64_t generation = m_processGeneration;
+        m_work.Start({ "Loading the Mono runtime", kMonoWork, true, false }, [this, process, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
+            {
+                const Status status = m_mono.Start(process, &progress);
+                const bool cancelled = progress.Cancelled();
+                return [this, status, cancelled, generation, fromScript]() { FinishMono(status, cancelled, true, fromScript, generation); };
+            });
+    }
+
+    void Engine::ReloadMono(bool fromScript)
+    {
+        if (MonoLoading())
+            return;
+        if (!m_mono.Present())
+        {
+            LoadMono(fromScript);
+            return;
+        }
+        const std::uint64_t generation = m_processGeneration;
+        m_work.Start({ "Reloading the Mono classes", kMonoWork, true, false }, [this, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
+            {
+                const Status status = m_mono.Refresh(&progress);
+                const bool cancelled = progress.Cancelled();
+                return [this, status, cancelled, generation, fromScript]() { FinishMono(status, cancelled, false, fromScript, generation); };
+            });
+    }
+
+    void Engine::FinishMono(const Status& status, bool cancelled, bool starting, bool fromScript, std::uint64_t generation)
+    {
+        if (generation != m_processGeneration)
+            return;
+        if (status)
+        {
+            if (starting)
+                RefreshSymbolProvider();
+            if (!fromScript)
+                Notify(LogLevel::Success, Format("%s %zu Mono classes", starting ? "Loaded" : "Reloaded", m_mono.ClassCount()));
+            return;
+        }
+        if (cancelled)
+        {
+            LOG_INFO("Mono", starting ? "Loading the Mono runtime was cancelled" : "Reloading the Mono classes was cancelled; the earlier list stays");
+            return;
+        }
+        if (fromScript)
+            LOG_WARN("Mono", status.Text);
+        else
+            Notify(status);
+    }
+
+    void Engine::LookUpProcessLater(std::string name, std::function<void(std::uint32_t)> found)
+    {
+        m_work.Start({ "Looking for " + name, "lookup", false, true }, [name, found = std::move(found)](WorkProgress&) mutable -> BackgroundWork::Finish
+            {
+                const std::uint32_t id = Target::FindProcessId(name).value_or(0);
+                return [found = std::move(found), id]() { found(id); };
+            });
+    }
+
+    std::vector<WorkInfo> Engine::BusyWork() const
+    {
+        std::vector<WorkInfo> list = m_work.List();
+        if (m_pdbSymbols.Active() && !m_pdbSymbols.Loaded())
+        {
+            WorkInfo symbols;
+            symbols.Id = kSymbolsWork;
+            symbols.Title = "Loading symbols";
+            symbols.Group = "symbols";
+            symbols.Done = m_pdbSymbols.ModulesDone();
+            symbols.Total = m_pdbSymbols.ModulesTotal();
+            symbols.Fraction = symbols.Total > 0 ? std::clamp(static_cast<double>(symbols.Done) / static_cast<double>(symbols.Total), 0.0, 1.0) : -1.0;
+            symbols.Text = symbols.Total > 0 ? Format("Module %lld of %lld", static_cast<long long>(std::min(symbols.Done + 1, symbols.Total)), static_cast<long long>(symbols.Total))
+                                             : std::string("Starting the symbol handler");
+            symbols.Seconds = Now() - m_symbolsStarted;
+            symbols.Cancellable = true;
+            symbols.Cancelling = m_pdbSymbols.Stopping();
+            list.push_back(std::move(symbols));
+        }
+        return list;
+    }
+
+    void Engine::CancelWork(int id)
+    {
+        if (id == kSymbolsWork)
+            m_pdbSymbols.Cancel();
+        else
+            m_work.Cancel(id);
     }
 
     void Engine::RefreshSymbolProvider()
@@ -1187,23 +1300,38 @@ namespace Manifold
         if (now - m_lastAttachCheck < kAttachCheckSeconds)
             return;
         m_lastAttachCheck = now;
-        if (m_process && m_process->Alive())
+        if ((m_process && m_process->Alive()) || m_attachLookup)
             return;
-        for (const std::string& name : m_settings.AutoAttach)
-        {
-            const std::string trimmed = Trim(name);
-            if (trimmed.empty())
-                continue;
-            if (const auto id = Target::FindProcessId(trimmed))
+        m_attachLookup = true;
+        const std::vector<std::string> names = m_settings.AutoAttach;
+        m_work.Start({ "Looking for processes to open", "attach", false, true }, [this, names](WorkProgress&) -> BackgroundWork::Finish
             {
-                const Status status = OpenProcess(*id);
-                if (status)
-                    Notify(LogLevel::Success, "Auto attached to " + trimmed);
-                else
-                    Notify(status);
-                return;
-            }
-        }
+                std::uint32_t id = 0;
+                std::string matched;
+                for (const std::string& name : names)
+                {
+                    const std::string trimmed = Trim(name);
+                    if (trimmed.empty())
+                        continue;
+                    if (const auto found = Target::FindProcessId(trimmed))
+                    {
+                        id = *found;
+                        matched = trimmed;
+                        break;
+                    }
+                }
+                return [this, id, matched]()
+                    {
+                        m_attachLookup = false;
+                        if (!id || !m_settings.AutoAttachEnabled || (m_process && m_process->Alive()))
+                            return;
+                        const Status status = OpenProcess(id);
+                        if (status)
+                            Notify(LogLevel::Success, "Auto attached to " + matched);
+                        else
+                            Notify(status);
+                    };
+            });
     }
 
     Asm::AaResult Engine::AutoAssemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record)
@@ -1403,6 +1531,7 @@ namespace Manifold
         {
             PROFILE_ZONE("Finished background jobs");
             m_jobs.Drain();
+            m_work.Drain();
         }
         const int scansBefore = m_scanner.ScanNumber();
         {

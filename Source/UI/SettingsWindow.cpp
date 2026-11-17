@@ -823,6 +823,11 @@ namespace Manifold::UI
         }
 
         list.Section("Program");
+        if (list.Row("Splash screen", "Shows the logo and the start-up steps right away and for at least two seconds, then the main window appears. Off, the main window appears as soon as it is drawn. Takes effect at the next start.", toggle))
+        {
+            changed |= ToggleSwitch("##splash", &settings.ShowSplash);
+            list.EndRow();
+        }
         const bool elevated = Target::IsElevated();
         const float button = std::round(Px(210.0f));
         if (list.Row("Administrator rights", elevated ? "The program runs as administrator and can open protected processes." : "Some games can only be opened with administrator rights.",

@@ -787,10 +787,17 @@ namespace Manifold
         PROFILE_WAIT("Present (waits for the display)");
         if (mainShown)
         {
-            const HRESULT hr = m_swapChain->Present(1, 0);
-            m_occluded = (hr == DXGI_STATUS_OCCLUDED);
+            const HRESULT hr = m_swapChain->Present(m_relaxedPacing && RefreshRate() >= 100 ? 2 : 1, 0);
+            m_occluded = hr == DXGI_STATUS_OCCLUDED && !m_cloaked;
             if (Profiler::Enabled())
                 CountPresentationMode(m_swapChain);
+            if (m_cloaked && !m_presentedCloaked)
+            {
+                m_presentedCloaked = true;
+                m_client.FirstFrameReady();
+            }
+            if (m_cloaked && m_revealRequested)
+                Reveal();
         }
         if (!mainShown || m_occluded)
         {
@@ -809,6 +816,40 @@ namespace Manifold
             if (!WaitForVBlank(m_device, pacer))
                 ::DwmFlush();
         }
+    }
+
+    UINT WindowHost::RefreshRate()
+    {
+        const ULONGLONG now = ::GetTickCount64();
+        if (m_refreshRate && now - m_refreshCheckedAt < 2000)
+            return m_refreshRate;
+        m_refreshCheckedAt = now;
+        DWM_TIMING_INFO timing{};
+        timing.cbSize = sizeof(timing);
+        if (SUCCEEDED(::DwmGetCompositionTimingInfo(nullptr, &timing)) && timing.rateRefresh.uiDenominator)
+            m_refreshRate = static_cast<UINT>((timing.rateRefresh.uiNumerator + timing.rateRefresh.uiDenominator / 2) / timing.rateRefresh.uiDenominator);
+        else
+            m_refreshRate = 60;
+        return m_refreshRate;
+    }
+
+    void WindowHost::HideUntilFirstFrame()
+    {
+        const BOOL cloak = TRUE;
+        m_cloaked = SUCCEEDED(::DwmSetWindowAttribute(m_hwnd, DWMWA_CLOAK, &cloak, sizeof(cloak)));
+    }
+
+    void WindowHost::Reveal()
+    {
+        if (!m_cloaked)
+            return;
+        const BOOL cloak = FALSE;
+        ::DwmSetWindowAttribute(m_hwnd, DWMWA_CLOAK, &cloak, sizeof(cloak));
+        m_cloaked = false;
+        m_revealRequested = false;
+        m_occluded = false;
+        NoteInput();
+        m_client.Revealed();
     }
 
     bool WindowHost::StartRendering()
@@ -901,6 +942,8 @@ namespace Manifold
 
     bool WindowHost::Hidden()
     {
+        if (m_cloaked)
+            return false;
         if (!::IsWindowVisible(m_hwnd) || ::IsIconic(m_hwnd) || (m_occluded && m_swapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED))
             return !ToolWindowShown();
         m_occluded = false;

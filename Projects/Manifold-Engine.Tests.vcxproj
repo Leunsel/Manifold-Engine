@@ -112,6 +112,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Asm\Assembler.cpp" />
     <ClCompile Include="..\Source\Asm\AutoAssembler.cpp" />
     <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp" />
+    <ClCompile Include="..\Source\Core\BackgroundWork.cpp" />
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
     <ClCompile Include="..\Source\Core\JobQueue.cpp" />
@@ -169,6 +170,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Tests\MonoTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
     <ClCompile Include="..\Tests\WatchStress.cpp" />
+    <ClCompile Include="..\Tests\WorkTests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Tests\TestKit.h" />

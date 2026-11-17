@@ -3,6 +3,7 @@
 #include "Core/Errors.h"
 #include "Target/RemoteCall.h"
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -12,6 +13,11 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+
+namespace Manifold
+{
+    class WorkProgress;
+}
 
 namespace Manifold::Target
 {
@@ -57,9 +63,9 @@ namespace Manifold::Target
     class MonoBridge
     {
     public:
-        Status Start(std::shared_ptr<Process> process);
+        Status Start(std::shared_ptr<Process> process, WorkProgress* progress = nullptr);
         void Stop();
-        bool Present() const { return m_present; }
+        bool Present() const { return m_present.load(); }
 
         // Whether one of the known Mono runtime DLLs is in the target's module
         // list. Only looks at the cached list, so it is cheap enough to ask
@@ -67,8 +73,8 @@ namespace Manifold::Target
         static bool HasRuntime(const Process& process);
         const std::string& Module() const { return m_module; }
 
-        Status Refresh();
-        std::uint64_t Generation() const { return m_generation; }
+        Status Refresh(WorkProgress* progress = nullptr);
+        std::uint64_t Generation() const { return m_generation.load(); }
 
         // The class list is shallow: Namespace/Name/Image/Handle are filled, but
         // Methods and Fields load only when asked for (a real game has far too
@@ -124,6 +130,7 @@ namespace Manifold::Target
         std::optional<std::uint64_t> CallFn(const char* name, std::uint64_t a0 = 0, std::uint64_t a1 = 0, std::uint64_t a2 = 0, std::uint64_t a3 = 0);
         std::string CallString(const char* name, std::uint64_t handle);
         int FindClass(std::string_view name) const;
+        Status Enumerate(WorkProgress* progress, bool starting);
         void EnsureMembers(int classIndex);
         std::optional<std::string> ResolveHead(std::uint64_t header, bool allowRuntimeFallback);
         const std::string* FindJitName(std::uint64_t address) const;
@@ -134,7 +141,7 @@ namespace Manifold::Target
         std::function<bool()> m_paused;
         mutable std::recursive_mutex m_lock;
         RemoteCall m_call;
-        bool m_present = false;
+        std::atomic<bool> m_present{ false };
         std::string m_module;
         std::uint64_t m_domain = 0;
         std::map<std::string, std::uint64_t> m_functions;
@@ -143,7 +150,7 @@ namespace Manifold::Target
         std::map<std::uint64_t, int> m_handleIndex;  // MonoClass* -> class
         std::uint64_t m_handleMin = 0;  // span of known MonoClass* pointers, to
         std::uint64_t m_handleMax = 0;  // vet a klass before asking the runtime
-        std::uint64_t m_generation = 0;
+        std::atomic<std::uint64_t> m_generation{ 0 };
 
         // Reverse-resolution cache for MethodNameAt. Resolved method code ranges
         // sorted by Start (non-overlapping), plus the addresses already known not

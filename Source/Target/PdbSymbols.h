@@ -25,6 +25,8 @@ namespace Manifold::Target
 
         bool Begin(void* processHandle, std::vector<ModuleInfo> modules, bool windowsSymbols);
         void End();
+        void Cancel() { m_stop = true; }
+        bool Stopping() const { return m_stop.load(); }
         bool Active() const { return m_active.load(); }
 
         std::optional<std::uint64_t> Resolve(std::string_view name) const;

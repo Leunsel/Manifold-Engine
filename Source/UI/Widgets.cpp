@@ -3,6 +3,7 @@
 #include "Core/Errors.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "UI/Fonts.h"
+#include "UI/Loading.h"
 #include "UI/UiScale.h"
 
 #include "imgui_internal.h"
@@ -836,6 +837,7 @@ namespace Manifold::UI
 
     void Spinner(float size, ImVec4 color)
     {
+        NoteAnimation();
         const ImVec2 pos = ImGui::GetCursorScreenPos();
         ImGui::Dummy(ImVec2(size, size));
         ImDrawList* draw = ImGui::GetWindowDrawList();

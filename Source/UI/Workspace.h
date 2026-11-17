@@ -122,6 +122,7 @@ namespace Manifold::UI
         void OpenProfiler(int tab = -1);
         void OpenNopSled();
         bool Animating() const;
+        bool OnlySpinnersAnimating() const;
         void AddAddress(std::uint64_t address, Scan::ValueType type, std::string description = {});
         void Confirm(std::string title, std::string text, std::function<void()> yes, std::string yesLabel = "Yes");
         void Report(const Status& status);
@@ -159,6 +160,8 @@ namespace Manifold::UI
         Shell& m_shell;
         double m_lastProcessCheckedAt = -100.0;
         std::uint32_t m_lastProcessId = 0;
+        bool m_lastProcessLookup = false;
+        void RefreshLastProcess();
         std::unique_ptr<MainWindow> m_main;
         std::vector<std::unique_ptr<MemoryViewer>> m_memoryViewers;
         std::vector<std::unique_ptr<StructureWindow>> m_structures;

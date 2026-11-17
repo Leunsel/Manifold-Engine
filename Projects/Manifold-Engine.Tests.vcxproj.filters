@@ -69,6 +69,9 @@
     <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp">
       <Filter>Source\Asm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Core\BackgroundWork.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Core\Deflate.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
@@ -232,6 +235,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\WatchStress.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\WorkTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClInclude Include="..\Tests\TestKit.h">

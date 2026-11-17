@@ -63,6 +63,7 @@ namespace Manifold
         bool ReleaseMode = false;
         bool ProfilerEnabled = false;
         bool ProfilerInStatusBar = true;
+        bool ShowSplash = true;
         int NopSledBest = 0;
 
         bool VerboseLog = false;

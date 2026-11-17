@@ -1,5 +1,6 @@
 #include "Target/Mono.h"
 
+#include "Core/BackgroundWork.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Target/Process.h"
@@ -70,17 +71,17 @@ namespace Manifold::Target
         return m_call.ReadCString(*pointer);
     }
 
-    Status MonoBridge::Start(std::shared_ptr<Process> process)
+    Status MonoBridge::Start(std::shared_ptr<Process> process, WorkProgress* progress)
     {
         Stop();
-        std::lock_guard lock(m_lock);
         if (!process || !process->Alive())
             return Status::Fail(ErrorCode::NoProcess);
         if (!process->Is64Bit())
             return Status::Fail(ErrorCode::MonoNotFound, "only 64-bit Mono targets are supported");
+        if (progress)
+            progress->SetText("Looking for the runtime");
 
         std::string module;
-        std::uint64_t root = 0;
         for (const char* candidate : kModuleCandidates)
         {
             if (process->FindModule(candidate) && process->FindExport(candidate, "mono_get_root_domain"))
@@ -91,12 +92,12 @@ namespace Manifold::Target
         }
         if (module.empty())
         {
-            // Fall back to scanning every module for the export (covers an
-            // embedded runtime or a renamed test target).
             if (const auto modules = process->Modules())
             {
                 for (const ModuleInfo& info : *modules)
                 {
+                    if (progress && progress->Cancelled())
+                        return Status::Fail(ErrorCode::MonoNotFound, "cancelled");
                     if (process->FindExport(info.Name, "mono_get_root_domain"))
                     {
                         module = info.Name;
@@ -108,7 +109,6 @@ namespace Manifold::Target
         if (module.empty())
             return Status::Fail(ErrorCode::MonoNotFound);
 
-        m_process = process;
         std::map<std::string, std::uint64_t> functions;
         for (const char* name : kFunctions)
         {
@@ -117,33 +117,39 @@ namespace Manifold::Target
                 functions[name] = address;
         }
         if (!functions.count("mono_get_root_domain") || !functions.count("mono_class_get_methods"))
-        {
-            m_process.reset();
             return Status::Fail(ErrorCode::MonoNotFound, module + " is missing expected functions");
-        }
+        if (progress && progress->Cancelled())
+            return Status::Fail(ErrorCode::MonoNotFound, "cancelled");
 
-        if (Status started = m_call.Start(process); !started)
+        if (progress)
+            progress->SetText("Starting the helper in the game");
         {
-            m_process.reset();
-            return started;
+            std::lock_guard lock(m_lock);
+            m_process = process;
+            if (Status started = m_call.Start(process); !started)
+            {
+                m_process.reset();
+                return started;
+            }
+            m_functions = std::move(functions);
+            m_module = module;
+            const std::uint64_t root = CallFn("mono_get_root_domain").value_or(0);
+            if (!root)
+            {
+                m_call.Stop();
+                m_functions.clear();
+                m_module.clear();
+                m_process.reset();
+                return Status::Fail(ErrorCode::MonoNotFound, "the root domain was null");
+            }
+            m_domain = root;
+            CallFn("mono_thread_attach", root);
         }
-        m_functions = std::move(functions);
-        m_module = module;
-
-        root = CallFn("mono_get_root_domain").value_or(0);
-        if (!root)
-        {
-            m_call.Stop();
-            m_functions.clear();
-            m_process.reset();
-            return Status::Fail(ErrorCode::MonoNotFound, "the root domain was null");
-        }
-        m_domain = root;
-        CallFn("mono_thread_attach", root);
-        m_present = true;
-        ++m_generation;
         LOG_SUCCESS("Mono", "Mono runtime found in " + module);
-        return Refresh();
+        const Status enumerated = Enumerate(progress, true);
+        if (!enumerated)
+            Stop();
+        return enumerated;
     }
 
     void MonoBridge::Stop()
@@ -163,75 +169,132 @@ namespace Manifold::Target
         ++m_generation;
     }
 
-    Status MonoBridge::Refresh()
+    Status MonoBridge::Refresh(WorkProgress* progress)
     {
-        std::lock_guard lock(m_lock);
-        if (!m_present || !m_process)
+        if (!m_present.load())
             return Status::Fail(ErrorCode::MonoNotFound);
-        m_classes.clear();
-        m_classIndex.clear();
-        m_handleIndex.clear();
-        m_handleMin = m_handleMax = 0;
-        m_jitRanges.clear();
-        m_jitMisses.clear();
-        m_call.ResetScratch();
+        return Enumerate(progress, false);
+    }
 
-        // mono_assembly_foreach collects each assembly pointer into an array.
+    Status MonoBridge::Enumerate(WorkProgress* progress, bool starting)
+    {
+        const auto stopped = [progress] { return progress && progress->Cancelled(); };
+        const Status cancelled = Status::Fail(ErrorCode::MonoNotFound, "cancelled");
+        if (progress)
+            progress->SetText("Reading the assemblies");
+
         constexpr int kMaxAssemblies = 4096;
-        const std::uint64_t array = m_call.Scratch(static_cast<std::size_t>(16 + kMaxAssemblies * 8));
-        if (!array)
-            return Status::Fail(ErrorCode::MonoNotFound, "no scratch space");
-        const std::uint64_t cap = kMaxAssemblies;
-        m_process->Write(array + 8, &cap, sizeof(cap));
-        CallFn("mono_assembly_foreach", m_call.CollectorAddress(), array);
-        std::uint64_t count = 0;
-        m_process->ReadExact(array, &count, sizeof(count));
-        count = std::min<std::uint64_t>(count, kMaxAssemblies);
-        std::vector<std::uint64_t> assemblies(static_cast<std::size_t>(count));
-        if (count)
-            m_process->ReadExact(array + 16, assemblies.data(), static_cast<std::size_t>(count) * 8);
+        std::vector<std::uint64_t> assemblies;
+        {
+            std::lock_guard lock(m_lock);
+            if (!m_process || !m_domain)
+                return Status::Fail(ErrorCode::MonoNotFound);
+            m_call.ResetScratch();
+            const std::uint64_t array = m_call.Scratch(static_cast<std::size_t>(16 + kMaxAssemblies * 8));
+            if (!array)
+                return Status::Fail(ErrorCode::MonoNotFound, "no scratch space");
+            const std::uint64_t cap = kMaxAssemblies;
+            m_process->Write(array + 8, &cap, sizeof(cap));
+            CallFn("mono_assembly_foreach", m_call.CollectorAddress(), array);
+            std::uint64_t count = 0;
+            m_process->ReadExact(array, &count, sizeof(count));
+            count = std::min<std::uint64_t>(count, kMaxAssemblies);
+            assemblies.resize(static_cast<std::size_t>(count));
+            if (count)
+                m_process->ReadExact(array + 16, assemblies.data(), static_cast<std::size_t>(count) * 8);
+            m_call.ResetScratch();
+        }
 
-        std::vector<std::pair<std::uint64_t, std::string>> images;  // image handle, name
+        std::vector<std::pair<std::uint64_t, std::string>> images;
         for (std::uint64_t assembly : assemblies)
         {
+            if (stopped())
+                return cancelled;
+            std::lock_guard lock(m_lock);
             const auto image = CallFn("mono_assembly_get_image", assembly);
             if (image && *image)
                 images.emplace_back(*image, CallString("mono_image_get_name", *image));
         }
-        m_call.ResetScratch();
 
-        for (const auto& [image, imageName] : images)
+        std::vector<int> rows;
+        std::int64_t total = 0;
+        for (const auto& image : images)
         {
-            const auto tableInfo = CallFn("mono_image_get_table_info", image, kTableTypeDef);
-            const auto rows = CallFn("mono_table_info_get_rows", tableInfo.value_or(0));
-            const int rowCount = std::min(kMaxClasses, static_cast<int>(rows.value_or(0) & 0xFFFFFFFFu));
-            for (int row = 1; row <= rowCount; ++row)
-            {
-                const auto klass = CallFn("mono_class_get", image, kTokenTypeDef | static_cast<unsigned int>(row));
-                if (!klass || !*klass)
-                    continue;
-                MonoClass info;
-                info.Handle = *klass;
-                info.Image = imageName;
-                info.Name = CallString("mono_class_get_name", *klass);
-                info.Namespace = CallString("mono_class_get_namespace", *klass);
-                if (info.Name.empty() || info.Name == "<Module>")
-                    continue;
-                const int classIndex = static_cast<int>(m_classes.size());
-                m_classIndex.emplace(info.Name, classIndex);
-                if (!info.Namespace.empty())
-                    m_classIndex.emplace(info.FullName(), classIndex);
-                m_handleIndex.emplace(info.Handle, classIndex);
-                if (m_handleMin == 0 || info.Handle < m_handleMin)
-                    m_handleMin = info.Handle;
-                if (info.Handle > m_handleMax)
-                    m_handleMax = info.Handle;
-                m_classes.push_back(std::move(info));
-            }
-            m_call.ResetScratch();
+            std::lock_guard lock(m_lock);
+            const auto tableInfo = CallFn("mono_image_get_table_info", image.first, kTableTypeDef);
+            const auto count = CallFn("mono_table_info_get_rows", tableInfo.value_or(0));
+            rows.push_back(std::min(kMaxClasses, static_cast<int>(count.value_or(0) & 0xFFFFFFFFu)));
+            total += rows.back();
         }
-        ++m_generation;
-        LOG_INFO("Mono", "Read " + std::to_string(m_classes.size()) + " classes from " + m_module);
+        if (progress)
+        {
+            progress->SetSteps(0, total);
+            progress->SetText("Reading the classes");
+        }
+
+        std::vector<MonoClass> classes;
+        classes.reserve(static_cast<std::size_t>(total));
+        for (std::size_t i = 0; i < images.size(); ++i)
+        {
+            for (int row = 1; row <= rows[i]; ++row)
+            {
+                if ((row & 63) == 0 && stopped())
+                    return cancelled;
+                MonoClass info;
+                {
+                    std::lock_guard lock(m_lock);
+                    const auto klass = CallFn("mono_class_get", images[i].first, kTokenTypeDef | static_cast<unsigned int>(row));
+                    if (klass && *klass)
+                    {
+                        info.Handle = *klass;
+                        info.Name = CallString("mono_class_get_name", *klass);
+                        info.Namespace = CallString("mono_class_get_namespace", *klass);
+                    }
+                }
+                if (progress)
+                    progress->Step();
+                if (!info.Handle || info.Name.empty() || info.Name == "<Module>")
+                    continue;
+                info.Image = images[i].second;
+                classes.push_back(std::move(info));
+            }
+        }
+        if (stopped())
+            return cancelled;
+
+        std::map<std::string, int> classIndex;
+        std::map<std::uint64_t, int> handleIndex;
+        std::uint64_t handleMin = 0;
+        std::uint64_t handleMax = 0;
+        for (int index = 0; index < static_cast<int>(classes.size()); ++index)
+        {
+            const MonoClass& info = classes[static_cast<std::size_t>(index)];
+            classIndex.emplace(info.Name, index);
+            if (!info.Namespace.empty())
+                classIndex.emplace(info.FullName(), index);
+            handleIndex.emplace(info.Handle, index);
+            if (handleMin == 0 || info.Handle < handleMin)
+                handleMin = info.Handle;
+            if (info.Handle > handleMax)
+                handleMax = info.Handle;
+        }
+        const std::size_t count = classes.size();
+        std::string module;
+        {
+            std::lock_guard lock(m_lock);
+            m_classes = std::move(classes);
+            m_classIndex = std::move(classIndex);
+            m_handleIndex = std::move(handleIndex);
+            m_handleMin = handleMin;
+            m_handleMax = handleMax;
+            m_jitRanges.clear();
+            m_jitMisses.clear();
+            module = m_module;
+            if (starting)
+                m_present = true;
+            ++m_generation;
+        }
+        LOG_INFO("Mono", "Read " + std::to_string(count) + " classes from " + module);
         return Status::Success();
     }
 
