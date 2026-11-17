@@ -20,6 +20,8 @@ namespace Manifold
         std::filesystem::path Table;
         std::string Process;
         std::vector<std::string> Open;
+        std::filesystem::path ProfileReport;
+        int ProfileSeconds = 10;
     };
 
     class Application final : private WindowHost::Client, public UI::Shell
@@ -52,6 +54,7 @@ namespace Manifold
         void RememberPlacement();
         void FirstFrameWork();
         void TickWhileWaiting(unsigned milliseconds);
+        void ProfileReportWork();
 
         StartOptions m_options;
         Settings m_settings;
@@ -62,5 +65,6 @@ namespace Manifold
         bool m_running = false;
         bool m_started = false;
         int m_frames = 0;
+        unsigned long long m_profileUntil = 0;
     };
 }

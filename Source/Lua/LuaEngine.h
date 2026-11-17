@@ -370,6 +370,8 @@ namespace Manifold::Lua
 
         int AddTimer(int interval, bool enabled);
         Timer* FindTimer(int id);
+        const std::map<int, Timer>& Timers() const { return m_timers; }
+        std::size_t TaskCount() const { return m_tasks.size(); }
         int AddHotkey(std::vector<int> keys, int callback);
         void RemoveHotkey(int id);
 

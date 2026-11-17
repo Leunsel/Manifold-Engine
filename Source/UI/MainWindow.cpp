@@ -1,9 +1,11 @@
 #include "UI/Windows.h"
 
+#include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
 #include "UI/Fonts.h"
+#include "UI/ProfilerWindow.h"
 #include "UI/ScriptUi.h"
 #include "UI/Shortcuts.h"
 #include "UI/UiScale.h"
@@ -154,7 +156,10 @@ namespace Manifold::UI
         drawList->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + Px(kTitleHeight)), ImGui::GetColorU32(ManifoldTheme::Sidebar), rounding, ImDrawFlags_RoundCornersTop);
         drawList->AddRect(pos, ImVec2(pos.x + size.x, pos.y + size.y), ImGui::GetColorU32(ManifoldTheme::Border), rounding);
 
-        TitleBar();
+        {
+            PROFILE_ZONE("Title bar and menus");
+            TitleBar();
+        }
         ImGui::SetCursorPos(ImVec2(Px(10.0f), Px(kTitleHeight) + Px(8.0f)));
         ImGui::BeginGroup();
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, PxWhole(8.0f, 8.0f));
@@ -162,9 +167,13 @@ namespace Manifold::UI
         ImGui::BeginChild("##body", ImVec2(width, size.y - Px(kTitleHeight) - Px(16.0f) - Px(kStatusHeight)), ImGuiChildFlags_None,
             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
         m_release = m_engine.Options().ReleaseMode;
-        ProcessBar();
+        {
+            PROFILE_ZONE("Process bar");
+            ProcessBar();
+        }
         if (m_engine.Options().CompactMode)
         {
+            PROFILE_ZONE("Address list");
             AddressListCard(ImGui::GetContentRegionAvail().y);
         }
         else
@@ -175,14 +184,21 @@ namespace Manifold::UI
             m_topHeight = std::clamp(m_topHeight, Px(200.0f), std::max(Px(200.0f), available - Px(140.0f)));
             float bottom = available - m_topHeight - Px(6.0f);
             Splitter("##split", false, Px(6.0f), &m_topHeight, &bottom, Px(200.0f), Px(120.0f));
-            ScanArea(m_topHeight);
+            {
+                PROFILE_ZONE("Scanner and found list");
+                ScanArea(m_topHeight);
+            }
             ImGui::SetCursorPosY(ImGui::GetCursorPosY() - Px(2.0f));
+            PROFILE_ZONE("Address list");
             AddressListCard(ImGui::GetContentRegionAvail().y);
         }
         ImGui::EndChild();
         ImGui::PopStyleVar();
         ImGui::EndGroup();
-        StatusBar();
+        {
+            PROFILE_ZONE("Status bar");
+            StatusBar();
+        }
         MainShortcuts();
 
         ValueDialog();
@@ -482,6 +498,8 @@ namespace Manifold::UI
                 workspace.OpenShortcuts();
             if (!m_release && ImGui::MenuItem(ICON_FA_LIST_OL "  Error codes"))
                 workspace.OpenLog();
+            if (engine.Options().ProfilerEnabled && CommandItem(ICON_FA_TACHOMETER_ALT "  Profiler and diagnostics", Command::OpenProfiler))
+                workspace.OpenProfiler();
             if (!Target::IsElevated() && ImGui::MenuItem(ICON_FA_SHIELD_ALT "  Restart as administrator"))
                 workspace.Window().RestartElevated();
             ImGui::Separator();
@@ -3127,6 +3145,15 @@ namespace Manifold::UI
         Muted(ICON_FA_FILE_ALT "  " + table);
         ImGui::SameLine(0.0f, Px(18.0f));
         Muted(Target::IsElevated() ? ICON_FA_SHIELD_ALT "  Administrator" : ICON_FA_USER "  No administrator rights");
+        std::string frames;
+        if (engine.Options().ProfilerInStatusBar && FrameReadout(frames))
+        {
+            ImGui::SameLine(0.0f, Px(18.0f));
+            Muted(frames);
+            if (ImGui::IsItemClicked())
+                m_workspace.OpenProfiler();
+            ItemTooltip("Work per frame and frames per second. Click to open the profiler.");
+        }
 
         if (const std::optional<LogEntry> newest = RuntimeLog::Last())
         {

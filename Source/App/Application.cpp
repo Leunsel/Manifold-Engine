@@ -2,16 +2,20 @@
 
 #include "App/Commands.h"
 #include "App/CrashHandler.h"
+#include "App/Diagnostics.h"
 #include "App/Sounds.h"
+#include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
 #include "UI/LuaDialogs.h"
+#include "UI/ProfilerWindow.h"
 #include "UI/Theme.h"
 #include "UI/Windows.h"
 
 #include "imgui.h"
 
 #include <algorithm>
+#include <fstream>
 
 #include <windows.h>
 #include <shellapi.h>
@@ -153,12 +157,52 @@ namespace Manifold
                 m_workspace->OpenProcessPicker();
             else if (window == "about")
                 m_workspace->OpenAbout();
+            else if (window == "profiler")
+                m_workspace->OpenProfiler(UI::ProfilerWindow::OverviewTab);
+            else if (window == "breakdown")
+                m_workspace->OpenProfiler(UI::ProfilerWindow::BreakdownTab);
+            else if (window == "threads")
+                m_workspace->OpenProfiler(UI::ProfilerWindow::ThreadsTab);
+            else if (window == "checks")
+                m_workspace->OpenProfiler(UI::ProfilerWindow::ChecksTab);
+            else if (window == "appinfo")
+                m_workspace->OpenProfiler(UI::ProfilerWindow::InfoTab);
+            else if (window == "nopsled")
+                m_workspace->OpenNopSled();
         }
+        if (!m_options.ProfileReport.empty())
+        {
+            Diagnostics::Sample(true);
+            m_profileUntil = ::GetTickCount64() + static_cast<unsigned long long>(m_options.ProfileSeconds) * 1000ull;
+            LOG_INFO("Program", "Measuring for " + std::to_string(m_options.ProfileSeconds) + " s, then writing the diagnostics report to " + WideToUtf8(m_options.ProfileReport.wstring()));
+        }
+    }
+
+    void Application::ProfileReportWork()
+    {
+        if (!m_profileUntil || ::GetTickCount64() < m_profileUntil)
+            return;
+        m_profileUntil = 0;
+        const std::string report = UI::DiagnosticsReport(*m_workspace);
+        std::ofstream file(m_options.ProfileReport, std::ios::binary | std::ios::trunc);
+        file.write(report.data(), static_cast<std::streamsize>(report.size()));
+        file.close();
+        if (!file)
+        {
+            m_engine->Notify(Status::Fail(ErrorCode::ReportNotSaved, WideToUtf8(m_options.ProfileReport.wstring())));
+            return;
+        }
+        LOG_INFO("Program", "Wrote the diagnostics report to " + WideToUtf8(m_options.ProfileReport.wstring()));
+        if (m_engine->ActiveScripts().empty())
+            Close();
+        else
+            m_workspace->RequestQuit();
     }
 
     void Application::BeforeFrame()
     {
         Sounds::SetEnabled(m_settings.PlaySounds);
+        Profiler::SetEnabled(m_settings.ProfilerEnabled || !m_options.ProfileReport.empty());
         if (m_engine)
             m_engine->Tick();
     }
@@ -173,6 +217,7 @@ namespace Manifold
             m_started = true;
             FirstFrameWork();
         }
+        ProfileReportWork();
     }
 
     void Application::CloseRequested()
@@ -231,10 +276,16 @@ namespace Manifold
             if (now >= until)
                 return;
             const unsigned slice = static_cast<unsigned>(std::min<ULONGLONG>(kIdleTickMilliseconds, until - now));
-            if (m_host.Wait(slice))
-                return;
+            {
+                PROFILE_WAIT("Waiting for input");
+                if (m_host.Wait(slice))
+                    return;
+            }
             if (::GetTickCount64() + kIdleTickMilliseconds / 2 < until)
+            {
+                PROFILE_ZONE("Engine tick while waiting");
                 m_engine->Tick();
+            }
         }
     }
 
@@ -242,20 +293,27 @@ namespace Manifold
     {
         while (m_running)
         {
-            if (!m_host.PumpMessages())
-                m_running = false;
+            {
+                PROFILE_ZONE("Window messages");
+                if (!m_host.PumpMessages())
+                    m_running = false;
+            }
             if (!m_running)
                 break;
             if (m_host.Hidden())
             {
-                m_engine->Tick();
+                {
+                    PROFILE_ZONE("Engine tick while hidden");
+                    m_engine->Tick();
+                }
                 TickWhileWaiting(kHiddenMilliseconds);
                 continue;
             }
+            const bool animating = m_workspace->Animating();
             const bool busy = m_engine->Scanner().Busy() || m_engine->Debugger().Broken() || !m_engine->Notices().empty() || m_engine->Working();
-            if (!busy && m_host.InputAge() > kBusyMilliseconds)
+            if (!animating && !busy && m_host.InputAge() > kBusyMilliseconds)
                 TickWhileWaiting(kIdleFrameMilliseconds);
-            else if (busy && m_host.InputAge() > kBusyMilliseconds)
+            else if (!animating && busy && m_host.InputAge() > kBusyMilliseconds)
                 TickWhileWaiting(33);
             m_host.ApplyPendingResize();
             m_host.RenderFrame();

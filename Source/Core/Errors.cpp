@@ -262,6 +262,9 @@ namespace Manifold
             { ErrorCode::NotElevated, "The program runs without administrator rights.",
                 "Many games run elevated or protect their memory, and then they cannot be opened.",
                 "Restart as administrator from the Help menu if a process cannot be opened." },
+            { ErrorCode::ReportNotSaved, "The diagnostics report could not be written to {}.",
+                "The folder does not exist or is not writable.",
+                "Save it somewhere else, or copy it to the clipboard instead." },
 
             { ErrorCode::TableNotRead, "The table {} could not be read.",
                 "The file is missing or not readable.",

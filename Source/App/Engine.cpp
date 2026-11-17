@@ -2,6 +2,7 @@
 
 #include "App/Sounds.h"
 
+#include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
 
@@ -1399,18 +1400,25 @@ namespace Manifold
     void Engine::Tick()
     {
         const double now = Now();
-        m_jobs.Drain();
-        const int scansBefore = m_scanner.ScanNumber();
-        if (m_scanner.Poll())
         {
-            if (m_scanner.ScanNumber() != scansBefore)
-                Sounds::Play(Sounds::Cue::Success);
-            else if (!m_scanner.LastError().Ok())
-                Sounds::Play(Sounds::Cue::Error);
+            PROFILE_ZONE("Finished background jobs");
+            m_jobs.Drain();
+        }
+        const int scansBefore = m_scanner.ScanNumber();
+        {
+            PROFILE_ZONE("Scanner");
+            if (m_scanner.Poll())
+            {
+                if (m_scanner.ScanNumber() != scansBefore)
+                    Sounds::Play(Sounds::Cue::Success);
+                else if (!m_scanner.LastError().Ok())
+                    Sounds::Play(Sounds::Cue::Error);
+            }
         }
 
         if (m_process && now - m_lastAliveCheck > kAliveCheckSeconds)
         {
+            PROFILE_ZONE("Process check");
             m_lastAliveCheck = now;
             if (!m_process->Alive())
             {
@@ -1419,21 +1427,47 @@ namespace Manifold
             }
         }
 
-        UpdateAutoAttach();
-        UpdateFreezes();
-        UpdateHotkeys();
-        RefreshValues(false);
-        m_lua->Tick(now);
-        DrainMainWork();
+        {
+            PROFILE_ZONE("Open processes automatically");
+            UpdateAutoAttach();
+        }
+        {
+            PROFILE_ZONE("Frozen values");
+            UpdateFreezes();
+        }
+        {
+            PROFILE_ZONE("Hotkeys");
+            UpdateHotkeys();
+        }
+        {
+            PROFILE_ZONE("Address list values");
+            RefreshValues(false);
+        }
+        {
+            PROFILE_ZONE("Lua timers");
+            m_lua->Tick(now);
+        }
+        {
+            PROFILE_ZONE("Work for the main thread");
+            DrainMainWork();
+        }
         if (m_async)
         {
-            m_lua->RunTasks(kTaskBudgetSeconds);
-            DrainMainWork();
+            {
+                PROFILE_ZONE("Lua tasks");
+                m_lua->RunTasks(kTaskBudgetSeconds);
+            }
+            {
+                PROFILE_ZONE("Work for the main thread");
+                DrainMainWork();
+            }
+            PROFILE_ZONE("Script activations");
             PumpActivations(kActivationBudgetSeconds);
         }
 
         if (m_debugger.Attached())
         {
+            PROFILE_ZONE("Debugger");
             const Debug::BreakInfo info = m_debugger.Break();
             if (info.Broken && info.Serial != m_lastBreakSerial)
             {

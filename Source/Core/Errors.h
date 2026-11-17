@@ -80,6 +80,7 @@
     X(Crashed, 5010) \
     X(LastRunCrashed, 5011) \
     X(NotElevated, 5012) \
+    X(ReportNotSaved, 5013) \
     X(TableNotRead, 6001) \
     X(TableNotXml, 6002) \
     X(TableNotCheatTable, 6003) \

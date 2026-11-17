@@ -68,6 +68,8 @@ namespace Manifold::UI
     class ThreadListWindow;
     class TraceWindow;
     class MonoWindow;
+    class ProfilerWindow;
+    class NopSledWindow;
 
     struct FileFilter
     {
@@ -117,6 +119,9 @@ namespace Manifold::UI
         void OpenThreadList();
         void OpenTrace(std::uint64_t address, unsigned int viewport = 0);
         void OpenMono();
+        void OpenProfiler(int tab = -1);
+        void OpenNopSled();
+        bool Animating() const;
         void AddAddress(std::uint64_t address, Scan::ValueType type, std::string description = {});
         void Confirm(std::string title, std::string text, std::function<void()> yes, std::string yesLabel = "Yes");
         void Report(const Status& status);
@@ -177,6 +182,8 @@ namespace Manifold::UI
         std::unique_ptr<BreakpointWindow> m_breakpoints;
         std::unique_ptr<ThreadListWindow> m_threadList;
         std::unique_ptr<MonoWindow> m_mono;
+        std::unique_ptr<ProfilerWindow> m_profiler;
+        std::unique_ptr<NopSledWindow> m_nopSled;
         std::vector<std::unique_ptr<TraceWindow>> m_traces;
         int m_nextTrace = 1;
         MemoryViewer& ActiveMemoryViewer();
@@ -200,6 +207,10 @@ namespace Manifold::UI
         bool m_aboutOpen = false;
         bool m_quitConfirmed = false;
         bool m_restyle = false;
+        void SecretKeys();
+        int m_secretStep = 0;
+        int m_versionClicks = 0;
+        double m_versionClickedAt = -100.0;
     };
 
     std::string NextWindowTitle(const char* base, int number);

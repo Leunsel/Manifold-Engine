@@ -2,8 +2,11 @@
 
 #include "Asm/AutoAssembler.h"
 #include "Core/Errors.h"
+#include "App/Diagnostics.h"
+#include "App/Engine.h"
 #include "App/Sounds.h"
 #include "Core/JobQueue.h"
+#include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Core/Xml.h"
 #include "Debug/BreakAction.h"
@@ -697,6 +700,142 @@ data:
         CHECK_EQ(finished, 100);
     }
 
+    void Spin(double milliseconds)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        while (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() < milliseconds)
+        {
+        }
+    }
+
+    const Profiler::ZoneView* FindZone(const std::vector<Profiler::ZoneView>& tree, std::string_view name)
+    {
+        for (const Profiler::ZoneView& zone : tree)
+        {
+            if (name == zone.Name)
+                return &zone;
+        }
+        return nullptr;
+    }
+
+    void ProfilerZones()
+    {
+        Profiler::SetEnabled(false);
+        Profiler::Reset();
+        {
+            PROFILE_ZONE("Test while off");
+        }
+        Profiler::SetEnabled(true);
+        Profiler::BeginFrame();
+        for (int frame = 0; frame < 5; ++frame)
+        {
+            {
+                PROFILE_ZONE("Test outer");
+                Spin(2.0);
+                for (int call = 0; call < 2; ++call)
+                {
+                    PROFILE_ZONE("Test inner");
+                    Spin(1.0);
+                }
+            }
+            {
+                PROFILE_WAIT("Test wait");
+                Spin(3.0);
+            }
+            std::thread([] { PROFILE_ZONE("Test other thread"); }).join();
+            Profiler::Count("Test counter", frame);
+            Profiler::BeginFrame();
+        }
+        CHECK_EQ(Profiler::Frames(), 5);
+        CHECK_EQ(Profiler::FrameCount(), 5u);
+        const std::vector<Profiler::ZoneView> tree = Profiler::Tree();
+        const Profiler::ZoneView* outer = FindZone(tree, "Test outer");
+        const Profiler::ZoneView* inner = FindZone(tree, "Test inner");
+        const Profiler::ZoneView* wait = FindZone(tree, "Test wait");
+        CHECK(outer && inner && wait);
+        CHECK(!FindZone(tree, "Test while off"));
+        CHECK(!FindZone(tree, "Test other thread"));
+        if (outer && inner && wait)
+        {
+            CHECK_EQ(outer->Depth, 1);
+            CHECK_EQ(inner->Depth, 2);
+            CHECK_EQ(inner->Parent, outer->Node);
+            CHECK(wait->Wait && !outer->Wait);
+            CHECK(std::abs(inner->CallsPerFrame - 2.0) < 1e-9);
+            CHECK_MSG(outer->AverageMs >= 3.8, std::to_string(outer->AverageMs));
+            CHECK_MSG(outer->SelfMs >= 1.8 && outer->SelfMs < outer->AverageMs - 1.5, std::to_string(outer->SelfMs));
+            CHECK(outer->MaxMs >= outer->AverageMs);
+            CHECK(Profiler::ZoneMs(inner->Node, 0) >= 1.9);
+            CHECK(std::abs(Profiler::ZoneCalls(inner->Node, 0) - 2.0) < 1e-9);
+        }
+        CHECK_MSG(Profiler::FrameMs(0) >= Profiler::WorkMs(0) + 2.8, std::to_string(Profiler::FrameMs(0)) + " vs " + std::to_string(Profiler::WorkMs(0)));
+        CHECK(Profiler::WorkMs(0) >= 3.8);
+        const Profiler::FrameSummary summary = Profiler::Summary();
+        CHECK_EQ(summary.Frames, 5);
+        CHECK(summary.PeriodMs > summary.WorkMs && summary.WorkP50 <= summary.WorkP99 && summary.WorkP99 <= summary.WorkMax);
+        CHECK(summary.FramesPerSecond > 0.0 && summary.FramesPerSecond < 1000.0 / 6.5);
+        bool counted = false;
+        for (const Profiler::CounterView& counter : Profiler::Counters())
+            counted = counted || (std::string_view(counter.Name) == "Test counter" && counter.Last == 4.0 && counter.Max == 4.0);
+        CHECK(counted);
+        std::vector<float> history;
+        Profiler::WorkHistory(history);
+        CHECK_EQ(history.size(), 5u);
+        Profiler::SetPaused(true);
+        Profiler::BeginFrame();
+        Profiler::BeginFrame();
+        CHECK_EQ(Profiler::Frames(), 5);
+        Profiler::SetPaused(false);
+        Profiler::Reset();
+        CHECK_EQ(Profiler::Frames(), 0);
+        CHECK_EQ(Profiler::FrameCount(), 0u);
+        CHECK_EQ(Profiler::FrameMs(0), 0.0);
+        Profiler::SetEnabled(false);
+    }
+
+    void DiagnosticsInfo()
+    {
+        CHECK_EQ(Diagnostics::Milliseconds(12.345), "12.3 ms");
+        CHECK_EQ(Diagnostics::Milliseconds(0.25), "0.25 ms");
+        CHECK_EQ(Diagnostics::Milliseconds(0.05), "50 us");
+        CHECK_EQ(Diagnostics::Bytes(3u << 20), "3.0 MB");
+        CHECK_EQ(Diagnostics::Bytes(512), "512 bytes");
+
+        Settings settings;
+        Engine engine(settings);
+        Diagnostics::Sample(true);
+        Spin(20.0);
+        Diagnostics::Sample(true);
+        const Diagnostics::ProcessSample& sample = Diagnostics::LastSample();
+        CHECK(sample.Valid);
+        CHECK(sample.PrivateBytes > 0 && sample.WorkingSet > 0 && sample.Handles > 0 && sample.Threads >= 1);
+        const std::vector<Diagnostics::ThreadSample>& threads = Diagnostics::LastThreads();
+        CHECK(!threads.empty());
+        CHECK(std::any_of(threads.begin(), threads.end(), [](const Diagnostics::ThreadSample& thread) { return thread.Main && !thread.Start.empty(); }));
+
+        const std::vector<Diagnostics::InfoGroup> groups = Diagnostics::CollectInfo(engine);
+        const auto group = [&](std::string_view title) {
+            return std::find_if(groups.begin(), groups.end(), [&](const Diagnostics::InfoGroup& entry) { return entry.Title == title; }) != groups.end();
+        };
+        CHECK(group("Build") && group("System") && group("Graphics") && group("This program") && group("Engine") && group("Lua") && group("Settings"));
+
+        const std::vector<Diagnostics::Check> checks = Diagnostics::RunChecks(engine);
+        CHECK(checks.size() >= 4);
+        bool sorted = true;
+        for (std::size_t i = 1; i < checks.size(); ++i)
+            sorted = sorted && static_cast<int>(checks[i - 1].Severity) >= static_cast<int>(checks[i].Severity);
+        CHECK(sorted);
+        CHECK(std::any_of(checks.begin(), checks.end(), [](const Diagnostics::Check& check) { return check.Area == "Files" && check.Title.find("program folder") != std::string::npos; }));
+        CHECK(std::any_of(checks.begin(), checks.end(), [](const Diagnostics::Check& check) { return check.Act == Diagnostics::Action::TurnOnProfiler; }));
+
+        const std::string report = Diagnostics::Report(engine, { { "Extra group", { { "Extra key", "Extra value" } } } });
+        CHECK(report.rfind("# Manifold Engine diagnostics", 0) == 0);
+        CHECK(report.find("## Checks") != std::string::npos);
+        CHECK(report.find("## Build") != std::string::npos);
+        CHECK(report.find("## Extra group") != std::string::npos && report.find("- Extra key: Extra value") != std::string::npos);
+        CHECK(report.find("## Threads") != std::string::npos);
+    }
+
     int RunCoreTests()
     {
         const int before = Totals().Failures;
@@ -713,6 +852,8 @@ data:
         Jobs();
         SoundDecoding();
         RecordIndex();
+        ProfilerZones();
+        DiagnosticsInfo();
         return Totals().Failures - before;
     }
 }

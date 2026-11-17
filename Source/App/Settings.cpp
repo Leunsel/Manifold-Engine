@@ -112,6 +112,9 @@ namespace Manifold
         if (auto v = text("compact")) CompactMode = ToBool(*v);
         if (auto v = text("playsounds")) PlaySounds = ToBool(*v);
         if (auto v = text("mode")) ReleaseMode = EqualsNoCase(*v, "release");
+        if (auto v = text("profiler")) ProfilerEnabled = ToBool(*v);
+        if (auto v = text("profilerstatusbar")) ProfilerInStatusBar = ToBool(*v);
+        if (auto v = text("nopsledbest")) NopSledBest = std::max(0, ToInt(*v, 0));
         if (auto v = text("verboselog")) VerboseLog = ToBool(*v);
         if (auto v = text("logdebugstrings")) LogDebugStrings = ToBool(*v);
         if (auto v = text("hardwareexecute")) UseHardwareExecuteBreakpoints = ToBool(*v);
@@ -147,7 +150,8 @@ namespace Manifold
         out << "TableScripts=" << (TableScripts == TableScriptPolicy::Always ? "always" : TableScripts == TableScriptPolicy::Never ? "never" : "ask") << "\n";
         out << "ActiveScriptsOnQuit=" << (ActiveScriptsOnQuit == QuitPolicy::Disable ? "disable" : ActiveScriptsOnQuit == QuitPolicy::Leave ? "leave" : "ask") << "\n\n";
         out << "[Interface]\n";
-        out << "Mode=" << (ReleaseMode ? "release" : "developer") << "\nCompact=" << (CompactMode ? 1 : 0) << "\nPlaySounds=" << (PlaySounds ? 1 : 0) << "\n\n";
+        out << "Mode=" << (ReleaseMode ? "release" : "developer") << "\nCompact=" << (CompactMode ? 1 : 0) << "\nPlaySounds=" << (PlaySounds ? 1 : 0) << "\n";
+        out << "Profiler=" << (ProfilerEnabled ? 1 : 0) << "\nProfilerStatusBar=" << (ProfilerInStatusBar ? 1 : 0) << "\n\n";
         out << "[Debugger]\n";
         out << "VerboseLog=" << (VerboseLog ? 1 : 0) << "\nLogDebugStrings=" << (LogDebugStrings ? 1 : 0) << "\n";
         out << "HardwareExecute=" << (UseHardwareExecuteBreakpoints ? 1 : 0) << "\nRegistersOnBreak=" << (ShowRegistersOnBreak ? 1 : 0) << "\n";
@@ -164,6 +168,8 @@ namespace Manifold
             for (const auto& [name, value] : Theme.Sizes)
                 out << "Size." << name << "=" << value << "\n";
         }
+        if (NopSledBest > 0)
+            out << "\n[Extras]\nNopSledBest=" << NopSledBest << "\n";
         if (!Shortcuts.empty())
         {
             out << "\n[Shortcuts]\n";

@@ -7,6 +7,8 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <algorithm>
+#include <cstdlib>
 #include <string>
 
 #include "Syscalls/Syscall.h"
@@ -29,6 +31,10 @@ namespace
                 options.Open = Manifold::Split(Manifold::WideToUtf8(argument.substr(7)), ',');
             else if (argument.rfind(L"--table=", 0) == 0)
                 options.Table = argument.substr(8);
+            else if (argument.rfind(L"--profile-report=", 0) == 0)
+                options.ProfileReport = argument.substr(17);
+            else if (argument.rfind(L"--profile-seconds=", 0) == 0)
+                options.ProfileSeconds = std::max(1, std::min(3600, _wtoi(argument.substr(18).c_str())));
             else if (!argument.empty() && argument[0] != L'-')
                 options.Table = argument;
         }

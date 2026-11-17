@@ -76,13 +76,14 @@ The tests cover the assembler (557 cases), value parsing, XML and cheat table ro
 - View → Release mode is for using a finished table: the address list shows only Active, Description and Value, the Tools menu and the technical menu entries are gone (Edit keeps only Settings), a double click turns a script on or off, and messages leave out their error codes. The same menu switches it back.
 - Scripts that only run Lua, such as one that starts the game, work without an opened process. Scripts that need the game say so when they are turned on.
 - When the program closes while scripts are active in the game, it asks whether to turn them off first, so nothing stays behind in the game. Settings → Scripts can make that choice permanent.
+- Settings → General → Diagnostics turns on the profiler. Help → Profiler and diagnostics (`Ctrl+Shift+F12`, also without the profiler) shows the frame graph, the breakdown of a frame (engine tick, Lua timers and tasks, every window, drawing, waiting for the display), the program's threads with their processor use, checks of the setup and environment (rights, writable folder, graphics driver, overlays hooking the program, hypervisor, microcode, memory, Lua timers) and app info; Copy report and Save report put all of it into one text. `Manifold-Engine.exe --profile-report=report.txt --profile-seconds=10` measures for that long, writes the report and closes; `--open=profiler`, `breakdown`, `threads`, `checks` or `appinfo` opens the window on that tab at start.
 
 ## Layout
 
 | Folder | Content |
 | --- | --- |
 | `Source/App` | program, window host, settings, the engine that ties the parts together, crash handler |
-| `Source/Core` | error codes, log, text helpers, XML |
+| `Source/Core` | error codes, log, text helpers, XML, the frame profiler |
 | `Source/Target` | process access, process list, symbols and address expressions |
 | `Source/Disasm`, `Source/Asm` | Zydis disassembler, assembler and Auto Assembler |
 | `Source/Templates`, `Templates` | template engine, its values and the built-in template files (`Tools/embed_templates.py` puts them into `Source/Generated/BuiltinTemplates.cpp`) |

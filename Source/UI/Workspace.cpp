@@ -1,11 +1,14 @@
 #include "UI/Workspace.h"
 
+#include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Core/Version.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
 #include "Table/CheatTable.h"
 #include "Target/Process.h"
+#include "UI/NopSled.h"
+#include "UI/ProfilerWindow.h"
 #include "UI/ScriptUi.h"
 #include "UI/Shortcuts.h"
 #include "UI/TemplateManager.h"
@@ -72,10 +75,20 @@ namespace Manifold::UI
             m_restyle = false;
             m_shell.Restyle();
         }
-        HandleRequests();
-        HandleShortcuts();
-        m_main->Draw();
-        DrawWindows();
+        {
+            PROFILE_ZONE("Requests and shortcuts");
+            HandleRequests();
+            HandleShortcuts();
+        }
+        {
+            PROFILE_ZONE("Main window");
+            m_main->Draw();
+        }
+        {
+            PROFILE_ZONE("Tool windows");
+            DrawWindows();
+        }
+        PROFILE_ZONE("Dialogs and notices");
         DrawConfirm();
         DrawQuitPrompt();
         DrawTableScriptPrompt();
@@ -85,51 +98,47 @@ namespace Manifold::UI
 
     void Workspace::DrawWindows()
     {
-        for (std::size_t i = 0; i < m_memoryViewers.size(); ++i)
-            m_memoryViewers[i]->Draw();
-        for (std::size_t i = 0; i < m_structures.size(); ++i)
-            m_structures[i]->Draw();
-        for (std::size_t i = 0; i < m_scripts.size(); ++i)
-            m_scripts[i]->Draw();
-        for (std::size_t i = 0; i < m_watches.size(); ++i)
-            m_watches[i]->Draw();
-        for (std::size_t i = 0; i < m_editors.size(); ++i)
-            m_editors[i]->Draw();
-        if (m_lua && !m_lua->Closed())
-            m_lua->Draw();
-        if (m_log && !m_log->Closed())
-            m_log->Draw();
-        if (m_settings && !m_settings->Closed())
-            m_settings->Draw();
-        if (m_picker && !m_picker->Closed())
-            m_picker->Draw();
-        if (m_symbols && !m_symbols->Closed())
-            m_symbols->Draw();
-        if (m_regions && !m_regions->Closed())
-            m_regions->Draw();
-        if (m_tableFiles && !m_tableFiles->Closed())
-            m_tableFiles->Draw();
-        if (m_patchScan && !m_patchScan->Closed())
-            m_patchScan->Draw();
-        if (m_codeDissect && !m_codeDissect->Closed())
-            m_codeDissect->Draw();
-        if (m_asmSearch && !m_asmSearch->Closed())
-            m_asmSearch->Draw();
-        if (m_byteSearch && !m_byteSearch->Closed())
-            m_byteSearch->Draw();
-        if (m_breakpoints && !m_breakpoints->Closed())
-            m_breakpoints->Draw();
-        if (m_threadList && !m_threadList->Closed())
-            m_threadList->Draw();
-        if (m_mono && !m_mono->Closed())
-            m_mono->Draw();
-        for (std::size_t i = 0; i < m_traces.size(); ++i)
-            m_traces[i]->Draw();
-        if (m_shortcuts && !m_shortcuts->Closed())
-            m_shortcuts->Draw();
-        if (m_templateManager && !m_templateManager->Closed())
-            m_templateManager->Draw();
-        m_scriptForms->Draw();
+        const auto drawAll = [](const char* zone, auto& windows) {
+            if (windows.empty())
+                return;
+            PROFILE_ZONE(zone);
+            for (std::size_t i = 0; i < windows.size(); ++i)
+                windows[i]->Draw();
+        };
+        const auto drawOne = [](const char* zone, auto& window) {
+            if (!window || window->Closed())
+                return;
+            PROFILE_ZONE(zone);
+            window->Draw();
+        };
+        drawAll("Memory viewers", m_memoryViewers);
+        drawAll("Structure dissect", m_structures);
+        drawAll("Script editors", m_scripts);
+        drawAll("Watch windows", m_watches);
+        drawAll("Record editors", m_editors);
+        drawOne("Lua engine", m_lua);
+        drawOne("Log", m_log);
+        drawOne("Settings", m_settings);
+        drawOne("Process list", m_picker);
+        drawOne("Symbols", m_symbols);
+        drawOne("Memory regions", m_regions);
+        drawOne("Table files", m_tableFiles);
+        drawOne("Patch scan", m_patchScan);
+        drawOne("Code dissect", m_codeDissect);
+        drawOne("Assembly search", m_asmSearch);
+        drawOne("Byte search", m_byteSearch);
+        drawOne("Breakpoints", m_breakpoints);
+        drawOne("Thread list", m_threadList);
+        drawOne("Mono / .NET", m_mono);
+        drawAll("Traces", m_traces);
+        drawOne("Keyboard shortcuts", m_shortcuts);
+        drawOne("Template manager", m_templateManager);
+        drawOne("Profiler", m_profiler);
+        drawOne("NOP Sled", m_nopSled);
+        {
+            PROFILE_ZONE("Script forms");
+            m_scriptForms->Draw();
+        }
         Prune(m_memoryViewers);
         m_engine.MemoryViewerVisible = std::any_of(m_memoryViewers.begin(), m_memoryViewers.end(), [](const auto& viewer) { return !viewer->Closed(); });
         Prune(m_structures);
@@ -183,6 +192,34 @@ namespace Manifold::UI
             OpenLua();
         if (Pressed(Command::OpenLog) && !release)
             OpenLog();
+        if (Pressed(Command::OpenProfiler))
+            OpenProfiler();
+        SecretKeys();
+    }
+
+    void Workspace::SecretKeys()
+    {
+        static constexpr ImGuiKey kSequence[] = { ImGuiKey_UpArrow, ImGuiKey_UpArrow, ImGuiKey_DownArrow, ImGuiKey_DownArrow, ImGuiKey_LeftArrow, ImGuiKey_RightArrow,
+            ImGuiKey_LeftArrow, ImGuiKey_RightArrow, ImGuiKey_B, ImGuiKey_A };
+        const ImGuiIO& io = ImGui::GetIO();
+        if (io.WantTextInput || io.KeyCtrl || io.KeyAlt)
+            return;
+        for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key)
+        {
+            const ImGuiKey pressed = static_cast<ImGuiKey>(key);
+            if (pressed == ImGuiKey_LeftShift || pressed == ImGuiKey_RightShift || (pressed >= ImGuiKey_MouseLeft && pressed <= ImGuiKey_MouseWheelY) ||
+                !ImGui::IsKeyPressed(pressed, false))
+                continue;
+            if (pressed == kSequence[m_secretStep])
+                ++m_secretStep;
+            else
+                m_secretStep = pressed == kSequence[0] ? 1 : 0;
+            if (m_secretStep == static_cast<int>(std::size(kSequence)))
+            {
+                m_secretStep = 0;
+                OpenNopSled();
+            }
+        }
     }
 
     void Workspace::OpenTableDialog(bool merge)
@@ -428,6 +465,25 @@ namespace Manifold::UI
         if (!m_mono)
             m_mono = std::make_unique<MonoWindow>(*this);
         m_mono->Show();
+    }
+
+    void Workspace::OpenProfiler(int tab)
+    {
+        if (!m_profiler)
+            m_profiler = std::make_unique<ProfilerWindow>(*this);
+        m_profiler->Show(tab);
+    }
+
+    void Workspace::OpenNopSled()
+    {
+        if (!m_nopSled)
+            m_nopSled = std::make_unique<NopSledWindow>(*this);
+        m_nopSled->Show();
+    }
+
+    bool Workspace::Animating() const
+    {
+        return m_nopSled && m_nopSled->Animating();
     }
 
     void Workspace::OpenTrace(std::uint64_t address, unsigned int viewport)
@@ -960,6 +1016,24 @@ namespace Manifold::UI
         if (BeginModal(id, ICON_FA_MICROCHIP, "About Manifold Engine", ImVec2(460.0f, 0.0f), &m_aboutOpen))
         {
             ImGui::Text("Version %s", MANIFOLD_VERSION_TEXT);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+            {
+                const double now = ImGui::GetTime();
+                m_versionClicks = now - m_versionClickedAt < 1.5 ? m_versionClicks + 1 : 1;
+                m_versionClickedAt = now;
+            }
+            if (m_versionClicks >= 4 && ImGui::GetTime() - m_versionClickedAt < 1.5)
+            {
+                ImGui::SameLine(0.0f, Px(10.0f));
+                Muted(std::string(static_cast<std::size_t>(m_versionClicks - 3), '.') + " " + std::to_string(7 - m_versionClicks));
+            }
+            if (m_versionClicks >= 7)
+            {
+                m_versionClicks = 0;
+                m_aboutOpen = false;
+                ImGui::CloseCurrentPopup();
+                OpenNopSled();
+            }
             Muted("Memory scanner, debugger, assembler and Lua scripting for Windows processes.");
             ImGui::Spacing();
             ImGui::TextUnformatted("Built with Dear ImGui (docking), Zydis 5 and Lua 5.4.");

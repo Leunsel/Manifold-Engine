@@ -48,6 +48,9 @@
     <ClCompile Include="..\Source\App\Commands.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\Diagnostics.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Engine.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -73,6 +76,9 @@
       <Filter>Source\Core</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Core\JobQueue.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\Profiler.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Core\RuntimeLog.cpp">

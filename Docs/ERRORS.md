@@ -100,6 +100,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-5010 | The program crashed (…). | An unexpected error stopped the program. | Start the program again. If it stays, report the code with the log file next to the program. |
 | ME-5011 | The last run crashed. A report is in …. | The program ended through an unexpected error last time. | Start the program again. If it stays, report the code with the log file next to the program. |
 | ME-5012 | The program runs without administrator rights. | Many games run elevated or protect their memory, and then they cannot be opened. | Restart as administrator from the Help menu if a process cannot be opened. |
+| ME-5013 | The diagnostics report could not be written to …. | The folder does not exist or is not writable. | Save it somewhere else, or copy it to the clipboard instead. |
 
 ## Cheat tables
 

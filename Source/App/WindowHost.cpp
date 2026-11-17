@@ -1,6 +1,8 @@
 #include "App/WindowHost.h"
 
+#include "App/Diagnostics.h"
 #include "Core/Errors.h"
+#include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Resource.h"
 #include "UI/Fonts.h"
@@ -131,6 +133,76 @@ namespace Manifold
                 style.FrameBorderSize = base.FrameBorderSize;
             }
             style.FontScaleDpi = scale;
+        }
+
+        Diagnostics::Adapter AdapterOf(IDXGIAdapter* adapter)
+        {
+            Diagnostics::Adapter info;
+            IDXGIAdapter1* first = nullptr;
+            if (SUCCEEDED(adapter->QueryInterface(IID_PPV_ARGS(&first))))
+            {
+                DXGI_ADAPTER_DESC1 desc{};
+                if (SUCCEEDED(first->GetDesc1(&desc)))
+                {
+                    info.Name = WideToUtf8(desc.Description);
+                    info.Vendor = desc.VendorId;
+                    info.VideoMemory = desc.DedicatedVideoMemory;
+                    info.Software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+                }
+                first->Release();
+            }
+            return info;
+        }
+
+        void DescribeGraphics(HWND window, IDXGIAdapter* adapter, IDXGIFactory2* factory, D3D_FEATURE_LEVEL level, bool warp)
+        {
+            Diagnostics::GraphicsInfo info;
+            info.Window = window;
+            info.Warp = warp;
+            info.Device = AdapterOf(adapter);
+            LARGE_INTEGER version{};
+            if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &version)))
+            {
+                char text[48];
+                std::snprintf(text, sizeof(text), "%u.%u.%u.%u", HIWORD(version.HighPart), LOWORD(version.HighPart), HIWORD(version.LowPart), LOWORD(version.LowPart));
+                info.Driver = text;
+            }
+            char feature[24];
+            std::snprintf(feature, sizeof(feature), "Direct3D %u_%u", (static_cast<unsigned>(level) >> 12) & 0xFu, (static_cast<unsigned>(level) >> 8) & 0xFu);
+            info.FeatureLevel = feature;
+            info.SwapEffect = "flip discard, 2 buffers, synced to the display";
+            IDXGIAdapter1* other = nullptr;
+            for (UINT index = 0; factory->EnumAdapters1(index, &other) != DXGI_ERROR_NOT_FOUND; ++index)
+            {
+                info.Adapters.push_back(AdapterOf(other));
+                other->Release();
+                other = nullptr;
+            }
+            Diagnostics::SetGraphics(std::move(info));
+        }
+
+        void CountDrawData()
+        {
+            int lists = 0;
+            int commands = 0;
+            int vertices = 0;
+            int viewports = 0;
+            for (ImGuiViewport* viewport : ImGui::GetPlatformIO().Viewports)
+            {
+                const ImDrawData* data = viewport->DrawData;
+                if (!data || !data->Valid)
+                    continue;
+                ++viewports;
+                lists += data->CmdListsCount;
+                vertices += data->TotalVtxCount;
+                for (const ImDrawList* list : data->CmdLists)
+                    commands += list->CmdBuffer.Size;
+            }
+            Profiler::Count("Draw calls", commands);
+            Profiler::Count("Vertices", vertices);
+            Profiler::Count("Draw lists", lists);
+            Profiler::Count("Viewports drawn", viewports);
+            Profiler::Count("ImGui windows", ImGui::GetCurrentContext()->Windows.Size);
         }
 
         bool IsInputMessage(UINT message)
@@ -291,9 +363,13 @@ namespace Manifold
         UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
         const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0 };
         D3D_FEATURE_LEVEL obtained = {};
+        bool warp = false;
         HRESULT hr = ::D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, &m_device, &obtained, &m_context);
         if (hr == DXGI_ERROR_UNSUPPORTED)
+        {
+            warp = true;
             hr = ::D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, &m_device, &obtained, &m_context);
+        }
         if (FAILED(hr))
         {
             PutError(m_error, ARRAYSIZE(m_error), ErrorCode::DeviceFailed, HexText(hr));
@@ -319,6 +395,7 @@ namespace Manifold
             PutError(m_error, ARRAYSIZE(m_error), ErrorCode::FactoryFailed, HexText(hr));
             return false;
         }
+        DescribeGraphics(m_hwnd, adapter, factory, obtained, warp);
 
         DXGI_SWAP_CHAIN_DESC1 desc = {};
         desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -413,30 +490,73 @@ namespace Manifold
             ~FrameDone() { Flag = false; }
         } frameDone{ m_inFrame };
 
-        m_client.BeforeFrame();
+        Profiler::BeginFrame();
+        {
+            PROFILE_ZONE("Engine tick");
+            m_client.BeforeFrame();
+        }
 
-        ImGui_ImplDX11_NewFrame();
-        ImGui_ImplWin32_NewFrame();
-        ImGui::GetIO().ConfigInputTrickleEventQueue = ClicksOrKeysQueued();
-        ImGui::NewFrame();
+        {
+            PROFILE_ZONE("Input and new frame");
+            ImGui_ImplDX11_NewFrame();
+            ImGui_ImplWin32_NewFrame();
+            ImGui::GetIO().ConfigInputTrickleEventQueue = ClicksOrKeysQueued();
+            ImGui::NewFrame();
+        }
 
-        m_dragAreas.clear();
-        m_client.DrawFrame();
+        {
+            PROFILE_ZONE("Build the interface");
+            m_dragAreas.clear();
+            m_client.DrawFrame();
+        }
 
-        ImGui::Render();
+        {
+            PROFILE_ZONE("Finish the draw lists");
+            ImGui::Render();
+        }
+        if (Profiler::Enabled())
+            CountDrawData();
 
-        const ImVec4 clear = ManifoldTheme::Page;
-        const float rgba[4] = { clear.x, clear.y, clear.z, 1.0f };
-        m_context->OMSetRenderTargets(1, &m_renderTarget, nullptr);
-        m_context->ClearRenderTargetView(m_renderTarget, rgba);
-        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        {
+            PROFILE_ZONE("Draw the main window");
+            const ImVec4 clear = ManifoldTheme::Page;
+            const float rgba[4] = { clear.x, clear.y, clear.z, 1.0f };
+            m_context->OMSetRenderTargets(1, &m_renderTarget, nullptr);
+            m_context->ClearRenderTargetView(m_renderTarget, rgba);
+            ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        }
 
         if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
         {
-            ImGui::UpdatePlatformWindows();
-            ImGui::RenderPlatformWindowsDefault();
+            ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+            {
+                PROFILE_ZONE("Draw the tool windows");
+                ImGui::UpdatePlatformWindows();
+                for (int i = 1; i < platform.Viewports.Size; ++i)
+                {
+                    ImGuiViewport* viewport = platform.Viewports[i];
+                    if (viewport->Flags & ImGuiViewportFlags_IsMinimized)
+                        continue;
+                    if (platform.Platform_RenderWindow)
+                        platform.Platform_RenderWindow(viewport, nullptr);
+                    if (platform.Renderer_RenderWindow)
+                        platform.Renderer_RenderWindow(viewport, nullptr);
+                }
+            }
+            PROFILE_WAIT("Present the tool windows");
+            for (int i = 1; i < platform.Viewports.Size; ++i)
+            {
+                ImGuiViewport* viewport = platform.Viewports[i];
+                if (viewport->Flags & ImGuiViewportFlags_IsMinimized)
+                    continue;
+                if (platform.Platform_SwapBuffers)
+                    platform.Platform_SwapBuffers(viewport, nullptr);
+                if (platform.Renderer_SwapBuffers)
+                    platform.Renderer_SwapBuffers(viewport, nullptr);
+            }
         }
 
+        PROFILE_WAIT("Present (waits for the display)");
         const HRESULT hr = m_swapChain->Present(1, 0);
         m_occluded = (hr == DXGI_STATUS_OCCLUDED);
     }

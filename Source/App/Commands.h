@@ -40,6 +40,7 @@ namespace Manifold
         OpenShortcuts,
         OpenLog,
         OpenMono,
+        OpenProfiler,
 
         NewTable,
         OpenLastProcess,

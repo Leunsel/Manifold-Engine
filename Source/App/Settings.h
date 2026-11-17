@@ -61,6 +61,9 @@ namespace Manifold
         bool CompactMode = false;
         bool PlaySounds = true;
         bool ReleaseMode = false;
+        bool ProfilerEnabled = false;
+        bool ProfilerInStatusBar = true;
+        int NopSledBest = 0;
 
         bool VerboseLog = false;
         bool LogDebugStrings = true;

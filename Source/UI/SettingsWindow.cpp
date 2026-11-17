@@ -2,6 +2,7 @@
 
 #include "App/Settings.h"
 #include "App/Sounds.h"
+#include "Core/Profiler.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Core/Version.h"
@@ -791,6 +792,33 @@ namespace Manifold::UI
                 std::filesystem::create_directories(Paths::SoundsFolder(), error);
                 OpenFolder(Paths::SoundsFolder());
             }
+            list.EndRow();
+        }
+
+        list.Section("Diagnostics");
+        if (list.Row("Profiler", "Measures every frame: the engine, Lua timers and tasks, each window, drawing and waiting, and adds Help > Profiler and diagnostics. "
+                "It costs a few microseconds per frame. The checks of setup and environment work without it.", toggle))
+        {
+            if (ToggleSwitch("##profiler", &settings.ProfilerEnabled))
+            {
+                Profiler::SetEnabled(settings.ProfilerEnabled);
+                changed = true;
+            }
+            list.EndRow();
+        }
+        if (list.Row("Frame time in the status bar", "Shows the work per frame and the frame rate at the bottom of the main window while the profiler is on. Click it to open the profiler.", toggle))
+        {
+            ImGui::BeginDisabled(!settings.ProfilerEnabled);
+            changed |= ToggleSwitch("##profilerstatus", &settings.ProfilerInStatusBar);
+            ImGui::EndDisabled();
+            list.EndRow();
+        }
+        const float profilerButton = std::round(Px(210.0f));
+        if (list.Row("Profiler and diagnostics", "Frame graph, the breakdown of a frame, threads, checks of the setup and app info. " + BindingText(Command::OpenProfiler, CurrentBinding(Command::OpenProfiler)) + " opens it from anywhere.",
+                profilerButton))
+        {
+            if (ImGui::Button(ICON_FA_TACHOMETER_ALT "  Open the profiler", ImVec2(profilerButton, 0.0f)))
+                m_workspace.OpenProfiler();
             list.EndRow();
         }
 
