@@ -152,6 +152,26 @@ namespace Manifold::Lua
             return process;
         }
 
+        std::shared_ptr<Target::Process> OpenedForAccess(lua_State* state, Status& error)
+        {
+            const auto& process = Owner(state).Process();
+            if (!process)
+                error = Status::Fail(ErrorCode::NoProcess);
+            return process;
+        }
+
+        int AccessFailed(lua_State* state, const Target::Process& process, const Status& status)
+        {
+            if (!process.Alive())
+                return Failed(state, ErrorCode::ProcessExited);
+            return Failed(state, status);
+        }
+
+        int ReadFailure(lua_State* state, const Target::Process& process, std::uint64_t address)
+        {
+            return AccessFailed(state, process, Status::Fail(ErrorCode::ReadFailed, Hex(address)));
+        }
+
         void SetString(lua_State* state, const char* key, std::string_view value)
         {
             lua_pushlstring(state, value.data(), value.size());
@@ -400,7 +420,7 @@ namespace Manifold::Lua
         {
             T value{};
             if (!process.ReadExact(address, &value, sizeof(T)))
-                return Failed(state, ErrorCode::ReadFailed, Hex(address));
+                return ReadFailure(state, process, address);
             if constexpr (std::is_floating_point_v<T>)
                 lua_pushnumber(state, static_cast<lua_Number>(value));
             else
@@ -413,7 +433,7 @@ namespace Manifold::Lua
             std::vector<std::uint8_t> bytes(length * (wide ? 2 : 1));
             const std::size_t got = process.Read(address, bytes.data(), bytes.size());
             if (got == 0)
-                return Failed(state, ErrorCode::ReadFailed, Hex(address));
+                return ReadFailure(state, process, address);
             if (wide)
             {
                 std::wstring text;
@@ -436,7 +456,7 @@ namespace Manifold::Lua
         int Read(lua_State* state)
         {
             Status error;
-            const auto process = Opened(state, error);
+            const auto process = OpenedForAccess(state, error);
             if (!process)
                 return Failed(state, error);
             std::uint64_t address = 0;
@@ -466,7 +486,7 @@ namespace Manifold::Lua
                     return luaL_argerror(state, 3, "count out of range");
                 std::vector<std::uint8_t> bytes(static_cast<std::size_t>(count));
                 if (!process->ReadExact(address, bytes.data(), bytes.size()))
-                    return Failed(state, ErrorCode::ReadFailed, Hex(address));
+                    return ReadFailure(state, *process, address);
                 lua_createtable(state, static_cast<int>(bytes.size()), 0);
                 for (std::size_t i = 0; i < bytes.size(); ++i)
                 {
@@ -485,7 +505,7 @@ namespace Manifold::Lua
                 if (!process->ReadExact(address, data, static_cast<std::size_t>(count)))
                 {
                     lua_pop(state, 1);
-                    return Failed(state, ErrorCode::ReadFailed, Hex(address));
+                    return ReadFailure(state, *process, address);
                 }
                 luaL_pushresultsize(&buffer, static_cast<std::size_t>(count));
                 return 1;
@@ -509,7 +529,7 @@ namespace Manifold::Lua
         int WriteMemory(lua_State* state)
         {
             Status error;
-            const auto process = Opened(state, error);
+            const auto process = OpenedForAccess(state, error);
             if (!process)
                 return Failed(state, error);
             std::uint64_t address = 0;
@@ -585,7 +605,7 @@ namespace Manifold::Lua
             {
                 const Status status = process->Write(address, bytes.data(), bytes.size());
                 if (!status)
-                    return Failed(state, status);
+                    return AccessFailed(state, *process, status);
             }
             lua_pushboolean(state, 1);
             return 1;
@@ -594,7 +614,7 @@ namespace Manifold::Lua
         int IsReadable(lua_State* state)
         {
             Status error;
-            const auto process = Opened(state, error);
+            const auto process = OpenedForAccess(state, error);
             std::uint64_t address = 0;
             lua_pushboolean(state, process && Resolve(state, 1, address, error) && process->IsReadable(address) ? 1 : 0);
             return 1;
