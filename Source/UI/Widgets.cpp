@@ -722,13 +722,15 @@ namespace Manifold::UI
         return changed;
     }
 
-    bool Splitter(const char* id, bool vertical, float thickness, float* first, float* second, float minFirst, float minSecond)
+    bool Splitter(const char* id, bool vertical, float thickness, float* first, float* second, float minFirst, float minSecond, float length)
     {
         ImGuiWindow* window = ImGui::GetCurrentWindow();
         const ImGuiID splitterId = window->GetID(id);
+        const ImVec2 available = ImGui::GetContentRegionAvail();
+        const float across = length > 0.0f ? std::min(length, vertical ? available.y : available.x) : (vertical ? available.y : available.x);
         ImRect bb;
         bb.Min = ImVec2(window->DC.CursorPos.x + (vertical ? *first : 0.0f), window->DC.CursorPos.y + (vertical ? 0.0f : *first));
-        bb.Max = ImVec2(bb.Min.x + (vertical ? thickness : ImGui::GetContentRegionAvail().x), bb.Min.y + (vertical ? ImGui::GetContentRegionAvail().y : thickness));
+        bb.Max = ImVec2(bb.Min.x + (vertical ? thickness : across), bb.Min.y + (vertical ? across : thickness));
         ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0, 0, 0, 0));
         const bool moved = ImGui::SplitterBehavior(bb, splitterId, vertical ? ImGuiAxis_X : ImGuiAxis_Y, first, second, minFirst, minSecond, 4.0f, 0.04f);
         ImGui::PopStyleColor();

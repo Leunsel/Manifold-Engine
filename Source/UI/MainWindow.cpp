@@ -169,7 +169,9 @@ namespace Manifold::UI
         {
             PROFILE_ZONE("Docked tool windows");
             const ImGuiID dock = ImGui::GetID("##maindock");
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(Px(380.0f), Px(300.0f)));
             ImGui::DockSpace(dock, ImVec2(width, height), ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingOverCentralNode);
+            ImGui::PopStyleVar();
             if (const ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dock))
             {
                 const float gap = Px(6.0f);
@@ -640,7 +642,7 @@ namespace Manifold::UI
         float right = total - left - gap;
         ResultsCard(left, height);
         ImGui::SetCursorPos(start);
-        if (Splitter("##scansplit", true, Px(8.0f), &left, &right, Px(260.0f), Px(300.0f)))
+        if (Splitter("##scansplit", true, Px(8.0f), &left, &right, Px(260.0f), Px(300.0f), height))
             m_resultsShare = left / total;
         ImGui::SetCursorPos(ImVec2(start.x + left + Px(8.0f), start.y));
         ScanCard(right, height);
