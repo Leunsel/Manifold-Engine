@@ -67,11 +67,12 @@ namespace Manifold::UI
         bool Passes(const Lua::ConsoleEntry& entry, const ConsoleFilter& filter) const;
         void WrapText(std::uint64_t id, RowKind kind, std::uint8_t value, std::string_view text, std::uint32_t columns, bool head);
         void AddTree(std::uint64_t id, std::uint8_t value, const Lua::ValueSnapshot& snapshot, bool includeRoot);
-        void DrawRow(const Row& row, const Lua::ConsoleEntry& entry, const ConsoleFilter& filter, const ConsoleActions& actions, float width);
+        void DrawRow(const Row& row, const Lua::ConsoleEntry& entry, const ConsoleFilter& filter, const ConsoleActions& actions, float width, bool continues);
         bool Expanded(std::uint64_t id, std::uint32_t key) const;
         void Toggle(std::uint64_t id, std::uint32_t key);
         const Lua::ValueSnapshot* ValueOf(const Lua::ConsoleEntry& entry, std::uint8_t value) const;
         float MessageOffset(bool time) const;
+        float RowStride() const;
 
         std::vector<Row> m_rows;
         std::set<std::pair<std::uint64_t, std::uint32_t>> m_expanded;
@@ -84,6 +85,7 @@ namespace Manifold::UI
         std::uint32_t m_columns = 0;
         std::uint32_t m_maxColumns = 0;
         float m_glyph = 7.0f;
+        float m_iconColumn = 16.0f;
         ConsoleFilter m_builtFilter;
         std::uint64_t m_selected = 0;
         bool m_follow = true;

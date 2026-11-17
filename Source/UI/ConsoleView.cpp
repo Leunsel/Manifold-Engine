@@ -166,7 +166,7 @@ namespace Manifold::UI
 
     float ConsoleView::MessageOffset(bool time) const
     {
-        return std::round(Px(4.0f) + m_glyph * (3.0f + (time ? 9.0f : 0.0f)));
+        return std::round(Px(4.0f) + m_iconColumn + m_glyph * (1.0f + (time ? 9.0f : 0.0f)));
     }
 
     const Lua::ValueSnapshot* ConsoleView::ValueOf(const Lua::ConsoleEntry& entry, std::uint8_t value) const
@@ -376,42 +376,48 @@ namespace Manifold::UI
     {
         const Lua::ConsoleCounts counts = log.Counts();
         constexpr LogLevel kLevels[] = { LogLevel::Debug, LogLevel::Info, LogLevel::Success, LogLevel::Warning, LogLevel::Error };
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, PxWhole(6.0f, 2.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Px(10.0f));
+        static constexpr const char* kNames[] = { "Debug", "Info and print", "Success", "Warning", "Error" };
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float spacing = style.ItemSpacing.x;
+        const float side = ImGui::GetFrameHeight();
+        const float toggles = side * 4.0f + spacing * 3.0f;
         const float start = ImGui::GetCursorPosX();
-        for (std::size_t i = 0; i < std::size(kLevels); ++i)
-        {
-            const bool on = filter.Levels[i];
-            const ImVec4 color = LevelColor(kLevels[i]);
-            const std::string label = std::string(LevelIcon(kLevels[i])) + " " + Grouped(counts.Levels[i]) + "##level" + std::to_string(i);
-            const float width = ImGui::CalcTextSize(label.c_str(), nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2.0f;
-            if (i > 0)
-                FlowNext(width, start);
-            ImGui::PushStyleColor(ImGuiCol_Button, on ? ManifoldTheme::WithAlpha(color, 0.18f) : ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(color, 0.28f));
-            ImGui::PushStyleColor(ImGuiCol_Text, on ? color : ManifoldTheme::Muted);
-            if (ImGui::Button(label.c_str()))
-            {
-                filter.Levels[i] = !filter.Levels[i];
-                changed = true;
-            }
-            ImGui::PopStyleColor(3);
-            static constexpr const char* kNames[] = { "debug", "info and print", "success", "warning", "error" };
-            ItemTooltip((std::string(on ? "Hide " : "Show ") + kNames[i] + " entries. Right-click shows only these.").c_str());
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-            {
-                for (std::size_t k = 0; k < filter.Levels.size(); ++k)
-                    filter.Levels[k] = k == i;
-                changed = true;
-            }
-        }
-        ImGui::PopStyleVar(2);
-
+        const float avail = ImGui::GetContentRegionAvail().x;
         const std::vector<std::string> channels = log.Channels();
-        const float comboWidth = Px(150.0f);
-        FlowNext(comboWidth, start);
-        ImGui::SetNextItemWidth(comboWidth);
-        if (ImGui::BeginCombo("##channel", filter.Channel.empty() ? "All channels" : filter.Channel.c_str()))
+
+        struct Segment
+        {
+            std::string Text;
+            ImVec4 Color;
+        };
+        const bool levelsFiltered = std::find(filter.Levels.begin(), filter.Levels.end(), false) != filter.Levels.end();
+        std::vector<Segment> segments;
+        segments.push_back({ ICON_FA_FILTER, ManifoldTheme::Muted });
+        for (std::size_t i = 3; i < std::size(kLevels); ++i)
+            if (counts.Levels[i] > 0)
+                segments.push_back({ std::string(LevelIcon(kLevels[i])) + " " + Grouped(counts.Levels[i]),
+                    filter.Levels[i] ? LevelColor(kLevels[i]) : ManifoldTheme::WithAlpha(LevelColor(kLevels[i]), 0.45f) });
+        segments.push_back({ ICON_FA_CARET_DOWN, ManifoldTheme::Muted });
+        const float gap = Px(6.0f);
+        float levelsWidth = style.FramePadding.x * 2.0f + gap * static_cast<float>(segments.size() - 1);
+        for (const Segment& segment : segments)
+            levelsWidth += ImGui::CalcTextSize(segment.Text.c_str()).x;
+
+        const float channelMin = Px(90.0f);
+        const float searchMin = Px(80.0f);
+        const float rest = avail - levelsWidth - toggles - spacing * 3.0f;
+        const bool channelInline = rest >= channelMin + searchMin;
+        const bool togglesInline = channelInline || avail - levelsWidth - toggles - spacing * 2.0f >= searchMin;
+        const float channelWidth = channelInline ? std::clamp(rest * 0.4f, channelMin, Px(150.0f)) : 0.0f;
+        const float searchWidth = channelInline ? std::min(rest - channelWidth, Px(360.0f))
+                                : togglesInline ? std::min(avail - levelsWidth - toggles - spacing * 2.0f, Px(360.0f))
+                                                : std::max(Px(40.0f), avail - levelsWidth - spacing);
+        if (!channelInline && !filter.Channel.empty())
+            segments.front().Color = ManifoldTheme::Accent;
+        if (levelsFiltered)
+            segments.front().Color = ManifoldTheme::Accent;
+
+        const auto channelItems = [&]()
         {
             if (ImGui::Selectable("All channels", filter.Channel.empty()))
             {
@@ -420,21 +426,139 @@ namespace Manifold::UI
             }
             for (const std::string& channel : channels)
             {
-                const auto depth = static_cast<float>(std::count(channel.begin(), channel.end(), '/'));
+                const auto depth = static_cast<std::size_t>(std::count(channel.begin(), channel.end(), '/'));
                 const std::size_t slash = channel.rfind('/');
-                const std::string label = std::string(static_cast<std::size_t>(depth) * 2, ' ') + (slash == std::string::npos ? channel : channel.substr(slash + 1)) + "##" + channel;
+                const std::string label = std::string(depth * 2, ' ') + (slash == std::string::npos ? channel : channel.substr(slash + 1)) + "##" + channel;
                 if (ImGui::Selectable(label.c_str(), filter.Channel == channel))
                 {
                     filter.Channel = channel;
                     changed = true;
                 }
             }
-            ImGui::EndCombo();
-        }
-        ItemTooltip("Shows one channel and its sub-channels.");
+        };
 
-        const float searchWidth = Px(170.0f);
-        FlowNext(searchWidth, start);
+        const bool menuOpen = ImGui::IsPopupOpen("##levelmenu");
+        if (menuOpen)
+            ImGui::PushStyleColor(ImGuiCol_Button, style.Colors[ImGuiCol_ButtonActive]);
+        if (ImGui::Button("##levels", ImVec2(levelsWidth, side)))
+            ImGui::OpenPopup("##levelmenu");
+        if (menuOpen)
+            ImGui::PopStyleColor();
+        const ImVec2 buttonMin = ImGui::GetItemRectMin();
+        const ImVec2 buttonMax = ImGui::GetItemRectMax();
+        {
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            float x = buttonMin.x + style.FramePadding.x;
+            for (const Segment& segment : segments)
+            {
+                draw->AddText(ImVec2(x, buttonMin.y + style.FramePadding.y), ImGui::GetColorU32(segment.Color), segment.Text.c_str());
+                x += ImGui::CalcTextSize(segment.Text.c_str()).x + gap;
+            }
+        }
+        if (!menuOpen)
+        {
+            std::string tip = "Filter by level";
+            if (!channelInline)
+                tip += togglesInline ? " and channel" : ", channel and view";
+            tip += ".";
+            for (std::size_t i = 0; i < std::size(kLevels); ++i)
+                tip += std::string("\n") + (filter.Levels[i] ? "" : "(hidden) ") + kNames[i] + ": " + Grouped(counts.Levels[i]);
+            if (!channelInline && !filter.Channel.empty())
+                tip += "\nChannel: " + filter.Channel;
+            ItemTooltip(tip.c_str());
+        }
+
+        ImGui::SetNextWindowPos(ImVec2(buttonMin.x, buttonMax.y + Px(2.0f)));
+        if (ImGui::BeginPopup("##levelmenu"))
+        {
+            float nameWidth = 0.0f;
+            float countWidth = 0.0f;
+            for (std::size_t i = 0; i < std::size(kLevels); ++i)
+            {
+                nameWidth = std::max(nameWidth, ImGui::CalcTextSize(kNames[i]).x);
+                countWidth = std::max(countWidth, ImGui::CalcTextSize(Grouped(counts.Levels[i]).c_str()).x);
+            }
+            const float iconWidth = ImGui::GetFontSize() * 1.6f;
+            const float rowWidth = std::max(Px(170.0f), iconWidth + nameWidth + Px(24.0f) + countWidth + Px(8.0f));
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            for (std::size_t i = 0; i < std::size(kLevels); ++i)
+            {
+                const bool on = filter.Levels[i];
+                const ImVec4 color = LevelColor(kLevels[i]);
+                ImGui::PushID(static_cast<int>(i));
+                ImGui::PushStyleColor(ImGuiCol_Header, on ? ManifoldTheme::WithAlpha(color, 0.18f) : ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ManifoldTheme::WithAlpha(color, on ? 0.28f : 0.14f));
+                ImGui::PushStyleColor(ImGuiCol_HeaderActive, ManifoldTheme::WithAlpha(color, 0.36f));
+                const ImVec2 at = ImGui::GetCursorScreenPos();
+                if (ImGui::Selectable("##level", true, ImGuiSelectableFlags_NoAutoClosePopups, ImVec2(rowWidth, 0.0f)))
+                {
+                    filter.Levels[i] = !filter.Levels[i];
+                    changed = true;
+                }
+                ImGui::PopStyleColor(3);
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                {
+                    for (std::size_t k = 0; k < filter.Levels.size(); ++k)
+                        filter.Levels[k] = k == i;
+                    changed = true;
+                }
+                ItemTooltip(on ? "Click hides these entries, right-click shows only these." : "Click shows these entries, right-click shows only these.");
+                const std::string count = Grouped(counts.Levels[i]);
+                const float pad = Px(4.0f);
+                draw->AddText(ImVec2(at.x + pad, at.y), ImGui::GetColorU32(on ? color : ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.7f)), LevelIcon(kLevels[i]));
+                draw->AddText(ImVec2(at.x + pad + iconWidth, at.y), ImGui::GetColorU32(on ? ManifoldTheme::Text : ManifoldTheme::Muted), kNames[i]);
+                draw->AddText(ImVec2(at.x + rowWidth - pad - ImGui::CalcTextSize(count.c_str()).x, at.y), ImGui::GetColorU32(on ? color : ManifoldTheme::Muted), count.c_str());
+                ImGui::PopID();
+            }
+            ImGui::Separator();
+            ImGui::BeginDisabled(!levelsFiltered);
+            if (ImGui::Selectable(ICON_FA_EYE "  Show all levels", false, ImGuiSelectableFlags_NoAutoClosePopups, ImVec2(rowWidth, 0.0f)))
+            {
+                filter.Levels.fill(true);
+                changed = true;
+            }
+            ImGui::EndDisabled();
+            if (!channelInline)
+            {
+                ImGui::Separator();
+                SectionLabel("Channel");
+                channelItems();
+            }
+            if (!togglesInline)
+            {
+                ImGui::Separator();
+                SectionLabel("View");
+                ImGui::PushItemFlag(ImGuiItemFlags_AutoClosePopups, false);
+                const auto option = [&](const char* label, bool& value)
+                {
+                    if (ImGui::MenuItem(label, nullptr, value))
+                    {
+                        value = !value;
+                        changed = true;
+                    }
+                };
+                option(ICON_FA_ALIGN_LEFT "  Wrap lines", filter.Wrap);
+                option(ICON_FA_CLOCK "  Show the time", filter.Time);
+                option(ICON_FA_HASHTAG "  Integers in hex", filter.Hex);
+                option(ICON_FA_ARROW_DOWN "  Follow new entries", m_follow);
+                ImGui::PopItemFlag();
+            }
+            ImGui::EndPopup();
+        }
+
+        if (channelInline)
+        {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(channelWidth);
+            if (ImGui::BeginCombo("##channel", filter.Channel.empty() ? "All channels" : filter.Channel.c_str()))
+            {
+                channelItems();
+                ImGui::EndCombo();
+            }
+            ItemTooltip("Shows one channel and its sub-channels.");
+        }
+
+        ImGui::SameLine();
         ImGui::SetNextItemWidth(searchWidth);
         if (m_focusSearch)
         {
@@ -444,30 +568,35 @@ namespace Manifold::UI
         if (InputTextWithHint("##consolesearch", ICON_FA_SEARCH " Search", filter.Search))
             changed = true;
 
+        if (!togglesInline)
+            return;
+        bool first = true;
         const auto toggle = [&](const char* icon, bool& value, const char* tip)
         {
-            const float side = ImGui::GetFrameHeight();
-            FlowNext(side, start);
-            ImGui::PushStyleColor(ImGuiCol_Button, value ? ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.22f) : ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+            ImGui::SameLine();
+            if (first)
+                ImGui::SetCursorPosX(start + avail - toggles);
+            first = false;
+            int colors = 1;
             ImGui::PushStyleColor(ImGuiCol_Text, value ? ManifoldTheme::Accent : ManifoldTheme::Muted);
-            ImGui::PushID(icon);
-            if (ImGui::Button(icon, ImVec2(side, side)))
+            if (value)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.22f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.32f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.42f));
+                colors += 3;
+            }
+            if (IconButton(icon, tip))
             {
                 value = !value;
                 changed = true;
             }
-            ImGui::PopID();
-            ImGui::PopStyleColor(2);
-            ItemTooltip(tip);
+            ImGui::PopStyleColor(colors);
         };
         toggle(ICON_FA_ALIGN_LEFT, filter.Wrap, "Wrap long lines at the window's edge");
         toggle(ICON_FA_CLOCK, filter.Time, "Show the time of each entry");
         toggle(ICON_FA_HASHTAG, filter.Hex, "Show integers in hex");
-        const float side = ImGui::GetFrameHeight();
-        FlowNext(side, start);
-        bool follow = m_follow;
-        toggle(ICON_FA_ARROW_DOWN, follow, "Follow new entries");
-        m_follow = follow;
+        toggle(ICON_FA_ARROW_DOWN, m_follow, "Follow new entries");
     }
 
     void ConsoleView::Draw(const Lua::ConsoleLog& log, const ConsoleFilter& filter, ImVec2 size, const ConsoleActions& actions)
@@ -488,6 +617,11 @@ namespace Manifold::UI
         }
         PushMono();
         m_glyph = std::max(1.0f, ImGui::CalcTextSize("M").x);
+        m_iconColumn = m_glyph * 2.0f;
+        for (const char* icon : { LevelIcon(LogLevel::Debug), LevelIcon(LogLevel::Info), LevelIcon(LogLevel::Success), LevelIcon(LogLevel::Warning), LevelIcon(LogLevel::Error),
+                 static_cast<const char*>(ICON_FA_INFO_CIRCLE) })
+            m_iconColumn = std::max(m_iconColumn, ImGui::CalcTextSize(icon).x + Px(6.0f));
+        m_iconColumn = std::round(m_iconColumn);
         const float width = ImGui::GetContentRegionAvail().x;
         const float messageX = MessageOffset(filter.Time);
         const std::uint32_t columns = filter.Wrap ? static_cast<std::uint32_t>(std::max(16.0f, std::floor((width - messageX - Px(6.0f)) / m_glyph))) : 4096u;
@@ -514,10 +648,11 @@ namespace Manifold::UI
         const bool grew = m_rows.size() != before || log.Generation() != m_generation;
         m_generation = log.Generation();
 
-        const float rowHeight = std::round(ImGui::GetTextLineHeight() + Px(3.0f));
+        const float rowHeight = RowStride();
         const bool atBottom = ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - rowHeight;
         if (const std::uint64_t dropped = log.Dropped())
             Muted(Grouped(dropped) + (dropped == 1 ? " earlier entry is" : " earlier entries are") + " no longer kept");
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
         ImGuiListClipper clipper;
         clipper.Begin(static_cast<int>(m_rows.size()), rowHeight);
         while (clipper.Step())
@@ -525,12 +660,14 @@ namespace Manifold::UI
             for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
             {
                 const Row& row = m_rows[static_cast<std::size_t>(i)];
+                const bool continues = static_cast<std::size_t>(i) + 1 < m_rows.size() && m_rows[static_cast<std::size_t>(i) + 1].Id == row.Id;
                 ImGui::PushID(i);
-                if (!log.VisitId(row.Id, [&](const Lua::ConsoleEntry& entry) { DrawRow(row, entry, filter, actions, width); }))
+                if (!log.VisitId(row.Id, [&](const Lua::ConsoleEntry& entry) { DrawRow(row, entry, filter, actions, width, continues); }))
                     ImGui::Dummy(ImVec2(width, rowHeight));
                 ImGui::PopID();
             }
         }
+        ImGui::PopStyleVar();
         if (grew && (m_follow || atBottom))
             ImGui::SetScrollHereY(1.0f);
 
@@ -591,15 +728,21 @@ namespace Manifold::UI
         ImGui::EndChild();
     }
 
-    void ConsoleView::DrawRow(const Row& row, const Lua::ConsoleEntry& entry, const ConsoleFilter& filter, const ConsoleActions& actions, float width)
+    float ConsoleView::RowStride() const
+    {
+        return std::round(ImGui::GetTextLineHeight() + Px(3.0f)) + std::round(Px(3.0f));
+    }
+
+    void ConsoleView::DrawRow(const Row& row, const Lua::ConsoleEntry& entry, const ConsoleFilter& filter, const ConsoleActions& actions, float width, bool continues)
     {
         ImDrawList* draw = ImGui::GetWindowDrawList();
         const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const float stride = RowStride();
         const float rowHeight = std::round(ImGui::GetTextLineHeight() + Px(3.0f));
         const float textY = origin.y + std::round((rowHeight - ImGui::GetTextLineHeight()) * 0.5f);
         const float messageX = origin.x + MessageOffset(filter.Time);
-        const ImVec2 max(origin.x + std::max(width, ImGui::GetContentRegionAvail().x), origin.y + rowHeight);
-        ImGui::InvisibleButton("##row", ImVec2(std::max(1.0f, max.x - origin.x), rowHeight));
+        const ImVec2 max(origin.x + std::max(width, ImGui::GetContentRegionAvail().x), origin.y + (continues ? stride : rowHeight));
+        ImGui::InvisibleButton("##row", ImVec2(std::max(1.0f, max.x - origin.x), stride));
         const bool hovered = ImGui::IsItemHovered();
         const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
         if (entry.Kind == Lua::EntryKind::Error || entry.Level == LogLevel::Error)
@@ -650,7 +793,7 @@ namespace Manifold::UI
             }
             if (icon && (row.Kind == RowKind::Head || row.Value == 0))
                 draw->AddText(ImVec2(x, textY), ImGui::GetColorU32(color), icon);
-            x += m_glyph * 2.0f;
+            x += m_iconColumn;
             if (filter.Time && (row.Kind == RowKind::Head || row.Value == 0))
                 draw->AddText(ImVec2(x, textY), ImGui::GetColorU32(ManifoldTheme::Muted), Lua::ConsoleTime(entry.TimeMs, false).c_str());
             if (row.Kind == RowKind::Head || row.Value == 0)
@@ -661,7 +804,7 @@ namespace Manifold::UI
                     const float sourceWidth = ImGui::CalcTextSize(source.c_str()).x;
                     const float right = std::min(origin.x + width, ImGui::GetCurrentWindow()->InnerRect.Max.x);
                     const float sx = std::max(messageX, right - sourceWidth - Px(6.0f));
-                    draw->AddRectFilled(ImVec2(sx - Px(6.0f), origin.y), ImVec2(right, origin.y + rowHeight), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Sidebar, 0.85f)));
+                    draw->AddRectFilled(ImVec2(sx - Px(6.0f), origin.y), ImVec2(right, max.y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Sidebar, 0.85f)));
                     draw->AddText(ImVec2(sx, textY), ImGui::GetColorU32(ManifoldTheme::Muted), source.c_str());
                     if (hovered && entry.Source.Line > 0)
                         ImGui::SetItemTooltip("%s", (entry.Source.Chunk + ":" + std::to_string(entry.Source.Line) + (entry.Source.Function.empty() ? std::string() : " in " + entry.Source.Function)).c_str());
