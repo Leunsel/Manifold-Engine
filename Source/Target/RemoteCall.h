@@ -2,6 +2,7 @@
 
 #include "Core/Errors.h"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -58,11 +59,45 @@ namespace Manifold::Target
         std::uint64_t MainStub() const { return m_code ? m_code + 0x300 : 0; }
         Status EnterMain(std::chrono::milliseconds wait);
         Status CallMain(std::uint64_t function, std::uint64_t a0, std::uint64_t a1, std::uint64_t a2, std::uint64_t a3, std::uint64_t& result);
+
+        // A list of calls the stub runs back to back in ONE main-thread visit:
+        // one write sends them, one read brings every result back, so the game
+        // waits for the calls themselves instead of a cross-process round trip
+        // per call. The records live in target memory the caller owns
+        // (`buffer`, calls.size() * kMainCallSize bytes, read-write).
+        static constexpr std::size_t kMainCallSize = 0x80;
+        static constexpr std::uint32_t kMainCallData = 64;
+        struct MainCall
+        {
+            std::uint64_t Function = 0;
+            std::uint64_t Args[4] = {};
+            // After the call returns non-null, CopyBytes bytes at result +
+            // CopyOffset are copied into Data, still on the main thread (e.g.
+            // a boxed value, read before the garbage collector can take it).
+            std::uint32_t CopyOffset = 0;
+            std::uint32_t CopyBytes = 0;
+            // Written into the record before the call; an argument may point
+            // here (see MainCallData), e.g. a params array and its values.
+            std::array<std::uint8_t, kMainCallData> Data{};
+        };
+        struct MainResult
+        {
+            std::uint64_t Result = 0;
+            std::uint64_t Slot = 0;     // the record's own 8-byte slot, zero before the call
+            std::array<std::uint8_t, kMainCallData> Data{};
+        };
+        // Addresses inside the record of call `index`, to pass as arguments.
+        static std::uint64_t MainCallSlot(std::uint64_t buffer, std::size_t index) { return buffer + index * kMainCallSize + 0x38; }
+        static std::uint64_t MainCallData(std::uint64_t buffer, std::size_t index) { return buffer + index * kMainCallSize + 0x40; }
+        Status CallMainBatch(std::uint64_t buffer, const std::vector<MainCall>& calls, std::vector<MainResult>& results);
         void LeaveMain();
         // While set, EnterMain gives up at once instead of waiting for a frame.
         void InterruptMain(bool interrupt) { m_interrupt = interrupt; }
         bool InsideMain() const;
         std::uint64_t MainRuns() const;
+        // Main-thread requests that had to wait for the game's next frame
+        // because the stub had already returned (a running total).
+        std::uint64_t FrameWaits() const { return m_frameWaits; }
         std::uint32_t MainThreadId() const;
 
         // A fresh, zeroed region in the shared scratch page (for iterators,
@@ -76,6 +111,7 @@ namespace Manifold::Target
         void Wake() const;
         std::uint64_t ReadMain(std::uint32_t offset) const;
         Status WaitForResult(std::uint64_t control, bool main, std::uint64_t& result, bool* notTaken);
+        Status SendMain(std::uint64_t request, const std::uint64_t* block, std::size_t words, std::uint64_t& result);
 
         std::shared_ptr<Process> m_process;
         void* m_wake = nullptr;          // local event; the worker waits on its duplicate
@@ -86,6 +122,7 @@ namespace Manifold::Target
         std::uint64_t m_collector = 0;
         std::uint64_t m_thread = 0;     // target thread handle (as a value)
         std::chrono::milliseconds m_timeout{ 5000 };
+        std::uint64_t m_frameWaits = 0;
         std::atomic<bool> m_interrupt{ false };
     };
 }

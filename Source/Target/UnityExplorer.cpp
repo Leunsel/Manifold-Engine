@@ -18,6 +18,7 @@ namespace Manifold::Target
     namespace
     {
         constexpr std::size_t kArgsSize = 0x10000;
+        constexpr std::size_t kBatchCalls = 128;     // calls per main-thread round trip
         constexpr auto kVisitBudget = std::chrono::milliseconds(4);
         constexpr std::size_t kMaxNodes = 200000;
         constexpr std::size_t kMaxChildren = 20000;
@@ -384,6 +385,7 @@ namespace Manifold::Target
         m_visiting = false;
         m_args = 0;
         m_argsUsed = 0;
+        m_batch = 0;
         m_hooked = false;
         m_delegate = 0;
         m_delegatePin = 0;
@@ -466,13 +468,12 @@ namespace Manifold::Target
         }
         if (!fn)
             return std::nullopt;
-        if (!m_visiting || !m_mono.m_call.InsideMain())
-        {
-            m_visitStart = std::chrono::steady_clock::now();
-            m_visiting = true;
-        }
         std::uint64_t result = 0;
-        const Status status = m_mono.m_call.CallMain(fn, a0, a1, a2, a3, result);
+        ++m_statTrips;
+        ++m_statCalls;
+        Status status = BeginVisit();
+        if (status)
+            status = m_mono.m_call.CallMain(fn, a0, a1, a2, a3, result);
         if (!status)
         {
             m_visiting = false;
@@ -493,15 +494,44 @@ namespace Manifold::Target
         return Worker(function, a0, a1, a2, a3);
     }
 
+    Status UnityExplorer::BeginVisit()
+    {
+        if (m_visiting && m_mono.m_call.InsideMain())
+            return Status::Success();
+        // ∑ Enter first, THEN start the clock. The wait for the game's next
+        // frame is not time its main thread spends serving us; with the clock
+        // started before it, the first call already looked like a spent
+        // budget, YieldFrame left, and every following call waited two more
+        // frames to get back in (a 5-child GameObject took 300 ms).
+        if (Status entered = m_mono.m_call.EnterMain(std::chrono::milliseconds(2000)); !entered)
+            return entered;
+        m_visitStart = std::chrono::steady_clock::now();
+        m_visitRuns = m_mono.m_call.MainRuns();
+        m_visiting = true;
+        return Status::Success();
+    }
+
     void UnityExplorer::YieldFrame()
     {
         // Give the frame back to the game once this visit used its budget; the
         // next main-thread call waits for the following frame.
-        if (m_visiting && std::chrono::steady_clock::now() - m_visitStart > kVisitBudget)
+        if (!m_visiting)
+            return;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - m_visitStart <= kVisitBudget)
+            return;
+        // The budget is per frame. If the stub has been called again since the
+        // clock started (its run counter moved), the game already had its frame
+        // in between, so this frame's share starts now.
+        const std::uint64_t runs = m_mono.m_call.MainRuns();
+        if (runs != m_visitRuns)
         {
-            m_mono.m_call.LeaveMain();
-            m_visiting = false;
+            m_visitRuns = runs;
+            m_visitStart = now;
+            return;
         }
+        m_mono.m_call.LeaveMain();
+        m_visiting = false;
     }
 
     std::uint64_t UnityExplorer::ArgSpace(std::size_t bytes)
@@ -575,6 +605,126 @@ namespace Manifold::Target
         }
         out.Ok = true;
         out.Result = *result;
+        return out;
+    }
+
+    std::vector<UnityExplorer::Invoked> UnityExplorer::InvokeMany(const std::vector<BatchInvoke>& calls)
+    {
+        // ∑ One cross-process round trip per call kept the game's main thread
+        // spinning in the stub while this side wrote arguments and polled for
+        // each result: a Transform refresh was ~37 trips, so Auto could only
+        // run once a second. Here every call goes into one record list the
+        // stub runs back to back; one write sends it, one read brings all
+        // results back, and boxed values are copied out while the main thread
+        // still holds them, so no collection can take them before they are read.
+        std::vector<Invoked> out(calls.size());
+        if (calls.empty())
+            return out;
+        const auto fail = [&](std::size_t from, const std::string& text)
+            {
+                for (std::size_t i = from; i < out.size(); ++i)
+                {
+                    if (!out[i].Ok && out[i].Error.empty())
+                        out[i].Error = text;
+                }
+            };
+        std::uint64_t invoke = 0;
+        {
+            std::lock_guard bridge(m_mono.m_lock);
+            if (m_mono.m_present)
+                invoke = m_mono.Fn("mono_runtime_invoke");
+        }
+        const auto process = Proc();
+        if (!invoke || !process)
+        {
+            fail(0, invoke ? "no process" : "this Mono runtime has no mono_runtime_invoke");
+            return out;
+        }
+        if (!m_batch)
+        {
+            Status status;
+            m_batch = process->Allocate(kBatchCalls * RemoteCall::kMainCallSize, PAGE_READWRITE, 0, status);
+            if (!m_batch)
+            {
+                fail(0, "no room for the call list in the game: " + status.Text);
+                return out;
+            }
+        }
+        std::vector<RemoteCall::MainCall> chunk;
+        std::vector<std::size_t> owners;
+        std::vector<RemoteCall::MainResult> results;
+        for (std::size_t start = 0; start < calls.size(); start += kBatchCalls)
+        {
+            if (Aborted())
+            {
+                fail(start, "cancelled");
+                break;
+            }
+            chunk.clear();
+            owners.clear();
+            const std::size_t end = std::min(calls.size(), start + kBatchCalls);
+            for (std::size_t i = start; i < end; ++i)
+            {
+                const BatchInvoke& request = calls[i];
+                if (!request.Method)
+                {
+                    out[i].Error = "the method was not found in this Unity version";
+                    continue;
+                }
+                const std::size_t slot = chunk.size();
+                RemoteCall::MainCall call;
+                call.Function = invoke;
+                call.Args[0] = request.Method;
+                call.Args[1] = request.Self;
+                call.Args[3] = RemoteCall::MainCallSlot(m_batch, slot);    // MonoObject** exc
+                if (request.IntArg)
+                {
+                    // params = { &value }, both inside the record's data.
+                    const std::uint64_t data = RemoteCall::MainCallData(m_batch, slot);
+                    const std::uint64_t value = data + 8;
+                    std::memcpy(call.Data.data(), &value, sizeof(value));
+                    std::memcpy(call.Data.data() + 8, &*request.IntArg, sizeof(std::int32_t));
+                    call.Args[2] = data;
+                }
+                call.CopyOffset = static_cast<std::uint32_t>(kObjectHeader);
+                call.CopyBytes = std::min<std::uint32_t>(request.ValueBytes, RemoteCall::kMainCallData);
+                chunk.push_back(call);
+                owners.push_back(i);
+            }
+            if (chunk.empty())
+                continue;
+            ++m_statTrips;
+            m_statCalls += static_cast<int>(chunk.size());
+            Status status = BeginVisit();
+            if (status)
+                status = m_mono.m_call.CallMainBatch(m_batch, chunk, results);
+            if (!status)
+            {
+                m_visiting = false;
+                {
+                    std::lock_guard state(m_stateLock);
+                    m_status.Error = status.Text;
+                }
+                for (const std::size_t owner : owners)
+                    out[owner].Error = status.Text;
+                continue;
+            }
+            for (std::size_t k = 0; k < chunk.size(); ++k)
+            {
+                Invoked& got = out[owners[k]];
+                const RemoteCall::MainResult& result = results[k];
+                if (result.Slot)
+                {
+                    got.Error = ExceptionText(true, result.Slot);
+                    continue;
+                }
+                got.Ok = true;
+                got.Result = result.Result;
+                if (chunk[k].CopyBytes && result.Result)
+                    got.Value.assign(result.Data.begin(), result.Data.begin() + chunk[k].CopyBytes);
+            }
+            YieldFrame();
+        }
         return out;
     }
 
@@ -1601,6 +1751,7 @@ namespace Manifold::Target
             return entered;
         }
         m_visitStart = std::chrono::steady_clock::now();
+        m_visitRuns = m_mono.m_call.MainRuns();
         m_visiting = true;
         const auto version = CallString(true, Method("UnityEngine.Application", "get_unityVersion", 0), Arg::Ref(0));
         const auto background = CallValue<std::uint8_t>(true, Method("UnityEngine.Application", "get_runInBackground", 0), Arg::Ref(0));
@@ -2186,68 +2337,135 @@ namespace Manifold::Target
         if (!transform)
             return false;
         info.Object = transform;
-        const Arg self = Arg::Ref(transform);
         const char* klass = "UnityEngine.Transform";
-        const auto read = [&](const char* name, float* out)
+        const char* const getters[] = { "get_localPosition", "get_localEulerAngles", "get_localScale", "get_position" };
+        float* const targets[] = { info.LocalPosition, info.LocalEuler, info.LocalScale, info.Position };
+        std::vector<BatchInvoke> calls;
+        for (const char* name : getters)
+            calls.push_back({ Method(klass, name, 0), transform, std::nullopt, sizeof(Vector3) });
+        const std::vector<Invoked> got = InvokeMany(calls);
+        for (std::size_t i = 0; i < got.size(); ++i)
+        {
+            if (const auto value = ValueOf<Vector3>(got[i]))
             {
-                if (const auto value = CallValue<Vector3>(true, Method(klass, name, 0), self))
-                {
-                    out[0] = value->X;
-                    out[1] = value->Y;
-                    out[2] = value->Z;
-                    return true;
-                }
-                return false;
-            };
-        info.Read = read("get_localPosition", info.LocalPosition);
-        read("get_localEulerAngles", info.LocalEuler);
-        read("get_localScale", info.LocalScale);
-        read("get_position", info.Position);
+                targets[i][0] = value->X;
+                targets[i][1] = value->Y;
+                targets[i][2] = value->Z;
+            }
+        }
+        info.Read = ValueOf<Vector3>(got[0]).has_value();
         return info.Read;
+    }
+
+    std::optional<std::string> UnityExplorer::TextOf(const Invoked& call) const
+    {
+        if (!call.Ok)
+            return std::nullopt;
+        return ReadString(call.Result);
+    }
+
+    template <typename T>
+    std::optional<T> UnityExplorer::ValueOf(const Invoked& call)
+    {
+        if (!call.Ok || call.Value.size() < sizeof(T))
+            return std::nullopt;
+        T value{};
+        std::memcpy(&value, call.Value.data(), sizeof(T));
+        return value;
     }
 
     void UnityExplorer::ReadGameObject(std::uint64_t gameObject, UnityGameObject& info, std::vector<MonoGcHandle>& pins)
     {
+        // Batched in stages, each one round trip: the GameObject's own values,
+        // its transform's links, then the chain parent/child -> GameObject ->
+        // name, where each stage needs the results of the one before.
         info.Object = gameObject;
-        const Arg self = Arg::Ref(gameObject);
         const char* go = "UnityEngine.GameObject";
-        info.Name = CallString(true, Method("UnityEngine.Object", "get_name", 0), self).value_or("?");
-        info.Tag = CallString(true, Method(go, "get_tag", 0), self).value_or(std::string());
-        info.Layer = CallValue<std::int32_t>(true, Method(go, "get_layer", 0), self).value_or(0);
-        info.ActiveSelf = CallValue<std::uint8_t>(true, Method(go, "get_activeSelf", 0), self).value_or(0) != 0;
-        info.ActiveInHierarchy = CallValue<std::uint8_t>(true, Method(go, "get_activeInHierarchy", 0), self).value_or(0) != 0;
-        if (const auto scene = CallValue<std::int32_t>(true, Method(go, "get_scene", 0), self))
+        const char* transformClass = "UnityEngine.Transform";
+        const std::uint64_t getName = Method("UnityEngine.Object", "get_name", 0);
+        const std::uint64_t getGameObject = Method("UnityEngine.Component", "get_gameObject", 0);
+        const std::vector<Invoked> own = InvokeMany({
+            { getName, gameObject },
+            { Method(go, "get_tag", 0), gameObject },
+            { Method(go, "get_layer", 0), gameObject, std::nullopt, sizeof(std::int32_t) },
+            { Method(go, "get_activeSelf", 0), gameObject, std::nullopt, sizeof(std::uint8_t) },
+            { Method(go, "get_activeInHierarchy", 0), gameObject, std::nullopt, sizeof(std::uint8_t) },
+            { Method(go, "get_scene", 0), gameObject, std::nullopt, sizeof(std::int32_t) },
+            { Method(go, "get_transform", 0), gameObject },
+        });
+        info.Name = TextOf(own[0]).value_or("?");
+        info.Tag = TextOf(own[1]).value_or(std::string());
+        info.Layer = ValueOf<std::int32_t>(own[2]).value_or(0);
+        info.ActiveSelf = ValueOf<std::uint8_t>(own[3]).value_or(0) != 0;
+        info.ActiveInHierarchy = ValueOf<std::uint8_t>(own[4]).value_or(0) != 0;
+        if (const auto scene = ValueOf<std::int32_t>(own[5]))
             info.Scene = CallString(true, Method("UnityEngine.SceneManagement.Scene", "get_name", 0), Arg::Value<std::int32_t>(*scene)).value_or(std::string());
-        const std::uint64_t transform = CallObject(true, Method(go, "get_transform", 0), self);
+        const std::uint64_t transform = own[6].Ok ? own[6].Result : 0;
         if (transform)
         {
             pins.push_back(Pin(transform));
             ReadTransform(transform, info.Transform);
-            const std::uint64_t parent = CallObject(true, Method("UnityEngine.Transform", "get_parent", 0), Arg::Ref(transform));
+            const std::vector<Invoked> links = InvokeMany({
+                { Method(transformClass, "get_parent", 0), transform },
+                { Method(transformClass, "get_childCount", 0), transform, std::nullopt, sizeof(std::int32_t) },
+            });
+            const std::uint64_t parent = links[0].Ok ? links[0].Result : 0;
+            info.ChildCount = ValueOf<std::int32_t>(links[1]).value_or(0);
+            const int shown = std::clamp(info.ChildCount, 0, static_cast<int>(kMaxShownChildren));
+
+            // Stage 1: the parent's GameObject and every child transform.
+            std::vector<BatchInvoke> first;
+            if (parent)
+                first.push_back({ getGameObject, parent });
+            const std::size_t firstChildren = first.size();
+            const std::uint64_t getChild = Method(transformClass, "GetChild", 1);
+            for (int i = 0; i < shown; ++i)
+                first.push_back({ getChild, transform, i });
+            const std::vector<Invoked> firstGot = InvokeMany(first);
             if (parent)
             {
-                info.Parent = CallObject(true, Method("UnityEngine.Component", "get_gameObject", 0), Arg::Ref(parent));
+                info.Parent = firstGot[0].Ok ? firstGot[0].Result : 0;
                 pins.push_back(Pin(parent));
                 pins.push_back(Pin(info.Parent));
-                info.ParentName = CallString(true, Method("UnityEngine.Object", "get_name", 0), Arg::Ref(info.Parent)).value_or("?");
             }
-            info.ChildCount = CallValue<std::int32_t>(true, Method("UnityEngine.Transform", "get_childCount", 0), Arg::Ref(transform)).value_or(0);
-            for (int i = 0; i < std::min<int>(info.ChildCount, static_cast<int>(kMaxShownChildren)); ++i)
+
+            // Stage 2: the parent's name and the children's GameObjects.
+            std::vector<BatchInvoke> second;
+            if (info.Parent)
+                second.push_back({ getName, info.Parent });
+            const std::size_t secondChildren = second.size();
+            for (std::size_t k = firstChildren; k < firstGot.size(); ++k)
             {
-                const std::uint64_t child = CallObject(true, Method("UnityEngine.Transform", "GetChild", 1), Arg::Ref(transform), { Arg::Value<std::int32_t>(i) });
-                const std::uint64_t childObject = child ? CallObject(true, Method("UnityEngine.Component", "get_gameObject", 0), Arg::Ref(child)) : 0;
-                if (!childObject)
-                    continue;
-                pins.push_back(Pin(childObject));
-                info.Children.push_back({ childObject, CallString(true, Method("UnityEngine.Object", "get_name", 0), Arg::Ref(childObject)).value_or("?"), "GameObject" });
-                YieldFrame();
+                if (firstGot[k].Ok && firstGot[k].Result)
+                    second.push_back({ getGameObject, firstGot[k].Result });
             }
+            const std::vector<Invoked> secondGot = InvokeMany(second);
+            if (parent)
+                info.ParentName = info.Parent ? TextOf(secondGot[0]).value_or("?") : "?";
+
+            // Stage 3: the children's names.
+            std::vector<BatchInvoke> third;
+            std::vector<std::uint64_t> childObjects;
+            for (std::size_t k = secondChildren; k < secondGot.size(); ++k)
+            {
+                if (!secondGot[k].Ok || !secondGot[k].Result)
+                    continue;
+                childObjects.push_back(secondGot[k].Result);
+                pins.push_back(Pin(secondGot[k].Result));
+                third.push_back({ getName, secondGot[k].Result });
+            }
+            const std::vector<Invoked> names = InvokeMany(third);
+            for (std::size_t k = 0; k < childObjects.size(); ++k)
+                info.Children.push_back({ childObjects[k], TextOf(names[k]).value_or("?"), "GameObject" });
         }
         const std::uint64_t componentType = TypeObject(FindClass("UnityEngine.Component"));
-        const std::uint64_t list = CallObject(true, Method(go, "GetComponents", 1, "System.Type"), self, { Arg::Ref(componentType) });
+        const std::uint64_t list = CallObject(true, Method(go, "GetComponents", 1, "System.Type"), Arg::Ref(gameObject), { Arg::Ref(componentType) });
         if (list)
         {
             pins.push_back(Pin(list));
+            const std::uint64_t getEnabled = Method("UnityEngine.Behaviour", "get_enabled", 0);
+            std::vector<BatchInvoke> enabled;
+            std::vector<std::size_t> enabledFor;
             for (const std::uint64_t component : ReadArray(list, 512))
             {
                 if (!component)
@@ -2260,10 +2478,15 @@ namespace Manifold::Target
                 const std::vector<std::string> chain = ChainOf(klass);
                 entry.HasEnabled = std::find(chain.begin(), chain.end(), "UnityEngine.Behaviour") != chain.end();
                 if (entry.HasEnabled)
-                    entry.Enabled = CallValue<std::uint8_t>(true, Method("UnityEngine.Behaviour", "get_enabled", 0), Arg::Ref(component)).value_or(0) != 0;
+                {
+                    enabled.push_back({ getEnabled, component, std::nullopt, sizeof(std::uint8_t) });
+                    enabledFor.push_back(info.Components.size());
+                }
                 info.Components.push_back(std::move(entry));
-                YieldFrame();
             }
+            const std::vector<Invoked> states = InvokeMany(enabled);
+            for (std::size_t k = 0; k < states.size(); ++k)
+                info.Components[enabledFor[k]].Enabled = ValueOf<std::uint8_t>(states[k]).value_or(0) != 0;
         }
     }
 
@@ -2282,6 +2505,12 @@ namespace Manifold::Target
         if (type.ValueType)
         {
             value.Raw.assign(static_cast<std::size_t>(std::max(1, type.Size)), 0);
+            // A batch already copied the boxed value out inside the game.
+            if (!call.Value.empty() && call.Value.size() >= value.Raw.size())
+            {
+                std::memcpy(value.Raw.data(), call.Value.data(), value.Raw.size());
+                return value;
+            }
             if (!call.Result || !process || !process->ReadExact(call.Result + kObjectHeader, value.Raw.data(), value.Raw.size()))
             {
                 value.Read = false;
@@ -2304,19 +2533,27 @@ namespace Manifold::Target
     {
         if (!inspection.Layout || inspection.FromScan)
             return;
+        // Every getter in one batch; value results come back already copied.
+        std::vector<BatchInvoke> calls;
+        std::vector<std::size_t> members;
         for (std::size_t i = 0; i < inspection.Layout->Members.size(); ++i)
         {
-            if (Aborted())
-                break;
             const MonoMember& member = inspection.Layout->Members[i];
             if (member.Kind != MonoMemberKind::Property || !member.Getter)
                 continue;
             if (!member.Static && !inspection.Object)
                 continue;
-            const Invoked call = Invoke(true, member.Getter, Arg::Ref(member.Static ? 0 : inspection.Object), {});
-            inspection.Values[static_cast<int>(i)] = ReadResult(member.Type, call, pins);
-            YieldFrame();
+            BatchInvoke call;
+            call.Method = member.Getter;
+            call.Self = member.Static ? 0 : inspection.Object;
+            if (member.Type.ValueType && member.Type.Size > 0 && member.Type.Size <= static_cast<int>(RemoteCall::kMainCallData))
+                call.ValueBytes = static_cast<std::uint32_t>(member.Type.Size);
+            calls.push_back(call);
+            members.push_back(i);
         }
+        const std::vector<Invoked> got = InvokeMany(calls);
+        for (std::size_t k = 0; k < got.size(); ++k)
+            inspection.Values[static_cast<int>(members[k])] = ReadResult(inspection.Layout->Members[members[k]].Type, got[k], pins);
     }
 
     void UnityExplorer::DoInspect(int id, bool properties)
@@ -2326,6 +2563,10 @@ namespace Manifold::Target
             return;
         UnityInspection inspection = *copy;
         inspection.Error.clear();
+        const auto started = std::chrono::steady_clock::now();
+        const std::uint64_t waitsBefore = m_mono.m_call.FrameWaits();
+        m_statTrips = 0;
+        m_statCalls = 0;
         if (!inspection.Klass && inspection.Object)
             inspection.Klass = ClassOf(inspection.Object);
         if (!inspection.Klass)
@@ -2348,12 +2589,19 @@ namespace Manifold::Target
                     inspection.Error = hooked.Text;
                 else
                 {
-                    const Arg self = Arg::Ref(inspection.Object);
-                    const Invoked name = Invoke(true, Method("UnityEngine.Object", "get_name", 0), self, {});
-                    if (name.Ok)
-                        inspection.ObjectName = ReadString(name.Result);
+                    // Name, owner and enabled state in one round trip.
+                    std::vector<BatchInvoke> head = { { Method("UnityEngine.Object", "get_name", 0), inspection.Object } };
+                    if (layout.Component && !layout.GameObject)
+                    {
+                        head.push_back({ Method("UnityEngine.Component", "get_gameObject", 0), inspection.Object });
+                        if (layout.Behaviour)
+                            head.push_back({ Method("UnityEngine.Behaviour", "get_enabled", 0), inspection.Object, std::nullopt, sizeof(std::uint8_t) });
+                    }
+                    const std::vector<Invoked> got = InvokeMany(head);
+                    if (got[0].Ok)
+                        inspection.ObjectName = ReadString(got[0].Result);
                     else
-                        inspection.Error = name.Error;
+                        inspection.Error = got[0].Error;
                     if (layout.GameObject)
                     {
                         UnityGameObject info;
@@ -2362,14 +2610,14 @@ namespace Manifold::Target
                     }
                     else if (layout.Component)
                     {
-                        inspection.Owner = CallObject(true, Method("UnityEngine.Component", "get_gameObject", 0), self);
+                        inspection.Owner = got[1].Ok ? got[1].Result : 0;
                         if (inspection.Owner)
                         {
                             pins.push_back(Pin(inspection.Owner));
                             inspection.OwnerName = CallString(true, Method("UnityEngine.Object", "get_name", 0), Arg::Ref(inspection.Owner)).value_or("?");
                         }
                         if (layout.Behaviour)
-                            if (const auto enabled = CallValue<std::uint8_t>(true, Method("UnityEngine.Behaviour", "get_enabled", 0), self))
+                            if (const auto enabled = ValueOf<std::uint8_t>(got[2]))
                                 inspection.Enabled = *enabled != 0;
                         if (layout.Transform)
                         {
@@ -2424,6 +2672,10 @@ namespace Manifold::Target
         if (readProperties)
             ReadProperties(inspection, pins);
         inspection.Loading = false;
+        inspection.RefreshMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+        inspection.Calls = m_statCalls;
+        inspection.RoundTrips = m_statTrips;
+        inspection.FrameWaits = static_cast<int>(m_mono.m_call.FrameWaits() - waitsBefore);
         std::vector<MonoGcHandle> old;
         bool alive = false;
         {

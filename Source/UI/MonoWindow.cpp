@@ -133,21 +133,23 @@ namespace Manifold::UI
         SyncUnity(unity);
 
         // Toolbar: what is loaded, the explorer's state, reload and shut down.
+        // Items wrap onto a second line instead of running off a narrow window.
         ImGui::AlignTextToFramePadding();
         Muted(mono.Module() + "  ·  " + std::to_string(m_classes.size()) + " classes" +
             (m_status.UnityVersion.empty() ? std::string() : "  ·  Unity " + m_status.UnityVersion));
-        ImGui::SameLine();
         if (work)
         {
+            ImGui::SameLine();
             if (LoadingLine(*work))
                 m_engine.CancelWork(work->Id);
         }
         else
         {
+            FlowNext(SmallButtonWidth(ICON_FA_SYNC "  Reload"));
             if (ImGui::SmallButton(ICON_FA_SYNC "  Reload"))
                 m_engine.ReloadMono();
             ItemTooltip("Reads the class list again, for assemblies the game loaded later");
-            ImGui::SameLine();
+            FlowNext(SmallButtonWidth(ICON_FA_POWER_OFF "  Shut down"));
             if (ImGui::SmallButton(ICON_FA_POWER_OFF "  Shut down"))
             {
                 CloseAll();
@@ -159,11 +161,15 @@ namespace Manifold::UI
         }
         StatusLine(unity);
 
+        // The window's minimum (620 px, held even when docked) fits both panes
+        // at their minimums, so neither can be squeezed below a usable width.
         const float gap = Px(8.0f);
+        const float minList = Px(250.0f);
+        const float minInspector = Px(340.0f);
         if (m_listWidth <= 0.0f)
             m_listWidth = Px(360.0f);
         const float total = ImGui::GetContentRegionAvail().x;
-        m_listWidth = std::clamp(m_listWidth, Px(240.0f), std::max(Px(240.0f), total - Px(300.0f) - gap));
+        m_listWidth = std::clamp(m_listWidth, minList, std::max(minList, total - minInspector - gap));
         const float height = ImGui::GetContentRegionAvail().y;
         const ImVec2 start = ImGui::GetCursorPos();
 
@@ -208,7 +214,7 @@ namespace Manifold::UI
         float left = m_listWidth;
         float right = total - left - gap;
         ImGui::SetCursorPos(start);
-        if (Splitter("##monosplit", true, gap, &left, &right, Px(240.0f), Px(300.0f), height))
+        if (Splitter("##monosplit", true, gap, &left, &right, minList, minInspector, height))
             m_listWidth = left;
         ImGui::SetCursorPos(ImVec2(start.x + m_listWidth + gap, start.y));
         ImGui::BeginChild("##monoright", ImVec2(0.0f, height), ImGuiChildFlags_Borders);
@@ -222,32 +228,47 @@ namespace Manifold::UI
 
     void MonoWindow::StatusLine(Target::UnityExplorer& unity)
     {
-        if (m_status.Busy)
-        {
-            ImGui::SameLine();
-            Spinner(ImGui::GetTextLineHeight() * 0.5f, ManifoldTheme::Accent);
-            ImGui::SameLine();
-            Muted(m_status.Task.empty() ? std::string("Working") : m_status.Task);
-            ImGui::SameLine();
-            if (ImGui::SmallButton(ICON_FA_STOP "  Stop"))
-                unity.Cancel();
-            ItemTooltip("Stops the running request");
-        }
+        // The running request goes LAST on the line and only once it has run
+        // for a moment: with Auto, the inspector refreshes ten times a second,
+        // and a spinner, task text and Stop button popping in front of the
+        // other items made the whole line jump each time.
+        const double now = ImGui::GetTime();
+        if (!m_status.Busy)
+            m_busySince = -1.0;
+        else if (m_busySince < 0.0)
+            m_busySince = now;
+        const bool showBusy = m_status.Busy && now - m_busySince > 0.4;
+        const char* const explorerOn = ICON_FA_EXCLAMATION_TRIANGLE " explorer on";
+        const char* const keepLabel = "Keep running in the background";
         if (unity.Enabled())
         {
-            ImGui::SameLine();
-            ImGui::TextColored(ManifoldTheme::Warning, ICON_FA_EXCLAMATION_TRIANGLE " explorer on");
+            FlowNext(ImGui::CalcTextSize(explorerOn).x);
+            ImGui::TextColored(ManifoldTheme::Warning, "%s", explorerOn);
             ItemTooltip("Code runs inside the game while this is on. It can crash Unity 6 games; Shut down takes it back out.");
         }
         if (m_status.Hooked)
         {
-            ImGui::SameLine();
+            FlowNext(CheckboxWidth(keepLabel));
             const bool background = m_status.RunInBackground.value_or(false);
             bool keep = background;
-            if (ImGui::Checkbox("Keep running in the background", &keep))
+            if (ImGui::Checkbox(keepLabel, &keep))
                 unity.SetRunInBackground(keep);
             ItemTooltip("Sets Application.runInBackground, so the game keeps updating while Manifold is in front. Most requests need the game to run. "
                         "Shut down sets it back.");
+        }
+        if (showBusy)
+        {
+            // Spinner, task and Stop stay together when they wrap.
+            const std::string task = m_status.Task.empty() ? std::string("Working") : m_status.Task;
+            const float spacing = ImGui::GetStyle().ItemSpacing.x;
+            FlowNext(ImGui::GetTextLineHeight() * 0.5f + spacing + ImGui::CalcTextSize(task.c_str()).x + spacing + SmallButtonWidth(ICON_FA_STOP "  Stop"));
+            Spinner(ImGui::GetTextLineHeight() * 0.5f, ManifoldTheme::Accent);
+            ImGui::SameLine();
+            Muted(task);
+            ImGui::SameLine();
+            if (ImGui::SmallButton(ICON_FA_STOP "  Stop"))
+                unity.Cancel();
+            ItemTooltip("Stops the running request");
         }
         if (!m_status.Error.empty())
             TextWithError(ICON_FA_EXCLAMATION_TRIANGLE "  " + m_status.Error, ManifoldTheme::Warning);

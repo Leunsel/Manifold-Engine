@@ -378,6 +378,113 @@ namespace Manifold::Tests
         CHECK(engine.MonoPresent());
     }
 
+    // The batch mode of the main-thread channel (the Unity inspector sends all
+    // getters of a refresh this way): many calls in one request, results in
+    // order, the per-record slot and data addresses, and the in-game copy of
+    // the bytes a result points at, skipped for a null result.
+    void CheckMainBatch(Target::Process& process, Target::RemoteCall& call, std::uint64_t echo)
+    {
+        using Target::RemoteCall;
+        const std::uint64_t touch = process.FindExport(process.Name(), "Touch");
+        CHECK(touch != 0);
+        if (!touch)
+            return;
+        Status status;
+        constexpr std::size_t kCalls = 200;    // more than one page of records
+        const std::uint64_t buffer = process.Allocate(kCalls * RemoteCall::kMainCallSize, PAGE_READWRITE, 0, status);
+        const std::uint64_t source = buffer ? process.Allocate(0x100, PAGE_READWRITE, 0, status) : 0;
+        CHECK_MSG(buffer && source, status.Text);
+        if (!buffer || !source)
+            return;
+        std::uint8_t pattern[0x40];
+        for (std::size_t i = 0; i < sizeof(pattern); ++i)
+            pattern[i] = static_cast<std::uint8_t>(0xA0 + i);
+        CHECK(process.Write(source, pattern, sizeof(pattern)).Ok());
+
+        std::vector<RemoteCall::MainCall> calls(kCalls);
+        for (std::size_t i = 0; i < kCalls; ++i)
+        {
+            calls[i].Function = echo;               // returns its first argument
+            calls[i].Args[0] = 1000 + i;
+        }
+        // Copy out of the memory the result points at (offset 0x10, 16 bytes).
+        calls[3].Args[0] = source;
+        calls[3].CopyOffset = 0x10;
+        calls[3].CopyBytes = 16;
+        // A null result skips the copy, so the preset data stays.
+        calls[4].Args[0] = 0;
+        calls[4].CopyBytes = 16;
+        calls[4].Data.fill(0x5A);
+        // The record's own slot as an out-parameter: Touch bumps it to 1.
+        calls[5].Function = touch;
+        calls[5].Args[0] = RemoteCall::MainCallSlot(buffer, 5);
+        // The record's data as an in/out argument: 41 + 1.
+        calls[6].Function = touch;
+        calls[6].Args[0] = RemoteCall::MainCallData(buffer, 6);
+        const std::int64_t seed = 41;
+        std::memcpy(calls[6].Data.data(), &seed, sizeof(seed));
+
+        std::vector<RemoteCall::MainResult> results;
+        const Status sent = call.CallMainBatch(buffer, calls, results);
+        CHECK_MSG(sent.Ok(), sent.Text);
+        CHECK_EQ(results.size(), kCalls);
+        if (!sent || results.size() != kCalls)
+            return;
+        bool ordered = true;
+        for (std::size_t i = 0; i < kCalls; ++i)
+        {
+            if (i >= 3 && i <= 6)
+                continue;
+            ordered = ordered && results[i].Result == 1000 + i && results[i].Slot == 0;
+        }
+        CHECK_MSG(ordered, "batch results came back out of order or with a slot set");
+        CHECK_EQ(results[3].Result, source);
+        CHECK(std::memcmp(results[3].Data.data(), pattern + 0x10, 16) == 0);
+        CHECK_EQ(results[4].Result, std::uint64_t(0));
+        CHECK(results[4].Data[0] == 0x5A && results[4].Data[15] == 0x5A);
+        CHECK_EQ(results[5].Result, std::uint64_t(1));
+        CHECK_EQ(results[5].Slot, std::uint64_t(1));
+        std::int64_t bumped = 0;
+        std::memcpy(&bumped, results[6].Data.data(), sizeof(bumped));
+        CHECK_EQ(results[6].Result, std::uint64_t(42));
+        CHECK_EQ(bumped, std::int64_t(42));
+
+        // A copy larger than a record holds is refused before anything runs.
+        std::vector<RemoteCall::MainCall> tooBig(1);
+        tooBig[0].Function = echo;
+        tooBig[0].CopyBytes = RemoteCall::kMainCallData + 1;
+        CHECK(!call.CallMainBatch(buffer, tooBig, results).Ok());
+        CHECK(call.CallMainBatch(buffer, {}, results).Ok() && results.empty());
+
+        // Timing, for the record: one batch against the same calls one by one,
+        // each measured while the stub is serving (a call right before), best
+        // of five -- otherwise whichever runs first pays for the next tick.
+        std::vector<RemoteCall::MainCall> plain(64);
+        for (std::size_t i = 0; i < plain.size(); ++i)
+        {
+            plain[i].Function = echo;
+            plain[i].Args[0] = i;
+        }
+        std::uint64_t result = 0;
+        bool timed = true;
+        double batchMs = 1e9;
+        double singleMs = 1e9;
+        for (int round = 0; round < 5; ++round)
+        {
+            timed = timed && call.CallMain(echo, 0, 0, 0, 0, result).Ok();
+            const auto batchStart = std::chrono::steady_clock::now();
+            timed = timed && call.CallMainBatch(buffer, plain, results).Ok();
+            batchMs = std::min(batchMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - batchStart).count());
+            timed = timed && call.CallMain(echo, 0, 0, 0, 0, result).Ok();
+            const auto singleStart = std::chrono::steady_clock::now();
+            for (std::size_t i = 0; i < plain.size(); ++i)
+                timed = timed && call.CallMain(echo, i, 0, 0, 0, result).Ok();
+            singleMs = std::min(singleMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - singleStart).count());
+        }
+        CHECK(timed);
+        std::printf("main-thread batch: 64 calls in %.3f ms as one batch, %.3f ms one by one (best of 5, stub serving)\n", batchMs, singleMs);
+    }
+
     // The main-thread channel: with the stub wired into the target's per-frame
     // tick (as the Unity explorer hangs it on Application.onBeforeRender), calls
     // run on the target's main thread, and the channel ends cleanly.
@@ -417,6 +524,28 @@ namespace Manifold::Tests
         CHECK_MSG(ok, "a batch of main-thread calls did not round-trip");
         CHECK_EQ(call.MainThreadId(), thread);
         CHECK(call.MainRuns() > 0);
+
+        CheckMainBatch(process, call, attach);
+
+        // A request sent while the stub is not running waits for the next tick
+        // and is counted as a frame wait. The tick is taken out first (a call
+        // landing in a running visit is rightly not a wait) and put back while
+        // the request is out.
+        {
+            const std::uint64_t none = 0;
+            CHECK(process.Write(tickSlot, &none, sizeof(none)).Ok());
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            const std::uint64_t waits = call.FrameWaits();
+            std::thread rewire([&]
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+                    process.Write(tickSlot, &stub, sizeof(stub));
+                });
+            const bool served = call.CallMain(attach, 9, 0, 0, 0, result).Ok() && result == 9;
+            rewire.join();
+            CHECK(served);
+            CHECK_MSG(call.FrameWaits() > waits, "a request sent while the stub was not running was not counted as a frame wait");
+        }
 
         call.LeaveMain();
         CHECK(!call.InsideMain());

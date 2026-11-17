@@ -1040,6 +1040,8 @@ namespace Manifold::UI
             int Position = -1;
             bool Auto = false;
             double RefreshedAt = 0.0;
+            double ShownMs = -1.0;         // the refresh time on screen, updated twice a second
+            double ShownAt = -1.0;
             std::uint64_t Key = 0;
             int Current() const { return Position >= 0 && Position < static_cast<int>(History.size()) ? History[static_cast<std::size_t>(Position)] : 0; }
         };
@@ -1098,6 +1100,7 @@ namespace Manifold::UI
         std::uint64_t m_unityGeneration = 0;
         std::uint64_t m_monoGeneration = ~0ull;
         Target::UnityStatus m_status;
+        double m_busySince = -1.0;         // when the current explorer job started, -1 while idle
         Target::UnityTree m_tree;
         Target::UnitySearchResult m_search;
         std::map<int, Target::UnityInspection> m_inspections;

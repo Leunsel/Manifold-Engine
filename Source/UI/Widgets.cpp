@@ -1039,6 +1039,11 @@ namespace Manifold::UI
         return ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(label, nullptr, true).x;
     }
 
+    float SmallButtonWidth(const char* label)
+    {
+        return ImGui::CalcTextSize(label, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    }
+
     bool FlowNext(float width, float indent)
     {
         const float next = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + width;
@@ -1113,6 +1118,28 @@ namespace Manifold::UI
         }
         ImGui::SetNextWindowSize(ImVec2(Px(size.x), Px(size.y)), undocked ? ImGuiCond_Always : ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSizeConstraints(Px(minimum.x, minimum.y), ImVec2(FLT_MAX, FLT_MAX));
+        // ∑ Docking drops size constraints ("Docking currently override
+        // constraints" in imgui.cpp) and its splitters only keep the style's
+        // tiny WindowMinSize, so a docked tool window could be dragged down to
+        // a sliver and squeeze its layout into unreadable slivers (a docked
+        // Mono window at 390 px). Below its minimum the content now keeps the
+        // minimum size and the window scrolls instead. Measured from last
+        // frame's size, so it follows one frame late, which nobody sees.
+        if (const ImGuiWindow* window = ImGui::FindWindowByName(title); window && !window->Collapsed && window->InnerRect.GetWidth() > 0.0f)
+        {
+            const ImGuiStyle& style = ImGui::GetStyle();
+            const float bars = ImGui::GetFrameHeight() * ((flags & ImGuiWindowFlags_MenuBar) ? 2.0f : 1.0f);
+            const ImVec2 need(Px(minimum.x) - style.WindowPadding.x * 2.0f, Px(minimum.y) - style.WindowPadding.y * 2.0f - bars);
+            const ImVec2 natural(window->InnerRect.GetWidth() - window->WindowPadding.x * 2.0f, window->InnerRect.GetHeight() - window->WindowPadding.y * 2.0f);
+            const ImVec2 content(natural.x + 1.0f < need.x ? need.x : 0.0f, natural.y + 1.0f < need.y ? need.y : 0.0f);
+            if (content.x > 0.0f || content.y > 0.0f)
+            {
+                ImGui::SetNextWindowContentSize(content);   // 0 keeps that axis automatic
+                if (content.x > 0.0f)
+                    flags |= ImGuiWindowFlags_HorizontalScrollbar;
+                flags &= ~(ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+            }
+        }
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ManifoldTheme::Page);
         const bool visible = ImGui::Begin(title, open, flags);
         ImGui::PopStyleColor();

@@ -227,6 +227,12 @@ namespace Manifold::Target
         bool Loading = false;
         std::string Error;
         std::uint64_t Generation = 0;
+        // The last refresh: wall time, and the main-thread calls it made in
+        // how many round trips to the game.
+        double RefreshMs = 0.0;
+        int Calls = 0;
+        int RoundTrips = 0;
+        int FrameWaits = 0;             // round trips that waited for the game's next frame
     };
 
     struct UnityStatus
@@ -353,6 +359,19 @@ namespace Manifold::Target
             bool Ok = false;
             std::uint64_t Result = 0;   // the returned object (boxed for value types)
             std::string Error;
+            std::vector<std::uint8_t> Value;  // a batch's copied value bytes (empty otherwise)
+        };
+
+        // One managed call of a batch (InvokeMany): method on self, with at
+        // most one int parameter, run through mono_runtime_invoke.
+        struct BatchInvoke
+        {
+            std::uint64_t Method = 0;
+            std::uint64_t Self = 0;
+            std::optional<std::int32_t> IntArg;
+            // > 0: copy that many bytes of the boxed result in the game, right
+            // after the call (at most RemoteCall::kMainCallData).
+            std::uint32_t ValueBytes = 0;
         };
 
         // False (and leaves a reason in the status) while the explorer is off,
@@ -370,8 +389,13 @@ namespace Manifold::Target
         // object, a string) on the game's main thread once the callback is up,
         // never off-thread, where a static constructor or GC would crash it.
         std::optional<std::uint64_t> Exec(const char* function, std::uint64_t a0 = 0, std::uint64_t a1 = 0, std::uint64_t a2 = 0, std::uint64_t a3 = 0);
+        // Enters the game's main thread if needed and starts the per-frame clock.
+        Status BeginVisit();
         void YieldFrame();
         Invoked Invoke(bool main, std::uint64_t method, const Arg& self, const std::vector<Arg>& params);
+        // Runs all calls on the main thread in as few visits as possible (one
+        // round trip per kBatchCalls calls); results come back in call order.
+        std::vector<Invoked> InvokeMany(const std::vector<BatchInvoke>& calls);
         std::string ExceptionText(bool main, std::uint64_t exception);
         std::uint64_t ArgSpace(std::size_t bytes);
 
@@ -392,6 +416,8 @@ namespace Manifold::Target
         std::vector<std::uint64_t> ReadArray(std::uint64_t monoArray, std::size_t limit, std::size_t* total = nullptr) const;
         template <typename T> std::optional<T> Unbox(std::uint64_t boxed) const;
         std::optional<std::string> CallString(bool main, std::uint64_t method, const Arg& self);
+        std::optional<std::string> TextOf(const Invoked& call) const;          // a string result
+        template <typename T> static std::optional<T> ValueOf(const Invoked& call);  // a copied value
         template <typename T> std::optional<T> CallValue(bool main, std::uint64_t method, const Arg& self, const std::vector<Arg>& params = {});
         std::uint64_t CallObject(bool main, std::uint64_t method, const Arg& self, const std::vector<Arg>& params = {});
         std::uint64_t NewString(const std::string& text);
@@ -440,7 +466,11 @@ namespace Manifold::Target
         // Job-thread only.
         std::uint64_t m_args = 0;                 // argument page in the game
         std::size_t m_argsUsed = 0;
+        std::uint64_t m_batch = 0;                // batch records in the game (never freed, like m_args)
+        int m_statTrips = 0;                      // main-thread round trips of the current job
+        int m_statCalls = 0;                      // main-thread calls of the current job
         std::chrono::steady_clock::time_point m_visitStart{};
+        std::uint64_t m_visitRuns = 0;            // the stub's run counter when the clock started
         bool m_visiting = false;
         std::uint64_t m_delegate = 0;
         MonoGcHandle m_delegatePin = 0;

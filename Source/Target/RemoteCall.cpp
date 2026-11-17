@@ -49,7 +49,14 @@ namespace Manifold::Target
         // it never holds a frame for long -- but it does NOT drop Active when it
         // does, because a flag that is only up for that sliver of a frame is
         // impossible to catch by polling from another process.
-        // Request: 0 nothing pending, 1 call.
+        // Request: 0 nothing pending, 1 call, 2 batch. A batch puts the record
+        // array at Func (0x08) and its count at A0 (0x10); the stub counts down
+        // in A1 (0x18). Each record is RemoteCall::kMainCallSize bytes:
+        //   +0x00 function  +0x08..+0x20 a0..a3  +0x28 result
+        //   +0x30 copy offset (u32)  +0x34 copy bytes (u32)  +0x38 slot
+        //   +0x40 data (kMainCallData bytes)
+        // After each call the stub copies `copy bytes` from result + offset
+        // into data (skipped for a null result), still on the main thread.
         constexpr std::uint32_t kMainStubOffset = 0x300;
         constexpr std::uint32_t kMainControlOffset = 0x800;
         constexpr std::uint32_t kMainActiveOffset = 0x38;
@@ -58,7 +65,12 @@ namespace Manifold::Target
         constexpr std::uint32_t kMainIdleOffset = 0x50;
         constexpr std::uint32_t kMainWantOffset = 0x60;
         constexpr std::uint32_t kMainControlSize = 0x68;
-        constexpr std::uint64_t kMainIdleCycles = 400000;
+        // ∑ ~0.5 ms at 3 GHz. Long enough to bridge this side's own work
+        // between two requests of one refresh (reading back a few dozen names
+        // already took longer than the old 0.13 ms), each such gap otherwise
+        // costing a whole frame; short enough that the game barely notices it
+        // once at the end of a visit.
+        constexpr std::uint64_t kMainIdleCycles = 1500000;
 
         class Emitter
         {
@@ -220,6 +232,8 @@ namespace Manifold::Target
             e.Bytes({ 0x48, 0x8B, 0x06 });             // mov rax, [rsi]
             e.Bytes({ 0x48, 0x83, 0xF8, 0x01 });       // cmp rax, 1
             e.Jump(0x84, "call");                      // je call
+            e.Bytes({ 0x48, 0x83, 0xF8, 0x02 });       // cmp rax, 2
+            e.Jump(0x84, "batch");                     // je batch
             e.Bytes({ 0xF3, 0x90 });                   // pause
             e.Bytes({ 0x0F, 0x31 });                   // rdtsc
             e.Bytes({ 0x48, 0xC1, 0xE2, 0x20 });       // shl rdx, 32
@@ -241,6 +255,42 @@ namespace Manifold::Target
             e.Bytes({ 0xB8, 0x01, 0x00, 0x00, 0x00 }); // mov eax, 1
             e.Bytes({ 0x31, 0xC9 });                   // xor ecx, ecx
             e.Bytes({ 0xF0, 0x48, 0x0F, 0xB1, 0x0E }); // lock cmpxchg [rsi], rcx  call 1 -> 0
+            e.Jump(0xE9, "awake");                     // jmp awake
+            // ∑ A whole list in one visit: rbx walks the records (callee-saved,
+            // and "awake" resets it to a timestamp afterwards); the count lives
+            // in the control block so no further register needs saving.
+            e.Label("batch");
+            e.Bytes({ 0x48, 0x8B, 0x5E, 0x08 });       // mov rbx, [rsi+0x08]  records
+            e.Bytes({ 0x48, 0x8B, 0x46, 0x10 });       // mov rax, [rsi+0x10]  count
+            e.Bytes({ 0x48, 0x89, 0x46, 0x18 });       // mov [rsi+0x18], rax  remaining
+            e.Label("next");
+            e.Bytes({ 0x48, 0x83, 0x7E, 0x18, 0x00 }); // cmp qword [rsi+0x18], 0
+            e.Jump(0x84, "batchdone");                 // je batchdone
+            e.Bytes({ 0x48, 0x8B, 0x4B, 0x08 });       // mov rcx, [rbx+0x08]
+            e.Bytes({ 0x48, 0x8B, 0x53, 0x10 });       // mov rdx, [rbx+0x10]
+            e.Bytes({ 0x4C, 0x8B, 0x43, 0x18 });       // mov r8,  [rbx+0x18]
+            e.Bytes({ 0x4C, 0x8B, 0x4B, 0x20 });       // mov r9,  [rbx+0x20]
+            e.Bytes({ 0xFF, 0x13 });                   // call [rbx]
+            e.Bytes({ 0x48, 0x89, 0x43, 0x28 });       // mov [rbx+0x28], rax  result
+            e.Bytes({ 0x48, 0x85, 0xC0 });             // test rax, rax
+            e.Jump(0x84, "skip");                      // jz skip
+            e.Bytes({ 0x8B, 0x4B, 0x34 });             // mov ecx, [rbx+0x34]  copy bytes
+            e.Bytes({ 0x85, 0xC9 });                   // test ecx, ecx
+            e.Jump(0x84, "skip");                      // jz skip
+            e.Bytes({ 0x56, 0x57 });                   // push rsi; push rdi
+            e.Bytes({ 0x8B, 0x53, 0x30 });             // mov edx, [rbx+0x30]  copy offset
+            e.Bytes({ 0x48, 0x8D, 0x34, 0x10 });       // lea rsi, [rax+rdx]
+            e.Bytes({ 0x48, 0x8D, 0x7B, 0x40 });       // lea rdi, [rbx+0x40]  data
+            e.Bytes({ 0xF3, 0xA4 });                   // rep movsb
+            e.Bytes({ 0x5F, 0x5E });                   // pop rdi; pop rsi
+            e.Label("skip");
+            e.Bytes({ 0x48, 0x81, 0xC3, 0x80, 0x00, 0x00, 0x00 }); // add rbx, 0x80  next record
+            e.Bytes({ 0x48, 0xFF, 0x4E, 0x18 });       // dec qword [rsi+0x18]
+            e.Jump(0xE9, "next");                      // jmp next
+            e.Label("batchdone");
+            e.Bytes({ 0xB8, 0x02, 0x00, 0x00, 0x00 }); // mov eax, 2
+            e.Bytes({ 0x31, 0xC9 });                   // xor ecx, ecx
+            e.Bytes({ 0xF0, 0x48, 0x0F, 0xB1, 0x0E }); // lock cmpxchg [rsi], rcx  batch 2 -> 0
             e.Jump(0xE9, "awake");                     // jmp awake
             e.Label("clear");
             e.Bytes({ 0x48, 0xC7, 0x46, 0x38, 0x00, 0x00, 0x00, 0x00 }); // mov qword [rsi+0x38], 0  active off
@@ -561,6 +611,52 @@ namespace Manifold::Target
         result = 0;
         if (!m_process || !m_code || !m_thread || !function)
             return Status::Fail(ErrorCode::NoProcess);
+        const std::uint64_t block[5] = { function, a0, a1, a2, a3 };
+        return SendMain(1, block, 5, result);
+    }
+
+    Status RemoteCall::CallMainBatch(std::uint64_t buffer, const std::vector<MainCall>& calls, std::vector<MainResult>& results)
+    {
+        results.clear();
+        if (!m_process || !m_code || !m_thread || !buffer)
+            return Status::Fail(ErrorCode::NoProcess);
+        if (calls.empty())
+            return Status::Success();
+        std::vector<std::uint8_t> records(calls.size() * kMainCallSize, 0);
+        for (std::size_t i = 0; i < calls.size(); ++i)
+        {
+            const MainCall& call = calls[i];
+            if (!call.Function || call.CopyBytes > kMainCallData)
+                return Status::Fail(ErrorCode::MonoCallFailed, "a main-thread batch entry has no function or copies more than " + std::to_string(kMainCallData) + " bytes");
+            std::uint8_t* record = records.data() + i * kMainCallSize;
+            std::memcpy(record + 0x00, &call.Function, 8);
+            std::memcpy(record + 0x08, call.Args, sizeof(call.Args));
+            std::memcpy(record + 0x30, &call.CopyOffset, 4);
+            std::memcpy(record + 0x34, &call.CopyBytes, 4);
+            std::memcpy(record + 0x40, call.Data.data(), kMainCallData);
+        }
+        if (!m_process->Write(buffer, records.data(), records.size()))
+            return Status::Fail(ErrorCode::WriteFailed);
+        const std::uint64_t block[3] = { buffer, calls.size(), calls.size() };
+        std::uint64_t ignored = 0;
+        if (Status sent = SendMain(2, block, 3, ignored); !sent)
+            return sent;
+        // One read brings every result, slot and copied value back.
+        if (!m_process->ReadExact(buffer, records.data(), records.size()))
+            return Status::Fail(ErrorCode::ReadFailed);
+        results.resize(calls.size());
+        for (std::size_t i = 0; i < calls.size(); ++i)
+        {
+            const std::uint8_t* record = records.data() + i * kMainCallSize;
+            std::memcpy(&results[i].Result, record + 0x28, 8);
+            std::memcpy(&results[i].Slot, record + 0x38, 8);
+            std::memcpy(results[i].Data.data(), record + 0x40, kMainCallData);
+        }
+        return Status::Success();
+    }
+
+    Status RemoteCall::SendMain(std::uint64_t request, const std::uint64_t* block, std::size_t words, std::uint64_t& result)
+    {
         const std::uint64_t control = m_code + kMainControlOffset;
         for (int attempt = 0; attempt < 2; ++attempt)
         {
@@ -569,14 +665,17 @@ namespace Manifold::Target
                 if (Status entered = EnterMain(std::chrono::milliseconds(2000)); !entered)
                     return entered;
             }
-            const std::uint64_t block[5] = { function, a0, a1, a2, a3 };
-            if (!m_process->Write(control + kFuncOffset, block, sizeof(block)))
+            if (!m_process->Write(control + kFuncOffset, block, words * sizeof(std::uint64_t)))
                 return Status::Fail(ErrorCode::WriteFailed);
-            const std::uint64_t go = 1;
-            if (!m_process->Write(control + kRequestOffset, &go, sizeof(go)))
+            // A run counter that moved while the request was out means the stub
+            // had given the frame back and served it only on the next one.
+            const std::uint64_t runs = ReadMain(kMainRunsOffset);
+            if (!m_process->Write(control + kRequestOffset, &request, sizeof(request)))
                 return Status::Fail(ErrorCode::WriteFailed);
             bool notTaken = false;
             const Status done = WaitForResult(control, true, result, &notTaken);
+            if (done && ReadMain(kMainRunsOffset) != runs)
+                ++m_frameWaits;
             if (done || !notTaken)
                 return done;
             // The stub went idle just before the request: it never ran, so it is

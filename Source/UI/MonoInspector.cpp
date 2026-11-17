@@ -11,6 +11,8 @@
 #include "UI/Widgets.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 
 namespace Manifold::UI
 {
@@ -245,15 +247,43 @@ namespace Manifold::UI
         }
         ImGui::SameLine();
         ImGui::Checkbox("Auto", &tab.Auto);
-        ItemTooltip("Reads properties and the GameObject again every second. Fields always update live.");
-        if (tab.Auto && !inspection->Loading && ImGui::GetTime() - tab.RefreshedAt > 1.0)
+        ItemTooltip("Reads properties and the GameObject again about ten times a second (or as fast as the game answers). Fields always update live.");
+        // The getters of one refresh run as a batch in a single visit to the
+        // game's main thread, so a short interval costs the game little.
+        constexpr double kAutoRefreshSeconds = 0.1;
+        if (tab.Auto && !inspection->Loading && ImGui::GetTime() - tab.RefreshedAt > kAutoRefreshSeconds)
         {
             unity.Refresh(id, true);
             tab.RefreshedAt = ImGui::GetTime();
         }
-        if (inspection->Loading)
+        // Fixed slots, so nothing in this row comes and goes while Auto runs:
+        // the time of the last refresh stays up during the next one (and is
+        // updated twice a second, not ten times), and the spinner shows only
+        // for a slow refresh, at a fixed place after it.
+        const double now = ImGui::GetTime();
+        if (inspection->RoundTrips > 0 && (tab.ShownAt < 0.0 || now - tab.ShownAt > 0.5 || !tab.Auto))
         {
-            ImGui::SameLine();
+            tab.ShownMs = inspection->RefreshMs;
+            tab.ShownAt = now;
+        }
+        else if (inspection->RoundTrips == 0 && !inspection->Loading)
+            tab.ShownMs = -1.0;    // nothing ran in the game (e.g. found by a scan)
+        ImGui::SameLine();
+        const float slotX = ImGui::GetCursorPosX();
+        if (tab.ShownMs >= 0.0)
+        {
+            ImGui::TextColored(ManifoldTheme::Muted, "%.0f ms", tab.ShownMs);
+            char detail[220];
+            std::snprintf(detail, sizeof(detail),
+                "The last refresh took %.1f ms: %d calls on the game's main thread in %d round trips, %d of them waited for the game's next frame.",
+                inspection->RefreshMs, inspection->Calls, inspection->RoundTrips, inspection->FrameWaits);
+            ItemTooltip(detail);
+        }
+        else
+            ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeight()));
+        if (inspection->Loading && now - tab.RefreshedAt > 0.3)
+        {
+            ImGui::SameLine(slotX + ImGui::CalcTextSize("00000 ms").x);
             Spinner(ImGui::GetTextLineHeight() * 0.4f, ManifoldTheme::Accent);
         }
 
@@ -265,7 +295,10 @@ namespace Manifold::UI
             if (!inspection->ObjectName.empty())
             {
                 ImGui::TextUnformatted(("\"" + inspection->ObjectName + "\"").c_str());
-                ImGui::SameLine();
+                PushMono();
+                const float addressWidth = ImGui::CalcTextSize(Hex(inspection->Object).c_str()).x;
+                PopMono();
+                FlowNext(addressWidth);
             }
             PushMono();
             ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::AddressText);
@@ -290,9 +323,10 @@ namespace Manifold::UI
             }
             if (!parts.empty())
             {
+                const std::string derives = "derives from " + Join(parts, " > ");
                 if (inspection->Object)
-                    ImGui::SameLine();
-                Muted("derives from " + Join(parts, " > "));
+                    FlowNext(ImGui::CalcTextSize(derives.c_str()).x);
+                Muted(derives);
             }
         }
         if (inspection->FromScan)
@@ -424,7 +458,18 @@ namespace Manifold::UI
             float shown[3] = { values[row][0], values[row][1], values[row][2] };
             if (mine)
                 std::copy(m_dragValue, m_dragValue + 3, shown);
-            ImGui::SetNextItemWidth(std::min(Px(360.0f), ImGui::GetContentRegionAvail().x));
+            else
+            {
+                // Engine noise such as -1.3e-07 would read "-0.000" and its sign
+                // flip between refreshes; anything that rounds to zero shows 0.
+                for (float& value : shown)
+                {
+                    if (std::fabs(value) < 0.0005f)
+                        value = 0.0f;
+                }
+            }
+            // Never narrower than three readable numbers (~60 px each).
+            ImGui::SetNextItemWidth(std::clamp(ImGui::GetContentRegionAvail().x, Px(180.0f), Px(360.0f)));
             if (ImGui::DragFloat3("##vector", shown, row == 1 ? 0.5f : 0.05f, 0.0f, 0.0f, "%.3f"))
             {
                 m_dragTransform = transform.Object;
@@ -448,7 +493,8 @@ namespace Manifold::UI
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted("World position");
         ImGui::SameLine(label);
-        Muted(Format("%.3f, %.3f, %.3f", transform.Position[0], transform.Position[1], transform.Position[2]));
+        const auto clean = [](float value) { return std::fabs(value) < 0.0005f ? 0.0f : value; };
+        Muted(Format("%.3f, %.3f, %.3f", clean(transform.Position[0]), clean(transform.Position[1]), clean(transform.Position[2])));
     }
 
     void MonoWindow::ElementsTable(Target::UnityExplorer& unity, const Target::UnityInspection& inspection)
@@ -597,15 +643,17 @@ namespace Manifold::UI
     {
         const Target::MonoClassLayout& layout = *inspection.Layout;
         ImGui::Spacing();
-        ImGui::SetNextItemWidth(std::min(Px(220.0f), ImGui::GetContentRegionAvail().x * 0.4f));
+        // The switches wrap under the filter in a narrow inspector instead of
+        // running off its edge.
+        ImGui::SetNextItemWidth(std::clamp(ImGui::GetContentRegionAvail().x * 0.4f, Px(140.0f), Px(220.0f)));
         InputTextWithHint("##memberfilter", "filter members", m_memberFilter);
-        ImGui::SameLine();
+        FlowNext(CheckboxWidth("Fields"));
         ImGui::Checkbox("Fields", &m_showFields);
-        ImGui::SameLine();
+        FlowNext(CheckboxWidth("Properties"));
         ImGui::Checkbox("Properties", &m_showProperties);
-        ImGui::SameLine();
+        FlowNext(CheckboxWidth("Methods"));
         ImGui::Checkbox("Methods", &m_showMethods);
-        ImGui::SameLine();
+        FlowNext(CheckboxWidth("Inherited"));
         ImGui::Checkbox("Inherited", &m_showInherited);
         ItemTooltip("Also members of the base classes (MonoBehaviour, Component, ...)");
 
