@@ -19,6 +19,7 @@ namespace Manifold::Target
     {
         constexpr std::size_t kArgsSize = 0x10000;
         constexpr std::size_t kBatchCalls = 128;     // calls per main-thread round trip
+        constexpr const char* kGoneText = "the object is gone (the game destroyed it, e.g. on a scene change), so nothing was called on it";
         constexpr auto kVisitBudget = std::chrono::milliseconds(4);
         constexpr std::size_t kMaxNodes = 200000;
         constexpr std::size_t kMaxChildren = 20000;
@@ -262,6 +263,7 @@ namespace Manifold::Target
             Publish();
             try
             {
+                LearnClassShape();
                 job.second();
             }
             catch (const std::exception& error)
@@ -393,6 +395,14 @@ namespace Manifold::Target
         m_dontDestroyHandle = 0;
         m_originalRunInBackground.reset();
         m_handleApi.reset();
+        {
+            std::lock_guard state(m_stateLock);
+            m_classShape = {};
+            m_validClasses.clear();
+        }
+        m_methodClasses.clear();
+        m_parents.clear();
+        m_valueClasses.clear();
         m_methods.clear();
         m_typeObjects.clear();
         m_types.clear();
@@ -563,6 +573,11 @@ namespace Manifold::Target
             out.Error = method ? "no process" : "the method was not found in this Unity version";
             return out;
         }
+        if (self.Bytes.empty() && !SelfFits(self.Pointer, method))
+        {
+            out.Error = kGoneText;
+            return out;
+        }
         m_argsUsed = 0;
         const std::uint64_t exception = ArgSpace(8);
         const std::uint64_t array = params.empty() ? 0 : ArgSpace(8 * params.size());
@@ -669,6 +684,11 @@ namespace Manifold::Target
                 if (!request.Method)
                 {
                     out[i].Error = "the method was not found in this Unity version";
+                    continue;
+                }
+                if (!SelfFits(request.Self, request.Method))
+                {
+                    out[i].Error = kGoneText;
                     continue;
                 }
                 const std::size_t slot = chunk.size();
@@ -1079,7 +1099,169 @@ namespace Manifold::Target
         const auto vtable = process->ReadPointer(object);
         if (!vtable || *vtable < 0x10000)
             return 0;
-        return process->ReadPointer(*vtable).value_or(0);
+        // ∑ Whatever comes back here can end up in mono_class_get_type /
+        // mono_type_get_name on the worker, and Mono dereferences it blindly.
+        // A field of an object the game had destroyed and collected (Content
+        // Warning, after the player died and the level reloaded) produced a
+        // "class" of 0x01000001A9DE141D and killed the game inside
+        // mono_type_get_name. So nothing leaves here unvetted.
+        const std::uint64_t klass = process->ReadPointer(*vtable).value_or(0);
+        return IsClass(klass) ? klass : 0;
+    }
+
+    bool UnityExplorer::IsClass(std::uint64_t klass) const
+    {
+        if (klass < 0x10000 || klass > 0x7FFFFFFFFFFFull || (klass & 7) != 0)
+            return false;
+        ClassShape shape;
+        {
+            std::lock_guard state(m_stateLock);
+            if (m_validClasses.count(klass))
+                return true;
+            shape = m_classShape;
+        }
+        bool enumerated = false;
+        {
+            std::lock_guard bridge(m_mono.m_lock);
+            enumerated = m_mono.m_handleIndex.count(klass) != 0;
+        }
+        if (enumerated)
+        {
+            std::lock_guard state(m_stateLock);
+            m_validClasses.insert(klass);
+            return true;
+        }
+        // Not enumerated (a generic instance, an array): its image field must
+        // name a loaded image, and its name field a readable name.
+        const auto process = Proc();
+        if (!shape.Ready || !process)
+            return false;
+        const auto image = process->ReadPointer(klass + shape.Image);
+        if (!image || !*image)
+            return false;
+        {
+            std::lock_guard bridge(m_mono.m_lock);
+            if (!m_mono.m_images.count(*image))
+                return false;
+        }
+        const auto name = process->ReadPointer(klass + shape.Name);
+        if (!name || *name < 0x10000)
+            return false;
+        char text[128] = {};
+        const std::size_t got = process->Read(*name, text, sizeof(text));
+        std::size_t length = 0;
+        while (length < got && text[length] != '\0')
+        {
+            if (static_cast<unsigned char>(text[length]) < 0x20)
+                return false;
+            ++length;
+        }
+        if (length == 0 || length == got)
+            return false;
+        std::lock_guard state(m_stateLock);
+        m_validClasses.insert(klass);
+        return true;
+    }
+
+    void UnityExplorer::LearnClassShape()
+    {
+        {
+            std::lock_guard state(m_stateLock);
+            if (m_classShape.Ready || m_classShape.Failed)
+                return;
+        }
+        std::vector<std::uint64_t> samples;
+        {
+            std::lock_guard bridge(m_mono.m_lock);
+            if (!m_mono.m_present || m_mono.m_classes.empty())
+                return;
+            const std::size_t count = m_mono.m_classes.size();
+            for (std::size_t i = 0; i < 6 && i < count; ++i)
+                samples.push_back(m_mono.m_classes[i * count / 6].Handle);
+        }
+        // The offsets at which the class holds what mono_class_get_image and
+        // mono_class_get_name return, the same in every sample.
+        const auto process = Proc();
+        std::optional<std::uint32_t> imageAt;
+        std::optional<std::uint32_t> nameAt;
+        int agreed = 0;
+        bool consistent = process != nullptr;
+        for (const std::uint64_t klass : samples)
+        {
+            if (!consistent)
+                break;
+            const std::uint64_t image = Worker("mono_class_get_image", klass).value_or(0);
+            const std::uint64_t name = Worker("mono_class_get_name", klass).value_or(0);
+            std::uint64_t words[64] = {};
+            if (!image || !name || !process->ReadExact(klass, words, sizeof(words)))
+                continue;
+            std::optional<std::uint32_t> foundImage;
+            std::optional<std::uint32_t> foundName;
+            for (std::uint32_t i = 0; i < 64; ++i)
+            {
+                if (!foundImage && words[i] == image)
+                    foundImage = i * 8;
+                if (!foundName && words[i] == name)
+                    foundName = i * 8;
+            }
+            if (!foundImage || !foundName || (imageAt && *imageAt != *foundImage) || (nameAt && *nameAt != *foundName))
+                consistent = false;
+            imageAt = foundImage;
+            nameAt = foundName;
+            ++agreed;
+        }
+        std::lock_guard state(m_stateLock);
+        if (consistent && agreed >= 2 && imageAt && nameAt)
+        {
+            m_classShape.Ready = true;
+            m_classShape.Image = *imageAt;
+            m_classShape.Name = *nameAt;
+        }
+        else
+        {
+            m_classShape.Failed = true;
+            LOG_WARN("Unity", "Could not learn where this Mono keeps a class's image and name; objects of generic and array classes stay unnamed");
+        }
+    }
+
+    std::uint64_t UnityExplorer::MethodClass(std::uint64_t method)
+    {
+        if (const auto found = m_methodClasses.find(method); found != m_methodClasses.end())
+            return found->second;
+        const std::uint64_t klass = Worker("mono_method_get_class", method).value_or(0);
+        m_methodClasses[method] = klass;
+        return klass;
+    }
+
+    bool UnityExplorer::Derives(std::uint64_t klass, std::uint64_t base)
+    {
+        for (int depth = 0; klass && depth < 48; ++depth)
+        {
+            if (klass == base)
+                return true;
+            auto found = m_parents.find(klass);
+            if (found == m_parents.end())
+                found = m_parents.emplace(klass, Worker("mono_class_get_parent", klass).value_or(0)).first;
+            klass = found->second;
+        }
+        return false;
+    }
+
+    bool UnityExplorer::SelfFits(std::uint64_t self, std::uint64_t method)
+    {
+        if (!self || !method)
+            return true;
+        const std::uint64_t declaring = MethodClass(method);
+        if (!declaring)
+            return true;    // cannot tell; the runtime did not say
+        // A struct's method gets a pointer to the value, not an object.
+        auto value = m_valueClasses.find(declaring);
+        if (value == m_valueClasses.end())
+            value = m_valueClasses.emplace(declaring, (Worker("mono_class_is_valuetype", declaring).value_or(0) & 0xFF) != 0).first;
+        if (value->second)
+            return true;
+        const std::uint64_t klass = ClassOf(self);
+        return klass && Derives(klass, declaring);
     }
 
     std::string UnityExplorer::ClassNameOf(std::uint64_t object)
@@ -2569,6 +2751,20 @@ namespace Manifold::Target
         m_statCalls = 0;
         if (!inspection.Klass && inspection.Object)
             inspection.Klass = ClassOf(inspection.Object);
+        // Once inspected, the memory must still hold an object of that class.
+        // After a scene change the game may have destroyed and collected it
+        // and reused the memory; from then on nothing is called on it (and it
+        // stays gone even if another object of the class lands there).
+        if (!inspection.Gone && inspection.Object && inspection.Klass && ClassOf(inspection.Object) != inspection.Klass)
+            inspection.Gone = true;
+        if (inspection.Gone)
+        {
+            inspection.Values.clear();
+            inspection.GameObject.reset();
+            inspection.Transform.reset();
+            inspection.Error = "This object is gone: the game destroyed it (a scene change does that), and its memory may already hold "
+                               "something else, so nothing is read from it or called on it any more.";
+        }
         if (!inspection.Klass)
         {
             inspection.Error = "This address does not hold a managed object.";
@@ -2579,7 +2775,7 @@ namespace Manifold::Target
             inspection.Title = inspection.Layout->Name;
         }
         std::vector<MonoGcHandle> pins;
-        if (inspection.Layout && inspection.Object && !inspection.FromScan)
+        if (inspection.Layout && inspection.Object && !inspection.FromScan && !inspection.Gone)
         {
             pins.push_back(Pin(inspection.Object));
             const MonoClassLayout& layout = *inspection.Layout;
@@ -2630,7 +2826,7 @@ namespace Manifold::Target
             }
         }
         bool readProperties = false;
-        if (properties && inspection.Layout && (inspection.Object || inspection.Klass))
+        if (properties && inspection.Layout && (inspection.Object || inspection.Klass) && !inspection.Gone)
         {
             bool any = false;
             for (const MonoMember& member : inspection.Layout->Members)
@@ -2872,6 +3068,10 @@ namespace Manifold::Target
         if (!process)
             return;
         std::string error;
+        // Writing into an object the game has collected would overwrite
+        // whatever now lives in that memory.
+        if (!member.Static && inspection->Object && (inspection->Gone || ClassOf(inspection->Object) != inspection->Klass))
+            return Fail(member.Name + ": " + kGoneText);
         if (member.Kind == MonoMemberKind::Field)
         {
             if (member.Literal)

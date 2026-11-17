@@ -164,6 +164,7 @@ namespace Manifold::Target
         std::map<std::uint64_t, int> m_handleIndex;  // MonoClass* -> class
         std::uint64_t m_handleMin = 0;  // span of known MonoClass* pointers, to
         std::uint64_t m_handleMax = 0;  // vet a klass before asking the runtime
+        std::unordered_set<std::uint64_t> m_images;  // MonoImage* of every loaded assembly
         std::atomic<std::uint64_t> m_generation{ 0 };
 
         // Reverse-resolution cache for MethodNameAt. Resolved method code ranges

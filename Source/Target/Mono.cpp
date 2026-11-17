@@ -27,7 +27,7 @@ namespace Manifold::Target
             "mono_compile_method", "mono_class_get_fields", "mono_field_get_name", "mono_field_get_offset",
             "mono_field_get_type", "mono_type_get_type", "mono_field_get_flags", "mono_object_get_class",
             "mono_jit_info_table_find", "mono_jit_info_get_method", "mono_jit_info_get_code_start",
-            "mono_jit_info_get_code_size", "mono_method_get_class",
+            "mono_jit_info_get_code_size", "mono_method_get_class", "mono_class_get_image",
             // Used by the Unity explorer; a runtime without some of them still
             // loads, the explorer then reports what is missing.
             "mono_class_get_method_from_name", "mono_method_signature", "mono_signature_get_param_count",
@@ -314,6 +314,9 @@ namespace Manifold::Target
             if (info.Handle > handleMax)
                 handleMax = info.Handle;
         }
+        std::unordered_set<std::uint64_t> imageSet;
+        for (const auto& image : images)
+            imageSet.insert(image.first);
         const std::size_t count = classes.size();
         std::string module;
         {
@@ -323,6 +326,7 @@ namespace Manifold::Target
             m_handleIndex = std::move(handleIndex);
             m_handleMin = handleMin;
             m_handleMax = handleMax;
+            m_images = std::move(imageSet);
             m_jitRanges.clear();
             m_jitMisses.clear();
             module = m_module;

@@ -560,6 +560,46 @@ namespace Manifold::Tests
         call.Stop();
     }
 
+    // Class pointers read from the game's memory are vetted before anything
+    // hands them to Mono (which dereferences them blindly: the Content Warning
+    // crash in mono_type_get_name). An enumerated class passes at once, a
+    // class the bridge never listed passes only by its shape once that has
+    // been learned, and what a collected object's memory holds never passes.
+    void CheckClassVetting(Engine& engine)
+    {
+        Target::Process& process = *engine.Process();
+        Target::UnityExplorer& unity = engine.Mono().Unity();
+        const std::uint64_t player = process.FindExport(process.Name(), "g_fakePlayer");
+        const std::uint64_t list = process.FindExport(process.Name(), "g_fakeList");
+        const std::uint64_t wild = process.FindExport(process.Name(), "g_fakeWild");
+        const std::uint64_t notClass = process.FindExport(process.Name(), "g_fakeNotClass");
+        CHECK(player && list && wild && notClass);
+        if (!player || !list || !wild || !notClass)
+            return;
+
+        // The explorer takes the process with its first job, and every job
+        // learns the class shape first; this one then fails, as the test
+        // target is no Unity game.
+        unity.SetEnabled(true);
+        unity.ReadScenes();
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (unity.State().Busy && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        unity.SetEnabled(false);
+
+        CHECK(unity.ClassOf(player) != 0);
+        std::uint64_t listClass = 0;
+        process.ReadExact(list, &listClass, sizeof(listClass));       // the vtable
+        process.ReadExact(listClass, &listClass, sizeof(listClass));  // its class
+        CHECK(listClass != 0);
+        CHECK_EQ(unity.ClassOf(list), listClass);
+        CHECK(unity.IsClass(listClass));
+        CHECK_EQ(unity.ClassOf(wild), std::uint64_t(0));
+        CHECK_EQ(unity.ClassOf(notClass), std::uint64_t(0));
+        CHECK(!unity.IsClass(0x01000001A9DE141Dull));
+    }
+
     // Host-side value formatting and parsing (no live game needed): the
     // inspector draws fields from these.
     void CheckUnityFormat(Engine& engine)
@@ -770,6 +810,7 @@ namespace Manifold::Tests
         CheckMonoInBackground(engine);
         CheckMainThread(engine);
         CheckUnityFormat(engine);
+        CheckClassVetting(engine);
     }
 
     // Attaches to an already-running process and lists its Mono runtime. Only

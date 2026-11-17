@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace Manifold::Target
@@ -224,6 +225,10 @@ namespace Manifold::Target
         std::optional<bool> Enabled;    // a Behaviour
         std::string ObjectName;         // a UnityEngine.Object's name
         bool FromScan = false;          // found by a memory scan: managed calls stay off
+        // The object is no longer there: its memory no longer holds an object
+        // of Klass (the game destroyed and collected it, e.g. on a scene
+        // change). Nothing is called on it or read from it any more.
+        bool Gone = false;
         bool Loading = false;
         std::string Error;
         std::uint64_t Generation = 0;
@@ -326,9 +331,18 @@ namespace Manifold::Target
         MonoShown ReadField(const MonoMember& field, std::uint64_t object);
         MonoShown Format(const MonoTypeInfo& type, const std::uint8_t* bytes, std::size_t size, int depth = 0);
         MonoShown Shown(const MonoMember& member, const MonoReadValue& value);
+        // The class of the object at this address, read from the game's memory
+        // and vetted (IsClass): 0 when the memory does not hold a live object,
+        // e.g. one the game destroyed and collected after a scene change.
         std::uint64_t ClassOf(std::uint64_t object) const;
         std::string ClassNameOf(std::uint64_t object);
         std::string ClassName(std::uint64_t klass);
+        // Whether a pointer read from the game's memory is a MonoClass*: one the
+        // bridge enumerated, one already confirmed, or one whose image field
+        // names a loaded assembly image (offsets learned from known classes).
+        // Mono dereferences whatever it is given, so garbage handed to it
+        // crashes the game inside the runtime.
+        bool IsClass(std::uint64_t klass) const;
 
         // Text to bytes for a value of this type: numbers, true/false, enum
         // names, and structs as "1, 2, 3". Strings and references are not
@@ -389,6 +403,16 @@ namespace Manifold::Target
         // object, a string) on the game's main thread once the callback is up,
         // never off-thread, where a static constructor or GC would crash it.
         std::optional<std::uint64_t> Exec(const char* function, std::uint64_t a0 = 0, std::uint64_t a1 = 0, std::uint64_t a2 = 0, std::uint64_t a3 = 0);
+        // Learns where MonoClass keeps its image and name from a few enumerated
+        // classes (job thread; once per runtime). Until then IsClass accepts
+        // enumerated classes only.
+        void LearnClassShape();
+        // Whether `self` is still an instance of the class that declares
+        // `method` (or a subclass), so a remembered object that the game has
+        // destroyed and collected is never handed to managed code as `this`.
+        bool SelfFits(std::uint64_t self, std::uint64_t method);
+        std::uint64_t MethodClass(std::uint64_t method);
+        bool Derives(std::uint64_t klass, std::uint64_t base);
         // Enters the game's main thread if needed and starts the per-frame clock.
         Status BeginVisit();
         void YieldFrame();
@@ -467,6 +491,18 @@ namespace Manifold::Target
         std::uint64_t m_args = 0;                 // argument page in the game
         std::size_t m_argsUsed = 0;
         std::uint64_t m_batch = 0;                // batch records in the game (never freed, like m_args)
+        struct ClassShape
+        {
+            bool Ready = false;
+            bool Failed = false;
+            std::uint32_t Image = 0;              // offset of MonoClass::image
+            std::uint32_t Name = 0;               // offset of MonoClass::name
+        };
+        mutable ClassShape m_classShape;          // under m_stateLock
+        mutable std::unordered_set<std::uint64_t> m_validClasses;   // confirmed MonoClass*, under m_stateLock
+        std::map<std::uint64_t, std::uint64_t> m_methodClasses;    // MonoMethod* -> declaring class (job thread)
+        std::map<std::uint64_t, std::uint64_t> m_parents;          // MonoClass* -> parent (job thread)
+        std::map<std::uint64_t, bool> m_valueClasses;              // MonoClass* -> is a value type (job thread)
         int m_statTrips = 0;                      // main-thread round trips of the current job
         int m_statCalls = 0;                      // main-thread calls of the current job
         std::chrono::steady_clock::time_point m_visitStart{};

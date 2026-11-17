@@ -65,8 +65,12 @@ namespace
 {
     struct FakeMethod { const char* Name; void* Address; };
     struct FakeField { const char* Name; int Offset; int TypeCode; int Flags; };
-    struct FakeClass { const char* Namespace; const char* Name; const FakeMethod* Methods; int MethodCount; const FakeField* Fields; int FieldCount; };
+    struct FakeImage;
+    // Image comes after the name, like MonoClass::image in the real runtime;
+    // the explorer learns both offsets from mono_class_get_image/_get_name.
+    struct FakeClass { const char* Namespace; const char* Name; const FakeMethod* Methods; int MethodCount; const FakeField* Fields; int FieldCount; const FakeImage* Image = nullptr; };
     struct FakeImage { const char* Name; const FakeClass* Classes; int ClassCount; };
+    extern const FakeImage kImage;
 
     long long FakeAdd(long long a) { return a + 1; }
     long long FakeSub(long long a) { return a - 1; }
@@ -76,14 +80,26 @@ namespace
     const FakeField kPlayerFields[] = { { "health", 0x10, 0x08, 0 }, { "ammo", 0x1C, 0x08, 0 }, { "s_instances", 0x00, 0x12, 0x10 } };
     const FakeMethod kGameMethods[] = { { "Update", reinterpret_cast<void*>(&FakeAdd) } };
     const FakeClass kClasses[] = {
-        { "Game", "Player", kPlayerMethods, 2, kPlayerFields, 3 },
-        { "Game", "GameManager", kGameMethods, 1, nullptr, 0 },
+        { "Game", "Player", kPlayerMethods, 2, kPlayerFields, 3, &kImage },
+        { "Game", "GameManager", kGameMethods, 1, nullptr, 0, &kImage },
     };
     const FakeImage kImage = { "Assembly-CSharp", kClasses, 2 };
+    // A class the image does not list, like a generic instance the runtime
+    // makes on demand: the explorer may only accept it by its shape.
+    const FakeClass kListClass = { "System.Collections.Generic", "List`1", nullptr, 0, nullptr, 0, &kImage };
+    // Readable memory that is not a class (no image inside).
+    const unsigned long long kNotAClass[8] = { 0x4141414141414141ull, 0x4242424242424242ull, 0x4343434343434343ull, 0x4444444444444444ull,
+                                               0x4545454545454545ull, 0x4646464646464646ull, 0x4747474747474747ull, 0x4848484848484848ull };
     int g_domain = 0xD0;
 
     struct FakeVTable { const FakeClass* Klass; };
     FakeVTable g_playerVT = { &kClasses[0] };
+    FakeVTable g_listVT = { &kListClass };
+    // What a collected object's memory can look like: a "class" pointer that
+    // is no address at all (the value from the Content Warning crash), and
+    // one that points at readable memory holding no class.
+    FakeVTable g_wildVT = { reinterpret_cast<const FakeClass*>(0x01000001A9DE141Dull) };
+    FakeVTable g_notClassVT = { reinterpret_cast<const FakeClass*>(kNotAClass) };
     struct FakeObject { FakeVTable* VTable; int Health; int Ammo; };
 
     // A tiny JIT-info table so MethodNameAt (reverse resolution) has something to
@@ -124,6 +140,9 @@ namespace
 }
 
 extern "C" __declspec(dllexport) FakeObject g_fakePlayer = { &g_playerVT, 1000, 30 };
+extern "C" __declspec(dllexport) FakeObject g_fakeList = { &g_listVT, 0, 0 };
+extern "C" __declspec(dllexport) FakeObject g_fakeWild = { &g_wildVT, 0, 0 };
+extern "C" __declspec(dllexport) FakeObject g_fakeNotClass = { &g_notClassVT, 0, 0 };
 
 extern "C"
 {
@@ -147,6 +166,7 @@ extern "C"
     }
     __declspec(dllexport) const char* mono_class_get_name(void* klass) { return static_cast<FakeClass*>(klass)->Name; }
     __declspec(dllexport) const char* mono_class_get_namespace(void* klass) { return static_cast<FakeClass*>(klass)->Namespace; }
+    __declspec(dllexport) void* mono_class_get_image(void* klass) { return const_cast<FakeImage*>(static_cast<FakeClass*>(klass)->Image); }
     __declspec(dllexport) void* mono_class_get_methods(void* klass, void** iter)
     {
         FakeClass* c = static_cast<FakeClass*>(klass);

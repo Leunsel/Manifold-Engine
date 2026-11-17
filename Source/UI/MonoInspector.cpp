@@ -245,8 +245,20 @@ namespace Manifold::UI
             unity.Refresh(id, true);
             tab.RefreshedAt = ImGui::GetTime();
         }
+        // An object the game destroyed and collected (a scene change) no longer
+        // holds its class: stop refreshing it and stop reading its memory at
+        // once, and let one refresh record it as gone.
+        const bool gone = inspection->Gone || (inspection->Object && inspection->Klass && unity.ClassOf(inspection->Object) != inspection->Klass);
+        if (gone)
+        {
+            tab.Auto = false;
+            if (!inspection->Gone && !inspection->Loading)
+                unity.Refresh(id, false);
+        }
         ImGui::SameLine();
+        ImGui::BeginDisabled(gone);
         ImGui::Checkbox("Auto", &tab.Auto);
+        ImGui::EndDisabled();
         ItemTooltip("Reads properties and the GameObject again about ten times a second (or as fast as the game answers). Fields always update live.");
         // The getters of one refresh run as a batch in a single visit to the
         // game's main thread, so a short interval costs the game little.
@@ -333,6 +345,12 @@ namespace Manifold::UI
             TextWithError(ICON_FA_INFO_CIRCLE "  Found by a memory scan: only fields are shown, nothing is called on it.", ManifoldTheme::Label);
         if (!inspection->Error.empty())
             TextWithError(ICON_FA_EXCLAMATION_TRIANGLE "  " + inspection->Error, ManifoldTheme::Warning);
+        if (gone)
+        {
+            if (!inspection->Gone)
+                TextWithError(ICON_FA_EXCLAMATION_TRIANGLE "  This object is gone: the game destroyed it, so its memory is no longer read.", ManifoldTheme::Warning);
+            return;
+        }
 
         ImGui::BeginChild("##inspectorbody", ImVec2(0.0f, 0.0f));
         if (inspection->GameObject)
