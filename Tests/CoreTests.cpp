@@ -26,6 +26,8 @@
 #include <thread>
 #include <chrono>
 
+#include <windows.h>
+
 namespace Manifold::Tests
 {
     namespace
@@ -818,6 +820,14 @@ data:
             return std::find_if(groups.begin(), groups.end(), [&](const Diagnostics::InfoGroup& entry) { return entry.Title == title; }) != groups.end();
         };
         CHECK(group("Build") && group("System") && group("Graphics") && group("This program") && group("Engine") && group("Lua") && group("Settings"));
+        if (::GetSystemMetrics(SM_CMONITORS) > 0)
+        {
+            CHECK(Diagnostics::DisplayAdapterLuid(nullptr) != 0);
+            const auto screens = std::find_if(groups.begin(), groups.end(), [](const Diagnostics::InfoGroup& entry) { return entry.Title == "Displays"; });
+            CHECK(screens != groups.end() && std::any_of(screens->Rows.begin(), screens->Rows.end(), [](const Diagnostics::InfoRow& row) { return row.Key.rfind("\\\\.\\DISPLAY", 0) == 0 && row.Value.find(" Hz, on ") != std::string::npos; }));
+        }
+        const std::string preference = Diagnostics::WindowsGraphicsPreference();
+        CHECK(preference.empty() || preference == "Power saving" || preference == "High performance" || preference == "a chosen graphics card");
 
         const std::vector<Diagnostics::Check> checks = Diagnostics::RunChecks(engine);
         CHECK(checks.size() >= 4);
@@ -834,6 +844,41 @@ data:
         CHECK(report.find("## Build") != std::string::npos);
         CHECK(report.find("## Extra group") != std::string::npos && report.find("- Extra key: Extra value") != std::string::npos);
         CHECK(report.find("## Threads") != std::string::npos);
+
+        DEVMODEW mode{};
+        mode.dmSize = sizeof(mode);
+        if (::EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency >= 30)
+        {
+            const auto twoRefreshes = std::chrono::microseconds(static_cast<long long>(2.2e6 / mode.dmDisplayFrequency));
+            Profiler::SetEnabled(false);
+            Profiler::Reset();
+            Profiler::SetEnabled(true);
+            Profiler::BeginFrame();
+            for (int frame = 0; frame < 70; ++frame)
+            {
+                if (frame < 10)
+                {
+                    PROFILE_WAIT("Waiting for input");
+                    std::this_thread::sleep_for(twoRefreshes);
+                }
+                {
+                    PROFILE_WAIT("Test present");
+                    std::this_thread::sleep_for(twoRefreshes);
+                }
+                Profiler::BeginFrame();
+            }
+            const std::vector<Diagnostics::Check> paced = Diagnostics::RunChecks(engine);
+            const auto missed = std::find_if(paced.begin(), paced.end(), [](const Diagnostics::Check& check) { return check.Title == "Frames miss the display's refresh"; });
+            CHECK(missed != paced.end());
+            if (missed != paced.end())
+            {
+                CHECK(missed->Severity == Diagnostics::Level::Warning);
+                CHECK_MSG(missed->Detail.find("60 of the last 60 frames") == 0, missed->Detail);
+                CHECK_MSG(missed->Detail.find("waiting until the graphics card") != std::string::npos, missed->Detail);
+            }
+            Profiler::SetEnabled(false);
+            Profiler::Reset();
+        }
     }
 
     int RunCoreTests()

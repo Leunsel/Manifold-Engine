@@ -16,6 +16,7 @@ namespace Manifold::Diagnostics
         std::string Name;
         std::uint32_t Vendor = 0;
         std::uint64_t VideoMemory = 0;
+        std::uint64_t Luid = 0;
         bool Software = false;
     };
 
@@ -28,11 +29,15 @@ namespace Manifold::Diagnostics
         std::string FeatureLevel;
         bool Warp = false;
         std::string SwapEffect;
+        std::string Choice;
+        bool ChosenByWindows = false;
         void* Window = nullptr;
     };
 
     void SetGraphics(GraphicsInfo info);
     const GraphicsInfo& Graphics();
+    std::uint64_t DisplayAdapterLuid(void* window);
+    std::string WindowsGraphicsPreference();
 
     enum class Level
     {

@@ -161,11 +161,30 @@ namespace Manifold::UI
             TitleBar();
         }
         ImGui::SetCursorPos(ImVec2(Px(10.0f), Px(kTitleHeight) + Px(8.0f)));
+        const float width = size.x - Px(20.0f);
+        const float height = size.y - Px(kTitleHeight) - Px(16.0f) - Px(kStatusHeight);
+        const ImVec2 bodyPos = ImGui::GetCursorScreenPos();
+        ImVec2 innerPos = bodyPos;
+        ImVec2 innerSize(width, height);
+        {
+            PROFILE_ZONE("Docked tool windows");
+            const ImGuiID dock = ImGui::GetID("##maindock");
+            ImGui::DockSpace(dock, ImVec2(width, height), ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingOverCentralNode);
+            if (const ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dock))
+            {
+                const float gap = Px(6.0f);
+                const float left = central->Pos.x > bodyPos.x + 0.5f ? gap : 0.0f;
+                const float top = central->Pos.y > bodyPos.y + 0.5f ? gap : 0.0f;
+                const float right = central->Pos.x + central->Size.x < bodyPos.x + width - 0.5f ? gap : 0.0f;
+                const float bottom = central->Pos.y + central->Size.y < bodyPos.y + height - 0.5f ? gap : 0.0f;
+                innerPos = ImVec2(central->Pos.x + left, central->Pos.y + top);
+                innerSize = ImVec2(std::max(Px(40.0f), central->Size.x - left - right), std::max(Px(40.0f), central->Size.y - top - bottom));
+            }
+        }
+        ImGui::SetCursorScreenPos(innerPos);
         ImGui::BeginGroup();
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, PxWhole(8.0f, 8.0f));
-        const float width = size.x - Px(20.0f);
-        ImGui::BeginChild("##body", ImVec2(width, size.y - Px(kTitleHeight) - Px(16.0f) - Px(kStatusHeight)), ImGuiChildFlags_None,
-            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
+        ImGui::BeginChild("##body", innerSize, ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
         m_release = m_engine.Options().ReleaseMode;
         {
             PROFILE_ZONE("Process bar");

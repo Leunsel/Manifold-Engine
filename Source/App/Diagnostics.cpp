@@ -18,16 +18,21 @@ extern "C"
 #include <algorithm>
 #include <bit>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <future>
 #include <map>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <system_error>
 
 #include <windows.h>
+#include <dwmapi.h>
 #include <intrin.h>
 #include <psapi.h>
 
@@ -515,6 +520,552 @@ namespace Manifold::Diagnostics
         {
             checks.push_back({ level, area, std::move(title), std::move(detail), std::move(fix), action });
         }
+
+        const Adapter* DisplayAdapter(const GraphicsInfo& gpu)
+        {
+            const std::uint64_t luid = DisplayAdapterLuid(gpu.Window);
+            if (!luid)
+                return nullptr;
+            for (const Adapter& other : gpu.Adapters)
+            {
+                if (other.Luid == luid)
+                    return &other;
+            }
+            return nullptr;
+        }
+
+        struct FramePace
+        {
+            int Frames = 0;
+            int Late = 0;
+            int TwoRefreshes = 0;
+            double PeriodMs = 0.0;
+            double WorkMs = 0.0;
+        };
+
+        std::vector<int> IdleNodes()
+        {
+            std::vector<int> idle;
+            for (const Profiler::ZoneView& zone : Profiler::Tree())
+            {
+                if (zone.Depth == 1 && zone.Wait && std::strcmp(zone.Name, "Waiting for input") == 0)
+                    idle.push_back(zone.Node);
+            }
+            return idle;
+        }
+
+        struct FullSpeed
+        {
+            double Share = 0.0;
+            double FramesPerSecond = 0.0;
+        };
+
+        FullSpeed MeasureFullSpeed(double windowMs)
+        {
+            const std::vector<int> idle = IdleNodes();
+            FullSpeed result;
+            double total = 0.0;
+            double busy = 0.0;
+            int frames = 0;
+            for (int ago = 0; ago < Profiler::Frames() && total < windowMs; ++ago)
+            {
+                const double frame = Profiler::FrameMs(ago);
+                total += frame;
+                ++frames;
+                if (std::none_of(idle.begin(), idle.end(), [ago](int node) { return Profiler::ZoneMs(node, ago) > 0.0; }))
+                    busy += frame;
+            }
+            if (total > 0.0)
+            {
+                result.Share = busy / total;
+                result.FramesPerSecond = frames * 1000.0 / total;
+            }
+            return result;
+        }
+
+        bool GraphicsDriverThread(const std::string& start)
+        {
+            static constexpr const char* kDrivers[] = { "nvwgf2um", "nvd3dum", "nvldumd", "igd10", "igd12", "igc64", "amdxx", "atidxx", "amdxc", "d3d11.dll", "dxgi.dll" };
+            for (const char* driver : kDrivers)
+            {
+                if (::_strnicmp(start.c_str(), driver, std::strlen(driver)) == 0)
+                    return true;
+            }
+            return false;
+        }
+
+        FramePace MeasurePace(int refreshHz)
+        {
+            const std::vector<int> idle = IdleNodes();
+            FramePace pace;
+            const double refreshMs = 1000.0 / refreshHz;
+            double period = 0.0;
+            double work = 0.0;
+            for (int ago = 0; ago < Profiler::Frames(); ++ago)
+            {
+                const double frame = Profiler::FrameMs(ago);
+                const bool waited = std::any_of(idle.begin(), idle.end(), [ago](int node) { return Profiler::ZoneMs(node, ago) > 0.0; });
+                if (waited || frame <= 0.0)
+                    continue;
+                ++pace.Frames;
+                period += frame;
+                work += Profiler::WorkMs(ago);
+                if (frame > refreshMs * 1.5)
+                    ++pace.Late;
+                if (frame > refreshMs * 1.5 && frame <= refreshMs * 2.5)
+                    ++pace.TwoRefreshes;
+            }
+            if (pace.Frames)
+            {
+                pace.PeriodMs = period / pace.Frames;
+                pace.WorkMs = work / pace.Frames;
+            }
+            return pace;
+        }
+
+        std::uint64_t PackLuid(LUID luid)
+        {
+            return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(luid.HighPart)) << 32) | luid.LowPart;
+        }
+
+        struct ActiveDisplay
+        {
+            std::wstring GdiName;
+            std::string Monitor;
+            std::uint64_t Luid = 0;
+            int Width = 0;
+            int Height = 0;
+            double RefreshHz = 0.0;
+            bool Primary = false;
+            std::string Color;
+        };
+
+        struct AdvancedColorInfo2
+        {
+            DISPLAYCONFIG_DEVICE_INFO_HEADER Header;
+            UINT32 Flags;
+            UINT32 Encoding;
+            UINT32 BitsPerChannel;
+            UINT32 Mode;
+        };
+
+        constexpr DISPLAYCONFIG_DEVICE_INFO_TYPE kAdvancedColorInfo2 = static_cast<DISPLAYCONFIG_DEVICE_INFO_TYPE>(15);
+
+        std::string ColorMode(const DISPLAYCONFIG_PATH_TARGET_INFO& target)
+        {
+            AdvancedColorInfo2 color{};
+            color.Header.type = kAdvancedColorInfo2;
+            color.Header.size = sizeof(color);
+            color.Header.adapterId = target.adapterId;
+            color.Header.id = target.id;
+            if (::DisplayConfigGetDeviceInfo(&color.Header) == ERROR_SUCCESS)
+            {
+                const std::string depth = color.BitsPerChannel ? ", " + std::to_string(color.BitsPerChannel) + " bits per color" : std::string();
+                if (color.Mode == 2)
+                    return "HDR on" + depth;
+                if (color.Mode == 1)
+                    return "advanced color without HDR" + depth;
+                return color.BitsPerChannel > 8 ? "SDR" + depth : std::string();
+            }
+            DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO old{};
+            old.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO;
+            old.header.size = sizeof(old);
+            old.header.adapterId = target.adapterId;
+            old.header.id = target.id;
+            if (::DisplayConfigGetDeviceInfo(&old.header) == ERROR_SUCCESS && old.advancedColorEnabled)
+                return "advanced color on (HDR or automatic color management)";
+            return {};
+        }
+
+        std::vector<ActiveDisplay> ActiveDisplays()
+        {
+            std::vector<ActiveDisplay> displays;
+            std::vector<DISPLAYCONFIG_PATH_INFO> paths;
+            std::vector<DISPLAYCONFIG_MODE_INFO> modes;
+            LONG result = ERROR_INSUFFICIENT_BUFFER;
+            UINT32 pathCount = 0;
+            UINT32 modeCount = 0;
+            for (int attempt = 0; attempt < 3 && result == ERROR_INSUFFICIENT_BUFFER; ++attempt)
+            {
+                if (::GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS)
+                    return displays;
+                paths.resize(pathCount);
+                modes.resize(modeCount);
+                result = ::QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(), &modeCount, modes.data(), nullptr);
+            }
+            if (result != ERROR_SUCCESS)
+                return displays;
+            for (UINT32 i = 0; i < pathCount; ++i)
+            {
+                const DISPLAYCONFIG_PATH_INFO& path = paths[i];
+                DISPLAYCONFIG_SOURCE_DEVICE_NAME source{};
+                source.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+                source.header.size = sizeof(source);
+                source.header.adapterId = path.sourceInfo.adapterId;
+                source.header.id = path.sourceInfo.id;
+                if (::DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS)
+                    continue;
+                ActiveDisplay display;
+                display.GdiName = source.viewGdiDeviceName;
+                display.Luid = PackLuid(path.sourceInfo.adapterId);
+                if (path.targetInfo.refreshRate.Denominator)
+                    display.RefreshHz = static_cast<double>(path.targetInfo.refreshRate.Numerator) / path.targetInfo.refreshRate.Denominator;
+                if (path.sourceInfo.modeInfoIdx < modeCount && modes[path.sourceInfo.modeInfoIdx].infoType == DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE)
+                {
+                    const DISPLAYCONFIG_SOURCE_MODE& mode = modes[path.sourceInfo.modeInfoIdx].sourceMode;
+                    display.Width = static_cast<int>(mode.width);
+                    display.Height = static_cast<int>(mode.height);
+                    display.Primary = mode.position.x == 0 && mode.position.y == 0;
+                }
+                DISPLAYCONFIG_TARGET_DEVICE_NAME target{};
+                target.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+                target.header.size = sizeof(target);
+                target.header.adapterId = path.targetInfo.adapterId;
+                target.header.id = path.targetInfo.id;
+                if (::DisplayConfigGetDeviceInfo(&target.header) == ERROR_SUCCESS)
+                    display.Monitor = WideToUtf8(target.monitorFriendlyDeviceName);
+                display.Color = ColorMode(path.targetInfo);
+                displays.push_back(std::move(display));
+            }
+            return displays;
+        }
+
+        std::wstring MonitorDevice(HWND window)
+        {
+            const HMONITOR monitor = window ? ::MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY) : ::MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+            MONITORINFOEXW info{};
+            info.cbSize = sizeof(info);
+            if (!monitor || !::GetMonitorInfoW(monitor, &info))
+                return {};
+            return info.szDevice;
+        }
+
+        std::vector<HWND> ProgramWindows()
+        {
+            std::vector<HWND> windows;
+            if (!ImGui::GetCurrentContext())
+            {
+                if (HWND main = static_cast<HWND>(GraphicsStore().Window))
+                    windows.push_back(main);
+                return windows;
+            }
+            for (const ImGuiViewport* viewport : ImGui::GetPlatformIO().Viewports)
+            {
+                HWND window = static_cast<HWND>(viewport->PlatformHandleRaw ? viewport->PlatformHandleRaw : viewport->PlatformHandle);
+                if (window && ::IsWindowVisible(window) && !::IsIconic(window))
+                    windows.push_back(window);
+            }
+            return windows;
+        }
+
+        struct NvidiaValue
+        {
+            bool Read = false;
+            bool Set = false;
+            std::uint32_t Value = 0;
+        };
+
+        struct NvidiaDisplay
+        {
+            std::string GdiName;
+            bool Possible = false;
+            bool Enabled = false;
+            bool Requested = false;
+            bool Active = false;
+        };
+
+        struct NvidiaInfo
+        {
+            bool Loaded = false;
+            std::string Problem;
+            std::string Profile;
+            NvidiaValue VSync;
+            NvidiaValue MaxFps;
+            NvidiaValue BackgroundFps;
+            NvidiaValue Gsync;
+            NvidiaValue Technology;
+            NvidiaValue Power;
+            std::vector<NvidiaDisplay> Displays;
+        };
+
+        constexpr std::uint32_t kNvVSyncMode = 0x00A879CF;
+        constexpr std::uint32_t kNvMaxFps = 0x10835002;
+        constexpr std::uint32_t kNvBackgroundFps = 0x10835016;
+        constexpr std::uint32_t kNvGsyncMode = 0x1194F158;
+        constexpr std::uint32_t kNvTechnology = 0x10A879CF;
+        constexpr std::uint32_t kNvPowerMode = 0x1057EB71;
+        constexpr std::uint32_t kNvVSyncPassive = 0x60925292;
+        constexpr std::uint32_t kNvVSyncOff = 0x08416747;
+        constexpr std::uint32_t kNvVSyncOn = 0x47814940;
+        constexpr std::uint32_t kNvVSyncHalf = 0x32610244;
+        constexpr std::uint32_t kNvVSyncThird = 0x71271021;
+        constexpr std::uint32_t kNvVSyncQuarter = 0x13245256;
+        constexpr std::uint32_t kNvVSyncFast = 0x18888888;
+        constexpr std::uint32_t kNvGsyncWindowed = 2;
+        constexpr int kNvSettingNotFound = -160;
+        constexpr int kNvIncompatibleVersion = -9;
+
+        struct NvSetting
+        {
+            std::uint32_t Version;
+            wchar_t Name[2048];
+            std::uint32_t Id;
+            std::uint32_t Type;
+            std::uint32_t Location;
+            std::uint32_t IsCurrentPredefined;
+            std::uint32_t IsPredefinedValid;
+            union
+            {
+                std::uint32_t U32;
+                unsigned char Binary[4100];
+            } Predefined;
+            union
+            {
+                std::uint32_t U32;
+                unsigned char Binary[4100];
+            } Current;
+        };
+        static_assert(sizeof(NvSetting) == 0x3020, "NVDRS_SETTING_V1");
+
+        struct NvVrrInfo
+        {
+            std::uint32_t Version;
+            std::uint32_t Flags;
+            std::uint32_t Reserved[4];
+        };
+
+        using NvQuery = void*(__cdecl*)(std::uint32_t);
+
+        template <typename Function>
+        Function NvFunction(NvQuery query, std::uint32_t id)
+        {
+            return reinterpret_cast<Function>(query(id));
+        }
+
+        NvidiaInfo ReadNvidia()
+        {
+            NvidiaInfo info;
+            HMODULE library = ::LoadLibraryExW(L"nvapi64.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+            const auto query = library ? reinterpret_cast<NvQuery>(reinterpret_cast<void*>(::GetProcAddress(library, "nvapi_QueryInterface"))) : nullptr;
+            if (!query)
+            {
+                info.Problem = "nvapi64.dll is missing";
+                return info;
+            }
+            using Initialize = int(__cdecl*)();
+            using CreateSession = int(__cdecl*)(void**);
+            using SessionCall = int(__cdecl*)(void*);
+            using GetProfile = int(__cdecl*)(void*, void**);
+            using FindApplication = int(__cdecl*)(void*, const wchar_t*, void**, void*);
+            using GetSetting = int(__cdecl*)(void*, void*, std::uint32_t, NvSetting*);
+            using DisplayIdByName = int(__cdecl*)(const char*, std::uint32_t*);
+            using GetVrrInfo = int(__cdecl*)(std::uint32_t, NvVrrInfo*);
+            const auto initialize = NvFunction<Initialize>(query, 0x0150E828);
+            const auto createSession = NvFunction<CreateSession>(query, 0x0694D52E);
+            const auto loadSettings = NvFunction<SessionCall>(query, 0x375DBD6B);
+            const auto destroySession = NvFunction<SessionCall>(query, 0xDAD9CFF8);
+            const auto globalProfile = NvFunction<GetProfile>(query, 0x617BFF9F);
+            const auto findApplication = NvFunction<FindApplication>(query, 0xEEE566B2);
+            const auto getSetting = NvFunction<GetSetting>(query, 0x73BF8338);
+            const auto displayId = NvFunction<DisplayIdByName>(query, 0xAE457190);
+            const auto vrrInfo = NvFunction<GetVrrInfo>(query, 0xDF8FDA57);
+            if (!initialize || !createSession || !loadSettings || !destroySession || !globalProfile || !getSetting)
+            {
+                info.Problem = "the NVIDIA driver interface is incomplete";
+                return info;
+            }
+            if (const int status = initialize(); status != 0)
+            {
+                info.Problem = "NvAPI_Initialize failed with " + std::to_string(status);
+                return info;
+            }
+            void* session = nullptr;
+            if (createSession(&session) != 0 || !session)
+            {
+                info.Problem = "no settings session";
+                return info;
+            }
+            if (const int status = loadSettings(session); status != 0)
+            {
+                destroySession(session);
+                info.Problem = "the driver settings could not be loaded (" + std::to_string(status) + ")";
+                return info;
+            }
+            void* profile = nullptr;
+            if (findApplication)
+            {
+                wchar_t program[MAX_PATH] = L"";
+                ::GetModuleFileNameW(nullptr, program, MAX_PATH);
+                const std::wstring file = std::filesystem::path(program).filename().wstring();
+                std::vector<wchar_t> name(2048, L'\0');
+                std::copy_n(file.begin(), std::min<std::size_t>(file.size(), name.size() - 1), name.begin());
+                std::vector<unsigned char> application(0x6000);
+                for (const std::uint32_t version : { 0x4500Cu, 0x3400Cu })
+                {
+                    std::fill(application.begin(), application.end(), static_cast<unsigned char>(0));
+                    std::memcpy(application.data(), &version, sizeof(version));
+                    void* found = nullptr;
+                    const int status = findApplication(session, name.data(), &found, application.data());
+                    if (status == kNvIncompatibleVersion)
+                        continue;
+                    if (status == 0 && found)
+                    {
+                        profile = found;
+                        info.Profile = "program settings for " + WideToUtf8(file);
+                    }
+                    break;
+                }
+            }
+            if (!profile)
+            {
+                if (globalProfile(session, &profile) != 0 || !profile)
+                {
+                    destroySession(session);
+                    info.Problem = "no global profile";
+                    return info;
+                }
+                info.Profile = "global settings";
+            }
+            auto setting = std::make_unique<NvSetting>();
+            const auto read = [&](std::uint32_t id) {
+                NvidiaValue value;
+                std::memset(setting.get(), 0, sizeof(NvSetting));
+                setting->Version = static_cast<std::uint32_t>(sizeof(NvSetting)) | (1u << 16);
+                const int status = getSetting(session, profile, id, setting.get());
+                value.Read = status == 0 || status == kNvSettingNotFound;
+                value.Set = status == 0;
+                value.Value = status == 0 ? setting->Current.U32 : 0;
+                return value;
+            };
+            info.VSync = read(kNvVSyncMode);
+            info.MaxFps = read(kNvMaxFps);
+            info.BackgroundFps = read(kNvBackgroundFps);
+            info.Gsync = read(kNvGsyncMode);
+            info.Technology = read(kNvTechnology);
+            info.Power = read(kNvPowerMode);
+            destroySession(session);
+            if (displayId && vrrInfo)
+            {
+                for (const ActiveDisplay& display : ActiveDisplays())
+                {
+                    const std::string name = WideToUtf8(display.GdiName);
+                    std::uint32_t id = 0;
+                    if (displayId(name.c_str(), &id) != 0)
+                        continue;
+                    NvVrrInfo vrr{};
+                    vrr.Version = static_cast<std::uint32_t>(sizeof(NvVrrInfo)) | (1u << 16);
+                    if (vrrInfo(id, &vrr) != 0)
+                        continue;
+                    info.Displays.push_back({ name, (vrr.Flags & 2u) != 0, (vrr.Flags & 1u) != 0, (vrr.Flags & 4u) != 0, (vrr.Flags & 16u) != 0 });
+                }
+            }
+            info.Loaded = true;
+            return info;
+        }
+
+        struct NvidiaCache
+        {
+            std::optional<NvidiaInfo> Last;
+            std::shared_future<NvidiaInfo> Pending;
+            std::chrono::steady_clock::time_point ReadAt{};
+        };
+
+        const NvidiaInfo* Nvidia(std::chrono::milliseconds wait)
+        {
+            const GraphicsInfo& gpu = GraphicsStore();
+            if (!gpu.Known || gpu.Warp || gpu.Device.Vendor != kVendorNvidia)
+                return nullptr;
+            static NvidiaCache cache;
+            const auto now = std::chrono::steady_clock::now();
+            if (!cache.Pending.valid() && (!cache.Last || now - cache.ReadAt > std::chrono::minutes(1)))
+                cache.Pending = std::async(std::launch::async, ReadNvidia).share();
+            if (cache.Pending.valid() && cache.Pending.wait_for(wait) == std::future_status::ready)
+            {
+                cache.Last = cache.Pending.get();
+                cache.ReadAt = now;
+                cache.Pending = {};
+            }
+            return cache.Last ? &*cache.Last : nullptr;
+        }
+
+        std::string NvidiaVSyncText(const NvidiaValue& value)
+        {
+            if (!value.Set)
+                return "driver default (Use the 3D application setting)";
+            switch (value.Value)
+            {
+            case kNvVSyncPassive: return "Use the 3D application setting";
+            case kNvVSyncOff: return "Off";
+            case kNvVSyncOn: return "On";
+            case kNvVSyncHalf: return "On, every 2nd refresh";
+            case kNvVSyncThird: return "On, every 3rd refresh";
+            case kNvVSyncQuarter: return "On, every 4th refresh";
+            case kNvVSyncFast: return "Fast";
+            default: return Hex(value.Value);
+            }
+        }
+
+        std::string NvidiaFpsText(const NvidiaValue& value)
+        {
+            if (!value.Set)
+                return "driver default (Off)";
+            return value.Value ? std::to_string(value.Value) + " fps" : std::string("Off");
+        }
+
+        std::string NvidiaGsyncText(const NvidiaValue& value)
+        {
+            if (!value.Set)
+                return "driver default (full screen only)";
+            switch (value.Value)
+            {
+            case 0: return "Off";
+            case 1: return "Full screen only";
+            case kNvGsyncWindowed: return "Full screen and windowed";
+            default: return Hex(value.Value);
+            }
+        }
+
+        std::string NvidiaTechnologyText(const NvidiaValue& value)
+        {
+            if (!value.Set)
+                return "driver default (G-SYNC allowed)";
+            switch (value.Value)
+            {
+            case 0: return "G-SYNC allowed";
+            case 1: return "G-SYNC forced off";
+            case 2: return "G-SYNC not allowed";
+            case 3: return "ULMB";
+            case 4: return "Fixed refresh";
+            default: return Hex(value.Value);
+            }
+        }
+
+        std::string NvidiaPowerText(const NvidiaValue& value)
+        {
+            if (!value.Set)
+                return "driver default (Normal)";
+            switch (value.Value)
+            {
+            case 0: return "Adaptive";
+            case 1: return "Prefer maximum performance";
+            case 2: return "Driver controlled";
+            case 3: return "Prefer consistent performance";
+            case 4: return "Prefer minimum power";
+            case 5: return "Normal";
+            default: return Hex(value.Value);
+            }
+        }
+
+        const NvidiaDisplay* NvidiaDisplayOf(const NvidiaInfo& nvidia, HWND window)
+        {
+            const std::string device = WideToUtf8(MonitorDevice(window));
+            for (const NvidiaDisplay& display : nvidia.Displays)
+            {
+                if (::_stricmp(display.GdiName.c_str(), device.c_str()) == 0)
+                    return &display;
+            }
+            return nullptr;
+        }
     }
 
     void SetGraphics(GraphicsInfo info)
@@ -526,6 +1077,44 @@ namespace Manifold::Diagnostics
     const GraphicsInfo& Graphics()
     {
         return GraphicsStore();
+    }
+
+    std::uint64_t DisplayAdapterLuid(void* window)
+    {
+        const std::wstring device = MonitorDevice(static_cast<HWND>(window));
+        if (device.empty())
+            return 0;
+        for (const ActiveDisplay& display : ActiveDisplays())
+        {
+            if (::_wcsicmp(display.GdiName.c_str(), device.c_str()) == 0)
+                return display.Luid;
+        }
+        return 0;
+    }
+
+    std::string WindowsGraphicsPreference()
+    {
+        wchar_t program[MAX_PATH];
+        const DWORD length = ::GetModuleFileNameW(nullptr, program, MAX_PATH);
+        if (length == 0 || length >= MAX_PATH)
+            return {};
+        wchar_t value[512];
+        DWORD size = sizeof(value);
+        if (::RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\DirectX\\UserGpuPreferences", program, RRF_RT_REG_SZ, nullptr, value, &size) != ERROR_SUCCESS)
+            return {};
+        const std::string text = WideToUtf8(value);
+        if (text.find("SpecificAdapter=") != std::string::npos)
+            return "a chosen graphics card";
+        const std::size_t at = text.find("GpuPreference=");
+        if (at == std::string::npos)
+            return {};
+        switch (std::strtoul(text.c_str() + at + 14, nullptr, 10))
+        {
+        case 0: return {};
+        case 1: return "Power saving";
+        case 2: return "High performance";
+        default: return "a chosen graphics card";
+        }
     }
 
     const char* LevelName(Level level)
@@ -735,6 +1324,12 @@ namespace Manifold::Diagnostics
         if (gpu.Known)
         {
             graphics.Rows.push_back({ "Adapter", gpu.Device.Name + (gpu.Warp ? " (software)" : "") });
+            if (!gpu.Choice.empty())
+                graphics.Rows.push_back({ "Picked by", gpu.Choice });
+            const Adapter* shownOn = DisplayAdapter(gpu);
+            graphics.Rows.push_back({ "Display connected to", shownOn ? shownOn->Name : std::string("unknown") });
+            const std::string preference = WindowsGraphicsPreference();
+            graphics.Rows.push_back({ "Windows graphics setting", preference.empty() ? std::string("none (Let Windows decide)") : preference });
             graphics.Rows.push_back({ "Vendor", VendorName(gpu.Device.Vendor) });
             graphics.Rows.push_back({ "Video memory", Bytes(gpu.Device.VideoMemory) });
             if (!gpu.Driver.empty())
@@ -753,7 +1348,49 @@ namespace Manifold::Diagnostics
         if (display.Dpi)
             graphics.Rows.push_back({ "Scale", std::to_string(display.Dpi * 100 / 96) + " % (" + std::to_string(display.Dpi) + " dpi)" });
         graphics.Rows.push_back({ "DPI awareness", DpiAwareness() });
+        if (const NvidiaInfo* nvidia = Nvidia(std::chrono::milliseconds(0)))
+        {
+            if (!nvidia->Loaded)
+                graphics.Rows.push_back({ "NVIDIA settings", "not readable: " + nvidia->Problem });
+            else
+            {
+                graphics.Rows.push_back({ "NVIDIA settings from", nvidia->Profile });
+                graphics.Rows.push_back({ "NVIDIA vertical sync", NvidiaVSyncText(nvidia->VSync) });
+                graphics.Rows.push_back({ "NVIDIA max frame rate", NvidiaFpsText(nvidia->MaxFps) });
+                graphics.Rows.push_back({ "NVIDIA background max frame rate", NvidiaFpsText(nvidia->BackgroundFps) });
+                graphics.Rows.push_back({ "NVIDIA G-SYNC", NvidiaGsyncText(nvidia->Gsync) });
+                graphics.Rows.push_back({ "NVIDIA monitor technology", NvidiaTechnologyText(nvidia->Technology) });
+                graphics.Rows.push_back({ "NVIDIA power management", NvidiaPowerText(nvidia->Power) });
+                if (const NvidiaDisplay* shown = NvidiaDisplayOf(*nvidia, static_cast<HWND>(gpu.Window)))
+                    graphics.Rows.push_back({ "G-SYNC on this display", !shown->Possible ? std::string("not possible") : shown->Active ? std::string("active") : shown->Enabled ? std::string("on, not active") : std::string("possible, off") });
+            }
+        }
         groups.push_back(std::move(graphics));
+
+        InfoGroup screens{ "Displays", {} };
+        DWM_TIMING_INFO timing{};
+        timing.cbSize = sizeof(timing);
+        if (SUCCEEDED(::DwmGetCompositionTimingInfo(nullptr, &timing)) && timing.rateRefresh.uiDenominator && timing.rateCompose.uiDenominator)
+            screens.Rows.push_back({ "Desktop composition", Fixed(static_cast<double>(timing.rateCompose.uiNumerator) / timing.rateCompose.uiDenominator, 2) + " Hz (primary display refreshes at " +
+                                                                Fixed(static_cast<double>(timing.rateRefresh.uiNumerator) / timing.rateRefresh.uiDenominator, 2) + " Hz)" });
+        for (const ActiveDisplay& screen : ActiveDisplays())
+        {
+            std::string card = "unknown card";
+            for (const Adapter& other : gpu.Adapters)
+            {
+                if (other.Luid == screen.Luid)
+                    card = other.Name;
+            }
+            screens.Rows.push_back({ WideToUtf8(screen.GdiName), (screen.Monitor.empty() ? std::string("Display") : screen.Monitor) + ", " + std::to_string(screen.Width) + " x " + std::to_string(screen.Height) + " at " +
+                                                                     Fixed(screen.RefreshHz, 2) + " Hz, on " + card + (screen.Color.empty() ? std::string() : ", " + screen.Color) + (screen.Primary ? ", primary" : "") });
+        }
+        for (HWND window : ProgramWindows())
+        {
+            wchar_t title[256] = L"";
+            ::GetWindowTextW(window, title, ARRAYSIZE(title));
+            screens.Rows.push_back({ "Window \"" + WideToUtf8(title) + "\"", WideToUtf8(MonitorDevice(window)) + (window == static_cast<HWND>(gpu.Window) ? " (main window)" : "") });
+        }
+        groups.push_back(std::move(screens));
 
         InfoGroup self{ "This program", {} };
         const ProcessSample& sample = LastSample();
@@ -867,6 +1504,7 @@ namespace Manifold::Diagnostics
                 "Move the program to a folder you can write to, such as one in your user folder, or run it as administrator.");
 
         const GraphicsInfo& gpu = Graphics();
+        bool crossAdapter = false;
         if (gpu.Known)
         {
             if (gpu.Warp || gpu.Device.Software)
@@ -880,7 +1518,22 @@ namespace Manifold::Diagnostics
                 if (!other.Software && other.VideoMemory > gpu.Device.VideoMemory * 2 && other.Name != gpu.Device.Name)
                     bigger = &other;
             }
-            if (bigger && gpu.Device.Vendor == kVendorIntel)
+            const Adapter* shownOn = nullptr;
+            {
+                PROFILE_ZONE("Checks: display adapter");
+                shownOn = DisplayAdapter(gpu);
+            }
+            crossAdapter = !gpu.Warp && shownOn && shownOn->Luid != gpu.Device.Luid;
+            if (crossAdapter)
+                Add(checks, Level::Warning, "Graphics", "Drawn on one graphics card, shown on another",
+                    "The window is drawn by " + gpu.Device.Name + ", but its display is connected to " + shownOn->Name +
+                        ". Windows copies every frame from one card to the other, which costs time and makes frames miss the display's refresh.",
+                    gpu.ChosenByWindows ? "Windows Settings > System > Display > Graphics: set Manifold-Engine.exe to Let Windows decide or pick " + shownOn->Name + ", then restart Manifold Engine. It then draws on the card the display is connected to."
+                                        : "Restart Manifold Engine with the main window on this display. At start it picks the card that the display is connected to.");
+            else if (bigger && gpu.Device.Vendor == kVendorIntel && shownOn)
+                Add(checks, Level::Info, "Graphics", "Runs on the integrated graphics",
+                    "The window is drawn by " + gpu.Device.Name + ", which also drives the display, while " + bigger->Name + " is also installed. That is fine for this program; it saves power and no frame has to be copied between cards.");
+            else if (bigger && gpu.Device.Vendor == kVendorIntel)
                 Add(checks, Level::Info, "Graphics", "Runs on the integrated graphics", "The window is drawn by " + gpu.Device.Name + " while " + bigger->Name + " is also installed. That is fine for this program; it saves power.",
                     "To use the other one: Windows Settings > System > Display > Graphics, add Manifold-Engine.exe and pick High performance.");
             if (!gpu.SwapEffect.empty() && gpu.SwapEffect.find("flip") == std::string::npos)
@@ -894,6 +1547,80 @@ namespace Manifold::Diagnostics
         }
         if (display.RefreshHz > 0)
             Add(checks, Level::Info, "Graphics", "Frames follow the display", "Drawing waits for the display, at most " + std::to_string(display.RefreshHz) + " frames per second while you work, and about 10 per second when nothing happens.");
+        const FramePace pace = display.RefreshHz > 0 && Profiler::Enabled() ? MeasurePace(display.RefreshHz) : FramePace{};
+        const bool framesMiss = pace.Frames >= 60 && pace.Late * 5 >= pace.Frames;
+        std::string nvidiaCause;
+        if (const NvidiaInfo* nvidia = Nvidia(std::chrono::milliseconds(0)); nvidia && nvidia->Loaded)
+        {
+            const int windows = std::max<int>(1, static_cast<int>(ProgramWindows().size()));
+            const std::string windowCount = std::to_string(windows) + (windows == 1 ? " window" : " windows");
+            const std::string from = " in the NVIDIA " + nvidia->Profile;
+            const std::string program = "NVIDIA Control Panel > Manage 3D settings > Program settings (or the NVIDIA app > Graphics > Program settings): add Manifold-Engine.exe and set ";
+            if (nvidia->MaxFps.Set && nvidia->MaxFps.Value > 0)
+            {
+                const double together = static_cast<double>(nvidia->MaxFps.Value) / windows;
+                const bool slows = display.RefreshHz > 0 && together < display.RefreshHz * 0.95;
+                const std::string title = "The NVIDIA driver limits the frame rate to " + std::to_string(nvidia->MaxFps.Value) + " fps";
+                if (slows)
+                    nvidiaCause = title;
+                Add(checks, slows ? Level::Warning : Level::Info, "Graphics", title,
+                    "Max Frame Rate is " + std::to_string(nvidia->MaxFps.Value) + " fps" + from +
+                        ". The limit counts every frame that any window of the program shows, and Manifold shows its main window and every tool window on its own. With " + windowCount +
+                        " open, the interface runs at about " + Fixed(together, 0) + " frames per second.",
+                    program + "Max Frame Rate to Off.");
+            }
+            if (nvidia->BackgroundFps.Set && nvidia->BackgroundFps.Value > 0)
+                Add(checks, Level::Info, "Graphics", "The NVIDIA driver slows down programs in the background",
+                    "Background Application Max Frame Rate is " + std::to_string(nvidia->BackgroundFps.Value) + " fps" + from + ". While another program is in front, all windows of Manifold together show about " +
+                        std::to_string(nvidia->BackgroundFps.Value) + " frames per second.",
+                    program + "Background Application Max Frame Rate to Off, if Manifold should stay fast while a game is in front.");
+            const bool technologyOff = nvidia->Technology.Set && (nvidia->Technology.Value == 1 || nvidia->Technology.Value == 2 || nvidia->Technology.Value == 4);
+            const NvidiaDisplay* shown = NvidiaDisplayOf(*nvidia, static_cast<HWND>(gpu.Window));
+            if (nvidia->Gsync.Set && nvidia->Gsync.Value == kNvGsyncWindowed && !technologyOff && shown && (shown->Possible || shown->Enabled))
+            {
+                const std::string title = "G-SYNC is on for windowed programs";
+                if (framesMiss && nvidiaCause.empty())
+                    nvidiaCause = title;
+                Add(checks, framesMiss ? Level::Warning : Level::Info, "Graphics", title,
+                    "G-SYNC is set to full screen and windowed" + from + (shown->Active ? ", and the display runs in G-SYNC mode right now" : "") +
+                        ". The display then refreshes when the window in focus shows a frame. Manifold shows its main window and every tool window on its own, and they can hold each other up.",
+                    program + "Monitor Technology to Fixed Refresh.");
+            }
+        }
+        if (pace.Frames >= 60)
+        {
+            const double refreshMs = 1000.0 / display.RefreshHz;
+            const std::string hz = std::to_string(display.RefreshHz) + " Hz";
+            if (framesMiss)
+            {
+                std::string detail = std::to_string(pace.Late) + " of the last " + std::to_string(pace.Frames) + " frames drawn at full speed took longer than one refresh of the " + hz +
+                                     " display (" + std::to_string(pace.TwoRefreshes) + " of them exactly two refreshes), so the interface runs at about " + Fixed(1000.0 / pace.PeriodMs, 0) + " instead of " +
+                                     std::to_string(display.RefreshHz) + " frames per second.";
+                const std::wstring device = MonitorDevice(static_cast<HWND>(gpu.Window));
+                for (const ActiveDisplay& screen : ActiveDisplays())
+                {
+                    if (!screen.Color.empty() && screen.Color.rfind("SDR", 0) != 0 && ::_wcsicmp(screen.GdiName.c_str(), device.c_str()) == 0)
+                        detail += " The display runs with " + screen.Color + ", so Windows composes the desktop in 16-bit floating point and the program's 8-bit windows always go through that step.";
+                }
+                std::string fix;
+                if (pace.WorkMs > refreshMs * 0.8)
+                {
+                    detail += " Drawing a frame takes " + Milliseconds(pace.WorkMs) + ", close to or over one refresh (" + Milliseconds(refreshMs) + ").";
+                    fix = "Open the Breakdown tab to see the zone that takes the time.";
+                }
+                else
+                {
+                    detail += " Drawing a frame takes only " + Milliseconds(pace.WorkMs) + "; the rest of the " + Milliseconds(pace.PeriodMs) + " is spent waiting until the graphics card and Windows show it.";
+                    fix = crossAdapter         ? "See \"Drawn on one graphics card, shown on another\"."
+                          : !nvidiaCause.empty() ? "See \"" + nvidiaCause + "\"."
+                                                 : "A game or another program that keeps the graphics card busy delays the frames. Updating the graphics driver can help.";
+                }
+                Add(checks, Level::Warning, "Performance", "Frames miss the display's refresh", detail, fix);
+            }
+            else
+                Add(checks, Level::Ok, "Performance", "Frames keep up with the display",
+                    std::to_string(pace.Frames - pace.Late) + " of the last " + std::to_string(pace.Frames) + " frames drawn at full speed came in time for the " + hz + " display.");
+        }
 
         std::vector<LoadedModule> foreign;
         {
@@ -993,7 +1720,26 @@ namespace Manifold::Diagnostics
                     "Frames that took longer than 50 ms. Loading a table, an AOB scan in a script or a slow Lua timer can cause them.", "Click the tall bars in the frame graph to see where the time went.");
         }
 
-        if (sample.Valid && sample.CpuOfOneCore > 30.0 && !engine.Scanner().Busy() && !engine.Working())
+        const FullSpeed recent = Profiler::Enabled() ? MeasureFullSpeed(1000.0) : FullSpeed{};
+        if (sample.Valid && sample.CpuOfOneCore > 30.0 && !engine.Scanner().Busy() && !engine.Working() && recent.Share >= 0.5)
+        {
+            double main = 0.0;
+            double driver = 0.0;
+            for (const ThreadSample& thread : LastThreads())
+            {
+                if (thread.Main)
+                    main += thread.CpuOfOneCore;
+                else if (GraphicsDriverThread(thread.Start))
+                    driver += thread.CpuOfOneCore;
+            }
+            std::string detail = "While you work, every open window is drawn " + Fixed(recent.FramesPerSecond, 0) + " times per second, and that takes " + Percent(sample.CpuOfOneCore) + " of one core.";
+            if (main > 0.0 || driver > 0.0)
+                detail += " " + Percent(main) + " of it is the program's main thread and " + Percent(driver) + " the graphics driver, which prepares every window for the display.";
+            detail += " When nothing happens, the program draws about 10 times per second and uses far less.";
+            Add(checks, Level::Info, "Performance", "Drawing at full speed", detail,
+                "Close tool windows you do not need, or dock them into each other by dragging a title bar with Shift held: docked tool windows share one window.");
+        }
+        else if (sample.Valid && sample.CpuOfOneCore > 30.0 && !engine.Scanner().Busy() && !engine.Working())
         {
             std::string causes;
             int timers = 0;
@@ -1065,6 +1811,7 @@ namespace Manifold::Diagnostics
     std::string Report(Engine& engine, const std::vector<InfoGroup>& extra)
     {
         Sample(true);
+        Nvidia(std::chrono::seconds(3));
         std::ostringstream out;
         const std::time_t now = std::time(nullptr);
         std::tm local{};
@@ -1115,6 +1862,28 @@ namespace Manifold::Diagnostics
                 out << line;
             }
             out << "```\n";
+
+            std::vector<std::pair<double, int>> slowest;
+            for (int ago = 0; ago < Profiler::Frames(); ++ago)
+                slowest.emplace_back(Profiler::FrameMs(ago), ago);
+            std::sort(slowest.begin(), slowest.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+            const std::vector<Profiler::ZoneView> tree = Profiler::Tree();
+            out << "\n## Slowest frames\n\n";
+            for (std::size_t i = 0; i < slowest.size() && i < 5; ++i)
+            {
+                const int ago = slowest[i].second;
+                out << "- " << Milliseconds(slowest[i].first) << ", " << ago << (ago == 1 ? " frame ago:" : " frames ago:");
+                bool first = true;
+                for (const Profiler::ZoneView& zone : tree)
+                {
+                    const double ms = Profiler::ZoneMs(zone.Node, ago);
+                    if (zone.Depth == 0 || ms < (zone.Depth == 1 ? 1.0 : 2.0))
+                        continue;
+                    out << (first ? " " : ", ") << zone.Name << " " << Milliseconds(ms);
+                    first = false;
+                }
+                out << "\n";
+            }
             const std::vector<Profiler::CounterView> counters = Profiler::Counters();
             if (!counters.empty())
             {

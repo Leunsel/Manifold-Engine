@@ -17,11 +17,15 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include <dwmapi.h>
+#include <dxgi1_3.h>
 #include <windowsx.h>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandlerEx(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, ImGuiIO& io);
@@ -45,8 +49,172 @@ namespace Manifold
 
         void (*g_createViewportWindow)(ImGuiViewport*) = nullptr;
         void (*g_setViewportTitle)(ImGuiViewport*, const char*) = nullptr;
+        void (*g_destroyViewportWindow)(ImGuiViewport*) = nullptr;
+        void (*g_createViewportChain)(ImGuiViewport*) = nullptr;
+        void (*g_resizeViewportChain)(ImGuiViewport*, ImVec2) = nullptr;
         HICON g_viewportIcon = nullptr;
         HICON g_viewportIconSmall = nullptr;
+        UINT g_frameLatency = 0;
+
+        constexpr ULONGLONG kToolWindowRefreshMilliseconds = 1000;
+
+        struct ToolWindowFrame
+        {
+            std::uint64_t Hash = 0;
+            ULONGLONG ShownAt = 0;
+            bool Dirty = true;
+        };
+
+        std::unordered_map<ImGuiID, ToolWindowFrame> g_toolFrames;
+        std::vector<ImGuiViewport*> g_toolsToShow;
+
+        std::uint64_t Mix(std::uint64_t hash, std::uint64_t value)
+        {
+            hash ^= value;
+            hash *= 0x9E3779B97F4A7C15ull;
+            return hash ^ (hash >> 29);
+        }
+
+        std::uint64_t HashBytes(std::uint64_t hash, const void* data, std::size_t size)
+        {
+            const auto* bytes = static_cast<const unsigned char*>(data);
+            std::size_t at = 0;
+            for (; at + 8 <= size; at += 8)
+            {
+                std::uint64_t word = 0;
+                std::memcpy(&word, bytes + at, 8);
+                hash = Mix(hash, word);
+            }
+            std::uint64_t tail = 0;
+            if (size > at)
+                std::memcpy(&tail, bytes + at, size - at);
+            return Mix(hash, tail ^ size);
+        }
+
+        std::uint64_t DrawDataHash(const ImDrawData* data)
+        {
+            if (!data || !data->Valid)
+                return 0;
+            std::uint64_t hash = 0x6A09E667F3BCC909ull;
+            hash = HashBytes(hash, &data->DisplayPos, sizeof(data->DisplayPos));
+            hash = HashBytes(hash, &data->DisplaySize, sizeof(data->DisplaySize));
+            hash = HashBytes(hash, &data->FramebufferScale, sizeof(data->FramebufferScale));
+            for (const ImDrawList* list : data->CmdLists)
+            {
+                hash = HashBytes(hash, list->VtxBuffer.Data, static_cast<std::size_t>(list->VtxBuffer.size_in_bytes()));
+                hash = HashBytes(hash, list->IdxBuffer.Data, static_cast<std::size_t>(list->IdxBuffer.size_in_bytes()));
+                for (const ImDrawCmd& command : list->CmdBuffer)
+                {
+                    hash = HashBytes(hash, &command.ClipRect, sizeof(command.ClipRect));
+                    hash = Mix(hash, reinterpret_cast<std::uintptr_t>(command.TexRef._TexData));
+                    hash = Mix(hash, static_cast<std::uint64_t>(command.TexRef._TexID));
+                    hash = Mix(hash, (static_cast<std::uint64_t>(command.VtxOffset) << 32) | command.IdxOffset);
+                    hash = Mix(hash, command.ElemCount);
+                    hash = Mix(hash, reinterpret_cast<std::uintptr_t>(command.UserCallback));
+                    hash = Mix(hash, reinterpret_cast<std::uintptr_t>(command.UserCallbackData));
+                }
+            }
+            return hash;
+        }
+
+        bool ToolWindowChanged(ImGuiViewport* viewport, ULONGLONG now)
+        {
+            ToolWindowFrame& frame = g_toolFrames[viewport->ID];
+            const std::uint64_t hash = DrawDataHash(viewport->DrawData);
+            if (!frame.Dirty && hash == frame.Hash && now - frame.ShownAt < kToolWindowRefreshMilliseconds)
+                return false;
+            frame.Hash = hash;
+            frame.ShownAt = now;
+            frame.Dirty = false;
+            return true;
+        }
+
+        IDXGIOutput* g_vblankOutput = nullptr;
+        HMONITOR g_vblankMonitor = nullptr;
+
+        void ReleaseVBlankOutput()
+        {
+            if (g_vblankOutput)
+                g_vblankOutput->Release();
+            g_vblankOutput = nullptr;
+            g_vblankMonitor = nullptr;
+        }
+
+        bool WaitForVBlank(ID3D11Device* device, HWND window)
+        {
+            const HMONITOR monitor = ::MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY);
+            if (monitor != g_vblankMonitor)
+            {
+                ReleaseVBlankOutput();
+                g_vblankMonitor = monitor;
+                IDXGIDevice* dxgi = nullptr;
+                IDXGIAdapter* adapter = nullptr;
+                if (device && SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dxgi))) && SUCCEEDED(dxgi->GetAdapter(&adapter)))
+                {
+                    IDXGIOutput* output = nullptr;
+                    for (UINT index = 0; !g_vblankOutput && adapter->EnumOutputs(index, &output) != DXGI_ERROR_NOT_FOUND; ++index)
+                    {
+                        DXGI_OUTPUT_DESC desc{};
+                        if (SUCCEEDED(output->GetDesc(&desc)) && desc.Monitor == monitor)
+                            g_vblankOutput = output;
+                        else
+                            output->Release();
+                        output = nullptr;
+                    }
+                }
+                if (adapter)
+                    adapter->Release();
+                if (dxgi)
+                    dxgi->Release();
+            }
+            return g_vblankOutput && SUCCEEDED(g_vblankOutput->WaitForVBlank());
+        }
+
+        void MatchFrameLatency(ID3D11Device* device, UINT presents)
+        {
+            presents = std::clamp<UINT>(presents, 1, 16);
+            if (presents == g_frameLatency || !device)
+                return;
+            IDXGIDevice1* dxgi = nullptr;
+            if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dxgi))))
+            {
+                if (SUCCEEDED(dxgi->SetMaximumFrameLatency(presents)))
+                    g_frameLatency = presents;
+                dxgi->Release();
+            }
+        }
+
+        void CountPresentationMode(IDXGISwapChain* chain)
+        {
+            IDXGISwapChainMedia* media = nullptr;
+            if (!chain || FAILED(chain->QueryInterface(IID_PPV_ARGS(&media))))
+                return;
+            DXGI_FRAME_STATISTICS_MEDIA stats{};
+            if (SUCCEEDED(media->GetFrameStatisticsMedia(&stats)))
+                Profiler::Count("Main window shown as an overlay (1 = yes)", stats.CompositionMode == DXGI_FRAME_PRESENTATION_MODE_OVERLAY ? 1.0 : 0.0);
+            media->Release();
+        }
+
+        void DestroyViewportWindow(ImGuiViewport* viewport)
+        {
+            PROFILE_ZONE("Close a tool window");
+            g_toolFrames.erase(viewport->ID);
+            g_destroyViewportWindow(viewport);
+        }
+
+        void CreateViewportChain(ImGuiViewport* viewport)
+        {
+            PROFILE_ZONE("Create a tool window's swap chain");
+            g_toolFrames[viewport->ID].Dirty = true;
+            g_createViewportChain(viewport);
+        }
+
+        void ResizeViewportChain(ImGuiViewport* viewport, ImVec2 size)
+        {
+            PROFILE_ZONE("Resize a tool window's swap chain");
+            g_toolFrames[viewport->ID].Dirty = true;
+            g_resizeViewportChain(viewport, size);
+        }
 
         bool PrivateUse(std::uint32_t codepoint)
         {
@@ -82,6 +250,7 @@ namespace Manifold
 
         void CreateViewportWindow(ImGuiViewport* viewport)
         {
+            PROFILE_ZONE("Create a tool window");
             g_createViewportWindow(viewport);
             HWND hwnd = static_cast<HWND>(viewport->PlatformHandleRaw);
             if (!hwnd)
@@ -147,6 +316,7 @@ namespace Manifold
                     info.Name = WideToUtf8(desc.Description);
                     info.Vendor = desc.VendorId;
                     info.VideoMemory = desc.DedicatedVideoMemory;
+                    info.Luid = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(desc.AdapterLuid.HighPart)) << 32) | desc.AdapterLuid.LowPart;
                     info.Software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
                 }
                 first->Release();
@@ -154,11 +324,36 @@ namespace Manifold
             return info;
         }
 
-        void DescribeGraphics(HWND window, IDXGIAdapter* adapter, IDXGIFactory2* factory, D3D_FEATURE_LEVEL level, bool warp)
+        IDXGIAdapter1* HardwareAdapter(std::uint64_t luid)
+        {
+            if (!luid)
+                return nullptr;
+            IDXGIFactory1* factory = nullptr;
+            if (FAILED(::CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+                return nullptr;
+            IDXGIAdapter1* found = nullptr;
+            IDXGIAdapter1* adapter = nullptr;
+            for (UINT index = 0; !found && factory->EnumAdapters1(index, &adapter) != DXGI_ERROR_NOT_FOUND; ++index)
+            {
+                DXGI_ADAPTER_DESC1 desc{};
+                const std::uint64_t id = SUCCEEDED(adapter->GetDesc1(&desc)) ? (static_cast<std::uint64_t>(static_cast<std::uint32_t>(desc.AdapterLuid.HighPart)) << 32) | desc.AdapterLuid.LowPart : 0;
+                if (id == luid && !(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE))
+                    found = adapter;
+                else
+                    adapter->Release();
+                adapter = nullptr;
+            }
+            factory->Release();
+            return found;
+        }
+
+        void DescribeGraphics(HWND window, IDXGIAdapter* adapter, IDXGIFactory2* factory, D3D_FEATURE_LEVEL level, bool warp, std::string choice, bool chosenByWindows)
         {
             Diagnostics::GraphicsInfo info;
             info.Window = window;
             info.Warp = warp;
+            info.Choice = std::move(choice);
+            info.ChosenByWindows = chosenByWindows;
             info.Device = AdapterOf(adapter);
             LARGE_INTEGER version{};
             if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &version)))
@@ -170,7 +365,7 @@ namespace Manifold
             char feature[24];
             std::snprintf(feature, sizeof(feature), "Direct3D %u_%u", (static_cast<unsigned>(level) >> 12) & 0xFu, (static_cast<unsigned>(level) >> 8) & 0xFu);
             info.FeatureLevel = feature;
-            info.SwapEffect = "flip discard, 2 buffers, synced to the display";
+            info.SwapEffect = "flip discard, 3 buffers, synced to the display";
             IDXGIAdapter1* other = nullptr;
             for (UINT index = 0; factory->EnumAdapters1(index, &other) != DXGI_ERROR_NOT_FOUND; ++index)
             {
@@ -364,7 +559,21 @@ namespace Manifold
         const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0 };
         D3D_FEATURE_LEVEL obtained = {};
         bool warp = false;
-        HRESULT hr = ::D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, &m_device, &obtained, &m_context);
+        HRESULT hr = E_FAIL;
+        const std::string preference = Diagnostics::WindowsGraphicsPreference();
+        const bool chosenByWindows = !preference.empty();
+        std::string choice = chosenByWindows ? "Windows graphics setting for this program (" + preference + ")" : "Windows default (no card found for the display)";
+        if (!chosenByWindows)
+        {
+            if (IDXGIAdapter1* display = HardwareAdapter(Diagnostics::DisplayAdapterLuid(m_hwnd)))
+            {
+                hr = ::D3D11CreateDevice(display, D3D_DRIVER_TYPE_UNKNOWN, nullptr, flags, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, &m_device, &obtained, &m_context);
+                display->Release();
+                choice = SUCCEEDED(hr) ? "the card the display is connected to" : "Windows default (the display's card failed with " + HexText(hr) + ")";
+            }
+        }
+        if (FAILED(hr))
+            hr = ::D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, &m_device, &obtained, &m_context);
         if (hr == DXGI_ERROR_UNSUPPORTED)
         {
             warp = true;
@@ -395,13 +604,13 @@ namespace Manifold
             PutError(m_error, ARRAYSIZE(m_error), ErrorCode::FactoryFailed, HexText(hr));
             return false;
         }
-        DescribeGraphics(m_hwnd, adapter, factory, obtained, warp);
+        DescribeGraphics(m_hwnd, adapter, factory, obtained, warp, warp ? std::string("software fallback") : std::move(choice), chosenByWindows);
 
         DXGI_SWAP_CHAIN_DESC1 desc = {};
         desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         desc.SampleDesc.Count = 1;
         desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        desc.BufferCount = 2;
+        desc.BufferCount = 3;
         desc.Scaling = DXGI_SCALING_NONE;
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         hr = factory->CreateSwapChainForHwnd(m_device, m_hwnd, &desc, nullptr, nullptr, &m_swapChain);
@@ -438,6 +647,7 @@ namespace Manifold
 
     void WindowHost::DestroyDeviceAndSwapChain()
     {
+        ReleaseVBlankOutput();
         DestroyRenderTarget();
         if (m_swapChain) { m_swapChain->Release(); m_swapChain = nullptr; }
         if (m_context) { m_context->Release(); m_context = nullptr; }
@@ -528,44 +738,77 @@ namespace Manifold
             ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         }
 
+        UINT presents = mainShown ? 1 : 0;
         if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
         {
             ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+            g_toolsToShow.clear();
             {
                 PROFILE_ZONE("Draw the tool windows");
                 ImGui::UpdatePlatformWindows();
+                const ULONGLONG now = ::GetTickCount64();
+                int unchanged = 0;
                 for (int i = 1; i < platform.Viewports.Size; ++i)
                 {
                     ImGuiViewport* viewport = platform.Viewports[i];
                     if (viewport->Flags & ImGuiViewportFlags_IsMinimized)
+                    {
+                        g_toolFrames[viewport->ID].Dirty = true;
                         continue;
+                    }
+                    if (!ToolWindowChanged(viewport, now))
+                    {
+                        ++unchanged;
+                        continue;
+                    }
+                    g_toolsToShow.push_back(viewport);
                     if (platform.Platform_RenderWindow)
                         platform.Platform_RenderWindow(viewport, nullptr);
                     if (platform.Renderer_RenderWindow)
                         platform.Renderer_RenderWindow(viewport, nullptr);
                 }
+                if (Profiler::Enabled())
+                    Profiler::Count("Tool windows left as they were", unchanged);
             }
+            presents += static_cast<UINT>(g_toolsToShow.size());
+            MatchFrameLatency(m_device, presents);
             PROFILE_WAIT("Present the tool windows");
-            for (int i = 1; i < platform.Viewports.Size; ++i)
+            for (ImGuiViewport* viewport : g_toolsToShow)
             {
-                ImGuiViewport* viewport = platform.Viewports[i];
-                if (viewport->Flags & ImGuiViewportFlags_IsMinimized)
-                    continue;
                 if (platform.Platform_SwapBuffers)
                     platform.Platform_SwapBuffers(viewport, nullptr);
                 if (platform.Renderer_SwapBuffers)
                     platform.Renderer_SwapBuffers(viewport, nullptr);
             }
         }
+        else
+            MatchFrameLatency(m_device, presents);
 
         PROFILE_WAIT("Present (waits for the display)");
         if (mainShown)
         {
             const HRESULT hr = m_swapChain->Present(1, 0);
             m_occluded = (hr == DXGI_STATUS_OCCLUDED);
+            if (Profiler::Enabled())
+                CountPresentationMode(m_swapChain);
         }
         if (!mainShown || m_occluded)
-            ::DwmFlush();
+        {
+            HWND pacer = m_hwnd;
+            const ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+            for (int i = 1; i < platform.Viewports.Size; ++i)
+            {
+                const ImGuiViewport* viewport = platform.Viewports[i];
+                HWND hwnd = static_cast<HWND>(viewport->PlatformHandleRaw ? viewport->PlatformHandleRaw : viewport->PlatformHandle);
+                if (hwnd && !(viewport->Flags & ImGuiViewportFlags_IsMinimized))
+                {
+                    pacer = hwnd;
+                    break;
+                }
+            }
+            if (!WaitForVBlank(m_device, pacer))
+                ::DwmFlush();
+        }
     }
 
     bool WindowHost::StartRendering()
@@ -605,7 +848,7 @@ namespace Manifold
         viewportChain.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         viewportChain.SampleDesc.Count = 1;
         viewportChain.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        viewportChain.BufferCount = 2;
+        viewportChain.BufferCount = 3;
         viewportChain.Windowed = TRUE;
         viewportChain.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         ImGui_ImplDX11_SetSwapChainDescs(&viewportChain, 1);
@@ -621,6 +864,21 @@ namespace Manifold
         {
             g_setViewportTitle = platform.Platform_SetWindowTitle;
             platform.Platform_SetWindowTitle = &SetViewportTitle;
+        }
+        if (platform.Platform_DestroyWindow && platform.Platform_DestroyWindow != &DestroyViewportWindow)
+        {
+            g_destroyViewportWindow = platform.Platform_DestroyWindow;
+            platform.Platform_DestroyWindow = &DestroyViewportWindow;
+        }
+        if (platform.Renderer_CreateWindow && platform.Renderer_CreateWindow != &CreateViewportChain)
+        {
+            g_createViewportChain = platform.Renderer_CreateWindow;
+            platform.Renderer_CreateWindow = &CreateViewportChain;
+        }
+        if (platform.Renderer_SetWindowSize && platform.Renderer_SetWindowSize != &ResizeViewportChain)
+        {
+            g_resizeViewportChain = platform.Renderer_SetWindowSize;
+            platform.Renderer_SetWindowSize = &ResizeViewportChain;
         }
         return true;
     }
