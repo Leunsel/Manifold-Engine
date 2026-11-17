@@ -517,6 +517,8 @@ namespace Manifold
         if (Profiler::Enabled())
             CountDrawData();
 
+        const bool mainShown = ::IsWindowVisible(m_hwnd) && !::IsIconic(m_hwnd);
+        if (mainShown)
         {
             PROFILE_ZONE("Draw the main window");
             const ImVec4 clear = ManifoldTheme::Page;
@@ -557,8 +559,13 @@ namespace Manifold
         }
 
         PROFILE_WAIT("Present (waits for the display)");
-        const HRESULT hr = m_swapChain->Present(1, 0);
-        m_occluded = (hr == DXGI_STATUS_OCCLUDED);
+        if (mainShown)
+        {
+            const HRESULT hr = m_swapChain->Present(1, 0);
+            m_occluded = (hr == DXGI_STATUS_OCCLUDED);
+        }
+        if (!mainShown || m_occluded)
+            ::DwmFlush();
     }
 
     bool WindowHost::StartRendering()
@@ -637,8 +644,23 @@ namespace Manifold
     bool WindowHost::Hidden()
     {
         if (!::IsWindowVisible(m_hwnd) || ::IsIconic(m_hwnd) || (m_occluded && m_swapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED))
-            return true;
+            return !ToolWindowShown();
         m_occluded = false;
+        return false;
+    }
+
+    bool WindowHost::ToolWindowShown() const
+    {
+        if (!m_imgui)
+            return false;
+        const ImGuiPlatformIO& platform = ImGui::GetPlatformIO(m_imgui);
+        for (int i = 1; i < platform.Viewports.Size; ++i)
+        {
+            const ImGuiViewport* viewport = platform.Viewports[i];
+            HWND hwnd = static_cast<HWND>(viewport->PlatformHandleRaw ? viewport->PlatformHandleRaw : viewport->PlatformHandle);
+            if (hwnd && ::IsWindowVisible(hwnd) && !::IsIconic(hwnd))
+                return true;
+        }
         return false;
     }
 

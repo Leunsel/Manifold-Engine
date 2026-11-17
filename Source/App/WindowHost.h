@@ -63,6 +63,7 @@ namespace Manifold
 
         bool PumpMessages();
         bool Hidden();
+        bool ToolWindowShown() const;
         bool Wait(unsigned milliseconds) const;
         void NoteInput();
         unsigned long long InputAge() const;
