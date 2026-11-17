@@ -7,6 +7,7 @@
 #include "Target/Mono.h"
 #include "Target/Process.h"
 #include "Target/RemoteCall.h"
+#include "Target/UnityExplorer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -377,6 +378,105 @@ namespace Manifold::Tests
         CHECK(engine.MonoPresent());
     }
 
+    // The main-thread channel: with the stub wired into the target's per-frame
+    // tick (as the Unity explorer hangs it on Application.onBeforeRender), calls
+    // run on the target's main thread, and the channel ends cleanly.
+    void CheckMainThread(Engine& engine)
+    {
+        Target::Process& process = *engine.Process();
+        const std::uint64_t attach = process.FindExport(process.Name(), "mono_thread_attach");
+        const std::uint64_t tickSlot = process.FindExport(process.Name(), "g_tick");
+        CHECK(attach && tickSlot);
+        if (!attach || !tickSlot)
+            return;
+        Target::RemoteCall call;
+        CHECK(call.Start(engine.Process()).Ok());
+        if (!call.Running())
+            return;
+
+        // Before the tick is wired, EnterMain must give up (the stub never runs).
+        call.SetTimeout(std::chrono::milliseconds(5000));
+        const Status noTick = call.EnterMain(std::chrono::milliseconds(400));
+        CHECK_MSG(!noTick.Ok(), "EnterMain should fail while nothing calls the stub");
+        CHECK(!call.InsideMain());
+
+        const std::uint64_t stub = call.MainStub();
+        CHECK(stub != 0);
+        CHECK(process.Write(tickSlot, &stub, sizeof(stub)).Ok());
+
+        const Status entered = call.EnterMain(std::chrono::milliseconds(3000));
+        CHECK_MSG(entered.Ok(), entered.Text);
+        CHECK(call.InsideMain());
+        const std::uint32_t thread = call.MainThreadId();
+        CHECK(thread != 0);
+
+        std::uint64_t result = 0;
+        bool ok = true;
+        for (int i = 0; i < 200; ++i)
+            ok = ok && call.CallMain(attach, static_cast<std::uint64_t>(i), 0, 0, 0, result).Ok() && result == static_cast<std::uint64_t>(i);
+        CHECK_MSG(ok, "a batch of main-thread calls did not round-trip");
+        CHECK_EQ(call.MainThreadId(), thread);
+        CHECK(call.MainRuns() > 0);
+
+        call.LeaveMain();
+        CHECK(!call.InsideMain());
+
+        // The stub keeps returning after leaving (idle), so the tick is harmless.
+        const std::uint64_t runs = call.MainRuns();
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+        CHECK(call.MainRuns() >= runs);
+
+        const std::uint64_t none = 0;
+        process.Write(tickSlot, &none, sizeof(none));
+        call.Stop();
+    }
+
+    // Host-side value formatting and parsing (no live game needed): the
+    // inspector draws fields from these.
+    void CheckUnityFormat(Engine& engine)
+    {
+        Target::UnityExplorer& unity = engine.Mono().Unity();
+        const auto info = [](int code, int size)
+            {
+                Target::MonoTypeInfo type;
+                type.Code = code;
+                type.ValueCode = code;
+                type.ValueType = true;
+                type.Size = size;
+                return type;
+            };
+        const std::int32_t number = 1337;
+        const Target::MonoShown shownInt = unity.Format(info(Target::MonoTypeCode::I4, 4), reinterpret_cast<const std::uint8_t*>(&number), 4);
+        CHECK_EQ(shownInt.Text, std::string("1337"));
+        CHECK(shownInt.Editable);
+        const std::uint8_t yes = 1;
+        CHECK_EQ(unity.Format(info(Target::MonoTypeCode::Boolean, 1), &yes, 1).Text, std::string("true"));
+        const float speed = 3.5f;
+        CHECK_EQ(unity.Format(info(Target::MonoTypeCode::R4, 4), reinterpret_cast<const std::uint8_t*>(&speed), 4).Text, std::string("3.5"));
+
+        std::string error;
+        const auto bytes = unity.Parse(info(Target::MonoTypeCode::I4, 4), "0x100", &error);
+        CHECK_MSG(bytes.has_value(), error);
+        if (bytes)
+        {
+            CHECK_EQ(bytes->size(), 4u);
+            std::int32_t parsed = 0;
+            std::memcpy(&parsed, bytes->data(), 4);
+            CHECK_EQ(parsed, 256);
+        }
+        CHECK(!unity.Parse(info(Target::MonoTypeCode::I1, 1), "999", &error).has_value());
+        CHECK(unity.Parse(info(Target::MonoTypeCode::Boolean, 1), "true", &error).has_value());
+
+        Target::MonoMember method;
+        method.Kind = Target::MonoMemberKind::Method;
+        method.Name = "Teleport";
+        method.Params = { info(Target::MonoTypeCode::R4, 4), info(Target::MonoTypeCode::R4, 4) };
+        method.Params[0].Name = "System.Single";
+        method.Params[1].Name = "System.Single";
+        method.ParamNames = { "x", "y" };
+        CHECK_EQ(Target::UnityExplorer::Signature(method), std::string("(float x, float y)"));
+    }
+
     void CheckMono(Engine& engine)
     {
         const Target::Process& process = *engine.Process();
@@ -539,6 +639,8 @@ namespace Manifold::Tests
             CHECK_EQ(luaResult, expected);
         }
         CheckMonoInBackground(engine);
+        CheckMainThread(engine);
+        CheckUnityFormat(engine);
     }
 
     // Attaches to an already-running process and lists its Mono runtime. Only
@@ -659,6 +761,222 @@ namespace Manifold::Tests
             std::printf("method at %s: %s\n", Hex(method).c_str(), reverse ? reverse->c_str() : "not resolved");
         }
         std::printf("done; detaching\n");
+        return 0;
+    }
+
+    // Attaches to a running Unity game and exercises the explorer end to end,
+    // read-mostly: it injects the per-frame callback and sets runInBackground
+    // (restored on detach) but changes no game state. It reads the scenes,
+    // expands one, searches for a class and inspects an object, then detaches.
+    int RunUnityDump(const std::vector<std::string>& arguments)
+    {
+        std::string name = "CloverPit";
+        std::uint32_t pid = 0;
+        std::string searchClass = "UnityEngine.Camera";
+        int idleSeconds = 0;
+        int probe = 4;
+        bool pinning = true;
+        for (const std::string& argument : arguments)
+        {
+            if (argument.rfind("--process=", 0) == 0)
+                name = argument.substr(10);
+            else if (argument.rfind("--pid=", 0) == 0)
+                pid = static_cast<std::uint32_t>(ParseDecimal(argument.substr(6)).value_or(0));
+            else if (argument.rfind("--class=", 0) == 0)
+                searchClass = argument.substr(8);
+            else if (argument.rfind("--idle-seconds=", 0) == 0)
+                idleSeconds = static_cast<int>(ParseDecimal(argument.substr(15)).value_or(0));
+            else if (argument.rfind("--probe=", 0) == 0)
+                probe = static_cast<int>(ParseDecimal(argument.substr(8)).value_or(4));
+            else if (argument == "--no-pin")
+                pinning = false;
+        }
+        std::setvbuf(stdout, nullptr, _IONBF, 0);
+        Settings settings;
+        Engine engine(settings);
+        const Status opened = pid ? engine.OpenProcess(pid) : engine.OpenProcessByName(name);
+        if (!opened)
+        {
+            std::printf("could not open %s: %s\n", pid ? std::to_string(pid).c_str() : name.c_str(), opened.Text.c_str());
+            return 2;
+        }
+        std::printf("opened %s (pid %lu)\n", engine.Process()->Name().c_str(), static_cast<unsigned long>(engine.Process()->Id()));
+        const Status mono = engine.EnsureMono();
+        if (!mono)
+        {
+            std::printf("no Mono: %s\n", mono.Text.c_str());
+            return 1;
+        }
+        std::printf("Mono: %zu classes in %s\n", engine.Mono().ClassCount(), engine.Mono().Module().c_str());
+
+        Target::UnityExplorer& unity = engine.Mono().Unity();
+        const auto wait = [&](const char* what, auto ready, int seconds)
+            {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+                while (std::chrono::steady_clock::now() < deadline)
+                {
+                    const Target::UnityStatus status = unity.State();
+                    if (!status.Error.empty())
+                    {
+                        std::printf("  %s: %s\n", what, status.Error.c_str());
+                        return false;
+                    }
+                    if (!status.Busy && ready())
+                        return true;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+                }
+                std::printf("  %s: timed out\n", what);
+                return false;
+            };
+
+        // The game must be in the FOREGROUND and rendering: Unity engine calls
+        // run on its main thread, reached through the onBeforeRender callback,
+        // which only fires while the game renders.
+        // This harness exists to exercise the explorer, so it opts in for itself.
+        unity.SetEnabled(true);
+        unity.SetProbeLevel(probe);
+        unity.SetPinning(pinning);
+        if (!pinning)
+            std::printf("GC handles are switched OFF for this run\n");
+        unity.ReadScenes();  // the first real request installs the hook and enters main
+        if (probe < 4)
+        {
+            // Bisection run: let the bootstrap stop at the probe level, then sit
+            // still and see whether the game minds. Give the job a moment to
+            // start first -- asking "is it idle?" before it ever began reports
+            // the state from before the probe.
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            wait("probe", [&] { return !unity.State().Busy; }, 20);
+            const Target::UnityStatus probed = unity.State();
+            std::printf("probe level %d: hooked %d, callback runs %llu, note: %s\n", probe, probed.Hooked ? 1 : 0,
+                static_cast<unsigned long long>(probed.CallbackRuns), probed.Error.c_str());
+            const int seconds = idleSeconds > 0 ? idleSeconds : 6;
+            for (int i = 0; i < seconds * 2; ++i)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                if (!engine.Process()->Alive())
+                {
+                    std::printf("the game died %.1f s into probe level %d\n", (i + 1) * 0.5, probe);
+                    return 1;
+                }
+            }
+            std::printf("probe level %d: survived %d s; detaching\n", probe, seconds);
+            return 0;
+        }
+        wait("hook", [&] { return unity.State().Hooked && unity.State().MainThread != 0; }, 20);
+        const Target::UnityStatus status = unity.State();
+        std::printf("hooked on %s, callback runs %llu, main thread %lu, Unity %s\n", status.Hook.c_str(),
+            static_cast<unsigned long long>(status.CallbackRuns), static_cast<unsigned long>(status.MainThread),
+            status.UnityVersion.empty() ? "?" : status.UnityVersion.c_str());
+        if (!status.Missing.empty())
+            std::printf("MISSING mono exports: %s\n", Join(status.Missing, ", ").c_str());
+        if (!status.Hooked || status.MainThread == 0)
+        {
+            if (status.CallbackRuns == 0)
+                std::printf("the game never called the callback at all: it is not rendering (background/minimized/loading)\n");
+            else
+                std::printf("the game called the callback %llu times but the handshake did not complete\n",
+                    static_cast<unsigned long long>(status.CallbackRuns));
+            return 1;
+        }
+
+        if (idleSeconds > 0)
+        {
+            // Bare-callback test: the hook is in and the main thread calls the
+            // stub each frame, but nothing else runs. If the game survives this,
+            // the callback itself is harmless and the managed calls are the risk.
+            std::printf("idling %d s with the callback installed, no further calls...\n", idleSeconds);
+            for (int i = 0; i < idleSeconds * 2; ++i)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                if (!engine.Process()->Alive())
+                {
+                    std::printf("the game died after %.1f s of just the idle callback\n", (i + 1) * 0.5);
+                    return 1;
+                }
+            }
+            std::printf("survived %d s with the idle callback; detaching\n", idleSeconds);
+            return 0;
+        }
+
+        unity.ReadScenes();
+        if (!wait("scenes", [&] { return unity.Tree().Read; }, 20))
+            return 1;
+        Target::UnityTree tree = unity.Tree();
+        std::printf("%zu scene(s):\n", tree.Scenes.size());
+        int expandable = -1;
+        for (int s = 0; s < static_cast<int>(tree.Scenes.size()); ++s)
+        {
+            const Target::UnityScene& scene = tree.Scenes[static_cast<std::size_t>(s)];
+            std::printf("  [%d] %-28s roots %d%s%s\n", s, scene.Name.c_str(), scene.RootCount,
+                scene.Active ? " (active)" : "", scene.DontDestroy ? " (DontDestroyOnLoad)" : "");
+            if (expandable < 0 && scene.RootCount != 0 && !scene.DontDestroy)
+                expandable = s;
+        }
+        if (expandable >= 0)
+        {
+            unity.ExpandScene(expandable);
+            wait("expand", [&] { return unity.Tree().Scenes[static_cast<std::size_t>(expandable)].RootsLoaded; }, 20);
+            tree = unity.Tree();
+            const Target::UnityScene& scene = tree.Scenes[static_cast<std::size_t>(expandable)];
+            std::printf("roots of \"%s\":\n", scene.Name.c_str());
+            for (std::size_t i = 0; i < scene.Roots.size() && i < 12; ++i)
+            {
+                const Target::UnityNode& node = tree.Nodes[static_cast<std::size_t>(scene.Roots[i])];
+                std::printf("  %s%-32s  %d child(ren)  %s\n", node.Active ? " " : "~", node.Name.c_str(), node.ChildCount, Hex(node.Object).c_str());
+            }
+        }
+
+        unity.Search({ searchClass, std::string(), false });
+        wait("search", [&] { return unity.SearchResult().Done; }, 30);
+        const Target::UnitySearchResult result = unity.SearchResult();
+        std::printf("search %s: %zu hit(s)%s\n", searchClass.c_str(), result.Hits.size(), result.HeapScan ? " (memory scan)" : "");
+        std::uint64_t inspectObject = 0;
+        for (std::size_t i = 0; i < result.Hits.size() && i < 8; ++i)
+        {
+            std::printf("  %-28s %s %s\n", result.Hits[i].Name.c_str(), result.Hits[i].Class.c_str(), Hex(result.Hits[i].Object).c_str());
+            if (!inspectObject)
+                inspectObject = result.Hits[i].Object;
+        }
+        if (!inspectObject && expandable >= 0 && !tree.Scenes[static_cast<std::size_t>(expandable)].Roots.empty())
+            inspectObject = tree.Nodes[static_cast<std::size_t>(tree.Scenes[static_cast<std::size_t>(expandable)].Roots[0])].Object;
+
+        if (inspectObject)
+        {
+            const int id = unity.Inspect(inspectObject);
+            wait("inspect", [&] { const auto in = unity.Inspection(id); return in && !in->Loading; }, 20);
+            if (const auto inspection = unity.Inspection(id))
+            {
+                std::printf("inspect %s -> %s\n", Hex(inspectObject).c_str(), inspection->Title.c_str());
+                if (inspection->GameObject)
+                {
+                    const Target::UnityGameObject& go = *inspection->GameObject;
+                    std::printf("  GameObject \"%s\"  active %d  scene %s  layer %d  %zu component(s)\n",
+                        go.Name.c_str(), go.ActiveInHierarchy, go.Scene.c_str(), go.Layer, go.Components.size());
+                    if (go.Transform.Read)
+                        std::printf("  localPosition %.3f, %.3f, %.3f\n", go.Transform.LocalPosition[0], go.Transform.LocalPosition[1], go.Transform.LocalPosition[2]);
+                    for (std::size_t i = 0; i < go.Components.size() && i < 10; ++i)
+                        std::printf("    %s%s\n", go.Components[i].Class.c_str(), go.Components[i].HasEnabled ? (go.Components[i].Enabled ? " [enabled]" : " [disabled]") : "");
+                }
+                if (inspection->Layout)
+                {
+                    int shown = 0;
+                    for (std::size_t i = 0; i < inspection->Layout->Members.size() && shown < 14; ++i)
+                    {
+                        const Target::MonoMember& member = inspection->Layout->Members[i];
+                        if (member.Kind == Target::MonoMemberKind::Field && !member.Static)
+                        {
+                            const Target::MonoShown value = unity.ReadField(member, inspectObject);
+                            std::printf("    %-24s %-18s = %s\n", member.Name.c_str(), Target::UnityExplorer::ShortTypeName(member.Type).c_str(), value.Text.c_str());
+                            ++shown;
+                        }
+                    }
+                }
+                if (!inspection->Error.empty())
+                    std::printf("  note: %s\n", inspection->Error.c_str());
+            }
+        }
+        std::printf("done; detaching (callback removed, runInBackground restored)\n");
         return 0;
     }
 

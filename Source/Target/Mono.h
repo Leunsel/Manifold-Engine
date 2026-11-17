@@ -22,6 +22,7 @@ namespace Manifold
 namespace Manifold::Target
 {
     class Process;
+    class UnityExplorer;
 
     struct MonoMethod
     {
@@ -63,9 +64,21 @@ namespace Manifold::Target
     class MonoBridge
     {
     public:
+        MonoBridge();
+        ~MonoBridge();
+        MonoBridge(const MonoBridge&) = delete;
+        MonoBridge& operator=(const MonoBridge&) = delete;
+
         Status Start(std::shared_ptr<Process> process, WorkProgress* progress = nullptr);
+        // Ends everything in the game: the Unity explorer takes its callback
+        // out, the worker thread ends, the class list is dropped.
         void Stop();
         bool Present() const { return m_present.load(); }
+
+        // The scene and object explorer and the inspector on top of this
+        // bridge. Created on first use; it starts nothing in the game until a
+        // scene or object request needs the game's main thread.
+        UnityExplorer& Unity();
 
         // Whether one of the known Mono runtime DLLs is in the target's module
         // list. Only looks at the cached list, so it is cheap enough to ask
@@ -126,6 +139,7 @@ namespace Manifold::Target
         std::optional<int> FieldOffset(std::string_view className, std::string_view fieldName);
 
     private:
+        friend class UnityExplorer;
         std::uint64_t Fn(const char* name) const;
         std::optional<std::uint64_t> CallFn(const char* name, std::uint64_t a0 = 0, std::uint64_t a1 = 0, std::uint64_t a2 = 0, std::uint64_t a3 = 0);
         std::string CallString(const char* name, std::uint64_t handle);
@@ -163,5 +177,8 @@ namespace Manifold::Target
         };
         std::vector<JitRange> m_jitRanges;
         std::unordered_set<std::uint64_t> m_jitMisses;
+
+        std::mutex m_unityLock;
+        std::unique_ptr<UnityExplorer> m_unity;
     };
 }

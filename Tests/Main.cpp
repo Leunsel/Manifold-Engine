@@ -34,6 +34,7 @@ namespace Manifold::Tests
     int RunDebuggerCheck(const std::vector<std::string>& arguments);
     int RunMonoCheck(const std::vector<std::string>& arguments);
     int RunMonoDump(const std::vector<std::string>& arguments);
+    int RunUnityDump(const std::vector<std::string>& arguments);
 
     Counter& Totals()
     {
@@ -59,6 +60,8 @@ int main(int argc, char** argv)
             return Manifold::Tests::RunMonoCheck(arguments);
         if (argument == "--mono-dump")
             return Manifold::Tests::RunMonoDump(arguments);
+        if (argument == "--unity-dump")
+            return Manifold::Tests::RunUnityDump(arguments);
         if (argument == "--disasm-check")
         {
             for (const std::string& other : arguments)

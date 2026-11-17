@@ -122,6 +122,10 @@ namespace Manifold
         Status ReloadMonoNow();
         void LoadMono(bool fromScript = false);
         void ReloadMono(bool fromScript = false);
+        // Ends the Mono helper in the game (and the Unity explorer's callback)
+        // without closing the process; Mono names stop resolving until it is
+        // loaded again.
+        void StopMono(bool fromScript = false);
         bool MonoLoading() const { return m_work.Busy(kMonoWork); }
         int MonoWork() const { return m_work.Find(kMonoWork); }
         Target::MonoBridge& Mono() { return m_mono; }

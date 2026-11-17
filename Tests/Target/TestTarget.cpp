@@ -203,6 +203,12 @@ extern "C" __declspec(dllexport) __declspec(noinline) long long Touch(volatile l
     return *value;
 }
 
+// A slot the main loop calls each tick, like a game's per-frame callback. The
+// Mono main-thread channel test writes the RemoteCall stub address here and so
+// gets its calls run on this thread, the way the Unity explorer hangs its stub
+// on Application.onBeforeRender.
+extern "C" __declspec(dllexport) void (*g_tick)() = nullptr;
+
 namespace
 {
     DWORD WINAPI Worker(void*)
@@ -352,18 +358,18 @@ int main(int argc, char** argv)
     std::fflush(stdout);
     for (;;)
     {
-        if (hiddenMain)
+        // Each tick lasts ~500 ms of wall time (the scan tests depend on that
+        // cadence), bounded by the clock so a coarse Sleep granularity does not
+        // stretch it; g_tick, when a test wires it, runs often within the tick.
+        const unsigned long long until = ::GetTickCount64() + 500;
+        do
         {
-            for (int i = 0; i < 250; ++i)
-            {
+            if (hiddenMain)
                 Touch(&g_stress[0]);
-                ::Sleep(2);
-            }
-        }
-        else
-        {
-            ::Sleep(500);
-        }
+            if (g_tick)
+                g_tick();
+            ::Sleep(2);
+        } while (::GetTickCount64() < until);
         g_ticks = g_ticks + 1;
         if (g_ticks % 2 == 0)
             Damage(g_world->Hero, 1);

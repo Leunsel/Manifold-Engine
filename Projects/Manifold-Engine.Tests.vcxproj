@@ -162,6 +162,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Target\Process.cpp" />
     <ClCompile Include="..\Source\Target\RemoteCall.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
+    <ClCompile Include="..\Source\Target\UnityExplorer.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateCheck.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateEngine.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateFiles.cpp" />

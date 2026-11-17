@@ -4,6 +4,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Target/Process.h"
+#include "Target/UnityExplorer.h"
 
 #include <algorithm>
 #include <array>
@@ -27,6 +28,17 @@ namespace Manifold::Target
             "mono_field_get_type", "mono_type_get_type", "mono_field_get_flags", "mono_object_get_class",
             "mono_jit_info_table_find", "mono_jit_info_get_method", "mono_jit_info_get_code_start",
             "mono_jit_info_get_code_size", "mono_method_get_class",
+            // Used by the Unity explorer; a runtime without some of them still
+            // loads, the explorer then reports what is missing.
+            "mono_class_get_method_from_name", "mono_method_signature", "mono_signature_get_param_count",
+            "mono_signature_get_params", "mono_signature_get_return_type", "mono_type_get_name", "mono_class_from_mono_type",
+            "mono_class_get_type", "mono_type_get_object", "mono_gchandle_new", "mono_gchandle_free", "mono_runtime_invoke",
+            "mono_object_new", "mono_string_new", "mono_class_get_parent", "mono_class_get_properties", "mono_property_get_name",
+            "mono_property_get_get_method", "mono_property_get_set_method", "mono_method_get_flags", "mono_class_vtable",
+            "mono_vtable_get_static_field_data", "mono_field_static_get_value", "mono_field_set_value", "mono_field_static_set_value",
+            "mono_class_is_valuetype", "mono_class_is_enum", "mono_class_enum_basetype", "mono_class_value_size",
+            "mono_class_get_element_class", "mono_array_element_size", "mono_class_get_rank", "mono_object_to_string", "mono_free",
+            "mono_method_get_param_names",
         };
 
         const char* const kModuleCandidates[] = { "mono-2.0-bdwgc.dll", "mono.dll", "mono-2.0.dll", "monobdwgc-2.0.dll" };
@@ -152,8 +164,31 @@ namespace Manifold::Target
         return enumerated;
     }
 
+    MonoBridge::MonoBridge() = default;
+
+    MonoBridge::~MonoBridge()
+    {
+        Stop();
+    }
+
+    UnityExplorer& MonoBridge::Unity()
+    {
+        std::lock_guard lock(m_unityLock);
+        if (!m_unity)
+            m_unity = std::make_unique<UnityExplorer>(*this);
+        return *m_unity;
+    }
+
     void MonoBridge::Stop()
     {
+        // The explorer first, without holding m_lock: its job thread takes
+        // m_lock per call and is joined here, and it takes its callback out of
+        // the game through the worker before the worker goes.
+        {
+            std::lock_guard unityLock(m_unityLock);
+            if (m_unity)
+                m_unity->Shutdown();
+        }
         std::lock_guard lock(m_lock);
         m_call.Stop();
         m_functions.clear();

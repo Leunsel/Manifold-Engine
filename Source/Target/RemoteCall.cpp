@@ -38,6 +38,28 @@ namespace Manifold::Target
         constexpr std::uint32_t kCollectorOffset = 0x200;
         constexpr std::uint64_t kScratchSize = 0x10000;
 
+        // The main-thread channel: a stub at kMainStubOffset and its control
+        // block at kMainControlOffset, both in the code page.
+        //
+        // Want (set by this side) says the host wants the game's main thread;
+        // Active (set by the stub) says the stub is serving. Active is a LATCH:
+        // it stays set across frames until Want is cleared, so this side can see
+        // it with ordinary cross-process reads. The stub itself returns to the
+        // game as soon as no call is pending for kMainIdleCycles TSC ticks, so
+        // it never holds a frame for long -- but it does NOT drop Active when it
+        // does, because a flag that is only up for that sliver of a frame is
+        // impossible to catch by polling from another process.
+        // Request: 0 nothing pending, 1 call.
+        constexpr std::uint32_t kMainStubOffset = 0x300;
+        constexpr std::uint32_t kMainControlOffset = 0x800;
+        constexpr std::uint32_t kMainActiveOffset = 0x38;
+        constexpr std::uint32_t kMainRunsOffset = 0x40;
+        constexpr std::uint32_t kMainThreadOffset = 0x48;
+        constexpr std::uint32_t kMainIdleOffset = 0x50;
+        constexpr std::uint32_t kMainWantOffset = 0x60;
+        constexpr std::uint32_t kMainControlSize = 0x68;
+        constexpr std::uint64_t kMainIdleCycles = 400000;
+
         class Emitter
         {
         public:
@@ -169,6 +191,66 @@ namespace Manifold::Target
             return e.Resolve();
         }
 
+        // void stub(void), run by whatever thread the game calls it on. It
+        // returns at once unless the host asked to enter; then it serves calls
+        // like the worker until a leave request or an idle timeout.
+        std::vector<std::uint8_t> MainCode(std::uint64_t control)
+        {
+            Emitter e;
+            e.Bytes({ 0x56, 0x57, 0x53 });             // push rsi; push rdi; push rbx
+            e.Bytes({ 0x48, 0x89, 0xE7 });             // mov rdi, rsp
+            e.Bytes({ 0x48, 0x83, 0xE4, 0xF0 });       // and rsp, -16
+            e.Bytes({ 0x48, 0x83, 0xEC, 0x20 });       // sub rsp, 0x20
+            e.Bytes({ 0x48, 0xBE });                   // mov rsi, control
+            for (int shift = 0; shift < 64; shift += 8)
+                e.Byte(static_cast<std::uint8_t>(control >> shift));
+            e.Bytes({ 0xF0, 0x48, 0xFF, 0x46, 0x40 }); // lock inc qword [rsi+0x40]  runs
+            e.Bytes({ 0x65, 0x8B, 0x04, 0x25, 0x48, 0x00, 0x00, 0x00 }); // mov eax, gs:[0x48]  thread id
+            e.Bytes({ 0x48, 0x89, 0x46, 0x48 });       // mov [rsi+0x48], rax
+            e.Bytes({ 0x48, 0x8B, 0x46, 0x60 });       // mov rax, [rsi+0x60]  want
+            e.Bytes({ 0x48, 0x85, 0xC0 });             // test rax, rax
+            e.Jump(0x84, "clear");                     // jz clear
+            e.Bytes({ 0x48, 0xC7, 0x46, 0x38, 0x01, 0x00, 0x00, 0x00 }); // mov qword [rsi+0x38], 1  active (latch)
+            e.Label("awake");
+            e.Bytes({ 0x0F, 0x31 });                   // rdtsc
+            e.Bytes({ 0x48, 0xC1, 0xE2, 0x20 });       // shl rdx, 32
+            e.Bytes({ 0x48, 0x09, 0xD0 });             // or rax, rdx
+            e.Bytes({ 0x48, 0x89, 0xC3 });             // mov rbx, rax  last activity
+            e.Label("loop");
+            e.Bytes({ 0x48, 0x8B, 0x06 });             // mov rax, [rsi]
+            e.Bytes({ 0x48, 0x83, 0xF8, 0x01 });       // cmp rax, 1
+            e.Jump(0x84, "call");                      // je call
+            e.Bytes({ 0xF3, 0x90 });                   // pause
+            e.Bytes({ 0x0F, 0x31 });                   // rdtsc
+            e.Bytes({ 0x48, 0xC1, 0xE2, 0x20 });       // shl rdx, 32
+            e.Bytes({ 0x48, 0x09, 0xD0 });             // or rax, rdx
+            e.Bytes({ 0x48, 0x29, 0xD8 });             // sub rax, rbx
+            e.Bytes({ 0x48, 0x3B, 0x46, 0x50 });       // cmp rax, [rsi+0x50]  idle limit
+            e.Jump(0x82, "loop");                      // jb loop
+            // Nothing pending for a while: give the frame back to the game but
+            // KEEP Active set, so the next frame resumes serving right away.
+            e.Jump(0xE9, "out");                       // jmp out
+            e.Label("call");
+            e.Bytes({ 0x48, 0x8B, 0x4E, 0x10 });       // mov rcx, [rsi+0x10]
+            e.Bytes({ 0x48, 0x8B, 0x56, 0x18 });       // mov rdx, [rsi+0x18]
+            e.Bytes({ 0x4C, 0x8B, 0x46, 0x20 });       // mov r8,  [rsi+0x20]
+            e.Bytes({ 0x4C, 0x8B, 0x4E, 0x28 });       // mov r9,  [rsi+0x28]
+            e.Bytes({ 0x48, 0x8B, 0x46, 0x08 });       // mov rax, [rsi+0x08]
+            e.Bytes({ 0xFF, 0xD0 });                   // call rax
+            e.Bytes({ 0x48, 0x89, 0x46, 0x30 });       // mov [rsi+0x30], rax
+            e.Bytes({ 0xB8, 0x01, 0x00, 0x00, 0x00 }); // mov eax, 1
+            e.Bytes({ 0x31, 0xC9 });                   // xor ecx, ecx
+            e.Bytes({ 0xF0, 0x48, 0x0F, 0xB1, 0x0E }); // lock cmpxchg [rsi], rcx  call 1 -> 0
+            e.Jump(0xE9, "awake");                     // jmp awake
+            e.Label("clear");
+            e.Bytes({ 0x48, 0xC7, 0x46, 0x38, 0x00, 0x00, 0x00, 0x00 }); // mov qword [rsi+0x38], 0  active off
+            e.Label("out");
+            e.Bytes({ 0x48, 0x89, 0xFC });             // mov rsp, rdi
+            e.Bytes({ 0x5B, 0x5F, 0x5E });             // pop rbx; pop rdi; pop rsi
+            e.Bytes({ 0xC3 });                         // ret
+            return e.Resolve();
+        }
+
         // A kernel32 export the worker may call. System DLLs share their base
         // across the processes of one boot, so the local address is trusted
         // when the module it lies in (kernel32, or kernelbase for a forwarded
@@ -289,8 +371,15 @@ namespace Manifold::Target
                 return failure;
             };
 
+        std::vector<std::uint8_t> main = MainCode(m_code + kMainControlOffset);
+        std::vector<std::uint8_t> mainControl(kMainControlSize, 0);
+        std::memcpy(mainControl.data() + kMainIdleOffset, &kMainIdleCycles, sizeof(kMainIdleCycles));
+        if (worker.size() > kCollectorOffset || collector.size() > kMainStubOffset - kCollectorOffset || main.size() > kMainControlOffset - kMainStubOffset)
+            return fail(Status::Fail(ErrorCode::WriteFailed, "the remote worker code does not fit its page"));
         if (!m_process->Write(m_code, worker.data(), worker.size()) ||
             !m_process->Write(m_collector, collector.data(), collector.size()) ||
+            !m_process->Write(m_code + kMainStubOffset, main.data(), main.size()) ||
+            !m_process->Write(m_code + kMainControlOffset, mainControl.data(), mainControl.size()) ||
             !m_process->Write(m_control, control.data(), control.size()))
             return fail(Status::Fail(ErrorCode::WriteFailed, "could not set up the remote worker"));
 
@@ -310,6 +399,8 @@ namespace Manifold::Target
 
     void RemoteCall::Stop()
     {
+        if (m_process && m_code && m_thread)
+            LeaveMain();
         bool stopped = false;
         if (m_process && m_thread && m_control)
         {
@@ -317,8 +408,8 @@ namespace Manifold::Target
             m_process->Write(m_control + kRequestOffset, &stop, sizeof(stop));
             Wake();
             // Wait until the worker has left its loop (it writes Stopped right
-            // before returning) so freeing its pages cannot pull memory out from
-            // under a running call.
+            // before returning), so a call in flight finishes before this side
+            // drops its handles and stops reading the block.
             for (int tries = 0; tries < 100 && !stopped; ++tries)
             {
                 std::uint64_t value = 0;
@@ -329,14 +420,17 @@ namespace Manifold::Target
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
             }
         }
-        if (m_process && (stopped || !m_thread))
-        {
-            // The code page is left allocated on purpose: the worker thread is
-            // still executing its last few instructions there. Leaking one small
-            // page is cheaper than risking an execute-after-free in the target.
-            if (m_data) m_process->Free(m_data);
-            if (m_control) m_process->Free(m_control);
-        }
+        // Nothing here is freed, on purpose. The code page still holds the
+        // worker's last instructions, and the control block and the scratch
+        // arena are worse: the worker is attached to the target's Mono runtime
+        // (mono_thread_attach), so its stack and registers are scanned
+        // CONSERVATIVELY by the garbage collector. rsi holds the control block
+        // for the worker's whole life and scratch addresses stay in its frames,
+        // so after a free the next collection takes such a leftover value for an
+        // object candidate, rounds it down to its 8 KB block and reads the block
+        // header out of the unmapped page -- an access violation inside the
+        // game's GC, which is exactly how this crashed Unity games on detach.
+        // Three small pages per attach are far cheaper than that.
         if (m_wake)
             ::CloseHandle(m_wake);
         m_wake = nullptr;
@@ -366,6 +460,11 @@ namespace Manifold::Target
         // A spinning worker picks the request up by itself and the event just
         // stays set; a waiting one wakes at once instead of after a timer tick.
         Wake();
+        return WaitForResult(m_control, false, result, nullptr);
+    }
+
+    Status RemoteCall::WaitForResult(std::uint64_t control, bool main, std::uint64_t& result, bool* notTaken)
+    {
         // Spin (the worker answers in microseconds) and only fall back to
         // sleeping after a grace period, so enumerating tens of thousands of
         // members stays fast; the deadline still guards a hung call.
@@ -373,10 +472,21 @@ namespace Manifold::Target
         for (std::uint64_t spins = 0;; ++spins)
         {
             std::uint64_t request = 1;
-            if (!m_process->ReadExact(m_control + kRequestOffset, &request, sizeof(request)))
+            if (!m_process->ReadExact(control + kRequestOffset, &request, sizeof(request)))
                 return Status::Fail(ErrorCode::ReadFailed);
             if (request == 0)
                 break;
+            // The main stub only drops "inside" while it is not running a call,
+            // so a request still pending then was never taken.
+            if (main && (spins & 15) == 15 && !InsideMain())
+            {
+                std::uint64_t again = 1;
+                if (m_process->ReadExact(control + kRequestOffset, &again, sizeof(again)) && again == 0)
+                    break;
+                if (notTaken)
+                    *notTaken = true;
+                return Status::Fail(ErrorCode::MonoCallFailed, "the game's main thread went on before the call was taken");
+            }
             if (!m_process->Alive())
                 return Status::Fail(ErrorCode::DebugTargetExited);
             if (std::chrono::steady_clock::now() > deadline)
@@ -386,9 +496,118 @@ namespace Manifold::Target
             else
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        if (!m_process->ReadExact(m_control + kResultOffset, &result, sizeof(result)))
+        if (!m_process->ReadExact(control + kResultOffset, &result, sizeof(result)))
             return Status::Fail(ErrorCode::ReadFailed);
         return Status::Success();
+    }
+
+    std::uint64_t RemoteCall::ReadMain(std::uint32_t offset) const
+    {
+        std::uint64_t value = 0;
+        if (m_process && m_code)
+            m_process->ReadExact(m_code + kMainControlOffset + offset, &value, sizeof(value));
+        return value;
+    }
+
+    bool RemoteCall::InsideMain() const
+    {
+        return ReadMain(kMainActiveOffset) != 0;
+    }
+
+    std::uint64_t RemoteCall::MainRuns() const
+    {
+        return ReadMain(kMainRunsOffset);
+    }
+
+    std::uint32_t RemoteCall::MainThreadId() const
+    {
+        return static_cast<std::uint32_t>(ReadMain(kMainThreadOffset));
+    }
+
+    Status RemoteCall::EnterMain(std::chrono::milliseconds wait)
+    {
+        if (!m_process || !m_code || !m_thread)
+            return Status::Fail(ErrorCode::NoProcess);
+        if (InsideMain())
+            return Status::Success();
+        const std::uint64_t control = m_code + kMainControlOffset;
+        const std::uint64_t want = 1;
+        if (!m_process->Write(control + kMainWantOffset, &want, sizeof(want)))
+            return Status::Fail(ErrorCode::WriteFailed);
+        // The stub sets Active on the game's next frame and keeps it set, so
+        // this poll cannot miss it however short the stub's own visit is.
+        const auto deadline = std::chrono::steady_clock::now() + wait;
+        for (int spins = 0;; ++spins)
+        {
+            if (InsideMain())
+                return Status::Success();
+            if (!m_process->Alive())
+                return Status::Fail(ErrorCode::DebugTargetExited);
+            if (std::chrono::steady_clock::now() > deadline || m_interrupt)
+                break;
+            if (spins < 200)
+                std::this_thread::yield();
+            else
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        // The main thread never reached the stub: take the wish back, so it
+        // does not start serving later behind our back.
+        const std::uint64_t off = 0;
+        m_process->Write(control + kMainWantOffset, &off, sizeof(off));
+        if (InsideMain())
+            return Status::Success();
+        return Status::Fail(ErrorCode::MonoCallFailed, "the game's main thread did not run within " + std::to_string(wait.count()) +
+            " ms (the game may be paused, loading, or stopped while it is in the background)");
+    }
+
+    Status RemoteCall::CallMain(std::uint64_t function, std::uint64_t a0, std::uint64_t a1, std::uint64_t a2, std::uint64_t a3, std::uint64_t& result)
+    {
+        result = 0;
+        if (!m_process || !m_code || !m_thread || !function)
+            return Status::Fail(ErrorCode::NoProcess);
+        const std::uint64_t control = m_code + kMainControlOffset;
+        for (int attempt = 0; attempt < 2; ++attempt)
+        {
+            if (!InsideMain())
+            {
+                if (Status entered = EnterMain(std::chrono::milliseconds(2000)); !entered)
+                    return entered;
+            }
+            const std::uint64_t block[5] = { function, a0, a1, a2, a3 };
+            if (!m_process->Write(control + kFuncOffset, block, sizeof(block)))
+                return Status::Fail(ErrorCode::WriteFailed);
+            const std::uint64_t go = 1;
+            if (!m_process->Write(control + kRequestOffset, &go, sizeof(go)))
+                return Status::Fail(ErrorCode::WriteFailed);
+            bool notTaken = false;
+            const Status done = WaitForResult(control, true, result, &notTaken);
+            if (done || !notTaken)
+                return done;
+            // The stub went idle just before the request: it never ran, so it is
+            // safe to enter again and send it once more.
+        }
+        return Status::Fail(ErrorCode::MonoCallFailed, "the game's main thread kept going on before the call was taken");
+    }
+
+    void RemoteCall::LeaveMain()
+    {
+        if (!m_process || !m_code)
+            return;
+        const std::uint64_t control = m_code + kMainControlOffset;
+        const std::uint64_t off = 0;
+        m_process->Write(control + kMainWantOffset, &off, sizeof(off));
+        // The stub clears Active on its next run, which is a whole frame away,
+        // so give it that long: a stale Active would make the next call wait
+        // for a stub that is not serving. A game that is not rendering never
+        // gets there at all, hence the bound.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+        for (int tries = 0; InsideMain() && std::chrono::steady_clock::now() < deadline; ++tries)
+        {
+            if (tries < 200)
+                std::this_thread::yield();
+            else
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
     }
 
     std::uint64_t RemoteCall::Scratch(std::size_t bytes)

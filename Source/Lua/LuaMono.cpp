@@ -154,6 +154,12 @@ namespace Manifold::Lua
             return 0;
         }
 
+        int MonoShutdown(lua_State* state)
+        {
+            Owner(state).StopMono(true);
+            return 0;
+        }
+
         int MonoGetAddressBody(lua_State* state)
         {
             Engine& engine = Owner(state);
@@ -177,6 +183,7 @@ namespace Manifold::Lua
             { "mono_class_getFieldOffset", &WithMono<MonoClassGetFieldOffsetBody> },
             { "mono_getAddress", &WithMono<MonoGetAddressBody> },
             { "mono_showDissector", &MonoShowDissector },
+            { "mono_shutdown", &MonoShutdown },
         };
     }
 

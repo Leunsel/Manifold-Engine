@@ -1967,6 +1967,9 @@ namespace Manifold::UI
             if (ImGui::MenuItem(ICON_FA_SYNC "  Reload classes", nullptr, false, !m_engine.MonoLoading()))
                 m_engine.ReloadMono();
             ItemTooltip("Reads the class list again, for assemblies the game loaded later");
+            if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut down Mono", nullptr, false, !m_engine.MonoLoading()))
+                m_engine.StopMono();
+            ItemTooltip("Ends the helper thread in the game and takes the Unity explorer's callback out. Mono method names and lookups stop until it is loaded again.");
         }
         ImGui::Separator();
         if (CommandItem(ICON_FA_DICE_D6 "  Mono / .NET dissector", Command::OpenMono))

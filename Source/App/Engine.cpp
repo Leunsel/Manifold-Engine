@@ -243,6 +243,19 @@ namespace Manifold
             });
     }
 
+    void Engine::StopMono(bool fromScript)
+    {
+        m_work.CancelGroup(kMonoWork);
+        m_work.CompleteGroup(kMonoWork);
+        if (!m_mono.Present())
+            return;
+        m_mono.Stop();
+        RefreshSymbolProvider();
+        LOG_INFO("Mono", "Shut down the Mono helper in the game");
+        if (!fromScript)
+            Notify(LogLevel::Success, "Shut down Mono: the helper in the game has ended");
+    }
+
     void Engine::FinishMono(const Status& status, bool cancelled, bool starting, bool fromScript, std::uint64_t generation)
     {
         if (generation != m_processGeneration)

@@ -2,6 +2,7 @@
 
 #include "Core/Errors.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -46,6 +47,24 @@ namespace Manifold::Target
         // item to the array the user pointer names: { u64 count; u64 cap; u64 items[cap]; }.
         std::uint64_t CollectorAddress() const { return m_collector; }
 
+        // A second channel that runs calls on whatever thread calls MainStub()
+        // as void(): a game registers it as a per-frame callback, so the calls
+        // run on its main thread between frames. The stub returns at once
+        // unless EnterMain asked for it; then it holds the thread and serves
+        // CallMain requests until LeaveMain, or by itself once no request came
+        // for a few dozen milliseconds (so a host that dies or stalls never
+        // freezes the game). Its control block lives in the code page, which is
+        // never freed, so a stub still registered after Stop keeps returning.
+        std::uint64_t MainStub() const { return m_code ? m_code + 0x300 : 0; }
+        Status EnterMain(std::chrono::milliseconds wait);
+        Status CallMain(std::uint64_t function, std::uint64_t a0, std::uint64_t a1, std::uint64_t a2, std::uint64_t a3, std::uint64_t& result);
+        void LeaveMain();
+        // While set, EnterMain gives up at once instead of waiting for a frame.
+        void InterruptMain(bool interrupt) { m_interrupt = interrupt; }
+        bool InsideMain() const;
+        std::uint64_t MainRuns() const;
+        std::uint32_t MainThreadId() const;
+
         // A fresh, zeroed region in the shared scratch page (for iterators,
         // collector arrays and out-parameters). Returns 0 when the arena is full.
         std::uint64_t Scratch(std::size_t bytes);
@@ -55,6 +74,8 @@ namespace Manifold::Target
 
     private:
         void Wake() const;
+        std::uint64_t ReadMain(std::uint32_t offset) const;
+        Status WaitForResult(std::uint64_t control, bool main, std::uint64_t& result, bool* notTaken);
 
         std::shared_ptr<Process> m_process;
         void* m_wake = nullptr;          // local event; the worker waits on its duplicate
@@ -65,5 +86,6 @@ namespace Manifold::Target
         std::uint64_t m_collector = 0;
         std::uint64_t m_thread = 0;     // target thread handle (as a value)
         std::chrono::milliseconds m_timeout{ 5000 };
+        std::atomic<bool> m_interrupt{ false };
     };
 }

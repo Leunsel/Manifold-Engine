@@ -176,6 +176,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Target\Process.cpp" />
     <ClCompile Include="..\Source\Target\RemoteCall.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
+    <ClCompile Include="..\Source\Target\UnityExplorer.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateCheck.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateEngine.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateFiles.cpp" />
@@ -201,6 +202,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\LuaWindow.cpp" />
     <ClCompile Include="..\Source\UI\MainWindow.cpp" />
     <ClCompile Include="..\Source\UI\MemoryViewer.cpp" />
+    <ClCompile Include="..\Source\UI\MonoInspector.cpp" />
     <ClCompile Include="..\Source\UI\MonoWindow.cpp" />
     <ClCompile Include="..\Source\UI\NopSled.cpp" />
     <ClCompile Include="..\Source\UI\PatchScanWindow.cpp" />
@@ -276,6 +278,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Target\Process.h" />
     <ClInclude Include="..\Source\Target\RemoteCall.h" />
     <ClInclude Include="..\Source\Target\Symbols.h" />
+    <ClInclude Include="..\Source\Target\UnityExplorer.h" />
     <ClInclude Include="..\Source\Templates\BuiltinTemplates.h" />
     <ClInclude Include="..\Source\Templates\TemplateCheck.h" />
     <ClInclude Include="..\Source\Templates\TemplateEngine.h" />

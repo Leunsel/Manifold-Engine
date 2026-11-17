@@ -216,6 +216,9 @@
     <ClCompile Include="..\Source\Target\Symbols.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\UnityExplorer.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Templates\TemplateCheck.cpp">
       <Filter>Source\Templates</Filter>
     </ClCompile>
