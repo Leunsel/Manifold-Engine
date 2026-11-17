@@ -66,6 +66,9 @@ namespace Manifold::UI
     bool ColorDot(const char* id, ImVec4 color, float size);
 
     bool KeepOutOfCentralDock(const char* title);
+    float CheckboxWidth(const char* label);
+    bool FlowNext(float width, float indent = -1.0f);
+    void TextFitted(std::string_view text, float maxWidth, const ImVec4& color);
     bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags = 0, ImVec2 minimum = ImVec2(260.0f, 160.0f));
     void EndToolWindow();
     bool FocusRequested();

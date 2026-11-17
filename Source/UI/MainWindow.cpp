@@ -563,33 +563,41 @@ namespace Manifold::UI
             m_workspace.OpenProcessPicker();
         ItemTooltip(WithKeys("Pick the process to work on", Command::OpenProcess).c_str());
         ImGui::SameLine(0.0f, Px(12.0f));
+
+        const float right = ImGui::GetWindowContentRegionMax().x;
+        Debug::Debugger& debugger = engine.Debugger();
+        std::string debugText = !m_release && debugger.Attached() ? (debugger.Broken() ? ICON_FA_PAUSE_CIRCLE "  Broken" : ICON_FA_BUG "  Debugger attached") : "";
+        float x = right;
+        if (!m_release)
+            x -= ImGui::CalcTextSize(ICON_FA_MEMORY "  Memory view").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        const float debugWidth = debugText.empty() ? 0.0f : ImGui::CalcTextSize(debugText.c_str()).x + Px(16.0f);
+        const float textRoom = x - debugWidth - Px(12.0f) - ImGui::GetCursorPosX();
         if (hasProcess)
         {
             const auto& process = *engine.Process();
             ImGui::PushFont(Fonts::Bold(), 0.0f);
-            ImGui::TextUnformatted(process.Name().c_str());
+            const float nameWidth = std::min(ImGui::CalcTextSize(process.Name().c_str()).x, std::max(Px(60.0f), textRoom));
+            TextFitted(process.Name(), nameWidth, ManifoldTheme::Text);
             ImGui::PopFont();
-            ImGui::SameLine();
-            if (m_release)
-                Muted(process.Alive() ? "Opened" : "Closed");
-            else
-                Muted(Format("pid %u  ·  %s  ·  %zu modules", process.Id(), process.Is64Bit() ? "64-bit" : "32-bit", process.Modules()->size()));
+            const float detailRoom = textRoom - nameWidth - ImGui::GetStyle().ItemSpacing.x;
+            if (detailRoom > Px(40.0f))
+            {
+                ImGui::SameLine();
+                if (m_release)
+                    TextFitted(process.Alive() ? "Opened" : "Closed", detailRoom, ManifoldTheme::Muted);
+                else
+                    TextFitted(Format("pid %u  ·  %s  ·  %zu modules", process.Id(), process.Is64Bit() ? "64-bit" : "32-bit", process.Modules()->size()), detailRoom, ManifoldTheme::Muted);
+            }
         }
         else
         {
-            Muted(m_release ? "No game opened yet." : "No process opened. Pick one to scan, view memory or run scripts.");
+            TextFitted(m_release ? "No game opened yet." : "No process opened. Pick one to scan, view memory or run scripts.", textRoom, ManifoldTheme::Muted);
         }
         if (m_release)
         {
             EndCard();
             return;
         }
-
-        const float right = ImGui::GetWindowContentRegionMax().x;
-        Debug::Debugger& debugger = engine.Debugger();
-        std::string debugText = debugger.Attached() ? (debugger.Broken() ? ICON_FA_PAUSE_CIRCLE "  Broken" : ICON_FA_BUG "  Debugger attached") : "";
-        float x = right;
-        x -= ImGui::CalcTextSize(ICON_FA_MEMORY "  Memory view").x + ImGui::GetStyle().FramePadding.x * 2.0f;
         ImGui::SameLine();
         ImGui::SetCursorPos(ImVec2(x, y));
         if (ImGui::Button(ICON_FA_MEMORY "  Memory view"))
@@ -613,9 +621,23 @@ namespace Manifold::UI
     void MainWindow::ScanArea(float height)
     {
         const float total = ImGui::GetContentRegionAvail().x;
-        float left = std::floor(total * m_resultsShare);
-        float right = total - left - Px(8.0f);
         const ImVec2 start = ImGui::GetCursorPos();
+        const float gap = Px(8.0f);
+        if (total < Px(260.0f) + Px(300.0f) + gap)
+        {
+            float top = std::floor(height * m_stackShare);
+            float bottom = height - top - gap;
+            ResultsCard(total, top);
+            ImGui::SetCursorPos(start);
+            if (Splitter("##scanstack", false, gap, &top, &bottom, Px(90.0f), Px(150.0f)))
+                m_stackShare = top / height;
+            ImGui::SetCursorPos(ImVec2(start.x, start.y + top + gap));
+            ScanCard(total, bottom);
+            ImGui::SetCursorPos(ImVec2(start.x, start.y + height + Px(6.0f)));
+            return;
+        }
+        float left = std::floor(total * m_resultsShare);
+        float right = total - left - gap;
         ResultsCard(left, height);
         ImGui::SetCursorPos(start);
         if (Splitter("##scansplit", true, Px(8.0f), &left, &right, Px(260.0f), Px(300.0f)))
@@ -1242,28 +1264,33 @@ namespace Manifold::UI
         const bool busy = scanner.Busy();
         const bool scanned = scanner.HasResults();
         const float buttonWidth = std::floor((ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2.0f) / 3.0f);
+        const bool iconsOnly = buttonWidth < ImGui::CalcTextSize(ICON_FA_FILTER "  Next scan").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        const char* firstLabel = iconsOnly ? ICON_FA_SEARCH "##firstscan" : ICON_FA_SEARCH "  First scan";
+        const char* newLabel = iconsOnly ? ICON_FA_REDO "##newscan" : ICON_FA_REDO "  New scan";
+        const char* nextLabel = iconsOnly ? ICON_FA_FILTER "##nextscan" : ICON_FA_FILTER "  Next scan";
+        const char* undoLabel = iconsOnly ? ICON_FA_UNDO "##undoscan" : ICON_FA_UNDO "  Undo scan";
 
         ImGui::BeginDisabled(busy);
         if (!scanned)
         {
-            if (AccentButton(ICON_FA_SEARCH "  First scan", ImVec2(buttonWidth, 0.0f)))
+            if (AccentButton(firstLabel, ImVec2(buttonWidth, 0.0f)))
                 DoFirstScan();
         }
-        else if (ImGui::Button(ICON_FA_REDO "  New scan", ImVec2(buttonWidth, 0.0f)))
+        else if (ImGui::Button(newLabel, ImVec2(buttonWidth, 0.0f)))
         {
             NewScan();
         }
         ItemTooltip(scanned ? WithKeys("Forget the results and start over", Command::NewScan).c_str() : WithKeys("Scan the memory for the value", Command::FirstScan).c_str());
         ImGui::SameLine();
         ImGui::BeginDisabled(!scanned);
-        if ((scanned ? AccentButton(ICON_FA_FILTER "  Next scan", ImVec2(buttonWidth, 0.0f)) : ImGui::Button(ICON_FA_FILTER "  Next scan", ImVec2(buttonWidth, 0.0f))))
+        if ((scanned ? AccentButton(nextLabel, ImVec2(buttonWidth, 0.0f)) : ImGui::Button(nextLabel, ImVec2(buttonWidth, 0.0f))))
             DoNextScan();
-        if (scanned)
-            ItemTooltip(WithKeys("Keep the results that match", Command::FirstScan).c_str());
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_ForTooltip))
+            ImGui::SetTooltip("%s", WithKeys(scanned ? "Keep the results that match" : "Next scan: keep the results that match", Command::FirstScan).c_str());
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::BeginDisabled(!scanner.CanUndo());
-        if (ImGui::Button(ICON_FA_UNDO "  Undo scan", ImVec2(buttonWidth, 0.0f)))
+        if (ImGui::Button(undoLabel, ImVec2(buttonWidth, 0.0f)))
             scanner.Undo();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             ImGui::SetTooltip("%s", WithKeys("Go back to the results before the last scan", Command::UndoScan).c_str());
@@ -1444,37 +1471,46 @@ namespace Manifold::UI
         ImGui::EndDisabled();
 
         const Scan::ValueType type = scanned ? scanner.Type() : Scan::kScanTypes[m_typeIndex];
+        const float optionIndent = ImGui::GetCursorPosX() + labelWidth - ImGui::GetStyle().WindowPadding.x + Px(2.0f);
         if ((kind == Scan::ScanKind::Single && Scan::IsFloating(type)) || kind == Scan::ScanKind::All)
         {
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + labelWidth - ImGui::GetStyle().WindowPadding.x + Px(2.0f));
+            ImGui::SetCursorPosX(optionIndent);
             ImGui::RadioButton("Rounded", &m_floatMode, 0);
             ItemTooltip("100.5 finds values from 100.45 to 100.55");
-            ImGui::SameLine();
+            FlowNext(CheckboxWidth("Truncated"), optionIndent);
             ImGui::RadioButton("Truncated", &m_floatMode, 1);
             ItemTooltip("100.5 finds values from 100.5 to 100.6");
-            ImGui::SameLine();
+            FlowNext(CheckboxWidth("Exact"), optionIndent);
             ImGui::RadioButton("Exact", &m_floatMode, 2);
         }
         if (kind == Scan::ScanKind::Single && type == Scan::ValueType::String)
         {
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + labelWidth - ImGui::GetStyle().WindowPadding.x + Px(2.0f));
+            ImGui::SetCursorPosX(optionIndent);
             ImGui::Checkbox("UTF-16", &m_unicode);
-            ImGui::SameLine();
+            FlowNext(CheckboxWidth("Case sensitive"), optionIndent);
             ImGui::Checkbox("Case sensitive", &m_caseSensitive);
         }
 
         ImGui::Spacing();
         if (ImGui::CollapsingHeader("Memory scan options"))
         {
+            const ImGuiStyle& style = ImGui::GetStyle();
+            const float stopLabel = ImGui::CalcTextSize("Stop").x;
+            const float rangeRoom = ImGui::GetContentRegionAvail().x - labelWidth + style.WindowPadding.x;
+            const bool rangeOneLine = rangeRoom >= Px(150.0f) * 2.0f + stopLabel + style.ItemSpacing.x * 2.0f;
+            const float rangeWidth = rangeOneLine ? Px(150.0f) : std::max(Px(80.0f), rangeRoom - style.ItemSpacing.x);
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted("Start");
             ImGui::SameLine(labelWidth);
-            ImGui::SetNextItemWidth(Px(150.0f));
+            ImGui::SetNextItemWidth(rangeWidth);
             InputText("##start", m_start, ImGuiInputTextFlags_CharsHexadecimal);
-            ImGui::SameLine();
+            if (rangeOneLine)
+                ImGui::SameLine();
+            else
+                ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted("Stop");
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(Px(150.0f));
+            ImGui::SameLine(rangeOneLine ? 0.0f : labelWidth);
+            ImGui::SetNextItemWidth(rangeWidth);
             InputText("##stop", m_stop, ImGuiInputTextFlags_CharsHexadecimal);
             if (engine.HasProcess() && ImGui::BeginCombo("##module", "Limit to a module...", ImGuiComboFlags_HeightLarge))
             {
@@ -1495,18 +1531,18 @@ namespace Manifold::UI
             }
             TriStateCheckbox("Writable", m_writable);
             ItemTooltip("Checked: only writable memory. Empty: only read-only memory. Mixed: both.");
-            ImGui::SameLine();
+            FlowNext(CheckboxWidth("Executable"));
             TriStateCheckbox("Executable", m_executable);
-            ImGui::SameLine();
+            FlowNext(CheckboxWidth("Copy on write"));
             TriStateCheckbox("Copy on write", m_copyOnWrite);
             ImGui::Checkbox("Private", &m_private);
-            ImGui::SameLine();
+            FlowNext(CheckboxWidth("Image"));
             ImGui::Checkbox("Image", &m_image);
-            ImGui::SameLine();
+            FlowNext(CheckboxWidth("Mapped"));
             ImGui::Checkbox("Mapped", &m_mapped);
             ImGui::Checkbox("Fast scan", &m_fastScan);
             ItemTooltip("Only look at addresses aligned to this many bytes. Values in games are nearly always aligned.");
-            ImGui::SameLine();
+            FlowNext(Px(70.0f) + style.ItemInnerSpacing.x + ImGui::CalcTextSize("Alignment").x);
             ImGui::BeginDisabled(!m_fastScan);
             ImGui::SetNextItemWidth(Px(70.0f));
             ImGui::InputInt("Alignment", &m_alignment, 1, 4);
@@ -1536,33 +1572,47 @@ namespace Manifold::UI
         BeginCard("##addresslist", nullptr, ImVec2(0.0f, height), ImGuiWindowFlags_NoScrollbar);
         ImGui::AlignTextToFramePadding();
         CardTitle(ICON_FA_LIST, "Address list", list.Count() ? std::to_string(list.Count()) + (list.Count() == 1 ? " record" : " records") : "");
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float iconWidth = ImGui::GetFrameHeight();
+        const float gap = Px(4.0f);
+        const float right = ImGui::GetWindowContentRegionMax().x;
+        const float titleEnd = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x;
+        const auto labelWidth = [&](const char* label) { return ImGui::CalcTextSize(label, nullptr, true).x + style.FramePadding.x * 2.0f; };
+        const float textButtons = m_release ? 0.0f : Px(16.0f) + labelWidth(ICON_FA_PLUS "  Address") + labelWidth(ICON_FA_FOLDER_PLUS "  Group") + labelWidth(ICON_FA_CODE "  Script") + gap * 2.0f;
+        const float iconButtons = m_release ? 0.0f : Px(16.0f) + iconWidth * 3.0f + gap * 2.0f;
+        const float groupsWidth = (iconWidth + gap) * 2.0f + Px(6.0f);
+        const float room = right - titleEnd - Px(12.0f);
+        float filterWidth = Px(180.0f);
+        const bool iconsOnly = textButtons + groupsWidth + filterWidth + gap + iconWidth > room;
+        const float buttons = iconsOnly ? iconButtons : textButtons;
+        if (buttons + groupsWidth + filterWidth + gap + iconWidth > room)
+            filterWidth = std::max(Px(110.0f), room - buttons - groupsWidth - gap - iconWidth);
+        const bool ownLine = buttons + groupsWidth + filterWidth + gap + iconWidth > room;
         if (!m_release)
         {
             ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.06f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.11f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.16f));
+            const ImVec2 iconSize(iconWidth, 0.0f);
             ImGui::SameLine(0.0f, Px(16.0f));
-            if (ImGui::Button(ICON_FA_PLUS "  Address"))
+            if (ImGui::Button(iconsOnly ? ICON_FA_PLUS "##addaddress" : ICON_FA_PLUS "  Address", iconsOnly ? iconSize : ImVec2(0.0f, 0.0f)))
                 OpenAddDialog();
             ItemTooltip(WithKeys("Add an address by hand", Command::AddAddress).c_str());
-            ImGui::SameLine(0.0f, Px(4.0f));
-            if (ImGui::Button(ICON_FA_FOLDER_PLUS "  Group"))
+            ImGui::SameLine(0.0f, gap);
+            if (ImGui::Button(iconsOnly ? ICON_FA_FOLDER_PLUS "##addgroup" : ICON_FA_FOLDER_PLUS "  Group", iconsOnly ? iconSize : ImVec2(0.0f, 0.0f)))
                 list.AddGroup("Group");
             ItemTooltip(WithKeys("Add an empty group", Command::AddGroup).c_str());
-            ImGui::SameLine(0.0f, Px(4.0f));
-            if (ImGui::Button(ICON_FA_CODE "  Script"))
+            ImGui::SameLine(0.0f, gap);
+            if (ImGui::Button(iconsOnly ? ICON_FA_CODE "##addscript" : ICON_FA_CODE "  Script", iconsOnly ? iconSize : ImVec2(0.0f, 0.0f)))
                 AddScriptRecord();
             ItemTooltip(WithKeys("Add an Auto Assembler script", Command::AddScript).c_str());
             ImGui::PopStyleColor(3);
         }
-        const float filterWidth = Px(180.0f);
-        const float iconWidth = ImGui::GetFrameHeight();
-        const float gap = Px(4.0f);
-        const float right = ImGui::GetWindowContentRegionMax().x;
         const float filterX = right - filterWidth - iconWidth - gap;
-        const float groupsX = filterX - (iconWidth + gap) * 2.0f - Px(6.0f);
-        ProgressLine(groupsX - Px(12.0f));
-        ImGui::SameLine();
+        const float groupsX = filterX - groupsWidth;
+        ProgressLine(ownLine ? right : groupsX - Px(12.0f));
+        if (!ownLine)
+            ImGui::SameLine();
         ImGui::SetCursorPosX(groupsX);
         if (IconButton(ICON_FA_EXPAND_ALT, WithKeys("Expand every group", Command::ExpandGroups).c_str()))
             list.ForEach([](Table::MemoryRecord& record) { if (!record.Children.empty()) record.Expanded = true; });

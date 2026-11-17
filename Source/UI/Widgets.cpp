@@ -1032,6 +1032,48 @@ namespace Manifold::UI
         pending.erase(id);
     }
 
+    float CheckboxWidth(const char* label)
+    {
+        return ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(label, nullptr, true).x;
+    }
+
+    bool FlowNext(float width, float indent)
+    {
+        const float next = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + width;
+        const float limit = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+        if (next <= limit + 0.5f)
+        {
+            ImGui::SameLine();
+            return true;
+        }
+        if (indent >= 0.0f)
+            ImGui::SetCursorPosX(indent);
+        return false;
+    }
+
+    void TextFitted(std::string_view text, float maxWidth, const ImVec4& color)
+    {
+        const char* begin = text.data();
+        const char* end = begin + text.size();
+        const ImVec2 size = ImGui::CalcTextSize(begin, end);
+        ImGui::PushStyleColor(ImGuiCol_Text, color);
+        if (size.x <= maxWidth || maxWidth <= 0.0f)
+        {
+            ImGui::TextUnformatted(begin, end);
+            ImGui::PopStyleColor();
+            return;
+        }
+        const ImVec2 pos = ImGui::GetCursorScreenPos();
+        const float width = std::max(0.0f, maxWidth);
+        const ImRect rect(pos, ImVec2(pos.x + width, pos.y + size.y));
+        ImGui::ItemSize(rect.GetSize());
+        if (ImGui::ItemAdd(rect, 0))
+            ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(), rect.Min, rect.Max, rect.Max.x, begin, end, &size);
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+            ImGui::SetTooltip("%.*s", static_cast<int>(text.size()), begin);
+    }
+
     bool KeepOutOfCentralDock(const char* title)
     {
         ImGuiID dockId = 0;

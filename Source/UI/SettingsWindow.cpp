@@ -219,17 +219,20 @@ namespace Manifold::UI
             const float right = std::round(m_left + cell * static_cast<float>(column + 1) - m_padding);
             const float frame = ImGui::GetFrameHeight();
             const float line = ImGui::GetTextLineHeight();
-            m_below = controlWidth < 0.0f;
+            m_below = controlWidth < 0.0f || right - left - controlWidth - Px(20.0f) < Px(120.0f);
             m_rowPadding = std::round(Px(description.empty() ? 9.0f : 12.0f));
             const float top = m_lineTop;
-            const float textWidth = m_below ? right - left : std::max(Px(60.0f), right - left - controlWidth - Px(20.0f));
+            const float textWidth = m_below ? right - left : right - left - controlWidth - Px(20.0f);
+            const bool titleWraps = ImGui::CalcTextSize(title.data(), title.data() + title.size()).x > textWidth;
 
             ImGui::PushID(m_section ? m_section : "");
             ImGui::PushID(title.data(), title.data() + title.size());
-            const float textTop = m_below || !description.empty() ? top + m_rowPadding : std::round(top + m_rowPadding + (frame - line) * 0.5f);
+            const float textTop = m_below || !description.empty() || titleWraps ? top + m_rowPadding : std::round(top + m_rowPadding + (frame - line) * 0.5f);
             ImGui::SetCursorScreenPos(ImVec2(left, textTop));
+            ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + textWidth);
             ImGui::TextUnformatted(title.data(), title.data() + title.size());
-            float textBottom = textTop + line;
+            ImGui::PopTextWrapPos();
+            float textBottom = ImGui::GetItemRectMax().y;
             if (!description.empty())
             {
                 ImGui::SetCursorScreenPos(ImVec2(left, textBottom + Px(3.0f)));
@@ -590,6 +593,9 @@ namespace Manifold::UI
         ImGui::PopFont();
 
         const float textX = pos.x + badge + Px(14.0f);
+        const char* headerButton = m_page == 1 ? ICON_FA_UNDO "  Reset theme" : m_page == KeyboardPage ? ICON_FA_UNDO "  Reset all keys" : nullptr;
+        const float headerButtonWidth = headerButton ? ImGui::CalcTextSize(headerButton).x + ImGui::GetStyle().FramePadding.x * 2.0f + Px(16.0f) : 0.0f;
+        const float textRight = std::max(textX + Px(120.0f), right - headerButtonWidth);
         ImGui::PushFont(Fonts::Bold(), ImGui::GetFontSize() * 1.3f);
         const float titleHeight = ImGui::GetTextLineHeight();
         ImGui::SetCursorScreenPos(ImVec2(textX, pos.y + Px(1.0f)));
@@ -597,8 +603,11 @@ namespace Manifold::UI
         ImGui::PopFont();
         ImGui::SetCursorScreenPos(ImVec2(textX, pos.y + Px(1.0f) + titleHeight + Px(3.0f)));
         ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
+        ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + (textRight - textX));
         ImGui::TextUnformatted(info.Subtitle);
+        ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
+        const float headerBottom = std::max(pos.y + badge, ImGui::GetItemRectMax().y);
 
         if (m_page == 1)
         {
@@ -622,7 +631,7 @@ namespace Manifold::UI
             ImGui::EndDisabled();
             ItemTooltip("Back to the default shortcuts, the Cheat Engine keys and Manifold's own");
         }
-        ImGui::SetCursorScreenPos(ImVec2(pos.x, pos.y + badge + Px(26.0f)));
+        ImGui::SetCursorScreenPos(ImVec2(pos.x, std::round(headerBottom + Px(26.0f))));
     }
 
     bool SettingsWindow::ShortcutsPage(SettingsList& list, Settings& settings)

@@ -171,6 +171,7 @@ namespace Manifold::UI
         bool m_focusValue = false;
         float m_topHeight = 0.0f;
         float m_resultsShare = 0.58f;
+        float m_stackShare = 0.42f;
 
         std::set<std::uint64_t> m_selectedResults;
         std::uint64_t m_lastClickedResult = 0;
