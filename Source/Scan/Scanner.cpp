@@ -6,11 +6,13 @@
 #include "Target/Process.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <cwctype>
 #include <functional>
+#include <type_traits>
 
 #include <windows.h>
 
@@ -26,6 +28,15 @@ namespace Manifold::Scan
         double Now()
         {
             return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        }
+
+        void PreferFastCores()
+        {
+            THREAD_POWER_THROTTLING_STATE state{};
+            state.Version = THREAD_POWER_THROTTLING_CURRENT_VERSION;
+            state.ControlMask = THREAD_POWER_THROTTLING_EXECUTION_SPEED;
+            state.StateMask = 0;
+            ::SetThreadInformation(::GetCurrentThread(), ThreadPowerThrottling, &state, sizeof(state));
         }
 
         class TempFile
@@ -441,7 +452,177 @@ namespace Manifold::Scan
                 return false;
             }
 
+            template <class Visit>
+            bool Scan(const std::uint8_t* now, const std::uint8_t* previous, const std::uint8_t* first, std::size_t begin, std::size_t end, std::size_t stride, Visit& visit) const
+            {
+                if (m_kind == ScanKind::Single)
+                {
+                    switch (m_type)
+                    {
+                    case ValueType::Byte: return ScanInteger<std::int8_t>(now, previous, first, begin, end, stride, visit);
+                    case ValueType::TwoBytes: return ScanInteger<std::int16_t>(now, previous, first, begin, end, stride, visit);
+                    case ValueType::FourBytes: return ScanInteger<std::int32_t>(now, previous, first, begin, end, stride, visit);
+                    case ValueType::EightBytes: return ScanInteger<std::int64_t>(now, previous, first, begin, end, stride, visit);
+                    case ValueType::Pointer:
+                        return m_size == 4 ? ScanInteger<std::int32_t>(now, previous, first, begin, end, stride, visit)
+                                           : ScanInteger<std::int64_t>(now, previous, first, begin, end, stride, visit);
+                    case ValueType::Float: return ScanFloat<float>(now, previous, first, begin, end, stride, visit);
+                    case ValueType::Double: return ScanFloat<double>(now, previous, first, begin, end, stride, visit);
+                    default: break;
+                    }
+                }
+                for (std::size_t offset = begin; offset < end; offset += stride)
+                {
+                    if (Test(now + offset, previous + offset, first + offset) && !visit(offset))
+                        return false;
+                }
+                return true;
+            }
+
         private:
+            static constexpr std::size_t kBlock = 64;
+
+            template <class T, class Visit, class Pred>
+            static bool Each(const std::uint8_t* data, std::size_t begin, std::size_t end, std::size_t stride, Visit& visit, Pred pred)
+            {
+                std::size_t offset = begin;
+                if (stride == sizeof(T))
+                {
+                    for (; offset < end && end - offset >= kBlock * sizeof(T); offset += kBlock * sizeof(T))
+                    {
+                        const std::uint8_t* block = data + offset;
+                        unsigned any = 0;
+                        for (std::size_t i = 0; i < kBlock; ++i)
+                            any |= pred(Load<T>(block + i * sizeof(T))) ? 1u : 0u;
+                        if (!any)
+                            continue;
+                        for (std::size_t i = 0; i < kBlock; ++i)
+                        {
+                            if (pred(Load<T>(block + i * sizeof(T))) && !visit(offset + i * sizeof(T)))
+                                return false;
+                        }
+                    }
+                }
+                for (; offset < end; offset += stride)
+                {
+                    if (pred(Load<T>(data + offset)) && !visit(offset))
+                        return false;
+                }
+                return true;
+            }
+
+            template <class T, class Visit, class Pred>
+            static bool EachPair(const std::uint8_t* data, const std::uint8_t* other, std::size_t begin, std::size_t end, std::size_t stride, Visit& visit, Pred pred)
+            {
+                std::size_t offset = begin;
+                if (stride == sizeof(T))
+                {
+                    for (; offset < end && end - offset >= kBlock * sizeof(T); offset += kBlock * sizeof(T))
+                    {
+                        const std::uint8_t* block = data + offset;
+                        const std::uint8_t* against = other + offset;
+                        unsigned any = 0;
+                        for (std::size_t i = 0; i < kBlock; ++i)
+                            any |= pred(Load<T>(block + i * sizeof(T)), Load<T>(against + i * sizeof(T))) ? 1u : 0u;
+                        if (!any)
+                            continue;
+                        for (std::size_t i = 0; i < kBlock; ++i)
+                        {
+                            if (pred(Load<T>(block + i * sizeof(T)), Load<T>(against + i * sizeof(T))) && !visit(offset + i * sizeof(T)))
+                                return false;
+                        }
+                    }
+                }
+                for (; offset < end; offset += stride)
+                {
+                    if (pred(Load<T>(data + offset), Load<T>(other + offset)) && !visit(offset))
+                        return false;
+                }
+                return true;
+            }
+
+            template <class T>
+            static T Wrapped(T a, T b, bool add)
+            {
+                using U = std::make_unsigned_t<T>;
+                return static_cast<T>(add ? static_cast<U>(static_cast<U>(a) + static_cast<U>(b)) : static_cast<U>(static_cast<U>(a) - static_cast<U>(b)));
+            }
+
+            template <class T, class Visit>
+            bool ScanInteger(const std::uint8_t* now, const std::uint8_t* previous, const std::uint8_t* first, std::size_t begin, std::size_t end, std::size_t stride, Visit& visit) const
+            {
+                const T a = static_cast<T>(m_intA);
+                const std::int64_t low = m_intA;
+                const std::int64_t high = m_intB;
+                switch (m_mode)
+                {
+                case Compare::Exact: return Each<T>(now, begin, end, stride, visit, [a](T v) { return v == a; });
+                case Compare::Bigger: return Each<T>(now, begin, end, stride, visit, [low](T v) { return static_cast<std::int64_t>(v) > low; });
+                case Compare::Smaller: return Each<T>(now, begin, end, stride, visit, [low](T v) { return static_cast<std::int64_t>(v) < low; });
+                case Compare::Between:
+                    return Each<T>(now, begin, end, stride, visit, [low, high](T v) { return static_cast<std::int64_t>(v) >= low && static_cast<std::int64_t>(v) <= high; });
+                case Compare::Unknown: return Each<T>(now, begin, end, stride, visit, [](T) { return true; });
+                case Compare::Increased: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return v > p; });
+                case Compare::Decreased: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return v < p; });
+                case Compare::IncreasedBy: return EachPair<T>(now, previous, begin, end, stride, visit, [a](T v, T p) { return v == Wrapped<T>(p, a, true); });
+                case Compare::DecreasedBy: return EachPair<T>(now, previous, begin, end, stride, visit, [a](T v, T p) { return v == Wrapped<T>(p, a, false); });
+                case Compare::Changed: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return v != p; });
+                case Compare::Unchanged: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return v == p; });
+                case Compare::SameAsFirst: return EachPair<T>(now, first, begin, end, stride, visit, [](T v, T p) { return v == p; });
+                }
+                return true;
+            }
+
+            template <class T, class Visit, class Equal>
+            bool ScanFloatWith(const std::uint8_t* now, const std::uint8_t* previous, const std::uint8_t* first, std::size_t begin, std::size_t end, std::size_t stride, Visit& visit,
+                Equal equal) const
+            {
+                const double a = m_doubleA;
+                const double b = m_doubleB;
+                switch (m_mode)
+                {
+                case Compare::Exact: return Each<T>(now, begin, end, stride, visit, [a, equal](T v) { return equal(static_cast<double>(v), a); });
+                case Compare::Bigger: return Each<T>(now, begin, end, stride, visit, [a](T v) { return static_cast<double>(v) > a; });
+                case Compare::Smaller: return Each<T>(now, begin, end, stride, visit, [a](T v) { return static_cast<double>(v) < a; });
+                case Compare::Between: return Each<T>(now, begin, end, stride, visit, [a, b](T v) { return static_cast<double>(v) >= a && static_cast<double>(v) <= b; });
+                case Compare::Unknown: return Each<T>(now, begin, end, stride, visit, [](T) { return true; });
+                case Compare::Increased: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return v > p; });
+                case Compare::Decreased: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return v < p; });
+                case Compare::IncreasedBy:
+                    return EachPair<T>(now, previous, begin, end, stride, visit, [a, equal](T v, T p) { return equal(static_cast<double>(v), static_cast<double>(p) + a); });
+                case Compare::DecreasedBy:
+                    return EachPair<T>(now, previous, begin, end, stride, visit, [a, equal](T v, T p) { return equal(static_cast<double>(v), static_cast<double>(p) - a); });
+                case Compare::Changed: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return v != p; });
+                case Compare::Unchanged: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return v == p; });
+                case Compare::SameAsFirst: return EachPair<T>(now, first, begin, end, stride, visit, [](T v, T p) { return v == p; });
+                }
+                return true;
+            }
+
+            template <class T, class Visit>
+            bool ScanFloat(const std::uint8_t* now, const std::uint8_t* previous, const std::uint8_t* first, std::size_t begin, std::size_t end, std::size_t stride, Visit& visit) const
+            {
+                const double step = m_step;
+                switch (m_floats)
+                {
+                case FloatMode::Exact:
+                    return ScanFloatWith<T>(now, previous, first, begin, end, stride, visit, [](double value, double wanted) {
+                        if constexpr (std::is_same_v<T, float>)
+                            return static_cast<float>(value) == static_cast<float>(wanted);
+                        else
+                            return value == wanted;
+                    });
+                case FloatMode::Truncated:
+                    return ScanFloatWith<T>(now, previous, first, begin, end, stride, visit, [step](double value, double wanted) {
+                        return wanted >= 0.0 ? (value >= wanted && value < wanted + step) : (value <= wanted && value > wanted - step);
+                    });
+                case FloatMode::Rounded:
+                default:
+                    return ScanFloatWith<T>(now, previous, first, begin, end, stride, visit,
+                        [step](double value, double wanted) { return std::fabs(value - wanted) <= step * 0.5 + std::fabs(wanted) * 1e-12; });
+                }
+            }
+
             std::int64_t SignExtend(std::uint64_t raw) const
             {
                 switch (m_size)
@@ -509,6 +690,47 @@ namespace Manifold::Scan
                 return slot ? &*slot : nullptr;
             }
         };
+
+        template <class Write>
+        bool ScanTypes(const TypedMatchers& typed, const std::vector<ValueType>& types, const std::uint8_t* now, const std::uint8_t* previous, const std::uint8_t* first,
+            std::size_t begin, std::size_t end, std::size_t stride, std::vector<std::vector<std::uint32_t>>& hits, Write& write)
+        {
+            const std::size_t count = std::min(types.size(), kTypeSlots);
+            if (hits.size() < count)
+                hits.resize(count);
+            for (std::size_t t = 0; t < count; ++t)
+            {
+                std::vector<std::uint32_t>& list = hits[t];
+                list.clear();
+                const Matcher* matcher = typed.Find(types[t]);
+                if (!matcher)
+                    continue;
+                auto collect = [&list](std::size_t offset) {
+                    list.push_back(static_cast<std::uint32_t>(offset));
+                    return true;
+                };
+                matcher->Scan(now, previous, first, begin, end, stride, collect);
+            }
+            std::array<std::size_t, kTypeSlots> at{};
+            for (;;)
+            {
+                std::size_t best = count;
+                std::uint32_t lowest = UINT32_MAX;
+                for (std::size_t t = 0; t < count; ++t)
+                {
+                    if (at[t] < hits[t].size() && hits[t][at[t]] < lowest)
+                    {
+                        lowest = hits[t][at[t]];
+                        best = t;
+                    }
+                }
+                if (best == count)
+                    return true;
+                ++at[best];
+                if (!write(lowest, types[best]))
+                    return false;
+            }
+        }
 
         std::vector<ValueType> MaskTypes(std::uint32_t mask)
         {
@@ -1071,6 +1293,7 @@ namespace Manifold::Scan
 
     void Scanner::Run(std::shared_ptr<Target::Process> process, ScanOptions options, std::shared_ptr<const ResultSet> previous, std::shared_ptr<const ResultSet> saved)
     {
+        PreferFastCores();
         const bool mixed = options.Kind == ScanKind::All;
         Matcher matcher;
         TypedMatchers typed;
@@ -1187,11 +1410,13 @@ namespace Manifold::Scan
             std::atomic<std::size_t> next{ 0 };
             const auto worker = [&](int index)
                 {
+                    PreferFastCores();
                     TempFile& file = *result->Files[static_cast<std::size_t>(index)];
                     std::vector<std::uint8_t> buffer(kChunkBytes + kGroupMaxBytes + 64);
                     std::vector<std::uint8_t> record(8 + tagBytes + 2 * static_cast<std::size_t>(valueSize));
                     std::vector<Segment> localSegments;
                     std::vector<Snapshot> localSnapshots;
+                    std::vector<std::vector<std::uint32_t>> hits;
                     for (;;)
                     {
                         const std::size_t item = next.fetch_add(1);
@@ -1226,29 +1451,20 @@ namespace Manifold::Scan
                         segment.File = index;
                         segment.Offset = file.Size();
                         const auto write = writer(file, record, segment);
-                        const std::uint64_t firstOffset = (alignment - (chunk.Base % static_cast<std::uint64_t>(alignment))) % static_cast<std::uint64_t>(alignment);
-                        for (std::uint64_t offset = firstOffset; offset < chunk.Size && offset + static_cast<std::uint64_t>(valueSize) <= readSize; offset += static_cast<std::uint64_t>(alignment))
+                        const std::size_t firstOffset = static_cast<std::size_t>((alignment - (chunk.Base % static_cast<std::uint64_t>(alignment))) % static_cast<std::uint64_t>(alignment));
+                        const std::size_t limit = readSize >= static_cast<std::size_t>(valueSize)
+                                                      ? static_cast<std::size_t>(std::min<std::uint64_t>(chunk.Size, readSize - static_cast<std::size_t>(valueSize) + 1))
+                                                      : 0;
+                        const std::uint8_t* data = buffer.data();
+                        if (mixed)
                         {
-                            const std::uint8_t* value = buffer.data() + offset;
-                            const std::uint64_t address = chunk.Base + offset;
-                            if (mixed)
-                            {
-                                bool ok = true;
-                                for (ValueType type : typed.Types)
-                                {
-                                    if (typed.Find(type)->Test(value, value, value) && !write(address, type, value, value))
-                                    {
-                                        ok = false;
-                                        break;
-                                    }
-                                }
-                                if (!ok)
-                                    break;
-                            }
-                            else if (matcher.Test(value, value, value) && !write(address, singleType, value, value))
-                            {
-                                break;
-                            }
+                            auto emit = [&](std::uint32_t offset, ValueType type) { return write(chunk.Base + offset, type, data + offset, data + offset); };
+                            ScanTypes(typed, typed.Types, data, data, data, firstOffset, limit, static_cast<std::size_t>(alignment), hits, emit);
+                        }
+                        else
+                        {
+                            auto emit = [&](std::size_t offset) { return write(chunk.Base + offset, singleType, data + offset, data + offset); };
+                            matcher.Scan(data, data, data, firstOffset, limit, static_cast<std::size_t>(alignment), emit);
                         }
                         if (segment.Count)
                             localSegments.push_back(segment);
@@ -1284,7 +1500,9 @@ namespace Manifold::Scan
             const std::size_t items = fromSnapshot ? previous->Snapshots.size() : previous->Segments.size();
             const auto worker = [&](int index)
                 {
+                    PreferFastCores();
                     TempFile& file = *result->Files[static_cast<std::size_t>(index)];
+                    std::vector<std::vector<std::uint32_t>> hits;
                     const std::size_t recordSize = previous->RecordSize();
                     const std::size_t previousTag = previous->TagBytes();
                     std::vector<std::uint8_t> record(8 + tagBytes + 2 * static_cast<std::size_t>(valueSize));
@@ -1322,28 +1540,48 @@ namespace Manifold::Scan
                                 m_done += snapshot.Size;
                                 continue;
                             }
-                            for (std::uint64_t position = 0; position < snapshot.Positions && !storeFailed; ++position)
+                            if (againstSaved)
                             {
-                                const std::size_t offset = static_cast<std::size_t>(position * static_cast<std::uint64_t>(alignment));
-                                if (offset + static_cast<std::size_t>(valueSize) > current.size())
-                                    break;
-                                const std::uint8_t* now = current.data() + offset;
-                                const std::uint8_t* before = input.data() + offset;
-                                const std::uint64_t address = snapshot.Base + offset;
+                                for (std::uint64_t position = 0; position < snapshot.Positions && !storeFailed; ++position)
+                                {
+                                    const std::size_t offset = static_cast<std::size_t>(position * static_cast<std::uint64_t>(alignment));
+                                    if (offset + static_cast<std::size_t>(valueSize) > current.size())
+                                        break;
+                                    const std::uint8_t* now = current.data() + offset;
+                                    const std::uint8_t* before = input.data() + offset;
+                                    const std::uint64_t address = snapshot.Base + offset;
+                                    if (mixed)
+                                    {
+                                        for (ValueType type : previous->AllList)
+                                        {
+                                            const Matcher* test = typed.Find(type);
+                                            const std::uint8_t* against = test ? compareWith(address, type, before, before) : nullptr;
+                                            if (against && test->Test(now, against, before) && !write(address, type, now, before))
+                                                break;
+                                        }
+                                        continue;
+                                    }
+                                    const std::uint8_t* against = compareWith(address, singleType, before, before);
+                                    if (against && matcher.Test(now, against, before) && !write(address, singleType, now, before))
+                                        break;
+                                }
+                            }
+                            else
+                            {
+                                const std::size_t usable = current.size() >= static_cast<std::size_t>(valueSize) ? current.size() - static_cast<std::size_t>(valueSize) + 1 : 0;
+                                const std::size_t limit = static_cast<std::size_t>(std::min<std::uint64_t>(snapshot.Positions * static_cast<std::uint64_t>(alignment), usable));
+                                const std::uint8_t* now = current.data();
+                                const std::uint8_t* before = input.data();
                                 if (mixed)
                                 {
-                                    for (ValueType type : previous->AllList)
-                                    {
-                                        const Matcher* test = typed.Find(type);
-                                        const std::uint8_t* against = test ? compareWith(address, type, before, before) : nullptr;
-                                        if (against && test->Test(now, against, before) && !write(address, type, now, before))
-                                            break;
-                                    }
-                                    continue;
+                                    auto emit = [&](std::uint32_t offset, ValueType type) { return write(snapshot.Base + offset, type, now + offset, before + offset); };
+                                    ScanTypes(typed, previous->AllList, now, before, before, 0, limit, static_cast<std::size_t>(alignment), hits, emit);
                                 }
-                                const std::uint8_t* against = compareWith(address, singleType, before, before);
-                                if (against && matcher.Test(now, against, before) && !write(address, singleType, now, before))
-                                    break;
+                                else
+                                {
+                                    auto emit = [&](std::size_t offset) { return write(snapshot.Base + offset, singleType, now + offset, before + offset); };
+                                    matcher.Scan(now, before, before, 0, limit, static_cast<std::size_t>(alignment), emit);
+                                }
                             }
                             m_done += snapshot.Size;
                         }
@@ -1903,6 +2141,7 @@ namespace Manifold::Scan
         const bool firstFixed = pattern.Mask[0] == 0xFF;
         const auto worker = [&]
             {
+                PreferFastCores();
                 std::vector<std::uint8_t> buffer(kChunkBytes + 256);
                 for (;;)
                 {
