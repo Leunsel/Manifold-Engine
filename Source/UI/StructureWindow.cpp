@@ -891,7 +891,7 @@ namespace Manifold::UI
             ImGui::SameLine();
             ImGui::PopID();
         }
-        if (IconButton(ICON_FA_PLUS, WithKeys("Add a column to compare another address", Command::AddStructureColumn).c_str()))
+        if (IconButton(ICON_FA_PLUS "##addcolumn", WithKeys("Add a column to compare another address", Command::AddStructureColumn).c_str()))
             m_columns.push_back({});
 
         ImGui::SetNextItemWidth(Px(240.0f));
@@ -929,7 +929,7 @@ namespace Manifold::UI
         InputTextWithHint("##addoffset", "offset", m_addOffset, ImGuiInputTextFlags_CharsHexadecimal);
         ImGui::SameLine(0.0f, Px(4.0f));
         ImGui::BeginDisabled(!current);
-        if (IconButton(ICON_FA_PLUS, "Add a field at that offset, or at the end of the structure when it is blank") && current)
+        if (IconButton(ICON_FA_PLUS "##addfield", "Add a field at that offset, or at the end of the structure when it is blank") && current)
         {
             Table::StructField field;
             field.Offset = static_cast<int>(ParseHex(m_addOffset).value_or(static_cast<std::uint64_t>(current->Size())));
