@@ -233,7 +233,7 @@ namespace Manifold::UI
         const Target::UnityInspection* inspection = Snapshot(id);
         if (!inspection)
         {
-            Spinner(ImGui::GetTextLineHeight() * 0.4f, ManifoldTheme::Accent);
+            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
             ImGui::SameLine();
             Muted("Opening...");
             return;
@@ -304,7 +304,8 @@ namespace Manifold::UI
         if (inspection->Loading && now - tab.RefreshedAt > 0.3)
         {
             ImGui::SameLine(slotX + ImGui::CalcTextSize("00000 ms").x);
-            Spinner(ImGui::GetTextLineHeight() * 0.4f, ManifoldTheme::Accent);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + ImGui::GetStyle().FramePadding.y);
+            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
         }
 
         const Target::MonoClassLayout* layout = inspection->Layout.get();

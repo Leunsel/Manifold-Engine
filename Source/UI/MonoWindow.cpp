@@ -300,8 +300,8 @@ namespace Manifold::UI
             // Spinner, task and Stop stay together when they wrap.
             const std::string task = m_status.Task.empty() ? std::string("Working") : m_status.Task;
             const float spacing = ImGui::GetStyle().ItemSpacing.x;
-            FlowNext(ImGui::GetTextLineHeight() * 0.5f + spacing + ImGui::CalcTextSize(task.c_str()).x + spacing + SmallButtonWidth(ICON_FA_STOP "  Stop"));
-            Spinner(ImGui::GetTextLineHeight() * 0.5f, ManifoldTheme::Accent);
+            FlowNext(ImGui::GetTextLineHeight() + spacing + ImGui::CalcTextSize(task.c_str()).x + spacing + SmallButtonWidth(ICON_FA_STOP "  Stop"));
+            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
             ImGui::SameLine();
             Muted(task);
             ImGui::SameLine();
@@ -415,7 +415,7 @@ namespace Manifold::UI
                     unity.ExpandScene(s);
                 if (scene.Loading && scene.Roots.empty())
                 {
-                    Spinner(ImGui::GetTextLineHeight() * 0.4f, ManifoldTheme::Accent);
+                    Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
                     ImGui::SameLine();
                     Muted("Reading...");
                 }
@@ -477,7 +477,7 @@ namespace Manifold::UI
                 unity.ExpandNode(index);
             if (node.Loading && node.Children.empty())
             {
-                Spinner(ImGui::GetTextLineHeight() * 0.4f, ManifoldTheme::Accent);
+                Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
                 ImGui::SameLine();
                 Muted("Reading...");
             }
@@ -575,7 +575,7 @@ namespace Manifold::UI
         ImGui::Separator();
         if (m_search.Running)
         {
-            Spinner(ImGui::GetTextLineHeight() * 0.4f, ManifoldTheme::Accent);
+            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
             ImGui::SameLine();
             Muted("Searching for " + m_search.Request.ClassName + "... " + std::to_string(m_search.Hits.size()) + " so far");
         }
