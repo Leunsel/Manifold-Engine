@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -37,6 +38,8 @@ namespace Manifold::Target
         // The [begin, end) RVAs of a 64-bit module's unwind table, sorted by
         // begin; empty for a 32-bit module or one without the table.
         static std::vector<std::pair<std::uint32_t, std::uint32_t>> UnwindFunctions(const Process& process, std::uint64_t base, std::uint64_t size);
+        static std::vector<std::pair<std::uint32_t, std::uint32_t>> FunctionsFromUnwind(std::span<const std::uint8_t> table, std::uint32_t tableRva, std::span<const std::uint8_t> info,
+            std::uint32_t infoRva, std::uint64_t size);
 
     private:
         struct Function

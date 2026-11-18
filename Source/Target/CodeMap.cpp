@@ -4,7 +4,9 @@
 #include "Target/Process.h"
 
 #include <algorithm>
+#include <cstring>
 #include <iterator>
+#include <unordered_map>
 
 #include <windows.h>
 
@@ -20,6 +22,9 @@ namespace Manifold::Target
         constexpr std::uint64_t kMonoProbe = 64;
         constexpr std::uint64_t kMonoStride = 8;
         constexpr std::uint32_t kMaxUnwindBytes = 64 * 1024 * 1024;
+        constexpr std::uint32_t kMaxUnwindInfo = 4 + 256 * 2 + 12;
+        constexpr std::uint8_t kChainedInfo = 0x4;
+        constexpr int kMaxChain = 8;
 
         struct UnwindEntry
         {
@@ -75,16 +80,99 @@ namespace Manifold::Target
         if (directory.VirtualAddress == 0 || directory.Size < sizeof(UnwindEntry) || directory.Size > kMaxUnwindBytes ||
             static_cast<std::uint64_t>(directory.VirtualAddress) + directory.Size > size)
             return functions;
-        std::vector<UnwindEntry> entries(directory.Size / sizeof(UnwindEntry));
-        if (!process.ReadExact(base + directory.VirtualAddress, entries.data(), entries.size() * sizeof(UnwindEntry)))
+        std::vector<std::uint8_t> table(directory.Size / sizeof(UnwindEntry) * sizeof(UnwindEntry));
+        if (!process.ReadExact(base + directory.VirtualAddress, table.data(), table.size()))
             return functions;
+        std::uint32_t low = UINT32_MAX;
+        std::uint32_t high = 0;
+        for (std::size_t offset = 0; offset + sizeof(UnwindEntry) <= table.size(); offset += sizeof(UnwindEntry))
+        {
+            UnwindEntry entry{};
+            std::memcpy(&entry, table.data() + offset, sizeof(entry));
+            const std::uint32_t at = entry.Unwind & ~1u;
+            if (at == 0 || at >= size || (entry.Unwind & 1u))
+                continue;
+            low = std::min(low, at);
+            high = std::max(high, at);
+        }
+        std::vector<std::uint8_t> info;
+        if (low <= high)
+        {
+            const std::uint64_t span = std::min<std::uint64_t>(static_cast<std::uint64_t>(high - low) + kMaxUnwindInfo, size - low);
+            if (span <= kMaxUnwindBytes)
+            {
+                info.resize(static_cast<std::size_t>(span));
+                info.resize(process.Read(base + low, info.data(), info.size()));
+            }
+        }
+        return FunctionsFromUnwind(table, directory.VirtualAddress, info, low <= high ? low : 0, size);
+    }
+
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> CodeMap::FunctionsFromUnwind(std::span<const std::uint8_t> table, std::uint32_t tableRva, std::span<const std::uint8_t> info,
+        std::uint32_t infoRva, std::uint64_t size)
+    {
+        std::vector<UnwindEntry> entries(table.size() / sizeof(UnwindEntry));
+        if (!entries.empty())
+            std::memcpy(entries.data(), table.data(), entries.size() * sizeof(UnwindEntry));
+        std::sort(entries.begin(), entries.end(), [](const UnwindEntry& a, const UnwindEntry& b) { return a.Begin < b.Begin; });
+
+        const auto entryAt = [&](std::uint32_t rva) -> std::optional<UnwindEntry>
+            {
+                UnwindEntry entry{};
+                if (rva >= tableRva && rva - tableRva + sizeof(entry) <= table.size())
+                {
+                    std::memcpy(&entry, table.data() + (rva - tableRva), sizeof(entry));
+                    return entry;
+                }
+                if (rva >= infoRva && rva - infoRva + sizeof(entry) <= info.size())
+                {
+                    std::memcpy(&entry, info.data() + (rva - infoRva), sizeof(entry));
+                    return entry;
+                }
+                return std::nullopt;
+            };
+        const auto parentOf = [&](const UnwindEntry& entry) -> std::optional<UnwindEntry>
+            {
+                if (entry.Unwind & 1u)
+                    return entryAt(entry.Unwind & ~1u);
+                if (entry.Unwind < infoRva)
+                    return std::nullopt;
+                const std::size_t offset = entry.Unwind - infoRva;
+                if (offset + 4 > info.size() || !((info[offset] >> 3) & kChainedInfo))
+                    return std::nullopt;
+                const std::size_t codes = (static_cast<std::size_t>(info[offset + 2]) + 1) & ~std::size_t(1);
+                return entryAt(static_cast<std::uint32_t>(entry.Unwind + 4 + codes * 2));
+            };
+
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> functions;
         functions.reserve(entries.size());
+        std::unordered_map<std::uint32_t, std::size_t> roots;
         for (const UnwindEntry& entry : entries)
         {
-            if (entry.Begin < entry.End && entry.End <= size)
-                functions.emplace_back(entry.Begin, entry.End);
+            if (entry.Begin >= entry.End || entry.End > size)
+                continue;
+            std::uint32_t root = entry.Begin;
+            UnwindEntry current = entry;
+            for (int depth = 0; depth < kMaxChain; ++depth)
+            {
+                const std::optional<UnwindEntry> parent = parentOf(current);
+                if (!parent || parent->Begin == current.Begin)
+                    break;
+                root = parent->Begin;
+                current = *parent;
+            }
+            if (root != entry.Begin)
+            {
+                const auto found = roots.find(root);
+                if (found != roots.end() && functions[found->second].second == entry.Begin)
+                {
+                    functions[found->second].second = entry.End;
+                    continue;
+                }
+            }
+            roots[entry.Begin] = functions.size();
+            functions.emplace_back(entry.Begin, entry.End);
         }
-        std::sort(functions.begin(), functions.end());
         return functions;
     }
 

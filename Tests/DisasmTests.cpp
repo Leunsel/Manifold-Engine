@@ -390,6 +390,44 @@ namespace Manifold::Tests
         return counts.Failed;
     }
 
+    namespace
+    {
+        void ChainedUnwind()
+        {
+            struct Entry
+            {
+                std::uint32_t Begin;
+                std::uint32_t End;
+                std::uint32_t Unwind;
+            };
+            const Entry table[] = { { 0x1000, 0x1040, 0x5000 }, { 0x1040, 0x1100, 0x5010 }, { 0x1100, 0x1180, 0x5030 }, { 0x1200, 0x1300, 0x5050 }, { 0x2000, 0x2010, 0x5060 } };
+            std::vector<std::uint8_t> info(0x100, 0);
+            const auto put = [&info](std::uint32_t at, std::uint8_t flags, std::uint8_t codes, const Entry* parent)
+                {
+                    const std::size_t offset = at - 0x5000;
+                    info[offset] = static_cast<std::uint8_t>(1 | (flags << 3));
+                    info[offset + 2] = codes;
+                    if (parent)
+                        std::memcpy(info.data() + offset + 4 + ((codes + 1u) & ~1u) * 2, parent, sizeof(Entry));
+                };
+            put(0x5000, 0, 2, nullptr);
+            put(0x5010, 4, 0, &table[0]);
+            put(0x5030, 4, 1, &table[1]);
+            put(0x5050, 0, 0, nullptr);
+            put(0x5060, 4, 0, &table[0]);
+            const auto functions = Target::CodeMap::FunctionsFromUnwind({ reinterpret_cast<const std::uint8_t*>(table), sizeof(table) }, 0x4000, info, 0x5000, 0x10000);
+            const std::vector<std::pair<std::uint32_t, std::uint32_t>> expected = { { 0x1000, 0x1180 }, { 0x1200, 0x1300 }, { 0x2000, 0x2010 } };
+            CHECK(functions == expected);
+            const std::uint8_t indirect[] = { 0x00, 0x30, 0x00, 0x00, 0x40, 0x30, 0x00, 0x00, 0x01, 0x40, 0x00, 0x00 };
+            std::vector<std::uint8_t> both(std::begin(indirect), std::end(indirect));
+            const Entry rootEntry = { 0x2F00, 0x3000, 0x5000 };
+            both.insert(both.begin(), reinterpret_cast<const std::uint8_t*>(&rootEntry), reinterpret_cast<const std::uint8_t*>(&rootEntry) + sizeof(rootEntry));
+            const auto chainedByPointer = Target::CodeMap::FunctionsFromUnwind(both, 0x4000, info, 0x5000, 0x10000);
+            CHECK(chainedByPointer == (std::vector<std::pair<std::uint32_t, std::uint32_t>>{ { 0x2F00, 0x3040 } }));
+        }
+
+    }
+
     int RunDisasmTests()
     {
         const int before = Totals().Failures;
@@ -411,6 +449,7 @@ namespace Manifold::Tests
             ::VirtualFree(second, 0, MEM_RELEASE);
         }
         UnreadableFloor(engine);
+        ChainedUnwind();
         engine.CloseProcess();
         return Totals().Failures - before;
     }
