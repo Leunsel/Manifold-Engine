@@ -159,7 +159,7 @@ namespace Manifold::UI
         Engine& m_engine;
         Shell& m_shell;
         double m_lastProcessCheckedAt = -100.0;
-        std::uint32_t m_lastProcessId = 0;
+        std::optional<ProcessId> m_lastProcessId;
         bool m_lastProcessLookup = false;
         void RefreshLastProcess();
         std::unique_ptr<MainWindow> m_main;

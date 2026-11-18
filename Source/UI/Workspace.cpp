@@ -244,7 +244,7 @@ namespace Manifold::UI
             return;
         m_lastProcessCheckedAt = now;
         m_lastProcessLookup = true;
-        m_engine.LookUpProcessLater(last, [this, last](std::uint32_t id)
+        m_engine.LookUpProcessLater(last, [this, last](std::optional<ProcessId> id)
             {
                 m_lastProcessLookup = false;
                 if (last == m_engine.Options().LastProcess)
@@ -257,7 +257,7 @@ namespace Manifold::UI
         if (m_engine.Options().LastProcess.empty())
             return false;
         RefreshLastProcess();
-        return m_lastProcessId != 0 && (!m_engine.HasProcess() || m_engine.Process()->Id() != m_lastProcessId);
+        return m_lastProcessId && (!m_engine.HasProcess() || m_engine.Process()->Id() != *m_lastProcessId);
     }
 
     void Workspace::OpenLastProcess()
@@ -268,14 +268,14 @@ namespace Manifold::UI
             OpenProcessPicker();
             return;
         }
-        const std::uint32_t id = Target::FindProcessId(last).value_or(0);
+        const std::optional<ProcessId> id = Target::FindProcessId(last);
         m_lastProcessCheckedAt = -100.0;
         if (!id)
         {
             Report(Status::Fail(ErrorCode::ProcessNotFound, last));
             return;
         }
-        Report(m_engine.OpenProcess(id));
+        Report(m_engine.OpenProcess(*id));
     }
 
     void Workspace::OpenShortcuts()
@@ -400,7 +400,7 @@ namespace Manifold::UI
             OpenProcessPicker();
         else if (clicked == 1)
         {
-            Report(m_engine.OpenProcess(m_lastProcessId));
+            Report(m_engine.OpenProcess(*m_lastProcessId));
             m_lastProcessCheckedAt = -100.0;
         }
     }
@@ -826,7 +826,7 @@ namespace Manifold::UI
                 if (m_quitRemember && choice != 3)
                 {
                     m_engine.Options().ActiveScriptsOnQuit = choice == 1 ? QuitPolicy::Disable : QuitPolicy::Leave;
-                    Report(m_engine.Options().Save(Paths::SettingsFile()));
+                    Report(m_engine.SaveOptionsNow());
                 }
             }
             EndModal();
@@ -913,9 +913,8 @@ namespace Manifold::UI
 
     void Workspace::DrawNotices()
     {
-        auto& notices = m_engine.Notices();
         const double now = m_engine.Now();
-        notices.erase(std::remove_if(notices.begin(), notices.end(), [&](const Notice& notice) { return now - notice.At > kNoticeSeconds; }), notices.end());
+        const std::vector<Notice> notices = m_engine.Notifications().Visible(now, kNoticeSeconds);
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         float y = DrawWorkToasts(m_engine, viewport->Pos.y + viewport->Size.y - Px(40.0f));
         if (notices.empty())
@@ -923,7 +922,7 @@ namespace Manifold::UI
         const float width = std::min(Px(440.0f), viewport->Size.x - Px(40.0f));
         for (auto it = notices.rbegin(); it != notices.rend(); ++it)
         {
-            Notice& notice = *it;
+            const Notice& notice = *it;
             const std::string id = "##notice" + std::to_string(notice.Id);
             const float age = static_cast<float>(now - notice.At);
             const float alpha = age > kNoticeSeconds - 0.6 ? std::max(0.0f, static_cast<float>((kNoticeSeconds - age) / 0.6)) : 1.0f;
@@ -943,11 +942,12 @@ namespace Manifold::UI
             ImGui::PopStyleColor();
             ImGui::SameLine();
             ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width - Px(50.0f));
-            ImGui::TextUnformatted(m_engine.Options().ReleaseMode ? WithoutCodes(notice.Text).c_str() : notice.Text.c_str());
+            const std::string text = (m_engine.Options().ReleaseMode ? WithoutCodes(notice.Text) : notice.Text) + (notice.Count > 1 ? " (" + std::to_string(notice.Count) + "x)" : std::string());
+            ImGui::TextUnformatted(text.c_str());
             ImGui::PopTextWrapPos();
             ErrorTooltip(notice.Text);
             if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
-                notice.At = now - kNoticeSeconds;
+                m_engine.Notifications().Expire(notice.Id, now - kNoticeSeconds);
             y -= ImGui::GetWindowHeight() + Px(8.0f);
             ImGui::End();
             ImGui::PopStyleColor(2);

@@ -211,7 +211,7 @@ namespace Manifold::Tests
             Settings settings;
             settings.UseInProcessDebugger = veh;
             Engine engine(settings);
-            const Status opened = engine.OpenProcess(info.dwProcessId);
+            const Status opened = engine.OpenProcess(MakeProcessId(info.dwProcessId));
             CHECK_MSG(opened.Ok(), opened.Text);
             const Status attached = opened ? engine.EnsureDebugger() : opened;
             CHECK_MSG(attached.Ok(), attached.Text);

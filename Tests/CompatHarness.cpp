@@ -116,7 +116,7 @@ end
                         std::printf("%s %s\n", error ? "LUA-ERROR" : "lua      ", text.c_str());
                 }
                 engine.Lua().ClearOutput();
-                for (const Notice& notice : engine.Notices())
+                for (const Notice& notice : engine.Notifications().Visible(engine.Now(), 1e9))
                 {
                     if (notice.Id <= static_cast<int>(NoticeCount))
                         continue;

@@ -942,9 +942,9 @@ namespace Manifold::UI
             widestAddress = std::max(widestAddress, ImGui::CalcTextSize(addressTexts.back().c_str()).x);
         }
         PopMono();
-        if (m_addressProcess != process.Id())
+        if (m_addressProcess != Raw(process.Id()))
         {
-            m_addressProcess = process.Id();
+            m_addressProcess = Raw(process.Id());
             if (m_addressAuto)
                 m_addressWidth = 0.0f;
         }
@@ -2861,10 +2861,11 @@ namespace Manifold::UI
         InputText("##size", m_allocateSize, ImGuiInputTextFlags_CharsHexadecimal);
         if (AccentButton("Allocate", Px(100.0f, 0.0f)))
         {
-            Status status;
-            const std::uint64_t memory = m_engine.Process()->Allocate(static_cast<std::size_t>(ParseHex(m_allocateSize).value_or(0x1000)), 0x40, 0, status);
-            if (memory)
+            const Result<Address> allocated = m_engine.Process()->Allocate(static_cast<std::size_t>(ParseHex(m_allocateSize).value_or(0x1000)), 0x40);
+            const Status status = allocated.ToStatus();
+            if (allocated)
             {
+                const Address memory = *allocated;
                 m_hexTop = memory;
                 m_hexSelected = memory;
                 m_engine.Notify(LogLevel::Success, "Allocated " + m_allocateSize + " bytes at " + Hex(memory));

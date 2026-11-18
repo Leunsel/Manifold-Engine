@@ -1,5 +1,6 @@
 #include "Target/PdbSymbols.h"
 
+#include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 
@@ -96,6 +97,7 @@ namespace Manifold::Target
 
     void PdbSymbols::Worker(std::vector<ModuleInfo> modules, bool windowsSymbols)
     {
+        SetThreadName(L"PDB symbols");
         const HANDLE process = static_cast<HANDLE>(m_handle);
 
         ::SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_FAIL_CRITICAL_ERRORS |

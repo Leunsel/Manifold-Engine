@@ -1,5 +1,6 @@
 #include "Target/UnityExplorer.h"
 
+#include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Target/Mono.h"
@@ -235,7 +236,11 @@ namespace Manifold::Target
             return;
         m_jobs.emplace_back(std::move(task), std::move(job));
         if (!m_thread.joinable())
-            m_thread = std::thread([this] { Loop(); });
+            m_thread = std::thread([this]
+                {
+                    SetThreadName(L"Unity explorer");
+                    Loop();
+                });
         m_jobWake.notify_one();
     }
 
@@ -551,8 +556,7 @@ namespace Manifold::Target
             const auto process = Proc();
             if (!process)
                 return 0;
-            Status status;
-            m_args = process->Allocate(kArgsSize, PAGE_READWRITE, 0, status);
+            m_args = process->Allocate(kArgsSize, PAGE_READWRITE).ValueOr(0);
             if (!m_args)
                 return 0;
         }
@@ -657,13 +661,13 @@ namespace Manifold::Target
         }
         if (!m_batch)
         {
-            Status status;
-            m_batch = process->Allocate(kBatchCalls * RemoteCall::kMainCallSize, PAGE_READWRITE, 0, status);
-            if (!m_batch)
+            const Result<Address> batch = process->Allocate(kBatchCalls * RemoteCall::kMainCallSize, PAGE_READWRITE);
+            if (!batch)
             {
-                fail(0, "no room for the call list in the game: " + status.Text);
+                fail(0, "no room for the call list in the game: " + batch.Error().Text);
                 return out;
             }
+            m_batch = *batch;
         }
         std::vector<RemoteCall::MainCall> chunk;
         std::vector<std::size_t> owners;

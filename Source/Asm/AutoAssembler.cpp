@@ -949,14 +949,14 @@ namespace Manifold::Asm
                     }
                     else
                     {
-                        Status status;
-                        block = m_host.Process->Allocate(static_cast<std::size_t>(total), PAGE_EXECUTE_READWRITE, m_is64 ? nearAddress : 0, status);
-                        if (!block)
+                        const Result<Address> allocated = m_host.Process->Allocate(static_cast<std::size_t>(total), PAGE_EXECUTE_READWRITE, m_is64 ? nearAddress : 0);
+                        if (!allocated)
                         {
-                            m_result.Error = Status::Fail(ErrorCode::AaAllocFailed, first.Name + " (" + status.Text + ")");
+                            m_result.Error = Status::Fail(ErrorCode::AaAllocFailed, first.Name + " (" + allocated.Error().Text + ")");
                             m_result.Line = first.Line;
                             return false;
                         }
+                        block = *allocated;
                         m_allocatedBlocks.push_back(block);
                         LOG_DEBUG("Auto Assembler", "Allocated " + Hex(total) + " bytes at " + Hex(block));
                     }

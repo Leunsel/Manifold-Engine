@@ -5,7 +5,13 @@
 #include "App/Diagnostics.h"
 #include "App/Engine.h"
 #include "App/Sounds.h"
+#include "App/Notifications.h"
+#include "App/SettingsStore.h"
+#include "Core/Handle.h"
+#include "Core/Ini.h"
 #include "Core/JobQueue.h"
+#include "Core/MainThread.h"
+#include "Core/Types.h"
 #include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Core/Xml.h"
@@ -709,34 +715,144 @@ data:
 
     void Jobs()
     {
-        JobQueue jobs;
+        BackgroundWork work;
+        JobQueue jobs(work);
         int finished = 0;
-        std::thread::id worker;
+        std::vector<int> order;
+        std::atomic<int> ran{ 0 };
+        std::atomic<int> running{ 0 };
+        std::atomic<int> overlaps{ 0 };
+        std::atomic<std::thread::id> worker{ std::thread::id() };
         for (int i = 0; i < 3; ++i)
         {
-            jobs.Post([&worker, &finished, i]() -> JobQueue::Finish
+            jobs.Post([&, i]() -> JobQueue::Finish
                 {
+                    if (++running > 1)
+                        ++overlaps;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     worker = std::this_thread::get_id();
-                    return [&finished, i]() { finished += i + 1; };
+                    --running;
+                    ++ran;
+                    return [&finished, &order, i]()
+                        {
+                            finished += i + 1;
+                            order.push_back(i);
+                        };
                 });
         }
-        for (int wait = 0; wait < 200 && jobs.Busy(); ++wait)
+        for (int wait = 0; wait < 400 && ran < 3; ++wait)
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        CHECK(!jobs.Busy());
+        CHECK_EQ(ran.load(), 3);
         CHECK_EQ(finished, 0);
-        jobs.Drain();
+        for (int wait = 0; wait < 400 && jobs.Busy(); ++wait)
+        {
+            work.Drain();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        CHECK(!jobs.Busy());
         CHECK_EQ(finished, 6);
-        CHECK(worker != std::thread::id() && worker != std::this_thread::get_id());
+        CHECK(order == std::vector<int>({ 0, 1, 2 }));
+        CHECK_EQ(overlaps.load(), 0);
+        CHECK(worker.load() != std::thread::id() && worker.load() != std::this_thread::get_id());
         jobs.Post([]() -> JobQueue::Finish { throw std::runtime_error("job failed on purpose"); });
         jobs.Post([&finished]() -> JobQueue::Finish { return [&finished]() { finished = 100; }; });
-        for (int wait = 0; wait < 200 && jobs.Busy(); ++wait)
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        jobs.Drain();
+        for (int wait = 0; wait < 400 && jobs.Busy(); ++wait)
+        {
+            work.Drain();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
         CHECK_EQ(finished, 100);
-        jobs.Stop();
+        work.Stop();
         jobs.Post([&finished]() -> JobQueue::Finish { return [&finished]() { finished = -1; }; });
-        jobs.Drain();
+        work.Drain();
+        CHECK(!jobs.Busy());
         CHECK_EQ(finished, 100);
+    }
+
+    void Foundations()
+    {
+        const Result<Address> good(Address(0x1234));
+        CHECK(good.Ok() && *good == 0x1234 && good.ToStatus().Ok());
+        const Result<Address> bad(Status::Fail(ErrorCode::AllocFailed, "x"));
+        CHECK(!bad && bad.ValueOr(7) == 7 && bad.Error().Code == ErrorCode::AllocFailed && bad.ToStatus().Code == ErrorCode::AllocFailed);
+        CHECK_EQ(Raw(MakeProcessId(4242)), 4242u);
+        CHECK_EQ(ToText(MakeProcessId(17)), std::string("17"));
+
+        UniqueHandle event(::CreateEventW(nullptr, TRUE, FALSE, nullptr));
+        CHECK(static_cast<bool>(event));
+        UniqueHandle moved(std::move(event));
+        CHECK(!event && static_cast<bool>(moved));
+        CHECK(!UniqueHandle(INVALID_HANDLE_VALUE));
+        moved.Reset();
+        CHECK(!moved);
+
+        const std::vector<Ini::Section> sections = Ini::Parse("top=1\r\n; comment\n[One]\nKey = a=b\n# also a comment\n\n[Two]\nx=\n");
+        CHECK_EQ(sections.size(), std::size_t(3));
+        if (sections.size() == 3)
+        {
+            CHECK(sections[0].Name.empty() && sections[0].Entries.size() == 1 && sections[0].Entries[0].Value == "1");
+            CHECK(sections[1].Name == "One" && sections[1].Entries.size() == 1 && sections[1].Entries[0].Key == "Key " && sections[1].Entries[0].Value == " a=b");
+            CHECK(sections[2].Name == "Two" && sections[2].Entries.size() == 1 && sections[2].Entries[0].Value.empty());
+        }
+        wchar_t folder[MAX_PATH] = L"";
+        ::GetTempPathW(MAX_PATH, folder);
+        const std::filesystem::path file = std::filesystem::path(folder) / ("manifold-ini-" + std::to_string(::GetCurrentProcessId())) / "test.ini";
+        CHECK(Ini::WriteAtomic(file, "[A]\nb=c\n"));
+        CHECK(Ini::ReadText(file).value_or("") == "[A]\nb=c\n");
+        CHECK(!std::filesystem::exists(std::filesystem::path(file) += L".tmp"));
+
+        Settings settings;
+        settings.NopSledBest = 77;
+        SettingsStore store(settings, file);
+        CHECK(!store.Pending() && !store.Due(100.0));
+        store.Changed(10.0);
+        CHECK(store.Pending() && !store.Due(10.2) && store.Due(11.0));
+        CHECK(store.Flush().Ok());
+        CHECK(!store.Pending());
+        Settings loaded;
+        CHECK(loaded.Load(file) && loaded.NopSledBest == 77);
+        std::error_code ignored;
+        std::filesystem::remove_all(file.parent_path(), ignored);
+
+        NotificationCenter center;
+        center.Post(LogLevel::Error, "same", 1.0);
+        center.Post(LogLevel::Error, "same", 2.0);
+        center.Post(LogLevel::Info, "other", 2.5);
+        std::vector<Notice> notices = center.Visible(3.0, 10.0);
+        CHECK_EQ(notices.size(), std::size_t(2));
+        if (notices.size() == 2)
+        {
+            CHECK(notices[0].Text == "same" && notices[0].Count == 2 && notices[0].At == 2.0);
+            CHECK(notices[1].Text == "other" && notices[1].Count == 1 && notices[1].Id > notices[0].Id);
+            center.Expire(notices[1].Id, -100.0);
+        }
+        CHECK_EQ(center.Visible(3.0, 10.0).size(), std::size_t(1));
+        CHECK(center.Visible(30.0, 10.0).empty() && center.Empty());
+        for (int i = 0; i < 20; ++i)
+            center.Post(LogLevel::Info, "notice " + std::to_string(i), 1.0);
+        CHECK(center.Visible(1.0, 10.0).size() <= 6);
+
+        MainThreadQueue queue;
+        CHECK(OnMainThread());
+        int ran = 0;
+        std::thread poster([&queue, &ran]()
+            {
+                CHECK(!OnMainThread());
+                queue.RunAndWait([&ran]() { ran += 1; });
+            });
+        for (int wait = 0; wait < 400 && ran == 0; ++wait)
+        {
+            queue.Drain();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        poster.join();
+        CHECK_EQ(ran, 1);
+        queue.RunAndWait([&ran]() { ran += 10; });
+        CHECK_EQ(ran, 11);
+        queue.Post([&ran]() { ran += 100; });
+        CHECK(!queue.Empty());
+        CHECK_EQ(queue.Drain(), std::size_t(1));
+        CHECK(queue.Empty() && ran == 111);
     }
 
     void Spin(double milliseconds)
@@ -1058,6 +1174,7 @@ data:
         Conditions();
         BreakExpressions();
         Jobs();
+        Foundations();
         SoundDecoding();
         FolderMigration();
         RecordIndex();

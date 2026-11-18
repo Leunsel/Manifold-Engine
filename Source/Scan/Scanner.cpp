@@ -1,6 +1,7 @@
 #include "Scan/Scanner.h"
 
 #include "App/Settings.h"
+#include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Target/Process.h"
@@ -1293,6 +1294,7 @@ namespace Manifold::Scan
 
     void Scanner::Run(std::shared_ptr<Target::Process> process, ScanOptions options, std::shared_ptr<const ResultSet> previous, std::shared_ptr<const ResultSet> saved)
     {
+        SetThreadName(L"Scanner");
         PreferFastCores();
         const bool mixed = options.Kind == ScanKind::All;
         Matcher matcher;
@@ -1410,6 +1412,7 @@ namespace Manifold::Scan
             std::atomic<std::size_t> next{ 0 };
             const auto worker = [&](int index)
                 {
+                    SetThreadName(L"Scan worker");
                     PreferFastCores();
                     TempFile& file = *result->Files[static_cast<std::size_t>(index)];
                     std::vector<std::uint8_t> buffer(kChunkBytes + kGroupMaxBytes + 64);
@@ -1500,6 +1503,7 @@ namespace Manifold::Scan
             const std::size_t items = fromSnapshot ? previous->Snapshots.size() : previous->Segments.size();
             const auto worker = [&](int index)
                 {
+                    SetThreadName(L"Scan worker");
                     PreferFastCores();
                     TempFile& file = *result->Files[static_cast<std::size_t>(index)];
                     std::vector<std::vector<std::uint32_t>> hits;
@@ -2141,6 +2145,7 @@ namespace Manifold::Scan
         const bool firstFixed = pattern.Mask[0] == 0xFF;
         const auto worker = [&]
             {
+                SetThreadName(L"Scan worker");
                 PreferFastCores();
                 std::vector<std::uint8_t> buffer(kChunkBytes + 256);
                 for (;;)

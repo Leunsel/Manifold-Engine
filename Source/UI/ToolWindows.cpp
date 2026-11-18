@@ -80,7 +80,7 @@ namespace Manifold::UI
                 m_workspace.Window().RestartElevated();
         }
 
-        const auto open = [&](std::uint32_t id)
+        const auto open = [&](ProcessId id)
             {
                 const Status status = engine.OpenProcess(id);
                 m_workspace.Report(status);
@@ -96,20 +96,20 @@ namespace Manifold::UI
             ImGui::TableSetupColumn("Window", ImGuiTableColumnFlags_WidthStretch, 1.6f);
             ImGui::TableSetupColumn("Bits", ImGuiTableColumnFlags_WidthFixed, Px(40.0f));
             ImGui::TableHeadersRow();
-            const std::uint32_t current = engine.HasProcess() ? engine.Process()->Id() : 0;
+            const ProcessId current = engine.HasProcess() ? engine.Process()->Id() : ProcessId::None;
             for (const Target::ProcessEntry& entry : m_list)
             {
                 if (m_windowsOnly && entry.WindowTitle.empty())
                     continue;
-                if (!m_filter.empty() && !ContainsNoCase(entry.Name, m_filter) && !ContainsNoCase(entry.WindowTitle, m_filter) && std::to_string(entry.Id).find(m_filter) == std::string::npos)
+                if (!m_filter.empty() && !ContainsNoCase(entry.Name, m_filter) && !ContainsNoCase(entry.WindowTitle, m_filter) && ToText(entry.Id).find(m_filter) == std::string::npos)
                     continue;
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::PushID(static_cast<int>(entry.Id));
-                const bool selected = m_selected == entry.Id;
-                if (ImGui::Selectable(std::to_string(entry.Id).c_str(), selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
+                ImGui::PushID(static_cast<int>(Raw(entry.Id)));
+                const bool selected = m_selected == Raw(entry.Id);
+                if (ImGui::Selectable(ToText(entry.Id).c_str(), selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
                 {
-                    m_selected = entry.Id;
+                    m_selected = Raw(entry.Id);
                     if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                         open(entry.Id);
                 }
@@ -129,7 +129,7 @@ namespace Manifold::UI
         }
         ImGui::BeginDisabled(m_selected == 0);
         if (AccentButton(ICON_FA_PLUG "  Open", Px(110.0f, 0.0f)) || (m_selected && ImGui::IsKeyPressed(ImGuiKey_Enter, false) && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)))
-            open(m_selected);
+            open(MakeProcessId(m_selected));
         ImGui::EndDisabled();
         ImGui::SameLine();
         Muted(std::to_string(m_list.size()) + " processes");

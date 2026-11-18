@@ -69,13 +69,13 @@ namespace Manifold::UI
         options.LuaWrapOutput = m_filter.Wrap;
         options.LuaConsoleTime = m_filter.Time;
         options.LuaConsoleHex = m_filter.Hex;
-        m_workspace.Report(options.Save(Paths::SettingsFile()));
+        m_engine.SaveOptionsSoon();
     }
 
     void LuaWindow::RememberShowOnPrint(bool show)
     {
         m_engine.Lua().RememberShowOnPrint(show);
-        m_workspace.Report(m_engine.Options().Save(Paths::SettingsFile()));
+        m_engine.SaveOptionsSoon();
     }
 
     void LuaWindow::SelectTab(Tab tab)
@@ -249,7 +249,7 @@ namespace Manifold::UI
             m_engine.Options().LuaDocsPanel = !m_engine.Options().LuaDocsPanel;
             if (m_engine.Options().LuaDocsPanel)
                 m_docs.FocusSearch();
-            m_workspace.Report(m_engine.Options().Save(Paths::SettingsFile()));
+            m_engine.SaveOptionsSoon();
             break;
         case Command::LuaStop: Stop(); break;
         case Command::LuaConsoleTab: SelectTab(Tab::Console); break;

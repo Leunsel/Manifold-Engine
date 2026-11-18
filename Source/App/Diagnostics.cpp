@@ -5,6 +5,7 @@
 #include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Core/BuildInfo.h"
+#include "Core/MainThread.h"
 #include "Lua/LuaEngine.h"
 #include "Target/Process.h"
 
@@ -978,7 +979,7 @@ namespace Manifold::Diagnostics
             static NvidiaCache cache;
             const auto now = std::chrono::steady_clock::now();
             if (!cache.Pending.valid() && (!cache.Last || now - cache.ReadAt > std::chrono::minutes(1)))
-                cache.Pending = std::async(std::launch::async, ReadNvidia).share();
+                cache.Pending = std::async(std::launch::async, []() { SetThreadName(L"NVIDIA query"); return ReadNvidia(); }).share();
             if (cache.Pending.valid() && cache.Pending.wait_for(wait) == std::future_status::ready)
             {
                 cache.Last = cache.Pending.get();
@@ -1417,7 +1418,7 @@ namespace Manifold::Diagnostics
         if (engine.HasProcess())
         {
             const auto& process = engine.Process();
-            state.Rows.push_back({ "Process", process->Name() + " (" + std::to_string(process->Id()) + ", " + (process->Is64Bit() ? "64-bit" : "32-bit") + ")" });
+            state.Rows.push_back({ "Process", process->Name() + " (" + ToText(process->Id()) + ", " + (process->Is64Bit() ? "64-bit" : "32-bit") + ")" });
         }
         else
         {

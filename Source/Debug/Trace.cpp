@@ -1,5 +1,6 @@
 #include "Debug/Trace.h"
 
+#include "Core/MainThread.h"
 #include "Core/Text.h"
 #include "Debug/Debugger.h"
 #include "Target/Process.h"
@@ -65,6 +66,7 @@ namespace Manifold::Debug
 
     void Tracer::Run(TraceRequest request)
     {
+        SetThreadName(L"Tracer");
         BreakAction action = request.Trigger;
         action.Break = true;
         const Status set = m_debugger.SetBreakpoint(request.Address, BreakpointType::Execute, 1, false, action);

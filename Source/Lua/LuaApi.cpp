@@ -277,7 +277,7 @@ namespace Manifold::Lua
         int OpenedProcessId(lua_State* state)
         {
             const auto& process = Owner(state).Process();
-            lua_pushinteger(state, process ? process->Id() : 0);
+            lua_pushinteger(state, process ? Raw(process->Id()) : 0);
             return 1;
         }
 
@@ -285,7 +285,7 @@ namespace Manifold::Lua
         {
             const auto id = Target::FindProcessId(luaL_checkstring(state, 1));
             if (id)
-                lua_pushinteger(state, *id);
+                lua_pushinteger(state, Raw(*id));
             else
                 lua_pushnil(state);
             return 1;
@@ -297,7 +297,7 @@ namespace Manifold::Lua
             for (const Target::ProcessEntry& entry : Target::ListProcesses(false))
             {
                 lua_pushstring(state, entry.Name.c_str());
-                lua_rawseti(state, -2, entry.Id);
+                lua_rawseti(state, -2, Raw(entry.Id));
             }
             return 1;
         }
@@ -577,11 +577,10 @@ namespace Manifold::Lua
             const lua_Integer size = luaL_checkinteger(state, 1);
             const std::uint64_t base = lua_isnoneornil(state, 2) ? 0 : AddressArgument(state, 2);
             const DWORD protect = static_cast<DWORD>(luaL_optinteger(state, 3, PAGE_EXECUTE_READWRITE));
-            Status status;
-            const std::uint64_t memory = process->Allocate(static_cast<std::size_t>(size), protect, base, status);
+            const Result<Address> memory = process->Allocate(static_cast<std::size_t>(size), protect, base);
             if (!memory)
-                return luaL_error(state, "%s", status.Text.c_str());
-            PushAddress(state, memory);
+                return luaL_error(state, "%s", memory.Error().Text.c_str());
+            PushAddress(state, *memory);
             return 1;
         }
 
@@ -1247,7 +1246,7 @@ namespace Manifold::Lua
             lua_pop(state, 1);
             return Status::Fail(ErrorCode::ProcessNotFound, text);
         }
-        return engine.OpenProcess(static_cast<std::uint32_t>(*id));
+        return engine.OpenProcess(MakeProcessId(static_cast<std::uint32_t>(*id)));
     }
 
     void NoteFunction(const char* name)

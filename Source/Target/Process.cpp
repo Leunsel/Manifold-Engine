@@ -1,6 +1,7 @@
 #include "Target/Process.h"
 
 #include "Core/RuntimeLog.h"
+#include "Core/Handle.h"
 #include "Core/Text.h"
 
 #include <algorithm>
@@ -462,11 +463,11 @@ namespace Manifold::Target
             if (TryProcessSnapshotNt(out))
                 return out;
 
-            HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if (snapshot == INVALID_HANDLE_VALUE)
+            const UniqueHandle snapshot(::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+            if (!snapshot)
                 return out;
             PROCESSENTRY32W entry{ sizeof(entry) };
-            for (BOOL more = ::Process32FirstW(snapshot, &entry); more; more = ::Process32NextW(snapshot, &entry))
+            for (BOOL more = ::Process32FirstW(snapshot.Get(), &entry); more; more = ::Process32NextW(snapshot.Get(), &entry))
             {
                 ProcSnapshotEntry snap;
                 snap.Id = entry.th32ProcessID;
@@ -475,7 +476,6 @@ namespace Manifold::Target
                 snap.Name = WideToUtf8(entry.szExeFile);
                 out.push_back(std::move(snap));
             }
-            ::CloseHandle(snapshot);
             return out;
         }
     }
@@ -530,17 +530,16 @@ namespace Manifold::Target
             if (entry.Id == 0 || entry.Id == self)
                 continue;
             ProcessEntry process;
-            process.Id = entry.Id;
-            process.ParentId = entry.ParentId;
+            process.Id = MakeProcessId(entry.Id);
+            process.ParentId = MakeProcessId(entry.ParentId);
             process.Name = entry.Name;
             process.Threads = entry.Threads;
             if (const auto title = titles.find(entry.Id); title != titles.end())
                 process.WindowTitle = title->second;
-            if (HANDLE handle = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.Id))
+            if (const UniqueHandle handle(::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.Id)); handle)
             {
-                process.Is64Bit = TargetIs64Bit(handle);
-                process.Path = ImagePath(handle);
-                ::CloseHandle(handle);
+                process.Is64Bit = TargetIs64Bit(handle.Get());
+                process.Path = ImagePath(handle.Get());
             }
             else
             {
@@ -551,36 +550,36 @@ namespace Manifold::Target
         return list;
     }
 
-    std::optional<std::uint32_t> FindProcessId(std::string_view name)
+    std::optional<ProcessId> FindProcessId(std::string_view name)
     {
         if (name.empty())
             return std::nullopt;
-        std::optional<std::uint32_t> exact;
-        std::optional<std::uint32_t> prefix;
+        std::optional<ProcessId> exact;
+        std::optional<ProcessId> prefix;
         for (const ProcSnapshotEntry& entry : ProcessSnapshot())
         {
             if (EqualsNoCase(entry.Name, name))
-                exact = entry.Id;
+                exact = MakeProcessId(entry.Id);
             else if (entry.Name.size() > name.size() && EqualsNoCase(std::string_view(entry.Name).substr(0, name.size()), name))
-                prefix = entry.Id;
+                prefix = MakeProcessId(entry.Id);
         }
         return exact ? exact : prefix;
     }
 
     bool IsElevated()
     {
-        HANDLE token = nullptr;
-        if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &token))
+        HANDLE raw = nullptr;
+        if (!::OpenProcessToken(::GetCurrentProcess(), TOKEN_QUERY, &raw))
             return false;
+        const UniqueHandle token(raw);
         TOKEN_ELEVATION elevation{};
         DWORD size = 0;
-        const bool elevated = ::GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &size) && elevation.TokenIsElevated;
-        ::CloseHandle(token);
-        return elevated;
+        return ::GetTokenInformation(token.Get(), TokenElevation, &elevation, sizeof(elevation), &size) && elevation.TokenIsElevated;
     }
 
-    std::shared_ptr<Process> Process::Open(std::uint32_t id, Status& status)
+    Result<std::shared_ptr<Process>> Process::Open(ProcessId processId)
     {
+        const DWORD id = Raw(processId);
         constexpr DWORD kAccess = PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION | PROCESS_CREATE_THREAD |
                                   PROCESS_SUSPEND_RESUME | SYNCHRONIZE;
         HANDLE handle = nullptr;
@@ -609,17 +608,15 @@ namespace Manifold::Target
         {
             const std::string detail = std::to_string(id) + ", " + LastErrorText(error);
             if (error == ERROR_ACCESS_DENIED)
-                status = Status::Fail(ErrorCode::ProcessAccessDenied, detail);
-            else if (error == ERROR_INVALID_PARAMETER)
-                status = Status::Fail(ErrorCode::ProcessNotFound, std::to_string(id));
-            else
-                status = Status::Fail(ErrorCode::ProcessOpenFailed, detail);
-            return nullptr;
+                return Status::Fail(ErrorCode::ProcessAccessDenied, detail);
+            if (error == ERROR_INVALID_PARAMETER)
+                return Status::Fail(ErrorCode::ProcessNotFound, std::to_string(id));
+            return Status::Fail(ErrorCode::ProcessOpenFailed, detail);
         }
 
         std::shared_ptr<Process> process(new Process());
-        process->m_id = id;
-        process->m_handle = handle;
+        process->m_id = processId;
+        process->m_handle.Reset(handle);
         process->m_path = ImagePath(handle);
         process->m_name = WideToUtf8(std::filesystem::path(process->m_path).filename().wstring());
         if (process->m_name.empty())
@@ -638,24 +635,17 @@ namespace Manifold::Target
             }
         }
         process->RefreshModules();
-        status = Status::Success();
         return process;
-    }
-
-    Process::~Process()
-    {
-        if (m_handle)
-            ::CloseHandle(m_handle);
     }
 
     bool Process::Alive() const
     {
-        return m_handle && ::WaitForSingleObject(m_handle, 0) == WAIT_TIMEOUT;
+        return m_handle.Get() && ::WaitForSingleObject(m_handle.Get(), 0) == WAIT_TIMEOUT;
     }
 
     std::size_t Process::Read(std::uint64_t address, void* buffer, std::size_t size) const
     {
-        if (!m_handle || size == 0)
+        if (!m_handle.Get() || size == 0)
             return 0;
         if (DryRun() && DryInsideAllocation(address, size))
         {
@@ -663,7 +653,7 @@ namespace Manifold::Target
             return size;
         }
         SIZE_T done = 0;
-        if (TryReadVm(m_handle, address, buffer, size, done) && done == size)
+        if (TryReadVm(m_handle.Get(), address, buffer, size, done) && done == size)
         {
             if (DryRun())
                 DryOverlay(address, static_cast<std::uint8_t*>(buffer), size);
@@ -680,7 +670,7 @@ namespace Manifold::Target
             const std::uint64_t pageEnd = (at & ~0xFFFull) + 0x1000;
             const std::size_t chunk = static_cast<std::size_t>(std::min(pageEnd, end) - at);
             SIZE_T got = 0;
-            if (TryReadVm(m_handle, at, out + (at - address), chunk, got) && got == chunk)
+            if (TryReadVm(m_handle.Get(), at, out + (at - address), chunk, got) && got == chunk)
             {
                 anyRead = true;
                 total = static_cast<std::size_t>(at - address) + chunk;
@@ -700,7 +690,7 @@ namespace Manifold::Target
 
     bool Process::ReadExact(std::uint64_t address, void* buffer, std::size_t size) const
     {
-        if (!m_handle || size == 0)
+        if (!m_handle.Get() || size == 0)
             return false;
         if (DryRun() && DryInsideAllocation(address, size))
         {
@@ -708,7 +698,7 @@ namespace Manifold::Target
             return true;
         }
         SIZE_T done = 0;
-        const bool read = TryReadVm(m_handle, address, buffer, size, done) && done == size;
+        const bool read = TryReadVm(m_handle.Get(), address, buffer, size, done) && done == size;
         if (read && DryRun())
             DryOverlay(address, static_cast<std::uint8_t*>(buffer), size);
         return read;
@@ -791,7 +781,7 @@ namespace Manifold::Target
 
     Status Process::Write(std::uint64_t address, const void* data, std::size_t size) const
     {
-        if (!m_handle)
+        if (!m_handle.Get())
             return Status::Fail(ErrorCode::NoProcess);
         if (size == 0)
             return Status::Success();
@@ -809,7 +799,7 @@ namespace Manifold::Target
                 for (std::uint64_t page = address & ~0xFFFull; page < address + size; page += 0x1000)
                 {
                     MEMORY_BASIC_INFORMATION info{};
-                    if (!QueryVm(m_handle, page, info) || info.State != MEM_COMMIT)
+                    if (!QueryVm(m_handle.Get(), page, info) || info.State != MEM_COMMIT)
                         return Status::Fail(ErrorCode::WriteFailed, Hex(address));
                 }
                 std::lock_guard lock(m_dryLock);
@@ -826,36 +816,35 @@ namespace Manifold::Target
         for (std::uint64_t page = address & ~0xFFFull; page < address + size; page += 0x1000)
         {
             MEMORY_BASIC_INFORMATION info{};
-            if (!QueryVm(m_handle, page, info) || info.State != MEM_COMMIT)
+            if (!QueryVm(m_handle.Get(), page, info) || info.State != MEM_COMMIT)
                 return Status::Fail(ErrorCode::WriteFailed, Hex(address));
             if (!WritableProtect(info.Protect) || (info.Protect & PAGE_GUARD))
             {
                 DWORD old = 0;
-                if (ProtectVm(m_handle, page, 0x1000, WritableFor(info.Protect), old))
+                if (ProtectVm(m_handle.Get(), page, 0x1000, WritableFor(info.Protect), old))
                     changed.emplace_back(page, old);
             }
         }
 
         SIZE_T done = 0;
-        const bool written = TryWriteVm(m_handle, address, data, size, done) && done == size;
+        const bool written = TryWriteVm(m_handle.Get(), address, data, size, done) && done == size;
         const DWORD error = written ? 0 : ::GetLastError();
         for (const auto& [page, old] : changed)
         {
             DWORD ignored = 0;
-            ProtectVm(m_handle, page, 0x1000, old, ignored);
+            ProtectVm(m_handle.Get(), page, 0x1000, old, ignored);
         }
-        ::FlushInstructionCache(m_handle, reinterpret_cast<LPCVOID>(address), size);
+        ::FlushInstructionCache(m_handle.Get(), reinterpret_cast<LPCVOID>(address), size);
         if (!written)
             return Status::Fail(ErrorCode::WriteFailed, Hex(address) + " (" + LastErrorText(error) + ")");
         return Status::Success();
     }
 
-    std::uint64_t Process::Allocate(std::size_t size, std::uint32_t protect, std::uint64_t nearAddress, Status& status) const
+    Result<Address> Process::Allocate(std::size_t size, std::uint32_t protect, Address nearAddress) const
     {
-        if (!m_handle)
+        if (!m_handle.Get())
         {
-            status = Status::Fail(ErrorCode::NoProcess);
-            return 0;
+            return Status::Fail(ErrorCode::NoProcess);
         }
         const std::uint64_t wanted = (size + kGranularity - 1) & ~(kGranularity - 1);
         if (nearAddress != 0 && m_is64Bit)
@@ -895,20 +884,17 @@ namespace Manifold::Target
                     {
                         if (DryReserve(at, static_cast<std::size_t>(wanted)))
                         {
-                            status = Status::Success();
                             return at;
                         }
                     }
                     continue;
                 }
-                if (void* memory = AllocVm(m_handle, candidate, size, MEM_RESERVE | MEM_COMMIT, protect))
+                if (void* memory = AllocVm(m_handle.Get(), candidate, size, MEM_RESERVE | MEM_COMMIT, protect))
                 {
-                    status = Status::Success();
                     return reinterpret_cast<std::uint64_t>(memory);
                 }
             }
-            status = Status::Fail(ErrorCode::AllocFailed, Hex(size) + " bytes near " + Hex(nearAddress));
-            return 0;
+            return Status::Fail(ErrorCode::AllocFailed, Hex(size) + " bytes near " + Hex(nearAddress));
         }
 
         if (DryRun())
@@ -921,27 +907,23 @@ namespace Manifold::Target
                 {
                     if (DryReserve(at, static_cast<std::size_t>(wanted)))
                     {
-                        status = Status::Success();
                         return at;
                     }
                 }
             }
-            status = Status::Fail(ErrorCode::AllocFailed, Hex(size) + " bytes");
-            return 0;
+            return Status::Fail(ErrorCode::AllocFailed, Hex(size) + " bytes");
         }
-        void* memory = AllocVm(m_handle, 0, size, MEM_RESERVE | MEM_COMMIT, protect);
+        void* memory = AllocVm(m_handle.Get(), 0, size, MEM_RESERVE | MEM_COMMIT, protect);
         if (!memory)
         {
-            status = Status::Fail(ErrorCode::AllocFailed, Hex(size) + " bytes, " + LastErrorText(::GetLastError()));
-            return 0;
+            return Status::Fail(ErrorCode::AllocFailed, Hex(size) + " bytes, " + LastErrorText(::GetLastError()));
         }
-        status = Status::Success();
         return reinterpret_cast<std::uint64_t>(memory);
     }
 
     Status Process::Free(std::uint64_t address) const
     {
-        if (!m_handle)
+        if (!m_handle.Get())
             return Status::Fail(ErrorCode::NoProcess);
         if (DryRun())
         {
@@ -951,7 +933,7 @@ namespace Manifold::Target
                 return Status::Fail(ErrorCode::FreeFailed, Hex(address));
             return Status::Success();
         }
-        if (!FreeVm(m_handle, address))
+        if (!FreeVm(m_handle.Get(), address))
             return Status::Fail(ErrorCode::FreeFailed, Hex(address));
         return Status::Success();
     }
@@ -959,7 +941,7 @@ namespace Manifold::Target
     std::optional<std::uint32_t> Process::Protect(std::uint64_t address, std::size_t size, std::uint32_t protect) const
     {
         DWORD old = 0;
-        if (m_handle && DryRun())
+        if (m_handle.Get() && DryRun())
         {
             {
                 std::lock_guard lock(m_dryLock);
@@ -968,11 +950,11 @@ namespace Manifold::Target
             if (DryInsideAllocation(address, std::max<std::size_t>(size, 1)))
                 return static_cast<std::uint32_t>(PAGE_EXECUTE_READWRITE);
             MEMORY_BASIC_INFORMATION info{};
-            if (!QueryVm(m_handle, address, info) || info.State != MEM_COMMIT)
+            if (!QueryVm(m_handle.Get(), address, info) || info.State != MEM_COMMIT)
                 return std::nullopt;
             return static_cast<std::uint32_t>(info.Protect);
         }
-        if (!m_handle || !ProtectVm(m_handle, address, size, protect, old))
+        if (!m_handle.Get() || !ProtectVm(m_handle.Get(), address, size, protect, old))
             return std::nullopt;
         return old;
     }
@@ -980,11 +962,11 @@ namespace Manifold::Target
     std::vector<RegionInfo> Process::Regions(std::uint64_t start, std::uint64_t stop) const
     {
         std::vector<RegionInfo> regions;
-        if (!m_handle)
+        if (!m_handle.Get())
             return regions;
         std::uint64_t at = start;
         MEMORY_BASIC_INFORMATION info{};
-        while (at < stop && QueryVm(m_handle, at, info) == sizeof(info))
+        while (at < stop && QueryVm(m_handle.Get(), at, info) == sizeof(info))
         {
             RegionInfo region = FromQuery(info);
             if (region.Size == 0)
@@ -1001,7 +983,7 @@ namespace Manifold::Target
     std::optional<RegionInfo> Process::RegionAt(std::uint64_t address) const
     {
         MEMORY_BASIC_INFORMATION info{};
-        if (!m_handle || QueryVm(m_handle, address, info) != sizeof(info))
+        if (!m_handle.Get() || QueryVm(m_handle.Get(), address, info) != sizeof(info))
             return std::nullopt;
         return FromQuery(info);
     }
@@ -1026,16 +1008,16 @@ namespace Manifold::Target
         // via NtReadVirtualMemory. It side-steps the Toolhelp cross-bitness bugs
         // (ERROR_BAD_LENGTH/ERROR_PARTIAL_COPY retries) and goes through the
         // direct system call path. On any failure we fall back to Toolhelp.
-        const bool viaPeb = m_handle && (m_is64Bit
-            ? TryModulesViaPeb64(m_handle, *modules)
-            : TryModulesViaPeb32(m_handle, *modules));
+        const bool viaPeb = m_handle.Get() && (m_is64Bit
+            ? TryModulesViaPeb64(m_handle.Get(), *modules)
+            : TryModulesViaPeb32(m_handle.Get(), *modules));
 
         if (!viaPeb)
         {
             HANDLE snapshot = INVALID_HANDLE_VALUE;
             for (int attempt = 0; attempt < 5 && snapshot == INVALID_HANDLE_VALUE; ++attempt)
             {
-                snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, m_id);
+                snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, Raw(m_id));
                 if (snapshot == INVALID_HANDLE_VALUE && ::GetLastError() != ERROR_BAD_LENGTH)
                     break;
             }
@@ -1125,16 +1107,15 @@ namespace Manifold::Target
     std::vector<std::uint32_t> Process::Threads() const
     {
         std::vector<std::uint32_t> threads;
-        HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if (snapshot == INVALID_HANDLE_VALUE)
+        const UniqueHandle snapshot(::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0));
+        if (!snapshot)
             return threads;
         THREADENTRY32 entry{ sizeof(entry) };
-        for (BOOL more = ::Thread32First(snapshot, &entry); more; more = ::Thread32Next(snapshot, &entry))
+        for (BOOL more = ::Thread32First(snapshot.Get(), &entry); more; more = ::Thread32Next(snapshot.Get(), &entry))
         {
-            if (entry.th32OwnerProcessID == m_id)
+            if (entry.th32OwnerProcessID == Raw(m_id))
                 threads.push_back(entry.th32ThreadID);
         }
-        ::CloseHandle(snapshot);
         return threads;
     }
 
@@ -1142,21 +1123,21 @@ namespace Manifold::Target
     {
         static const NtProcessCall suspend = NtCall("NtSuspendProcess");
         if (DryRun())
-            return m_handle != nullptr;
-        return suspend && m_handle && suspend(m_handle) >= 0;
+            return m_handle.Get() != nullptr;
+        return suspend && m_handle.Get() && suspend(m_handle.Get()) >= 0;
     }
 
     bool Process::Resume() const
     {
         static const NtProcessCall resume = NtCall("NtResumeProcess");
         if (DryRun())
-            return m_handle != nullptr;
-        return resume && m_handle && resume(m_handle) >= 0;
+            return m_handle.Get() != nullptr;
+        return resume && m_handle.Get() && resume(m_handle.Get()) >= 0;
     }
 
     Status Process::CreateThread(std::uint64_t start, std::uint64_t parameter, bool wait, std::uint32_t timeoutMilliseconds) const
     {
-        if (!m_handle)
+        if (!m_handle.Get())
             return Status::Fail(ErrorCode::NoProcess);
         if (DryRun())
         {
@@ -1164,11 +1145,10 @@ namespace Manifold::Target
             ++m_dryActivity.Threads;
             return Status::Success();
         }
-        HANDLE thread = ::CreateRemoteThread(m_handle, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(start), reinterpret_cast<LPVOID>(parameter), 0, nullptr);
+        const UniqueHandle thread(::CreateRemoteThread(m_handle.Get(), nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(start), reinterpret_cast<LPVOID>(parameter), 0, nullptr));
         if (!thread)
             return Status::Fail(ErrorCode::ThreadCreateFailed, Hex(start) + ", " + LastErrorText(::GetLastError()));
-        const DWORD waited = wait ? ::WaitForSingleObject(thread, timeoutMilliseconds) : WAIT_OBJECT_0;
-        ::CloseHandle(thread);
+        const DWORD waited = wait ? ::WaitForSingleObject(thread.Get(), timeoutMilliseconds) : WAIT_OBJECT_0;
         if (waited != WAIT_OBJECT_0)
             return Status::Fail(ErrorCode::ThreadTimedOut, Hex(start) + ", " + std::to_string(timeoutMilliseconds) + " ms");
         return Status::Success();
@@ -1227,7 +1207,7 @@ namespace Manifold::Target
 
     Status Process::InjectLibrary(const std::wstring& path) const
     {
-        if (!m_handle)
+        if (!m_handle.Get())
             return Status::Fail(ErrorCode::NoProcess);
         if (DryRun())
         {
@@ -1239,16 +1219,16 @@ namespace Manifold::Target
         if (loadLibrary == 0)
             return Status::Fail(ErrorCode::InjectFailed, "LoadLibraryW not found in the target");
         const std::size_t bytes = (path.size() + 1) * sizeof(wchar_t);
-        Status status;
-        const std::uint64_t memory = Allocate(bytes, PAGE_READWRITE, 0, status);
-        if (!memory)
-            return status;
+        const Result<Address> allocated = Allocate(bytes, PAGE_READWRITE);
+        if (!allocated)
+            return allocated.Error();
+        const std::uint64_t memory = *allocated;
         if (Status written = Write(memory, path.c_str(), bytes); !written)
         {
             Free(memory);
             return written;
         }
-        HANDLE thread = ::CreateRemoteThread(m_handle, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(loadLibrary), reinterpret_cast<LPVOID>(memory), 0, nullptr);
+        const UniqueHandle thread(::CreateRemoteThread(m_handle.Get(), nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(loadLibrary), reinterpret_cast<LPVOID>(memory), 0, nullptr));
         if (!thread)
         {
             const DWORD error = ::GetLastError();
@@ -1256,10 +1236,9 @@ namespace Manifold::Target
             return Status::Fail(ErrorCode::ThreadCreateFailed, LastErrorText(error));
         }
         constexpr DWORD kLoadTimeout = 15000;
-        const DWORD waited = ::WaitForSingleObject(thread, kLoadTimeout);
+        const DWORD waited = ::WaitForSingleObject(thread.Get(), kLoadTimeout);
         DWORD exitCode = 0;
-        const bool finished = waited == WAIT_OBJECT_0 && ::GetExitCodeThread(thread, &exitCode);
-        ::CloseHandle(thread);
+        const bool finished = waited == WAIT_OBJECT_0 && ::GetExitCodeThread(thread.Get(), &exitCode);
         if (waited != WAIT_OBJECT_0)
             return Status::Fail(ErrorCode::ThreadTimedOut, WideToUtf8(path) + ", " + std::to_string(kLoadTimeout) + " ms");
         Free(memory);

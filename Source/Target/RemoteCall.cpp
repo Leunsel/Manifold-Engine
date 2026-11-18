@@ -358,16 +358,18 @@ namespace Manifold::Target
             return Status::Fail(ErrorCode::ThreadCreateFailed, "the remote-call worker supports 64-bit targets only");
         m_process = std::move(process);
 
-        Status status;
-        m_code = m_process->Allocate(0x1000, PAGE_EXECUTE_READWRITE, 0, status);
-        if (!m_code)
-            return status;
-        m_control = m_process->Allocate(kControlSize, PAGE_READWRITE, 0, status);
-        m_data = m_control ? m_process->Allocate(kScratchSize, PAGE_READWRITE, 0, status) : 0;
-        if (!m_control || !m_data)
+        const Result<Address> codeBlock = m_process->Allocate(0x1000, PAGE_EXECUTE_READWRITE);
+        if (!codeBlock)
+            return codeBlock.Error();
+        m_code = *codeBlock;
+        const Result<Address> controlBlock = m_process->Allocate(kControlSize, PAGE_READWRITE);
+        const Result<Address> dataBlock = controlBlock ? m_process->Allocate(kScratchSize, PAGE_READWRITE) : Result<Address>(controlBlock.Error());
+        m_control = controlBlock.ValueOr(0);
+        m_data = dataBlock.ValueOr(0);
+        if (!controlBlock || !dataBlock)
         {
             Stop();
-            return status ? Status::Fail(ErrorCode::AllocFailed) : status;
+            return controlBlock ? dataBlock.Error() : controlBlock.Error();
         }
 
         std::vector<std::uint8_t> worker = WorkerCode();
@@ -381,7 +383,7 @@ namespace Manifold::Target
         // round trip; the host handle lets it leave by itself when this
         // process ends without Stop (crash, killed harness). Both are given to
         // the target with SYNCHRONIZE only and closed by the worker as it ends.
-        HANDLE target = Process::DryRun() ? nullptr : ::OpenProcess(PROCESS_DUP_HANDLE, FALSE, m_process->Id());
+        HANDLE target = Process::DryRun() ? nullptr : ::OpenProcess(PROCESS_DUP_HANDLE, FALSE, Raw(m_process->Id()));
         std::uint64_t remoteWake = 0;
         std::uint64_t remoteHost = 0;
         const std::uint64_t wait = SystemExport(*m_process, "WaitForMultipleObjects");

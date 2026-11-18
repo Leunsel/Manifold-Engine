@@ -85,7 +85,7 @@ namespace Manifold::Tests
         CheckQuiet(lua, mark, "second run");
 
         mark = Mark(lua);
-        CHECK(engine.OpenProcess(::GetCurrentProcessId()).Ok());
+        CHECK(engine.OpenProcess(MakeProcessId(::GetCurrentProcessId())).Ok());
         CheckQuiet(lua, mark, "process opened");
 
         mark = Mark(lua);

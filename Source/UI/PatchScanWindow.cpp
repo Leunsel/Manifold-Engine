@@ -65,7 +65,7 @@ namespace Manifold::UI
         m_result.reset();
         m_restore = -1;
         std::shared_ptr<Target::Process> process = m_scanned;
-        m_task.Start([process, modules = std::move(modules)](Target::PatchScanProgress& progress)
+        m_task.Start(engine.Work(), "Looking for patched code", [process, modules = std::move(modules)](Target::PatchScanProgress& progress)
             {
                 return Target::ScanForPatches(*process, modules, &progress);
             });

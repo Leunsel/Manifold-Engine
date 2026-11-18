@@ -150,7 +150,7 @@ namespace Manifold::UI
         }
         m_generation = engine.ProcessGeneration();
         std::shared_ptr<Target::Process> process = engine.Process();
-        m_task.Start([process, modules = std::move(modules)](Disasm::DissectProgress& progress)
+        m_task.Start(engine.Work(), "Dissecting code", [process, modules = std::move(modules)](Disasm::DissectProgress& progress)
             {
                 return Disasm::DissectCode(*process, modules, &progress);
             });
@@ -464,7 +464,7 @@ namespace Manifold::UI
         std::shared_ptr<Target::Process> process = m_process;
         const Disasm::Disassembler* disassembler = &engine.Disassembler();
         const Target::Symbols* symbols = &engine.Symbols();
-        m_task.Start([process, disassembler, symbols, spans = std::move(spans), pattern = *pattern](Disasm::AsmSearchProgress& progress)
+        m_task.Start(engine.Work(), "Searching for instructions", [process, disassembler, symbols, spans = std::move(spans), pattern = *pattern](Disasm::AsmSearchProgress& progress)
             {
                 return Disasm::SearchAssembly(*process, *disassembler, symbols, spans, pattern, &progress);
             });

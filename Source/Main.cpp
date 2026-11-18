@@ -1,6 +1,7 @@
 #include "App/Application.h"
 #include "App/CrashHandler.h"
 #include "App/Settings.h"
+#include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 
@@ -45,6 +46,7 @@ namespace
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE, _In_ LPWSTR, _In_ int showCommand)
 {
+    Manifold::BindMainThread();
     InitSysCalls();
     ::SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS | LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
     {

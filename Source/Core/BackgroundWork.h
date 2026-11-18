@@ -41,6 +41,7 @@ namespace Manifold
         std::string Group;
         bool Cancellable = true;
         bool Quiet = false;
+        bool Serial = false;
     };
 
     struct WorkInfo
@@ -93,10 +94,14 @@ namespace Manifold
             std::shared_ptr<WorkProgress> Progress = std::make_shared<WorkProgress>();
             std::chrono::steady_clock::time_point Started = std::chrono::steady_clock::now();
             std::thread Thread;
+            Job Waiting;
+            bool Launched = false;
             bool Done = false;
             Finish Finished;
         };
 
+        void Launch(Entry* entry, Job job);
+        void LaunchNextSerial(const std::string& group);
         void Settle(std::unique_ptr<Entry> entry, bool run);
         std::unique_ptr<Entry> Take(Entry* entry);
 

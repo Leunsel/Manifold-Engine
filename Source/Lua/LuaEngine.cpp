@@ -1167,7 +1167,7 @@ namespace Manifold::Lua
             lua_pushnil(m_state);
         }
         lua_setglobal(m_state, "process");
-        const std::uint32_t id = process ? process->Id() : 0;
+        const std::uint32_t id = process ? Raw(process->Id()) : 0;
         std::string error;
         lua_getglobal(m_state, "onOpenProcess");
         if (lua_isfunction(m_state, -1))

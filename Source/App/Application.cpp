@@ -377,7 +377,7 @@ namespace Manifold
         if (m_engine->HasProcess())
             parameters += L" --process=\"" + Utf8ToWide(m_engine->Process()->Name()) + L"\"";
         RememberPlacement();
-        m_settings.Save(Paths::SettingsFile());
+        m_engine->SaveOptionsNow();
         const auto result = reinterpret_cast<INT_PTR>(::ShellExecuteW(m_host.Window(), L"runas", program.c_str(), parameters.c_str(), nullptr, SW_SHOWNORMAL));
         if (result > 32)
             m_running = false;
@@ -441,7 +441,7 @@ namespace Manifold
                 continue;
             }
             const bool animating = m_workspace->Animating();
-            const bool busy = m_engine->Scanner().Busy() || m_engine->Debugger().Broken() || !m_engine->Notices().empty() || m_engine->Working();
+            const bool busy = m_engine->Scanner().Busy() || m_engine->Debugger().Broken() || !m_engine->Notifications().Empty() || m_engine->Working();
             if (!animating && !busy && m_host.InputAge() > kBusyMilliseconds)
                 TickWhileWaiting(kIdleFrameMilliseconds);
             else if (!animating && busy && m_host.InputAge() > kBusyMilliseconds)
@@ -452,7 +452,7 @@ namespace Manifold
         }
         Sounds::Stop();
         RememberPlacement();
-        const Status saved = m_settings.Save(Paths::SettingsFile());
+        const Status saved = m_engine->SaveOptionsNow();
         if (!saved)
             LOG_ERROR("Program", saved.Text);
         if (ImGui::GetCurrentContext() && ImGui::GetIO().IniFilename)

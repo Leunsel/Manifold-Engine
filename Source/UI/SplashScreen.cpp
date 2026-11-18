@@ -1,5 +1,6 @@
 #include "UI/SplashScreen.h"
 
+#include "Core/MainThread.h"
 #include "Core/Text.h"
 #include "Core/Version.h"
 #include "Resource.h"
@@ -441,6 +442,7 @@ namespace Manifold::UI
 
     void SplashScreen::Run(HINSTANCE instance, RECT area, UINT dpi)
     {
+        SetThreadName(L"Splash screen");
         static const ATOM registered = [instance]
             {
                 WNDCLASSEXW wc{ sizeof(wc) };

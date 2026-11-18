@@ -3199,7 +3199,7 @@ namespace Manifold::UI
 
     void MainWindow::SaveOptions()
     {
-        m_workspace.Report(m_engine.Options().Save(Paths::SettingsFile()));
+        m_engine.SaveOptionsSoon();
     }
 
     void MainWindow::OpenValueDialog(Table::MemoryRecord& record)

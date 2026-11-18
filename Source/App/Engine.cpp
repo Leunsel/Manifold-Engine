@@ -18,7 +18,6 @@ namespace Manifold
 {
     namespace
     {
-        constexpr std::size_t kMaxNotices = 6;
         constexpr double kAliveCheckSeconds = 1.0;
         constexpr double kAttachCheckSeconds = 1.5;
 
@@ -44,7 +43,7 @@ namespace Manifold
     };
 
     Engine::Engine(Settings& settings)
-        : m_settings(settings), m_disassembler64(std::make_unique<Disasm::Disassembler>(true)), m_disassembler32(std::make_unique<Disasm::Disassembler>(false))
+        : m_settings(settings), m_settingsStore(settings, Paths::SettingsFile()), m_disassembler64(std::make_unique<Disasm::Disassembler>(true)), m_disassembler32(std::make_unique<Disasm::Disassembler>(false))
     {
         m_lua = std::make_unique<Lua::LuaEngine>(*this);
         m_debugger.SetLogDebugStrings(settings.LogDebugStrings);
@@ -75,7 +74,7 @@ namespace Manifold
         return (!m_process || m_process->Is64Bit()) ? *m_disassembler64 : *m_disassembler32;
     }
 
-    Status Engine::OpenProcess(std::uint32_t id)
+    Status Engine::OpenProcess(ProcessId id)
     {
         WaitForActivation();
         if (m_process && m_process->Id() == id && m_process->Alive())
@@ -83,20 +82,19 @@ namespace Manifold
             m_process->RefreshModules();
             m_symbols.Attach(m_process);
             m_codeMap.Attach(m_process, &m_mono);
-            LOG_INFO("Process", Format("%s (pid %u) is already open; scripts and symbols stay as they are", m_process->Name().c_str(), id));
+            LOG_INFO("Process", Format("%s (pid %u) is already open; scripts and symbols stay as they are", m_process->Name().c_str(), Raw(id)));
             m_lua->OnProcessOpened();
             return Status::Success();
         }
-        Status status;
-        std::shared_ptr<Target::Process> process = Target::Process::Open(id, status);
+        Result<std::shared_ptr<Target::Process>> process = Target::Process::Open(id);
         if (!process)
         {
-            LOG_ERROR("Process", status.Text);
-            return status;
+            LOG_ERROR("Process", process.Error().Text);
+            return process.Error();
         }
         if (m_process)
             CloseProcess();
-        m_process = std::move(process);
+        m_process = std::move(process).Value();
         m_symbols.Attach(m_process);
         m_codeMap.Attach(m_process, &m_mono);
         for (const Table::TableSymbol& symbol : m_tableSymbols)
@@ -106,7 +104,7 @@ namespace Manifold
         }
         ++m_processGeneration;
         m_settings.LastProcess = m_process->Name();
-        LOG_SUCCESS("Process", Format("Opened %s (pid %u, %s)", m_process->Name().c_str(), m_process->Id(), m_process->Is64Bit() ? "64-bit" : "32-bit"));
+        LOG_SUCCESS("Process", Format("Opened %s (pid %u, %s)", m_process->Name().c_str(), Raw(m_process->Id()), m_process->Is64Bit() ? "64-bit" : "32-bit"));
         m_lua->OnProcessOpened();
         RefreshValues(true);
         return Status::Success();
@@ -279,11 +277,11 @@ namespace Manifold
             Notify(status);
     }
 
-    void Engine::LookUpProcessLater(std::string name, std::function<void(std::uint32_t)> found)
+    void Engine::LookUpProcessLater(std::string name, std::function<void(std::optional<ProcessId>)> found)
     {
         m_work.Start({ "Looking for " + name, "lookup", false, true }, [name, found = std::move(found)](WorkProgress&) mutable -> BackgroundWork::Finish
             {
-                const std::uint32_t id = Target::FindProcessId(name).value_or(0);
+                const std::optional<ProcessId> id = Target::FindProcessId(name);
                 return [found = std::move(found), id]() { found(id); };
             });
     }
@@ -931,6 +929,7 @@ namespace Manifold
         std::shared_ptr<Target::Process> process = m_process;
         running->Result = std::async(std::launch::async, [this, script = record->Script, options, memory, process, recordId]()
             {
+                SetThreadName(L"Script activation");
                 t_activationWorker = true;
                 Asm::AaHost host;
                 host.Process = process.get();
@@ -1015,34 +1014,20 @@ namespace Manifold
         }
         std::promise<void> finished;
         std::future<void> future = finished.get_future();
-        {
-            std::lock_guard lock(m_mainLock);
-            m_mainWork.push_back([&]()
-                {
-                    const bool serving = m_workerLuaActive;
-                    m_workerLuaActive = true;
-                    work();
-                    m_workerLuaActive = serving;
-                    finished.set_value();
-                });
-        }
+        m_mainQueue.Post([&]()
+            {
+                const bool serving = m_workerLuaActive;
+                m_workerLuaActive = true;
+                work();
+                m_workerLuaActive = serving;
+                finished.set_value();
+            });
         future.wait();
     }
 
     void Engine::DrainMainWork()
     {
-        for (;;)
-        {
-            std::function<void()> work;
-            {
-                std::lock_guard lock(m_mainLock);
-                if (m_mainWork.empty())
-                    return;
-                work = std::move(m_mainWork.front());
-                m_mainWork.pop_front();
-            }
-            work();
-        }
+        m_mainQueue.Drain();
     }
 
     Status Engine::RunLuaForWorker(std::string_view code, int recordId, bool syntaxCheck, std::string& output)
@@ -1051,40 +1036,37 @@ namespace Manifold
         std::future<Status> future = finished.get_future();
         std::string result;
         const std::string text(code);
-        {
-            std::lock_guard lock(m_mainLock);
-            m_mainWork.push_back([&, this]()
+        m_mainQueue.Post([&, this]()
+            {
+                if (m_async && !m_waitingForWorker)
                 {
-                    if (m_async && !m_waitingForWorker)
-                    {
-                        auto saved = std::make_shared<Lua::ScriptGlobals>();
-                        m_lua->StartTask(text, "{$lua}", [&](const Status& status, const std::string& value)
-                            {
-                                result = value;
-                                finished.set_value(status);
-                            },
-                            [this, saved, recordId, syntaxCheck]()
-                            {
-                                *saved = m_lua->SaveScriptGlobals();
-                                m_lua->SetScriptGlobals(m_table.FindById(recordId), syntaxCheck);
-                                m_workerLuaActive = true;
-                            },
-                            [this, saved]()
-                            {
-                                m_lua->RestoreScriptGlobals(*saved);
-                                m_workerLuaActive = false;
-                            });
-                        return;
-                    }
-                    m_workerLuaActive = true;
-                    const Lua::ScriptGlobals saved = m_lua->SaveScriptGlobals();
-                    m_lua->SetScriptGlobals(m_table.FindById(recordId), syntaxCheck);
-                    const Status status = m_lua->RunWithResult(text, "{$lua}", result);
-                    m_lua->RestoreScriptGlobals(saved);
-                    m_workerLuaActive = false;
-                    finished.set_value(status);
-                });
-        }
+                    auto saved = std::make_shared<Lua::ScriptGlobals>();
+                    m_lua->StartTask(text, "{$lua}", [&](const Status& status, const std::string& value)
+                        {
+                            result = value;
+                            finished.set_value(status);
+                        },
+                        [this, saved, recordId, syntaxCheck]()
+                        {
+                            *saved = m_lua->SaveScriptGlobals();
+                            m_lua->SetScriptGlobals(m_table.FindById(recordId), syntaxCheck);
+                            m_workerLuaActive = true;
+                        },
+                        [this, saved]()
+                        {
+                            m_lua->RestoreScriptGlobals(*saved);
+                            m_workerLuaActive = false;
+                        });
+                    return;
+                }
+                m_workerLuaActive = true;
+                const Lua::ScriptGlobals saved = m_lua->SaveScriptGlobals();
+                m_lua->SetScriptGlobals(m_table.FindById(recordId), syntaxCheck);
+                const Status status = m_lua->RunWithResult(text, "{$lua}", result);
+                m_lua->RestoreScriptGlobals(saved);
+                m_workerLuaActive = false;
+                finished.set_value(status);
+            });
         const Status status = future.get();
         output = result;
         return status;
@@ -1321,7 +1303,7 @@ namespace Manifold
         const std::vector<std::string> names = m_settings.AutoAttach;
         m_work.Start({ "Looking for processes to open", "attach", false, true }, [this, names](WorkProgress&) -> BackgroundWork::Finish
             {
-                std::uint32_t id = 0;
+                std::optional<ProcessId> id;
                 std::string matched;
                 for (const std::string& name : names)
                 {
@@ -1330,7 +1312,7 @@ namespace Manifold
                         continue;
                     if (const auto found = Target::FindProcessId(trimmed))
                     {
-                        id = *found;
+                        id = found;
                         matched = trimmed;
                         break;
                     }
@@ -1340,7 +1322,7 @@ namespace Manifold
                         m_attachLookup = false;
                         if (!id || !m_settings.AutoAttachEnabled || (m_process && m_process->Alive()))
                             return;
-                        const Status status = OpenProcess(id);
+                        const Status status = OpenProcess(*id);
                         if (status)
                             Notify(LogLevel::Success, "Auto attached to " + matched);
                         else
@@ -1517,14 +1499,17 @@ namespace Manifold
         case LogLevel::Success: LOG_SUCCESS("Notice", text); break;
         default: LOG_INFO("Notice", text); break;
         }
-        Notice notice;
-        notice.Level = level;
-        notice.Text = std::move(text);
-        notice.At = Now();
-        notice.Id = m_nextNotice++;
-        m_notices.push_back(std::move(notice));
-        while (m_notices.size() > kMaxNotices)
-            m_notices.pop_front();
+        m_notifications.Post(level, std::move(text), Now());
+    }
+
+    void Engine::SaveOptionsSoon()
+    {
+        m_settingsStore.Changed(Now());
+    }
+
+    Status Engine::SaveOptionsNow()
+    {
+        return m_settingsStore.Flush();
     }
 
     void Engine::Notify(const Status& status, LogLevel level)
@@ -1542,10 +1527,12 @@ namespace Manifold
 
     void Engine::Tick()
     {
+        MANIFOLD_ASSERT_MAIN();
+        if (m_settingsStore.Due(Now()))
+            Notify(m_settingsStore.Flush());
         const double now = Now();
         {
             PROFILE_ZONE("Finished background jobs");
-            m_jobs.Drain();
             m_work.Drain();
         }
         const int scansBefore = m_scanner.ScanNumber();

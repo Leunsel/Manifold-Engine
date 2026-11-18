@@ -301,7 +301,7 @@ namespace Manifold::UI
         if (!m_engine.HasProcess())
             return;
         const Target::Process& process = *m_engine.Process();
-        m_process = process.Id();
+        m_process = Raw(process.Id());
         HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
         if (snapshot == INVALID_HANDLE_VALUE)
             return;
@@ -352,7 +352,7 @@ namespace Manifold::UI
             return;
         }
         const double now = ImGui::GetTime();
-        if (m_engine.HasProcess() && m_engine.Process()->Id() != m_process)
+        if (m_engine.HasProcess() && Raw(m_engine.Process()->Id()) != m_process)
             m_refreshAt = 0.0;
         if (now >= m_refreshAt)
         {

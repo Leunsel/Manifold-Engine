@@ -121,7 +121,9 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\App\CrashHandler.cpp" />
     <ClCompile Include="..\Source\App\Diagnostics.cpp" />
     <ClCompile Include="..\Source\App\Engine.cpp" />
+    <ClCompile Include="..\Source\App\Notifications.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
+    <ClCompile Include="..\Source\App\SettingsStore.cpp" />
     <ClCompile Include="..\Source\App\Sounds.cpp" />
     <ClCompile Include="..\Source\App\WindowHost.cpp" />
     <ClCompile Include="..\Source\Asm\Assembler.cpp" />
@@ -131,7 +133,11 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Core\BuildInfo.cpp" />
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
+    <ClCompile Include="..\Source\Core\Handle.cpp" />
+    <ClCompile Include="..\Source\Core\Ini.cpp" />
     <ClCompile Include="..\Source\Core\JobQueue.cpp" />
+    <ClCompile Include="..\Source\Core\MainThread.cpp" />
+    <ClCompile Include="..\Source\Core\Paths.cpp" />
     <ClCompile Include="..\Source\Core\Profiler.cpp" />
     <ClCompile Include="..\Source\Core\RuntimeLog.cpp" />
     <ClCompile Include="..\Source\Core\Text.cpp" />
@@ -231,7 +237,9 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\App\CrashHandler.h" />
     <ClInclude Include="..\Source\App\Diagnostics.h" />
     <ClInclude Include="..\Source\App\Engine.h" />
+    <ClInclude Include="..\Source\App\Notifications.h" />
     <ClInclude Include="..\Source\App\Settings.h" />
+    <ClInclude Include="..\Source\App\SettingsStore.h" />
     <ClInclude Include="..\Source\App\Sounds.h" />
     <ClInclude Include="..\Source\App\WindowHost.h" />
     <ClInclude Include="..\Source\Asm\Assembler.h" />
@@ -240,10 +248,15 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Core\BuildInfo.h" />
     <ClInclude Include="..\Source\Core\Deflate.h" />
     <ClInclude Include="..\Source\Core\Errors.h" />
+    <ClInclude Include="..\Source\Core\Handle.h" />
+    <ClInclude Include="..\Source\Core\Ini.h" />
     <ClInclude Include="..\Source\Core\JobQueue.h" />
+    <ClInclude Include="..\Source\Core\MainThread.h" />
+    <ClInclude Include="..\Source\Core\Paths.h" />
     <ClInclude Include="..\Source\Core\Profiler.h" />
     <ClInclude Include="..\Source\Core\RuntimeLog.h" />
     <ClInclude Include="..\Source\Core\Text.h" />
+    <ClInclude Include="..\Source\Core\Types.h" />
     <ClInclude Include="..\Source\Core\Version.h" />
     <ClInclude Include="..\Source\Core\Xml.h" />
     <ClInclude Include="..\Source\Debug\BreakAction.h" />

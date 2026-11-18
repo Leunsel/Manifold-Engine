@@ -383,7 +383,7 @@ namespace Manifold::Tests
 
         void Live(Engine& engine)
         {
-            const Status opened = engine.OpenProcess(::GetCurrentProcessId());
+            const Status opened = engine.OpenProcess(MakeProcessId(::GetCurrentProcessId()));
             CHECK_MSG(opened.Ok(), opened.Text);
             if (!opened)
                 return;
@@ -442,7 +442,7 @@ namespace Manifold::Tests
             wchar_t value[MAX_PATH] = L"";
             if (!::GetEnvironmentVariableW(L"MANIFOLD_TEMPLATE_CHECK", value, MAX_PATH))
                 return;
-            const Status opened = engine.OpenProcess(::GetCurrentProcessId());
+            const Status opened = engine.OpenProcess(MakeProcessId(::GetCurrentProcessId()));
             if (!opened)
                 return;
             std::uint64_t address = reinterpret_cast<std::uint64_t>(&RunTemplateTests);

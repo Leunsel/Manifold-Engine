@@ -2,6 +2,7 @@
 
 #include "App/Engine.h"
 #include "App/Settings.h"
+#include "Core/Ini.h"
 #include "Core/Text.h"
 #include "Core/RuntimeLog.h"
 #include "Lua/LuaCompatScripts.h"
@@ -2041,23 +2042,14 @@ namespace Manifold::Lua
         SettingsSections ReadScriptSettings()
         {
             SettingsSections sections;
-            std::ifstream file(Paths::ScriptSettingsFile(), std::ios::binary);
-            std::string line;
-            std::string current;
-            while (std::getline(file, line))
+            const std::optional<std::string> text = Ini::ReadText(Paths::ScriptSettingsFile());
+            if (!text)
+                return sections;
+            for (const Ini::Section& section : Ini::Parse(*text))
             {
-                if (!line.empty() && line.back() == '\r')
-                    line.pop_back();
-                if (line.size() >= 2 && line.front() == '[' && line.back() == ']')
-                {
-                    current = line.substr(1, line.size() - 2);
-                    sections[current];
-                    continue;
-                }
-                const std::size_t equals = line.find('=');
-                if (equals == std::string::npos || line.empty() || line.front() == ';')
-                    continue;
-                sections[current].emplace_back(line.substr(0, equals), UnescapeSetting(std::string_view(line).substr(equals + 1)));
+                auto& values = sections[section.Name];
+                for (const Ini::Entry& entry : section.Entries)
+                    values.emplace_back(entry.Key, UnescapeSetting(entry.Value));
             }
             return sections;
         }
@@ -2125,12 +2117,7 @@ namespace Manifold::Lua
                     text += key + "=" + EscapeSetting(entry) + "\r\n";
                 text += "\r\n";
             }
-            const std::filesystem::path path = Paths::ScriptSettingsFile();
-            std::error_code ignored;
-            std::filesystem::create_directories(path.parent_path(), ignored);
-            std::ofstream file(path, std::ios::binary | std::ios::trunc);
-            file.write(text.data(), static_cast<std::streamsize>(text.size()));
-            lua_pushboolean(state, static_cast<bool>(file));
+            lua_pushboolean(state, Ini::WriteAtomic(Paths::ScriptSettingsFile(), text));
             return 1;
         }
 

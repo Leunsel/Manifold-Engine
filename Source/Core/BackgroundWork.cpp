@@ -1,6 +1,8 @@
 #include "Core/BackgroundWork.h"
 
+#include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
+#include "Core/Text.h"
 
 #include <algorithm>
 #include <exception>
@@ -48,23 +50,52 @@ namespace Manifold
         entry->Options = std::move(options);
         Entry* raw = entry.get();
         const int id = raw->Id;
-        m_entries.push_back(std::move(entry));
-        raw->Thread = std::thread([this, raw, job = std::move(job)]()
+        const bool queued = raw->Options.Serial && std::any_of(m_entries.begin(), m_entries.end(), [raw](const auto& other)
             {
+                return other->Options.Serial && other->Options.Group == raw->Options.Group && !other->Done;
+            });
+        m_entries.push_back(std::move(entry));
+        if (queued)
+            raw->Waiting = std::move(job);
+        else
+            Launch(raw, std::move(job));
+        return id;
+    }
+
+    void BackgroundWork::Launch(Entry* entry, Job job)
+    {
+        entry->Launched = true;
+        entry->Started = std::chrono::steady_clock::now();
+        entry->Thread = std::thread([this, entry, job = std::move(job), name = Utf8ToWide("Work: " + entry->Options.Title)]()
+            {
+                SetThreadName(name.c_str());
                 Finish finish;
                 try
                 {
-                    finish = job(*raw->Progress);
+                    finish = job(*entry->Progress);
                 }
                 catch (const std::exception& error)
                 {
-                    LOG_ERROR("Work", raw->Options.Title + " failed: " + error.what());
+                    LOG_ERROR("Work", entry->Options.Title + " failed: " + error.what());
                 }
                 std::lock_guard done(m_lock);
-                raw->Finished = std::move(finish);
-                raw->Done = true;
+                entry->Finished = std::move(finish);
+                entry->Done = true;
+                if (entry->Options.Serial && !m_stopped)
+                    LaunchNextSerial(entry->Options.Group);
             });
-        return id;
+    }
+
+    void BackgroundWork::LaunchNextSerial(const std::string& group)
+    {
+        for (const auto& entry : m_entries)
+        {
+            if (entry->Options.Serial && entry->Options.Group == group && !entry->Launched)
+            {
+                Launch(entry.get(), std::move(entry->Waiting));
+                return;
+            }
+        }
     }
 
     void BackgroundWork::Cancel(int id)

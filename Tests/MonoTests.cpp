@@ -173,7 +173,7 @@ namespace Manifold::Tests
             std::setvbuf(stdout, nullptr, _IONBF, 0);
             Settings settings;
             Engine engine(settings);
-            const Status opened = engine.OpenProcess(pid);
+            const Status opened = engine.OpenProcess(MakeProcessId(pid));
             if (!opened)
             {
                 std::printf("could not open %u: %s\n", pid, opened.Text.c_str());
@@ -194,7 +194,7 @@ namespace Manifold::Tests
         // its own, and an idle worker must not burn the core it runs on.
         void CheckOrphanedWorker(Engine& engine)
         {
-            const std::uint32_t pid = engine.Process()->Id();
+            const std::uint32_t pid = Raw(engine.Process()->Id());
             const std::vector<WorkerThread> before = FindWorkers(pid);
             ChildHarness child;
             CHECK(child.Start(L"--mono-check --orphan-child --pid=" + std::to_wstring(pid)));
@@ -238,7 +238,7 @@ namespace Manifold::Tests
         {
             const Target::Process& process = *engine.Process();
             const std::uint64_t attach = process.FindExport(process.Name(), "mono_thread_attach");
-            const std::vector<WorkerThread> before = FindWorkers(process.Id());
+            const std::vector<WorkerThread> before = FindWorkers(Raw(process.Id()));
             Target::RemoteCall call;
             std::uint64_t result = 0;
             if (!attach || !call.Start(engine.Process()) || !call.Call(attach, 1, result))
@@ -277,7 +277,7 @@ namespace Manifold::Tests
             std::sort(gapped.begin(), gapped.end());
 
             double idleMs = -1;
-            const std::vector<WorkerThread> added = NewWorkers(before, FindWorkers(process.Id()));
+            const std::vector<WorkerThread> added = NewWorkers(before, FindWorkers(Raw(process.Id())));
             if (added.size() == 1)
             {
                 if (HANDLE thread = ::OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, added[0].Id))
@@ -389,11 +389,12 @@ namespace Manifold::Tests
         CHECK(touch != 0);
         if (!touch)
             return;
-        Status status;
         constexpr std::size_t kCalls = 200;    // more than one page of records
-        const std::uint64_t buffer = process.Allocate(kCalls * RemoteCall::kMainCallSize, PAGE_READWRITE, 0, status);
-        const std::uint64_t source = buffer ? process.Allocate(0x100, PAGE_READWRITE, 0, status) : 0;
-        CHECK_MSG(buffer && source, status.Text);
+        const Result<Address> allocated = process.Allocate(kCalls * RemoteCall::kMainCallSize, PAGE_READWRITE);
+        const Result<Address> second = allocated ? process.Allocate(0x100, PAGE_READWRITE) : Result<Address>(allocated.Error());
+        const std::uint64_t buffer = allocated.ValueOr(0);
+        const std::uint64_t source = second.ValueOr(0);
+        CHECK_MSG(buffer && source, second.Error().Text);
         if (!buffer || !source)
             return;
         std::uint8_t pattern[0x40];
@@ -653,12 +654,12 @@ namespace Manifold::Tests
 
         // The remote-call worker on its own: a pure function must round-trip.
         {
-            const std::vector<WorkerThread> before = FindWorkers(process.Id());
-            const std::uint32_t handlesBefore = ProcessHandleCount(process.Id());
+            const std::vector<WorkerThread> before = FindWorkers(Raw(process.Id()));
+            const std::uint32_t handlesBefore = ProcessHandleCount(Raw(process.Id()));
             Target::RemoteCall call;
             const Status started = call.Start(engine.Process());
             CHECK_MSG(started.Ok(), started.Text);
-            const std::vector<WorkerThread> added = NewWorkers(before, FindWorkers(process.Id()));
+            const std::vector<WorkerThread> added = NewWorkers(before, FindWorkers(Raw(process.Id())));
             CHECK_MSG(!started || added.size() == 1, "expected one new worker thread, found " + std::to_string(added.size()));
             HANDLE worker = added.size() == 1 ? ::OpenThread(SYNCHRONIZE | THREAD_QUERY_LIMITED_INFORMATION, FALSE, added[0].Id) : nullptr;
             if (started)
@@ -689,9 +690,9 @@ namespace Manifold::Tests
                 // A stop sent while a call still runs must survive the call's
                 // return, so the worker ends once the call is done.
                 Target::RemoteCall stuck;
-                const std::vector<WorkerThread> others = FindWorkers(process.Id());
+                const std::vector<WorkerThread> others = FindWorkers(Raw(process.Id()));
                 CHECK(stuck.Start(engine.Process()).Ok());
-                const std::vector<WorkerThread> stuckAdded = NewWorkers(others, FindWorkers(process.Id()));
+                const std::vector<WorkerThread> stuckAdded = NewWorkers(others, FindWorkers(Raw(process.Id())));
                 HANDLE stuckThread = stuckAdded.size() == 1 ? ::OpenThread(SYNCHRONIZE | THREAD_QUERY_LIMITED_INFORMATION, FALSE, stuckAdded[0].Id) : nullptr;
                 CHECK(stuckThread != nullptr);
                 stuck.SetTimeout(std::chrono::milliseconds(50));
@@ -714,7 +715,7 @@ namespace Manifold::Tests
                 CHECK(::WaitForSingleObject(worker, 2000) == WAIT_OBJECT_0);
                 CHECK(::GetExitCodeThread(worker, &code) && code == 1);
                 ::CloseHandle(worker);
-                const std::uint32_t handlesAfter = ProcessHandleCount(process.Id());
+                const std::uint32_t handlesAfter = ProcessHandleCount(Raw(process.Id()));
                 CHECK_MSG(handlesAfter == handlesBefore, "target handles " + std::to_string(handlesBefore) + " before, " + std::to_string(handlesAfter) + " after");
             }
         }
@@ -837,7 +838,7 @@ namespace Manifold::Tests
         {
             // Read-only: list RemoteCall worker threads and the CPU they used.
             if (!pid)
-                pid = Target::FindProcessId(name).value_or(0);
+                pid = Raw(Target::FindProcessId(name).value_or(ProcessId::None));
             if (!pid)
             {
                 std::printf("%s is not running\n", name.c_str());
@@ -851,7 +852,7 @@ namespace Manifold::Tests
         }
         Settings settings;
         Engine engine(settings);
-        const Status opened = pid ? engine.OpenProcess(pid) : engine.OpenProcessByName(name);
+        const Status opened = pid ? engine.OpenProcess(MakeProcessId(pid)) : engine.OpenProcessByName(name);
         if (!opened)
         {
             std::printf("could not open %s: %s\n", pid ? std::to_string(pid).c_str() : name.c_str(), opened.Text.c_str());
@@ -969,7 +970,7 @@ namespace Manifold::Tests
         std::setvbuf(stdout, nullptr, _IONBF, 0);
         Settings settings;
         Engine engine(settings);
-        const Status opened = pid ? engine.OpenProcess(pid) : engine.OpenProcessByName(name);
+        const Status opened = pid ? engine.OpenProcess(MakeProcessId(pid)) : engine.OpenProcessByName(name);
         if (!opened)
         {
             std::printf("could not open %s: %s\n", pid ? std::to_string(pid).c_str() : name.c_str(), opened.Text.c_str());
@@ -1183,7 +1184,7 @@ namespace Manifold::Tests
         {
             Settings settings;
             Engine engine(settings);
-            const Status opened = engine.OpenProcess(info.dwProcessId);
+            const Status opened = engine.OpenProcess(MakeProcessId(info.dwProcessId));
             CHECK_MSG(opened.Ok(), opened.Text);
             if (opened)
             {

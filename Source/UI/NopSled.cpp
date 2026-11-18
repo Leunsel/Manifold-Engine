@@ -413,7 +413,7 @@ namespace Manifold::UI
             RememberBest();
             Settings& settings = m_workspace.Core().Options();
             if (settings.NopSledBest == m_best && m_best > 0)
-                m_workspace.Report(settings.Save(Paths::SettingsFile()));
+                m_workspace.Core().SaveOptionsSoon();
             Sounds::Play(Sounds::Cue::Error);
             return;
         }

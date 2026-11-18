@@ -90,7 +90,7 @@ namespace Manifold::UI
         m_result.reset();
         m_selected = -1;
         std::shared_ptr<Target::Process> process = m_process;
-        m_task.Start([process, pattern = *pattern, ranges = std::move(ranges), filter](Scan::PatternProgress& progress)
+        m_task.Start(engine.Work(), "Searching for bytes", [process, pattern = *pattern, ranges = std::move(ranges), filter](Scan::PatternProgress& progress)
             {
                 const auto started = std::chrono::steady_clock::now();
                 Outcome outcome;

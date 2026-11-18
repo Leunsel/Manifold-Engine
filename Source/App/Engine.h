@@ -1,10 +1,13 @@
 #pragma once
 
+#include "App/Notifications.h"
 #include "App/Settings.h"
+#include "App/SettingsStore.h"
 #include "Asm/AutoAssembler.h"
 #include "Core/BackgroundWork.h"
 #include "Core/Errors.h"
 #include "Core/JobQueue.h"
+#include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 #include "Debug/Debugger.h"
 #include "Debug/Trace.h"
@@ -39,14 +42,6 @@ namespace Manifold::Lua
 
 namespace Manifold
 {
-    struct Notice
-    {
-        LogLevel Level = LogLevel::Info;
-        std::string Text;
-        double At = 0.0;
-        int Id = 0;
-    };
-
     enum class UiRequestKind
     {
         MemoryViewer,
@@ -88,13 +83,15 @@ namespace Manifold
         Engine& operator=(const Engine&) = delete;
 
         Settings& Options() { return m_settings; }
+        void SaveOptionsSoon();
+        Status SaveOptionsNow();
         JobQueue& Jobs() { return m_jobs; }
         BackgroundWork& Work() { return m_work; }
         std::vector<WorkInfo> BusyWork() const;
         void CancelWork(int id);
         double Now() const;
 
-        Status OpenProcess(std::uint32_t id);
+        Status OpenProcess(ProcessId id);
         Status OpenProcessByName(std::string_view name);
         void CloseProcess();
         const std::shared_ptr<Target::Process>& Process() const { return m_process; }
@@ -130,7 +127,7 @@ namespace Manifold
         int MonoWork() const { return m_work.Find(kMonoWork); }
         Target::MonoBridge& Mono() { return m_mono; }
         bool MonoPresent() const { return m_mono.Present(); }
-        void LookUpProcessLater(std::string name, std::function<void(std::uint32_t)> found);
+        void LookUpProcessLater(std::string name, std::function<void(std::optional<ProcessId>)> found);
         static constexpr int kSymbolsWork = -100;
         Table::AddressList& Table() { return m_table; }
         Table::StructureStore& Structures() { return m_structures; }
@@ -180,7 +177,7 @@ namespace Manifold
 
         void Notify(LogLevel level, std::string text);
         void Notify(const Status& status, LogLevel level = LogLevel::Error);
-        std::deque<Notice>& Notices() { return m_notices; }
+        NotificationCenter& Notifications() { return m_notifications; }
 
         void Request(UiRequest request) { m_requests.push_back(std::move(request)); }
         std::vector<UiRequest> TakeRequests();
@@ -224,6 +221,7 @@ namespace Manifold
         struct RunningActivation;
 
         Settings& m_settings;
+        SettingsStore m_settingsStore;
         std::shared_ptr<Target::Process> m_process;
         std::uint64_t m_processGeneration = 0;
         Target::Symbols m_symbols;
@@ -245,8 +243,7 @@ namespace Manifold
         Asm::AaMemory m_scratchMemory;
         std::shared_ptr<const Disasm::DissectResult> m_codeDissect;
 
-        std::deque<Notice> m_notices;
-        int m_nextNotice = 1;
+        NotificationCenter m_notifications;
         std::vector<UiRequest> m_requests;
         double m_lastValues = -1.0;
         double m_lastFreeze = -1.0;
@@ -265,8 +262,7 @@ namespace Manifold
         int m_progressDone = 0;
         int m_progressTotal = 0;
         std::string m_progressCurrent;
-        std::mutex m_mainLock;
-        std::deque<std::function<void()>> m_mainWork;
+        MainThreadQueue m_mainQueue;
         bool m_waitingForWorker = false;
         bool m_workerLuaActive = false;
         int m_tableTask = 0;
@@ -276,7 +272,7 @@ namespace Manifold
         bool m_visibleKnown = false;
         bool m_attachLookup = false;
         double m_symbolsStarted = 0.0;
-        JobQueue m_jobs;
         BackgroundWork m_work;
+        JobQueue m_jobs{ m_work };
     };
 }

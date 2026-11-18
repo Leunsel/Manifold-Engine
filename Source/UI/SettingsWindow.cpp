@@ -544,7 +544,7 @@ namespace Manifold::UI
         m_workspace.Core().Debugger().SetPreferHardware(settings.UseHardwareExecuteBreakpoints);
         if (changed)
         {
-            const Status status = settings.Save(Paths::SettingsFile());
+            const Status status = m_workspace.Core().SaveOptionsNow();
             m_saveError = status.Ok() ? "" : status.Text;
             m_savedAt = ImGui::GetTime();
         }

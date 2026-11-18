@@ -108,7 +108,9 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\App\Commands.cpp" />
     <ClCompile Include="..\Source\App\Diagnostics.cpp" />
     <ClCompile Include="..\Source\App\Engine.cpp" />
+    <ClCompile Include="..\Source\App\Notifications.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
+    <ClCompile Include="..\Source\App\SettingsStore.cpp" />
     <ClCompile Include="..\Source\App\Sounds.cpp" />
     <ClCompile Include="..\Source\Asm\Assembler.cpp" />
     <ClCompile Include="..\Source\Asm\AutoAssembler.cpp" />
@@ -117,7 +119,11 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Core\BuildInfo.cpp" />
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
+    <ClCompile Include="..\Source\Core\Handle.cpp" />
+    <ClCompile Include="..\Source\Core\Ini.cpp" />
     <ClCompile Include="..\Source\Core\JobQueue.cpp" />
+    <ClCompile Include="..\Source\Core\MainThread.cpp" />
+    <ClCompile Include="..\Source\Core\Paths.cpp" />
     <ClCompile Include="..\Source\Core\Profiler.cpp" />
     <ClCompile Include="..\Source\Core\RuntimeLog.cpp" />
     <ClCompile Include="..\Source\Core\Text.cpp" />

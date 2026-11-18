@@ -396,7 +396,7 @@ namespace Manifold::Tests
         Settings settings;
         Engine engine(settings);
         engine.Lua().Run("__manifoldHeadless = true", "headless");
-        const Status opened = engine.OpenProcess(::GetCurrentProcessId());
+        const Status opened = engine.OpenProcess(MakeProcessId(::GetCurrentProcessId()));
         CHECK_MSG(opened.Ok(), opened.Text);
         if (!opened)
             return Totals().Failures - before;

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Core/Errors.h"
+#include "Core/Handle.h"
+#include "Core/Types.h"
 
 #include <cstdint>
 #include <map>
@@ -11,8 +13,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-typedef void* HANDLE;
 
 namespace Manifold::Target
 {
@@ -48,8 +48,8 @@ namespace Manifold::Target
 
     struct ProcessEntry
     {
-        std::uint32_t Id = 0;
-        std::uint32_t ParentId = 0;
+        ProcessId Id = ProcessId::None;
+        ProcessId ParentId = ProcessId::None;
         std::string Name;
         std::string WindowTitle;
         std::wstring Path;
@@ -59,7 +59,7 @@ namespace Manifold::Target
     };
 
     std::vector<ProcessEntry> ListProcesses(bool withWindowTitles);
-    std::optional<std::uint32_t> FindProcessId(std::string_view name);
+    std::optional<ProcessId> FindProcessId(std::string_view name);
     bool IsElevated();
 
     using ModuleList = std::shared_ptr<const std::vector<ModuleInfo>>;
@@ -78,18 +78,18 @@ namespace Manifold::Target
     class Process
     {
     public:
-        static std::shared_ptr<Process> Open(std::uint32_t id, Status& status);
-        ~Process();
+        static Result<std::shared_ptr<Process>> Open(ProcessId id);
+        ~Process() = default;
 
         Process(const Process&) = delete;
         Process& operator=(const Process&) = delete;
 
-        std::uint32_t Id() const { return m_id; }
+        ProcessId Id() const { return m_id; }
         const std::string& Name() const { return m_name; }
         const std::wstring& Path() const { return m_path; }
         bool Is64Bit() const { return m_is64Bit; }
         int PointerSize() const { return m_is64Bit ? 8 : 4; }
-        HANDLE Handle() const { return m_handle; }
+        HANDLE Handle() const { return m_handle.Get(); }
         bool Alive() const;
         std::uint64_t LowestAddress() const { return 0x10000; }
         std::uint64_t HighestAddress() const { return m_highest; }
@@ -109,7 +109,7 @@ namespace Manifold::Target
         Status Write(std::uint64_t address, const void* data, std::size_t size) const;
         Status Write(std::uint64_t address, std::span<const std::uint8_t> bytes) const { return Write(address, bytes.data(), bytes.size()); }
 
-        std::uint64_t Allocate(std::size_t size, std::uint32_t protect, std::uint64_t nearAddress, Status& status) const;
+        Result<Address> Allocate(std::size_t size, std::uint32_t protect, Address nearAddress = 0) const;
         Status Free(std::uint64_t address) const;
         std::optional<std::uint32_t> Protect(std::uint64_t address, std::size_t size, std::uint32_t protect) const;
 
@@ -142,8 +142,8 @@ namespace Manifold::Target
         void DryOverlay(std::uint64_t address, std::uint8_t* out, std::size_t size) const;
         bool DryInsideAllocation(std::uint64_t address, std::size_t size) const;
 
-        std::uint32_t m_id = 0;
-        HANDLE m_handle = nullptr;
+        ProcessId m_id = ProcessId::None;
+        UniqueHandle m_handle;
         std::string m_name;
         std::wstring m_path;
         bool m_is64Bit = true;

@@ -1,11 +1,8 @@
 #pragma once
 
-#include <atomic>
-#include <condition_variable>
-#include <deque>
+#include "Core/BackgroundWork.h"
+
 #include <functional>
-#include <mutex>
-#include <thread>
 
 namespace Manifold
 {
@@ -15,26 +12,16 @@ namespace Manifold
         using Finish = std::function<void()>;
         using Job = std::function<Finish()>;
 
-        JobQueue();
-        ~JobQueue();
+        explicit JobQueue(BackgroundWork& work) : m_work(work) {}
 
         JobQueue(const JobQueue&) = delete;
         JobQueue& operator=(const JobQueue&) = delete;
 
         void Post(Job job);
-        void Drain();
         void Stop();
-        bool Busy() const { return m_pending.load() > 0; }
+        bool Busy() const;
 
     private:
-        void Work();
-
-        std::mutex m_lock;
-        std::condition_variable m_wake;
-        std::deque<Job> m_jobs;
-        std::deque<Finish> m_finished;
-        std::atomic<int> m_pending{ 0 };
-        bool m_stop = false;
-        std::thread m_thread;
+        BackgroundWork& m_work;
     };
 }

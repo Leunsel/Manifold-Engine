@@ -199,7 +199,7 @@ namespace Manifold::Lua
         void PushProcess(lua_State* state, const Target::Process& process)
         {
             lua_createtable(state, 0, 4);
-            SetInteger(state, "id", process.Id());
+            SetInteger(state, "id", Raw(process.Id()));
             SetString(state, "name", process.Name());
             SetString(state, "path", WideToUtf8(process.Path()));
             SetBoolean(state, "is64Bit", process.Is64Bit());
@@ -332,7 +332,7 @@ namespace Manifold::Lua
                 if (!name.empty() && !ContainsNoCase(entry.Name, name))
                     continue;
                 lua_createtable(state, 0, 5);
-                SetInteger(state, "id", entry.Id);
+                SetInteger(state, "id", Raw(entry.Id));
                 SetString(state, "name", entry.Name);
                 SetString(state, "path", WideToUtf8(entry.Path));
                 SetString(state, "windowTitle", entry.WindowTitle);

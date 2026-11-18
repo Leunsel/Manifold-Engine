@@ -2,6 +2,7 @@
 
 #include "App/Commands.h"
 #include "Core/Errors.h"
+#include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 
 #include <cstdio>
@@ -45,6 +46,7 @@ namespace Manifold::Tests
 
 int main(int argc, char** argv)
 {
+    Manifold::BindMainThread();
     std::filesystem::path target;
     bool assemblerOnly = false;
     bool allowSkips = false;

@@ -123,9 +123,9 @@ namespace Manifold::Tests
 
         std::uint64_t PlaceStill(Engine& engine, std::int32_t value)
         {
-            Status status;
-            const std::uint64_t page = engine.Process()->Allocate(4096, PAGE_READWRITE, 0, status);
-            CHECK_MSG(page != 0, status.Text);
+            const Result<Address> allocated = engine.Process()->Allocate(4096, PAGE_READWRITE);
+            CHECK_MSG(allocated.Ok(), allocated.Error().Text);
+            const std::uint64_t page = allocated.ValueOr(0);
             if (!page)
                 return 0;
             CHECK(engine.Process()->Write(page + 0x40, &value, sizeof(value)).Ok());
@@ -234,8 +234,7 @@ namespace Manifold::Tests
             CHECK_MSG(registered.Ok(), registered.Text);
             const Lua::CustomType* custom = engine.Lua().FindCustomType("Big endian test");
             CHECK(custom != nullptr);
-            Status allocated;
-            const std::uint64_t box = engine.Process()->Allocate(4096, PAGE_READWRITE, 0, allocated);
+            const std::uint64_t box = engine.Process()->Allocate(4096, PAGE_READWRITE).ValueOr(0);
             CHECK(box != 0);
             if (custom && box)
             {
@@ -283,31 +282,31 @@ namespace Manifold::Tests
             InitSysCalls();
             CHECK(OpenSysCall != 0 && ReadVmSysCall != 0 && WriteVmSysCall != 0 && AllocVmSysCall != 0);
 
-            Status missing;
-            CHECK(!Target::Process::Open(0xFFFFFFF0u, missing));
-            CHECK_MSG(missing.Code == ErrorCode::ProcessNotFound, missing.Text);
-            Status denied;
-            CHECK(!Target::Process::Open(4, denied));
-            CHECK_MSG(denied.Code == ErrorCode::ProcessAccessDenied, denied.Text);
+            const auto missing = Target::Process::Open(MakeProcessId(0xFFFFFFF0u));
+            CHECK(!missing);
+            CHECK_MSG(missing.Error().Code == ErrorCode::ProcessNotFound, missing.Error().Text);
+            const auto denied = Target::Process::Open(MakeProcessId(4));
+            CHECK(!denied);
+            CHECK_MSG(denied.Error().Code == ErrorCode::ProcessAccessDenied, denied.Error().Text);
 
-            Status opened;
-            const auto process = Target::Process::Open(id, opened);
-            CHECK_MSG(process != nullptr, opened.Text);
-            if (!process)
+            const auto opened = Target::Process::Open(MakeProcessId(id));
+            CHECK_MSG(opened.Ok(), opened.Error().Text);
+            if (!opened)
                 return;
+            const std::shared_ptr<Target::Process>& process = *opened;
             std::int32_t value = 0;
             CHECK(process->ReadExact(health, &value, sizeof(value)));
             CHECK(process->Write(health, &value, sizeof(value)).Ok());
             CHECK(!process->ReadExact(0x10, &value, sizeof(value)));
 
             ::SetLastError(ERROR_SUCCESS);
-            Status allocated;
-            CHECK(process->Allocate(std::size_t(1) << 46, PAGE_READWRITE, 0, allocated) == 0);
-            CHECK_MSG(allocated.Code == ErrorCode::AllocFailed && allocated.Text.find("completed successfully") == std::string::npos, allocated.Text);
+            const Result<Address> huge = process->Allocate(std::size_t(1) << 46, PAGE_READWRITE);
+            CHECK(!huge);
+            CHECK_MSG(huge.Error().Code == ErrorCode::AllocFailed && huge.Error().Text.find("completed successfully") == std::string::npos, huge.Error().Text);
 
-            Status small;
-            const std::uint64_t memory = process->Allocate(0x1000, PAGE_READWRITE, 0, small);
-            CHECK_MSG(memory != 0, small.Text);
+            const Result<Address> small = process->Allocate(0x1000, PAGE_READWRITE);
+            CHECK_MSG(small.Ok(), small.Error().Text);
+            const std::uint64_t memory = small.ValueOr(0);
             if (memory)
                 CHECK(process->Free(memory).Ok());
         }
@@ -332,7 +331,7 @@ namespace Manifold::Tests
         Settings settings;
         settings.ScanMapped = false;
         Engine engine(settings);
-        const Status opened = engine.OpenProcess(target.Info.dwProcessId);
+        const Status opened = engine.OpenProcess(MakeProcessId(target.Info.dwProcessId));
         CHECK_MSG(opened.Ok(), opened.Text);
         if (!opened)
             return Totals().Failures - before;
@@ -786,7 +785,7 @@ namespace Manifold::Tests
         }
 
         CHECK(engine.Symbols().Register("compatkeep", 0x1234, "test").Ok());
-        CHECK(engine.OpenProcess(target.Info.dwProcessId).Ok());
+        CHECK(engine.OpenProcess(MakeProcessId(target.Info.dwProcessId)).Ok());
         CHECK(engine.Symbols().FindRegistered("compatkeep").has_value());
         CHECK(engine.Process().get() == &process);
 
@@ -801,9 +800,9 @@ namespace Manifold::Tests
             SIZE_T done = 0;
             ::ReadProcessMemory(process.Handle(), reinterpret_cast<LPCVOID>(world), &raw, sizeof(raw), &done);
             CHECK_EQ(raw, stored.value_or(1));
-            Status allocated;
-            const std::uint64_t fake = process.Allocate(0x100, PAGE_EXECUTE_READWRITE, world, allocated);
-            CHECK(allocated.Ok() && fake != 0);
+            const Result<Address> allocated = process.Allocate(0x100, PAGE_EXECUTE_READWRITE, world);
+            CHECK(allocated.Ok());
+            const std::uint64_t fake = allocated.ValueOr(0);
             const auto region = process.RegionAt(fake);
             CHECK(!region || region->State != MEM_COMMIT);
             CHECK(process.Free(fake).Ok());

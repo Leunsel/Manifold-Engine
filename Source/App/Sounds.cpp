@@ -1,6 +1,7 @@
 #include "App/Sounds.h"
 
 #include "App/Settings.h"
+#include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 #include "Resource.h"
 
@@ -112,6 +113,7 @@ namespace Manifold::Sounds
 
         void LoadAll()
         {
+            SetThreadName(L"Sound loader");
             std::array<std::vector<std::uint8_t>, 2> loaded{ Load(Cue::Success), Load(Cue::Error) };
             std::lock_guard lock(g_lock);
             for (std::size_t i = 0; i < loaded.size(); ++i)

@@ -1,5 +1,6 @@
 #include "Debug/Debugger.h"
 
+#include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Debug/VehProtocol.h"
@@ -378,7 +379,7 @@ namespace Manifold::Debug
             LOG_ERROR("Debugger", status.Text);
             return status;
         }
-        LOG_SUCCESS("Debugger", "Attached to " + m_process->Name() + " (" + std::to_string(m_process->Id()) + ")");
+        LOG_SUCCESS("Debugger", "Attached to " + m_process->Name() + " (" + ToText(m_process->Id()) + ")");
         return status;
     }
 
@@ -1373,7 +1374,8 @@ namespace Manifold::Debug
 
     void Debugger::Loop(std::shared_ptr<std::promise<Status>> attached)
     {
-        const std::uint32_t id = m_process->Id();
+        SetThreadName(L"Debugger");
+        const std::uint32_t id = Raw(m_process->Id());
         if (!::DebugActiveProcess(id))
         {
             attached->set_value(Status::Fail(ErrorCode::DebugAttachFailed, ErrorText(::GetLastError())));
@@ -1888,10 +1890,10 @@ namespace Manifold::Debug
         if (!std::filesystem::exists(agent, ignore))
             return Status::Fail(ErrorCode::InjectFailed, "ManifoldAgent.dll was not found next to the program");
 
-        Status status;
-        const std::uint64_t block = m_process->Allocate(sizeof(Veh::Block), PAGE_READWRITE, 0, status);
-        if (!block)
-            return status;
+        const Result<Address> allocated = m_process->Allocate(sizeof(Veh::Block), PAGE_READWRITE);
+        if (!allocated)
+            return allocated.Error();
+        const std::uint64_t block = *allocated;
         auto shared = std::make_unique<Veh::Block>();
         std::memset(shared.get(), 0, sizeof(Veh::Block));
         shared->Magic = Veh::kMagic;
@@ -1951,7 +1953,7 @@ namespace Manifold::Debug
         m_attached = true;
         ++m_generation;
         m_vehThread = std::thread(&Debugger::VehPollLoop, this);
-        LOG_SUCCESS("Debugger", "In-process debugger running in " + m_process->Name() + " (" + std::to_string(m_process->Id()) + ")");
+        LOG_SUCCESS("Debugger", "In-process debugger running in " + m_process->Name() + " (" + ToText(m_process->Id()) + ")");
         return Status::Success();
     }
 
@@ -2063,6 +2065,7 @@ namespace Manifold::Debug
 
     void Debugger::VehPollLoop()
     {
+        SetThreadName(L"Debugger agent poll");
         struct Target
         {
             int Id;

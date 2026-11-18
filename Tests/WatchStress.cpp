@@ -69,7 +69,7 @@ namespace Manifold::Tests
         settings.UseInProcessDebugger = Flag(arguments, "--veh");
         Engine engine(settings);
         int result = 0;
-        const Status opened = engine.OpenProcess(info.dwProcessId);
+        const Status opened = engine.OpenProcess(MakeProcessId(info.dwProcessId));
         if (!opened)
         {
             std::printf("open failed: %s\n", opened.Text.c_str());

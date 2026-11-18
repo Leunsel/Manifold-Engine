@@ -334,7 +334,7 @@ namespace Manifold::UI
             Settings& settings = m_workspace.Core().Options();
             settings.ProfilerEnabled = true;
             Profiler::SetEnabled(true);
-            m_workspace.Report(settings.Save(Paths::SettingsFile()));
+            m_workspace.Core().SaveOptionsSoon();
             m_checkedAt = -100.0;
             break;
         }
