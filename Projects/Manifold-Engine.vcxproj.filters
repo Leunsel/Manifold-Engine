@@ -312,6 +312,9 @@
     <ClCompile Include="..\Source\Text\Highlight.cpp">
       <Filter>Source\Text</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Text\Json.cpp">
+      <Filter>Source\Text</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Text\LuaContext.cpp">
       <Filter>Source\Text</Filter>
     </ClCompile>
@@ -679,6 +682,9 @@
       <Filter>Source\Templates</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Text\Highlight.h">
+      <Filter>Source\Text</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Text\Json.h">
       <Filter>Source\Text</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Text\LuaContext.h">

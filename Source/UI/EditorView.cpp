@@ -556,7 +556,7 @@ namespace Manifold::UI
                     buffer.Outdent();
                     edit();
                 }
-                if (Pressed(Command::EditorToggleComment))
+                if (Pressed(Command::EditorToggleComment) && language != Language::Json)
                 {
                     buffer.ToggleComment(CommentPrefix(language));
                     edit();
@@ -631,7 +631,7 @@ namespace Manifold::UI
             if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Select all", "Ctrl+A"))
                 buffer.SelectAll();
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_COMMENT "  Comment lines", ShortcutText(Command::EditorToggleComment), false, editable))
+            if (ImGui::MenuItem(ICON_FA_COMMENT "  Comment lines", ShortcutText(Command::EditorToggleComment), false, editable && language != Language::Json))
             {
                 buffer.ToggleComment(CommentPrefix(language));
                 edited = true;

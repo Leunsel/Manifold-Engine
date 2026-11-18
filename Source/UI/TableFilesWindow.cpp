@@ -68,7 +68,7 @@ namespace Manifold::UI
                 return ICON_FA_FILE_IMAGE;
             if (extension == "wav" || extension == "mp3" || extension == "ogg")
                 return ICON_FA_FILE_AUDIO;
-            if (extension == "lua" || extension == "cea" || extension == "asm")
+            if (extension == "lua" || extension == "cea" || extension == "asm" || extension == "json")
                 return ICON_FA_FILE_CODE;
             if (extension == "zip" || extension == "7z" || extension == "rar")
                 return ICON_FA_FILE_ARCHIVE;
@@ -357,12 +357,38 @@ namespace Manifold::UI
                 m_text.assign(file->Data->begin(), file->Data->end());
                 m_textDirty = false;
                 m_editor = {};
+                m_jsonChecked = false;
+                m_jsonChangedAt = 0.0;
+                m_jsonProblem.reset();
             }
             const std::string extension = Extension(file->Name);
-            const Language language = extension == "lua" ? Language::Lua : (extension == "cea" || extension == "asm" ? Language::AutoAssembler : Language::Plain);
-            const float footer = ImGui::GetFrameHeight() + Px(8.0f);
+            const bool json = extension == "json" || (extension.empty() && Text::LooksLikeJson(m_text));
+            const Language language = json ? Language::Json : extension == "lua" ? Language::Lua : (extension == "cea" || extension == "asm" ? Language::AutoAssembler : Language::Plain);
+            const float footer = ImGui::GetFrameHeight() + Px(8.0f) + (json ? ImGui::GetTextLineHeightWithSpacing() : 0.0f);
             if (CodeEditor("##filetext", m_text, language, ImVec2(0.0f, ImGui::GetContentRegionAvail().y - footer), m_editor))
+            {
                 m_textDirty = true;
+                m_jsonChecked = false;
+                m_jsonChangedAt = ImGui::GetTime();
+            }
+            if (json && !m_jsonChecked && ImGui::GetTime() - m_jsonChangedAt > 0.25)
+            {
+                m_jsonProblem = Text::CheckJson(m_text);
+                m_jsonChecked = true;
+                m_editor.ErrorLine = m_jsonProblem ? m_jsonProblem->Line : 0;
+            }
+            if (json)
+            {
+                JsonStatus();
+                if (ImGui::Button(ICON_FA_ALIGN_LEFT "  Format"))
+                    ReformatJson(2);
+                ItemTooltip("Puts every value on its own line, indented two spaces per level. Strings and numbers stay exactly as they are.");
+                ImGui::SameLine();
+                if (ImGui::Button(ICON_FA_COMPRESS_ALT "  Compact"))
+                    ReformatJson(0);
+                ItemTooltip("Removes all spaces and line breaks between the values.");
+                ImGui::SameLine(0.0f, Px(14.0f));
+            }
             ImGui::BeginDisabled(!m_textDirty);
             if (AccentButton(ICON_FA_SAVE "  Save into the table"))
             {
@@ -423,5 +449,59 @@ namespace Manifold::UI
         }
         EndCard();
         EndToolWindow();
+    }
+
+    void TableFilesWindow::ReformatJson(int indent)
+    {
+        const Text::JsonFormatted formatted = Text::FormatJson(m_text, indent);
+        if (formatted.Problem)
+        {
+            m_jsonProblem = formatted.Problem;
+            m_jsonChecked = true;
+            m_editor.ErrorLine = formatted.Problem->Line;
+            ShowJsonProblem(*formatted.Problem);
+            return;
+        }
+        if (formatted.Text == m_text)
+            return;
+        Text::TextBuffer& buffer = m_editor.View.Buffer;
+        buffer.BreakUndoGroup();
+        buffer.Replace(0, buffer.Size(), formatted.Text);
+        buffer.BreakUndoGroup();
+        buffer.SetCaret(0, false);
+        m_editor.View.ScrollToCaret = true;
+        m_text = buffer.Text();
+        m_textDirty = true;
+        m_jsonProblem.reset();
+        m_jsonChecked = true;
+        m_editor.ErrorLine = 0;
+    }
+
+    void TableFilesWindow::ShowJsonProblem(const Text::JsonProblem& problem)
+    {
+        m_editor.View.Buffer.SetCaret(std::min(problem.Offset, m_editor.View.Buffer.Size()), false);
+        m_editor.View.ScrollToCaret = true;
+        m_editor.Focus = true;
+    }
+
+    void TableFilesWindow::JsonStatus()
+    {
+        if (!m_jsonChecked)
+        {
+            Muted("Checking the JSON...");
+            return;
+        }
+        if (!m_jsonProblem)
+        {
+            ImGui::TextColored(ManifoldTheme::Success, ICON_FA_CHECK_CIRCLE "  Valid JSON");
+            return;
+        }
+        const std::string text = ICON_FA_EXCLAMATION_TRIANGLE "  Line " + std::to_string(m_jsonProblem->Line) + ", column " + std::to_string(m_jsonProblem->Column) + ": " + m_jsonProblem->Message;
+        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Warning);
+        const bool clicked = ImGui::Selectable(text.c_str(), false, ImGuiSelectableFlags_None, ImVec2(ImGui::CalcTextSize(text.c_str()).x, 0.0f));
+        ImGui::PopStyleColor();
+        ItemTooltip("Not valid JSON. Click to put the cursor where the problem is.");
+        if (clicked)
+            ShowJsonProblem(*m_jsonProblem);
     }
 }

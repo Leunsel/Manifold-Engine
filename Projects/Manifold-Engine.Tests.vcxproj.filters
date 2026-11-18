@@ -297,6 +297,9 @@
     <ClCompile Include="..\Source\Text\Highlight.cpp">
       <Filter>Source\Text</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Text\Json.cpp">
+      <Filter>Source\Text</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Text\LuaContext.cpp">
       <Filter>Source\Text</Filter>
     </ClCompile>

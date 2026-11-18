@@ -1,6 +1,7 @@
 #include "TestKit.h"
 
 #include "Text/Highlight.h"
+#include "Text/Json.h"
 #include "Text/LuaContext.h"
 #include "Text/TextBuffer.h"
 
@@ -134,6 +135,72 @@ namespace Manifold::Tests
             CHECK(Has(pieces, "label", Token::Keyword));
 
             CHECK(Pieces(Language::Plain, "local x = 1").empty());
+        }
+
+        void JsonHighlight()
+        {
+            auto pieces = Pieces(Language::Json, "{\n  \"name\": \"Crab\",\n  \"level\": -12.5e3,\n  \"ok\": true, \"none\" : null\n}");
+            CHECK(Has(pieces, "\"name\"", Token::Label));
+            CHECK(Has(pieces, "\"Crab\"", Token::String));
+            CHECK(Has(pieces, "-12.5e3", Token::Number));
+            CHECK(Has(pieces, "true", Token::Keyword));
+            CHECK(Has(pieces, "\"none\"", Token::Label));
+            CHECK(Has(pieces, "null", Token::Keyword));
+            CHECK(!Covered(pieces, "{"));
+            CHECK(!Covered(pieces, ":"));
+
+            pieces = Pieces(Language::Json, "{\"a\\\"b\": [\"x\", 2]} // note\n/* one\ntwo */ [3]");
+            CHECK(Has(pieces, "\"a\\\"b\"", Token::Label));
+            CHECK(Has(pieces, "\"x\"", Token::String));
+            CHECK(Has(pieces, "2", Token::Number));
+            CHECK(Has(pieces, "// note", Token::Comment));
+            CHECK(Has(pieces, "/* one", Token::Comment));
+            CHECK(Has(pieces, "two */", Token::Comment));
+            CHECK(Has(pieces, "3", Token::Number));
+        }
+
+        void JsonFormat()
+        {
+            const Text::JsonFormatted pretty = Text::FormatJson("{\"a\":[1,2,{\"b\":\"x y\"}],\"c\":{},\"d\":[ ],\"e\":-0.5E+3}", 2);
+            CHECK(!pretty.Problem);
+            CHECK_EQ(pretty.Text, std::string("{\n  \"a\": [\n    1,\n    2,\n    {\n      \"b\": \"x y\"\n    }\n  ],\n  \"c\": {},\n  \"d\": [],\n  \"e\": -0.5E+3\n}"));
+            CHECK_EQ(Text::FormatJson(pretty.Text, 0).Text, std::string("{\"a\":[1,2,{\"b\":\"x y\"}],\"c\":{},\"d\":[],\"e\":-0.5E+3}"));
+            CHECK_EQ(Text::FormatJson("[1, 2]\r\n", 2).Text, std::string("[\r\n  1,\r\n  2\r\n]\r\n"));
+            CHECK_EQ(Text::FormatJson("\xEF\xBB\xBF{ }", 0).Text, std::string("\xEF\xBB\xBF{}"));
+            CHECK_EQ(Text::FormatJson("\"\\u00e9 \\n \\/\"", 2).Text, std::string("\"\\u00e9 \\n \\/\""));
+            CHECK_EQ(Text::FormatJson("[ 1.000000000000000000001 , 12345678901234567890 , \"\xC3\xA9\" ]", 0).Text,
+                std::string("[1.000000000000000000001,12345678901234567890,\"\xC3\xA9\"]"));
+            CHECK(!Text::CheckJson("[1,{\"a\":null,\"b\":false}]"));
+
+            const auto problem = [](std::string_view text, int line, int column, std::string_view needle)
+                {
+                    const std::optional<Text::JsonProblem> found = Text::CheckJson(text);
+                    CHECK_MSG(found && found->Line == line && found->Column == column && found->Message.find(needle) != std::string::npos,
+                        std::string(text) + " -> " + (found ? std::to_string(found->Line) + ":" + std::to_string(found->Column) + " " + found->Message : std::string("valid")));
+                    const Text::JsonFormatted formatted = Text::FormatJson(text, 2);
+                    CHECK(formatted.Problem.has_value() && formatted.Text.empty());
+                };
+            problem("{\n  \"a\": 1,\n  \"b\" 2\n}", 3, 7, "expected \":\"");
+            problem("[1, 2,]", 1, 7, "a comma before");
+            problem("{\"a\": 1 \"b\": 2}", 1, 9, "expected \",\" or \"}\"");
+            problem("{\"a\": 01}", 1, 8, "leading zero");
+            problem("{\"a\": tru}", 1, 7, "expected a value");
+            problem("{1: 2}", 1, 2, "a key in quotes");
+            problem("[1] 2", 1, 5, "more text");
+            problem("", 1, 1, "empty");
+            problem("{\"a\": \"x}", 1, 7, "not closed");
+            problem("[\"a\nb\"]", 1, 4, "not closed on its line");
+            problem("// c\n[1]", 1, 1, "no comments");
+            problem("[\"\\x\"]", 1, 3, "no JSON escape");
+            problem("[\"\\u12G4\"]", 1, 3, "four hex digits");
+            problem("[1.]", 1, 4, "decimal point");
+            problem("{\"\xC3\xA9\": x}", 1, 7, "expected a value");
+            problem(std::string(600, '[') + std::string(600, ']'), 1, 514, "deeper than 512");
+
+            CHECK(Text::LooksLikeJson("  \n[1]"));
+            CHECK(Text::LooksLikeJson("\xEF\xBB\xBF{}"));
+            CHECK(!Text::LooksLikeJson("local x = 1"));
+            CHECK(!Text::LooksLikeJson(""));
         }
 
         void Words()
@@ -522,6 +589,8 @@ namespace Manifold::Tests
         const int before = Totals().Failures;
         LuaHighlight();
         AaHighlight();
+        JsonHighlight();
+        JsonFormat();
         Words();
         Calls();
         Chains();

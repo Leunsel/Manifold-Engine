@@ -322,6 +322,79 @@ namespace Manifold::Text
         }
     }
 
+    namespace
+    {
+        bool IsJsonNumber(char c)
+        {
+            return IsDigit(c) || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-';
+        }
+
+        void JsonTokens(std::string_view line, LineState& state, Spans& out)
+        {
+            std::size_t i = 0;
+            while (i < line.size())
+            {
+                if (state.Kind == Block::Slash)
+                {
+                    const std::size_t end = line.find("*/", i);
+                    const std::size_t stop = end == npos ? line.size() : end + 2;
+                    out.Add(i, stop, Token::Comment);
+                    if (end != npos)
+                        state = { Block::None, 0 };
+                    i = stop;
+                    continue;
+                }
+                const char c = line[i];
+                if (c == '/' && i + 1 < line.size() && line[i + 1] == '/')
+                {
+                    out.Add(i, line.size(), Token::Comment);
+                    return;
+                }
+                if (c == '/' && i + 1 < line.size() && line[i + 1] == '*')
+                {
+                    out.Add(i, i + 2, Token::Comment);
+                    state = { Block::Slash, 0 };
+                    i += 2;
+                    continue;
+                }
+                if (c == '"')
+                {
+                    std::size_t end = i + 1;
+                    while (end < line.size() && line[end] != '"')
+                        end += line[end] == '\\' ? 2 : 1;
+                    end = std::min(end + 1, line.size());
+                    std::size_t after = end;
+                    while (after < line.size() && (line[after] == ' ' || line[after] == '\t'))
+                        ++after;
+                    out.Add(i, end, after < line.size() && line[after] == ':' ? Token::Label : Token::String);
+                    i = end;
+                    continue;
+                }
+                if (IsDigit(c) || (c == '-' && i + 1 < line.size() && IsDigit(line[i + 1])))
+                {
+                    std::size_t end = i + 1;
+                    while (end < line.size() && IsJsonNumber(line[end]))
+                        ++end;
+                    out.Add(i, end, Token::Number);
+                    i = end;
+                    continue;
+                }
+                if (IsAlpha(c))
+                {
+                    std::size_t end = i;
+                    while (end < line.size() && IsIdentifier(line[end]))
+                        ++end;
+                    const std::string_view word = line.substr(i, end - i);
+                    if (word == "true" || word == "false" || word == "null")
+                        out.Add(i, end, Token::Keyword);
+                    i = end;
+                    continue;
+                }
+                ++i;
+            }
+        }
+    }
+
     bool IsLuaKeyword(std::string_view word)
     {
         static const WordSet words(kLuaKeywords);
@@ -357,6 +430,10 @@ namespace Manifold::Text
         else if (language == Language::AutoAssembler)
         {
             AaTokens(line, state, out);
+        }
+        else if (language == Language::Json)
+        {
+            JsonTokens(line, state, out);
         }
     }
 

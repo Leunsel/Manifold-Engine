@@ -11,7 +11,8 @@ namespace Manifold::Text
     {
         AutoAssembler,
         Lua,
-        Plain
+        Plain,
+        Json
     };
 
     enum class Token : std::uint8_t

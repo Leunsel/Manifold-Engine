@@ -204,6 +204,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Templates\TemplateGenerator.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp" />
     <ClCompile Include="..\Source\Text\Highlight.cpp" />
+    <ClCompile Include="..\Source\Text\Json.cpp" />
     <ClCompile Include="..\Source\Text\LuaContext.cpp" />
     <ClCompile Include="..\Source\Text\TextBuffer.cpp" />
     <ClCompile Include="..\Source\UI\AddressActions.cpp" />
@@ -329,6 +330,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Templates\TemplateGenerator.h" />
     <ClInclude Include="..\Source\Templates\TemplateLibrary.h" />
     <ClInclude Include="..\Source\Text\Highlight.h" />
+    <ClInclude Include="..\Source\Text\Json.h" />
     <ClInclude Include="..\Source\Text\LuaContext.h" />
     <ClInclude Include="..\Source\Text\TextBuffer.h" />
     <ClInclude Include="..\Source\UI\AddressActions.h" />

@@ -7,6 +7,7 @@
 #include "Target/PatchScan.h"
 #include "Target/UnityExplorer.h"
 #include "Lua/LuaEngine.h"
+#include "Text/Json.h"
 #include "UI/AddressActions.h"
 #include "UI/BackgroundTask.h"
 #include "UI/CodeEditor.h"
@@ -739,6 +740,9 @@ namespace Manifold::UI
         void AddFiles(const std::vector<std::filesystem::path>& paths);
         void NewTextFile();
         void Export(const Table::TableFile& file);
+        void ReformatJson(int indent);
+        void ShowJsonProblem(const Text::JsonProblem& problem);
+        void JsonStatus();
 
         Workspace& m_workspace;
         bool m_open = true;
@@ -752,6 +756,9 @@ namespace Manifold::UI
         std::string m_textFor;
         bool m_textDirty = false;
         CodeEditorState m_editor;
+        bool m_jsonChecked = false;
+        double m_jsonChangedAt = 0.0;
+        std::optional<Text::JsonProblem> m_jsonProblem;
     };
 
     class RegionsWindow : public ToolWindow

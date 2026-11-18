@@ -190,6 +190,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Templates\TemplateGenerator.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp" />
     <ClCompile Include="..\Source\Text\Highlight.cpp" />
+    <ClCompile Include="..\Source\Text\Json.cpp" />
     <ClCompile Include="..\Source\Text\LuaContext.cpp" />
     <ClCompile Include="..\Source\Text\TextBuffer.cpp" />
     <ClCompile Include="..\Tests\AssemblerTests.cpp" />
