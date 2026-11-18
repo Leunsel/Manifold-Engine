@@ -24,8 +24,30 @@ namespace Manifold
         Leave
     };
 
+    enum class ThemeFamily
+    {
+        Standard,
+        Red,
+        Green,
+        Blue
+    };
+
+    enum class ThemeMode
+    {
+        Dark,
+        Light,
+        System
+    };
+
+    inline constexpr ThemeFamily kThemeFamilies[] = { ThemeFamily::Standard, ThemeFamily::Red, ThemeFamily::Green, ThemeFamily::Blue };
+
+    const char* ThemeFamilyKey(ThemeFamily family);
+    const char* ThemeModeKey(ThemeMode mode);
+
     struct ThemeSettings
     {
+        ThemeFamily Family = ThemeFamily::Standard;
+        ThemeMode Mode = ThemeMode::Dark;
         std::map<std::string, std::array<float, 4>> Colors;
         std::map<std::string, float> Sizes;
     };

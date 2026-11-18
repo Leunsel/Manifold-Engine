@@ -122,6 +122,27 @@ namespace Manifold
         }
     }
 
+    const char* ThemeFamilyKey(ThemeFamily family)
+    {
+        switch (family)
+        {
+        case ThemeFamily::Red: return "red";
+        case ThemeFamily::Green: return "green";
+        case ThemeFamily::Blue: return "blue";
+        default: return "standard";
+        }
+    }
+
+    const char* ThemeModeKey(ThemeMode mode)
+    {
+        switch (mode)
+        {
+        case ThemeMode::Light: return "light";
+        case ThemeMode::System: return "system";
+        default: return "dark";
+        }
+    }
+
     bool Settings::Load(const std::filesystem::path& path)
     {
         std::ifstream file(path, std::ios::binary);
@@ -223,6 +244,24 @@ namespace Manifold
         if (auto v = text("registersonbreak")) ShowRegistersOnBreak = ToBool(*v);
         if (auto v = text("showsymbols")) ShowSymbols = ToBool(*v);
         if (auto v = text("lastprocess")) LastProcess = *v;
+        Theme.Family = ThemeFamily::Standard;
+        Theme.Mode = ThemeMode::Dark;
+        if (auto v = text("palette"))
+        {
+            for (ThemeFamily family : kThemeFamilies)
+            {
+                if (EqualsNoCase(*v, ThemeFamilyKey(family)))
+                    Theme.Family = family;
+            }
+        }
+        if (auto v = text("appearance"))
+        {
+            for (ThemeMode mode : { ThemeMode::Dark, ThemeMode::Light, ThemeMode::System })
+            {
+                if (EqualsNoCase(*v, ThemeModeKey(mode)))
+                    Theme.Mode = mode;
+            }
+        }
         RecentTables.clear();
         for (std::size_t i = 0; i < kRecentTables; ++i)
         {
@@ -267,14 +306,12 @@ namespace Manifold
         out << "LastProcess=" << LastProcess << "\n";
         for (std::size_t i = 0; i < RecentTables.size() && i < kRecentTables; ++i)
             out << "Recent" << i << "=" << RecentTables[i] << "\n";
-        if (!Theme.Colors.empty() || !Theme.Sizes.empty())
-        {
-            out << "\n[Theme]\n";
-            for (const auto& [name, rgba] : Theme.Colors)
-                out << "Color." << name << "=" << rgba[0] << "," << rgba[1] << "," << rgba[2] << "," << rgba[3] << "\n";
-            for (const auto& [name, value] : Theme.Sizes)
-                out << "Size." << name << "=" << value << "\n";
-        }
+        out << "\n[Theme]\n";
+        out << "Palette=" << ThemeFamilyKey(Theme.Family) << "\nAppearance=" << ThemeModeKey(Theme.Mode) << "\n";
+        for (const auto& [name, rgba] : Theme.Colors)
+            out << "Color." << name << "=" << rgba[0] << "," << rgba[1] << "," << rgba[2] << "," << rgba[3] << "\n";
+        for (const auto& [name, value] : Theme.Sizes)
+            out << "Size." << name << "=" << value << "\n";
         if (NopSledBest > 0)
             out << "\n[Extras]\nNopSledBest=" << NopSledBest << "\n";
         if (!Shortcuts.empty())

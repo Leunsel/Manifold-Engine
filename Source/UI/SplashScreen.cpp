@@ -312,7 +312,7 @@ namespace Manifold::UI
                         const float py = static_cast<float>(y) + 0.5f;
                         const float distance = RoundedBox(px, py, centerX, centerY, halfWidth, halfHeight, radius);
                         const float shadowDistance = RoundedBox(px, py, centerX, centerY + shadowOffset, halfWidth, halfHeight, radius);
-                        const float shadow = 0.32f * std::pow(Clamp01(1.0f - std::max(shadowDistance, 0.0f) / blur), 2.2f);
+                        const float shadow = (ManifoldTheme::IsLight() ? 0.16f : 0.32f) * std::pow(Clamp01(1.0f - std::max(shadowDistance, 0.0f) / blur), 2.2f);
                         const float cover = Clamp01(0.5f - distance);
                         Rgb color = m_cardColor;
                         const float glowDistance = std::sqrt((px - glowX) * (px - glowX) + (py - glowY) * (py - glowY));

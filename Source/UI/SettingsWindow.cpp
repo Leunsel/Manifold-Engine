@@ -37,7 +37,7 @@ namespace Manifold::UI
 
         constexpr PageInfo kPages[] = {
             { ICON_FA_SLIDERS_H, "General", "Layout, refresh rates and the program itself." },
-            { ICON_FA_PALETTE, "Appearance", "Accent, colors, sizes and spacing. Changes show at once." },
+            { ICON_FA_PALETTE, "Appearance", "Theme, light or dark, accent, colors and sizes. Changes show at once." },
             { ICON_FA_SEARCH, "Scanner", "The scan options start with these values each time the program opens." },
             { ICON_FA_SCROLL, "Scripts", "Lua at start, scripts inside tables and opening processes by name." },
             { ICON_FA_BUG, "Debugger", "Breakpoints, the in-process debugger and the log." },
@@ -52,7 +52,7 @@ namespace Manifold::UI
         };
 
         const AccentPreset kAccents[] = {
-            { "Mint", ManifoldTheme::DefaultAccent },
+            { "Theme", ImVec4(0.0f, 0.0f, 0.0f, 0.0f) },
             { "Sky", ImVec4(0.36f, 0.68f, 0.98f, 1.0f) },
             { "Violet", ImVec4(0.67f, 0.54f, 0.98f, 1.0f) },
             { "Rose", ImVec4(0.96f, 0.46f, 0.64f, 1.0f) },
@@ -63,8 +63,10 @@ namespace Manifold::UI
         };
 
         const char* const kAccentColors[] = { "Accent", "AccentHovered" };
-        const char* const kSurfaceColors[] = { "Page", "Sidebar", "Card", "CardBorder", "Surface", "Frame", "Button", "Popup", "TitleBar", "Border", "RowSeparator" };
-        const char* const kTextColors[] = { "Text", "Label", "Muted", "Warning", "Error", "Changed" };
+        const char* const kSurfaceColors[] = { "Page", "Sidebar", "Card", "CardBorder", "Surface", "Frame", "Button", "Popup", "TitleBar", "Border", "RowSeparator", "Shadow" };
+        const char* const kTextColors[] = { "Text", "Label", "Muted", "Success", "Warning", "Error", "Changed" };
+
+        constexpr ThemeMode kModes[] = { ThemeMode::Light, ThemeMode::Dark, ThemeMode::System };
         const char* const kCodeColors[] = { "AddressText", "BytesText", "CodeKeyword", "CodeRegister", "CodeNumber", "CodeString", "CodeComment", "CodeSection",
             "CodeLabel", "FlowJump", "FlowCall", "FlowReturn", "Breakpoint", "CurrentLine" };
 
@@ -78,6 +80,96 @@ namespace Manifold::UI
         ImVec4 Lighter(ImVec4 color, float amount)
         {
             return ImVec4(std::min(1.0f, color.x + amount), std::min(1.0f, color.y + amount), std::min(1.0f, color.z + amount), color.w);
+        }
+
+        ImVec4 Deeper(ImVec4 color, float saturation, float value)
+        {
+            float h = 0.0f;
+            float s = 0.0f;
+            float v = 0.0f;
+            ImGui::ColorConvertRGBtoHSV(color.x, color.y, color.z, h, s, v);
+            ImVec4 result = color;
+            ImGui::ColorConvertHSVtoRGB(h, std::min(1.0f, s * saturation + 0.1f), v * value, result.x, result.y, result.z);
+            return result;
+        }
+
+        ImVec4 PresetAccent(int index, bool light)
+        {
+            if (index == 0)
+                return ManifoldTheme::PaletteOf(ManifoldTheme::CurrentFamily(), light).Accent;
+            const ImVec4 color = kAccents[index].Color;
+            return light ? Deeper(color, 1.25f, 0.68f) : color;
+        }
+
+        ImVec4 PresetHovered(ImVec4 accent, bool light)
+        {
+            return light ? ImVec4(accent.x * 0.88f, accent.y * 0.88f, accent.z * 0.88f, accent.w) : Lighter(accent, 0.08f);
+        }
+
+        bool OwnColors(const ThemeSettings& theme)
+        {
+            return std::any_of(theme.Colors.begin(), theme.Colors.end(), [](const auto& entry) { return ManifoldTheme::BelongsToCurrent(entry.first); });
+        }
+
+        void ResetOwnColors(ThemeSettings& theme)
+        {
+            for (auto it = theme.Colors.begin(); it != theme.Colors.end();)
+                it = ManifoldTheme::BelongsToCurrent(it->first) ? theme.Colors.erase(it) : std::next(it);
+            theme.Sizes.clear();
+        }
+
+        bool ThemeCard(ThemeFamily family, bool selected, bool light, float width, float height)
+        {
+            const ManifoldTheme::Palette& palette = ManifoldTheme::PaletteOf(family, light);
+            const char* label = ManifoldTheme::FamilyLabel(family);
+            const float labelHeight = ImGui::GetTextLineHeight() + Px(8.0f);
+            const ImVec2 pos = ImGui::GetCursorScreenPos();
+            const bool clicked = ImGui::InvisibleButton(label, ImVec2(width, height + labelHeight));
+            const bool hovered = ImGui::IsItemHovered();
+            ItemTooltip((std::string(label) + (light ? ", light" : ", dark")).c_str());
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            const auto color = [](ImVec4 value) { return ImGui::GetColorU32(value); };
+            const float rounding = Px(7.0f);
+            const ImVec2 max(pos.x + width, pos.y + height);
+            draw->AddRectFilled(pos, max, color(palette.Page), rounding);
+
+            const float sidebar = std::round(width * 0.24f);
+            draw->AddRectFilled(pos, ImVec2(pos.x + sidebar, max.y), color(palette.Sidebar), rounding, ImDrawFlags_RoundCornersLeft);
+            const float bar = std::max(2.0f, std::round(Px(3.0f)));
+            const float navLeft = pos.x + Px(6.0f);
+            const float navRight = pos.x + sidebar - Px(6.0f);
+            for (int i = 0; i < 4; ++i)
+            {
+                const float y = std::round(pos.y + Px(10.0f) + static_cast<float>(i) * Px(9.0f));
+                draw->AddRectFilled(ImVec2(navLeft, y), ImVec2(i == 0 ? navRight : navRight - Px(4.0f), y + bar), color(i == 0 ? palette.Accent : ManifoldTheme::WithAlpha(palette.Muted, 0.65f)), bar);
+            }
+
+            const ImVec2 cardMin(pos.x + sidebar + Px(7.0f), pos.y + Px(8.0f));
+            const ImVec2 cardMax(max.x - Px(7.0f), max.y - Px(8.0f));
+            draw->AddRectFilled(cardMin, cardMax, color(palette.Card), Px(4.0f));
+            draw->AddRect(cardMin, cardMax, color(palette.CardBorder), Px(4.0f));
+            const float inner = cardMax.x - cardMin.x - Px(12.0f);
+            const float left = cardMin.x + Px(6.0f);
+            const auto line = [&](int row, float from, float to, ImVec4 tint) {
+                const float y = std::round(cardMin.y + Px(7.0f) + static_cast<float>(row) * Px(8.0f));
+                draw->AddRectFilled(ImVec2(std::round(left + inner * from), y), ImVec2(std::round(left + inner * to), y + bar), color(tint), bar);
+            };
+            line(0, 0.0f, 0.62f, palette.Text);
+            line(1, 0.0f, 0.30f, palette.AddressText);
+            line(1, 0.38f, 0.58f, palette.Changed);
+            line(2, 0.0f, 0.30f, palette.AddressText);
+            line(2, 0.38f, 0.66f, palette.Label);
+            line(3, 0.0f, 0.46f, palette.Muted);
+            const float pillTop = std::round(cardMax.y - Px(6.0f) - Px(8.0f));
+            if (pillTop > cardMin.y + Px(36.0f))
+                draw->AddRectFilled(ImVec2(cardMax.x - Px(6.0f) - inner * 0.34f, pillTop), ImVec2(cardMax.x - Px(6.0f), pillTop + Px(8.0f)), color(palette.Accent), Px(4.0f));
+
+            const ImVec4 ring = selected ? ManifoldTheme::Accent : hovered ? ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.35f) : ManifoldTheme::Border;
+            draw->AddRect(ImVec2(pos.x - 0.5f, pos.y - 0.5f), ImVec2(max.x + 0.5f, max.y + 0.5f), color(ring), rounding, 0, selected ? Px(2.0f) : Px(1.0f));
+            const ImVec2 text = ImGui::CalcTextSize(label);
+            draw->AddText(ImVec2(std::round(pos.x + (width - text.x) * 0.5f), std::round(max.y + Px(5.0f))),
+                color(selected ? ManifoldTheme::Text : hovered ? ManifoldTheme::Label : ManifoldTheme::Muted), label);
+            return clicked;
         }
 
         bool SameColor(ImVec4 a, ImVec4 b)
@@ -426,7 +518,7 @@ namespace Manifold::UI
         if (m_themeReset)
         {
             m_themeReset = false;
-            settings.Theme = {};
+            ResetOwnColors(settings.Theme);
             themeEdited = true;
         }
         if (m_shortcutsReset)
@@ -439,7 +531,7 @@ namespace Manifold::UI
         }
         if (themeEdited)
         {
-            ManifoldTheme::Configure(settings.Theme.Colors, settings.Theme.Sizes);
+            ManifoldTheme::Configure(settings.Theme);
             m_workspace.RequestRestyle();
             m_themeSaveAt = ImGui::GetTime() + 0.6;
         }
@@ -614,11 +706,11 @@ namespace Manifold::UI
             const char* label = ICON_FA_UNDO "  Reset theme";
             const float width = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
             ImGui::SetCursorScreenPos(ImVec2(right - width, std::round(pos.y + (badge - ImGui::GetFrameHeight()) * 0.5f)));
-            ImGui::BeginDisabled(settings.Theme.Colors.empty() && settings.Theme.Sizes.empty());
+            ImGui::BeginDisabled(!OwnColors(settings.Theme) && settings.Theme.Sizes.empty());
             if (ImGui::Button(label))
                 m_themeReset = true;
             ImGui::EndDisabled();
-            ItemTooltip("Back to the default colors and sizes");
+            ItemTooltip("Back to this theme's own colors and the default sizes; theme and mode stay");
         }
         if (m_page == KeyboardPage)
         {
@@ -866,6 +958,46 @@ namespace Manifold::UI
         const float gap = std::round(Px(6.0f));
         const float colorControl = frame * 2.0f + gap;
         const int columns = ImGui::GetContentRegionAvail().x >= Px(560.0f) ? 2 : 1;
+        const std::string prefix = ManifoldTheme::CurrentPrefix();
+        const bool light = ManifoldTheme::IsLight();
+
+        list.Section("Theme");
+        if (list.Row("Theme", "Standard, or the same look tinted red, green or blue. Color changes further down belong to the theme and mode shown.", -1.0f))
+        {
+            const float space = std::round(Px(12.0f));
+            const float width = std::floor(std::min(Px(150.0f), (list.ControlWidth() - space * 3.0f) / 4.0f));
+            const float height = std::round(width * 0.62f);
+            const ImVec2 start = ImGui::GetCursorScreenPos();
+            for (int i = 0; i < static_cast<int>(std::size(kThemeFamilies)); ++i)
+            {
+                const ThemeFamily family = kThemeFamilies[i];
+                ImGui::SetCursorScreenPos(ImVec2(start.x + static_cast<float>(i) * (width + space), start.y));
+                if (ThemeCard(family, theme.Family == family, light, width, height) && theme.Family != family)
+                {
+                    theme.Family = family;
+                    edited = true;
+                }
+            }
+            list.EndRow();
+        }
+        const float modeWidth = std::round(Px(250.0f));
+        const std::string modeText = std::string("System follows the app mode set in Windows and switches along with it. Windows is set to ") +
+            (ManifoldTheme::SystemLight() ? "light" : "dark") + " right now.";
+        if (list.Row("Mode", modeText, modeWidth))
+        {
+            int mode = 0;
+            for (int i = 0; i < static_cast<int>(std::size(kModes)); ++i)
+            {
+                if (kModes[i] == theme.Mode)
+                    mode = i;
+            }
+            if (Segmented("##mode", &mode, { "Light", "Dark", "System" }, modeWidth))
+            {
+                theme.Mode = kModes[mode];
+                edited = true;
+            }
+            list.EndRow();
+        }
 
         const auto colorCell = [&](const std::string& key, const char* label, ImVec4 current) {
             if (!list.Row(label, {}, colorControl))
@@ -890,7 +1022,7 @@ namespace Manifold::UI
             for (std::size_t i = 0; i < count; ++i)
             {
                 if (const ManifoldTheme::PaletteColor* color = FindPalette(names[i]))
-                    colorCell(color->Name, color->Label, *color->Value);
+                    colorCell(prefix + color->Name, color->Label, *color->Value);
             }
         };
 
@@ -904,27 +1036,28 @@ namespace Manifold::UI
             for (int i = 0; i < static_cast<int>(std::size(kAccents)); ++i)
             {
                 const AccentPreset& preset = kAccents[i];
+                const ImVec4 shown = PresetAccent(i, light);
                 const ImVec2 pos(start.x + static_cast<float>(i) * (dot + gap), start.y + std::round((frame - dot) * 0.5f));
                 ImGui::SetCursorScreenPos(pos);
                 ImGui::PushID(i);
                 if (ImGui::InvisibleButton("##preset", ImVec2(dot, dot)))
                 {
-                    Erase(theme.Colors, "Accent");
-                    Erase(theme.Colors, "AccentHovered");
+                    Erase(theme.Colors, prefix + "Accent");
+                    Erase(theme.Colors, prefix + "AccentHovered");
                     if (i > 0)
                     {
-                        const ImVec4 hovered = Lighter(preset.Color, 0.08f);
-                        theme.Colors["Accent"] = { preset.Color.x, preset.Color.y, preset.Color.z, 1.0f };
-                        theme.Colors["AccentHovered"] = { hovered.x, hovered.y, hovered.z, 1.0f };
+                        const ImVec4 hovered = PresetHovered(shown, light);
+                        theme.Colors[prefix + "Accent"] = { shown.x, shown.y, shown.z, 1.0f };
+                        theme.Colors[prefix + "AccentHovered"] = { hovered.x, hovered.y, hovered.z, 1.0f };
                     }
                     edited = true;
                 }
-                ItemTooltip(preset.Name);
+                ItemTooltip(i == 0 ? (std::string(ManifoldTheme::FamilyLabel(theme.Family)) + " theme's own").c_str() : preset.Name);
                 const bool hovered = ImGui::IsItemHovered();
                 ImGui::PopID();
                 const ImVec2 center(pos.x + dot * 0.5f, pos.y + dot * 0.5f);
-                draw->AddCircleFilled(center, dot * 0.5f - Px(2.0f), ImGui::GetColorU32(preset.Color), 32);
-                if (SameColor(ManifoldTheme::Accent, preset.Color))
+                draw->AddCircleFilled(center, dot * 0.5f - Px(2.0f), ImGui::GetColorU32(shown), 32);
+                if (SameColor(ManifoldTheme::Accent, shown))
                     draw->AddCircle(center, dot * 0.5f, ImGui::GetColorU32(ManifoldTheme::Text), 32, Px(1.5f));
                 else if (hovered)
                     draw->AddCircle(center, dot * 0.5f, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.4f)), 32, Px(1.0f));
@@ -984,7 +1117,7 @@ namespace Manifold::UI
             list.Section("ImGui colors", columns);
             const ImGuiStyle& style = ImGui::GetStyle();
             for (int i = 0; i < ImGuiCol_COUNT; ++i)
-                colorCell(std::string("ImGui.") + ImGui::GetStyleColorName(i), ImGui::GetStyleColorName(i), style.Colors[i]);
+                colorCell(prefix + "ImGui." + ImGui::GetStyleColorName(i), ImGui::GetStyleColorName(i), style.Colors[i]);
         }
         return edited;
     }

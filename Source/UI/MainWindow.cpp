@@ -135,10 +135,11 @@ namespace Manifold::UI
             const bool hovered = ImGui::IsItemHovered();
             ImDrawList* drawList = ImGui::GetWindowDrawList();
             if (hovered)
-                drawList->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + height), danger ? IM_COL32(196, 43, 28, 255) : IM_COL32(255, 255, 255, 18));
+                drawList->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + height), danger ? IM_COL32(196, 43, 28, 255) : ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.07f)));
             const ImVec2 size = ImGui::CalcTextSize(icon);
-            drawList->AddText(ImVec2(std::round(pos.x + (width - size.x) * 0.5f), std::round(pos.y + (height - size.y) * 0.5f)),
-                hovered ? IM_COL32(240, 240, 240, 255) : IM_COL32(150, 154, 160, 255), icon);
+            const ImU32 iconColor = hovered && danger ? IM_COL32(255, 255, 255, 255)
+                : ImGui::GetColorU32(hovered ? ManifoldTheme::Text : ManifoldTheme::Mix(ManifoldTheme::Muted, ManifoldTheme::Text, 0.2f));
+            drawList->AddText(ImVec2(std::round(pos.x + (width - size.x) * 0.5f), std::round(pos.y + (height - size.y) * 0.5f)), iconColor, icon);
             return clicked;
         }
     }
@@ -2729,10 +2730,11 @@ namespace Manifold::UI
         ImGui::PopClipRect();
 
         return [draw = ImGui::GetWindowDrawList(), clip = table->InnerClipRect, min, max, fillColor = ImGui::GetColorU32(fill),
-                   borderColor = ImGui::GetColorU32(ManifoldTheme::Border), line = Px(1.0f), shadow = Px(6.0f), pieces = std::move(pieces), borders = std::move(borders)]()
+                   borderColor = ImGui::GetColorU32(ManifoldTheme::Border), shade = ImGui::GetColorU32(ManifoldTheme::Shadow), fade = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Shadow, 0.0f)),
+                   line = Px(1.0f), shadow = Px(6.0f), pieces = std::move(pieces), borders = std::move(borders)]()
             {
                 draw->PushClipRect(clip.Min, clip.Max, false);
-                draw->AddRectFilledMultiColor(ImVec2(min.x, max.y), ImVec2(max.x, max.y + shadow), IM_COL32(0, 0, 0, 70), IM_COL32(0, 0, 0, 70), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0));
+                draw->AddRectFilledMultiColor(ImVec2(min.x, max.y), ImVec2(max.x, max.y + shadow), shade, shade, fade, fade);
                 draw->AddRectFilled(min, max, fillColor);
                 for (const Border& border : borders)
                     draw->AddLineV(border.X, min.y, max.y, border.Color, 1.0f);

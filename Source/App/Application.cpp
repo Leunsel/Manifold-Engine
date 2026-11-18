@@ -57,13 +57,25 @@ namespace Manifold
             return (ticks(now) - ticks(created)) / 10000ull;
         }
 
+        constexpr const wchar_t* kPersonalizeKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
+
+        bool SystemUsesLightTheme()
+        {
+            DWORD value = 0;
+            DWORD size = sizeof(value);
+            if (::RegGetValueW(HKEY_CURRENT_USER, kPersonalizeKey, L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size) != ERROR_SUCCESS)
+                return false;
+            return value != 0;
+        }
+
         Settings LoadSettings()
         {
             Settings settings;
             settings.Load(Paths::SettingsFile());
             for (std::string& recent : settings.RecentTables)
                 recent = Paths::CurrentTablePath(recent, Paths::ProgramFolder());
-            ManifoldTheme::Configure(settings.Theme.Colors, settings.Theme.Sizes);
+            ManifoldTheme::SetSystemLight(SystemUsesLightTheme());
+            ManifoldTheme::Configure(settings.Theme);
             ApplyShortcutSettings(settings.Shortcuts);
             return settings;
         }
@@ -72,10 +84,15 @@ namespace Manifold
     Application::Application(StartOptions options) : m_options(std::move(options)), m_settings(LoadSettings()), m_host(*this, HostSetup())
     {
         RuntimeLog::SetVerbose(m_settings.VerboseLog);
+        WatchSystemTheme();
     }
 
     Application::~Application()
     {
+        if (m_themeEvent)
+            ::CloseHandle(m_themeEvent);
+        if (m_personalizeKey)
+            ::RegCloseKey(m_personalizeKey);
         m_splash.reset();
         UI::RemoveLuaDialogs();
         m_dialogs.reset();
@@ -190,6 +207,8 @@ namespace Manifold
                 m_workspace->OpenShortcuts();
             else if (window == "keyboard")
                 m_workspace->OpenSettings(UI::SettingsWindow::KeyboardPage);
+            else if (window == "appearance")
+                m_workspace->OpenSettings(UI::SettingsWindow::ThemePage);
             else if (window == "processes")
                 m_workspace->OpenProcessPicker();
             else if (window == "about")
@@ -257,8 +276,57 @@ namespace Manifold
         LOG_INFO("Program", Format("The main window appeared %llu ms after the start", MillisecondsSinceStart()));
     }
 
+    void Application::Restyle()
+    {
+        ManifoldTheme::Configure(m_settings.Theme);
+        m_host.Restyle();
+    }
+
+    void Application::WatchSystemTheme()
+    {
+        if (::RegOpenKeyExW(HKEY_CURRENT_USER, kPersonalizeKey, 0, KEY_NOTIFY | KEY_QUERY_VALUE, &m_personalizeKey) != ERROR_SUCCESS)
+        {
+            m_personalizeKey = nullptr;
+            return;
+        }
+        m_themeEvent = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!m_themeEvent || ::RegNotifyChangeKeyValue(m_personalizeKey, FALSE, REG_NOTIFY_CHANGE_LAST_SET, m_themeEvent, TRUE) != ERROR_SUCCESS)
+        {
+            if (m_themeEvent)
+                ::CloseHandle(m_themeEvent);
+            m_themeEvent = nullptr;
+        }
+    }
+
+    bool Application::HandleMessage(UINT msg, WPARAM, LPARAM lp, LRESULT&)
+    {
+        if (msg == WM_SETTINGCHANGE && lp && ::lstrcmpiW(reinterpret_cast<const wchar_t*>(lp), L"ImmersiveColorScheme") == 0)
+            m_systemThemeChanged = true;
+        return false;
+    }
+
+    void Application::FollowSystemTheme()
+    {
+        if (m_themeEvent && ::WaitForSingleObject(m_themeEvent, 0) == WAIT_OBJECT_0)
+        {
+            m_systemThemeChanged = true;
+            ::RegNotifyChangeKeyValue(m_personalizeKey, FALSE, REG_NOTIFY_CHANGE_LAST_SET, m_themeEvent, TRUE);
+        }
+        if (!m_systemThemeChanged)
+            return;
+        m_systemThemeChanged = false;
+        const bool light = SystemUsesLightTheme();
+        if (light == ManifoldTheme::SystemLight())
+            return;
+        ManifoldTheme::SetSystemLight(light);
+        LOG_INFO("Program", std::string("Windows switched apps to ") + (light ? "light" : "dark") + " mode");
+        if (m_settings.Theme.Mode == ThemeMode::System)
+            Restyle();
+    }
+
     void Application::BeforeFrame()
     {
+        FollowSystemTheme();
         if (m_host.Cloaked() && m_firstFrameReady && (!m_splash || ::GetTickCount64() - m_splashSince >= kSplashMilliseconds))
             m_host.RequestReveal();
         if (m_splash && m_splash->Finished())

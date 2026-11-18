@@ -1099,7 +1099,7 @@ namespace Manifold::UI
             else if (line.Address >= selectionLow && line.Address <= selectionHigh)
                 drawList->AddRectFilled(rowMin, rowMax, ImGui::GetColorU32(ManifoldTheme::CurrentLine));
             else if (static_cast<int>(i) == hoveredRow)
-                drawList->AddRectFilled(rowMin, rowMax, IM_COL32(255, 255, 255, 8));
+                drawList->AddRectFilled(rowMin, rowMax, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.03f)));
 
             const bool hasBreakpoint = std::any_of(breakpoints.begin(), breakpoints.end(), [&](const Debug::Breakpoint& breakpoint) { return breakpoint.Address == line.Address; });
             const float textY = y + Px(1.5f);

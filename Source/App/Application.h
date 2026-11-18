@@ -46,10 +46,13 @@ namespace Manifold
         float CornerRadius() const override { return m_host.CornerRadius(); }
         void* NativeWindow() const override { return m_host.Window(); }
         void RestartElevated() override;
-        void Restyle() override { m_host.Restyle(); }
+        void Restyle() override;
 
     private:
         void BeforeFrame() override;
+        bool HandleMessage(UINT msg, WPARAM wp, LPARAM lp, LRESULT& result) override;
+        void WatchSystemTheme();
+        void FollowSystemTheme();
         void DrawFrame() override;
         void FirstFrameReady() override;
         void Revealed() override;
@@ -73,5 +76,8 @@ namespace Manifold
         bool m_started = false;
         int m_frames = 0;
         unsigned long long m_profileUntil = 0;
+        HKEY m_personalizeKey = nullptr;
+        HANDLE m_themeEvent = nullptr;
+        bool m_systemThemeChanged = false;
     };
 }

@@ -57,6 +57,7 @@ namespace Manifold
         UINT g_frameLatency = 0;
 
         constexpr ULONGLONG kToolWindowRefreshMilliseconds = 1000;
+        constexpr DWORD kUseImmersiveDarkMode = 20;
 
         struct ToolWindowFrame
         {
@@ -248,6 +249,15 @@ namespace Manifold
             return collapsed.empty() ? std::string("Manifold Engine") : collapsed;
         }
 
+        void MatchViewportChrome(ImGuiViewport* viewport)
+        {
+            HWND hwnd = static_cast<HWND>(viewport->PlatformHandleRaw);
+            if (!hwnd)
+                return;
+            const BOOL dark = ManifoldTheme::IsLight() ? FALSE : TRUE;
+            ::DwmSetWindowAttribute(hwnd, kUseImmersiveDarkMode, &dark, sizeof(dark));
+        }
+
         void CreateViewportWindow(ImGuiViewport* viewport)
         {
             PROFILE_ZONE("Create a tool window");
@@ -255,6 +265,7 @@ namespace Manifold
             HWND hwnd = static_cast<HWND>(viewport->PlatformHandleRaw);
             if (!hwnd)
                 return;
+            MatchViewportChrome(viewport);
             if (g_viewportIcon)
                 ::SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(g_viewportIcon));
             if (g_viewportIconSmall)
@@ -268,7 +279,6 @@ namespace Manifold
 
         constexpr DWORD kWindowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME | WS_CLIPCHILDREN;
 
-        constexpr DWORD kUseImmersiveDarkMode = 20;
         constexpr DWORD kWindowCornerPreference = 33;
         constexpr DWORD kBorderColor = 34;
         constexpr DWORD kCornerRound = 2;
@@ -535,7 +545,7 @@ namespace Manifold
 
     void WindowHost::ApplyWindowChrome()
     {
-        const BOOL dark = TRUE;
+        const BOOL dark = ManifoldTheme::IsLight() ? FALSE : TRUE;
         ::DwmSetWindowAttribute(m_hwnd, kUseImmersiveDarkMode, &dark, sizeof(dark));
         const DWORD corner = kCornerRound;
         m_roundedCorners = SUCCEEDED(::DwmSetWindowAttribute(m_hwnd, kWindowCornerPreference, &corner, sizeof(corner)));
@@ -671,12 +681,23 @@ namespace Manifold
         if (!m_baseStyle)
             return;
         ImGuiStyle style;
-        ImGui::StyleColorsDark(&style);
+        if (ManifoldTheme::IsLight())
+            ImGui::StyleColorsLight(&style);
+        else
+            ImGui::StyleColorsDark(&style);
         ManifoldTheme::Apply(style);
         style.WindowRounding = 0.0f;
         style.Colors[ImGuiCol_WindowBg].w = 1.0f;
         *static_cast<ImGuiStyle*>(m_baseStyle) = style;
         RescaleForDpi(m_dpi);
+        if (m_hwnd)
+            ApplyWindowChrome();
+        if (m_imgui)
+        {
+            const ImGuiPlatformIO& platform = ImGui::GetPlatformIO(m_imgui);
+            for (int i = 1; i < platform.Viewports.Size; ++i)
+                MatchViewportChrome(platform.Viewports[i]);
+        }
     }
 
     void WindowHost::ApplyPendingResize()

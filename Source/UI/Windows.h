@@ -590,6 +590,7 @@ namespace Manifold::UI
     class SettingsWindow : public ToolWindow
     {
     public:
+        static constexpr int ThemePage = 1;
         static constexpr int KeyboardPage = 5;
 
         explicit SettingsWindow(Workspace& workspace);

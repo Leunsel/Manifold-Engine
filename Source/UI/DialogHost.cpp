@@ -113,8 +113,6 @@ namespace Manifold::UI
         m_window = ::CreateWindowExW(0, kClassName, L"", WS_POPUP, 0, 0, 100, static_cast<int>(kStartHeight), m_owner, nullptr, instance, this);
         if (!m_window)
             return false;
-        const BOOL dark = TRUE;
-        ::DwmSetWindowAttribute(m_window, kUseImmersiveDarkMode, &dark, sizeof(dark));
         const DWORD corner = kCornerRound;
         ::DwmSetWindowAttribute(m_window, kWindowCornerPreference, &corner, sizeof(corner));
 
@@ -264,6 +262,8 @@ namespace Manifold::UI
         }
         m_running = true;
         m_closeRequested = false;
+        const BOOL dark = ManifoldTheme::IsLight() ? FALSE : TRUE;
+        ::DwmSetWindowAttribute(m_window, kUseImmersiveDarkMode, &dark, sizeof(dark));
 
         const ImGuiStyle style = ImGui::GetStyle();
         ImFont* font = ImGui::GetIO().FontDefault;

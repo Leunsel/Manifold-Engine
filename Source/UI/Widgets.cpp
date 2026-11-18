@@ -1277,7 +1277,7 @@ namespace Manifold::UI
         switch (level)
         {
         case LogLevel::Debug: return ManifoldTheme::Muted;
-        case LogLevel::Success: return ManifoldTheme::Accent;
+        case LogLevel::Success: return ManifoldTheme::Success;
         case LogLevel::Warning: return ManifoldTheme::Warning;
         case LogLevel::Error: return ManifoldTheme::Error;
         default: return ManifoldTheme::Label;
