@@ -33,6 +33,7 @@ namespace Manifold::Tests
     int RunTemplateTests();
     int RunWatchStress(const std::vector<std::string>& arguments);
     int RunDebuggerCheck(const std::vector<std::string>& arguments);
+    int RunWatchArmCheck(const std::vector<std::string>& arguments);
     int RunMonoCheck(const std::vector<std::string>& arguments);
     int RunIl2CppCheck(const std::vector<std::string>& arguments);
     int RunMonoDump(const std::vector<std::string>& arguments);
@@ -60,6 +61,8 @@ int main(int argc, char** argv)
             return Manifold::Tests::RunWatchStress(arguments);
         if (argument == "--debugger-check")
             return Manifold::Tests::RunDebuggerCheck(arguments);
+        if (argument == "--watch-arm-check")
+            return Manifold::Tests::RunWatchArmCheck(arguments);
         if (argument == "--mono-check")
             return Manifold::Tests::RunMonoCheck(arguments);
         if (argument == "--il2cpp-check")

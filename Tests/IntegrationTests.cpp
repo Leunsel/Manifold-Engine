@@ -21,6 +21,7 @@ namespace Manifold::Tests
 {
     void CheckBreakActions(Engine& engine, bool veh);
     void CheckWatchesOnOneInstruction(Engine& engine, bool veh);
+    void CheckAttachArmsMainThread(Engine& engine, HANDLE mainThread, std::uint64_t address);
     void CheckMono(Engine& engine);
     void CheckIl2CppTarget(const std::filesystem::path& targetPath);
 
@@ -656,6 +657,7 @@ namespace Manifold::Tests
             Skip("TestTarget.CT not found");
         }
 
+        CheckAttachArmsMainThread(engine, target.Info.hThread, health);
         const Status attached = engine.EnsureDebugger();
         CHECK_MSG(attached.Ok(), attached.Text);
         if (attached)
