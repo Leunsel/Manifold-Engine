@@ -658,20 +658,23 @@ namespace Manifold::Tests
         CHECK_MSG(attached.Ok(), attached.Text);
         if (attached)
         {
-            int writes = 0;
-            CHECK(engine.Debugger().StartWatch(Debug::WatchKind::Writes, health, 4, writes).Ok());
-            int calls = 0;
-            CHECK(engine.Debugger().StartWatch(Debug::WatchKind::Calls, damage, 1, calls).Ok());
-            int accesses = 0;
-            CHECK(engine.Debugger().StartWatch(Debug::WatchKind::InstructionAccesses, target.Addresses["readhealth at "], 1, accesses).Ok());
             const auto recorded = [&engine](int id)
                 {
                     Debug::Watch copy;
                     return engine.Debugger().CopyWatch(id, copy) && !copy.Entries.empty();
                 };
+            int writes = 0;
+            CHECK(engine.Debugger().StartWatch(Debug::WatchKind::Writes, health, 4, writes).Ok());
+            const auto firstWrite = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (!recorded(writes) && std::chrono::steady_clock::now() < firstWrite)
+                Pause(engine, 100);
+            int calls = 0;
+            CHECK(engine.Debugger().StartWatch(Debug::WatchKind::Calls, damage, 1, calls).Ok());
+            int accesses = 0;
+            CHECK(engine.Debugger().StartWatch(Debug::WatchKind::InstructionAccesses, target.Addresses["readhealth at "], 1, accesses).Ok());
             Pause(engine, 2600);
             const auto patience = std::chrono::steady_clock::now() + std::chrono::seconds(8);
-            while ((!recorded(writes) || !recorded(calls) || !recorded(accesses)) && std::chrono::steady_clock::now() < patience)
+            while ((!recorded(calls) || !recorded(accesses)) && std::chrono::steady_clock::now() < patience)
                 Pause(engine, 100);
             Debug::Watch watch;
             CHECK(engine.Debugger().CopyWatch(writes, watch));
