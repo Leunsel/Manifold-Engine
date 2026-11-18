@@ -307,6 +307,20 @@ namespace Manifold::UI
                 ImGui::GetColorU32(ManifoldTheme::WithAlpha(page, 0.92f)), ImGui::GetColorU32(ManifoldTheme::WithAlpha(page, 0.92f)));
             draw->PopClipRect();
         }
+
+        std::uint64_t WithoutPadding(const Target::Process& process, std::uint64_t start, std::uint64_t end)
+        {
+            if (end <= start + 1)
+                return end;
+            std::uint8_t tail[64]{};
+            const std::size_t size = static_cast<std::size_t>(std::min<std::uint64_t>(sizeof(tail), end - start - 1));
+            if (process.Read(end - size, tail, size) != size)
+                return end;
+            std::size_t padding = 0;
+            while (padding < size && tail[size - 1 - padding] == 0xCC)
+                ++padding;
+            return end - padding;
+        }
     }
 
     MemoryViewer::MemoryViewer(Workspace& workspace, int number) : m_workspace(workspace), m_engine(workspace.Core()), m_templates(workspace), m_number(number)
@@ -834,7 +848,7 @@ namespace Manifold::UI
                     if (auto name = m_engine.Mono().MethodStartNameAt(range->first))
                     {
                         functionStart = range->first;
-                        functionEnd = range->second;
+                        functionEnd = WithoutPadding(process, range->first, range->second);
                         functionName = std::move(*name);
                     }
                 }
@@ -916,7 +930,7 @@ namespace Manifold::UI
                     {
                         const auto range = m_engine.Mono().MethodRange(line.Address);
                         functionStart = line.Address;
-                        functionEnd = range ? range->second : line.Address + kSymbolReach;
+                        functionEnd = range ? WithoutPadding(process, line.Address, range->second) : line.Address + kSymbolReach;
                     }
                 }
             }
