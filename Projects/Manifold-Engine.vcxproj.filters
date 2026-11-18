@@ -243,10 +243,13 @@
     <ClCompile Include="..\Source\Target\CodeMap.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
-    <ClCompile Include="..\Source\Target\Il2Cpp.cpp">
+    <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Mono.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\MonoRuntime.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\PatchScan.cpp">
@@ -579,7 +582,16 @@
     <ClInclude Include="..\Source\Target\CodeMap.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Target\Il2CppRuntime.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\ManagedRuntime.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Target\Mono.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\MonoRuntime.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\PatchScan.h">

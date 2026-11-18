@@ -1,9 +1,10 @@
-#include "Target/Mono.h"
+#include "Target/Il2CppRuntime.h"
 
 #include "Core/BackgroundWork.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Target/CodeMap.h"
+#include "Target/Mono.h"
 #include "Target/Process.h"
 
 #include <algorithm>
@@ -94,12 +95,12 @@ namespace Manifold::Target
         }
     }
 
-    Status MonoBridge::AttachIl2Cpp(const std::string& module)
+    Status Il2CppRuntime::Attach(const std::string& module)
     {
         std::map<std::string, std::uint64_t> functions;
         for (const char* name : kIl2CppFunctions)
         {
-            const std::uint64_t address = m_process->FindExport(module, name);
+            const std::uint64_t address = m_bridge.m_process->FindExport(module, name);
             if (address)
                 functions[name] = address;
         }
@@ -108,28 +109,28 @@ namespace Manifold::Target
             if (!functions.count(required))
                 return Status::Fail(ErrorCode::MonoNotFound, module + " has no " + required + " (an older or stripped IL2CPP build)");
         }
-        m_functions = std::move(functions);
+        m_bridge.m_functions = std::move(functions);
         // Before il2cpp_init has run there is no corlib yet, and
         // il2cpp_domain_get would make a domain of its own then; ask first.
-        if (Fn("il2cpp_get_corlib") && !CallFn("il2cpp_get_corlib").value_or(0))
+        if (m_bridge.Fn("il2cpp_get_corlib") && !m_bridge.CallFn("il2cpp_get_corlib").value_or(0))
         {
-            m_functions.clear();
+            m_bridge.m_functions.clear();
             return Status::Fail(ErrorCode::MonoNotFound, "the IL2CPP runtime is not set up yet (try again once the game has loaded)");
         }
-        const std::uint64_t domain = CallFn("il2cpp_domain_get").value_or(0);
+        const std::uint64_t domain = m_bridge.CallFn("il2cpp_domain_get").value_or(0);
         if (!domain)
         {
-            m_functions.clear();
+            m_bridge.m_functions.clear();
             return Status::Fail(ErrorCode::MonoNotFound, "the IL2CPP domain was null");
         }
-        m_domain = domain;
-        m_attached = CallFn("il2cpp_thread_attach", domain).value_or(0);
-        m_module = module;
-        m_runtime = ManagedRuntime::Il2Cpp;
+        m_bridge.m_domain = domain;
+        m_attached = m_bridge.CallFn("il2cpp_thread_attach", domain).value_or(0);
+        m_bridge.m_module = module;
+        m_bridge.m_runtime = ManagedRuntime::Il2Cpp;
         return Status::Success();
     }
 
-    Status MonoBridge::EnumerateIl2Cpp(WorkProgress* progress, bool starting)
+    Status Il2CppRuntime::Enumerate(WorkProgress* progress, bool starting)
     {
         const auto stopped = [progress] { return progress && progress->Cancelled(); };
         const Status cancelled = Status::Fail(ErrorCode::MonoNotFound, "cancelled");
@@ -138,22 +139,22 @@ namespace Manifold::Target
 
         std::vector<std::uint64_t> assemblies;
         {
-            std::lock_guard lock(m_lock);
-            if (!m_process || !m_domain)
+            std::lock_guard lock(m_bridge.m_lock);
+            if (!m_bridge.m_process || !m_bridge.m_domain)
                 return Status::Fail(ErrorCode::MonoNotFound);
-            m_call.ResetScratch();
-            const std::uint64_t size = m_call.Scratch(8);
+            m_bridge.m_call.ResetScratch();
+            const std::uint64_t size = m_bridge.m_call.Scratch(8);
             if (!size)
                 return Status::Fail(ErrorCode::MonoNotFound, "no scratch space");
-            const std::uint64_t array = CallFn("il2cpp_domain_get_assemblies", m_domain, size).value_or(0);
+            const std::uint64_t array = m_bridge.CallFn("il2cpp_domain_get_assemblies", m_bridge.m_domain, size).value_or(0);
             std::uint64_t count = 0;
-            m_process->ReadExact(size, &count, sizeof(count));
-            m_call.ResetScratch();
+            m_bridge.m_process->ReadExact(size, &count, sizeof(count));
+            m_bridge.m_call.ResetScratch();
             count = std::min(count, kMaxAssemblies);
             if (array && count)
             {
                 assemblies.resize(static_cast<std::size_t>(count));
-                if (!m_process->ReadExact(array, assemblies.data(), assemblies.size() * sizeof(std::uint64_t)))
+                if (!m_bridge.m_process->ReadExact(array, assemblies.data(), assemblies.size() * sizeof(std::uint64_t)))
                     assemblies.clear();
             }
         }
@@ -172,14 +173,14 @@ namespace Manifold::Target
         {
             if (stopped())
                 return cancelled;
-            std::lock_guard lock(m_lock);
-            const auto image = CallFn("il2cpp_assembly_get_image", assembly);
+            std::lock_guard lock(m_bridge.m_lock);
+            const auto image = m_bridge.CallFn("il2cpp_assembly_get_image", assembly);
             if (!image || !*image)
                 continue;
             ImageInfo info;
             info.Handle = *image;
-            info.Name = StripDll(CallString("il2cpp_image_get_name", *image));
-            info.Classes = std::min(CallFn("il2cpp_image_get_class_count", *image).value_or(0), kMaxClasses);
+            info.Name = StripDll(m_bridge.CallString("il2cpp_image_get_name", *image));
+            info.Classes = std::min(m_bridge.CallFn("il2cpp_image_get_class_count", *image).value_or(0), kMaxClasses);
             total += static_cast<std::int64_t>(info.Classes);
             images.push_back(std::move(info));
         }
@@ -209,15 +210,15 @@ namespace Manifold::Target
                 std::uint64_t namePointer = 0;
                 std::uint64_t namespacePointer = 0;
                 {
-                    std::lock_guard lock(m_lock);
-                    const auto klass = CallFn("il2cpp_image_get_class", image.Handle, index);
+                    std::lock_guard lock(m_bridge.m_lock);
+                    const auto klass = m_bridge.CallFn("il2cpp_image_get_class", image.Handle, index);
                     if (klass && *klass)
                     {
                         info.Handle = *klass;
-                        namePointer = CallFn("il2cpp_class_get_name", *klass).value_or(0);
-                        info.Name = m_call.ReadCString(namePointer);
-                        namespacePointer = CallFn("il2cpp_class_get_namespace", *klass).value_or(0);
-                        info.Namespace = m_call.ReadCString(namespacePointer);
+                        namePointer = m_bridge.CallFn("il2cpp_class_get_name", *klass).value_or(0);
+                        info.Name = m_bridge.m_call.ReadCString(namePointer);
+                        namespacePointer = m_bridge.CallFn("il2cpp_class_get_namespace", *klass).value_or(0);
+                        info.Namespace = m_bridge.m_call.ReadCString(namespacePointer);
                     }
                 }
                 if (progress)
@@ -238,9 +239,9 @@ namespace Manifold::Target
         if (stopped())
             return cancelled;
         Il2CppShape shape;
-        shape.ClassImage = CommonOffset(*m_process, imageSamples);
-        shape.ClassName = CommonOffset(*m_process, nameSamples);
-        shape.ClassNamespace = CommonOffset(*m_process, namespaceSamples);
+        shape.ClassImage = CommonOffset(*m_bridge.m_process, imageSamples);
+        shape.ClassName = CommonOffset(*m_bridge.m_process, nameSamples);
+        shape.ClassNamespace = CommonOffset(*m_bridge.m_process, namespaceSamples);
 
         // Every method's code address, one drain per class: the stub walks
         // il2cpp_class_get_methods in the game and reads methodPointer
@@ -257,9 +258,9 @@ namespace Manifold::Target
         std::uint64_t moduleBase = 0;
         std::uint64_t moduleEnd = 0;
         {
-            std::lock_guard lock(m_lock);
-            moduleBase = m_moduleBase;
-            moduleEnd = m_moduleEnd;
+            std::lock_guard lock(m_bridge.m_lock);
+            moduleBase = m_bridge.m_moduleBase;
+            moduleEnd = m_bridge.m_moduleEnd;
         }
         std::size_t methodCount = 0;
         std::vector<RemoteCall::DrainItem> items;
@@ -269,14 +270,14 @@ namespace Manifold::Target
             if ((index & 63) == 0 && stopped())
                 return cancelled;
             {
-                std::lock_guard lock(m_lock);
-                const std::uint64_t pointerFn = Fn("il2cpp_method_get_pointer");
-                if (!m_call.Drain(Fn("il2cpp_class_get_methods"), classes[static_cast<std::size_t>(index)].Handle, items,
+                std::lock_guard lock(m_bridge.m_lock);
+                const std::uint64_t pointerFn = m_bridge.Fn("il2cpp_method_get_pointer");
+                if (!m_bridge.m_call.Drain(m_bridge.Fn("il2cpp_class_get_methods"), classes[static_cast<std::size_t>(index)].Handle, items,
                         pointerFn ? RemoteCall::kNoPeek : kMethodPointerOffset, pointerFn, kMaxMembers))
                     items.clear();
                 if (!items.empty() && methodSamples.size() < kShapeSamples)
                 {
-                    if (const auto name = CallFn("il2cpp_method_get_name", items.front().Item); name && *name)
+                    if (const auto name = m_bridge.CallFn("il2cpp_method_get_name", items.front().Item); name && *name)
                         methodSamples.emplace_back(items.front().Item, *name);
                 }
             }
@@ -291,7 +292,7 @@ namespace Manifold::Target
         }
         if (stopped())
             return cancelled;
-        shape.MethodName = CommonOffset(*m_process, methodSamples);
+        shape.MethodName = CommonOffset(*m_bridge.m_process, methodSamples);
 
         // One entry per distinct code start; identical bodies that the
         // compiler folded share one, named after the first method listed.
@@ -312,7 +313,7 @@ namespace Manifold::Target
             code.push_back(std::move(entry));
             i = j;
         }
-        const auto unwind = CodeMap::UnwindFunctions(*m_process, moduleBase, moduleEnd - moduleBase);
+        const auto unwind = CodeMap::UnwindFunctions(*m_bridge.m_process, moduleBase, moduleEnd - moduleBase);
         for (std::size_t k = 0; k < code.size(); ++k)
         {
             std::uint64_t end = k + 1 < code.size() ? code[k + 1].Start : moduleEnd;
@@ -353,49 +354,47 @@ namespace Manifold::Target
         const std::size_t indexed = code.size();
         std::string module;
         {
-            std::lock_guard lock(m_lock);
-            m_classes = std::move(classes);
-            m_classIndex = std::move(classIndex);
-            m_handleIndex = std::move(handleIndex);
-            m_handleMin = handleMin;
-            m_handleMax = handleMax;
-            m_images = std::move(imageSet);
+            std::lock_guard lock(m_bridge.m_lock);
+            m_bridge.m_classes = std::move(classes);
+            m_bridge.m_classIndex = std::move(classIndex);
+            m_bridge.m_handleIndex = std::move(handleIndex);
+            m_bridge.m_handleMin = handleMin;
+            m_bridge.m_handleMax = handleMax;
+            m_bridge.m_images = std::move(imageSet);
             m_imageNames = std::move(imageNames);
             m_code = std::move(code);
             m_shape = shape;
-            m_jitRanges.clear();
-            m_jitMisses.clear();
-            module = m_module;
+            module = m_bridge.m_module;
             if (starting)
-                m_present = true;
-            ++m_generation;
+                m_bridge.m_present = true;
+            ++m_bridge.m_generation;
         }
         LOG_INFO("Mono", Format("Read %zu classes and %zu methods from %s (%zu code addresses)", count, methodCount, module.c_str(), indexed));
         return Status::Success();
     }
 
-    std::string MonoBridge::Il2CppMethodName(std::uint64_t method)
+    std::string Il2CppRuntime::MethodName(std::uint64_t method)
     {
         // MethodInfo::name read from memory where the runtime's answers showed
         // it, so naming code needs no call (and works while the game is held
         // at a breakpoint); the call is the fallback.
         if (m_shape.MethodName >= 0)
         {
-            if (const auto pointer = m_process->ReadPointer(method + static_cast<std::uint64_t>(m_shape.MethodName)); pointer && *pointer)
+            if (const auto pointer = m_bridge.m_process->ReadPointer(method + static_cast<std::uint64_t>(m_shape.MethodName)); pointer && *pointer)
             {
-                std::string name = m_call.ReadCString(*pointer, 512);
+                std::string name = m_bridge.m_call.ReadCString(*pointer, 512);
                 if (!name.empty())
                     return name;
             }
         }
-        if (m_paused && m_paused())
+        if (m_bridge.m_paused && m_bridge.m_paused())
             return {};
-        return CallString("il2cpp_method_get_name", method);
+        return m_bridge.CallString("il2cpp_method_get_name", method);
     }
 
-    void MonoBridge::EnsureMembersIl2Cpp(int classIndex)
+    void Il2CppRuntime::EnsureMembers(int classIndex)
     {
-        MonoClass& info = m_classes[static_cast<std::size_t>(classIndex)];
+        MonoClass& info = m_bridge.m_classes[static_cast<std::size_t>(classIndex)];
         if (info.MembersLoaded)
             return;
         info.MembersLoaded = true;
@@ -404,92 +403,92 @@ namespace Manifold::Target
         if (info.Discovered)
             return;
         const std::uint64_t klass = info.Handle;
-        if (const auto parent = CallFn("il2cpp_class_get_parent", klass); parent && *parent)
+        if (const auto parent = m_bridge.CallFn("il2cpp_class_get_parent", klass); parent && *parent)
         {
-            if (const auto known = m_handleIndex.find(*parent); known != m_handleIndex.end())
+            if (const auto known = m_bridge.m_handleIndex.find(*parent); known != m_bridge.m_handleIndex.end())
             {
-                info.Parent = m_classes[static_cast<std::size_t>(known->second)].FullName();
+                info.Parent = m_bridge.m_classes[static_cast<std::size_t>(known->second)].FullName();
             }
             else
             {
                 // The runtime's own answer, so asking it about it is safe.
-                const std::string name = CallString("il2cpp_class_get_name", *parent);
-                const std::string ns = CallString("il2cpp_class_get_namespace", *parent);
+                const std::string name = m_bridge.CallString("il2cpp_class_get_name", *parent);
+                const std::string ns = m_bridge.CallString("il2cpp_class_get_namespace", *parent);
                 info.Parent = ns.empty() ? name : ns + "." + name;
             }
         }
-        if (Fn("il2cpp_class_is_generic"))
-            info.Generic = (CallFn("il2cpp_class_is_generic", klass).value_or(0) & 0xFFu) != 0;
+        if (m_bridge.Fn("il2cpp_class_is_generic"))
+            info.Generic = (m_bridge.CallFn("il2cpp_class_is_generic", klass).value_or(0) & 0xFFu) != 0;
 
         std::vector<RemoteCall::DrainItem> items;
-        const std::uint64_t pointerFn = Fn("il2cpp_method_get_pointer");
-        if (m_call.Drain(Fn("il2cpp_class_get_methods"), klass, items, pointerFn ? RemoteCall::kNoPeek : kMethodPointerOffset, pointerFn, kMaxMembers))
+        const std::uint64_t pointerFn = m_bridge.Fn("il2cpp_method_get_pointer");
+        if (m_bridge.m_call.Drain(m_bridge.Fn("il2cpp_class_get_methods"), klass, items, pointerFn ? RemoteCall::kNoPeek : kMethodPointerOffset, pointerFn, kMaxMembers))
         {
-            const bool counts = Fn("il2cpp_method_get_param_count") != 0;
+            const bool counts = m_bridge.Fn("il2cpp_method_get_param_count") != 0;
             for (const RemoteCall::DrainItem& item : items)
             {
                 MonoMethod method;
                 method.Handle = item.Item;
                 method.Address = item.Peek;
-                method.Name = Il2CppMethodName(item.Item);
+                method.Name = MethodName(item.Item);
                 if (counts)
-                    method.ParamCount = static_cast<int>(CallFn("il2cpp_method_get_param_count", item.Item).value_or(0) & 0xFFFFu);
+                    method.ParamCount = static_cast<int>(m_bridge.CallFn("il2cpp_method_get_param_count", item.Item).value_or(0) & 0xFFFFu);
                 info.Methods.push_back(std::move(method));
             }
         }
         // An open generic definition (List`1) has no field offsets of its own;
         // they depend on the type arguments of each instance.
-        if (info.Generic || !Fn("il2cpp_class_get_fields"))
+        if (info.Generic || !m_bridge.Fn("il2cpp_class_get_fields"))
             return;
-        if (!m_call.Drain(Fn("il2cpp_class_get_fields"), klass, items, RemoteCall::kNoPeek, 0, kMaxMembers))
+        if (!m_bridge.m_call.Drain(m_bridge.Fn("il2cpp_class_get_fields"), klass, items, RemoteCall::kNoPeek, 0, kMaxMembers))
             return;
         for (const RemoteCall::DrainItem& item : items)
         {
-            const auto flags = static_cast<std::uint32_t>(CallFn("il2cpp_field_get_flags", item.Item).value_or(0) & 0xFFFFFFFFu);
+            const auto flags = static_cast<std::uint32_t>(m_bridge.CallFn("il2cpp_field_get_flags", item.Item).value_or(0) & 0xFFFFFFFFu);
             if (flags & kFieldStatic)  // not part of an instance (literals are static too)
                 continue;
             MonoField field;
-            field.Name = CallString("il2cpp_field_get_name", item.Item);
-            field.Offset = static_cast<int>(CallFn("il2cpp_field_get_offset", item.Item).value_or(0) & 0xFFFFFFFFu);
-            if (const auto type = CallFn("il2cpp_field_get_type", item.Item); type && *type)
-                field.TypeCode = static_cast<int>(CallFn("il2cpp_type_get_type", *type).value_or(0) & 0xFFu);
+            field.Name = m_bridge.CallString("il2cpp_field_get_name", item.Item);
+            field.Offset = static_cast<int>(m_bridge.CallFn("il2cpp_field_get_offset", item.Item).value_or(0) & 0xFFFFFFFFu);
+            if (const auto type = m_bridge.CallFn("il2cpp_field_get_type", item.Item); type && *type)
+                field.TypeCode = static_cast<int>(m_bridge.CallFn("il2cpp_type_get_type", *type).value_or(0) & 0xFFu);
             info.Fields.push_back(std::move(field));
         }
     }
 
-    std::optional<std::string> MonoBridge::ResolveHeadIl2Cpp(std::uint64_t header, bool allowShape)
+    std::optional<std::string> Il2CppRuntime::ResolveHead(std::uint64_t header, bool allowShape)
     {
         // An Il2CppObject starts with its Il2CppClass* (no vtable in between,
         // unlike Mono). Read with safe reads; a class pointer read from game
         // memory is only compared, never handed to the runtime.
-        const auto klass = m_process->ReadPointer(header);
+        const auto klass = m_bridge.m_process->ReadPointer(header);
         if (!klass || *klass < 0x10000)
             return std::nullopt;
-        if (const auto found = m_handleIndex.find(*klass); found != m_handleIndex.end())
-            return m_classes[static_cast<std::size_t>(found->second)].FullName();
+        if (const auto found = m_bridge.m_handleIndex.find(*klass); found != m_bridge.m_handleIndex.end())
+            return m_bridge.m_classes[static_cast<std::size_t>(found->second)].FullName();
         // Not in any image list (a generic instance, an array): accepted by its
         // shape only, with the image one of the known ones and a readable,
         // plausible name, and only for the exact address the caller gave.
         if (!allowShape || m_shape.ClassName < 0 || m_shape.ClassImage < 0)
             return std::nullopt;
-        const auto image = m_process->ReadPointer(*klass + static_cast<std::uint64_t>(m_shape.ClassImage));
+        const auto image = m_bridge.m_process->ReadPointer(*klass + static_cast<std::uint64_t>(m_shape.ClassImage));
         if (!image)
             return std::nullopt;
         const auto imageName = m_imageNames.find(*image);
         if (imageName == m_imageNames.end())
             return std::nullopt;
-        const auto namePointer = m_process->ReadPointer(*klass + static_cast<std::uint64_t>(m_shape.ClassName));
+        const auto namePointer = m_bridge.m_process->ReadPointer(*klass + static_cast<std::uint64_t>(m_shape.ClassName));
         if (!namePointer || !*namePointer)
             return std::nullopt;
-        const std::string name = m_call.ReadCString(*namePointer, 257);
+        const std::string name = m_bridge.m_call.ReadCString(*namePointer, 257);
         if (!PlausibleName(name))
             return std::nullopt;
         std::string ns;
         if (m_shape.ClassNamespace >= 0)
         {
-            if (const auto pointer = m_process->ReadPointer(*klass + static_cast<std::uint64_t>(m_shape.ClassNamespace)); pointer && *pointer)
+            if (const auto pointer = m_bridge.m_process->ReadPointer(*klass + static_cast<std::uint64_t>(m_shape.ClassNamespace)); pointer && *pointer)
             {
-                ns = m_call.ReadCString(*pointer, 257);
+                ns = m_bridge.m_call.ReadCString(*pointer, 257);
                 if (!ns.empty() && !PlausibleName(ns))
                     return std::nullopt;
             }
@@ -502,18 +501,18 @@ namespace Manifold::Target
         discovered.Discovered = true;
         discovered.MembersLoaded = true;
         const std::string full = discovered.FullName();
-        const int index = static_cast<int>(m_classes.size());
-        m_classIndex.emplace(discovered.Name, index);
+        const int index = static_cast<int>(m_bridge.m_classes.size());
+        m_bridge.m_classIndex.emplace(discovered.Name, index);
         if (!discovered.Namespace.empty())
-            m_classIndex.emplace(full, index);
-        m_handleIndex.emplace(*klass, index);
-        m_classes.push_back(std::move(discovered));
+            m_bridge.m_classIndex.emplace(full, index);
+        m_bridge.m_handleIndex.emplace(*klass, index);
+        m_bridge.m_classes.push_back(std::move(discovered));
         return full;
     }
 
-    MonoBridge::CodeEntry* MonoBridge::FindCode(std::uint64_t address)
+    Il2CppRuntime::CodeEntry* Il2CppRuntime::FindCode(std::uint64_t address)
     {
-        if (m_code.empty() || address < m_moduleBase || address >= m_moduleEnd)
+        if (m_code.empty() || address < m_bridge.m_moduleBase || address >= m_bridge.m_moduleEnd)
             return nullptr;
         auto it = std::upper_bound(m_code.begin(), m_code.end(), address, [](std::uint64_t value, const CodeEntry& entry) { return value < entry.Start; });
         if (it == m_code.begin())
@@ -522,13 +521,63 @@ namespace Manifold::Target
         return address < it->End ? &*it : nullptr;
     }
 
-    const std::string& MonoBridge::CodeName(CodeEntry& entry)
+    const std::string& Il2CppRuntime::CodeName(CodeEntry& entry)
     {
-        if (!entry.Name.empty() || entry.Class < 0 || entry.Class >= static_cast<int>(m_classes.size()))
+        if (!entry.Name.empty() || entry.Class < 0 || entry.Class >= static_cast<int>(m_bridge.m_classes.size()))
             return entry.Name;
-        const std::string method = Il2CppMethodName(entry.Method);
+        const std::string method = MethodName(entry.Method);
         if (!method.empty())
-            entry.Name = m_classes[static_cast<std::size_t>(entry.Class)].FullName() + ":" + method;
+            entry.Name = m_bridge.m_classes[static_cast<std::size_t>(entry.Class)].FullName() + ":" + method;
         return entry.Name;
+    }
+
+    void Il2CppRuntime::Detach()
+    {
+        // IL2CPP keeps a list of attached threads; take the worker off it
+        // before it ends, the way a native plugin's thread leaves.
+        if (m_attached && m_bridge.m_call.Running())
+            m_bridge.CallFn("il2cpp_thread_detach", m_attached);
+        m_attached = 0;
+        m_code.clear();
+        m_shape = {};
+        m_imageNames.clear();
+    }
+
+    std::optional<std::string> Il2CppRuntime::MethodNameAt(std::uint64_t address)
+    {
+        // IL2CPP code is the runtime module's own: the sorted index Start
+        // built answers, with no remote call for the range.
+        CodeEntry* entry = FindCode(address);
+        if (!entry)
+            return std::nullopt;
+        const std::string& name = CodeName(*entry);
+        if (name.empty())
+            return std::nullopt;
+        return name;
+    }
+
+    std::optional<std::string> Il2CppRuntime::MethodStartNameAt(std::uint64_t address)
+    {
+        CodeEntry* entry = FindCode(address);
+        if (!entry || entry->Start != address)
+            return std::nullopt;
+        const std::string& name = CodeName(*entry);
+        if (name.empty())
+            return std::nullopt;
+        return name;
+    }
+
+    std::optional<std::pair<std::uint64_t, std::uint64_t>> Il2CppRuntime::MethodRange(std::uint64_t address)
+    {
+        const CodeEntry* entry = FindCode(address);
+        if (!entry)
+            return std::nullopt;
+        return std::make_pair(entry->Start, entry->End);
+    }
+
+    std::size_t Il2CppRuntime::MethodsSharingCode(std::uint64_t address)
+    {
+        const CodeEntry* entry = FindCode(address);
+        return entry && entry->Start == address ? entry->Sharing : 0;
     }
 }

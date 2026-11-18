@@ -181,8 +181,9 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
-    <ClCompile Include="..\Source\Target\Il2Cpp.cpp" />
+    <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
     <ClCompile Include="..\Source\Target\Mono.cpp" />
+    <ClCompile Include="..\Source\Target\MonoRuntime.cpp" />
     <ClCompile Include="..\Source\Target\PatchScan.cpp" />
     <ClCompile Include="..\Source\Target\PdbSymbols.cpp" />
     <ClCompile Include="..\Source\Target\Process.cpp" />
@@ -295,7 +296,10 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Table\CheatTable.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
     <ClInclude Include="..\Source\Target\CodeMap.h" />
+    <ClInclude Include="..\Source\Target\Il2CppRuntime.h" />
+    <ClInclude Include="..\Source\Target\ManagedRuntime.h" />
     <ClInclude Include="..\Source\Target\Mono.h" />
+    <ClInclude Include="..\Source\Target\MonoRuntime.h" />
     <ClInclude Include="..\Source\Target\PatchScan.h" />
     <ClInclude Include="..\Source\Target\PdbSymbols.h" />
     <ClInclude Include="..\Source\Target\Process.h" />

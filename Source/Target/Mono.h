@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Errors.h"
+#include "Target/ManagedRuntime.h"
 #include "Target/RemoteCall.h"
 
 #include <atomic>
@@ -23,16 +24,6 @@ namespace Manifold::Target
 {
     class Process;
     class UnityExplorer;
-
-    // The managed runtime of a Unity game. Mono JIT-compiles methods at run
-    // time (mono_* exports, e.g. mono-2.0-bdwgc.dll); IL2CPP ships every
-    // method as native code in GameAssembly.dll (il2cpp_* exports).
-    enum class ManagedRuntime
-    {
-        None,
-        Mono,
-        Il2Cpp
-    };
 
     struct MonoMethod
     {
@@ -175,32 +166,12 @@ namespace Manifold::Target
 
     private:
         friend class UnityExplorer;
+        friend class MonoRuntime;
+        friend class Il2CppRuntime;
         struct Candidate
         {
             std::string Module;
             ManagedRuntime Runtime = ManagedRuntime::None;
-        };
-        // A method's code in IL2CPP's address index: [Start, End), the class
-        // index, the MethodInfo*, the name once it was asked for, and how many
-        // methods share this code (identical bodies are folded together).
-        struct CodeEntry
-        {
-            std::uint64_t Start = 0;
-            std::uint64_t End = 0;
-            std::uint64_t Method = 0;
-            int Class = -1;
-            std::uint32_t Sharing = 1;
-            std::string Name;
-        };
-        // Offsets learned from the runtime's own answers (il2cpp_class_get_name
-        // returns klass->name, and so on), so names can be read from memory
-        // without handing a pointer from game memory to the runtime.
-        struct Il2CppShape
-        {
-            int ClassImage = -1;
-            int ClassName = -1;
-            int ClassNamespace = -1;
-            int MethodName = -1;
         };
 
         std::uint64_t Fn(const char* name) const;
@@ -212,23 +183,12 @@ namespace Manifold::Target
         Status Enumerate(WorkProgress* progress, bool starting);
         void EnsureMembers(int classIndex);
         std::optional<std::string> ResolveHead(std::uint64_t header, bool allowRuntimeFallback);
-        const std::string* FindJitName(std::uint64_t address) const;
-        void RememberJitRange(std::uint64_t start, std::uint64_t end, std::string name);
-        void RememberJitMiss(std::uint64_t address);
-
-        // IL2CPP (Il2Cpp.cpp).
-        Status AttachIl2Cpp(const std::string& module);
-        Status EnumerateIl2Cpp(WorkProgress* progress, bool starting);
-        void EnsureMembersIl2Cpp(int classIndex);
-        std::string Il2CppMethodName(std::uint64_t method);
-        std::optional<std::string> ResolveHeadIl2Cpp(std::uint64_t header, bool allowShape);
-        CodeEntry* FindCode(std::uint64_t address);
-        const std::string& CodeName(CodeEntry& entry);
 
         std::shared_ptr<Process> m_process;
         std::function<bool()> m_paused;
         mutable std::recursive_mutex m_lock;
         RemoteCall m_call;
+        std::unique_ptr<RuntimeBackend> m_backend;
         std::atomic<bool> m_present{ false };
         std::atomic<ManagedRuntime> m_runtime{ ManagedRuntime::None };
         std::string m_module;
@@ -243,26 +203,6 @@ namespace Manifold::Target
         std::uint64_t m_handleMax = 0;  // vet a klass before asking the runtime
         std::unordered_set<std::uint64_t> m_images;  // MonoImage* of every loaded assembly
         std::atomic<std::uint64_t> m_generation{ 0 };
-
-        // Reverse-resolution cache for MethodNameAt. Resolved method code ranges
-        // sorted by Start (non-overlapping), plus the addresses already known not
-        // to be Mono code, so the hot per-line lookup almost never hits the runtime.
-        struct JitRange
-        {
-            std::uint64_t Start = 0;
-            std::uint64_t End = 0;
-            std::string Name;
-        };
-        std::vector<JitRange> m_jitRanges;
-        std::unordered_set<std::uint64_t> m_jitMisses;
-
-        // IL2CPP: every method's code, sorted by Start (one entry per distinct
-        // start), the learned struct offsets, the Il2CppThread* of the worker
-        // and the names of the images.
-        std::vector<CodeEntry> m_code;
-        Il2CppShape m_shape;
-        std::uint64_t m_attached = 0;
-        std::map<std::uint64_t, std::string> m_imageNames;
 
         std::mutex m_unityLock;
         std::unique_ptr<UnityExplorer> m_unity;
