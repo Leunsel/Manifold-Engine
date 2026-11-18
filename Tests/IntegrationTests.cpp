@@ -20,6 +20,7 @@
 namespace Manifold::Tests
 {
     void CheckBreakActions(Engine& engine, bool veh);
+    void CheckWatchesOnOneInstruction(Engine& engine, bool veh);
     void CheckMono(Engine& engine);
 
     namespace
@@ -734,6 +735,7 @@ namespace Manifold::Tests
             std::uint8_t afterBreakpoints = 0;
             CHECK(process.ReadExact(damage, &afterBreakpoints, 1) && afterBreakpoints == original[0]);
             CheckBreakActions(engine, false);
+            CheckWatchesOnOneInstruction(engine, false);
             CHECK(process.ReadExact(damage, &afterBreakpoints, 1) && afterBreakpoints == original[0]);
             CheckMono(engine);
 

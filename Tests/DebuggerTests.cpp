@@ -159,6 +159,106 @@ namespace Manifold::Tests
         CHECK_MSG(process.Alive(), std::string(backend) + ": the target died");
     }
 
+    void CheckWatchesOnOneInstruction(Engine& engine, bool veh)
+    {
+        const Target::Process& process = *engine.Process();
+        Debug::Debugger& debugger = engine.Debugger();
+        const char* backend = veh ? "in-process" : "windows";
+        const std::uint64_t damage = engine.Evaluate("TestTarget.Damage").value_or(0);
+        const std::uint64_t world = process.ReadPointer(engine.Evaluate("TestTarget.g_world").value_or(0)).value_or(0);
+        const std::uint64_t health = world ? process.ReadPointer(world + 8).value_or(0) : 0;
+        CHECK_MSG(damage && health, backend);
+        if (!damage || !health)
+            return;
+        const Disasm::Instruction first = engine.Disassembler().Read(process, damage, nullptr);
+        CHECK_MSG(first.Memory.Written && first.Memory.Size == 4, std::string(backend) + ": Damage starts with " + first.Text());
+
+        const auto hits = [&debugger](int id)
+            {
+                Debug::Watch copy;
+                return debugger.CopyWatch(id, copy) ? copy.Hits : 0ull;
+            };
+        const auto countAt = [&debugger](int id, std::uint64_t instruction)
+            {
+                Debug::Watch copy;
+                std::uint64_t count = 0;
+                if (debugger.CopyWatch(id, copy))
+                {
+                    for (const Debug::WatchEntry& entry : copy.Entries)
+                        count += entry.Instruction == instruction ? entry.Count : 0;
+                }
+                return count;
+            };
+        const auto callAfter = [&](int calls, std::uint64_t seen)
+            {
+                const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(6000);
+                while (hits(calls) <= seen && std::chrono::steady_clock::now() < until)
+                    Wait(engine, 20);
+                Wait(engine, 150);
+                return hits(calls) > seen;
+            };
+
+        struct Run
+        {
+            Debug::WatchKind Kind;
+            bool LostBits;
+        };
+        std::vector<Run> runs = { { Debug::WatchKind::Writes, false } };
+        if (!veh)
+            runs.insert(runs.end(), { { Debug::WatchKind::Writes, true }, { Debug::WatchKind::Accesses, false }, { Debug::WatchKind::Accesses, true } });
+        for (const Run& run : runs)
+        {
+            const std::string label = std::string(backend) + ", " + Debug::WatchKindName(run.Kind) + (run.LostBits ? ", step without data bits" : "");
+            debugger.SimulateMissingStepBits(run.LostBits);
+            int calls = 0;
+            int data = 0;
+            CHECK_MSG(debugger.StartWatch(Debug::WatchKind::Calls, damage, 1, calls).Ok(), label);
+            CHECK_MSG(debugger.StartWatch(run.Kind, health, 4, data).Ok(), label);
+            CHECK_MSG(callAfter(calls, 0), label + ": Damage was not called");
+            const std::uint64_t dataBefore = countAt(data, damage);
+            const std::uint64_t callsBefore = hits(calls);
+            CHECK_MSG(callAfter(calls, callsBefore), label + ": Damage was not called again");
+            const std::uint64_t dataAfter = countAt(data, damage);
+            const std::uint64_t callsAfter = hits(calls);
+            CHECK_MSG(callsAfter > callsBefore && dataAfter - dataBefore == callsAfter - callsBefore,
+                label + ": " + std::to_string(dataAfter - dataBefore) + " hits at Damage for " + std::to_string(callsAfter - callsBefore) + " calls");
+            if (run.Kind == Debug::WatchKind::Writes)
+            {
+                Debug::Watch watch;
+                CHECK(debugger.CopyWatch(data, watch));
+                CHECK_MSG(watch.Entries.size() == 1 && watch.Entries.front().Instruction == damage,
+                    label + ": " + (watch.Entries.empty() ? std::string("no write recorded") : std::to_string(watch.Entries.size()) + " writers, first " + Hex(watch.Entries.front().Instruction)));
+            }
+            debugger.RemoveWatch(data);
+            debugger.RemoveWatch(calls);
+        }
+
+        if (!veh)
+        {
+            debugger.SimulateMissingStepBits(true);
+            int calls = 0;
+            CHECK(debugger.StartWatch(Debug::WatchKind::Calls, damage, 1, calls).Ok());
+            const std::uint64_t serial = debugger.Break().Serial;
+            const Status set = debugger.SetBreakpoint(health, Debug::BreakpointType::Write, 4, true);
+            CHECK_MSG(set.Ok(), set.Text);
+            const bool broke = set && WaitForBreak(engine, serial, 4000);
+            CHECK_MSG(broke, "windows, step without data bits: the write breakpoint did not stop");
+            if (broke)
+            {
+                const Debug::BreakInfo info = debugger.Break();
+                CHECK_MSG(info.Reason.find("Write") != std::string::npos && info.BreakpointAddress == health, info.Reason);
+                CHECK_MSG(info.Address == first.Next(), "windows, step without data bits: stopped at " + Hex(info.Address));
+            }
+            CHECK(debugger.RemoveBreakpoint(health).Ok());
+            if (broke)
+                debugger.Resume(Debug::ResumeMode::Continue);
+            debugger.RemoveWatch(calls);
+        }
+        debugger.SimulateMissingStepBits(false);
+        Wait(engine, 100);
+        CHECK_MSG(process.Alive(), std::string(backend) + ": the target died");
+    }
+
     void CheckHostSilence(Engine& engine)
     {
         Debug::Debugger& debugger = engine.Debugger();
@@ -222,6 +322,7 @@ namespace Manifold::Tests
             if (attached)
             {
                 CheckBreakActions(engine, veh);
+                CheckWatchesOnOneInstruction(engine, veh);
                 if (veh)
                     CheckHostSilence(engine);
                 engine.Debugger().Detach();
