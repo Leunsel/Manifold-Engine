@@ -1,7 +1,10 @@
 #pragma once
 
+#include "App/ActivationRunner.h"
 #include "App/Notifications.h"
 #include "App/Settings.h"
+#include "App/TableRuntime.h"
+#include "App/TargetSession.h"
 #include "App/SettingsStore.h"
 #include "Asm/AutoAssembler.h"
 #include "Core/BackgroundWork.h"
@@ -55,15 +58,6 @@ namespace Manifold
         Quit
     };
 
-    struct ActivationProgress
-    {
-        int Done = 0;
-        int Total = 0;
-        std::string Current;
-        bool TableScript = false;
-        double TableScriptSeconds = 0.0;
-    };
-
     struct UiRequest
     {
         UiRequestKind Kind = UiRequestKind::MemoryViewer;
@@ -94,20 +88,21 @@ namespace Manifold
         Status OpenProcess(ProcessId id);
         Status OpenProcessByName(std::string_view name);
         void CloseProcess();
-        const std::shared_ptr<Target::Process>& Process() const { return m_process; }
-        bool HasProcess() const { return m_process != nullptr; }
-        std::uint64_t ProcessGeneration() const { return m_processGeneration; }
-        Target::Symbols& Symbols() { return m_symbols; }
+        const std::shared_ptr<Target::Process>& Process() const { return m_target.Process(); }
+        bool HasProcess() const { return m_target.Attached(); }
+        std::uint64_t ProcessGeneration() const { return m_target.Generation(); }
+        Target::Symbols& Symbols() { return m_target.Symbols(); }
+        TargetSession& Session() { return m_target; }
         void LoadSymbols(bool windowsSymbols);
-        bool SymbolsActive() const { return m_pdbSymbols.Active(); }
-        bool SymbolsLoaded() const { return m_pdbSymbols.Loaded(); }
-        bool WaitForSymbols(unsigned timeoutMs) { return m_pdbSymbols.WaitUntilLoaded(timeoutMs); }
-        int SymbolsModulesDone() const { return m_pdbSymbols.ModulesDone(); }
-        int SymbolsModulesTotal() const { return m_pdbSymbols.ModulesTotal(); }
+        bool SymbolsActive() const { return m_target.Pdb().Active(); }
+        bool SymbolsLoaded() const { return m_target.Pdb().Loaded(); }
+        bool WaitForSymbols(unsigned timeoutMs) { return m_target.Pdb().WaitUntilLoaded(timeoutMs); }
+        int SymbolsModulesDone() const { return m_target.Pdb().ModulesDone(); }
+        int SymbolsModulesTotal() const { return m_target.Pdb().ModulesTotal(); }
         const Disasm::Disassembler& Disassembler() const;
         // Known function starts and ends for the disassembler (unwind tables,
         // Mono methods, allocation starts); null without a process.
-        const Target::CodeMap* CodeMap() const { return m_process ? &m_codeMap : nullptr; }
+        const Target::CodeMap* CodeMap() const { return m_target.Attached() ? &m_target.CodeMap() : nullptr; }
         std::shared_ptr<const Disasm::DissectResult> CodeDissect() const { return m_codeDissect; }
         void SetCodeDissect(std::shared_ptr<const Disasm::DissectResult> result) { m_codeDissect = std::move(result); }
         Scan::Scanner& Scanner() { return m_scanner; }
@@ -125,55 +120,57 @@ namespace Manifold
         void StopMono(bool fromScript = false);
         bool MonoLoading() const { return m_work.Busy(kMonoWork); }
         int MonoWork() const { return m_work.Find(kMonoWork); }
-        Target::MonoBridge& Mono() { return m_mono; }
-        bool MonoPresent() const { return m_mono.Present(); }
+        Target::MonoBridge& Mono() { return m_target.Mono(); }
+        bool MonoPresent() const { return m_target.Mono().Present(); }
         void LookUpProcessLater(std::string name, std::function<void(std::optional<ProcessId>)> found);
         static constexpr int kSymbolsWork = -100;
-        Table::AddressList& Table() { return m_table; }
-        Table::StructureStore& Structures() { return m_structures; }
+        Table::AddressList& Table() { return m_tables.Table(); }
+        Table::StructureStore& Structures() { return m_tables.Structures(); }
+        TableRuntime& Tables() { return m_tables; }
+        ActivationRunner& Activation() { return m_activation; }
         Lua::LuaEngine& Lua() { return *m_lua; }
 
         std::optional<std::uint64_t> Evaluate(std::string_view expression, Status* error = nullptr) const;
-        std::string Describe(std::uint64_t address) const { return m_symbols.Describe(address); }
+        std::string Describe(std::uint64_t address) const { return m_target.Symbols().Describe(address); }
 
-        void ResolveRecord(Table::MemoryRecord& record);
-        std::vector<std::uint8_t> ReadRecord(Table::MemoryRecord& record);
-        std::string FormatRecord(const Table::MemoryRecord& record, std::span<const std::uint8_t> bytes) const;
-        const std::vector<Table::DropDownEntry>& DropDownOf(const Table::MemoryRecord& record) const;
-        void ApplyHotkey(Table::MemoryRecord& record, const Table::Hotkey& hotkey);
-        Status WriteRecord(Table::MemoryRecord& record, std::string_view text, bool recursive = true);
-        Status AddToRecord(Table::MemoryRecord& record, double delta);
-        Status SetActive(Table::MemoryRecord& record, bool active);
-        void RequestActive(Table::MemoryRecord& record, bool active, bool fromScript = false);
-        bool ActivationPending(int recordId) const { return m_pending.count(recordId) > 0; }
-        bool InsideActivation() const { return m_running != nullptr && m_workerLuaActive; }
-        void DropQueued(int recordId);
-        void CancelActivations();
-        ActivationProgress Progress() const;
-        bool Working() const;
-        void SetAsync(bool async) { m_async = async; }
-        bool Async() const { return m_async; }
+        void ResolveRecord(Table::MemoryRecord& record) { m_tables.ResolveRecord(record); }
+        std::vector<std::uint8_t> ReadRecord(Table::MemoryRecord& record) { return m_tables.ReadRecord(record); }
+        std::string FormatRecord(const Table::MemoryRecord& record, std::span<const std::uint8_t> bytes) const { return m_tables.FormatRecord(record, bytes); }
+        const std::vector<Table::DropDownEntry>& DropDownOf(const Table::MemoryRecord& record) const { return m_tables.DropDownOf(record); }
+        void ApplyHotkey(Table::MemoryRecord& record, const Table::Hotkey& hotkey) { m_tables.ApplyHotkey(record, hotkey); }
+        Status WriteRecord(Table::MemoryRecord& record, std::string_view text, bool recursive = true) { return m_tables.WriteRecord(record, text, recursive); }
+        Status AddToRecord(Table::MemoryRecord& record, double delta) { return m_tables.AddToRecord(record, delta); }
+        Status SetActive(Table::MemoryRecord& record, bool active) { return m_activation.SetActive(record, active); }
+        void RequestActive(Table::MemoryRecord& record, bool active, bool fromScript = false) { m_activation.RequestActive(record, active, fromScript); }
+        bool ActivationPending(int recordId) const { return m_activation.ActivationPending(recordId); }
+        bool InsideActivation() const { return m_activation.InsideActivation(); }
+        void DropQueued(int recordId) { m_activation.DropQueued(recordId); }
+        void CancelActivations() { m_activation.CancelActivations(); }
+        ActivationProgress Progress() const { return m_activation.Progress(); }
+        bool Working() const { return m_activation.Working(); }
+        void SetAsync(bool async) { m_activation.SetAsync(async); }
+        bool Async() const { return m_activation.Async(); }
         bool OnMainThread() const { return std::this_thread::get_id() == m_mainThread; }
-        static bool OnActivationWorker();
-        void RunOnMainAndWait(const std::function<void()>& work);
-        void StopTableScript();
-        std::vector<Table::MemoryRecord*> ActiveScripts();
-        std::vector<std::string> DeactivateAll();
-        void RequestDeactivateAll();
-        void RefreshValues(bool force);
-        void RefreshRecord(int id);
-        bool NeedsValue(const Table::MemoryRecord& record) const;
-        void SetVisibleRecords(std::vector<int> ids);
+        static bool OnActivationWorker() { return ActivationRunner::OnActivationWorker(); }
+        void RunOnMainAndWait(const std::function<void()>& work) { m_activation.RunOnMainAndWait(work); }
+        void StopTableScript() { m_activation.StopTableScript(); }
+        std::vector<Table::MemoryRecord*> ActiveScripts() { return m_activation.ActiveScripts(); }
+        std::vector<std::string> DeactivateAll() { return m_activation.DeactivateAll(); }
+        void RequestDeactivateAll() { m_activation.RequestDeactivateAll(); }
+        void RefreshValues(bool force) { m_tables.RefreshValues(force); }
+        void RefreshRecord(int id) { m_tables.RefreshRecord(id); }
+        bool NeedsValue(const Table::MemoryRecord& record) const { return m_tables.NeedsValue(record); }
+        void SetVisibleRecords(std::vector<int> ids) { m_tables.SetVisibleRecords(std::move(ids)); }
 
         Asm::AaResult AutoAssemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record = nullptr);
         Asm::AaResult AutoAssemble(std::string_view script, bool checkOnly);
 
-        Status LoadTable(const std::filesystem::path& path, bool merge);
-        Status SaveTable(const std::filesystem::path& path);
-        void NewTable();
-        std::vector<Table::TableSymbol> TableSymbols() const;
-        bool TableScriptWaiting() const { return m_tableScriptWaiting; }
-        void AnswerTableScript(bool run);
+        Status LoadTable(const std::filesystem::path& path, bool merge) { return m_tables.LoadTable(path, merge); }
+        Status SaveTable(const std::filesystem::path& path) { return m_tables.SaveTable(path); }
+        void NewTable() { m_tables.NewTable(); }
+        std::vector<Table::TableSymbol> TableSymbols() const { return m_tables.TableSymbols(); }
+        bool TableScriptWaiting() const { return m_tables.TableScriptWaiting(); }
+        void AnswerTableScript(bool run) { m_tables.AnswerTableScript(run); }
 
         void Notify(LogLevel level, std::string text);
         void Notify(const Status& status, LogLevel level = LogLevel::Error);
@@ -191,45 +188,10 @@ namespace Manifold
         bool MemoryViewerVisible = false;
 
     private:
-        void RefreshRecord(int id, double now);
-        void UpdateFreezes();
-        void UpdateHotkeys();
         void UpdateAutoAttach();
-        Status ActivateTree(Table::MemoryRecord& record, bool active);
-        Status ActivatePlain(Table::MemoryRecord& record, bool active);
-        void FinishRecordActivation(Table::MemoryRecord& record, bool active, bool fromScript);
-        void PumpActivations(double budgetSeconds);
-        struct ActivationJob;
-        void StartActivation(const ActivationJob& job);
-        std::vector<int> BottomToTop();
-        void FinishActivation();
-        void WaitForActivation();
-        void DrainMainWork();
-        void Unpend(int recordId);
-        void QueueChildren(Table::MemoryRecord& record, bool active, bool fromScript);
-        void RunRecordLua(const std::string& code, const char* name);
-        void RunTableScript(const std::string& script);
-        Status RunLuaForWorker(std::string_view code, int recordId, bool syntaxCheck, std::string& output);
-
-        struct ActivationJob
-        {
-            int RecordId = 0;
-            bool Active = false;
-            bool FromScript = false;
-            bool ChildrenDone = false;
-        };
-        struct RunningActivation;
-
         Settings& m_settings;
         SettingsStore m_settingsStore;
-        std::shared_ptr<Target::Process> m_process;
-        std::uint64_t m_processGeneration = 0;
-        Target::Symbols m_symbols;
-        Target::PdbSymbols m_pdbSymbols;
-        Target::MonoBridge m_mono;
-        Target::CodeMap m_codeMap;
-        bool m_pdbActive = false;
-        void RefreshSymbolProvider();
+        TargetSession m_target;
         void FinishMono(const Status& status, bool cancelled, bool starting, bool fromScript, std::uint64_t generation);
         static constexpr const char* kMonoWork = "mono";
         std::unique_ptr<Disasm::Disassembler> m_disassembler64;
@@ -237,41 +199,20 @@ namespace Manifold
         Scan::Scanner m_scanner;
         Debug::Debugger m_debugger;
         Debug::Tracer m_tracer{ m_debugger };
-        Table::AddressList m_table;
-        Table::StructureStore m_structures;
+        TableRuntime m_tables{ *this };
         std::unique_ptr<Lua::LuaEngine> m_lua;
         Asm::AaMemory m_scratchMemory;
         std::shared_ptr<const Disasm::DissectResult> m_codeDissect;
 
         NotificationCenter m_notifications;
         std::vector<UiRequest> m_requests;
-        double m_lastValues = -1.0;
-        double m_lastFreeze = -1.0;
         double m_lastAttachCheck = -1.0;
         double m_lastAliveCheck = -1.0;
         std::uint64_t m_lastBreakSerial = 0;
-        bool m_tableScriptWaiting = false;
-        std::string m_pendingTableScript;
-        std::vector<Table::TableSymbol> m_tableSymbols;
 
-        bool m_async = false;
         std::thread::id m_mainThread = std::this_thread::get_id();
-        std::deque<ActivationJob> m_activations;
-        std::unordered_map<int, int> m_pending;
-        std::unique_ptr<RunningActivation> m_running;
-        int m_progressDone = 0;
-        int m_progressTotal = 0;
-        std::string m_progressCurrent;
-        MainThreadQueue m_mainQueue;
-        bool m_waitingForWorker = false;
-        bool m_workerLuaActive = false;
-        int m_tableTask = 0;
-        bool m_tableTaskStopped = false;
-        double m_tableTaskStarted = 0.0;
-        std::vector<int> m_visibleRecords;
-        bool m_visibleKnown = false;
+        ActivationRunner m_activation{ *this };
         bool m_attachLookup = false;
-        double m_symbolsStarted = 0.0;
         BackgroundWork m_work;
         JobQueue m_jobs{ m_work };
     };

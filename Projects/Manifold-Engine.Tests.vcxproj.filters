@@ -48,6 +48,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\Source\App\ActivationRunner.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Commands.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -67,6 +70,12 @@
       <Filter>Source\App</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\App\Sounds.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\App\TableRuntime.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\App\TargetSession.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Asm\Assembler.cpp">

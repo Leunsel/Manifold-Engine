@@ -105,6 +105,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\Source\App\ActivationRunner.cpp" />
     <ClCompile Include="..\Source\App\Commands.cpp" />
     <ClCompile Include="..\Source\App\Diagnostics.cpp" />
     <ClCompile Include="..\Source\App\Engine.cpp" />
@@ -112,6 +113,8 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\App\Settings.cpp" />
     <ClCompile Include="..\Source\App\SettingsStore.cpp" />
     <ClCompile Include="..\Source\App\Sounds.cpp" />
+    <ClCompile Include="..\Source\App\TableRuntime.cpp" />
+    <ClCompile Include="..\Source\App\TargetSession.cpp" />
     <ClCompile Include="..\Source\Asm\Assembler.cpp" />
     <ClCompile Include="..\Source\Asm\AutoAssembler.cpp" />
     <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp" />

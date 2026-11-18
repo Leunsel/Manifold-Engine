@@ -54,6 +54,9 @@
     <ClCompile Include="..\Source\Main.cpp">
       <Filter>Source</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\ActivationRunner.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Application.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -79,6 +82,12 @@
       <Filter>Source\App</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\App\Sounds.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\App\TableRuntime.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\App\TargetSession.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\App\WindowHost.cpp">
@@ -390,6 +399,9 @@
     <ClInclude Include="..\Source\Resource.h">
       <Filter>Source</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\App\ActivationRunner.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\App\Application.h">
       <Filter>Source\App</Filter>
     </ClInclude>
@@ -415,6 +427,12 @@
       <Filter>Source\App</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\Sounds.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\TableRuntime.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\TargetSession.h">
       <Filter>Source\App</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\WindowHost.h">

@@ -116,6 +116,7 @@ exit /b 0</Command>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\Source\Main.cpp" />
+    <ClCompile Include="..\Source\App\ActivationRunner.cpp" />
     <ClCompile Include="..\Source\App\Application.cpp" />
     <ClCompile Include="..\Source\App\Commands.cpp" />
     <ClCompile Include="..\Source\App\CrashHandler.cpp" />
@@ -125,6 +126,8 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\App\Settings.cpp" />
     <ClCompile Include="..\Source\App\SettingsStore.cpp" />
     <ClCompile Include="..\Source\App\Sounds.cpp" />
+    <ClCompile Include="..\Source\App\TableRuntime.cpp" />
+    <ClCompile Include="..\Source\App\TargetSession.cpp" />
     <ClCompile Include="..\Source\App\WindowHost.cpp" />
     <ClCompile Include="..\Source\Asm\Assembler.cpp" />
     <ClCompile Include="..\Source\Asm\AutoAssembler.cpp" />
@@ -232,6 +235,7 @@ exit /b 0</Command>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Source\Resource.h" />
+    <ClInclude Include="..\Source\App\ActivationRunner.h" />
     <ClInclude Include="..\Source\App\Application.h" />
     <ClInclude Include="..\Source\App\Commands.h" />
     <ClInclude Include="..\Source\App\CrashHandler.h" />
@@ -241,6 +245,8 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\App\Settings.h" />
     <ClInclude Include="..\Source\App\SettingsStore.h" />
     <ClInclude Include="..\Source\App\Sounds.h" />
+    <ClInclude Include="..\Source\App\TableRuntime.h" />
+    <ClInclude Include="..\Source\App\TargetSession.h" />
     <ClInclude Include="..\Source\App\WindowHost.h" />
     <ClInclude Include="..\Source\Asm\Assembler.h" />
     <ClInclude Include="..\Source\Asm\AutoAssembler.h" />
