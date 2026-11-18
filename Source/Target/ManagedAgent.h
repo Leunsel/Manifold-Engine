@@ -42,6 +42,7 @@ namespace Manifold::Target
         constexpr int kStateFailed = 2;
 
         constexpr std::uint64_t kArrayData = 0x20;
+        constexpr std::uint32_t kSlotIndexMask = 0xFFFFu;
 
         enum Op : std::uint32_t
         {

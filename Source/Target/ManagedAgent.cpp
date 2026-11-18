@@ -406,8 +406,9 @@ namespace Manifold::Target
         {
             if (slot <= 0 || found.count(slot))
                 continue;
+            const std::uint64_t index = static_cast<std::uint32_t>(slot) & P::kSlotIndexMask;
             std::uint64_t address = 0;
-            if (m_process->ReadExact(m_slots + P::kArrayData + 8ull * static_cast<std::uint64_t>(slot), &address, sizeof(address)))
+            if (index && m_process->ReadExact(m_slots + P::kArrayData + 8ull * index, &address, sizeof(address)))
                 found[slot] = address;
         }
         return found;

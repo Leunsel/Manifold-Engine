@@ -295,76 +295,107 @@ namespace Manifold.Managed
 
     sealed class Registry
     {
+        public const int IndexBits = 16;
+        const int IndexMask = (1 << IndexBits) - 1;
+        const int MaxGeneration = 0x7FFF;
+
         readonly object[] m_slots;
+        readonly int[] m_generations;
         readonly Dictionary<object, int> m_index = new Dictionary<object, int>(new RefComparer());
         readonly List<int>[] m_groups;
-        readonly Stack<int> m_free = new Stack<int>();
+        readonly Queue<int> m_free = new Queue<int>();
         int m_next = 1;
 
         public Registry(object[] slots)
         {
             m_slots = slots;
+            m_generations = new int[slots.Length];
+            for (int i = 0; i < m_generations.Length; ++i)
+                m_generations[i] = 1;
             m_groups = new List<int>[slots.Length];
+        }
+
+        static int IndexOf(int id)
+        {
+            return id & IndexMask;
+        }
+
+        int IdOf(int index)
+        {
+            return (m_generations[index] << IndexBits) | index;
+        }
+
+        void Retire(int index)
+        {
+            m_generations[index] = m_generations[index] >= MaxGeneration ? 1 : m_generations[index] + 1;
         }
 
         public int Put(object value, int group)
         {
             if (value == null)
                 return 0;
-            int slot;
-            if (!m_index.TryGetValue(value, out slot))
+            int id;
+            if (!m_index.TryGetValue(value, out id))
             {
-                if (m_free.Count > 0)
-                    slot = m_free.Pop();
-                else if (m_next < m_slots.Length)
-                    slot = m_next++;
+                int index;
+                if (m_next < m_slots.Length)
+                    index = m_next++;
+                else if (m_free.Count > 0)
+                    index = m_free.Dequeue();
                 else
                     throw new InvalidOperationException("the explorer holds too many objects; close some inspector tabs");
-                m_slots[slot] = value;
-                m_index[value] = slot;
-                m_groups[slot] = new List<int>(1);
+                m_slots[index] = value;
+                m_groups[index] = new List<int>(1);
+                id = IdOf(index);
+                m_index[value] = id;
             }
-            if (!m_groups[slot].Contains(group))
-                m_groups[slot].Add(group);
-            return slot;
+            List<int> groups = m_groups[IndexOf(id)];
+            if (!groups.Contains(group))
+                groups.Add(group);
+            return id;
         }
 
-        public object Get(int slot)
+        public object Get(int id)
         {
-            if (slot <= 0)
+            if (id <= 0)
                 return null;
-            if (slot >= m_slots.Length || m_slots[slot] == null)
-                throw new InvalidOperationException("the explorer no longer holds object " + slot);
-            return m_slots[slot];
+            int index = IndexOf(id);
+            if (index == 0 || index >= m_slots.Length || m_slots[index] == null || IdOf(index) != id)
+                throw new InvalidOperationException("the explorer no longer holds object " + id);
+            return m_slots[index];
         }
 
         public List<int> Release(int group)
         {
             List<int> freed = new List<int>();
-            for (int slot = 1; slot < m_next; ++slot)
+            for (int index = 1; index < m_next; ++index)
             {
-                List<int> groups = m_groups[slot];
+                List<int> groups = m_groups[index];
                 if (groups == null || !groups.Remove(group) || groups.Count > 0)
                     continue;
-                m_index.Remove(m_slots[slot]);
-                m_slots[slot] = null;
-                m_groups[slot] = null;
-                m_free.Push(slot);
-                freed.Add(slot);
+                freed.Add(IdOf(index));
+                m_index.Remove(m_slots[index]);
+                m_slots[index] = null;
+                m_groups[index] = null;
+                Retire(index);
+                m_free.Enqueue(index);
             }
             return freed;
         }
 
         public void Clear()
         {
-            for (int slot = 0; slot < m_slots.Length; ++slot)
+            for (int index = 0; index < m_slots.Length; ++index)
             {
-                m_slots[slot] = null;
-                m_groups[slot] = null;
+                if (m_slots[index] != null || m_groups[index] != null)
+                    Retire(index);
+                m_slots[index] = null;
+                m_groups[index] = null;
             }
             m_index.Clear();
             m_free.Clear();
-            m_next = 1;
+            for (int index = 1; index < m_next; ++index)
+                m_free.Enqueue(index);
         }
     }
 
