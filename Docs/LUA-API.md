@@ -169,7 +169,7 @@ The Lua engine is `getLuaEngine()`: `cbShowOnPrint.Checked` (and `State`) is the
 
 ## Mono / .NET
 
-For a Unity game, Mono-based (one with `mono-2.0-bdwgc.dll` or `mono.dll`) or IL2CPP (one with `GameAssembly.dll`), the runtime is read through a small in-process worker, without injecting a DLL. As in Cheat Engine, the same `mono_*` functions serve both runtimes. On IL2CPP only metadata is read: there is no JIT, every method already has its code in `GameAssembly.dll`, and nothing runs managed code in the game.
+For a Unity game, Mono-based (one with `mono-2.0-bdwgc.dll` or `mono.dll`) or IL2CPP (one with `GameAssembly.dll`), the runtime is read through a small in-process worker, without injecting a native DLL. On Mono the class list comes from a small managed dumper that Manifold loads into the game's root domain (it stays loaded until the game ends), with the `mono_*` C functions as the fallback. As in Cheat Engine, the same `mono_*` functions serve both runtimes. On IL2CPP only metadata is read: there is no JIT, every method already has its code in `GameAssembly.dll`, and nothing runs managed code in the game.
 
 | Function | Result |
 | --- | --- |

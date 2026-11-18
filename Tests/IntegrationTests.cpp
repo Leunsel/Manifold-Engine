@@ -24,6 +24,7 @@ namespace Manifold::Tests
     void CheckAttachArmsMainThread(Engine& engine, HANDLE mainThread, std::uint64_t address);
     void CheckMono(Engine& engine);
     void CheckIl2CppTarget(const std::filesystem::path& targetPath);
+    void CheckManagedDumper(const std::filesystem::path& targetPath);
 
     namespace
     {
@@ -986,6 +987,7 @@ namespace Manifold::Tests
         engine.CloseProcess();
         DirectSystemCalls(target.Info.dwProcessId, health);
         CheckIl2CppTarget(targetPath);
+        CheckManagedDumper(targetPath);
         return Totals().Failures - before;
     }
 }

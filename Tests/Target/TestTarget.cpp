@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -144,12 +145,281 @@ extern "C" __declspec(dllexport) FakeObject g_fakeList = { &g_listVT, 0, 0 };
 extern "C" __declspec(dllexport) FakeObject g_fakeWild = { &g_wildVT, 0, 0 };
 extern "C" __declspec(dllexport) FakeObject g_fakeNotClass = { &g_notClassVT, 0, 0 };
 
+struct FakeAgentStats
+{
+    long Loads;
+    long Begins;
+    long Releases;
+    long ImageBytes;
+    long Live;
+    long Cancels;
+};
+extern "C" __declspec(dllexport) FakeAgentStats g_agentStats = {};
+
 // With --il2cpp the target plays an IL2CPP game instead (see below): the fake
 // Mono then has no root domain, so the bridge moves on to the il2cpp_* exports.
 namespace
 {
     bool g_il2cpp = false;
 }
+
+namespace
+{
+    enum class AgentMode
+    {
+        Off,
+        Good,
+        BadHandles,
+        BadOffsets,
+        Unsure,
+        Fail
+    };
+    AgentMode g_agentMode = AgentMode::Off;
+
+    const FakeMethod kAgentMethods[] = { { "Begin", nullptr }, { "Release", nullptr } };
+    const FakeField kAgentFields[] = { { "State", 0, 0x08, 0x10 }, { "Types", 0, 0x08, 0x10 }, { "Cancel", 0, 0x08, 0x10 }, { "Data", 0, 0x18, 0x10 }, { "Size", 0, 0x08, 0x10 } };
+    extern const FakeImage kAgentImage;
+    const FakeClass kAgentClass = { "Manifold.Managed", "Dumper", kAgentMethods, 2, kAgentFields, 5, &kAgentImage };
+    const FakeImage kAgentImage = { "ManifoldDumper2", &kAgentClass, 1 };
+    FakeVTable g_agentVT = { &kAgentClass };
+    long long g_agentBoxed[4] = {};
+    bool g_agentLoaded = false;
+
+    struct AgentStatics
+    {
+        volatile long State = 0;
+        volatile long Types = 0;
+        volatile long Cancel = 0;
+        void* volatile Data = nullptr;
+        volatile long Size = 0;
+    };
+    AgentStatics g_agentStatics;
+
+    class BlobWriter
+    {
+    public:
+        std::uint32_t Text(const std::string& text)
+        {
+            for (std::size_t i = 0; i < m_strings.size(); ++i)
+            {
+                if (m_strings[i] == text)
+                    return static_cast<std::uint32_t>(i);
+            }
+            m_strings.push_back(text);
+            return static_cast<std::uint32_t>(m_strings.size() - 1);
+        }
+        void U32(std::uint32_t value) { Put(m_types, &value, sizeof(value)); }
+        void I32(std::int32_t value) { Put(m_types, &value, sizeof(value)); }
+        void U64(std::uint64_t value) { Put(m_types, &value, sizeof(value)); }
+
+        std::vector<unsigned char> Finish(std::uint32_t flags, std::uint32_t types) const
+        {
+            std::vector<unsigned char> out;
+            const std::uint32_t header[] = { 0x4D44464Du, 2u, flags, static_cast<std::uint32_t>(m_strings.size()) };
+            Put(out, header, sizeof(header));
+            for (const std::string& text : m_strings)
+            {
+                const std::uint32_t length = static_cast<std::uint32_t>(text.size());
+                Put(out, &length, sizeof(length));
+                Put(out, text.data(), text.size());
+            }
+            Put(out, &types, sizeof(types));
+            out.insert(out.end(), m_types.begin(), m_types.end());
+            return out;
+        }
+
+    private:
+        static void Put(std::vector<unsigned char>& to, const void* data, std::size_t size)
+        {
+            const unsigned char* bytes = static_cast<const unsigned char*>(data);
+            to.insert(to.end(), bytes, bytes + size);
+        }
+
+        std::vector<std::string> m_strings;
+        std::vector<unsigned char> m_types;
+    };
+
+    std::vector<unsigned char> BuildAgentBlob()
+    {
+        BlobWriter writer;
+        const std::uint32_t count = static_cast<std::uint32_t>(kImage.ClassCount);
+        for (std::uint32_t c = 0; c < count; ++c)
+        {
+            const FakeClass& klass = kImage.Classes[c];
+            const FakeClass* handle = g_agentMode == AgentMode::BadHandles ? &kImage.Classes[(c + 1) % count] : &klass;
+            const bool nested = c == 1;
+            writer.U32(writer.Text(kImage.Name));
+            writer.U32(writer.Text(nested ? "" : klass.Namespace));
+            writer.U32(writer.Text(klass.Name));
+            writer.U32(writer.Text("UnityEngine.MonoBehaviour"));
+            writer.U32(0x02000001u + c);
+            writer.U64(reinterpret_cast<std::uint64_t>(handle));
+            writer.U32(nested ? 32u : 0u);
+            writer.U32(static_cast<std::uint32_t>(klass.FieldCount));
+            for (int f = 0; f < klass.FieldCount; ++f)
+            {
+                const FakeField& field = klass.Fields[f];
+                writer.U32(writer.Text(field.Name));
+                writer.I32(g_agentMode == AgentMode::BadOffsets ? field.Offset + 0x99 : field.Offset);
+                writer.U32((field.Flags & 0x10) ? 1u : 0u);
+                writer.U32(static_cast<std::uint32_t>(field.TypeCode));
+            }
+            writer.U32(static_cast<std::uint32_t>(klass.MethodCount));
+            for (int m = 0; m < klass.MethodCount; ++m)
+            {
+                writer.U32(writer.Text(klass.Methods[m].Name));
+                writer.U64(reinterpret_cast<std::uint64_t>(&klass.Methods[m]));
+                writer.U32(0);
+                writer.I32(1);
+            }
+        }
+        return writer.Finish(g_agentMode == AgentMode::Unsure ? 1u : 3u, count);
+    }
+
+    DWORD WINAPI AgentWorker(void*)
+    {
+        ::Sleep(120);
+        if (g_agentStatics.Cancel || g_agentMode == AgentMode::Fail)
+        {
+            g_agentStatics.State = 3;
+            return 0;
+        }
+        const std::vector<unsigned char> blob = BuildAgentBlob();
+        void* data = ::HeapAlloc(::GetProcessHeap(), 0, blob.size());
+        if (!data)
+        {
+            g_agentStatics.State = 3;
+            return 0;
+        }
+        std::memcpy(data, blob.data(), blob.size());
+        ::InterlockedIncrement(&g_agentStats.Live);
+        g_agentStatics.Data = data;
+        g_agentStatics.Size = static_cast<long>(blob.size());
+        g_agentStatics.Types = kImage.ClassCount;
+        g_agentStatics.State = 2;
+        return 0;
+    }
+
+    void AgentBegin()
+    {
+        if (g_agentStatics.State == 1)
+            return;
+        ::InterlockedIncrement(&g_agentStats.Begins);
+        g_agentStatics.Cancel = 0;
+        g_agentStatics.Types = 0;
+        g_agentStatics.State = 1;
+        ::CloseHandle(::CreateThread(nullptr, 0, &AgentWorker, nullptr, 0, nullptr));
+    }
+
+    void AgentRelease()
+    {
+        ::InterlockedIncrement(&g_agentStats.Releases);
+        if (g_agentStatics.State == 1)
+            return;
+        if (void* data = g_agentStatics.Data)
+        {
+            g_agentStatics.Data = nullptr;
+            ::HeapFree(::GetProcessHeap(), 0, data);
+            ::InterlockedDecrement(&g_agentStats.Live);
+        }
+        g_agentStatics.Size = 0;
+        g_agentStatics.State = 0;
+    }
+}
+
+extern "C"
+{
+    __declspec(dllexport) void* mono_image_open_from_data(char* data, unsigned int length, int needCopy, int* status)
+    {
+        static const char kName[] = "ManifoldDumper";
+        const bool dumper = g_agentMode != AgentMode::Off && data && needCopy && length > 0x200 && data[0] == 'M' && data[1] == 'Z'
+            && std::search(data, data + length, kName, kName + sizeof(kName) - 1) != data + length;
+        if (status)
+            *status = dumper ? 0 : 3;
+        if (!dumper)
+            return nullptr;
+        g_agentStats.ImageBytes = static_cast<long>(length);
+        return const_cast<FakeImage*>(&kAgentImage);
+    }
+    __declspec(dllexport) void* mono_assembly_load_from_full(void* image, const char* path, int* status, int)
+    {
+        const bool ok = image == &kAgentImage && path && std::strstr(path, "ManifoldDumper") != nullptr;
+        if (status)
+            *status = ok ? 0 : 3;
+        if (!ok)
+            return nullptr;
+        g_agentLoaded = true;
+        ::InterlockedIncrement(&g_agentStats.Loads);
+        return image;
+    }
+    __declspec(dllexport) void* mono_class_from_name(void* image, const char* space, const char* name)
+    {
+        const FakeImage* img = static_cast<const FakeImage*>(image);
+        for (int i = 0; img && space && name && i < img->ClassCount; ++i)
+        {
+            if (std::strcmp(img->Classes[i].Namespace, space) == 0 && std::strcmp(img->Classes[i].Name, name) == 0)
+                return const_cast<FakeClass*>(&img->Classes[i]);
+        }
+        return nullptr;
+    }
+    __declspec(dllexport) void* mono_class_get_method_from_name(void* klass, const char* name, int)
+    {
+        const FakeClass* c = static_cast<const FakeClass*>(klass);
+        for (int i = 0; c && name && i < c->MethodCount; ++i)
+        {
+            if (std::strcmp(c->Methods[i].Name, name) == 0)
+                return const_cast<FakeMethod*>(&c->Methods[i]);
+        }
+        return nullptr;
+    }
+    __declspec(dllexport) void* mono_class_get_field_from_name(void* klass, const char* name)
+    {
+        const FakeClass* c = static_cast<const FakeClass*>(klass);
+        for (int i = 0; c && name && i < c->FieldCount; ++i)
+        {
+            if (std::strcmp(c->Fields[i].Name, name) == 0)
+                return const_cast<FakeField*>(&c->Fields[i]);
+        }
+        return nullptr;
+    }
+    __declspec(dllexport) void* mono_class_vtable(void*, void* klass) { return klass == &kAgentClass ? &g_agentVT : nullptr; }
+    __declspec(dllexport) void* mono_runtime_invoke(void* method, void*, void**, void** exception)
+    {
+        if (exception)
+            *exception = nullptr;
+        if (method == &kAgentMethods[0])
+            AgentBegin();
+        else if (method == &kAgentMethods[1])
+            AgentRelease();
+        else
+            return nullptr;
+        g_agentBoxed[2] = g_agentStatics.State;
+        return g_agentBoxed;
+    }
+    __declspec(dllexport) void mono_field_static_get_value(void* vtable, void* field, void* value)
+    {
+        if (vtable != &g_agentVT || !value)
+            return;
+        if (field == &kAgentFields[0])
+            *static_cast<std::int32_t*>(value) = g_agentStatics.State;
+        else if (field == &kAgentFields[1])
+            *static_cast<std::int32_t*>(value) = g_agentStatics.Types;
+        else if (field == &kAgentFields[2])
+            *static_cast<std::int32_t*>(value) = g_agentStatics.Cancel;
+        else if (field == &kAgentFields[3])
+            *static_cast<void**>(value) = g_agentStatics.Data;
+        else if (field == &kAgentFields[4])
+            *static_cast<std::int32_t*>(value) = g_agentStatics.Size;
+    }
+    __declspec(dllexport) void mono_field_static_set_value(void* vtable, void* field, void* value)
+    {
+        if (vtable != &g_agentVT || !value || field != &kAgentFields[2])
+            return;
+        g_agentStatics.Cancel = *static_cast<std::int32_t*>(value);
+        ::InterlockedIncrement(&g_agentStats.Cancels);
+    }
+}
+
 
 extern "C"
 {
@@ -160,6 +430,8 @@ extern "C"
         fn(const_cast<FakeImage*>(&kImage), user);
         if (Synthetic().Image.ClassCount > 0)
             fn(const_cast<FakeImage*>(&Synthetic().Image), user);
+        if (g_agentLoaded)
+            fn(const_cast<FakeImage*>(&kAgentImage), user);
     }
     __declspec(dllexport) void* mono_assembly_get_image(void* assembly) { return assembly; }
     __declspec(dllexport) const char* mono_image_get_name(void* image) { return static_cast<FakeImage*>(image)->Name; }
@@ -524,6 +796,16 @@ int main(int argc, char** argv)
     {
         if (std::strcmp(argv[i], "--il2cpp") == 0)
             g_il2cpp = true;
+        else if (std::strcmp(argv[i], "--mono-agent") == 0)
+            g_agentMode = AgentMode::Good;
+        else if (std::strcmp(argv[i], "--mono-agent=bad-handles") == 0)
+            g_agentMode = AgentMode::BadHandles;
+        else if (std::strcmp(argv[i], "--mono-agent=bad-offsets") == 0)
+            g_agentMode = AgentMode::BadOffsets;
+        else if (std::strcmp(argv[i], "--mono-agent=unsure") == 0)
+            g_agentMode = AgentMode::Unsure;
+        else if (std::strcmp(argv[i], "--mono-agent=fail") == 0)
+            g_agentMode = AgentMode::Fail;
     }
     for (int i = 1; i < argc; ++i)
     {

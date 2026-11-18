@@ -13,6 +13,7 @@ GUIDS = {
     "TestTarget": "{7E8F9A0B-1C2D-4E3F-8A4B-5C6D7E8F9012}",
     "ManifoldAgent": "{2D3C4B5A-6978-4A1B-9C8D-0E1F2A3B4C5D}",
     "SyscallTest": "{4A5B6C7D-8E9F-40A1-B2C3-D4E5F6071829}",
+    "ManagedDumper": "{5B6C7D8E-9FA0-41B2-83C4-E5F607182930}",
 }
 
 TEST_EXCLUDED_DIRS = ("UI",)
@@ -243,6 +244,36 @@ exit /b 0</Command>
 """
 
 
+MANAGED_BUILD = """where dotnet &gt;nul 2&gt;nul || goto embed
+set MSBuildSDKsPath=
+set MSBuildExtensionsPath=
+set MSBUILD_EXE_PATH=
+dotnet build "$(ProjectDir)..\\Managed\\ManifoldDumper\\ManifoldDumper.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
+:embed
+where python &gt;nul 2&gt;nul || exit /b 0
+python "$(ProjectDir)..\\Tools\\embed_managed.py" --touch"""
+
+
+def managed_project():
+    import embed_managed
+    sources = [p for p in collect(os.path.join(ROOT, "Managed"), {".cs", ".csproj"})
+               if "\\obj\\" not in p.replace("/", "\\") and "\\bin\\" not in p.replace("/", "\\")]
+    inputs = ";".join("$(ProjectDir)" + rel(p) for p in sources + ["Tools/embed_managed.py"])
+    project = common_head("ManagedDumper", "Utility", "ManagedDumper")
+    project += f"""  <ItemDefinitionGroup>
+    <CustomBuildStep>
+      <Command>{MANAGED_BUILD}</Command>
+      <Message>Building the managed dumper and embedding it into the program</Message>
+      <Inputs>{inputs}</Inputs>
+      <Outputs>$(ProjectDir)..\\Build\\Managed\\{embed_managed.assembly_name()}.dll;$(ProjectDir)..\\Source\\Generated\\ManagedDumperImage.cpp</Outputs>
+    </CustomBuildStep>
+  </ItemDefinitionGroup>
+"""
+    project += items("None", sources)
+    project += tail()
+    return project
+
+
 def with_prebuild(project):
     return project.replace("  </ItemDefinitionGroup>\n", PREBUILD + "  </ItemDefinitionGroup>\n", 1)
 
@@ -260,6 +291,8 @@ def main():
     embed_lua.main()
     import embed_templates
     embed_templates.main()
+    import embed_managed
+    embed_managed.main()
     os.makedirs(PROJECTS, exist_ok=True)
     source = os.path.join(ROOT, "Source")
     app_sources = collect(source, {".cpp"})
@@ -284,6 +317,7 @@ def main():
     app += items("Image", ["Source/Resources/icon.ico"])
     app += reference("Dependencies")
     app += build_only_reference("ManifoldAgent")
+    app += build_only_reference("ManagedDumper")
     app += tail()
     app = disable_jmc_for(app, "Source/Syscalls/Syscall.cpp")
     app = with_prebuild(app)
@@ -312,6 +346,7 @@ def main():
     tests += items("ClInclude", test_headers)
     tests += reference("Dependencies")
     tests += build_only_reference("ManifoldAgent")
+    tests += build_only_reference("ManagedDumper")
     tests += tail()
     tests = disable_jmc_for(tests, "Source/Syscalls/Syscall.cpp")
     tests = with_prebuild(tests)
@@ -325,6 +360,7 @@ def main():
     target = target.replace("_WINDOWS;", "_CONSOLE;")
     target = target.replace("<UseDebugLibraries>true</UseDebugLibraries>", "<UseDebugLibraries>false</UseDebugLibraries>")
     target = target.replace("<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>", "<RuntimeLibrary>MultiThreaded</RuntimeLibrary>\n      <Optimization>MaxSpeed</Optimization>")
+    target = target.replace("<PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>", "<PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>")
     target += items("ClCompile", target_sources)
     target += tail()
     write("TestTarget.vcxproj", target)
@@ -385,8 +421,10 @@ def main():
     agent += tail()
     write("ManifoldAgent.vcxproj", agent)
 
+    write("ManagedDumper.vcxproj", managed_project())
+
     sln = "\r\nMicrosoft Visual Studio Solution File, Format Version 12.00\r\n# Visual Studio Version 17\r\nVisualStudioVersion = 17.0.31903.59\r\nMinimumVisualStudioVersion = 10.0.40219.1\r\n"
-    names = ("Manifold-Engine", "Dependencies", "Manifold-Engine.Tests", "TestTarget", "ManifoldAgent", "SyscallTest")
+    names = ("Manifold-Engine", "Dependencies", "Manifold-Engine.Tests", "TestTarget", "ManifoldAgent", "SyscallTest", "ManagedDumper")
     for name in names:
         sln += f'Project("{{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}}") = "{name}", "Projects\\{name}.vcxproj", "{GUIDS[name]}"\r\nEndProject\r\n'
     sln += "Global\r\n\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\r\n"

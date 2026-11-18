@@ -168,6 +168,9 @@
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp">
       <Filter>Source\Generated</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Generated\ManagedDumperImage.cpp">
+      <Filter>Source\Generated</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\ConsoleHistory.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -244,6 +247,9 @@
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\ManagedDumper.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Mono.cpp">
@@ -583,6 +589,9 @@
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\Il2CppRuntime.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\ManagedDumper.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\ManagedRuntime.h">

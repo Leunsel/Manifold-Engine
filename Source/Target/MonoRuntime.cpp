@@ -8,6 +8,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <thread>
+
+#include <windows.h>
 
 namespace Manifold::Target
 {
@@ -18,6 +22,11 @@ namespace Manifold::Target
         constexpr int kMaxClasses = 200000;
         constexpr int kMaxMembers = 65536;
         constexpr std::size_t kMaxJitMisses = 8192;
+        constexpr auto kDumperBudget = std::chrono::seconds(180);
+        constexpr auto kDumperPoll = std::chrono::milliseconds(20);
+        constexpr std::int64_t kMaxDumpBytes = std::int64_t(1) << 30;
+        constexpr std::size_t kClassSamples = 8;
+        constexpr std::size_t kMemberSamples = 32;
 
         const char* const kFunctions[] = {
             "mono_get_root_domain", "mono_thread_attach", "mono_assembly_foreach", "mono_assembly_get_image",
@@ -39,6 +48,7 @@ namespace Manifold::Target
             "mono_class_is_valuetype", "mono_class_is_enum", "mono_class_enum_basetype", "mono_class_value_size",
             "mono_class_get_element_class", "mono_array_element_size", "mono_class_get_rank", "mono_object_to_string", "mono_free",
             "mono_method_get_param_names",
+            "mono_image_open_from_data", "mono_assembly_load_from_full", "mono_class_from_name", "mono_class_get_field_from_name",
         };
     }
 
@@ -69,6 +79,8 @@ namespace Manifold::Target
 
     void MonoRuntime::Detach()
     {
+        if (!(m_bridge.m_paused && m_bridge.m_paused()))
+            StopDumper();
         m_jitRanges.clear();
         m_jitMisses.clear();
     }
@@ -125,21 +137,35 @@ namespace Manifold::Target
         std::int64_t total = 0;
         for (const auto& image : images)
         {
+            if (IsDumperImage(image.second))
+            {
+                rows.push_back(0);
+                continue;
+            }
             std::lock_guard lock(m_bridge.m_lock);
             const auto tableInfo = m_bridge.CallFn("mono_image_get_table_info", image.first, kTableTypeDef);
             const auto count = m_bridge.CallFn("mono_table_info_get_rows", tableInfo.value_or(0));
             rows.push_back(std::min(kMaxClasses, static_cast<int>(count.value_or(0) & 0xFFFFFFFFu)));
             total += rows.back();
         }
-        if (progress)
+        std::vector<MonoClass> classes;
+        bool dumped = false;
+        if (auto viaDumper = DumpWithAgent(images, total, progress))
+        {
+            classes = std::move(*viaDumper);
+            dumped = true;
+        }
+        if (stopped())
+            return cancelled;
+        if (!dumped && progress)
         {
             progress->SetSteps(0, total);
             progress->SetText("Reading the classes");
         }
 
-        std::vector<MonoClass> classes;
-        classes.reserve(static_cast<std::size_t>(total));
-        for (std::size_t i = 0; i < images.size(); ++i)
+        if (!dumped)
+            classes.reserve(static_cast<std::size_t>(total));
+        for (std::size_t i = 0; i < images.size() && !dumped; ++i)
         {
             for (int row = 1; row <= rows[i]; ++row)
             {
@@ -196,6 +222,7 @@ namespace Manifold::Target
             m_bridge.m_handleMin = handleMin;
             m_bridge.m_handleMax = handleMax;
             m_bridge.m_images = std::move(imageSet);
+            m_bridge.m_readByDumper = dumped;
             m_jitRanges.clear();
             m_jitMisses.clear();
             module = m_bridge.m_module;
@@ -203,8 +230,364 @@ namespace Manifold::Target
                 m_bridge.m_present = true;
             ++m_bridge.m_generation;
         }
-        LOG_INFO("Mono", "Read " + std::to_string(count) + " classes from " + module);
+        LOG_INFO("Mono", "Read " + std::to_string(count) + " classes from " + module + (dumped ? " through the managed dumper" : ""));
         return Status::Success();
+    }
+
+    std::optional<std::vector<MonoClass>> MonoRuntime::DumpWithAgent(const ImageList& images, std::int64_t total, WorkProgress* progress)
+    {
+        if (!m_bridge.m_useDumper.load() || m_dumperBroken || ManagedDumperImage().empty() || (m_bridge.m_paused && m_bridge.m_paused()))
+            return std::nullopt;
+        if (progress)
+            progress->SetText("Loading the managed dumper");
+        if (const Status loaded = LoadDumper(images); !loaded)
+        {
+            m_dumperBroken = true;
+            LOG_INFO("Mono", "The managed dumper is not used (" + loaded.Text + "), reading the classes through the runtime");
+            return std::nullopt;
+        }
+        Result<ManagedDump> dump = RunDumper(total, progress);
+        if (!dump)
+        {
+            if (progress && progress->Cancelled())
+                return std::nullopt;
+            m_dumperBroken = true;
+            LOG_WARN("Mono", "The managed dumper failed (" + dump.Error().Text + "), reading the classes through the runtime");
+            return std::nullopt;
+        }
+        if (!CheckDump(images, *dump))
+        {
+            m_dumperBroken = true;
+            return std::nullopt;
+        }
+        NameNestedTypes(*dump, progress);
+        if (progress && progress->Cancelled())
+            return std::nullopt;
+        return std::move(dump->Classes);
+    }
+
+    Status MonoRuntime::LoadDumper(const ImageList& images)
+    {
+        if (m_dumper.Class)
+            return Status::Success();
+        for (const char* name : { "mono_class_from_name", "mono_class_get_method_from_name", "mono_runtime_invoke", "mono_class_vtable",
+                 "mono_class_get_field_from_name", "mono_field_static_get_value", "mono_field_static_set_value" })
+        {
+            if (!m_bridge.Fn(name))
+                return Status::Fail(ErrorCode::MonoCallFailed, std::string("the runtime has no ") + name);
+        }
+        const std::span<const std::uint8_t> bytes = ManagedDumperImage();
+        std::lock_guard lock(m_bridge.m_lock);
+        if (!m_bridge.m_process)
+            return Status::Fail(ErrorCode::NoProcess);
+        Process& process = *m_bridge.m_process;
+        RemoteCall& call = m_bridge.m_call;
+        const auto text = [&](std::string_view value) -> std::uint64_t
+            {
+                const std::uint64_t at = call.Scratch(value.size() + 1);
+                if (at && !value.empty())
+                    process.Write(at, value.data(), value.size());
+                return at;
+            };
+        call.ResetScratch();
+        std::uint64_t image = 0;
+        for (const auto& [handle, name] : images)
+        {
+            if (name == ManagedDumpFormat::kImageName)
+                image = handle;
+        }
+        if (!image)
+        {
+            if (!m_bridge.Fn("mono_image_open_from_data") || !m_bridge.Fn("mono_assembly_load_from_full"))
+                return Status::Fail(ErrorCode::MonoCallFailed, "the runtime cannot load an assembly from memory");
+            const Result<Address> buffer = process.Allocate(bytes.size(), PAGE_READWRITE);
+            if (!buffer)
+                return buffer.Error();
+            const Status written = process.Write(*buffer, bytes);
+            const std::uint64_t status = call.Scratch(8);
+            const std::uint64_t opened = written && status
+                ? m_bridge.CallFn("mono_image_open_from_data", *buffer, bytes.size(), 1, status).value_or(0)
+                : 0;
+            process.Free(*buffer);
+            if (!opened)
+            {
+                std::int32_t code = -1;
+                if (status)
+                    process.ReadExact(status, &code, sizeof(code));
+                call.ResetScratch();
+                return Status::Fail(ErrorCode::MonoCallFailed, "the runtime did not open the dumper image (status " + std::to_string(code) + ")");
+            }
+            const std::uint64_t path = text(std::string(ManagedDumpFormat::kImageName) + ".dll");
+            const std::uint64_t assembly = m_bridge.CallFn("mono_assembly_load_from_full", opened, path, status, 0).value_or(0);
+            image = assembly ? m_bridge.CallFn("mono_assembly_get_image", assembly).value_or(0) : 0;
+            if (!image)
+            {
+                call.ResetScratch();
+                return Status::Fail(ErrorCode::MonoCallFailed, "the runtime did not load the dumper assembly");
+            }
+            LOG_INFO("Mono", "Loaded the managed dumper (" + std::to_string(bytes.size()) + " bytes) into the game");
+        }
+        DumperHandles found;
+        found.Class = m_bridge.CallFn("mono_class_from_name", image, text(ManagedDumpFormat::kNamespace), text(ManagedDumpFormat::kClass)).value_or(0);
+        if (found.Class)
+        {
+            found.VTable = m_bridge.CallFn("mono_class_vtable", m_bridge.m_domain, found.Class).value_or(0);
+            found.Begin = m_bridge.CallFn("mono_class_get_method_from_name", found.Class, text("Begin"), 0).value_or(0);
+            found.Release = m_bridge.CallFn("mono_class_get_method_from_name", found.Class, text("Release"), 0).value_or(0);
+            const auto field = [&](std::string_view name) { return m_bridge.CallFn("mono_class_get_field_from_name", found.Class, text(name)).value_or(0); };
+            found.State = field("State");
+            found.Types = field("Types");
+            found.Cancel = field("Cancel");
+            found.Data = field("Data");
+            found.Size = field("Size");
+        }
+        call.ResetScratch();
+        if (!found.Class || !found.VTable || !found.Begin || !found.Release || !found.State || !found.Types || !found.Cancel || !found.Data || !found.Size)
+            return Status::Fail(ErrorCode::MonoCallFailed, "the dumper in the game does not match this build");
+        m_dumper = found;
+        return Status::Success();
+    }
+
+    Result<ManagedDump> MonoRuntime::RunDumper(std::int64_t total, WorkProgress* progress)
+    {
+        {
+            std::lock_guard lock(m_bridge.m_lock);
+            if (!m_bridge.m_process)
+                return Status::Fail(ErrorCode::NoProcess);
+            m_bridge.m_call.ResetScratch();
+            const auto begun = InvokeStatic(m_dumper.Begin);
+            m_bridge.m_call.ResetScratch();
+            if (!begun)
+                return Status::Fail(ErrorCode::MonoCallFailed, "Dumper.Begin did not run");
+            m_dumperPending = true;
+        }
+        if (progress)
+        {
+            progress->SetText("Reading the classes");
+            progress->SetSteps(0, total);
+        }
+        const auto deadline = std::chrono::steady_clock::now() + kDumperBudget;
+        std::int64_t state = ManagedDumpFormat::Running;
+        while (state == ManagedDumpFormat::Running)
+        {
+            std::this_thread::sleep_for(kDumperPoll);
+            if (progress && progress->Cancelled())
+            {
+                StopDumper();
+                return Status::Fail(ErrorCode::MonoNotFound, "cancelled");
+            }
+            if (std::chrono::steady_clock::now() > deadline)
+            {
+                StopDumper();
+                return Status::Fail(ErrorCode::MonoCallFailed, "it did not finish in " + std::to_string(kDumperBudget.count()) + " s");
+            }
+            std::lock_guard lock(m_bridge.m_lock);
+            if (!m_bridge.m_process)
+                return Status::Fail(ErrorCode::NoProcess);
+            m_bridge.m_call.ResetScratch();
+            const auto read = ReadStatic(m_dumper.State, 4);
+            const auto types = ReadStatic(m_dumper.Types, 4);
+            m_bridge.m_call.ResetScratch();
+            if (!read)
+            {
+                StopDumper();
+                return Status::Fail(ErrorCode::MonoCallFailed, "its state could not be read");
+            }
+            state = *read;
+            if (progress && types)
+                progress->SetSteps(*types, std::max(total, *types));
+        }
+        if (state != ManagedDumpFormat::Done)
+        {
+            StopDumper();
+            return Status::Fail(ErrorCode::MonoCallFailed, "it failed inside the game");
+        }
+        std::vector<std::uint8_t> blob;
+        {
+            std::lock_guard lock(m_bridge.m_lock);
+            if (!m_bridge.m_process)
+                return Status::Fail(ErrorCode::NoProcess);
+            m_bridge.m_call.ResetScratch();
+            const auto data = ReadStatic(m_dumper.Data, 8);
+            const auto size = ReadStatic(m_dumper.Size, 4);
+            m_bridge.m_call.ResetScratch();
+            const bool usable = data && size && *data && *size > 0 && *size <= kMaxDumpBytes;
+            if (usable)
+            {
+                blob.resize(static_cast<std::size_t>(*size));
+                if (!m_bridge.m_process->ReadExact(static_cast<std::uint64_t>(*data), blob.data(), blob.size()))
+                    blob.clear();
+            }
+            StopDumper();
+            if (!usable)
+                return Status::Fail(ErrorCode::MonoCallFailed, "it published no data");
+            if (blob.empty())
+                return Status::Fail(ErrorCode::ReadFailed, "its data could not be read");
+        }
+        if (progress)
+            progress->SetText("Reading the dump");
+        return ParseManagedDump(blob);
+    }
+
+    bool MonoRuntime::CheckDump(const ImageList& images, ManagedDump& dump)
+    {
+        if (!dump.MonoHandles || dump.Classes.empty())
+        {
+            LOG_WARN("Mono", "The managed dump carries no runtime handles, reading the classes through the runtime");
+            return false;
+        }
+        std::map<std::string, std::uint64_t> imageByName;
+        for (const auto& [handle, name] : images)
+            imageByName.emplace(name, handle);
+        const std::size_t count = dump.Classes.size();
+        const std::size_t stride = std::max<std::size_t>(1, count / kClassSamples);
+
+        std::lock_guard lock(m_bridge.m_lock);
+        RemoteCall& call = m_bridge.m_call;
+        call.ResetScratch();
+        std::size_t classesChecked = 0;
+        for (std::size_t i = 0; i < count && classesChecked < kClassSamples; i += stride)
+        {
+            const MonoClass& info = dump.Classes[i];
+            const auto image = imageByName.find(info.Image);
+            const std::uint32_t token = dump.Tokens[i];
+            if (image == imageByName.end() || (token & 0xFF000000u) != kTokenTypeDef || !info.Handle)
+                continue;
+            const std::uint64_t klass = m_bridge.CallFn("mono_class_get", image->second, token).value_or(0);
+            if (klass != info.Handle)
+            {
+                LOG_WARN("Mono", "The managed dump names " + info.FullName() + " with a class the runtime does not confirm, reading the classes through the runtime");
+                return false;
+            }
+            ++classesChecked;
+        }
+        if (!classesChecked)
+        {
+            LOG_WARN("Mono", "No class of the managed dump could be checked against the runtime, reading the classes through the runtime");
+            return false;
+        }
+
+        bool membersOk = dump.OffsetsSure;
+        if (!membersOk)
+            LOG_WARN("Mono", "The managed dumper could not make the runtime lay out every class, the members are read through the runtime when needed");
+        const std::size_t memberStride = std::max<std::size_t>(1, count / kMemberSamples);
+        std::size_t fieldsChecked = 0;
+        std::size_t methodsChecked = 0;
+        for (std::size_t i = 0; i < count && membersOk && (fieldsChecked < kMemberSamples || methodsChecked < kMemberSamples); ++i)
+        {
+            const MonoClass& info = dump.Classes[(i * memberStride) % count];
+            if (!info.Handle || info.Generic)
+                continue;
+            if (!info.Fields.empty() && fieldsChecked < kMemberSamples)
+            {
+                const MonoField& field = info.Fields.front();
+                const std::uint64_t name = call.Scratch(field.Name.size() + 1);
+                if (name && !field.Name.empty())
+                    m_bridge.m_process->Write(name, field.Name.data(), field.Name.size());
+                const std::uint64_t handle = name ? m_bridge.CallFn("mono_class_get_field_from_name", info.Handle, name).value_or(0) : 0;
+                const auto offset = handle ? m_bridge.CallFn("mono_field_get_offset", handle) : std::nullopt;
+                call.ResetScratch();
+                membersOk = offset && static_cast<std::int32_t>(*offset & 0xFFFFFFFFu) == field.Offset;
+                ++fieldsChecked;
+            }
+            if (membersOk && !info.Methods.empty() && methodsChecked < kMemberSamples)
+            {
+                const MonoMethod& method = info.Methods.front();
+                membersOk = method.Handle && m_bridge.CallString("mono_method_get_name", method.Handle) == method.Name;
+                ++methodsChecked;
+            }
+        }
+        call.ResetScratch();
+        if (!membersOk)
+        {
+            if (dump.OffsetsSure)
+                LOG_WARN("Mono", "The managed dump's members do not match the runtime, they are read through the runtime when needed");
+            for (MonoClass& info : dump.Classes)
+            {
+                info.MembersLoaded = false;
+                info.Fields.clear();
+                info.Methods.clear();
+            }
+        }
+        return true;
+    }
+
+    void MonoRuntime::NameNestedTypes(ManagedDump& dump, WorkProgress* progress)
+    {
+        std::size_t asked = 0;
+        std::size_t named = 0;
+        for (std::size_t i = 0; i < dump.Classes.size(); ++i)
+        {
+            MonoClass& info = dump.Classes[i];
+            if (!(dump.Flags[i] & ManagedDumpFormat::kTypeNested) || !info.Handle)
+                continue;
+            if ((asked & 255) == 0 && progress && progress->Cancelled())
+                return;
+            std::lock_guard lock(m_bridge.m_lock);
+            std::string space = m_bridge.CallString("mono_class_get_namespace", info.Handle);
+            ++asked;
+            if (!space.empty())
+            {
+                info.Namespace = std::move(space);
+                ++named;
+            }
+        }
+        if (named)
+            LOG_INFO("Mono", std::to_string(named) + " of " + std::to_string(asked) + " nested classes carry a namespace of their own");
+    }
+
+    std::optional<std::uint64_t> MonoRuntime::InvokeStatic(std::uint64_t method)
+    {
+        const std::uint64_t exception = m_bridge.m_call.Scratch(8);
+        if (!exception || !method)
+            return std::nullopt;
+        const auto result = m_bridge.CallFn("mono_runtime_invoke", method, 0, 0, exception);
+        if (!result)
+            return std::nullopt;
+        std::uint64_t thrown = 0;
+        if (!m_bridge.m_process->ReadExact(exception, &thrown, sizeof(thrown)) || thrown)
+            return std::nullopt;
+        return *result;
+    }
+
+    std::optional<std::int64_t> MonoRuntime::ReadStatic(std::uint64_t field, std::size_t bytes)
+    {
+        const std::uint64_t out = m_bridge.m_call.Scratch(8);
+        if (!out || !m_bridge.CallFn("mono_field_static_get_value", m_dumper.VTable, field, out))
+            return std::nullopt;
+        if (bytes == 4)
+        {
+            std::int32_t value = 0;
+            if (!m_bridge.m_process->ReadExact(out, &value, sizeof(value)))
+                return std::nullopt;
+            return value;
+        }
+        std::int64_t value = 0;
+        if (!m_bridge.m_process->ReadExact(out, &value, sizeof(value)))
+            return std::nullopt;
+        return value;
+    }
+
+    bool MonoRuntime::WriteStatic(std::uint64_t field, std::int32_t value)
+    {
+        const std::uint64_t in = m_bridge.m_call.Scratch(8);
+        if (!in || !m_bridge.m_process->Write(in, &value, sizeof(value)))
+            return false;
+        return m_bridge.CallFn("mono_field_static_set_value", m_dumper.VTable, field, in).has_value();
+    }
+
+    void MonoRuntime::StopDumper()
+    {
+        if (!m_dumperPending)
+            return;
+        std::lock_guard lock(m_bridge.m_lock);
+        m_dumperPending = false;
+        if (!m_bridge.m_process)
+            return;
+        m_bridge.m_call.ResetScratch();
+        WriteStatic(m_dumper.Cancel, 1);
+        InvokeStatic(m_dumper.Release);
+        m_bridge.m_call.ResetScratch();
     }
 
     void MonoRuntime::EnsureMembers(int classIndex)

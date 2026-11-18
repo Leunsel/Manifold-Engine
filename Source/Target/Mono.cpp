@@ -235,6 +235,7 @@ namespace Manifold::Target
         m_handleIndex.clear();
         m_images.clear();
         m_present = false;
+        m_readByDumper = false;
         m_runtime = ManagedRuntime::None;
         m_domain = 0;
         m_module.clear();

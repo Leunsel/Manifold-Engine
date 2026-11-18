@@ -14,6 +14,8 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <map>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -816,12 +818,168 @@ namespace Manifold::Tests
 
     // Attaches to an already-running process and lists its Mono runtime. Only
     // our own pages are written; the game memory is read, not changed.
+    namespace
+    {
+        std::string ClassKey(const Target::MonoClass& info)
+        {
+            return info.Image + ":" + info.FullName();
+        }
+
+        int CompareDumper(Engine& engine, const std::vector<Target::MonoClass>& dumped)
+        {
+            if (!engine.Mono().ManagedDumperUsed())
+            {
+                std::printf("the managed dumper was not used, nothing to compare\n");
+                return 1;
+            }
+            std::map<std::string, int> dumpedKeys;
+            std::size_t dumpedFields = 0;
+            std::size_t dumpedMethods = 0;
+            for (const Target::MonoClass& info : dumped)
+            {
+                ++dumpedKeys[ClassKey(info)];
+                dumpedFields += info.Fields.size();
+                dumpedMethods += info.Methods.size();
+            }
+            std::printf("dump: %zu instance fields, %zu methods\n", dumpedFields, dumpedMethods);
+            std::vector<const Target::MonoClass*> candidates;
+            for (const Target::MonoClass& info : dumped)
+            {
+                if (!info.Generic && info.MembersLoaded && dumpedKeys[ClassKey(info)] == 1 && (!info.Fields.empty() || !info.Methods.empty()))
+                    candidates.push_back(&info);
+            }
+            constexpr std::size_t kSamples = 600;
+            std::vector<const Target::MonoClass*> samples;
+            const std::size_t stride = std::max<std::size_t>(1, candidates.size() / kSamples);
+            for (std::size_t i = 0; i < candidates.size() && samples.size() < kSamples; i += stride)
+                samples.push_back(candidates[i]);
+
+            const ProcessId pid = engine.Process()->Id();
+            engine.CloseProcess();
+            const Status reopened = engine.OpenProcess(pid);
+            if (!reopened)
+            {
+                std::printf("could not reopen the process: %s\n", reopened.Text.c_str());
+                return 1;
+            }
+            engine.Mono().SetManagedDumper(false);
+            const auto start = std::chrono::steady_clock::now();
+            const Status mono = engine.EnsureMono();
+            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            if (!mono)
+            {
+                std::printf("no Mono through the C API: %s\n", mono.Text.c_str());
+                return 1;
+            }
+            const std::vector<Target::MonoClass> native = engine.Mono().Classes();
+            std::printf("C API: %zu classes in %.2fs\n", native.size(), seconds);
+            std::map<std::string, int> nativeKeys;
+            std::map<std::uint64_t, std::string> nativeHandles;
+            for (const Target::MonoClass& info : native)
+            {
+                ++nativeKeys[ClassKey(info)];
+                nativeHandles.emplace(info.Handle, ClassKey(info));
+            }
+
+            std::vector<std::string> onlyDump;
+            std::vector<std::string> onlyNative;
+            for (const auto& [key, count] : dumpedKeys)
+            {
+                if (!nativeKeys.count(key))
+                    onlyDump.push_back(key);
+            }
+            for (const auto& [key, count] : nativeKeys)
+            {
+                if (!dumpedKeys.count(key))
+                    onlyNative.push_back(key);
+            }
+            std::size_t handleMismatch = 0;
+            for (const Target::MonoClass& info : dumped)
+            {
+                const auto found = nativeHandles.find(info.Handle);
+                if (found == nativeHandles.end() || found->second != ClassKey(info))
+                    ++handleMismatch;
+            }
+            std::printf("classes only in the dump: %zu, only through the C API: %zu, dump handles not matching: %zu\n", onlyDump.size(), onlyNative.size(), handleMismatch);
+            for (std::size_t i = 0; i < std::min<std::size_t>(onlyDump.size(), 12); ++i)
+                std::printf("  dump only: %s\n", onlyDump[i].c_str());
+            for (std::size_t i = 0; i < std::min<std::size_t>(onlyNative.size(), 12); ++i)
+                std::printf("  C API only: %s\n", onlyNative[i].c_str());
+
+            std::size_t compared = 0;
+            std::size_t fieldSets = 0;
+            std::size_t offsets = 0;
+            std::size_t types = 0;
+            std::size_t methodSets = 0;
+            std::size_t shown = 0;
+            const auto show = [&](const std::string& text)
+                {
+                    if (shown++ < 25)
+                        std::printf("  %s\n", text.c_str());
+                };
+            for (const Target::MonoClass* sample : samples)
+            {
+                const std::string key = ClassKey(*sample);
+                if (nativeKeys[key] != 1)
+                    continue;
+                const std::optional<Target::MonoClass> details = engine.Mono().ClassDetails(key);
+                if (!details)
+                    continue;
+                ++compared;
+                std::map<std::string, std::pair<int, int>> mine;
+                std::map<std::string, std::pair<int, int>> theirs;
+                for (const Target::MonoField& field : sample->Fields)
+                    mine[field.Name] = { field.Offset, field.TypeCode };
+                for (const Target::MonoField& field : details->Fields)
+                    theirs[field.Name] = { field.Offset, field.TypeCode };
+                if (mine.size() != theirs.size())
+                {
+                    ++fieldSets;
+                    show(key + ": " + std::to_string(mine.size()) + " fields in the dump, " + std::to_string(theirs.size()) + " through the C API");
+                }
+                for (const auto& [fieldName, value] : mine)
+                {
+                    const auto other = theirs.find(fieldName);
+                    if (other == theirs.end())
+                        continue;
+                    if (other->second.first != value.first)
+                    {
+                        ++offsets;
+                        show(key + "." + fieldName + ": offset " + Hex(static_cast<std::uint64_t>(value.first)) + " in the dump, " + Hex(static_cast<std::uint64_t>(other->second.first)) + " through the C API");
+                    }
+                    if (other->second.second != value.second)
+                    {
+                        ++types;
+                        show(key + "." + fieldName + ": type 0x" + Hex(static_cast<std::uint64_t>(value.second)) + " in the dump, 0x" + Hex(static_cast<std::uint64_t>(other->second.second)) + " through the C API");
+                    }
+                }
+                std::multiset<std::pair<std::string, std::uint64_t>> mineMethods;
+                std::multiset<std::pair<std::string, std::uint64_t>> theirMethods;
+                for (const Target::MonoMethod& entry : sample->Methods)
+                    mineMethods.emplace(entry.Name, entry.Handle);
+                for (const Target::MonoMethod& entry : details->Methods)
+                    theirMethods.emplace(entry.Name, entry.Handle);
+                if (mineMethods != theirMethods)
+                {
+                    ++methodSets;
+                    show(key + ": " + std::to_string(mineMethods.size()) + " methods in the dump, " + std::to_string(theirMethods.size()) + " through the C API");
+                }
+            }
+            std::printf("members of %zu sampled classes: %zu field lists differ, %zu offsets, %zu type codes, %zu method lists\n",
+                compared, fieldSets, offsets, types, methodSets);
+            std::printf("done; detaching\n");
+            return onlyDump.empty() && handleMismatch == 0 && fieldSets == 0 && offsets == 0 && methodSets == 0 ? 0 : 1;
+        }
+    }
+
     int RunMonoDump(const std::vector<std::string>& arguments)
     {
         std::string name = "CloverPit";
         std::uint32_t pid = 0;
         std::uint64_t object = 0;
         std::uint64_t method = 0;
+        const bool noDumper = std::find(arguments.begin(), arguments.end(), "--no-dumper") != arguments.end();
+        const bool compareDumper = std::find(arguments.begin(), arguments.end(), "--compare-dumper") != arguments.end();
         for (const std::string& argument : arguments)
         {
             if (argument.rfind("--process=", 0) == 0)
@@ -860,6 +1018,7 @@ namespace Manifold::Tests
         }
         std::printf("opened %s (pid %lu, %s)\n", engine.Process()->Name().c_str(), static_cast<unsigned long>(engine.Process()->Id()),
             engine.Process()->Is64Bit() ? "64-bit" : "32-bit");
+        engine.Mono().SetManagedDumper(!noDumper);
         const auto start = std::chrono::steady_clock::now();
         const Status mono = engine.EnsureMono();
         const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -869,8 +1028,11 @@ namespace Manifold::Tests
             return 1;
         }
         const std::vector<Target::MonoClass> classes = engine.Mono().Classes();
-        std::printf("%s in %s: %zu classes in %.2fs (members load on demand)\n", Target::MonoBridge::RuntimeName(engine.Mono().Runtime()),
-            engine.Mono().Module().c_str(), classes.size(), seconds);
+        std::printf("%s in %s: %zu classes in %.2fs (%s)\n", Target::MonoBridge::RuntimeName(engine.Mono().Runtime()),
+            engine.Mono().Module().c_str(), classes.size(), seconds,
+            engine.Mono().ManagedDumperUsed() ? "read by the managed dumper" : "read through the C API, members load on demand");
+        if (compareDumper)
+            return CompareDumper(engine, classes);
         const std::size_t show = std::min<std::size_t>(classes.size(), 18);
         for (std::size_t i = 0; i < show; ++i)
         {

@@ -153,6 +153,9 @@
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp">
       <Filter>Source\Generated</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Generated\ManagedDumperImage.cpp">
+      <Filter>Source\Generated</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\ConsoleHistory.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -229,6 +232,9 @@
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\ManagedDumper.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Mono.cpp">
@@ -316,6 +322,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\Main.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\ManagedDumperTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\ManifoldApiTests.cpp">

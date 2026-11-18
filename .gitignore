@@ -18,3 +18,7 @@ configs/
 crashes/
 logs/
 __pycache__/
+
+/Source/Generated/ManagedDumperImage.cpp
+/Managed/*/obj/
+/Managed/*/bin/

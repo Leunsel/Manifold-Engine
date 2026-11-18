@@ -140,6 +140,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp" />
+    <ClCompile Include="..\Source\Generated\ManagedDumperImage.cpp" />
     <ClCompile Include="..\Source\Lua\ConsoleHistory.cpp" />
     <ClCompile Include="..\Source\Lua\DocAnnotations.cpp" />
     <ClCompile Include="..\Source\Lua\DocRegistry.cpp" />
@@ -168,6 +169,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
+    <ClCompile Include="..\Source\Target\ManagedDumper.cpp" />
     <ClCompile Include="..\Source\Target\Mono.cpp" />
     <ClCompile Include="..\Source\Target\MonoRuntime.cpp" />
     <ClCompile Include="..\Source\Target\PatchScan.cpp" />
@@ -197,6 +199,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\Il2CppTests.cpp" />
     <ClCompile Include="..\Tests\IntegrationTests.cpp" />
     <ClCompile Include="..\Tests\Main.cpp" />
+    <ClCompile Include="..\Tests\ManagedDumperTests.cpp" />
     <ClCompile Include="..\Tests\ManifoldApiTests.cpp" />
     <ClCompile Include="..\Tests\MonoTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
@@ -215,6 +218,13 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
   <ItemGroup>
     <ProjectReference Include="ManifoldAgent.vcxproj">
       <Project>{2D3C4B5A-6978-4A1B-9C8D-0E1F2A3B4C5D}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="ManagedDumper.vcxproj">
+      <Project>{5B6C7D8E-9FA0-41B2-83C4-E5F607182930}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
     </ProjectReference>

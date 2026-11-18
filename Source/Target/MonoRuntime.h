@@ -1,10 +1,13 @@
 #pragma once
 
+#include "Core/Types.h"
+#include "Target/ManagedDumper.h"
 #include "Target/ManagedRuntime.h"
 
 #include <cstdint>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace Manifold::Target
@@ -28,6 +31,35 @@ namespace Manifold::Target
         std::optional<std::uint64_t> Compile(std::uint64_t method) override;
 
     private:
+        using ImageList = std::vector<std::pair<std::uint64_t, std::string>>;
+
+        struct DumperHandles
+        {
+            std::uint64_t Class = 0;
+            std::uint64_t VTable = 0;
+            std::uint64_t Begin = 0;
+            std::uint64_t Release = 0;
+            std::uint64_t State = 0;
+            std::uint64_t Types = 0;
+            std::uint64_t Cancel = 0;
+            std::uint64_t Data = 0;
+            std::uint64_t Size = 0;
+        };
+
+        std::optional<std::vector<MonoClass>> DumpWithAgent(const ImageList& images, std::int64_t total, WorkProgress* progress);
+        Status LoadDumper(const ImageList& images);
+        Result<ManagedDump> RunDumper(std::int64_t total, WorkProgress* progress);
+        bool CheckDump(const ImageList& images, ManagedDump& dump);
+        void NameNestedTypes(ManagedDump& dump, WorkProgress* progress);
+        std::optional<std::uint64_t> InvokeStatic(std::uint64_t method);
+        std::optional<std::int64_t> ReadStatic(std::uint64_t field, std::size_t bytes);
+        bool WriteStatic(std::uint64_t field, std::int32_t value);
+        void StopDumper();
+
+        DumperHandles m_dumper;
+        bool m_dumperPending = false;
+        bool m_dumperBroken = false;
+
         struct JitRange
         {
             std::uint64_t Start = 0;

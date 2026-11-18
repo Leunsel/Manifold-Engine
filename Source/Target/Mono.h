@@ -64,9 +64,11 @@ namespace Manifold::Target
 
     // Reads the managed runtime of a Unity game, Mono or IL2CPP: resolves
     // Class:Method to code addresses and lists classes, methods and field
-    // offsets. Everything runs through the RemoteCall worker, so no DLL is
-    // injected; the one worker thread is attached to the runtime's domain once
-    // and only makes metadata calls. The Unity explorer on top is Mono only.
+    // offsets. Everything runs through the RemoteCall worker, so no native
+    // DLL is injected; the one worker thread is attached to the runtime's
+    // domain once. On Mono it loads the small managed dumper into the root
+    // domain to read every class in one pass, and falls back to the C API
+    // when that fails. The Unity explorer on top is Mono only.
     class MonoBridge
     {
     public:
@@ -100,6 +102,8 @@ namespace Manifold::Target
         const std::string& Module() const { return m_module; }
 
         Status Refresh(WorkProgress* progress = nullptr);
+        void SetManagedDumper(bool use) { m_useDumper = use; }
+        bool ManagedDumperUsed() const { return m_readByDumper.load(); }
         std::uint64_t Generation() const { return m_generation.load(); }
 
         // The class list is shallow: Namespace/Name/Image/Handle are filled, but
@@ -203,6 +207,8 @@ namespace Manifold::Target
         std::uint64_t m_handleMax = 0;  // vet a klass before asking the runtime
         std::unordered_set<std::uint64_t> m_images;  // MonoImage* of every loaded assembly
         std::atomic<std::uint64_t> m_generation{ 0 };
+        std::atomic<bool> m_useDumper{ true };
+        std::atomic<bool> m_readByDumper{ false };
 
         std::mutex m_unityLock;
         std::unique_ptr<UnityExplorer> m_unity;

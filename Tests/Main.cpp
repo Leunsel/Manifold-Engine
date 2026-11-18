@@ -38,6 +38,7 @@ namespace Manifold::Tests
     int RunIl2CppCheck(const std::vector<std::string>& arguments);
     int RunMonoDump(const std::vector<std::string>& arguments);
     int RunUnityDump(const std::vector<std::string>& arguments);
+    int RunManagedDumpClr(const std::vector<std::string>& arguments);
 
     Counter& Totals()
     {
@@ -71,6 +72,8 @@ int main(int argc, char** argv)
             return Manifold::Tests::RunMonoDump(arguments);
         if (argument == "--unity-dump")
             return Manifold::Tests::RunUnityDump(arguments);
+        if (argument == "--managed-dump-clr")
+            return Manifold::Tests::RunManagedDumpClr(arguments);
         if (argument == "--disasm-check")
         {
             for (const std::string& other : arguments)
