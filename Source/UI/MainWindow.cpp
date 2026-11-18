@@ -2362,11 +2362,15 @@ namespace Manifold::UI
             }
             else
             {
-                ImGui::TextUnformatted(record.Address.c_str());
+                // ∑ A "+10" written relative to the parent tells nothing on its own, so the
+                // column shows where it landed and the tooltip keeps the written offset.
+                const std::string_view written = TrimView(record.Address);
+                const bool relative = !written.empty() && (written.front() == '+' || written.front() == '-') && record.Parent;
+                ImGui::TextUnformatted(relative && record.AddressOk ? Hex(record.ResolvedAddress).c_str() : record.Address.c_str());
                 if (!record.AddressOk && !record.AddressError.empty())
                     ErrorTooltip(record.AddressError);
                 else if (record.AddressOk)
-                    ItemTooltip(Hex(record.ResolvedAddress).c_str());
+                    ItemTooltip(relative ? ((record.Parent->Description.empty() ? std::string("Parent") : record.Parent->Description) + " " + std::string(written)).c_str() : Hex(record.ResolvedAddress).c_str());
             }
         }
         if (!m_release)
