@@ -664,7 +664,15 @@ namespace Manifold::Tests
             CHECK(engine.Debugger().StartWatch(Debug::WatchKind::Calls, damage, 1, calls).Ok());
             int accesses = 0;
             CHECK(engine.Debugger().StartWatch(Debug::WatchKind::InstructionAccesses, target.Addresses["readhealth at "], 1, accesses).Ok());
+            const auto recorded = [&engine](int id)
+                {
+                    Debug::Watch copy;
+                    return engine.Debugger().CopyWatch(id, copy) && !copy.Entries.empty();
+                };
             Pause(engine, 2600);
+            const auto patience = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+            while ((!recorded(writes) || !recorded(calls) || !recorded(accesses)) && std::chrono::steady_clock::now() < patience)
+                Pause(engine, 100);
             Debug::Watch watch;
             CHECK(engine.Debugger().CopyWatch(writes, watch));
             CHECK_MSG(!watch.Entries.empty() && watch.Entries.front().Instruction == damage, watch.Entries.empty() ? "no write recorded" : Hex(watch.Entries.front().Instruction));

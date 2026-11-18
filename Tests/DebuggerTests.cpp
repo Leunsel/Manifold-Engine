@@ -113,10 +113,14 @@ namespace Manifold::Tests
         }
 
         {
-            std::int32_t before = 0;
-            process.ReadExact(hero, &before, sizeof(before));
             const Status set = debugger.SetBreakpoint(damage, Debug::BreakpointType::Execute, 1, false, Action(engine, {}, "EDX = 0", false));
             CHECK_MSG(set.Ok(), set.Text);
+            const auto armed = std::chrono::steady_clock::now() + std::chrono::milliseconds(6000);
+            while (set && HitsAt(engine, damage) == 0 && std::chrono::steady_clock::now() < armed)
+                Wait(engine, 20);
+            CHECK_MSG(HitsAt(engine, damage) >= 1, std::string(backend) + ": the register-changing breakpoint was never hit");
+            std::int32_t before = 0;
+            process.ReadExact(hero, &before, sizeof(before));
             Wait(engine, 2700);
             std::int32_t after = 0;
             process.ReadExact(hero, &after, sizeof(after));
