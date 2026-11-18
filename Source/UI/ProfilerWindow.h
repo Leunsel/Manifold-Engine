@@ -14,7 +14,8 @@ namespace Manifold::UI
 {
     std::vector<Diagnostics::InfoGroup> InterfaceInfo();
     std::string DiagnosticsReport(Workspace& workspace);
-    bool FrameReadout(std::string& text);
+    // Work per frame ("0.63 ms") and frame rate ("144 fps") for the status bar, refreshed twice a second.
+    bool FrameReadout(std::string& work, std::string& rate);
 
     class ProfilerWindow : public ToolWindow
     {

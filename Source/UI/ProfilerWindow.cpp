@@ -238,20 +238,23 @@ namespace Manifold::UI
         return Diagnostics::Report(workspace.Core(), InterfaceInfo());
     }
 
-    bool FrameReadout(std::string& text)
+    bool FrameReadout(std::string& work, std::string& rate)
     {
         static double at = -100.0;
-        static std::string cached;
+        static std::string cachedWork;
+        static std::string cachedRate;
         if (!Profiler::Enabled() || Profiler::Frames() < 2)
             return false;
         const double now = ImGui::GetTime();
-        if (now - at > 0.5 || cached.empty())
+        if (now - at > 0.5 || cachedWork.empty())
         {
             at = now;
             const Profiler::FrameSummary summary = Profiler::Summary();
-            cached = ICON_FA_TACHOMETER_ALT "  " + Diagnostics::Milliseconds(summary.WorkMs) + " per frame  ·  " + Fixed(summary.FramesPerSecond, 0) + " fps";
+            cachedWork = Diagnostics::Milliseconds(summary.WorkMs);
+            cachedRate = Fixed(summary.FramesPerSecond, 0) + " fps";
         }
-        text = cached;
+        work = cachedWork;
+        rate = cachedRate;
         return true;
     }
 

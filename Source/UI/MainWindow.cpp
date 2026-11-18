@@ -36,6 +36,26 @@ namespace Manifold::UI
             Scan::Compare::Increased, Scan::Compare::IncreasedBy, Scan::Compare::Decreased, Scan::Compare::DecreasedBy, Scan::Compare::Changed,
             Scan::Compare::Unchanged, Scan::Compare::SameAsFirst };
 
+        // Text of one status bar part in a slot of fixed width, ending in "..." when it
+        // does not fit. Returns true when the text was cut.
+        bool StatusText(float x, float y, std::string_view text, float width, const ImVec4& color)
+        {
+            const char* begin = text.data();
+            const char* end = begin + text.size();
+            const ImVec2 size = ImGui::CalcTextSize(begin, end);
+            ImGui::SetCursorPos(ImVec2(x, y));
+            const ImVec2 pos = ImGui::GetCursorScreenPos();
+            const ImRect rect(pos, ImVec2(pos.x + std::max(0.0f, width), pos.y + size.y));
+            ImGui::ItemSize(rect.GetSize());
+            if (ImGui::ItemAdd(rect, 0))
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, color);
+                ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(), rect.Min, rect.Max, rect.Max.x, begin, end, &size);
+                ImGui::PopStyleColor();
+            }
+            return size.x > width + 0.5f;
+        }
+
         Scan::Tristate ToTristate(int state)
         {
             return state == 1 ? Scan::Tristate::Yes : state == 0 ? Scan::Tristate::No : Scan::Tristate::Any;
@@ -3210,44 +3230,134 @@ namespace Manifold::UI
         const float height = Px(kStatusHeight);
         const ImVec2 windowPos = ImGui::GetWindowPos();
         const ImVec2 windowSize = ImGui::GetWindowSize();
-        ImGui::SetCursorPos(ImVec2(Px(14.0f), windowSize.y - height + std::round((height - ImGui::GetTextLineHeight()) * 0.5f) - Px(1.0f)));
+        const float y = windowSize.y - height + std::round((height - ImGui::GetTextLineHeight()) * 0.5f) - Px(1.0f);
         ImGui::GetWindowDrawList()->AddLine(ImVec2(windowPos.x, windowPos.y + windowSize.y - height), ImVec2(windowPos.x + windowSize.x, windowPos.y + windowSize.y - height),
             ImGui::GetColorU32(ManifoldTheme::RowSeparator));
+
+        const auto measure = [](std::string_view text) { return ImGui::CalcTextSize(text.data(), text.data() + text.size()).x; };
+        const float margin = Px(14.0f);
+        const float gap = Px(18.0f);
+        const float left = margin;
+        const float right = std::max(left, windowSize.x - margin);
+        const float room = right - left;
+
         const std::string& path = engine.Table().FilePath;
-        std::string table = path.empty() ? "Untitled table" : WideToUtf8(std::filesystem::path(Utf8ToWide(path)).filename().wstring());
+        std::string table = ICON_FA_FILE_ALT "  " + (path.empty() ? std::string("Untitled table") : WideToUtf8(std::filesystem::path(Utf8ToWide(path)).filename().wstring()));
         if (engine.Table().Dirty())
             table += " *";
-        Muted(ICON_FA_FILE_ALT "  " + table);
-        ImGui::SameLine(0.0f, Px(18.0f));
-        Muted(Target::IsElevated() ? ICON_FA_SHIELD_ALT "  Administrator" : ICON_FA_USER "  No administrator rights");
-        std::string frames;
-        if (engine.Options().ProfilerInStatusBar && FrameReadout(frames))
-        {
-            ImGui::SameLine(0.0f, Px(18.0f));
-            Muted(frames);
-            if (ImGui::IsItemClicked())
-                m_workspace.OpenProfiler();
-            ItemTooltip("Work per frame and frames per second. Click to open the profiler.");
-        }
+        const float tableFull = measure(table);
+        const float tableFloor = std::min(tableFull, measure(ICON_FA_FILE_ALT "  ..."));
+        const float tableShort = std::min(tableFull, std::max(tableFloor, Px(130.0f)));
+        float tableWidth = tableFull;
 
-        if (const std::optional<LogEntry> newest = RuntimeLog::Last())
+        const bool elevated = Target::IsElevated();
+        const char* rightsIcon = elevated ? ICON_FA_SHIELD_ALT : ICON_FA_USER;
+        const char* rightsText = elevated ? "Administrator" : "No administrator rights";
+        const std::string rightsFull = std::string(rightsIcon) + "  " + rightsText;
+        bool rightsShort = false;
+
+        // Frame readout: 0 = work and rate, 1 = rate only, 2 = hidden.
+        std::string work;
+        std::string rate;
+        int framesLevel = engine.Options().ProfilerInStatusBar && FrameReadout(work, rate) ? 0 : 2;
+        const std::string framesFull = ICON_FA_TACHOMETER_ALT "  " + work + "  ·  " + rate;
+        const std::string framesRate = ICON_FA_TACHOMETER_ALT "  " + rate;
+        // ∑ Measured against the widest numbers too, so the parts keep still while the
+        // readout changes twice a second.
+        const float framesFullWidth = std::max(measure(framesFull), measure(ICON_FA_TACHOMETER_ALT "  0.00 ms  ·  000 fps"));
+        const float framesRateWidth = std::max(measure(framesRate), measure(ICON_FA_TACHOMETER_ALT "  000 fps"));
+
+        const std::optional<LogEntry> newest = RuntimeLog::Last();
+        const char* logIcon = newest ? LevelIcon(newest->Level) : "";
+        const std::string message = newest ? (m_release ? Workspace::WithoutCodes(newest->Message) : newest->Message) : std::string();
+        const std::string logText = newest ? std::string(logIcon) + "  " + message : std::string();
+        const float logFull = newest ? measure(logText) : 0.0f;
+        float logWant = logFull;
+
+        const auto rightsWidth = [&]() { return measure(rightsShort ? std::string_view(rightsIcon) : std::string_view(rightsFull)); };
+        const auto framesWidth = [&]() { return framesLevel == 0 ? framesFullWidth : framesLevel == 1 ? framesRateWidth : 0.0f; };
+        const auto overflow = [&]()
         {
-            const LogEntry& last = *newest;
-            const std::string text = std::string(LevelIcon(last.Level)) + "  " + (m_release ? Workspace::WithoutCodes(last.Message) : last.Message);
-            const float textWidth = std::min(ImGui::CalcTextSize(text.c_str()).x, windowSize.x * 0.55f);
-            ImGui::SameLine();
-            ImGui::SetCursorPosX(windowSize.x - textWidth - Px(14.0f));
-            ImGui::PushClipRect(ImGui::GetCursorScreenPos(), ImVec2(windowPos.x + windowSize.x - Px(10.0f), windowPos.y + windowSize.y), true);
-            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::WithAlpha(LevelColor(last.Level), 0.85f));
-            ImGui::TextUnformatted(text.c_str());
-            ImGui::PopStyleColor();
-            ImGui::PopClipRect();
-            if (!m_release)
+            float total = tableWidth + gap + rightsWidth();
+            if (framesLevel < 2)
+                total += gap + framesWidth();
+            if (logWant > 0.0f)
+                total += gap + logWant;
+            return total - room;
+        };
+        const auto shrinkTable = [&](float floor) { tableWidth = std::max(floor, tableWidth - overflow()); };
+
+        // ∑ The parts never share a pixel; they give up room in a fixed order instead. The
+        // rights shrink to their icon as soon as the newest log line would be cut. Then the
+        // log line keeps a fair share while the frame readout, the table name and the log
+        // line itself get shorter. Whatever is cut shows in full in its tooltip.
+        if (overflow() > 0.0f)
+            rightsShort = true;
+        logWant = std::min(logFull, std::max(Px(150.0f), room * 0.4f));
+        for (int step = 0; step < 5 && overflow() > 0.0f; ++step)
+        {
+            switch (step)
             {
-                if (!ErrorTooltip(last.Message) && ImGui::IsItemClicked())
-                    m_workspace.OpenLog();
-                ItemTooltip("Click to open the log");
+            case 0: framesLevel = std::max(framesLevel, 1); break;
+            case 1: shrinkTable(tableShort); break;
+            case 2: logWant = std::min(logFull, Px(150.0f)); break;
+            case 3: framesLevel = 2; break;
+            default: shrinkTable(tableFloor); break;
             }
         }
+
+        ImGui::PushClipRect(ImVec2(windowPos.x + left, windowPos.y + windowSize.y - height), ImVec2(windowPos.x + right, windowPos.y + windowSize.y), true);
+        float x = left;
+        if (StatusText(x, y, table, tableWidth, ManifoldTheme::Muted))
+            ItemTooltip(path.empty() ? "Untitled table" : path.c_str());
+        x += tableWidth + gap;
+
+        const float rights = rightsWidth();
+        StatusText(x, y, rightsShort ? std::string_view(rightsIcon) : std::string_view(rightsFull), rights, ManifoldTheme::Muted);
+        if (rightsShort)
+            ItemTooltip(rightsText);
+        x += rights + gap;
+
+        if (framesLevel < 2)
+        {
+            const float frames = framesWidth();
+            StatusText(x, y, framesLevel == 0 ? framesFull : framesRate, frames, ManifoldTheme::Muted);
+            if (ImGui::IsItemClicked())
+                m_workspace.OpenProfiler();
+            const std::string tip = framesLevel == 0 ? std::string("Work per frame and frames per second. Click to open the profiler.")
+                                                     : "Work per frame " + work + ", " + rate + ". Click to open the profiler.";
+            ItemTooltip(tip.c_str());
+            x += frames + gap;
+        }
+
+        if (newest)
+        {
+            const float space = right - x;
+            float width = std::min(logFull, space);
+            std::string_view shown = logText;
+            // ∑ Fewer than a few letters say nothing, so the line falls back to its level icon.
+            if (width < std::min(logFull, Px(48.0f)))
+            {
+                shown = logIcon;
+                width = measure(logIcon);
+            }
+            if (width <= space + 0.5f)
+            {
+                const bool cut = StatusText(right - width, y, shown, width, ManifoldTheme::WithAlpha(LevelColor(newest->Level), 0.85f));
+                if (m_release)
+                {
+                    if (cut)
+                        ItemTooltip(message.c_str());
+                }
+                else
+                {
+                    if (!ErrorTooltip(newest->Message) && ImGui::IsItemClicked())
+                        m_workspace.OpenLog();
+                    const std::string tip = cut ? message + "\n\nClick to open the log" : std::string("Click to open the log");
+                    ItemTooltip(tip.c_str());
+                }
+            }
+        }
+        ImGui::PopClipRect();
     }
 }
