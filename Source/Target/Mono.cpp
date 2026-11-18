@@ -327,6 +327,56 @@ namespace Manifold::Target
         return m_classes[static_cast<std::size_t>(index)].Fields;
     }
 
+    std::vector<MonoField> MonoBridge::TypedFieldsOf(std::string_view className)
+    {
+        std::lock_guard lock(m_lock);
+        return TypedFields(FindClass(className));
+    }
+
+    std::vector<MonoField> MonoBridge::TypedFieldsOf(std::uint64_t klass)
+    {
+        std::lock_guard lock(m_lock);
+        const auto found = m_handleIndex.find(klass);
+        return TypedFields(found == m_handleIndex.end() ? -1 : found->second);
+    }
+
+    std::vector<MonoField> MonoBridge::TypedFields(int classIndex)
+    {
+        if (classIndex < 0 || classIndex >= static_cast<int>(m_classes.size()) || !m_backend)
+            return {};
+        EnsureMembers(classIndex);
+        m_backend->ResolveValueTypes(classIndex);
+        return m_classes[static_cast<std::size_t>(classIndex)].Fields;
+    }
+
+    void MonoBridge::DescribeValueType(const std::string& prefix, std::uint64_t klass, MonoField& field)
+    {
+        const auto name = [&](const char* function) { return prefix + function; };
+        if (!klass || !Fn(name("class_is_valuetype").c_str()) || !Fn(name("class_value_size").c_str()))
+            return;
+        if ((CallFn(name("class_is_valuetype").c_str(), klass).value_or(0) & 0xFFu) == 0)
+            return;
+        const std::uint64_t align = m_call.Scratch(8);
+        const int size = static_cast<int>(CallFn(name("class_value_size").c_str(), klass, align).value_or(0) & 0xFFFFFFFFu);
+        if (size <= 0 || size > 0x10000)
+            return;
+        field.TypeHandle = klass;
+        field.ValueSize = size;
+        if (const auto known = m_handleIndex.find(klass); known != m_handleIndex.end())
+            field.TypeName = m_classes[static_cast<std::size_t>(known->second)].FullName();
+        else
+        {
+            const std::string space = CallString(name("class_get_namespace").c_str(), klass);
+            const std::string type = CallString(name("class_get_name").c_str(), klass);
+            field.TypeName = space.empty() ? type : space + "." + type;
+        }
+        if (!Fn(name("class_is_enum").c_str()) || (CallFn(name("class_is_enum").c_str(), klass).value_or(0) & 0xFFu) == 0)
+            return;
+        const std::uint64_t base = CallFn(name("class_enum_basetype").c_str(), klass).value_or(0);
+        if (base)
+            field.EnumCode = static_cast<int>(CallFn(name("type_get_type").c_str(), base).value_or(0) & 0xFFu);
+    }
+
     std::optional<MonoClass> MonoBridge::ClassDetails(std::string_view className)
     {
         std::lock_guard lock(m_lock);

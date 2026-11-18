@@ -184,6 +184,7 @@ exit /b 0</Command>
     </ClCompile>
     <ClCompile Include="..\Source\Table\AddressList.cpp" />
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
+    <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
@@ -306,6 +307,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Syscalls\Syscall.h" />
     <ClInclude Include="..\Source\Table\AddressList.h" />
     <ClInclude Include="..\Source\Table\CheatTable.h" />
+    <ClInclude Include="..\Source\Table\ManagedStructures.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
     <ClInclude Include="..\Source\Target\CodeMap.h" />
     <ClInclude Include="..\Source\Target\Il2CppRuntime.h" />

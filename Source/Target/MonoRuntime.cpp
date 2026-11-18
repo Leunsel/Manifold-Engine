@@ -691,6 +691,33 @@ namespace Manifold::Target
         m_bridge.m_call.ResetScratch();
     }
 
+    void MonoRuntime::ResolveValueTypes(int classIndex)
+    {
+        if (classIndex < 0 || classIndex >= static_cast<int>(m_bridge.m_classes.size()))
+            return;
+        MonoClass& info = m_bridge.m_classes[static_cast<std::size_t>(classIndex)];
+        if (info.ValueTypesRead)
+            return;
+        info.ValueTypesRead = true;
+        if (!info.Handle || !m_bridge.Fn("mono_class_get_field_from_name") || !m_bridge.Fn("mono_class_from_mono_type"))
+            return;
+        RemoteCall& call = m_bridge.m_call;
+        for (MonoField& field : info.Fields)
+        {
+            if (!MayBeValueType(field.TypeCode) || field.Name.empty() || field.TypeHandle)
+                continue;
+            call.ResetScratch();
+            const std::uint64_t name = call.Scratch(field.Name.size() + 1);
+            if (!name || !m_bridge.m_process->Write(name, field.Name.c_str(), field.Name.size() + 1))
+                continue;
+            const std::uint64_t handle = m_bridge.CallFn("mono_class_get_field_from_name", info.Handle, name).value_or(0);
+            const std::uint64_t type = handle ? m_bridge.CallFn("mono_field_get_type", handle).value_or(0) : 0;
+            const std::uint64_t klass = type ? m_bridge.CallFn("mono_class_from_mono_type", type).value_or(0) : 0;
+            m_bridge.DescribeValueType("mono_", klass, field);
+        }
+        call.ResetScratch();
+    }
+
     std::optional<std::string> MonoRuntime::ResolveHead(std::uint64_t header, bool allowRuntimeFallback)
     {
         // Read the object -> MonoVTable -> MonoClass chain ourselves with safe

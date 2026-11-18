@@ -65,11 +65,13 @@ extern "C" __declspec(dllexport) __declspec(align(64)) volatile long long g_stre
 namespace
 {
     struct FakeMethod { const char* Name; void* Address; };
-    struct FakeField { const char* Name; int Offset; int TypeCode; int Flags; };
+    struct FakeClass;
+    struct FakeField { const char* Name; int Offset; int TypeCode; int Flags; const FakeClass* TypeClass = nullptr; };
     struct FakeImage;
     // Image comes after the name, like MonoClass::image in the real runtime;
     // the explorer learns both offsets from mono_class_get_image/_get_name.
-    struct FakeClass { const char* Namespace; const char* Name; const FakeMethod* Methods; int MethodCount; const FakeField* Fields; int FieldCount; const FakeImage* Image = nullptr; };
+    struct FakeClass { const char* Namespace; const char* Name; const FakeMethod* Methods; int MethodCount; const FakeField* Fields; int FieldCount; const FakeImage* Image = nullptr;
+        bool ValueType = false; int ValueSize = 0; int EnumBase = 0; };
     struct FakeImage { const char* Name; const FakeClass* Classes; int ClassCount; };
     extern const FakeImage kImage;
 
@@ -85,6 +87,19 @@ namespace
         { "Game", "GameManager", kGameMethods, 1, nullptr, 0, &kImage },
     };
     const FakeImage kImage = { "Assembly-CSharp", kClasses, 2 };
+
+    extern const FakeImage kValuesImage;
+    const FakeField kVec3Fields[] = { { "x", 0x10, 0x0C, 0 }, { "y", 0x14, 0x0C, 0 }, { "z", 0x18, 0x0C, 0 } };
+    const FakeField kTeamFields[] = { { "value__", 0x10, 0x08, 0 } };
+    extern const FakeClass kValueClasses[];
+    const FakeField kMoverFields[] = { { "speed", 0x10, 0x0C, 0 }, { "team", 0x20, 0x11, 0, &kValueClasses[1] }, { "position", 0x14, 0x11, 0, &kValueClasses[0] }, { "owner", 0x28, 0x12, 0 } };
+    const FakeClass kValueClasses[] = {
+        { "Game", "Vec3", nullptr, 0, kVec3Fields, 3, &kValuesImage, true, 12, 0 },
+        { "Game", "Team", nullptr, 0, kTeamFields, 1, &kValuesImage, true, 4, 0x08 },
+        { "Game", "Mover", nullptr, 0, kMoverFields, 4, &kValuesImage },
+    };
+    const FakeImage kValuesImage = { "Assembly-Values", kValueClasses, 3 };
+    bool g_monoValues = false;
     // A class the image does not list, like a generic instance the runtime
     // makes on demand: the explorer may only accept it by its shape.
     const FakeClass kListClass = { "System.Collections.Generic", "List`1", nullptr, 0, nullptr, 0, &kImage };
@@ -242,38 +257,46 @@ namespace
     std::vector<unsigned char> BuildAgentBlob()
     {
         BlobWriter writer;
-        const std::uint32_t count = static_cast<std::uint32_t>(kImage.ClassCount);
-        for (std::uint32_t c = 0; c < count; ++c)
-        {
-            const FakeClass& klass = kImage.Classes[c];
-            const FakeClass* handle = g_agentMode == AgentMode::BadHandles ? &kImage.Classes[(c + 1) % count] : &klass;
-            const bool nested = c == 1;
-            writer.U32(writer.Text(kImage.Name));
-            writer.U32(writer.Text(nested ? "" : klass.Namespace));
-            writer.U32(writer.Text(klass.Name));
-            writer.U32(writer.Text("UnityEngine.MonoBehaviour"));
-            writer.U32(0x02000001u + c);
-            writer.U64(reinterpret_cast<std::uint64_t>(handle));
-            writer.U32(nested ? 32u : 0u);
-            writer.U32(static_cast<std::uint32_t>(klass.FieldCount));
-            for (int f = 0; f < klass.FieldCount; ++f)
+        std::uint32_t total = 0;
+        const auto write = [&](const FakeImage& image, bool main)
             {
-                const FakeField& field = klass.Fields[f];
-                writer.U32(writer.Text(field.Name));
-                writer.I32(g_agentMode == AgentMode::BadOffsets ? field.Offset + 0x99 : field.Offset);
-                writer.U32((field.Flags & 0x10) ? 1u : 0u);
-                writer.U32(static_cast<std::uint32_t>(field.TypeCode));
-            }
-            writer.U32(static_cast<std::uint32_t>(klass.MethodCount));
-            for (int m = 0; m < klass.MethodCount; ++m)
-            {
-                writer.U32(writer.Text(klass.Methods[m].Name));
-                writer.U64(reinterpret_cast<std::uint64_t>(&klass.Methods[m]));
-                writer.U32(0);
-                writer.I32(1);
-            }
-        }
-        return writer.Finish(g_agentMode == AgentMode::Unsure ? 1u : 3u, count);
+                const std::uint32_t count = static_cast<std::uint32_t>(image.ClassCount);
+                for (std::uint32_t c = 0; c < count; ++c)
+                {
+                    const FakeClass& klass = image.Classes[c];
+                    const FakeClass* handle = g_agentMode == AgentMode::BadHandles ? &image.Classes[(c + 1) % count] : &klass;
+                    const bool nested = main && c == 1;
+                    writer.U32(writer.Text(image.Name));
+                    writer.U32(writer.Text(nested ? "" : klass.Namespace));
+                    writer.U32(writer.Text(klass.Name));
+                    writer.U32(writer.Text(main ? "UnityEngine.MonoBehaviour" : "System.ValueType"));
+                    writer.U32(0x02000001u + c);
+                    writer.U64(reinterpret_cast<std::uint64_t>(handle));
+                    writer.U32(nested ? 32u : 0u);
+                    writer.U32(static_cast<std::uint32_t>(klass.FieldCount));
+                    for (int f = 0; f < klass.FieldCount; ++f)
+                    {
+                        const FakeField& field = klass.Fields[f];
+                        writer.U32(writer.Text(field.Name));
+                        writer.I32(g_agentMode == AgentMode::BadOffsets ? field.Offset + 0x99 : field.Offset);
+                        writer.U32((field.Flags & 0x10) ? 1u : 0u);
+                        writer.U32(static_cast<std::uint32_t>(field.TypeCode));
+                    }
+                    writer.U32(static_cast<std::uint32_t>(klass.MethodCount));
+                    for (int m = 0; m < klass.MethodCount; ++m)
+                    {
+                        writer.U32(writer.Text(klass.Methods[m].Name));
+                        writer.U64(reinterpret_cast<std::uint64_t>(&klass.Methods[m]));
+                        writer.U32(0);
+                        writer.I32(1);
+                    }
+                }
+                total += count;
+            };
+        write(kImage, true);
+        if (g_monoValues)
+            write(kValuesImage, false);
+        return writer.Finish(g_agentMode == AgentMode::Unsure ? 1u : 3u, total);
     }
 
     DWORD WINAPI AgentWorker(void*)
@@ -295,7 +318,7 @@ namespace
         ::InterlockedIncrement(&g_agentStats.Live);
         g_agentStatics.Data = data;
         g_agentStatics.Size = static_cast<long>(blob.size());
-        g_agentStatics.Types = kImage.ClassCount;
+        g_agentStatics.Types = kImage.ClassCount + (g_monoValues ? kValuesImage.ClassCount : 0);
         g_agentStatics.State = 2;
         return 0;
     }
@@ -428,6 +451,8 @@ extern "C"
     __declspec(dllexport) void mono_assembly_foreach(void (*fn)(void*, void*), void* user)
     {
         fn(const_cast<FakeImage*>(&kImage), user);
+        if (g_monoValues)
+            fn(const_cast<FakeImage*>(&kValuesImage), user);
         if (Synthetic().Image.ClassCount > 0)
             fn(const_cast<FakeImage*>(&Synthetic().Image), user);
         if (g_agentLoaded)
@@ -470,6 +495,20 @@ extern "C"
     __declspec(dllexport) int mono_field_get_offset(void* field) { return static_cast<FakeField*>(field)->Offset; }
     __declspec(dllexport) void* mono_field_get_type(void* field) { return &static_cast<FakeField*>(field)->TypeCode; }
     __declspec(dllexport) int mono_type_get_type(void* type) { return *static_cast<int*>(type); }
+    __declspec(dllexport) void* mono_class_from_mono_type(void* type)
+    {
+        const FakeField* field = reinterpret_cast<const FakeField*>(static_cast<const char*>(type) - offsetof(FakeField, TypeCode));
+        return const_cast<FakeClass*>(field->TypeClass);
+    }
+    __declspec(dllexport) int mono_class_is_valuetype(void* klass) { return static_cast<FakeClass*>(klass)->ValueType ? 1 : 0; }
+    __declspec(dllexport) int mono_class_is_enum(void* klass) { return static_cast<FakeClass*>(klass)->EnumBase != 0 ? 1 : 0; }
+    __declspec(dllexport) void* mono_class_enum_basetype(void* klass) { return &static_cast<FakeClass*>(klass)->EnumBase; }
+    __declspec(dllexport) int mono_class_value_size(void* klass, unsigned int* align)
+    {
+        if (align)
+            *align = 4;
+        return static_cast<FakeClass*>(klass)->ValueSize;
+    }
     __declspec(dllexport) int mono_field_get_flags(void* field) { return static_cast<FakeField*>(field)->Flags; }
     __declspec(dllexport) void* mono_object_get_class(void* object) { return const_cast<FakeClass*>(static_cast<FakeObject*>(object)->VTable->Klass); }
     __declspec(dllexport) void* mono_jit_info_table_find(void* /*domain*/, void* addr)
@@ -796,6 +835,8 @@ int main(int argc, char** argv)
     {
         if (std::strcmp(argv[i], "--il2cpp") == 0)
             g_il2cpp = true;
+        else if (std::strcmp(argv[i], "--mono-values") == 0)
+            g_monoValues = true;
         else if (std::strcmp(argv[i], "--mono-agent") == 0)
             g_agentMode = AgentMode::Good;
         else if (std::strcmp(argv[i], "--mono-agent=bad-handles") == 0)

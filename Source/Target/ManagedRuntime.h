@@ -39,6 +39,7 @@ namespace Manifold::Target
         virtual void Detach() = 0;
         virtual Status Enumerate(WorkProgress* progress, bool starting) = 0;
         virtual void EnsureMembers(int classIndex) = 0;
+        virtual void ResolveValueTypes(int) {}
         virtual std::optional<std::string> ResolveHead(std::uint64_t header, bool allowFallback) = 0;
         virtual std::optional<std::string> MethodNameAt(std::uint64_t address) = 0;
         virtual std::optional<std::string> MethodStartNameAt(std::uint64_t address) = 0;

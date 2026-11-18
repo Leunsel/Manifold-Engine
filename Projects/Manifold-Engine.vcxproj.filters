@@ -252,6 +252,9 @@
     <ClCompile Include="..\Source\Table\CheatTable.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Table\ManagedStructures.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\Structures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
@@ -610,6 +613,9 @@
       <Filter>Source\Table</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Table\CheatTable.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Table\ManagedStructures.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Table\Structures.h">

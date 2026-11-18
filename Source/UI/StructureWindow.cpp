@@ -3,6 +3,7 @@
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
+#include "Table/ManagedStructures.h"
 #include "Target/Mono.h"
 #include "UI/Fonts.h"
 #include "UI/Shortcuts.h"
@@ -20,9 +21,6 @@ namespace Manifold::UI
 {
     namespace
     {
-        // Maps a Mono field type (MONO_TYPE_*) to a dissect field. Reference
-        // types (string, class, array, object, pointer) become a pointer so they
-        // can be expanded; value types without a known size also show as pointer.
         Table::StructDefinition* LiveStructure(Engine& engine, const Table::StructDefinition* definition)
         {
             for (const auto& item : engine.Structures().Items)
@@ -33,24 +31,9 @@ namespace Manifold::UI
             return nullptr;
         }
 
-        Scan::ValueType MonoFieldType(int code, int& size, Table::FieldDisplay& display)
+        bool Embedded(const Table::StructField& field)
         {
-            using V = Scan::ValueType;
-            display = Table::FieldDisplay::Unsigned;
-            switch (code)
-            {
-            case 0x04: size = 1; display = Table::FieldDisplay::Signed; return V::Byte;      // I1
-            case 0x02: case 0x05: size = 1; return V::Byte;                                  // bool, U1
-            case 0x06: size = 2; display = Table::FieldDisplay::Signed; return V::TwoBytes;  // I2
-            case 0x03: case 0x07: size = 2; return V::TwoBytes;                              // char, U2
-            case 0x08: size = 4; display = Table::FieldDisplay::Signed; return V::FourBytes; // I4
-            case 0x09: size = 4; return V::FourBytes;                                        // U4
-            case 0x0a: case 0x18: size = 8; display = Table::FieldDisplay::Signed; return V::EightBytes;  // I8, I
-            case 0x0b: case 0x19: size = 8; return V::EightBytes;                            // U8, U
-            case 0x0c: size = 4; return V::Float;                                            // R4
-            case 0x0d: size = 8; return V::Double;                                           // R8
-            default: size = 8; return V::Pointer;                                            // string/class/array/object/ptr/valuetype
-            }
+            return field.Type != Scan::ValueType::Pointer && !field.ChildStructure.empty();
         }
     }
 
@@ -166,6 +149,11 @@ namespace Manifold::UI
         {
             if (!field.CustomType.empty())
                 return field.CustomType;
+            if (Embedded(field))
+            {
+                const std::size_t dot = field.ChildStructure.rfind('.');
+                return dot == std::string::npos ? field.ChildStructure : field.ChildStructure.substr(dot + 1);
+            }
             if (field.Type == Scan::ValueType::String)
                 return "String[" + std::to_string(field.Size) + "]";
             if (field.Type == Scan::ValueType::ByteArray)
@@ -486,9 +474,13 @@ namespace Manifold::UI
         engine.Jobs().Post([&engine, definition, address, scripts, finish]() -> JobQueue::Finish
             {
                 std::vector<Target::MonoField> fields;
+                Table::ManagedLayouts nested;
                 if (const auto className = engine.Mono().ClassNameAt(address))
-                    fields = engine.Mono().FieldsOf(*className);
-                return [&engine, definition, fields, scripts, finish]()
+                {
+                    fields = engine.Mono().TypedFieldsOf(*className);
+                    Table::CollectManagedLayouts(engine.Mono(), fields, nested);
+                }
+                return [&engine, definition, fields, nested, scripts, finish]()
                     {
                         if (fields.empty())
                         {
@@ -501,15 +493,9 @@ namespace Manifold::UI
                             finish(false);
                             return;
                         }
-                        live->Fields.clear();
-                        for (const Target::MonoField& field : fields)
-                        {
-                            Table::StructField member;
-                            member.Offset = field.Offset;
-                            member.Name = field.Name;
-                            member.Type = MonoFieldType(field.TypeCode, member.Size, member.Display);
-                            live->Fields.push_back(std::move(member));
-                        }
+                        Table::FillFromManaged(*live, fields, 0, nested);
+                        const int header = 2 * (engine.HasProcess() ? engine.Process()->PointerSize() : 8);
+                        Table::AddManagedLayouts(engine.Structures(), nested, header, live->Name);
                         finish(true);
                     };
             });
@@ -1086,7 +1072,8 @@ namespace Manifold::UI
             else
                 twin = seen[field.Offset]++;
             Row row{ &definition, static_cast<int>(index), depth, block, false, twin };
-            if (!anyExpanded || field.Type != Scan::ValueType::Pointer)
+            const bool embedded = Embedded(field);
+            if (!anyExpanded || (field.Type != Scan::ValueType::Pointer && !embedded))
             {
                 m_rows.push_back(row);
                 continue;
@@ -1104,7 +1091,10 @@ namespace Manifold::UI
             for (std::uint64_t base : m_blocks[static_cast<std::size_t>(block)].Bases)
             {
                 const std::uint64_t address = FieldAddress(base, field.Offset);
-                childBases.push_back(address && m_engine.HasProcess() ? m_engine.Process()->ReadPointer(address).value_or(0) : 0);
+                if (embedded)
+                    childBases.push_back(address);
+                else
+                    childBases.push_back(address && m_engine.HasProcess() ? m_engine.Process()->ReadPointer(address).value_or(0) : 0);
             }
             BuildRows(*child, std::move(childBases), fieldPath, depth + 1);
         }
@@ -1230,8 +1220,9 @@ namespace Manifold::UI
         if (indent > 0.0f)
             ImGui::Indent(indent);
         const bool pointer = field.Type == Scan::ValueType::Pointer;
-        const bool expanded = pointer && row.Expanded;
-        if (pointer)
+        const bool embedded = Embedded(field);
+        const bool expanded = (pointer || embedded) && row.Expanded;
+        if (pointer || embedded)
         {
             if (m_childLookups.count(fieldPath))
                 Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
@@ -1246,7 +1237,7 @@ namespace Manifold::UI
                 else
                 {
                     m_expanded.insert(fieldPath);
-                    if ((field.ChildStructure.empty() || !m_engine.Structures().Find(field.ChildStructure)) && !m_childLookups.count(fieldPath))
+                    if (pointer && (field.ChildStructure.empty() || !m_engine.Structures().Find(field.ChildStructure)) && !m_childLookups.count(fieldPath))
                     {
                         std::uint64_t target = 0;
                         if (!addresses.empty() && addresses.front() && m_engine.HasProcess())
@@ -1446,8 +1437,10 @@ namespace Manifold::UI
         {
             for (Scan::ValueType type : kFieldTypes)
             {
-                if (ImGui::MenuItem(Scan::TypeName(type), nullptr, field.CustomType.empty() && field.Type == type))
+                if (ImGui::MenuItem(Scan::TypeName(type), nullptr, field.CustomType.empty() && !Embedded(field) && field.Type == type))
                 {
+                    if (Embedded(field))
+                        field.ChildStructure.clear();
                     field.CustomType.clear();
                     field.Type = type;
                     field.Size = SizeOf(type, pointerSize, field.Size);

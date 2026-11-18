@@ -22,6 +22,7 @@ namespace Manifold::Target
         void Detach() override;
         Status Enumerate(WorkProgress* progress, bool starting) override;
         void EnsureMembers(int classIndex) override;
+        void ResolveValueTypes(int classIndex) override;
         std::optional<std::string> ResolveHead(std::uint64_t header, bool allowRuntimeFallback) override;
         std::optional<std::string> MethodNameAt(std::uint64_t address) override;
         std::optional<std::string> MethodStartNameAt(std::uint64_t address) override;

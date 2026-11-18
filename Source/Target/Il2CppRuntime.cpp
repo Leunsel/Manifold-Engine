@@ -39,6 +39,7 @@ namespace Manifold::Target
             "il2cpp_class_get_methods", "il2cpp_method_get_name", "il2cpp_method_get_param_count", "il2cpp_method_get_pointer",
             "il2cpp_class_get_fields", "il2cpp_field_get_name", "il2cpp_field_get_offset", "il2cpp_field_get_type",
             "il2cpp_field_get_flags", "il2cpp_type_get_type",
+            "il2cpp_class_from_type", "il2cpp_class_is_valuetype", "il2cpp_class_is_enum", "il2cpp_class_enum_basetype", "il2cpp_class_value_size",
         };
         const char* const kIl2CppRequired[] = {
             "il2cpp_domain_get", "il2cpp_thread_attach", "il2cpp_domain_get_assemblies", "il2cpp_assembly_get_image",
@@ -451,9 +452,15 @@ namespace Manifold::Target
             field.Name = m_bridge.CallString("il2cpp_field_get_name", item.Item);
             field.Offset = static_cast<int>(m_bridge.CallFn("il2cpp_field_get_offset", item.Item).value_or(0) & 0xFFFFFFFFu);
             if (const auto type = m_bridge.CallFn("il2cpp_field_get_type", item.Item); type && *type)
+            {
                 field.TypeCode = static_cast<int>(m_bridge.CallFn("il2cpp_type_get_type", *type).value_or(0) & 0xFFu);
+                if (MayBeValueType(field.TypeCode))
+                    m_bridge.DescribeValueType("il2cpp_", m_bridge.CallFn("il2cpp_class_from_type", *type).value_or(0), field);
+            }
             info.Fields.push_back(std::move(field));
         }
+        info.ValueTypesRead = true;
+        m_bridge.m_call.ResetScratch();
     }
 
     std::optional<std::string> Il2CppRuntime::ResolveHead(std::uint64_t header, bool allowShape)

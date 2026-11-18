@@ -38,7 +38,16 @@ namespace Manifold::Target
         std::string Name;
         int Offset = 0;
         int TypeCode = 0;  // MONO_TYPE_* of the field (IL2CPP's Il2CppTypeEnum uses the same codes)
+        std::uint64_t TypeHandle = 0;
+        std::string TypeName;
+        int ValueSize = 0;
+        int EnumCode = 0;
     };
+
+    inline bool MayBeValueType(int typeCode)
+    {
+        return typeCode == 0x11 || typeCode == 0x15;
+    }
 
     struct MonoInstance
     {
@@ -58,6 +67,7 @@ namespace Manifold::Target
         std::string Parent;         // IL2CPP: the base class, read with the members
         bool Generic = false;       // IL2CPP: an open generic definition, which has no field offsets
         bool Discovered = false;    // IL2CPP: named from its shape in memory, never handed to the runtime
+        bool ValueTypesRead = false;
 
         std::string FullName() const { return Namespace.empty() ? Name : Namespace + "." + Name; }
     };
@@ -116,6 +126,8 @@ namespace Manifold::Target
         // front, "Assembly-CSharp:Namespace.Class".
         std::vector<std::string> MethodsOf(std::string_view className);
         std::vector<MonoField> FieldsOf(std::string_view className);
+        std::vector<MonoField> TypedFieldsOf(std::string_view className);
+        std::vector<MonoField> TypedFieldsOf(std::uint64_t klass);
         // One class with its members loaded: methods with handles (and for
         // IL2CPP their code addresses and parameter counts), fields, parent.
         std::optional<MonoClass> ClassDetails(std::string_view className);
@@ -188,6 +200,8 @@ namespace Manifold::Target
         Status AttachRuntime(const Candidate& candidate);
         Status Enumerate(WorkProgress* progress, bool starting);
         void EnsureMembers(int classIndex);
+        std::vector<MonoField> TypedFields(int classIndex);
+        void DescribeValueType(const std::string& prefix, std::uint64_t klass, MonoField& field);
         std::optional<std::string> ResolveHead(std::uint64_t header, bool allowRuntimeFallback);
 
         std::shared_ptr<Process> m_process;

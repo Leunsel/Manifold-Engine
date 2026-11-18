@@ -3,6 +3,7 @@
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/Text.h"
+#include "Table/ManagedStructures.h"
 #include "Target/ManagedAgent.h"
 #include "Target/ManagedDumper.h"
 #include "Target/Mono.h"
@@ -466,10 +467,86 @@ namespace Manifold::Tests
             engine.CloseProcess();
         }
 
+        void CheckValueTypes(const std::filesystem::path& targetPath, const std::wstring& mode)
+        {
+            const std::string label = WideToUtf8(mode);
+            AgentTarget target;
+            const bool started = target.Start(targetPath, mode);
+            CHECK_MSG(started, "could not start the test target with " + label);
+            if (!started)
+                return;
+            Settings settings;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.Info.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            if (!opened)
+                return;
+            const Status mono = engine.EnsureMono();
+            CHECK_MSG(mono.Ok(), label + ": " + mono.Text);
+            if (!mono)
+                return;
+            const bool viaDump = mode.find(L"--mono-agent") != std::wstring::npos;
+            CHECK_MSG(engine.Mono().ManagedDumperUsed() == viaDump, label + ": the classes came the wrong way");
+
+            const std::vector<Target::MonoField> raw = engine.Mono().FieldsOf("Game.Mover");
+            CHECK_MSG(raw.size() == 4, label + ": " + std::to_string(raw.size()) + " fields");
+            const std::vector<Target::MonoField> fields = engine.Mono().TypedFieldsOf("Game.Mover");
+            const auto find = [&](const char* name) -> const Target::MonoField*
+                {
+                    const auto found = std::find_if(fields.begin(), fields.end(), [&](const Target::MonoField& field) { return field.Name == name; });
+                    return found == fields.end() ? nullptr : &*found;
+                };
+            const Target::MonoField* position = find("position");
+            const Target::MonoField* team = find("team");
+            const Target::MonoField* speed = find("speed");
+            const Target::MonoField* owner = find("owner");
+            CHECK_MSG(position && position->TypeName == "Game.Vec3" && position->ValueSize == 12 && position->EnumCode == 0 && position->TypeHandle,
+                label + ": position " + (position ? position->TypeName + " " + std::to_string(position->ValueSize) : std::string("missing")));
+            CHECK_MSG(team && team->TypeName == "Game.Team" && team->ValueSize == 4 && team->EnumCode == 0x08,
+                label + ": team " + (team ? team->TypeName + " " + std::to_string(team->EnumCode) : std::string("missing")));
+            CHECK(speed && speed->TypeName.empty() && speed->ValueSize == 0 && !speed->TypeHandle);
+            CHECK(owner && owner->TypeName.empty() && owner->ValueSize == 0);
+            CHECK(engine.Mono().TypedFieldsOf(std::uint64_t(0x1234)).empty());
+
+            Table::ManagedLayouts nested;
+            Table::CollectManagedLayouts(engine.Mono(), fields, nested);
+            CHECK_EQ(nested.size(), 1u);
+            Table::StructDefinition mover;
+            mover.Name = "Game.Mover";
+            Table::FillFromManaged(mover, fields, 0, nested);
+            CHECK_EQ(mover.Fields.size(), 4u);
+            if (mover.Fields.size() == 4)
+            {
+                const Table::StructField& first = mover.Fields[0];
+                const Table::StructField& inline3 = mover.Fields[1];
+                const Table::StructField& enumField = mover.Fields[2];
+                const Table::StructField& pointer = mover.Fields[3];
+                CHECK(first.Name == "speed" && first.Offset == 0x10 && first.Type == Scan::ValueType::Float);
+                CHECK_MSG(inline3.Name == "position" && inline3.Offset == 0x14 && inline3.Type == Scan::ValueType::ByteArray && inline3.Size == 12 && inline3.ChildStructure == "Game.Vec3",
+                    label + ": position became " + std::string(Scan::TypeName(inline3.Type)) + " of " + std::to_string(inline3.Size) + " -> '" + inline3.ChildStructure + "'");
+                CHECK(enumField.Name == "team" && enumField.Offset == 0x20 && enumField.Type == Scan::ValueType::FourBytes && enumField.Display == Table::FieldDisplay::Signed && enumField.ChildStructure.empty());
+                CHECK(pointer.Name == "owner" && pointer.Offset == 0x28 && pointer.Type == Scan::ValueType::Pointer);
+            }
+            Table::StructureStore store;
+            store.Add("Game.Mover");
+            Table::AddManagedLayouts(store, nested, 16, "Game.Mover");
+            const Table::StructDefinition* vec3 = store.Find("Game.Vec3");
+            CHECK(vec3 != nullptr);
+            if (vec3)
+            {
+                CHECK_EQ(vec3->Fields.size(), 3u);
+                if (vec3->Fields.size() == 3)
+                    CHECK(vec3->Fields[0].Name == "x" && vec3->Fields[0].Offset == 0 && vec3->Fields[1].Offset == 4 && vec3->Fields[2].Offset == 8 && vec3->Fields[2].Type == Scan::ValueType::Float);
+            }
+            engine.CloseProcess();
+        }
+
         void CheckAgentTarget(const std::filesystem::path& targetPath)
         {
+            CheckValueTypes(targetPath, L"--mono-values");
             if (Target::ManagedDumperImage().empty())
                 return;
+            CheckValueTypes(targetPath, L"--mono-agent --mono-values");
             for (const wchar_t* mode : { L"--mono-agent", L"--mono-agent=bad-handles", L"--mono-agent=bad-offsets", L"--mono-agent=unsure", L"--mono-agent=fail" })
                 CheckAgentMode(targetPath, mode);
         }
