@@ -373,7 +373,10 @@ namespace Manifold::UI
         }
         if (m_monoDetected && !m_release)
             scriptMenusWidth += ImGui::CalcTextSize("Mono").x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
-        ImGui::BeginChild("##menus", ImVec2(Px(540.0f) + scriptMenusWidth, menuHeight), ImGuiChildFlags_None, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
+        const float buttonWidth = Px(46.0f);
+        const float buttonsStart = width - buttonWidth * 3.0f;
+        const float menuChildWidth = std::max(Px(120.0f), std::min(Px(540.0f) + scriptMenusWidth, buttonsStart - menusStart - Px(8.0f)));
+        ImGui::BeginChild("##menus", ImVec2(menuChildWidth, menuHeight), ImGuiChildFlags_None, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
         ImGui::PopStyleVar();
         float menusEnd = origin.x + menusStart;
 
@@ -561,8 +564,6 @@ namespace Manifold::UI
         ImGui::PopStyleColor(2);
         ImGui::PopStyleVar(2);
 
-        const float buttonWidth = Px(46.0f);
-        const float buttonsStart = width - buttonWidth * 3.0f;
         workspace.Window().AddDragArea(menusEnd - origin.x + Px(8.0f), 0.0f, buttonsStart, height);
         ImGui::SetCursorPos(ImVec2(buttonsStart, 0.0f));
         if (WindowButton("##minimise", ICON_FA_WINDOW_MINIMIZE, buttonWidth, height, false))
