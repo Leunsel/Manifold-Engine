@@ -742,7 +742,7 @@ namespace Manifold::Lua
             else if (key == "comment")
                 record.Comment = TextArgument(state, 3);
             else if (key == "length")
-                record.Length = static_cast<int>(luaL_checkinteger(state, 3));
+                record.SetLength(luaL_checkinteger(state, 3));
             else if (key == "unicode")
                 record.Unicode = lua_toboolean(state, 3) != 0;
             else
@@ -806,16 +806,16 @@ namespace Manifold::Lua
             switch (static_cast<Part>(handle.Sub))
             {
             case Part::String:
-                if (key == "size") record->Length = static_cast<int>(luaL_checkinteger(state, 3));
+                if (key == "size") record->SetLength(luaL_checkinteger(state, 3));
                 else if (key == "unicode") record->Unicode = lua_toboolean(state, 3) != 0;
                 else if (key == "zeroterminate") record->ZeroTerminate = lua_toboolean(state, 3) != 0;
                 break;
             case Part::Aob:
-                if (key == "size") record->Length = static_cast<int>(luaL_checkinteger(state, 3));
+                if (key == "size") record->SetLength(luaL_checkinteger(state, 3));
                 break;
             case Part::Binary:
-                if (key == "startbit") record->BitStart = static_cast<int>(luaL_checkinteger(state, 3));
-                else if (key == "size") record->BitLength = static_cast<int>(luaL_checkinteger(state, 3));
+                if (key == "startbit") record->SetBits(luaL_checkinteger(state, 3), record->BitLength);
+                else if (key == "size") record->SetBits(record->BitStart, luaL_checkinteger(state, 3));
                 break;
             }
             Owner(state).Table().Touch();
@@ -1472,7 +1472,12 @@ namespace Manifold::Lua
             Engine& engine = Owner(state);
             std::uint64_t address = 0;
             if (lua_type(state, 1) == LUA_TNUMBER)
-                address = static_cast<std::uint64_t>(lua_tointeger(state, 1));
+            {
+                const auto value = ExactInteger(state, 1);
+                if (!value)
+                    return luaL_argerror(state, 1, "the address is not a whole number");
+                address = static_cast<std::uint64_t>(*value);
+            }
             else
             {
                 Status error;
@@ -1522,7 +1527,7 @@ namespace Manifold::Lua
         int DebugRemoveBreakpoint(lua_State* state)
         {
             Engine& engine = Owner(state);
-            const std::uint64_t address = lua_type(state, 1) == LUA_TNUMBER ? static_cast<std::uint64_t>(lua_tointeger(state, 1)) : engine.Evaluate(luaL_checkstring(state, 1)).value_or(0);
+            const std::uint64_t address = lua_type(state, 1) == LUA_TNUMBER ? static_cast<std::uint64_t>(ExactInteger(state, 1).value_or(0)) : engine.Evaluate(luaL_checkstring(state, 1)).value_or(0);
             EngineOf(state).ClearBreakpointCallback(address);
             const Status status = engine.Debugger().RemoveBreakpoint(address);
             lua_pushboolean(state, status.Ok());

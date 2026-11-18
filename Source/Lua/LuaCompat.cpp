@@ -66,10 +66,8 @@ namespace Manifold::Lua
 
         std::uint64_t Number(lua_State* state, int index)
         {
-            if (lua_isinteger(state, index))
-                return static_cast<std::uint64_t>(lua_tointeger(state, index));
             if (lua_type(state, index) == LUA_TNUMBER)
-                return static_cast<std::uint64_t>(static_cast<std::int64_t>(lua_tonumber(state, index)));
+                return static_cast<std::uint64_t>(ExactInteger(state, index).value_or(0));
             if (lua_type(state, index) == LUA_TSTRING)
             {
                 if (const auto value = ParseHex(lua_tostring(state, index)))

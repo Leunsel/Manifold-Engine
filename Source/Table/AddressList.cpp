@@ -21,6 +21,17 @@ namespace Manifold::Table
         return format;
     }
 
+    void MemoryRecord::SetLength(std::int64_t length)
+    {
+        Length = static_cast<int>(std::clamp<std::int64_t>(length, 1, kMaxRecordLength));
+    }
+
+    void MemoryRecord::SetBits(std::int64_t start, std::int64_t length)
+    {
+        BitStart = static_cast<int>(std::clamp<std::int64_t>(start, 0, 63));
+        BitLength = static_cast<int>(std::clamp<std::int64_t>(length, 1, 64 - BitStart));
+    }
+
     int MemoryRecord::Size(int pointerSize) const
     {
         return Scan::ValueSize(Type, Format(pointerSize));

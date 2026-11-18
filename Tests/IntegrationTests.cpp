@@ -15,6 +15,8 @@
 
 #include <windows.h>
 
+#include "Syscalls/Syscall.h"
+
 namespace Manifold::Tests
 {
     void CheckBreakActions(Engine& engine, bool veh);
@@ -275,6 +277,40 @@ namespace Manifold::Tests
                 "memscan all", luaResult);
             CHECK_MSG(lua.Ok() && luaResult.rfind("true|first|1234.", 0) == 0, lua.Text + " " + luaResult);
         }
+
+        void DirectSystemCalls(std::uint32_t id, std::uint64_t health)
+        {
+            InitSysCalls();
+            CHECK(OpenSysCall != 0 && ReadVmSysCall != 0 && WriteVmSysCall != 0 && AllocVmSysCall != 0);
+
+            Status missing;
+            CHECK(!Target::Process::Open(0xFFFFFFF0u, missing));
+            CHECK_MSG(missing.Code == ErrorCode::ProcessNotFound, missing.Text);
+            Status denied;
+            CHECK(!Target::Process::Open(4, denied));
+            CHECK_MSG(denied.Code == ErrorCode::ProcessAccessDenied, denied.Text);
+
+            Status opened;
+            const auto process = Target::Process::Open(id, opened);
+            CHECK_MSG(process != nullptr, opened.Text);
+            if (!process)
+                return;
+            std::int32_t value = 0;
+            CHECK(process->ReadExact(health, &value, sizeof(value)));
+            CHECK(process->Write(health, &value, sizeof(value)).Ok());
+            CHECK(!process->ReadExact(0x10, &value, sizeof(value)));
+
+            ::SetLastError(ERROR_SUCCESS);
+            Status allocated;
+            CHECK(process->Allocate(std::size_t(1) << 46, PAGE_READWRITE, 0, allocated) == 0);
+            CHECK_MSG(allocated.Code == ErrorCode::AllocFailed && allocated.Text.find("completed successfully") == std::string::npos, allocated.Text);
+
+            Status small;
+            const std::uint64_t memory = process->Allocate(0x1000, PAGE_READWRITE, 0, small);
+            CHECK_MSG(memory != 0, small.Text);
+            if (memory)
+                CHECK(process->Free(memory).Ok());
+        }
     }
 
     int RunIntegrationTests(const std::filesystem::path& targetPath)
@@ -283,7 +319,7 @@ namespace Manifold::Tests
         TargetProgram target;
         if (!Launch(targetPath, target))
         {
-            std::printf("  SKIP the test target %ls could not be started\n", targetPath.c_str());
+            Skip("the test target " + targetPath.string() + " could not be started");
             return 0;
         }
         const std::uint64_t world = target.Addresses["g_world at "];
@@ -559,11 +595,16 @@ namespace Manifold::Tests
 
         CHECK_EQ(engine.Evaluate("TestTarget.g_world").value_or(0), world);
         CHECK_EQ(engine.Evaluate("TestTarget.Damage").value_or(0), damage);
-        std::filesystem::path table = targetPath.parent_path();
-        for (int i = 0; i < 6 && !std::filesystem::exists(table / "Tests" / "Target" / "TestTarget.CT"); ++i)
-            table = table.parent_path();
-        table = table / "Tests" / "Target" / "TestTarget.CT";
-        if (std::filesystem::exists(table))
+        std::filesystem::path table;
+        for (std::filesystem::path at : { targetPath.parent_path(), std::filesystem::current_path() })
+        {
+            for (int i = 0; i < 8 && table.empty(); ++i, at = at.parent_path())
+            {
+                if (std::filesystem::exists(at / "Tests" / "Target" / "TestTarget.CT"))
+                    table = at / "Tests" / "Target" / "TestTarget.CT";
+            }
+        }
+        if (!table.empty())
         {
             settings.TableScripts = TableScriptPolicy::Never;
             const Status loaded = engine.LoadTable(table, false);
@@ -611,7 +652,7 @@ namespace Manifold::Tests
         }
         else
         {
-            std::printf("  SKIP TestTarget.CT not found\n");
+            Skip("TestTarget.CT not found");
         }
 
         const Status attached = engine.EnsureDebugger();
@@ -733,6 +774,9 @@ namespace Manifold::Tests
                 if not ok then return "enable: " .. tostring(info) end
                 local address = getAddressSafe("compatvalue")
                 if not address or readInteger(address) ~= 5 or readInteger(getAddressSafe("other")) ~= 6 then return "values" end
+                if readInteger(address + 0.0) ~= 5 then return "whole float address" end
+                local fractional, problem = pcall(readInteger, address + 0.5)
+                if fractional or not tostring(problem):find("not a whole number", 1, true) then return "fractional address " .. tostring(problem) end
                 if type(info.allocs) ~= "table" or not info.allocs.compatblock then return "allocs" end
                 if autoAssemble(script, false, info) ~= true then return "disable" end
                 if getAddressSafe("compatvalue") ~= nil or getAddressSafe("other") ~= nil then return "still registered" end
@@ -925,6 +969,7 @@ namespace Manifold::Tests
             CHECK_EQ(order(), std::string("+P+A+B+C-C-B-A-P"));
         }
         engine.CloseProcess();
+        DirectSystemCalls(target.Info.dwProcessId, health);
         return Totals().Failures - before;
     }
 }

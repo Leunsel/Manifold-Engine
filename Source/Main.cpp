@@ -55,6 +55,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE, _In_ LPWSTR, 
             LOG_INFO("Program", line);
         for (const std::string& line : migration.Problems)
             LOG_WARN("Program", line);
+        if (OpenSysCall == 0 || ReadVmSysCall == 0 || WriteVmSysCall == 0)
+            LOG_WARN("Program", "Direct system calls did not resolve, the Win32 API is used instead");
     }
 
     int result = 0;

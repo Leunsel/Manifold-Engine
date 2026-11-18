@@ -1309,7 +1309,7 @@ namespace Manifold::UI
     Status MemoryViewer::WriteBytes(std::uint64_t address, std::span<const std::uint8_t> bytes)
     {
         const Target::Process& process = *m_engine.Process();
-        MemoryEdit edit{ process.Id(), address, std::vector<std::uint8_t>(bytes.size()) };
+        MemoryEdit edit{ m_engine.ProcessGeneration(), address, std::vector<std::uint8_t>(bytes.size()) };
         const bool saved = process.ReadExact(address, edit.Original.data(), edit.Original.size());
         const Status status = process.Write(address, bytes);
         if (status && saved)
@@ -1323,8 +1323,8 @@ namespace Manifold::UI
 
     void MemoryViewer::UndoEdit()
     {
-        const std::uint32_t id = m_engine.Process()->Id();
-        while (!m_undo.empty() && m_undo.back().Process != id)
+        const std::uint64_t generation = m_engine.ProcessGeneration();
+        while (!m_undo.empty() && m_undo.back().Generation != generation)
             m_undo.pop_back();
         if (m_undo.empty())
         {

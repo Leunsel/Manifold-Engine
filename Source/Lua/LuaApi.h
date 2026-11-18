@@ -1,13 +1,20 @@
 #pragma once
 
+#include "Core/Errors.h"
 #include "Disasm/Disassembler.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 struct lua_State;
+
+namespace Manifold
+{
+    class Engine;
+}
 
 namespace Manifold::Table
 {
@@ -20,6 +27,8 @@ namespace Manifold::Lua
     class LuaEngine;
 
     LuaEngine& EngineOf(lua_State* state);
+    std::optional<std::int64_t> ExactInteger(lua_State* state, int index);
+    Status OpenProcessArgument(Engine& engine, lua_State* state, int index);
 
     void RegisterApi(LuaEngine& engine, lua_State* state);
     void RegisterMonoApi(LuaEngine& engine, lua_State* state);

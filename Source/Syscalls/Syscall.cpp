@@ -42,7 +42,18 @@ int GetSysCalls()
 		return 1;
 
 	HANDLE mapping = CreateFileMapping(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
+	if (!mapping)
+	{
+		CloseHandle(file);
+		return 1;
+	}
 	BYTE* base = (BYTE*)MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+	if (!base)
+	{
+		CloseHandle(mapping);
+		CloseHandle(file);
+		return 1;
+	}
 
 	auto dos = (PIMAGE_DOS_HEADER)base;
 	auto nt = (PIMAGE_NT_HEADERS)(base + dos->e_lfanew);
@@ -107,10 +118,7 @@ void InitSysCalls()
 {
 	int Status = GetSysCalls();
 	if (Status != 0)
-	{
-		// add error here
 		return;
-	}
 
 	OpenSysCall = SysCalls["NtOpenProcess"];
 	ReadVmSysCall = SysCalls["NtReadVirtualMemory"];

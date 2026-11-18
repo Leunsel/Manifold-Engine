@@ -28,6 +28,25 @@ namespace Manifold::Target
             return ntdll ? reinterpret_cast<NtProcessCall>(reinterpret_cast<void*>(::GetProcAddress(ntdll, name))) : nullptr;
         }
 
+        DWORD DosErrorOf(NTSTATUS status)
+        {
+            using Translate = ULONG(WINAPI*)(NTSTATUS);
+            static const Translate translate = []() -> Translate
+                {
+                    const HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
+                    return ntdll ? reinterpret_cast<Translate>(reinterpret_cast<void*>(::GetProcAddress(ntdll, "RtlNtStatusToDosError"))) : nullptr;
+                }();
+            return translate ? translate(status) : ERROR_GEN_FAILURE;
+        }
+
+        bool Succeeded(NTSTATUS status)
+        {
+            if (status >= 0)
+                return true;
+            ::SetLastError(DosErrorOf(status));
+            return false;
+        }
+
         std::string LastErrorText(DWORD error)
         {
             wchar_t* buffer = nullptr;
@@ -66,8 +85,7 @@ namespace Manifold::Target
             if (ReadVmSysCall == 0)
                 return ::ReadProcessMemory(handle, reinterpret_cast<LPCVOID>(address), buffer, size, &done) != 0;
             done = 0;
-            const NTSTATUS status = NtReadVirtualMemory_direct(handle, reinterpret_cast<PVOID>(address), buffer, size, &done);
-            return status >= 0;
+            return Succeeded(NtReadVirtualMemory_direct(handle, reinterpret_cast<PVOID>(address), buffer, size, &done));
         }
 
         bool TryWriteVm(HANDLE handle, std::uint64_t address, const void* data, std::size_t size, SIZE_T& done)
@@ -75,8 +93,7 @@ namespace Manifold::Target
             if (WriteVmSysCall == 0)
                 return ::WriteProcessMemory(handle, reinterpret_cast<LPVOID>(address), data, size, &done) != 0;
             done = 0;
-            const NTSTATUS status = NtWriteVirtualMemory_direct(handle, reinterpret_cast<PVOID>(address), const_cast<PVOID>(data), size, &done);
-            return status >= 0;
+            return Succeeded(NtWriteVirtualMemory_direct(handle, reinterpret_cast<PVOID>(address), const_cast<PVOID>(data), size, &done));
         }
 
         // Region query, protection, allocation and release go through the same
@@ -91,7 +108,7 @@ namespace Manifold::Target
             SIZE_T returned = 0;
             const NTSTATUS status = NtQueryVirtualMemory_direct(
                 handle, reinterpret_cast<PVOID>(address), 0 /*MemoryBasicInformation*/, &info, sizeof(info), &returned);
-            return status >= 0 ? returned : 0;
+            return Succeeded(status) ? returned : 0;
         }
 
         bool ProtectVm(HANDLE handle, std::uint64_t address, std::size_t size, DWORD newProtect, DWORD& oldProtect)
@@ -100,8 +117,7 @@ namespace Manifold::Target
                 return ::VirtualProtectEx(handle, reinterpret_cast<LPVOID>(address), size, newProtect, &oldProtect) != 0;
             PVOID base = reinterpret_cast<PVOID>(address);
             SIZE_T region = size;
-            const NTSTATUS status = NtProtectVirtualMemory_direct(handle, &base, &region, newProtect, &oldProtect);
-            return status >= 0;
+            return Succeeded(NtProtectVirtualMemory_direct(handle, &base, &region, newProtect, &oldProtect));
         }
 
         void* AllocVm(HANDLE handle, std::uint64_t desired, std::size_t size, DWORD allocationType, DWORD protect)
@@ -111,7 +127,7 @@ namespace Manifold::Target
             PVOID base = reinterpret_cast<PVOID>(desired);
             SIZE_T region = size;
             const NTSTATUS status = NtAllocateVirtualMemory_direct(handle, &base, 0, &region, allocationType, protect);
-            return status >= 0 ? base : nullptr;
+            return Succeeded(status) ? base : nullptr;
         }
 
         bool FreeVm(HANDLE handle, std::uint64_t address)
@@ -120,8 +136,7 @@ namespace Manifold::Target
                 return ::VirtualFreeEx(handle, reinterpret_cast<LPVOID>(address), 0, MEM_RELEASE) != 0;
             PVOID base = reinterpret_cast<PVOID>(address);
             SIZE_T region = 0;
-            const NTSTATUS status = NtFreeVirtualMemory_direct(handle, &base, &region, MEM_RELEASE);
-            return status >= 0;
+            return Succeeded(NtFreeVirtualMemory_direct(handle, &base, &region, MEM_RELEASE));
         }
 
         bool IsSystemPath(const std::wstring& path);
@@ -568,19 +583,30 @@ namespace Manifold::Target
     {
         constexpr DWORD kAccess = PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION | PROCESS_CREATE_THREAD |
                                   PROCESS_SUSPEND_RESUME | SYNCHRONIZE;
-        // handle = ::OpenProcess(kAccess, FALSE, id);
-
-        HANDLE handle = 0;
-	    OBJECT_ATTRIBUTES attributes;
-	    InitializeObjectAttributes(&attributes, NULL, 0, NULL, NULL);
-	    CLIENT_ID cid;
-	    cid.UniqueProcess = reinterpret_cast<HANDLE>(id);
-	    cid.UniqueThread = NULL;
-	    NtOpenProcess_direct(&handle, kAccess, &attributes, &cid);
+        HANDLE handle = nullptr;
+        DWORD error = ERROR_SUCCESS;
+        if (OpenSysCall == 0)
+        {
+            handle = ::OpenProcess(kAccess, FALSE, id);
+            if (!handle)
+                error = ::GetLastError();
+        }
+        else
+        {
+            OBJECT_ATTRIBUTES attributes;
+            InitializeObjectAttributes(&attributes, nullptr, 0, nullptr, nullptr);
+            CLIENT_ID cid{};
+            cid.UniqueProcess = ::ULongToHandle(id);
+            const NTSTATUS opened = NtOpenProcess_direct(&handle, kAccess, &attributes, &cid);
+            if (opened < 0 || !handle)
+            {
+                error = opened < 0 ? DosErrorOf(opened) : ERROR_INVALID_HANDLE;
+                handle = nullptr;
+            }
+        }
 
         if (!handle)
         {
-            const DWORD error = ::GetLastError();
             const std::string detail = std::to_string(id) + ", " + LastErrorText(error);
             if (error == ERROR_ACCESS_DENIED)
                 status = Status::Fail(ErrorCode::ProcessAccessDenied, detail);
@@ -1141,9 +1167,10 @@ namespace Manifold::Target
         HANDLE thread = ::CreateRemoteThread(m_handle, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(start), reinterpret_cast<LPVOID>(parameter), 0, nullptr);
         if (!thread)
             return Status::Fail(ErrorCode::ThreadCreateFailed, Hex(start) + ", " + LastErrorText(::GetLastError()));
-        if (wait)
-            ::WaitForSingleObject(thread, timeoutMilliseconds);
+        const DWORD waited = wait ? ::WaitForSingleObject(thread, timeoutMilliseconds) : WAIT_OBJECT_0;
         ::CloseHandle(thread);
+        if (waited != WAIT_OBJECT_0)
+            return Status::Fail(ErrorCode::ThreadTimedOut, Hex(start) + ", " + std::to_string(timeoutMilliseconds) + " ms");
         return Status::Success();
     }
 
@@ -1228,13 +1255,16 @@ namespace Manifold::Target
             Free(memory);
             return Status::Fail(ErrorCode::ThreadCreateFailed, LastErrorText(error));
         }
-        ::WaitForSingleObject(thread, 15000);
+        constexpr DWORD kLoadTimeout = 15000;
+        const DWORD waited = ::WaitForSingleObject(thread, kLoadTimeout);
         DWORD exitCode = 0;
-        ::GetExitCodeThread(thread, &exitCode);
+        const bool finished = waited == WAIT_OBJECT_0 && ::GetExitCodeThread(thread, &exitCode);
         ::CloseHandle(thread);
+        if (waited != WAIT_OBJECT_0)
+            return Status::Fail(ErrorCode::ThreadTimedOut, WideToUtf8(path) + ", " + std::to_string(kLoadTimeout) + " ms");
         Free(memory);
         const_cast<Process*>(this)->RefreshModules();
-        if (exitCode == 0)
+        if ((!finished || exitCode == 0) && !FindModule(WideToUtf8(std::filesystem::path(path).filename().wstring())))
             return Status::Fail(ErrorCode::InjectFailed, WideToUtf8(path));
         return Status::Success();
     }

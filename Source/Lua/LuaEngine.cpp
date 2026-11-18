@@ -759,10 +759,8 @@ namespace Manifold::Lua
             std::string error;
             if (CallReference(callback.Reference, 1, 1, error))
             {
-                if (lua_isinteger(m_state, -1))
-                    result = static_cast<std::uint64_t>(lua_tointeger(m_state, -1));
-                else if (lua_type(m_state, -1) == LUA_TNUMBER)
-                    result = static_cast<std::uint64_t>(static_cast<std::int64_t>(lua_tonumber(m_state, -1)));
+                if (const auto value = ExactInteger(m_state, -1))
+                    result = static_cast<std::uint64_t>(*value);
                 if (result && *result == 0)
                     result.reset();
             }
@@ -817,10 +815,8 @@ namespace Manifold::Lua
             result.Address = address;
             if (lua_type(m_state, -2) == LUA_TSTRING)
                 result.Name = lua_tostring(m_state, -2);
-            if (lua_isinteger(m_state, -1))
-                result.Address = static_cast<std::uint64_t>(lua_tointeger(m_state, -1));
-            else if (lua_type(m_state, -1) == LUA_TNUMBER)
-                result.Address = static_cast<std::uint64_t>(lua_tonumber(m_state, -1));
+            if (const auto value = ExactInteger(m_state, -1))
+                result.Address = static_cast<std::uint64_t>(*value);
             lua_settop(m_state, top);
             if (!result.Name.empty())
                 return result;
@@ -905,10 +901,11 @@ namespace Manifold::Lua
                     {
                         if (results >= 1 && lua_type(thread, -results) == LUA_TSTRING)
                             found->Name = lua_tostring(thread, -results);
-                        if (results >= 2 && lua_isinteger(thread, -results + 1))
-                            found->Address = static_cast<std::uint64_t>(lua_tointeger(thread, -results + 1));
-                        else if (results >= 2 && lua_type(thread, -results + 1) == LUA_TNUMBER)
-                            found->Address = static_cast<std::uint64_t>(lua_tonumber(thread, -results + 1));
+                        if (results >= 2)
+                        {
+                            if (const auto value = ExactInteger(thread, -results + 1))
+                                found->Address = static_cast<std::uint64_t>(*value);
+                        }
                     }, [chain, found, keep](const Status&, const std::string&)
                     {
                         if (!found->Name.empty())

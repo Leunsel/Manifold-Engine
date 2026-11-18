@@ -121,7 +121,13 @@ namespace Manifold::Lua
         {
             if (lua_type(state, index) == LUA_TNUMBER)
             {
-                address = static_cast<std::uint64_t>(lua_tointeger(state, index));
+                const auto value = ExactInteger(state, index);
+                if (!value)
+                {
+                    error = Status::Fail(ErrorCode::LuaBadArgument, "the address is not a whole number");
+                    return false;
+                }
+                address = static_cast<std::uint64_t>(*value);
                 return true;
             }
             const char* text = luaL_checkstring(state, index);
@@ -310,9 +316,7 @@ namespace Manifold::Lua
 
         int ProcessOpen(lua_State* state)
         {
-            Engine& engine = Owner(state);
-            const Status status = lua_type(state, 1) == LUA_TNUMBER ? engine.OpenProcess(static_cast<std::uint32_t>(lua_tointeger(state, 1)))
-                                                                    : engine.OpenProcessByName(luaL_checkstring(state, 1));
+            const Status status = OpenProcessArgument(Owner(state), state, 1);
             if (!status)
                 return Failed(state, status);
             return ProcessInfo(state);

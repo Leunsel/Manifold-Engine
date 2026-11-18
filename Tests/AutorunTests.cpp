@@ -59,7 +59,7 @@ namespace Manifold::Tests
         std::error_code error;
         if (!std::filesystem::is_directory(folder, error))
         {
-            std::printf("  no Autorun folder next to the sources, skipped\n");
+            Skip("no Autorun folder next to the sources above " + std::filesystem::current_path().string());
             return 0;
         }
         Settings settings;

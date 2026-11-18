@@ -47,6 +47,7 @@ int main(int argc, char** argv)
 {
     std::filesystem::path target;
     bool assemblerOnly = false;
+    bool allowSkips = false;
     const std::vector<std::string> arguments(argv + 1, argv + argc);
     for (const std::string& argument : arguments)
     {
@@ -96,6 +97,8 @@ int main(int argc, char** argv)
             target = argument.substr(9);
         if (argument == "--assembler")
             assemblerOnly = true;
+        if (argument == "--allow-skips")
+            allowSkips = true;
     }
     if (target.empty())
     {
@@ -133,6 +136,8 @@ int main(int argc, char** argv)
     std::printf("Integration (%ls)\n", target.c_str());
     Manifold::Tests::RunIntegrationTests(target);
     const auto& totals = Manifold::Tests::Totals();
-    std::printf("\n%d checks, %d failed; assembler suite: %d failed\n", totals.Checks, totals.Failures, assembler);
-    return totals.Failures + assembler;
+    std::printf("\n%d checks, %d failed, %d skipped; assembler suite: %d failed\n", totals.Checks, totals.Failures, totals.Skipped, assembler);
+    if (totals.Skipped && !allowSkips)
+        std::printf("Skipped checks fail the run. Run from the repository with TestTarget.exe beside the tests, or pass --allow-skips.\n");
+    return totals.Failures + assembler + (allowSkips ? 0 : totals.Skipped);
 }

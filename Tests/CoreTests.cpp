@@ -113,6 +113,8 @@ namespace Manifold::Tests
                 written.erase(std::remove(written.begin(), written.end(), '\r'), written.end());
                 CHECK_MSG(written == ErrorsMarkdown(), "Docs/ERRORS.md is out of date: run the tests with --errors-markdown");
             }
+            else
+                Skip("Docs/ERRORS.md not found above " + std::filesystem::current_path().string());
         }
 
         void XmlParsing()
@@ -228,6 +230,41 @@ namespace Manifold::Tests
             CHECK(Table::ParseTable(cheatEngine, foreign).Ok());
             CHECK(foreign.Records.size() == 1 && foreign.Records[0]->Id == 3 && foreign.Records[0]->Description == "Ammo");
             CHECK(foreign.Records.size() == 1 && foreign.Records[0]->Offsets == std::vector<std::string>({ "0", "1C" }));
+
+            const char* oversized = R"(<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>1</ID>
+      <VariableType>String</VariableType>
+      <Length>2147483647</Length>
+      <Address>1000</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>2</ID>
+      <VariableType>Binary</VariableType>
+      <BitStart>200</BitStart>
+      <BitLength>-5</BitLength>
+      <Address>1000</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>3</ID>
+      <VariableType>Binary</VariableType>
+      <BitStart>60</BitStart>
+      <BitLength>32</BitLength>
+      <Address>1000</Address>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>
+)";
+            Table::LoadedTable clamped;
+            CHECK(Table::ParseTable(oversized, clamped).Ok() && clamped.Records.size() == 3);
+            if (clamped.Records.size() == 3)
+            {
+                CHECK_EQ(clamped.Records[0]->Length, Table::kMaxRecordLength);
+                CHECK(clamped.Records[1]->BitStart == 63 && clamped.Records[1]->BitLength == 1);
+                CHECK(clamped.Records[2]->BitStart == 60 && clamped.Records[2]->BitLength == 4);
+            }
         }
 
         void AutoAssemblerOffline()
@@ -635,7 +672,7 @@ data:
         const std::filesystem::path file = at / "Assets" / "Sounds" / "Success.mp3";
         if (!std::filesystem::exists(file))
         {
-            std::printf("  SKIP Assets/Sounds/Success.mp3 not found\n");
+            Skip("Assets/Sounds/Success.mp3 not found above " + std::filesystem::current_path().string());
             return;
         }
         const auto read = [](const std::filesystem::path& path)

@@ -154,7 +154,10 @@ namespace Manifold::Tests
                 at = at.parent_path();
             const std::filesystem::path docs = at / "Docs" / "SHORTCUTS.md";
             if (!std::filesystem::exists(docs))
+            {
+                Skip("Docs/SHORTCUTS.md not found above " + std::filesystem::current_path().string());
                 return;
+            }
             std::ifstream file(docs, std::ios::binary);
             std::stringstream content;
             content << file.rdbuf();

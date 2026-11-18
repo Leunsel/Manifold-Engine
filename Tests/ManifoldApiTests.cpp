@@ -304,6 +304,8 @@ namespace Manifold::Tests
                 if fast ~= nil or noFast.code ~= "ME-1005" or noFast.where ~= "no process:14" then return "fast read " .. tostring(noFast) end
                 if #manifold.process.find() < 10 or #manifold.process.find("CSRSS") < 1 then return "find" end
                 if #manifold.process.find("no-such-process-name") ~= 0 then return "find filter" end
+                local opened, badId = manifold.process.open(0x100000004)
+                if opened ~= nil or badId.code ~= "ME-1001" or manifold.process.isOpen() then return "pid range " .. tostring(badId) end
                 return "ok")LUA");
         }
 
@@ -384,6 +386,8 @@ namespace Manifold::Tests
                 value, failure = read(0x10, "raw", { count = 8 })
                 if value ~= nil or failure.code ~= "ME-1006" then return "raw failure" end
                 if read(probeValue + 0.0, "i32") ~= -2 then return "float address" end
+                ok, problem = pcall(read, probeValue + 0.5, "i32")
+                if ok or problem.code ~= "ME-7007" then return "fractional address " .. tostring(problem) end
                 if manifold.memory.write(probeBytes, "raw", "\1\2") ~= true or read(probeBytes, "u16") ~= 0x0201 then return "write raw" end
                 ok = pcall(manifold.memory.write, probeBytes, "raw", { 1 })
                 if ok then return "write raw table" end
@@ -608,6 +612,8 @@ return M
                 written.erase(std::remove(written.begin(), written.end(), '\r'), written.end());
                 CHECK_MSG(written == markdown, "Docs/MANIFOLD-API.md is out of date: run the tests with --manifold-markdown");
             }
+            else
+                Skip("Docs/MANIFOLD-API.md not found above " + std::filesystem::current_path().string());
         }
     }
 

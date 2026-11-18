@@ -116,17 +116,15 @@ namespace Manifold::Table
             else
                 record->ShowSigned = record->Type == Scan::ValueType::Float || record->Type == Scan::ValueType::Double;
             if (const auto length = ParseDecimal(node.ChildText("Length")))
-                record->Length = static_cast<int>(*length);
+                record->SetLength(*length);
             if (const auto length = ParseDecimal(node.ChildText("ByteLength")))
-                record->Length = static_cast<int>(*length);
+                record->SetLength(*length);
             if (node.HasChild("Unicode"))
                 record->Unicode = Flag(node, "Unicode");
             if (node.HasChild("ZeroTerminate"))
                 record->ZeroTerminate = Flag(node, "ZeroTerminate");
-            if (const auto bit = ParseDecimal(node.ChildText("BitStart")))
-                record->BitStart = static_cast<int>(*bit);
-            if (const auto bits = ParseDecimal(node.ChildText("BitLength")))
-                record->BitLength = static_cast<int>(*bits);
+            record->SetBits(ParseDecimal(node.ChildText("BitStart")).value_or(record->BitStart),
+                ParseDecimal(node.ChildText("BitLength")).value_or(record->BitLength));
             if (const auto color = ParseHex(node.ChildText("Color")))
             {
                 record->Color = static_cast<std::uint32_t>(*color);

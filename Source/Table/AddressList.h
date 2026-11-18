@@ -69,6 +69,8 @@ namespace Manifold::Table
         std::string Text;
     };
 
+    constexpr int kMaxRecordLength = 4096;
+
     struct MemoryRecord
     {
         int Id = 0;
@@ -122,6 +124,8 @@ namespace Manifold::Table
 
         Scan::ValueFormat Format(int pointerSize) const;
         int Size(int pointerSize) const;
+        void SetLength(std::int64_t length);
+        void SetBits(std::int64_t start, std::int64_t length);
         bool IsPointer() const { return !Offsets.empty(); }
         bool ChildrenVisible() const;
         bool IsDescendantOf(const MemoryRecord* other) const;

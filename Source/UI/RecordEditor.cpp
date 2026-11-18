@@ -250,11 +250,10 @@ namespace Manifold::UI
         if (record.Kind == Table::RecordKind::Value)
         {
             record.Type = Scan::kRecordTypes[m_type];
-            record.Length = std::max(1, m_length);
+            record.SetLength(m_length);
             record.Unicode = m_unicode;
             record.ZeroTerminate = m_zeroTerminate;
-            record.BitStart = std::clamp(m_bitStart, 0, 63);
-            record.BitLength = std::clamp(m_bitLength, 1, 64 - record.BitStart);
+            record.SetBits(m_bitStart, m_bitLength);
             record.ShowHex = m_hex;
             record.ShowSigned = m_signed;
             record.Freeze = static_cast<Table::FreezeMode>(m_freeze);
@@ -418,7 +417,7 @@ namespace Manifold::UI
         {
             FieldLabel("Length");
             ImGui::InputInt("##length", &m_length);
-            m_length = std::clamp(m_length, 1, 4096);
+            m_length = std::clamp(m_length, 1, Table::kMaxRecordLength);
             if (type == Scan::ValueType::String)
             {
                 ImGui::SetCursorPosX(Px(kLabelWidth));

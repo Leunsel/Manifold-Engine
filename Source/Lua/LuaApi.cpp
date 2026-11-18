@@ -48,7 +48,12 @@ namespace Manifold::Lua
         std::uint64_t AddressArgument(lua_State* state, int index)
         {
             if (lua_type(state, index) == LUA_TNUMBER)
-                return static_cast<std::uint64_t>(lua_tointeger(state, index));
+            {
+                const auto value = ExactInteger(state, index);
+                if (!value)
+                    luaL_argerror(state, index, "the address is not a whole number");
+                return static_cast<std::uint64_t>(value.value_or(0));
+            }
             const char* text = luaL_checkstring(state, index);
             Status error;
             const auto value = Owner(state).Evaluate(text, &error);
@@ -262,11 +267,7 @@ namespace Manifold::Lua
 
         int OpenProcessFunction(lua_State* state)
         {
-            Status status;
-            if (lua_type(state, 1) == LUA_TNUMBER)
-                status = Owner(state).OpenProcess(static_cast<std::uint32_t>(lua_tointeger(state, 1)));
-            else
-                status = Owner(state).OpenProcessByName(luaL_checkstring(state, 1));
+            const Status status = OpenProcessArgument(Owner(state), state, 1);
             if (!status)
                 EngineOf(state).PrintError(status.Text);
             lua_pushboolean(state, status.Ok());
@@ -1073,13 +1074,15 @@ namespace Manifold::Lua
 
         int BitShl(lua_State* state)
         {
-            lua_pushinteger(state, static_cast<lua_Integer>(static_cast<std::uint64_t>(luaL_checkinteger(state, 1)) << luaL_checkinteger(state, 2)));
+            const lua_Integer count = luaL_checkinteger(state, 2);
+            lua_pushinteger(state, count < 0 || count >= 64 ? 0 : static_cast<lua_Integer>(static_cast<std::uint64_t>(luaL_checkinteger(state, 1)) << count));
             return 1;
         }
 
         int BitShr(lua_State* state)
         {
-            lua_pushinteger(state, static_cast<lua_Integer>(static_cast<std::uint64_t>(luaL_checkinteger(state, 1)) >> luaL_checkinteger(state, 2)));
+            const lua_Integer count = luaL_checkinteger(state, 2);
+            lua_pushinteger(state, count < 0 || count >= 64 ? 0 : static_cast<lua_Integer>(static_cast<std::uint64_t>(luaL_checkinteger(state, 1)) >> count));
             return 1;
         }
 
@@ -1220,6 +1223,31 @@ namespace Manifold::Lua
         auto* engine = static_cast<LuaEngine*>(lua_touserdata(state, -1));
         lua_pop(state, 1);
         return *engine;
+    }
+
+    std::optional<std::int64_t> ExactInteger(lua_State* state, int index)
+    {
+        if (lua_type(state, index) != LUA_TNUMBER)
+            return std::nullopt;
+        int exact = 0;
+        const lua_Integer value = lua_tointegerx(state, index, &exact);
+        if (!exact)
+            return std::nullopt;
+        return static_cast<std::int64_t>(value);
+    }
+
+    Status OpenProcessArgument(Engine& engine, lua_State* state, int index)
+    {
+        if (lua_type(state, index) != LUA_TNUMBER)
+            return engine.OpenProcessByName(luaL_checkstring(state, index));
+        const auto id = ExactInteger(state, index);
+        if (!id || *id < 0 || *id > 0xFFFFFFFFll)
+        {
+            std::string text = luaL_tolstring(state, index, nullptr);
+            lua_pop(state, 1);
+            return Status::Fail(ErrorCode::ProcessNotFound, text);
+        }
+        return engine.OpenProcess(static_cast<std::uint32_t>(*id));
     }
 
     void NoteFunction(const char* name)

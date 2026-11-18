@@ -1915,7 +1915,8 @@ namespace Manifold::Debug
         }
         if (Status thread = m_process->CreateThread(start, block, true); !thread)
         {
-            m_process->Free(block);
+            if (thread.Code != ErrorCode::ThreadTimedOut)
+                m_process->Free(block);
             return thread;
         }
         std::uint32_t running = 0;

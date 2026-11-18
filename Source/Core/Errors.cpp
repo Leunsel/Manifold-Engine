@@ -87,6 +87,9 @@ namespace Manifold
             { ErrorCode::NoModuleAt, "No module contains the address {}.",
                 "The address lies outside every loaded module: on the heap, on a stack, or in code the game allocated itself.",
                 "That is normal for objects and JIT code. Check the address in the memory viewer when a module was expected." },
+            { ErrorCode::ThreadTimedOut, "A thread started in the process did not finish in time: {}.",
+                "The code is still running or waits for something the game holds, for example while the game is paused in a debugger.",
+                "The memory the thread uses was kept. Check the code; a library's DllMain has to return quickly." },
 
             { ErrorCode::ScanNoValue, "Enter a value to scan for.",
                 "This scan type compares memory with a value, and the value field is empty.",

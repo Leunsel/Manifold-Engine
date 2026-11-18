@@ -9,6 +9,7 @@ namespace Manifold::Tests
     {
         int Checks = 0;
         int Failures = 0;
+        int Skipped = 0;
     };
 
     Counter& Totals();
@@ -20,6 +21,12 @@ namespace Manifold::Tests
             return;
         ++Totals().Failures;
         std::printf("  FAIL %s:%d  %s\n", file, line, what.c_str());
+    }
+
+    inline void Skip(const std::string& what)
+    {
+        ++Totals().Skipped;
+        std::printf("  SKIP %s\n", what.c_str());
     }
 }
 

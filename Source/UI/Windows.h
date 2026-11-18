@@ -270,7 +270,7 @@ namespace Manifold::UI
 
         struct MemoryEdit
         {
-            std::uint32_t Process = 0;
+            std::uint64_t Generation = 0;
             std::uint64_t Address = 0;
             std::vector<std::uint8_t> Original;
         };
