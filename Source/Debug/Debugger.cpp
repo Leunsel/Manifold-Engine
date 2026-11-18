@@ -302,6 +302,13 @@ namespace Manifold::Debug
         {
             return "Windows error " + std::to_string(error);
         }
+
+        bool Touches(const Breakpoint& breakpoint, std::uint64_t first, std::uint64_t last, bool written)
+        {
+            if (!breakpoint.Hardware || breakpoint.Type == BreakpointType::Execute || (breakpoint.Type == BreakpointType::Write && !written))
+                return false;
+            return first < breakpoint.Address + static_cast<std::uint64_t>(breakpoint.Size) && breakpoint.Address < last;
+        }
     }
 
     struct Debugger::ThreadState
@@ -309,6 +316,10 @@ namespace Manifold::Debug
         HANDLE Handle = nullptr;
         std::uint32_t Id = 0;
         std::uint64_t Reinsert = 0;
+        std::uint64_t StepInstruction = 0;
+        std::uint64_t StepFirst = 0;
+        std::uint64_t StepLast = 0;
+        bool StepWrites = false;
         bool Stepping = false;
         bool UntilReturn = false;
         bool ReturnPending = false;
@@ -489,17 +500,36 @@ namespace Manifold::Debug
         const std::uint64_t last = first + static_cast<std::uint64_t>(std::max(1, instruction.Memory.Size));
         for (auto& [address, breakpoint] : m_breakpoints)
         {
-            if (!breakpoint.Hardware || breakpoint.Type == BreakpointType::Execute || !breakpoint.WatchId)
+            if (!breakpoint.WatchId || !Touches(breakpoint, first, last, instruction.Memory.Written))
                 continue;
-            if (breakpoint.Type == BreakpointType::Write && !instruction.Memory.Written)
-                continue;
-            if (first < breakpoint.Address + static_cast<std::uint64_t>(breakpoint.Size) && breakpoint.Address < last)
-            {
-                auto watch = m_watches.find(breakpoint.WatchId);
-                if (watch != m_watches.end())
-                    RecordHit(watch->second, *previous, breakpoint.Address, threadId, registers);
-            }
+            auto watch = m_watches.find(breakpoint.WatchId);
+            if (watch != m_watches.end())
+                RecordHit(watch->second, *previous, breakpoint.Address, threadId, registers);
         }
+    }
+
+    void Debugger::PlanStepAccess(ThreadState& thread, const Disasm::RegisterValues& registers)
+    {
+        thread.StepInstruction = 0;
+        if (!thread.Armed || thread.Hidden)
+            return;
+        if (std::none_of(m_breakpoints.begin(), m_breakpoints.end(), [](const auto& item) { return item.second.Hardware && item.second.Type != BreakpointType::Execute; }))
+            return;
+        std::uint8_t bytes[16]{};
+        const std::size_t got = m_process->Read(registers.Rip, bytes, sizeof(bytes));
+        if (got == 0)
+            return;
+        UnpatchLocked(registers.Rip, bytes, got);
+        const Disasm::Instruction instruction = m_disassembler->Decode(registers.Rip, bytes, got, nullptr);
+        if (!instruction.Valid || instruction.IsNop || !instruction.Memory.Present || (!instruction.Memory.Read && !instruction.Memory.Written))
+            return;
+        const auto accessed = m_disassembler->EffectiveAddress(instruction, registers);
+        if (!accessed)
+            return;
+        thread.StepInstruction = registers.Rip;
+        thread.StepFirst = *accessed;
+        thread.StepLast = *accessed + static_cast<std::uint64_t>(std::max(1, instruction.Memory.Size));
+        thread.StepWrites = instruction.Memory.Written;
     }
 
     Status Debugger::ApplyHardware(std::uint32_t onlyThread)
@@ -862,6 +892,27 @@ namespace Manifold::Debug
         return breakpoint.Action.Break ? HitOutcome::Stop : HitOutcome::Run;
     }
 
+    void Debugger::DataHit(Breakpoint& breakpoint, std::uint64_t instruction, std::uint32_t threadId, Disasm::RegisterValues& registers, bool& changed, bool& enterBreak,
+        std::string& reason, std::uint64_t& breakpointAddress)
+    {
+        if (breakpoint.WatchId)
+        {
+            auto watch = m_watches.find(breakpoint.WatchId);
+            if (watch != m_watches.end())
+                RecordHit(watch->second, instruction, breakpoint.Address, threadId, registers);
+            return;
+        }
+        bool applied = false;
+        const HitOutcome outcome = RunBreakAction(breakpoint, registers, threadId, applied);
+        changed = changed || applied;
+        if (outcome == HitOutcome::Stop && !enterBreak)
+        {
+            enterBreak = true;
+            reason = std::string(BreakpointTypeName(breakpoint.Type)) + " breakpoint on " + Hex(breakpoint.Address);
+            breakpointAddress = breakpoint.Address;
+        }
+    }
+
     Status Debugger::RemoveBreakpoint(std::uint64_t address)
     {
         if (m_backend == Backend::Veh)
@@ -1137,6 +1188,7 @@ namespace Manifold::Debug
                         }
                     }
                     thread.Reinsert = at;
+                    PlanStepAccess(thread, context.Values());
                     context.SetFlags(context.Flags() | kTrapFlag);
                     context.Write();
                     return DBG_CONTINUE;
@@ -1146,6 +1198,7 @@ namespace Manifold::Debug
                     if (breakpoint.OwnerThread && breakpoint.OwnerThread != event.dwThreadId)
                     {
                         thread.Reinsert = at;
+                        PlanStepAccess(thread, context.Values());
                         context.SetFlags(context.Flags() | kTrapFlag);
                         context.Write();
                         return DBG_CONTINUE;
@@ -1164,6 +1217,7 @@ namespace Manifold::Debug
                 thread.Reinsert = at;
                 if (outcome != HitOutcome::Stop)
                 {
+                    PlanStepAccess(thread, values);
                     context.SetFlags(context.Flags() | kTrapFlag);
                     context.Write();
                     return DBG_CONTINUE;
@@ -1213,7 +1267,7 @@ namespace Manifold::Debug
                     ErrorText(::GetLastError()).c_str()));
                 return DBG_CONTINUE;
             }
-            const std::uint64_t dr6 = context.Dr6();
+            const std::uint64_t dr6 = thread.Reinsert && m_simulateMissingStepBits ? context.Dr6() & ~0xFull : context.Dr6();
             bool handled = false;
             bool write = false;
 
@@ -1273,35 +1327,34 @@ namespace Manifold::Debug
                 }
                 else
                 {
-                    const auto instruction = PreviousInstruction(context.Ip());
-                    if (breakpoint.WatchId)
+                    Disasm::RegisterValues current = values;
+                    bool changed = false;
+                    DataHit(breakpoint, PreviousInstruction(context.Ip()).value_or(context.Ip()), event.dwThreadId, current, changed, enterBreak, reason, breakpointAddress);
+                    if (changed)
                     {
-                        auto watch = m_watches.find(breakpoint.WatchId);
-                        if (watch != m_watches.end())
-                            RecordHit(watch->second, instruction.value_or(context.Ip()), breakpoint.Address, event.dwThreadId, values);
-                    }
-                    else
-                    {
-                        Disasm::RegisterValues current = values;
-                        bool changed = false;
-                        const HitOutcome outcome = RunBreakAction(breakpoint, current, event.dwThreadId, changed);
-                        if (changed)
-                        {
-                            context.Apply(current);
-                            write = true;
-                        }
-                        if (outcome == HitOutcome::Stop && !enterBreak)
-                        {
-                            enterBreak = true;
-                            reason = std::string(BreakpointTypeName(breakpoint.Type)) + " breakpoint on " + Hex(breakpoint.Address);
-                            breakpointAddress = breakpoint.Address;
-                        }
+                        context.Apply(current);
+                        write = true;
                     }
                 }
             }
 
             if (thread.Reinsert)
             {
+                if (thread.StepInstruction && thread.Armed && !thread.Hidden)
+                {
+                    Disasm::RegisterValues current = context.Values();
+                    bool changed = false;
+                    for (auto& [address, breakpoint] : m_breakpoints)
+                    {
+                        if (breakpoint.Slot < 0 || breakpoint.Slot >= 4 || (dr6 & (1ull << breakpoint.Slot)) != 0)
+                            continue;
+                        if (Touches(breakpoint, thread.StepFirst, thread.StepLast, thread.StepWrites))
+                            DataHit(breakpoint, thread.StepInstruction, event.dwThreadId, current, changed, enterBreak, reason, breakpointAddress);
+                    }
+                    if (changed)
+                        context.Apply(current);
+                }
+                thread.StepInstruction = 0;
                 auto found = m_breakpoints.find(thread.Reinsert);
                 if (found != m_breakpoints.end() && !found->second.Hardware)
                     InsertSoftware(found->second);
@@ -1528,7 +1581,10 @@ namespace Manifold::Debug
                             flags |= kTrapFlag;
                         }
                         if (thread.Reinsert)
+                        {
                             flags |= kTrapFlag;
+                            PlanStepAccess(thread, context.Values());
+                        }
                         context.SetFlags(flags);
                         context.Write();
                     }

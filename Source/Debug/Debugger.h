@@ -134,6 +134,7 @@ namespace Manifold::Debug
         void SetLogDebugStrings(bool on) { m_logDebugStrings = on; }
         void SetPreferHardware(bool on) { m_preferHardware = on; }
         void PauseHeartbeat(bool paused) { m_beatPaused = paused; }
+        void SimulateMissingStepBits(bool on) { m_simulateMissingStepBits = on; }
         void SetBackend(Backend backend) { m_backend = backend; }
         Backend CurrentBackend() const { return m_backend; }
         bool UsingVeh() const { return m_backend == Backend::Veh; }
@@ -182,6 +183,7 @@ namespace Manifold::Debug
         void CheckHiddenThreads(bool force);
         void CountHidden();
         void AttributeLostHit(std::uint64_t ip, std::uint32_t threadId, const Disasm::RegisterValues& registers);
+        void PlanStepAccess(ThreadState& thread, const Disasm::RegisterValues& registers);
         Status InsertSoftware(Breakpoint& breakpoint);
         void RemoveSoftware(Breakpoint& breakpoint);
         int TakeSlot() const;
@@ -208,6 +210,8 @@ namespace Manifold::Debug
             Stop
         };
         HitOutcome RunBreakAction(Breakpoint& breakpoint, Disasm::RegisterValues& registers, std::uint32_t threadId, bool& changed);
+        void DataHit(Breakpoint& breakpoint, std::uint64_t instruction, std::uint32_t threadId, Disasm::RegisterValues& registers, bool& changed, bool& enterBreak,
+            std::string& reason, std::uint64_t& breakpointAddress);
         void VehRemoveBreakpoint(std::uint64_t address);
         void VehResume(ResumeMode mode);
         void VehSetRegisters(const Disasm::RegisterValues& registers);
@@ -226,6 +230,7 @@ namespace Manifold::Debug
         std::atomic<bool> m_logDebugStrings{ true };
         std::atomic<bool> m_preferHardware{ false };
         std::atomic<bool> m_beatPaused{ false };
+        std::atomic<bool> m_simulateMissingStepBits{ false };
         bool m_is64Bit = true;
         bool m_initialBreakSeen = false;
 
