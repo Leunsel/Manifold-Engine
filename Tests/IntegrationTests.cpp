@@ -22,6 +22,7 @@ namespace Manifold::Tests
     void CheckBreakActions(Engine& engine, bool veh);
     void CheckWatchesOnOneInstruction(Engine& engine, bool veh);
     void CheckMono(Engine& engine);
+    void CheckIl2CppTarget(const std::filesystem::path& targetPath);
 
     namespace
     {
@@ -982,6 +983,7 @@ namespace Manifold::Tests
         }
         engine.CloseProcess();
         DirectSystemCalls(target.Info.dwProcessId, health);
+        CheckIl2CppTarget(targetPath);
         return Totals().Failures - before;
     }
 }

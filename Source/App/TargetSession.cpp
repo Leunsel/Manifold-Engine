@@ -1,5 +1,7 @@
 #include "App/TargetSession.h"
 
+#include "Core/Text.h"
+
 #include <vector>
 
 namespace Manifold
@@ -77,10 +79,20 @@ namespace Manifold
                 // (the runtime allocates its own code pages), so only for an
                 // address in no module is a Mono lookup worth the remote-call
                 // cost; the common in-module path never touches the runtime, and
-                // MethodNameAt caches so repeat lines are free.
-                if (m_mono.Present() && m_process && !m_process->ModuleAt(address))
+                // MethodNameAt caches so repeat lines are free. IL2CPP methods
+                // are GameAssembly.dll's own code and are looked up in the
+                // bridge's sorted table, without a remote call for the range.
+                if (m_mono.Present() && m_process && (m_mono.IsIl2Cpp() || !m_process->ModuleAt(address)))
+                {
                     if (const auto name = m_mono.MethodNameAt(address))
+                    {
+                        // Inside a method the offset stays, so the text
+                        // evaluates back to the same address.
+                        if (const auto range = m_mono.MethodRange(address); range && range->first < address)
+                            return *name + "+" + Hex(address - range->first);
                         return name;
+                    }
+                }
                 return std::nullopt;
             });
     }

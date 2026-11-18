@@ -56,28 +56,36 @@ namespace Manifold::Target
         }
         if (!process)
             return table;
+        for (const auto& [begin, end] : UnwindFunctions(*process, base, size))
+            table->Functions.push_back({ begin, end });
+        return table;
+    }
+
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> CodeMap::UnwindFunctions(const Process& process, std::uint64_t base, std::uint64_t size)
+    {
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> functions;
         IMAGE_DOS_HEADER dos{};
         IMAGE_NT_HEADERS64 nt{};
-        if (!process->ReadExact(base, &dos, sizeof(dos)) || dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew <= 0)
-            return table;
-        if (!process->ReadExact(base + static_cast<std::uint64_t>(dos.e_lfanew), &nt, sizeof(nt)) || nt.Signature != IMAGE_NT_SIGNATURE ||
+        if (!process.ReadExact(base, &dos, sizeof(dos)) || dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew <= 0)
+            return functions;
+        if (!process.ReadExact(base + static_cast<std::uint64_t>(dos.e_lfanew), &nt, sizeof(nt)) || nt.Signature != IMAGE_NT_SIGNATURE ||
             nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC || nt.OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_EXCEPTION)
-            return table;
+            return functions;
         const IMAGE_DATA_DIRECTORY directory = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
         if (directory.VirtualAddress == 0 || directory.Size < sizeof(UnwindEntry) || directory.Size > kMaxUnwindBytes ||
             static_cast<std::uint64_t>(directory.VirtualAddress) + directory.Size > size)
-            return table;
+            return functions;
         std::vector<UnwindEntry> entries(directory.Size / sizeof(UnwindEntry));
-        if (!process->ReadExact(base + directory.VirtualAddress, entries.data(), entries.size() * sizeof(UnwindEntry)))
-            return table;
-        table->Functions.reserve(entries.size());
+        if (!process.ReadExact(base + directory.VirtualAddress, entries.data(), entries.size() * sizeof(UnwindEntry)))
+            return functions;
+        functions.reserve(entries.size());
         for (const UnwindEntry& entry : entries)
         {
             if (entry.Begin < entry.End && entry.End <= size)
-                table->Functions.push_back({ entry.Begin, entry.End });
+                functions.emplace_back(entry.Begin, entry.End);
         }
-        std::sort(table->Functions.begin(), table->Functions.end(), [](const Function& a, const Function& b) { return a.Begin < b.Begin; });
-        return table;
+        std::sort(functions.begin(), functions.end());
+        return functions;
     }
 
     std::shared_ptr<const CodeMap::Table> CodeMap::TableFor(std::uint64_t address) const

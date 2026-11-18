@@ -48,6 +48,21 @@ namespace Manifold::Target
         // item to the array the user pointer names: { u64 count; u64 cap; u64 items[cap]; }.
         std::uint64_t CollectorAddress() const { return m_collector; }
 
+        // Walks an iterator API of the form item = function(object, &iter)
+        // (mono_class_get_methods, il2cpp_class_get_fields, ...) inside the
+        // target until it returns null, gathering a whole batch of items per
+        // round trip instead of one call each. With a peek offset the 8 bytes
+        // at item + offset are read next to each item, in the target; with a
+        // peek function, peek(item) is called instead (it wins over the offset).
+        struct DrainItem
+        {
+            std::uint64_t Item = 0;
+            std::uint64_t Peek = 0;
+        };
+        static constexpr std::uint32_t kNoPeek = 0xFFFFFFFFu;
+        Status Drain(std::uint64_t function, std::uint64_t object, std::vector<DrainItem>& items, std::uint32_t peekOffset = kNoPeek,
+            std::uint64_t peekFunction = 0, std::size_t limit = 65536);
+
         // A second channel that runs calls on whatever thread calls MainStub()
         // as void(): a game registers it as a per-frame callback, so the calls
         // run on its main thread between frames. The stub returns at once
@@ -120,6 +135,8 @@ namespace Manifold::Target
         std::uint64_t m_data = 0;       // scratch arena
         std::uint64_t m_dataUsed = 0;
         std::uint64_t m_collector = 0;
+        std::uint64_t m_drain = 0;
+        std::uint64_t m_drainBlock = 0;  // the drain's batch block
         std::uint64_t m_thread = 0;     // target thread handle (as a value)
         std::chrono::milliseconds m_timeout{ 5000 };
         std::uint64_t m_frameWaits = 0;

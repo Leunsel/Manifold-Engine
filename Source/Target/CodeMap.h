@@ -34,6 +34,10 @@ namespace Manifold::Target
         std::optional<std::pair<std::uint64_t, std::uint64_t>> FunctionAt(std::uint64_t address) const;
         std::size_t FunctionCount(std::uint64_t moduleBase) const;
 
+        // The [begin, end) RVAs of a 64-bit module's unwind table, sorted by
+        // begin; empty for a 32-bit module or one without the table.
+        static std::vector<std::pair<std::uint32_t, std::uint32_t>> UnwindFunctions(const Process& process, std::uint64_t base, std::uint64_t size);
+
     private:
         struct Function
         {

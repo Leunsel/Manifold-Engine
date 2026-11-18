@@ -24,18 +24,29 @@ namespace Manifold::Target
     class Process;
     class UnityExplorer;
 
+    // The managed runtime of a Unity game. Mono JIT-compiles methods at run
+    // time (mono_* exports, e.g. mono-2.0-bdwgc.dll); IL2CPP ships every
+    // method as native code in GameAssembly.dll (il2cpp_* exports).
+    enum class ManagedRuntime
+    {
+        None,
+        Mono,
+        Il2Cpp
+    };
+
     struct MonoMethod
     {
         std::string Name;
-        std::uint64_t Handle = 0;   // MonoMethod* in the target
-        std::uint64_t Address = 0;  // JIT code, filled on first resolve
+        std::uint64_t Handle = 0;   // MonoMethod* / MethodInfo* in the target
+        std::uint64_t Address = 0;  // the code: JIT-compiled on first resolve (Mono), known up front (IL2CPP)
+        int ParamCount = -1;        // read for IL2CPP; -1 when not read
     };
 
     struct MonoField
     {
         std::string Name;
         int Offset = 0;
-        int TypeCode = 0;  // MONO_TYPE_* of the field
+        int TypeCode = 0;  // MONO_TYPE_* of the field (IL2CPP's Il2CppTypeEnum uses the same codes)
     };
 
     struct MonoInstance
@@ -49,18 +60,22 @@ namespace Manifold::Target
         std::string Image;
         std::string Namespace;
         std::string Name;
-        std::uint64_t Handle = 0;   // MonoClass* in the target
+        std::uint64_t Handle = 0;   // MonoClass* / Il2CppClass* in the target
         bool MembersLoaded = false; // methods and fields are read on demand
         std::vector<MonoMethod> Methods;
         std::vector<MonoField> Fields;
+        std::string Parent;         // IL2CPP: the base class, read with the members
+        bool Generic = false;       // IL2CPP: an open generic definition, which has no field offsets
+        bool Discovered = false;    // IL2CPP: named from its shape in memory, never handed to the runtime
 
         std::string FullName() const { return Namespace.empty() ? Name : Namespace + "." + Name; }
     };
 
-    // Reads the Mono runtime of a target: resolves Class:Method to JIT addresses
-    // and lists classes, methods and field offsets. Everything runs through the
-    // RemoteCall worker, so no DLL is injected; the one worker thread is attached
-    // to the Mono root domain once.
+    // Reads the managed runtime of a Unity game, Mono or IL2CPP: resolves
+    // Class:Method to code addresses and lists classes, methods and field
+    // offsets. Everything runs through the RemoteCall worker, so no DLL is
+    // injected; the one worker thread is attached to the runtime's domain once
+    // and only makes metadata calls. The Unity explorer on top is Mono only.
     class MonoBridge
     {
     public:
@@ -75,15 +90,22 @@ namespace Manifold::Target
         void Stop();
         bool Present() const { return m_present.load(); }
 
+        // Which runtime Start attached to; None while nothing is attached.
+        ManagedRuntime Runtime() const { return m_runtime.load(); }
+        bool IsIl2Cpp() const { return m_runtime.load() == ManagedRuntime::Il2Cpp; }
+        static const char* RuntimeName(ManagedRuntime runtime);
+
         // The scene and object explorer and the inspector on top of this
-        // bridge. Created on first use; it starts nothing in the game until a
-        // scene or object request needs the game's main thread.
+        // bridge (Mono only). Created on first use; it starts nothing in the
+        // game until a scene or object request needs the game's main thread.
         UnityExplorer& Unity();
 
-        // Whether one of the known Mono runtime DLLs is in the target's module
-        // list. Only looks at the cached list, so it is cheap enough to ask
-        // every frame; Start also finds a renamed or embedded runtime.
+        // Whether one of the known runtime DLLs (a Mono DLL or IL2CPP's
+        // GameAssembly.dll) is in the target's module list, and which. Only
+        // looks at the cached list, so it is cheap enough to ask every frame;
+        // Start also finds a renamed or embedded runtime by its exports.
         static bool HasRuntime(const Process& process);
+        static ManagedRuntime DetectRuntime(const Process& process);
         const std::string& Module() const { return m_module; }
 
         Status Refresh(WorkProgress* progress = nullptr);
@@ -94,11 +116,16 @@ namespace Manifold::Target
         // many members to walk up front).
         std::vector<MonoClass> Classes() const;
         std::size_t ClassCount() const;
+        // Class names may be "Class", "Namespace.Class" or carry the image in
+        // front, "Assembly-CSharp:Namespace.Class".
         std::vector<std::string> MethodsOf(std::string_view className);
         std::vector<MonoField> FieldsOf(std::string_view className);
+        // One class with its members loaded: methods with handles (and for
+        // IL2CPP their code addresses and parameter counts), fields, parent.
+        std::optional<MonoClass> ClassDetails(std::string_view className);
 
         // The class of the object whose header is exactly at an address, or
-        // nullopt when it is not a known Mono object (checked against the
+        // nullopt when it is not a known managed object (checked against the
         // enumerated classes, so a random address does not pass).
         std::optional<std::string> ClassNameAt(std::uint64_t address);
 
@@ -108,15 +135,17 @@ namespace Manifold::Target
         // lands on the right class the way Cheat Engine does.
         std::optional<MonoInstance> ClassAt(std::uint64_t address);
 
-        // The JIT-compiled Mono method whose code contains an address, as
+        // The managed method whose code contains an address, as
         // "Namespace.Class:Method" (or "Class:Method" without a namespace), or
-        // nullopt when the address is not inside a Mono method. Safe for ANY
-        // address: mono_jit_info_table_find reports null off the JIT code, unlike
-        // mono_object_get_class which would dereference a wild pointer. Resolved
-        // ranges and a bounded set of misses are cached so the disassembler can
-        // ask per line every frame without a remote call each time. This is the
-        // reverse of AddressOf and names Mono code the memory viewer would
-        // otherwise show as a raw address (JIT code lives outside every module).
+        // nullopt when the address is not inside one. Safe for ANY address:
+        // Mono asks mono_jit_info_table_find, which reports null off the JIT
+        // code (unlike mono_object_get_class, which would dereference a wild
+        // pointer); IL2CPP looks the address up in a sorted table of every
+        // method's code that Start built. Resolved Mono ranges and a bounded
+        // set of misses are cached so the disassembler can ask per line every
+        // frame without a remote call each time. This is the reverse of
+        // AddressOf and names managed code the memory viewer would otherwise
+        // show as a raw address or a module offset.
         std::optional<std::string> MethodNameAt(std::uint64_t address);
 
         // The method name only when the address is exactly its first instruction,
@@ -128,22 +157,58 @@ namespace Manifold::Target
         // listing can show offsets from the method start and stop at its end.
         std::optional<std::pair<std::uint64_t, std::uint64_t>> MethodRange(std::uint64_t address);
 
+        // How many methods share code with the method at an address (IL2CPP
+        // folds identical method bodies into one); 1 for a method of its own,
+        // 0 when the address is no IL2CPP method start.
+        std::size_t MethodsSharingCode(std::uint64_t address);
+
         // While this answers true (the debugger holds the target at a break, so
         // the worker thread is frozen too), address lookups answer from the cache
         // only instead of waiting for a remote call that cannot finish.
         void SetPauseCheck(std::function<bool()> paused) { m_paused = std::move(paused); }
 
-        // "Class:Method" or "Namespace.Class:Method"; compiles the method on the
-        // first call and caches the address. Returns nullopt when not Mono or not found.
+        // "Class:Method", "Namespace.Class:Method" or "Image:Class:Method";
+        // compiles the method on the first call (Mono) and caches the address.
+        // Returns nullopt when no runtime is attached or the method is unknown.
         std::optional<std::uint64_t> AddressOf(std::string_view name);
         std::optional<int> FieldOffset(std::string_view className, std::string_view fieldName);
 
     private:
         friend class UnityExplorer;
+        struct Candidate
+        {
+            std::string Module;
+            ManagedRuntime Runtime = ManagedRuntime::None;
+        };
+        // A method's code in IL2CPP's address index: [Start, End), the class
+        // index, the MethodInfo*, the name once it was asked for, and how many
+        // methods share this code (identical bodies are folded together).
+        struct CodeEntry
+        {
+            std::uint64_t Start = 0;
+            std::uint64_t End = 0;
+            std::uint64_t Method = 0;
+            int Class = -1;
+            std::uint32_t Sharing = 1;
+            std::string Name;
+        };
+        // Offsets learned from the runtime's own answers (il2cpp_class_get_name
+        // returns klass->name, and so on), so names can be read from memory
+        // without handing a pointer from game memory to the runtime.
+        struct Il2CppShape
+        {
+            int ClassImage = -1;
+            int ClassName = -1;
+            int ClassNamespace = -1;
+            int MethodName = -1;
+        };
+
         std::uint64_t Fn(const char* name) const;
         std::optional<std::uint64_t> CallFn(const char* name, std::uint64_t a0 = 0, std::uint64_t a1 = 0, std::uint64_t a2 = 0, std::uint64_t a3 = 0);
         std::string CallString(const char* name, std::uint64_t handle);
         int FindClass(std::string_view name) const;
+        static std::vector<Candidate> FindRuntimes(const Process& process, WorkProgress* progress);
+        Status AttachRuntime(const Candidate& candidate);
         Status Enumerate(WorkProgress* progress, bool starting);
         void EnsureMembers(int classIndex);
         std::optional<std::string> ResolveHead(std::uint64_t header, bool allowRuntimeFallback);
@@ -151,12 +216,24 @@ namespace Manifold::Target
         void RememberJitRange(std::uint64_t start, std::uint64_t end, std::string name);
         void RememberJitMiss(std::uint64_t address);
 
+        // IL2CPP (Il2Cpp.cpp).
+        Status AttachIl2Cpp(const std::string& module);
+        Status EnumerateIl2Cpp(WorkProgress* progress, bool starting);
+        void EnsureMembersIl2Cpp(int classIndex);
+        std::string Il2CppMethodName(std::uint64_t method);
+        std::optional<std::string> ResolveHeadIl2Cpp(std::uint64_t header, bool allowShape);
+        CodeEntry* FindCode(std::uint64_t address);
+        const std::string& CodeName(CodeEntry& entry);
+
         std::shared_ptr<Process> m_process;
         std::function<bool()> m_paused;
         mutable std::recursive_mutex m_lock;
         RemoteCall m_call;
         std::atomic<bool> m_present{ false };
+        std::atomic<ManagedRuntime> m_runtime{ ManagedRuntime::None };
         std::string m_module;
+        std::uint64_t m_moduleBase = 0;  // the runtime module's range: IL2CPP's code lives in it
+        std::uint64_t m_moduleEnd = 0;
         std::uint64_t m_domain = 0;
         std::map<std::string, std::uint64_t> m_functions;
         std::vector<MonoClass> m_classes;
@@ -178,6 +255,14 @@ namespace Manifold::Target
         };
         std::vector<JitRange> m_jitRanges;
         std::unordered_set<std::uint64_t> m_jitMisses;
+
+        // IL2CPP: every method's code, sorted by Start (one entry per distinct
+        // start), the learned struct offsets, the Il2CppThread* of the worker
+        // and the names of the images.
+        std::vector<CodeEntry> m_code;
+        Il2CppShape m_shape;
+        std::uint64_t m_attached = 0;
+        std::map<std::uint64_t, std::string> m_imageNames;
 
         std::mutex m_unityLock;
         std::unique_ptr<UnityExplorer> m_unity;

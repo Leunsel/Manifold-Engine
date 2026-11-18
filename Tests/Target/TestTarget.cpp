@@ -144,9 +144,16 @@ extern "C" __declspec(dllexport) FakeObject g_fakeList = { &g_listVT, 0, 0 };
 extern "C" __declspec(dllexport) FakeObject g_fakeWild = { &g_wildVT, 0, 0 };
 extern "C" __declspec(dllexport) FakeObject g_fakeNotClass = { &g_notClassVT, 0, 0 };
 
+// With --il2cpp the target plays an IL2CPP game instead (see below): the fake
+// Mono then has no root domain, so the bridge moves on to the il2cpp_* exports.
+namespace
+{
+    bool g_il2cpp = false;
+}
+
 extern "C"
 {
-    __declspec(dllexport) void* mono_get_root_domain() { return &g_domain; }
+    __declspec(dllexport) void* mono_get_root_domain() { return g_il2cpp ? nullptr : &g_domain; }
     __declspec(dllexport) void* mono_thread_attach(void* domain) { return domain; }
     __declspec(dllexport) void mono_assembly_foreach(void (*fn)(void*, void*), void* user)
     {
@@ -215,6 +222,180 @@ extern "C"
                     return const_cast<FakeClass*>(&c);
         return nullptr;
     }
+}
+
+// A stand-in for IL2CPP over a static model, with the struct layouts the
+// bridge relies on and nothing else: an Il2CppObject starts with its
+// Il2CppClass*, Il2CppClass starts { image, gc_desc, name, namespaze },
+// MethodInfo starts { methodPointer, virtualMethodPointer, invoker, name }
+// (Unity 2021.2+), and the method and field iterators walk arrays the way
+// the real ones do (the iterator holds a pointer into the array, not an
+// index). There is no il2cpp_method_get_pointer, like in Unity's own API, so
+// the bridge reads methodPointer at offset 0.
+namespace
+{
+    struct FakeIl2CppImage;
+    struct FakeIl2CppClass;
+    struct FakeIl2CppType { int Type; };
+    struct FakeFieldInfo { const char* Name; const FakeIl2CppType* Type; const FakeIl2CppClass* Parent; int Offset; unsigned Token; int Flags; };
+    struct FakeMethodInfo { void* MethodPointer; void* VirtualMethodPointer; void* Invoker; const char* Name; const FakeIl2CppClass* Klass; void* ReturnType; void* Parameters; unsigned ParamCount; };
+    struct FakeIl2CppClass
+    {
+        const FakeIl2CppImage* Image;
+        void* GcDesc;
+        const char* Name;
+        const char* Namespace;
+        const FakeIl2CppClass* Parent;
+        const FakeMethodInfo* const* Methods;
+        unsigned MethodCount;
+        const FakeFieldInfo* Fields;
+        unsigned FieldCount;
+        bool Generic;
+    };
+    struct FakeIl2CppImage { const char* Name; const FakeIl2CppClass* Classes; unsigned ClassCount; };
+    struct FakeIl2CppAssembly { const FakeIl2CppImage* Image; };
+    struct FakeIl2CppObject { const FakeIl2CppClass* Klass; void* Monitor; int Id; int Pad; int Health; int Ammo; float Speed; };
+
+    // Distinct bodies, so the linker cannot fold them into one function.
+    __declspec(noinline) long long Il2CppTakeDamage(long long a) { return a * 3 + 7; }
+    __declspec(noinline) long long Il2CppHeal(long long a) { return a * 5 - 11; }
+    __declspec(noinline) long long Il2CppHealMore(long long a, long long b) { return a * 7 + b * 13; }
+    __declspec(noinline) long long Il2CppUpdate(long long a) { return (a ^ 0x55) + 17; }
+    __declspec(noinline) long long Il2CppToString(long long a) { return (a << 3) - 19; }
+    // One body for two getters, the way the compiler folds identical methods.
+    __declspec(noinline) long long Il2CppGetter(long long a) { return (a >> 2) + 23; }
+
+    extern const FakeIl2CppImage kCorlib;
+    extern const FakeIl2CppImage kGameImage;
+    extern const FakeIl2CppClass kCorlibClasses[];
+    extern const FakeIl2CppClass kGameClasses[];
+    const FakeIl2CppType kI4 = { 0x08 };
+    const FakeIl2CppType kR4 = { 0x0C };
+    const FakeIl2CppType kClassType = { 0x12 };
+
+    const FakeMethodInfo kObjectToString = { reinterpret_cast<void*>(&Il2CppToString), nullptr, nullptr, "ToString", &kCorlibClasses[1], nullptr, nullptr, 0 };
+    const FakeMethodInfo* const kObjectMethods[] = { &kObjectToString };
+    // Open generic methods have no code of their own.
+    const FakeMethodInfo kListAdd = { nullptr, nullptr, nullptr, "Add", &kCorlibClasses[2], nullptr, nullptr, 1 };
+    const FakeMethodInfo* const kListMethods[] = { &kListAdd };
+    const FakeFieldInfo kListFields[] = { { "_items", &kClassType, &kCorlibClasses[2], 0x10, 0, 0 } };
+
+    const FakeFieldInfo kActorFields[] = { { "id", &kI4, &kGameClasses[1], 0x10, 0, 0 } };
+    const FakeMethodInfo kTakeDamage = { reinterpret_cast<void*>(&Il2CppTakeDamage), nullptr, nullptr, "TakeDamage", &kGameClasses[2], nullptr, nullptr, 1 };
+    const FakeMethodInfo kHeal = { reinterpret_cast<void*>(&Il2CppHeal), nullptr, nullptr, "Heal", &kGameClasses[2], nullptr, nullptr, 1 };
+    const FakeMethodInfo kHealMore = { reinterpret_cast<void*>(&Il2CppHealMore), nullptr, nullptr, "Heal", &kGameClasses[2], nullptr, nullptr, 2 };
+    const FakeMethodInfo kGetHealth = { reinterpret_cast<void*>(&Il2CppGetter), nullptr, nullptr, "get_Health", &kGameClasses[2], nullptr, nullptr, 0 };
+    const FakeMethodInfo* const kPlayerIl2CppMethods[] = { &kTakeDamage, &kHeal, &kHealMore, &kGetHealth };
+    // health, ammo and speed belong to an instance; s_count is static and skipped.
+    const FakeFieldInfo kPlayerIl2CppFields[] = {
+        { "health", &kI4, &kGameClasses[2], 0x18, 0, 0 },
+        { "ammo", &kI4, &kGameClasses[2], 0x1C, 0, 0 },
+        { "speed", &kR4, &kGameClasses[2], 0x20, 0, 0 },
+        { "s_count", &kI4, &kGameClasses[2], 0x00, 0, 0x10 },
+    };
+    const FakeMethodInfo kManagerUpdate = { reinterpret_cast<void*>(&Il2CppUpdate), nullptr, nullptr, "Update", &kGameClasses[3], nullptr, nullptr, 0 };
+    const FakeMethodInfo kGetLevel = { reinterpret_cast<void*>(&Il2CppGetter), nullptr, nullptr, "get_Level", &kGameClasses[3], nullptr, nullptr, 0 };
+    const FakeMethodInfo kOnEvent = { nullptr, nullptr, nullptr, "OnEvent", &kGameClasses[3], nullptr, nullptr, 1 };
+    const FakeMethodInfo* const kManagerMethods[] = { &kManagerUpdate, &kGetLevel, &kOnEvent };
+    const FakeFieldInfo kManagerFields[] = { { "level", &kI4, &kGameClasses[3], 0x10, 0, 0 } };
+
+    const FakeIl2CppClass kCorlibClasses[] = {
+        { &kCorlib, nullptr, "<Module>", "", nullptr, nullptr, 0, nullptr, 0, false },
+        { &kCorlib, nullptr, "Object", "System", nullptr, kObjectMethods, 1, nullptr, 0, false },
+        { &kCorlib, nullptr, "List`1", "System.Collections.Generic", &kCorlibClasses[1], kListMethods, 1, kListFields, 1, true },
+    };
+    const FakeIl2CppClass kGameClasses[] = {
+        { &kGameImage, nullptr, "<Module>", "", nullptr, nullptr, 0, nullptr, 0, false },
+        { &kGameImage, nullptr, "Actor", "Game", &kCorlibClasses[1], nullptr, 0, kActorFields, 1, false },
+        { &kGameImage, nullptr, "Player", "Game", &kGameClasses[1], kPlayerIl2CppMethods, 4, kPlayerIl2CppFields, 4, false },
+        { &kGameImage, nullptr, "GameManager", "Game", &kCorlibClasses[1], kManagerMethods, 3, kManagerFields, 1, false },
+    };
+    const FakeIl2CppImage kCorlib = { "mscorlib.dll", kCorlibClasses, 3 };
+    const FakeIl2CppImage kGameImage = { "Assembly-CSharp.dll", kGameClasses, 4 };
+    const FakeIl2CppAssembly kCorlibAssembly = { &kCorlib };
+    const FakeIl2CppAssembly kGameAssembly = { &kGameImage };
+    const FakeIl2CppAssembly* const kAssemblies[] = { &kCorlibAssembly, &kGameAssembly };
+    // A generic instance (List<int>): the runtime makes these on demand, so no
+    // image lists them; the bridge may name one only by its shape.
+    const FakeIl2CppClass kListOfInt = { &kCorlib, nullptr, "List`1", "System.Collections.Generic", &kCorlibClasses[1], nullptr, 0, nullptr, 0, false };
+    // Something that looks like a class but whose image is no image.
+    const FakeIl2CppImage kStrayImage = { "Stray.dll", nullptr, 0 };
+    const FakeIl2CppClass kStrayClass = { &kStrayImage, nullptr, "Stray", "", nullptr, nullptr, 0, nullptr, 0, false };
+
+    int g_il2cppDomain = 0x1D;
+    int g_il2cppThread = 0x7D;
+}
+
+extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppPlayer = { &kGameClasses[2], nullptr, 42, 0, 1000, 30, 3.5f };
+extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppList = { &kListOfInt, nullptr, 0, 0, 0, 0, 0.0f };
+extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppWild = { reinterpret_cast<const FakeIl2CppClass*>(0x01000001A9DE141Dull), nullptr, 0, 0, 0, 0, 0.0f };
+extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppNotClass = { reinterpret_cast<const FakeIl2CppClass*>(kNotAClass), nullptr, 0, 0, 0, 0, 0.0f };
+extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppStray = { &kStrayClass, nullptr, 0, 0, 0, 0, 0.0f };
+extern "C" __declspec(dllexport) volatile long g_il2cppAttached = 0;
+extern "C" __declspec(dllexport) volatile long g_il2cppDetached = 0;
+
+extern "C"
+{
+    __declspec(dllexport) const void* il2cpp_get_corlib() { return g_il2cpp ? &kCorlib : nullptr; }
+    __declspec(dllexport) void* il2cpp_domain_get() { return g_il2cpp ? &g_il2cppDomain : nullptr; }
+    __declspec(dllexport) void* il2cpp_thread_attach(void*)
+    {
+        ::InterlockedIncrement(&g_il2cppAttached);
+        return &g_il2cppThread;
+    }
+    __declspec(dllexport) void il2cpp_thread_detach(void* thread)
+    {
+        if (thread == &g_il2cppThread)
+            ::InterlockedIncrement(&g_il2cppDetached);
+    }
+    __declspec(dllexport) const FakeIl2CppAssembly* const* il2cpp_domain_get_assemblies(const void*, std::size_t* size)
+    {
+        *size = sizeof(kAssemblies) / sizeof(kAssemblies[0]);
+        return kAssemblies;
+    }
+    __declspec(dllexport) const FakeIl2CppImage* il2cpp_assembly_get_image(const FakeIl2CppAssembly* assembly) { return assembly->Image; }
+    __declspec(dllexport) const char* il2cpp_image_get_name(const FakeIl2CppImage* image) { return image->Name; }
+    __declspec(dllexport) std::size_t il2cpp_image_get_class_count(const FakeIl2CppImage* image) { return image->ClassCount; }
+    __declspec(dllexport) const FakeIl2CppClass* il2cpp_image_get_class(const FakeIl2CppImage* image, std::size_t index)
+    {
+        return index < image->ClassCount ? &image->Classes[index] : nullptr;
+    }
+    __declspec(dllexport) const char* il2cpp_class_get_name(const FakeIl2CppClass* klass) { return klass->Name; }
+    __declspec(dllexport) const char* il2cpp_class_get_namespace(const FakeIl2CppClass* klass) { return klass->Namespace; }
+    __declspec(dllexport) const FakeIl2CppClass* il2cpp_class_get_parent(const FakeIl2CppClass* klass) { return klass->Parent; }
+    __declspec(dllexport) const FakeIl2CppImage* il2cpp_class_get_image(const FakeIl2CppClass* klass) { return klass->Image; }
+    __declspec(dllexport) bool il2cpp_class_is_generic(const FakeIl2CppClass* klass) { return klass->Generic; }
+    __declspec(dllexport) const FakeMethodInfo* il2cpp_class_get_methods(const FakeIl2CppClass* klass, void** iter)
+    {
+        if (!iter || !klass->MethodCount)
+            return nullptr;
+        const FakeMethodInfo* const* slot = static_cast<const FakeMethodInfo* const*>(*iter);
+        slot = slot ? slot + 1 : klass->Methods;
+        if (slot >= klass->Methods + klass->MethodCount)
+            return nullptr;
+        *iter = const_cast<void*>(static_cast<const void*>(slot));
+        return *slot;
+    }
+    __declspec(dllexport) const char* il2cpp_method_get_name(const FakeMethodInfo* method) { return method->Name; }
+    __declspec(dllexport) unsigned il2cpp_method_get_param_count(const FakeMethodInfo* method) { return method->ParamCount; }
+    __declspec(dllexport) const FakeFieldInfo* il2cpp_class_get_fields(const FakeIl2CppClass* klass, void** iter)
+    {
+        if (!iter || !klass->FieldCount)
+            return nullptr;
+        const FakeFieldInfo* field = static_cast<const FakeFieldInfo*>(*iter);
+        field = field ? field + 1 : klass->Fields;
+        if (field >= klass->Fields + klass->FieldCount)
+            return nullptr;
+        *iter = const_cast<void*>(static_cast<const void*>(field));
+        return field;
+    }
+    __declspec(dllexport) const char* il2cpp_field_get_name(const FakeFieldInfo* field) { return field->Name; }
+    __declspec(dllexport) std::size_t il2cpp_field_get_offset(const FakeFieldInfo* field) { return static_cast<std::size_t>(field->Offset); }
+    __declspec(dllexport) const FakeIl2CppType* il2cpp_field_get_type(const FakeFieldInfo* field) { return field->Type; }
+    __declspec(dllexport) int il2cpp_field_get_flags(const FakeFieldInfo* field) { return field->Flags; }
+    __declspec(dllexport) int il2cpp_type_get_type(const FakeIl2CppType* type) { return type->Type; }
+    // Not part of IL2CPP: a peek function for the remote-call drain test.
+    __declspec(dllexport) void* fake_method_pointer(const FakeMethodInfo* method) { return method->MethodPointer; }
 }
 
 extern "C" __declspec(dllexport) __declspec(noinline) long long Touch(volatile long long* value)
@@ -339,6 +520,11 @@ namespace
 
 int main(int argc, char** argv)
 {
+    for (int i = 1; i < argc; ++i)
+    {
+        if (std::strcmp(argv[i], "--il2cpp") == 0)
+            g_il2cpp = true;
+    }
     for (int i = 1; i < argc; ++i)
     {
         if (std::strcmp(argv[i], "--solo") == 0)

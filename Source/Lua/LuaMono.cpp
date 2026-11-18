@@ -3,6 +3,7 @@
 #include "Lua/LuaEngine.h"
 #include "Target/Mono.h"
 
+#include <optional>
 #include <string>
 
 #include "lua.hpp"
@@ -59,6 +60,22 @@ namespace Manifold::Lua
             return 1;
         }
 
+        // Whether the game runs IL2CPP: the same mono_* functions serve both,
+        // as in Cheat Engine, but IL2CPP code is compiled ahead of time and
+        // lives in GameAssembly.dll. Like mono_isPresent it starts nothing:
+        // without an attached runtime the module list answers.
+        int MonoIsIl2Cpp(lua_State* state)
+        {
+            Engine& engine = Owner(state);
+            bool il2cpp = false;
+            if (engine.MonoPresent())
+                il2cpp = engine.Mono().IsIl2Cpp();
+            else if (engine.Process())
+                il2cpp = Target::MonoBridge::DetectRuntime(*engine.Process()) == Target::ManagedRuntime::Il2Cpp;
+            lua_pushboolean(state, il2cpp ? 1 : 0);
+            return 1;
+        }
+
         int MonoRefreshBody(lua_State* state)
         {
             lua_pushboolean(state, Owner(state).MonoPresent() ? 1 : 0);
@@ -103,23 +120,13 @@ namespace Manifold::Lua
             return 1;
         }
 
-        const Target::MonoClass* FindClass(Engine& engine, const std::string& name, std::vector<Target::MonoClass>& storage)
-        {
-            storage = engine.Mono().Classes();
-            for (const Target::MonoClass& info : storage)
-            {
-                if (info.Name == name || info.FullName() == name)
-                    return &info;
-            }
-            return nullptr;
-        }
-
         int MonoClassGetMethodsBody(lua_State* state)
         {
             Engine& engine = Owner(state);
             const std::string name = luaL_checkstring(state, 1);
-            std::vector<Target::MonoClass> storage;
-            const Target::MonoClass* info = FindClass(engine, name, storage);
+            // The members load on demand here, so a class nobody opened before
+            // still lists its methods.
+            const std::optional<Target::MonoClass> info = engine.Mono().ClassDetails(name);
             if (!info)
             {
                 lua_pushnil(state);
@@ -150,7 +157,10 @@ namespace Manifold::Lua
 
         int MonoShowDissector(lua_State* state)
         {
-            Owner(state).Request(UiRequest{ UiRequestKind::Mono });
+            UiRequest request{ UiRequestKind::Mono };
+            if (lua_gettop(state) >= 1 && lua_type(state, 1) == LUA_TSTRING)
+                request.Text = lua_tostring(state, 1);
+            Owner(state).Request(std::move(request));
             return 0;
         }
 
@@ -177,6 +187,7 @@ namespace Manifold::Lua
         const struct { const char* Name; lua_CFunction Call; } kMonoFunctions[] = {
             { "mono_initialize", &WithMono<MonoInitializeBody> },
             { "mono_isPresent", &MonoIsPresent },
+            { "mono_isIl2Cpp", &MonoIsIl2Cpp },
             { "mono_refresh", &MonoRefresh },
             { "mono_enumClasses", &WithMono<MonoEnumClassesBody> },
             { "mono_class_getMethods", &WithMono<MonoClassGetMethodsBody> },

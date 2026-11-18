@@ -228,6 +228,9 @@
     <ClCompile Include="..\Source\Target\CodeMap.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\Il2Cpp.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\Mono.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -301,6 +304,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\DocTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\Il2CppTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\IntegrationTests.cpp">

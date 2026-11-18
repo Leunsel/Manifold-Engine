@@ -192,6 +192,8 @@ namespace Manifold::Target
                 }
                 if (Symbols::IsNameChar(c))
                 {
+                    if (const auto managed = ManagedName())
+                        return managed;
                     std::string module;
                     if (const std::size_t length = SpecialModule(module))
                     {
@@ -216,6 +218,28 @@ namespace Manifold::Target
                     return Name(word, true);
                 }
                 return Fail(Status::Fail(ErrorCode::ExprSyntax, m_text));
+            }
+
+            // A managed method named with its assembly, Assembly-CSharp:Player:TakeDamage:
+            // the dash belongs to the assembly name when a ':' follows it in the
+            // same word. Taken only when the whole word resolves, so a - b:c
+            // still subtracts.
+            std::optional<std::uint64_t> ManagedName()
+            {
+                std::size_t end = m_at;
+                while (end < m_text.size() && (Symbols::IsNameChar(m_text[end]) || m_text[end] == '-'))
+                    ++end;
+                const std::string_view word = m_text.substr(m_at, end - m_at);
+                const std::size_t dash = word.find('-');
+                const std::size_t colon = word.find(':');
+                if (dash == std::string_view::npos || colon == std::string_view::npos || dash > colon || word.back() == '-')
+                    return std::nullopt;
+                if (const auto value = m_symbols.Resolve(word))
+                {
+                    m_at = end;
+                    return value;
+                }
+                return std::nullopt;
             }
 
             std::size_t SpecialModule(std::string& matched) const
@@ -676,6 +700,7 @@ namespace Manifold::Target
         if (!m_process)
             return Hex(address);
         const auto module = m_process->ModuleAt(address);
+        std::string nearExport;
         if (module)
         {
             if (address == module->Base)
@@ -692,16 +717,19 @@ namespace Manifold::Target
                     if (const std::size_t dot = moduleName.rfind('.'); dot != std::string::npos)
                         moduleName.resize(dot);
                     std::string text = moduleName + "." + found->Name;
-                    if (address != found->Address)
-                        text += "+" + Hex(address - found->Address);
-                    return text;
+                    if (address == found->Address)
+                        return text;
+                    // Only the nearest export below: the provider may know the
+                    // function itself (a PDB name, or an IL2CPP method in
+                    // GameAssembly.dll next to the il2cpp_* exports).
+                    nearExport = text + "+" + Hex(address - found->Address);
                 }
             }
         }
-        // No export matched. Ask the symbol provider: for an in-module address
-        // that is the PDB describe; for an address in no module at all it is
-        // where JIT-compiled Mono methods get their Namespace.Class:Method name
-        // (such code lives outside every loaded module).
+        // No export at the address. Ask the symbol provider: for an in-module
+        // address that is the PDB describe or an IL2CPP method; for an address
+        // in no module at all it is where JIT-compiled Mono methods get their
+        // Namespace.Class:Method name (such code lives outside every module).
         if (m_hasProvider.load())
         {
             SymbolReverse reverse;
@@ -715,6 +743,8 @@ namespace Manifold::Target
                     return *name;
             }
         }
+        if (!nearExport.empty())
+            return nearExport;
         return module ? module->Name + "+" + Hex(address - module->Base) : Hex(address);
     }
 

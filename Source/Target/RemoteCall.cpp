@@ -38,6 +38,15 @@ namespace Manifold::Target
         constexpr std::uint32_t kCollectorOffset = 0x200;
         constexpr std::uint64_t kScratchSize = 0x10000;
 
+        // The iterator drain: u64 drain(fn, object, block), run by the worker.
+        // Block: +0x00 count (out), +0x08 cap, +0x10 iterator slot (in/out, so
+        // a full batch continues on the next call), +0x18 peek offset (or ~0),
+        // +0x20 done (out), +0x28 peek function (or 0); 16-byte entries
+        // { item, peek } from +0x30.
+        constexpr std::uint32_t kDrainOffset = 0x900;
+        constexpr std::uint32_t kDrainHeader = 0x30;
+        constexpr std::uint32_t kDrainBatch = 1024;
+
         // The main-thread channel: a stub at kMainStubOffset and its control
         // block at kMainControlOffset, both in the code page.
         //
@@ -328,6 +337,60 @@ namespace Manifold::Target
                 ::DuplicateHandle(target, reinterpret_cast<HANDLE>(handle), nullptr, nullptr, 0, FALSE, DUPLICATE_CLOSE_SOURCE);
         }
 
+        std::vector<std::uint8_t> DrainCode()
+        {
+            Emitter e;
+            e.Bytes({ 0x53, 0x56, 0x57 });             // push rbx; push rsi; push rdi
+            e.Bytes({ 0x41, 0x54, 0x41, 0x55 });       // push r12; push r13
+            e.Bytes({ 0x55 });                         // push rbp
+            e.Bytes({ 0x48, 0x89, 0xE5 });             // mov rbp, rsp
+            e.Bytes({ 0x48, 0x83, 0xE4, 0xF0 });       // and rsp, -16
+            e.Bytes({ 0x48, 0x83, 0xEC, 0x20 });       // sub rsp, 0x20
+            e.Bytes({ 0x49, 0x89, 0xCC });             // mov r12, rcx  function
+            e.Bytes({ 0x49, 0x89, 0xD5 });             // mov r13, rdx  object
+            e.Bytes({ 0x4C, 0x89, 0xC3 });             // mov rbx, r8   block
+            e.Label("loop");
+            e.Bytes({ 0x48, 0x8B, 0x03 });             // mov rax, [rbx]      count
+            e.Bytes({ 0x48, 0x3B, 0x43, 0x08 });       // cmp rax, [rbx+8]    cap
+            e.Jump(0x83, "full");                      // jae full
+            e.Bytes({ 0x4C, 0x89, 0xE9 });             // mov rcx, r13
+            e.Bytes({ 0x48, 0x8D, 0x53, 0x10 });       // lea rdx, [rbx+0x10] iterator
+            e.Bytes({ 0x41, 0xFF, 0xD4 });             // call r12
+            e.Bytes({ 0x48, 0x85, 0xC0 });             // test rax, rax
+            e.Jump(0x84, "end");                       // jz end
+            e.Bytes({ 0x48, 0x8B, 0x3B });             // mov rdi, [rbx]
+            e.Bytes({ 0x48, 0xC1, 0xE7, 0x04 });       // shl rdi, 4
+            e.Bytes({ 0x48, 0x8D, 0x7C, 0x3B, 0x30 }); // lea rdi, [rbx+rdi+0x30]  entry
+            e.Bytes({ 0x48, 0x89, 0x07 });             // mov [rdi], rax
+            e.Bytes({ 0x48, 0xC7, 0x47, 0x08, 0x00, 0x00, 0x00, 0x00 }); // mov qword [rdi+8], 0
+            e.Bytes({ 0x48, 0x8B, 0x73, 0x28 });       // mov rsi, [rbx+0x28] peek function
+            e.Bytes({ 0x48, 0x85, 0xF6 });             // test rsi, rsi
+            e.Jump(0x84, "read");                      // jz read
+            e.Bytes({ 0x48, 0x89, 0xC1 });             // mov rcx, rax
+            e.Bytes({ 0xFF, 0xD6 });                   // call rsi
+            e.Bytes({ 0x48, 0x89, 0x47, 0x08 });       // mov [rdi+8], rax
+            e.Jump(0xE9, "stored");                    // jmp stored
+            e.Label("read");
+            e.Bytes({ 0x48, 0x8B, 0x73, 0x18 });       // mov rsi, [rbx+0x18] peek offset
+            e.Bytes({ 0x48, 0x83, 0xFE, 0xFF });       // cmp rsi, -1
+            e.Jump(0x84, "stored");                    // je stored
+            e.Bytes({ 0x48, 0x8B, 0x34, 0x30 });       // mov rsi, [rax+rsi]
+            e.Bytes({ 0x48, 0x89, 0x77, 0x08 });       // mov [rdi+8], rsi
+            e.Label("stored");
+            e.Bytes({ 0x48, 0xFF, 0x03 });             // inc qword [rbx]
+            e.Jump(0xE9, "loop");                      // jmp loop
+            e.Label("end");
+            e.Bytes({ 0x48, 0xC7, 0x43, 0x20, 0x01, 0x00, 0x00, 0x00 }); // mov qword [rbx+0x20], 1  done
+            e.Label("full");
+            e.Bytes({ 0x48, 0x8B, 0x03 });             // mov rax, [rbx]
+            e.Bytes({ 0x48, 0x89, 0xEC });             // mov rsp, rbp
+            e.Bytes({ 0x5D });                         // pop rbp
+            e.Bytes({ 0x41, 0x5D, 0x41, 0x5C });       // pop r13; pop r12
+            e.Bytes({ 0x5F, 0x5E, 0x5B });             // pop rdi; pop rsi; pop rbx
+            e.Bytes({ 0xC3 });                         // ret
+            return e.Resolve();
+        }
+
         std::vector<std::uint8_t> CollectorCode()
         {
             // void collector(rcx = item, rdx = user); user -> { u64 count, u64 cap, u64 items[] }
@@ -364,12 +427,14 @@ namespace Manifold::Target
         m_code = *codeBlock;
         const Result<Address> controlBlock = m_process->Allocate(kControlSize, PAGE_READWRITE);
         const Result<Address> dataBlock = controlBlock ? m_process->Allocate(kScratchSize, PAGE_READWRITE) : Result<Address>(controlBlock.Error());
+        const Result<Address> drainBlock = dataBlock ? m_process->Allocate(kDrainHeader + kDrainBatch * sizeof(DrainItem), PAGE_READWRITE) : Result<Address>(dataBlock.Error());
         m_control = controlBlock.ValueOr(0);
         m_data = dataBlock.ValueOr(0);
-        if (!controlBlock || !dataBlock)
+        m_drainBlock = drainBlock.ValueOr(0);
+        if (!controlBlock || !dataBlock || !drainBlock)
         {
             Stop();
-            return controlBlock ? dataBlock.Error() : controlBlock.Error();
+            return drainBlock.Error();
         }
 
         std::vector<std::uint8_t> worker = WorkerCode();
@@ -426,10 +491,14 @@ namespace Manifold::Target
         std::vector<std::uint8_t> main = MainCode(m_code + kMainControlOffset);
         std::vector<std::uint8_t> mainControl(kMainControlSize, 0);
         std::memcpy(mainControl.data() + kMainIdleOffset, &kMainIdleCycles, sizeof(kMainIdleCycles));
-        if (worker.size() > kCollectorOffset || collector.size() > kMainStubOffset - kCollectorOffset || main.size() > kMainControlOffset - kMainStubOffset)
+        std::vector<std::uint8_t> drain = DrainCode();
+        if (worker.size() > kCollectorOffset || collector.size() > kMainStubOffset - kCollectorOffset || main.size() > kMainControlOffset - kMainStubOffset ||
+            kMainControlOffset + kMainControlSize > kDrainOffset || kDrainOffset + drain.size() > 0x1000)
             return fail(Status::Fail(ErrorCode::WriteFailed, "the remote worker code does not fit its page"));
+        m_drain = m_code + kDrainOffset;
         if (!m_process->Write(m_code, worker.data(), worker.size()) ||
             !m_process->Write(m_collector, collector.data(), collector.size()) ||
+            !m_process->Write(m_drain, drain.data(), drain.size()) ||
             !m_process->Write(m_code + kMainStubOffset, main.data(), main.size()) ||
             !m_process->Write(m_code + kMainControlOffset, mainControl.data(), mainControl.size()) ||
             !m_process->Write(m_control, control.data(), control.size()))
@@ -475,14 +544,14 @@ namespace Manifold::Target
         // Nothing here is freed, on purpose. The code page still holds the
         // worker's last instructions (it pops and returns after it wrote
         // Stopped), rsi holds the control block for the worker's whole life,
-        // and scratch addresses were handed to the target as pointers. Three
+        // and scratch addresses were handed to the target as pointers. Four
         // small pages per attach are cheaper than proving each one is no longer
         // reachable. (The Unity detach crash once blamed on freeing these was a
         // GC handle cut to 32 bits, see UnityExplorer::PointerHandles.)
         if (m_wake)
             ::CloseHandle(m_wake);
         m_wake = nullptr;
-        m_code = m_control = m_data = m_collector = 0;
+        m_code = m_control = m_data = m_collector = m_drain = m_drainBlock = 0;
         m_dataUsed = 0;
         m_thread = 0;
         m_process.reset();
@@ -725,6 +794,47 @@ namespace Manifold::Target
     void RemoteCall::ResetScratch()
     {
         m_dataUsed = 0;
+    }
+
+    Status RemoteCall::Drain(std::uint64_t function, std::uint64_t object, std::vector<DrainItem>& items, std::uint32_t peekOffset, std::uint64_t peekFunction, std::size_t limit)
+    {
+        items.clear();
+        if (!m_process || !m_thread || !m_drain || !m_drainBlock || !function)
+            return Status::Fail(ErrorCode::NoProcess);
+        // Its own block, apart from the scratch arena: only the header is
+        // written per walk, and the caller's scratch regions stay as they are.
+        const std::uint64_t block = m_drainBlock;
+        const std::uint64_t header[6] = { 0, kDrainBatch, 0, peekOffset == kNoPeek ? ~std::uint64_t(0) : peekOffset, 0, peekFunction };
+        Status status = m_process->Write(block, header, sizeof(header)) ? Status::Success() : Status::Fail(ErrorCode::WriteFailed);
+        std::vector<DrainItem> batch;
+        while (status && items.size() < limit)
+        {
+            std::uint64_t count = 0;
+            if (status = Call(m_drain, function, object, block, 0, count); !status)
+                break;
+            std::uint64_t state[6] = {};
+            if (!m_process->ReadExact(block, state, sizeof(state)))
+            {
+                status = Status::Fail(ErrorCode::ReadFailed);
+                break;
+            }
+            count = std::min<std::uint64_t>(state[0], kDrainBatch);
+            batch.resize(static_cast<std::size_t>(count));
+            if (count && !m_process->ReadExact(block + kDrainHeader, batch.data(), batch.size() * sizeof(DrainItem)))
+            {
+                status = Status::Fail(ErrorCode::ReadFailed);
+                break;
+            }
+            items.insert(items.end(), batch.begin(), batch.end());
+            if (state[4] != 0 || count == 0)
+                break;
+            const std::uint64_t zero = 0;
+            if (!m_process->Write(block, &zero, sizeof(zero)))
+                status = Status::Fail(ErrorCode::WriteFailed);
+        }
+        if (items.size() > limit)
+            items.resize(limit);
+        return status;
     }
 
     std::string RemoteCall::ReadCString(std::uint64_t address, std::size_t limit) const

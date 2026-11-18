@@ -228,9 +228,10 @@ namespace Manifold
             { ErrorCode::DebugTraceFailed, "The trace could not be started: {}.",
                 "A trace runs from a breakpoint and needs the debugger and a free breakpoint.",
                 "Attach the debugger, free a debug register or remove the breakpoint at that address first." },
-            { ErrorCode::MonoNotFound, "No Mono runtime was found in this process{}.",
-                "The .NET/Mono features need a Mono-based Unity game (one with mono-2.0-bdwgc.dll or mono.dll). IL2CPP games have no Mono runtime.",
-                "Open a Mono game, or check that the process is really Mono and not IL2CPP." },
+            { ErrorCode::MonoNotFound, "No Mono or IL2CPP runtime was found in this process{}.",
+                "The .NET features need a 64-bit Unity game: a Mono build (with mono-2.0-bdwgc.dll or mono.dll) or an IL2CPP build (with GameAssembly.dll). "
+                "An IL2CPP build without il2cpp_image_get_class (before Unity 2018.3) or with renamed exports is not supported.",
+                "Open the game's process once it has finished loading, or check that it is a Unity game at all." },
             { ErrorCode::MonoCallFailed, "A Mono call into the process failed: {}.",
                 "The in-process helper could not call a mono function, or the call did not return.",
                 "The process may have closed, or the Mono runtime may be an unexpected version." },

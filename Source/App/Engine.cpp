@@ -176,7 +176,8 @@ namespace Manifold
         }
         const std::shared_ptr<Target::Process> process = m_target.Process();
         const std::uint64_t generation = m_target.Generation();
-        m_work.Start({ "Loading the Mono runtime", kMonoWork, true, false }, [this, process, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
+        const bool il2cpp = Target::MonoBridge::DetectRuntime(*process) == Target::ManagedRuntime::Il2Cpp;
+        m_work.Start({ il2cpp ? "Loading the IL2CPP runtime" : "Loading the Mono runtime", kMonoWork, true, false }, [this, process, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
             {
                 const Status status = m_target.Mono().Start(process, &progress);
                 const bool cancelled = progress.Cancelled();
@@ -194,7 +195,7 @@ namespace Manifold
             return;
         }
         const std::uint64_t generation = m_target.Generation();
-        m_work.Start({ "Reloading the Mono classes", kMonoWork, true, false }, [this, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
+        m_work.Start({ m_target.Mono().IsIl2Cpp() ? "Reloading the IL2CPP classes" : "Reloading the Mono classes", kMonoWork, true, false }, [this, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
             {
                 const Status status = m_target.Mono().Refresh(&progress);
                 const bool cancelled = progress.Cancelled();
@@ -208,11 +209,12 @@ namespace Manifold
         m_work.CompleteGroup(kMonoWork);
         if (!m_target.Mono().Present())
             return;
+        const std::string runtime = Target::MonoBridge::RuntimeName(m_target.Mono().Runtime());
         m_target.Mono().Stop();
         m_target.RefreshSymbolProvider();
-        LOG_INFO("Mono", "Shut down the Mono helper in the game");
+        LOG_INFO("Mono", "Shut down the " + runtime + " helper in the game");
         if (!fromScript)
-            Notify(LogLevel::Success, "Shut down Mono: the helper in the game has ended");
+            Notify(LogLevel::Success, "Shut down " + runtime + ": the helper in the game has ended");
     }
 
     void Engine::FinishMono(const Status& status, bool cancelled, bool starting, bool fromScript, std::uint64_t generation)
@@ -224,12 +226,12 @@ namespace Manifold
             if (starting)
                 m_target.RefreshSymbolProvider();
             if (!fromScript)
-                Notify(LogLevel::Success, Format("%s %zu Mono classes", starting ? "Loaded" : "Reloaded", m_target.Mono().ClassCount()));
+                Notify(LogLevel::Success, Format("%s %zu %s classes", starting ? "Loaded" : "Reloaded", m_target.Mono().ClassCount(), Target::MonoBridge::RuntimeName(m_target.Mono().Runtime())));
             return;
         }
         if (cancelled)
         {
-            LOG_INFO("Mono", starting ? "Loading the Mono runtime was cancelled" : "Reloading the Mono classes was cancelled; the earlier list stays");
+            LOG_INFO("Mono", starting ? "Loading the managed runtime was cancelled" : "Reloading the classes was cancelled; the earlier list stays");
             return;
         }
         if (fromScript)

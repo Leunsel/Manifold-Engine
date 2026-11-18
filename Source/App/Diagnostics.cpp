@@ -1441,7 +1441,7 @@ namespace Manifold::Diagnostics
         const Debug::Debugger& debugger = engine.Debugger();
         state.Rows.push_back({ "Debugger", debugger.Attached() ? std::string(debugger.UsingVeh() ? "in-process (VEH)" : "Windows") + (debugger.Broken() ? ", stopped at a break" : ", running") : std::string("not attached") });
         state.Rows.push_back({ "Symbols", engine.SymbolsLoaded() ? "loaded (" + std::to_string(engine.SymbolsModulesDone()) + " modules)" : engine.SymbolsActive() ? "loading" : "exports only" });
-        state.Rows.push_back({ "Mono runtime", engine.MonoPresent() ? "attached" : "no" });
+        state.Rows.push_back({ "Mono runtime", engine.MonoPresent() ? std::string("attached (") + Target::MonoBridge::RuntimeName(engine.Mono().Runtime()) + ")" : std::string("no") });
         state.Rows.push_back({ "Background work", engine.Jobs().Busy() || engine.Working() ? "busy" : "idle" });
         groups.push_back(std::move(state));
 

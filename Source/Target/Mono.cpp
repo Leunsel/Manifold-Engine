@@ -43,20 +43,109 @@ namespace Manifold::Target
         };
 
         const char* const kModuleCandidates[] = { "mono-2.0-bdwgc.dll", "mono.dll", "mono-2.0.dll", "monobdwgc-2.0.dll" };
+        constexpr const char* kIl2CppModule = "GameAssembly.dll";
+
+        std::string_view WithoutDll(std::string_view name)
+        {
+            if (name.size() > 4 && EqualsNoCase(name.substr(name.size() - 4), ".dll"))
+                name.remove_suffix(4);
+            return name;
+        }
+    }
+
+    const char* MonoBridge::RuntimeName(ManagedRuntime runtime)
+    {
+        switch (runtime)
+        {
+            case ManagedRuntime::Mono: return "Mono";
+            case ManagedRuntime::Il2Cpp: return "IL2CPP";
+            default: return "no runtime";
+        }
+    }
+
+    ManagedRuntime MonoBridge::DetectRuntime(const Process& process)
+    {
+        const ModuleList modules = process.Modules();
+        if (!modules)
+            return ManagedRuntime::None;
+        // GameAssembly.dll wins: an IL2CPP game with a mod loader that brings
+        // its own Mono (MelonLoader) keeps the game's classes in IL2CPP.
+        ManagedRuntime found = ManagedRuntime::None;
+        for (const ModuleInfo& module : *modules)
+        {
+            if (EqualsNoCase(module.Name, kIl2CppModule))
+                return ManagedRuntime::Il2Cpp;
+            for (const char* candidate : kModuleCandidates)
+            {
+                if (EqualsNoCase(module.Name, candidate))
+                    found = ManagedRuntime::Mono;
+            }
+        }
+        return found;
     }
 
     bool MonoBridge::HasRuntime(const Process& process)
     {
-        const ModuleList modules = process.Modules();
-        for (const ModuleInfo& module : *modules)
+        return DetectRuntime(process) != ManagedRuntime::None;
+    }
+
+    std::vector<MonoBridge::Candidate> MonoBridge::FindRuntimes(const Process& process, WorkProgress* progress)
+    {
+        std::vector<Candidate> found;
+        if (process.FindModule(kIl2CppModule) && process.FindExport(kIl2CppModule, "il2cpp_domain_get"))
+            found.push_back({ kIl2CppModule, ManagedRuntime::Il2Cpp });
+        for (const char* candidate : kModuleCandidates)
         {
-            for (const char* candidate : kModuleCandidates)
+            if (process.FindModule(candidate) && process.FindExport(candidate, "mono_get_root_domain"))
             {
-                if (EqualsNoCase(module.Name, candidate))
-                    return true;
+                found.push_back({ candidate, ManagedRuntime::Mono });
+                break;
             }
         }
-        return false;
+        if (!found.empty())
+            return found;
+        // A renamed or embedded runtime: any module with the exports. Mono is
+        // tried first within a module, IL2CPP after it.
+        if (const auto modules = process.Modules())
+        {
+            for (const ModuleInfo& info : *modules)
+            {
+                if (progress && progress->Cancelled())
+                    return {};
+                if (process.FindExport(info.Name, "mono_get_root_domain"))
+                    found.push_back({ info.Name, ManagedRuntime::Mono });
+                if (process.FindExport(info.Name, "il2cpp_domain_get"))
+                    found.push_back({ info.Name, ManagedRuntime::Il2Cpp });
+            }
+        }
+        return found;
+    }
+
+    Status MonoBridge::AttachRuntime(const Candidate& candidate)
+    {
+        if (candidate.Runtime == ManagedRuntime::Il2Cpp)
+            return AttachIl2Cpp(candidate.Module);
+        std::map<std::string, std::uint64_t> functions;
+        for (const char* name : kFunctions)
+        {
+            const std::uint64_t address = m_process->FindExport(candidate.Module, name);
+            if (address)
+                functions[name] = address;
+        }
+        if (!functions.count("mono_get_root_domain") || !functions.count("mono_class_get_methods"))
+            return Status::Fail(ErrorCode::MonoNotFound, candidate.Module + " is missing expected functions");
+        m_functions = std::move(functions);
+        const std::uint64_t root = CallFn("mono_get_root_domain").value_or(0);
+        if (!root)
+        {
+            m_functions.clear();
+            return Status::Fail(ErrorCode::MonoNotFound, "the root domain was null");
+        }
+        m_domain = root;
+        m_module = candidate.Module;
+        m_runtime = ManagedRuntime::Mono;
+        CallFn("mono_thread_attach", root);
+        return Status::Success();
     }
 
     std::uint64_t MonoBridge::Fn(const char* name) const
@@ -90,52 +179,20 @@ namespace Manifold::Target
         if (!process || !process->Alive())
             return Status::Fail(ErrorCode::NoProcess);
         if (!process->Is64Bit())
-            return Status::Fail(ErrorCode::MonoNotFound, "only 64-bit Mono targets are supported");
+            return Status::Fail(ErrorCode::MonoNotFound, "only 64-bit Mono and IL2CPP targets are supported");
         if (progress)
             progress->SetText("Looking for the runtime");
 
-        std::string module;
-        for (const char* candidate : kModuleCandidates)
-        {
-            if (process->FindModule(candidate) && process->FindExport(candidate, "mono_get_root_domain"))
-            {
-                module = candidate;
-                break;
-            }
-        }
-        if (module.empty())
-        {
-            if (const auto modules = process->Modules())
-            {
-                for (const ModuleInfo& info : *modules)
-                {
-                    if (progress && progress->Cancelled())
-                        return Status::Fail(ErrorCode::MonoNotFound, "cancelled");
-                    if (process->FindExport(info.Name, "mono_get_root_domain"))
-                    {
-                        module = info.Name;
-                        break;
-                    }
-                }
-            }
-        }
-        if (module.empty())
-            return Status::Fail(ErrorCode::MonoNotFound);
-
-        std::map<std::string, std::uint64_t> functions;
-        for (const char* name : kFunctions)
-        {
-            const std::uint64_t address = process->FindExport(module, name);
-            if (address)
-                functions[name] = address;
-        }
-        if (!functions.count("mono_get_root_domain") || !functions.count("mono_class_get_methods"))
-            return Status::Fail(ErrorCode::MonoNotFound, module + " is missing expected functions");
+        const std::vector<Candidate> candidates = FindRuntimes(*process, progress);
         if (progress && progress->Cancelled())
             return Status::Fail(ErrorCode::MonoNotFound, "cancelled");
+        if (candidates.empty())
+            return Status::Fail(ErrorCode::MonoNotFound);
 
         if (progress)
             progress->SetText("Starting the helper in the game");
+        std::string module;
+        ManagedRuntime runtime = ManagedRuntime::None;
         {
             std::lock_guard lock(m_lock);
             m_process = process;
@@ -144,21 +201,40 @@ namespace Manifold::Target
                 m_process.reset();
                 return started;
             }
-            m_functions = std::move(functions);
-            m_module = module;
-            const std::uint64_t root = CallFn("mono_get_root_domain").value_or(0);
-            if (!root)
+            // The first candidate whose runtime answers with a domain wins; a
+            // runtime that is not set up yet leaves the next one its turn.
+            Status attached = Status::Fail(ErrorCode::MonoNotFound);
+            for (const Candidate& candidate : candidates)
+            {
+                if (progress && progress->Cancelled())
+                {
+                    attached = Status::Fail(ErrorCode::MonoNotFound, "cancelled");
+                    break;
+                }
+                attached = AttachRuntime(candidate);
+                if (attached)
+                    break;
+            }
+            if (!attached)
             {
                 m_call.Stop();
                 m_functions.clear();
                 m_module.clear();
+                m_domain = 0;
+                m_attached = 0;
+                m_runtime = ManagedRuntime::None;
                 m_process.reset();
-                return Status::Fail(ErrorCode::MonoNotFound, "the root domain was null");
+                return attached;
             }
-            m_domain = root;
-            CallFn("mono_thread_attach", root);
+            if (const auto info = process->FindModule(m_module))
+            {
+                m_moduleBase = info->Base;
+                m_moduleEnd = info->Base + info->Size;
+            }
+            module = m_module;
+            runtime = m_runtime.load();
         }
-        LOG_SUCCESS("Mono", "Mono runtime found in " + module);
+        LOG_SUCCESS("Mono", std::string(RuntimeName(runtime)) + " runtime found in " + module);
         const Status enumerated = Enumerate(progress, true);
         if (!enumerated)
             Stop();
@@ -191,16 +267,27 @@ namespace Manifold::Target
                 m_unity->Shutdown();
         }
         std::lock_guard lock(m_lock);
+        // IL2CPP keeps a list of attached threads; take the worker off it
+        // before it ends, the way a native plugin's thread leaves.
+        if (m_runtime.load() == ManagedRuntime::Il2Cpp && m_attached && m_call.Running())
+            CallFn("il2cpp_thread_detach", m_attached);
         m_call.Stop();
         m_functions.clear();
         m_classes.clear();
         m_classIndex.clear();
         m_handleIndex.clear();
+        m_images.clear();
+        m_imageNames.clear();
         m_jitRanges.clear();
         m_jitMisses.clear();
+        m_code.clear();
+        m_shape = {};
         m_present = false;
+        m_runtime = ManagedRuntime::None;
         m_domain = 0;
+        m_attached = 0;
         m_module.clear();
+        m_moduleBase = m_moduleEnd = 0;
         m_process.reset();
         ++m_generation;
     }
@@ -214,6 +301,8 @@ namespace Manifold::Target
 
     Status MonoBridge::Enumerate(WorkProgress* progress, bool starting)
     {
+        if (m_runtime.load() == ManagedRuntime::Il2Cpp)
+            return EnumerateIl2Cpp(progress, starting);
         const auto stopped = [progress] { return progress && progress->Cancelled(); };
         const Status cancelled = Status::Fail(ErrorCode::MonoNotFound, "cancelled");
         if (progress)
@@ -341,13 +430,38 @@ namespace Manifold::Target
     int MonoBridge::FindClass(std::string_view name) const
     {
         const auto found = m_classIndex.find(std::string(name));
-        return found == m_classIndex.end() ? -1 : found->second;
+        if (found != m_classIndex.end())
+            return found->second;
+        // "Image:Class" or "Image:Namespace.Class", the image with or without
+        // its .dll, as in Assembly-CSharp:Player:TakeDamage.
+        const std::size_t colon = name.find(':');
+        if (colon == std::string_view::npos || colon == 0 || colon + 1 >= name.size())
+            return -1;
+        const std::string_view image = WithoutDll(name.substr(0, colon));
+        const std::string_view klass = name.substr(colon + 1);
+        int byName = -1;
+        for (int index = 0; index < static_cast<int>(m_classes.size()); ++index)
+        {
+            const MonoClass& info = m_classes[static_cast<std::size_t>(index)];
+            if (!EqualsNoCase(WithoutDll(info.Image), image))
+                continue;
+            if (info.FullName() == klass)
+                return index;
+            if (byName < 0 && info.Name == klass)
+                byName = index;
+        }
+        return byName;
     }
 
     void MonoBridge::EnsureMembers(int classIndex)
     {
         if (classIndex < 0 || classIndex >= static_cast<int>(m_classes.size()))
             return;
+        if (m_runtime.load() == ManagedRuntime::Il2Cpp)
+        {
+            EnsureMembersIl2Cpp(classIndex);
+            return;
+        }
         MonoClass& info = m_classes[static_cast<std::size_t>(classIndex)];
         if (info.MembersLoaded)
             return;
@@ -406,6 +520,16 @@ namespace Manifold::Target
         return m_classes[static_cast<std::size_t>(index)].Fields;
     }
 
+    std::optional<MonoClass> MonoBridge::ClassDetails(std::string_view className)
+    {
+        std::lock_guard lock(m_lock);
+        const int index = FindClass(className);
+        if (index < 0)
+            return std::nullopt;
+        EnsureMembers(index);
+        return m_classes[static_cast<std::size_t>(index)];
+    }
+
     std::vector<MonoClass> MonoBridge::Classes() const
     {
         std::lock_guard lock(m_lock);
@@ -420,6 +544,8 @@ namespace Manifold::Target
 
     std::optional<std::string> MonoBridge::ResolveHead(std::uint64_t header, bool allowRuntimeFallback)
     {
+        if (m_runtime.load() == ManagedRuntime::Il2Cpp)
+            return ResolveHeadIl2Cpp(header, allowRuntimeFallback);
         // Read the object -> MonoVTable -> MonoClass chain ourselves with safe
         // reads (both pointers are at offset 0) rather than calling
         // mono_object_get_class in the target, which would dereference a wild
@@ -525,6 +651,18 @@ namespace Manifold::Target
         std::lock_guard lock(m_lock);
         if (!m_present || !m_process || !address)
             return std::nullopt;
+        if (m_runtime.load() == ManagedRuntime::Il2Cpp)
+        {
+            // IL2CPP code is the runtime module's own: the sorted index Start
+            // built answers, with no remote call for the range.
+            CodeEntry* entry = FindCode(address);
+            if (!entry)
+                return std::nullopt;
+            const std::string& name = CodeName(*entry);
+            if (name.empty())
+                return std::nullopt;
+            return name;
+        }
         // The disassembler asks per line every frame, so the cache answers first:
         // a resolved range, or a known miss, both without touching the runtime.
         if (const std::string* cached = FindJitName(address))
@@ -579,6 +717,16 @@ namespace Manifold::Target
         std::lock_guard lock(m_lock);
         if (!m_present || !m_process || !address)
             return std::nullopt;
+        if (m_runtime.load() == ManagedRuntime::Il2Cpp)
+        {
+            CodeEntry* entry = FindCode(address);
+            if (!entry || entry->Start != address)
+                return std::nullopt;
+            const std::string& name = CodeName(*entry);
+            if (name.empty())
+                return std::nullopt;
+            return name;
+        }
         MethodNameAt(address);  // resolve and cache the containing method's range
         auto it = std::lower_bound(m_jitRanges.begin(), m_jitRanges.end(), address,
             [](const JitRange& range, std::uint64_t value) { return range.Start < value; });
@@ -587,11 +735,27 @@ namespace Manifold::Target
         return std::nullopt;
     }
 
+    std::size_t MonoBridge::MethodsSharingCode(std::uint64_t address)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_present || m_runtime.load() != ManagedRuntime::Il2Cpp)
+            return 0;
+        const CodeEntry* entry = FindCode(address);
+        return entry && entry->Start == address ? entry->Sharing : 0;
+    }
+
     std::optional<std::pair<std::uint64_t, std::uint64_t>> MonoBridge::MethodRange(std::uint64_t address)
     {
         std::lock_guard lock(m_lock);
         if (!m_present || !m_process || !address)
             return std::nullopt;
+        if (m_runtime.load() == ManagedRuntime::Il2Cpp)
+        {
+            const CodeEntry* entry = FindCode(address);
+            if (!entry)
+                return std::nullopt;
+            return std::make_pair(entry->Start, entry->End);
+        }
         MethodNameAt(address);  // resolve and cache the containing method's range
         auto it = std::upper_bound(m_jitRanges.begin(), m_jitRanges.end(), address,
             [](std::uint64_t value, const JitRange& range) { return value < range.Start; });
@@ -622,6 +786,11 @@ namespace Manifold::Target
                 continue;
             if (method.Address)
                 return method.Address;
+            // IL2CPP has no JIT: the code address was read with the members,
+            // and a method without one (abstract, an open generic) has none,
+            // so an overload of the same name may still have code.
+            if (m_runtime.load() == ManagedRuntime::Il2Cpp)
+                continue;
             const auto address = CallFn("mono_compile_method", method.Handle);
             if (!address || !*address)
                 return std::nullopt;

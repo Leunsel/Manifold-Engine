@@ -1033,6 +1033,8 @@ namespace Manifold::UI
         void Draw() override;
         bool Closed() const override { return !m_open; }
         void Show() { m_open = true; m_bringToFront = true; }
+        // Picks a class in the Classes tab once the class list is there.
+        void ShowClass(std::string className) { m_pendingClass = std::move(className); }
 
     private:
         struct InspectorTab
@@ -1086,9 +1088,12 @@ namespace Manifold::UI
         std::string m_lastFilter = "\x01";
         int m_selected = -1;
         std::string m_selectedName;
-        std::vector<std::string> m_methods;
+        std::vector<Target::MonoMethod> m_methods;
         std::vector<Target::MonoField> m_fields;
-        std::map<std::string, std::uint64_t> m_resolved;
+        std::string m_parent;
+        bool m_generic = false;
+        std::string m_pendingClass;
+        std::map<std::size_t, std::uint64_t> m_resolved;
         float m_listWidth = 0.0f;
 
         int m_leftTab = 0;               // 0 scenes, 1 objects, 2 classes
