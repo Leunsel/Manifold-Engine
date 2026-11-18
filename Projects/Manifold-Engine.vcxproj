@@ -170,6 +170,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
+    <ClCompile Include="..\Source\Target\Il2Cpp.cpp" />
     <ClCompile Include="..\Source\Target\Mono.cpp" />
     <ClCompile Include="..\Source\Target\PatchScan.cpp" />
     <ClCompile Include="..\Source\Target\PdbSymbols.cpp" />

@@ -162,7 +162,7 @@ namespace Manifold::UI
             case UiRequestKind::StructureDissect: OpenStructure(request.Address, request.Text); break;
             case UiRequestKind::AutoAssembler: OpenScript(request.Text); break;
             case UiRequestKind::LuaEngine: OpenLua(); break;
-            case UiRequestKind::Mono: OpenMono(); break;
+            case UiRequestKind::Mono: OpenMono(request.Text); break;
             case UiRequestKind::Quit: RequestQuit(); break;
             }
         }
@@ -473,11 +473,13 @@ namespace Manifold::UI
         m_threadList->Show();
     }
 
-    void Workspace::OpenMono()
+    void Workspace::OpenMono(const std::string& className)
     {
         if (!m_mono)
             m_mono = std::make_unique<MonoWindow>(*this);
         m_mono->Show();
+        if (!className.empty())
+            m_mono->ShowClass(className);
     }
 
     void Workspace::OpenProfiler(int tab)

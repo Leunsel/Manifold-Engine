@@ -217,7 +217,8 @@ namespace Manifold
         }
         const std::shared_ptr<Target::Process> process = m_process;
         const std::uint64_t generation = m_processGeneration;
-        m_work.Start({ "Loading the Mono runtime", kMonoWork, true, false }, [this, process, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
+        const bool il2cpp = Target::MonoBridge::DetectRuntime(*process) == Target::ManagedRuntime::Il2Cpp;
+        m_work.Start({ il2cpp ? "Loading the IL2CPP runtime" : "Loading the Mono runtime", kMonoWork, true, false }, [this, process, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
             {
                 const Status status = m_mono.Start(process, &progress);
                 const bool cancelled = progress.Cancelled();
@@ -235,7 +236,7 @@ namespace Manifold
             return;
         }
         const std::uint64_t generation = m_processGeneration;
-        m_work.Start({ "Reloading the Mono classes", kMonoWork, true, false }, [this, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
+        m_work.Start({ m_mono.IsIl2Cpp() ? "Reloading the IL2CPP classes" : "Reloading the Mono classes", kMonoWork, true, false }, [this, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
             {
                 const Status status = m_mono.Refresh(&progress);
                 const bool cancelled = progress.Cancelled();
@@ -249,11 +250,12 @@ namespace Manifold
         m_work.CompleteGroup(kMonoWork);
         if (!m_mono.Present())
             return;
+        const std::string runtime = Target::MonoBridge::RuntimeName(m_mono.Runtime());
         m_mono.Stop();
         RefreshSymbolProvider();
-        LOG_INFO("Mono", "Shut down the Mono helper in the game");
+        LOG_INFO("Mono", "Shut down the " + runtime + " helper in the game");
         if (!fromScript)
-            Notify(LogLevel::Success, "Shut down Mono: the helper in the game has ended");
+            Notify(LogLevel::Success, "Shut down " + runtime + ": the helper in the game has ended");
     }
 
     void Engine::FinishMono(const Status& status, bool cancelled, bool starting, bool fromScript, std::uint64_t generation)
@@ -265,12 +267,12 @@ namespace Manifold
             if (starting)
                 RefreshSymbolProvider();
             if (!fromScript)
-                Notify(LogLevel::Success, Format("%s %zu Mono classes", starting ? "Loaded" : "Reloaded", m_mono.ClassCount()));
+                Notify(LogLevel::Success, Format("%s %zu %s classes", starting ? "Loaded" : "Reloaded", m_mono.ClassCount(), Target::MonoBridge::RuntimeName(m_mono.Runtime())));
             return;
         }
         if (cancelled)
         {
-            LOG_INFO("Mono", starting ? "Loading the Mono runtime was cancelled" : "Reloading the Mono classes was cancelled; the earlier list stays");
+            LOG_INFO("Mono", starting ? "Loading the managed runtime was cancelled" : "Reloading the classes was cancelled; the earlier list stays");
             return;
         }
         if (fromScript)
@@ -346,10 +348,20 @@ namespace Manifold
                 // (the runtime allocates its own code pages), so only for an
                 // address in no module is a Mono lookup worth the remote-call
                 // cost; the common in-module path never touches the runtime, and
-                // MethodNameAt caches so repeat lines are free.
-                if (MonoPresent() && m_process && !m_process->ModuleAt(address))
+                // MethodNameAt caches so repeat lines are free. IL2CPP methods
+                // are GameAssembly.dll's own code and are looked up in the
+                // bridge's sorted table, without a remote call for the range.
+                if (MonoPresent() && m_process && (m_mono.IsIl2Cpp() || !m_process->ModuleAt(address)))
+                {
                     if (const auto name = m_mono.MethodNameAt(address))
+                    {
+                        // Inside a method the offset stays, so the text
+                        // evaluates back to the same address.
+                        if (const auto range = m_mono.MethodRange(address); range && range->first < address)
+                            return *name + "+" + Hex(address - range->first);
                         return name;
+                    }
+                }
                 return std::nullopt;
             });
     }

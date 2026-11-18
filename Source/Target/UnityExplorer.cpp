@@ -209,11 +209,15 @@ namespace Manifold::Target
 
     bool UnityExplorer::Allowed()
     {
-        if (m_enabled.load())
+        // The explorer runs managed code through Mono's own API; an IL2CPP
+        // game has none of it (stage 1 reads its metadata only).
+        const bool il2cpp = m_mono.IsIl2Cpp();
+        if (m_enabled.load() && !il2cpp)
             return true;
         {
             std::lock_guard state(m_stateLock);
-            m_status.Error = "The scene explorer and inspector are switched off for this session.";
+            m_status.Error = il2cpp ? "The scene explorer and inspector work with Mono games only; this game runs IL2CPP."
+                                    : "The scene explorer and inspector are switched off for this session.";
         }
         Publish();
         return false;
@@ -221,11 +225,11 @@ namespace Manifold::Target
 
     void UnityExplorer::Post(std::string task, std::function<void()> job)
     {
-        if (!m_enabled.load())
+        if (!m_enabled.load() || m_mono.IsIl2Cpp())
             return;
         {
             std::lock_guard bridge(m_mono.m_lock);
-            if (!m_mono.m_present || !m_mono.m_process)
+            if (!m_mono.m_present || !m_mono.m_process || m_mono.m_runtime.load() != ManagedRuntime::Mono)
                 return;
             std::lock_guard state(m_stateLock);
             m_process = m_mono.m_process;
@@ -1816,6 +1820,8 @@ namespace Manifold::Target
         // the user turned the explorer on for this session.
         if (!m_enabled.load())
             return Status::Fail(ErrorCode::MonoCallFailed, "the scene explorer is switched off");
+        if (m_mono.Runtime() != ManagedRuntime::Mono)
+            return Status::Fail(ErrorCode::MonoCallFailed, "the scene explorer needs a Mono runtime");
         // A runtime that is missing one of these silently loses a feature, so
         // record them once instead of letting calls fail with an empty reason.
         {

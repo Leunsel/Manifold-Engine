@@ -868,7 +868,8 @@ namespace Manifold::Tests
             return 1;
         }
         const std::vector<Target::MonoClass> classes = engine.Mono().Classes();
-        std::printf("Mono in %s: %zu classes in %.2fs (members load on demand)\n", engine.Mono().Module().c_str(), classes.size(), seconds);
+        std::printf("%s in %s: %zu classes in %.2fs (members load on demand)\n", Target::MonoBridge::RuntimeName(engine.Mono().Runtime()),
+            engine.Mono().Module().c_str(), classes.size(), seconds);
         const std::size_t show = std::min<std::size_t>(classes.size(), 18);
         for (std::size_t i = 0; i < show; ++i)
         {
@@ -910,8 +911,10 @@ namespace Manifold::Tests
         }
         if (object)
         {
+            // Mono: object -> vtable -> class; IL2CPP: the object starts with its class.
+            const bool il2cpp = engine.Mono().IsIl2Cpp();
             const auto vtable = engine.Process()->ReadPointer(object);
-            const auto klass = vtable ? engine.Process()->ReadPointer(*vtable) : std::nullopt;
+            const auto klass = il2cpp ? vtable : vtable ? engine.Process()->ReadPointer(*vtable) : std::nullopt;
             const auto instance = engine.Mono().ClassAt(object);
             std::printf("object %s: vtable %s, klass %s -> class %s", Hex(object).c_str(),
                 vtable ? Hex(*vtable).c_str() : "unreadable", klass ? Hex(*klass).c_str() : "unreadable",

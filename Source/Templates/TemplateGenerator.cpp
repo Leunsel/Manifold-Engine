@@ -29,7 +29,7 @@ namespace Manifold::Templates
         constexpr int kMaxIncludeDepth = 16;
         constexpr std::size_t kPatternLimit = 64;
         constexpr std::size_t kHitLimit = 512;
-        constexpr const char* kMonoHint = "Manifold Engine does not read Mono metadata yet, so templates that need a managed method cannot be generated.";
+        constexpr const char* kMonoHint = "Manifold Engine reads Mono and IL2CPP classes, but does not fill a template's managed-method values yet, so templates that need a managed method cannot be generated.";
         constexpr const char* kModuleHint = "The selected address must be inside a loaded module. Dynamically allocated memory has no module to scan in.";
 
         constexpr const char* kEnvironment = R"LUA(
@@ -916,8 +916,14 @@ return setmetatable(env, { __index = index })
                         const std::string missing = c.Flag("HasManifoldCommands") ? "the Manifold Framework's Trampolines module" : "the Manifold Framework";
                         return "{\n   WARNING: this script needs " + missing + ", which is not loaded.\n   ManifoldInstallDetour / ManifoldEmitOriginal / ManifoldDestroyDetour\n   below will not assemble until it is. There is no plain Cheat Engine\n   equivalent for a trampoline, use a non-trampoline template instead.\n}";
                     } },
-                { "MonoAvailable", "Mono", "Whether the target runs Mono", kMonoHint, [](Context&) -> Value { return false; } },
-                { "MonoIsIl2Cpp", "Mono", "Whether the target is an IL2CPP build", kMonoHint, [](Context&) -> Value { return false; } },
+                { "MonoAvailable", "Mono", "Whether a Mono or IL2CPP runtime is loaded", kMonoHint, [](Context& c) -> Value { return c.Owner().MonoPresent(); } },
+                { "MonoIsIl2Cpp", "Mono", "Whether the target is an IL2CPP build", kMonoHint, [](Context& c) -> Value
+                    {
+                        Engine& engine = c.Owner();
+                        if (engine.MonoPresent())
+                            return engine.Mono().IsIl2Cpp();
+                        return engine.HasProcess() && Target::MonoBridge::DetectRuntime(*engine.Process()) == Target::ManagedRuntime::Il2Cpp;
+                    } },
                 { "MonoIsJitted", "Mono", "Whether the address is in JIT compiled managed code", kMonoHint, [](Context&) -> Value { return false; } },
                 { "MonoNamespace", "Mono", "Namespace of the managed method", kMonoHint, [](Context&) -> Value { return std::monostate{}; } },
                 { "MonoClass", "Mono", "Class of the managed method", kMonoHint, [](Context&) -> Value { return std::monostate{}; } },

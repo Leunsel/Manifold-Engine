@@ -19,6 +19,7 @@ namespace Manifold::Tests
 {
     void CheckBreakActions(Engine& engine, bool veh);
     void CheckMono(Engine& engine);
+    void CheckIl2CppTarget(const std::filesystem::path& targetPath);
 
     namespace
     {
@@ -925,6 +926,7 @@ namespace Manifold::Tests
             CHECK_EQ(order(), std::string("+P+A+B+C-C-B-A-P"));
         }
         engine.CloseProcess();
+        CheckIl2CppTarget(targetPath);
         return Totals().Failures - before;
     }
 }

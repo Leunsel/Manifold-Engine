@@ -118,7 +118,9 @@ namespace Manifold::UI
         void OpenBreakpointEditor(std::uint64_t address, Debug::BreakpointType type, int size, unsigned int viewport = 0);
         void OpenThreadList();
         void OpenTrace(std::uint64_t address, unsigned int viewport = 0);
-        void OpenMono();
+        // With a class name ("Player", "Game.Player" or "Assembly-CSharp:Game.Player")
+        // the window opens on that class in its Classes tab.
+        void OpenMono(const std::string& className = {});
         void OpenProfiler(int tab = -1);
         void OpenNopSled();
         bool Animating() const;

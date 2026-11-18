@@ -169,21 +169,24 @@ The Lua engine is `getLuaEngine()`: `cbShowOnPrint.Checked` (and `State`) is the
 
 ## Mono / .NET
 
-For a Mono-based Unity game (one with `mono-2.0-bdwgc.dll` or `mono.dll`), the runtime is read through a small in-process worker, without injecting a DLL. IL2CPP games have no Mono runtime and report as absent.
+For a Unity game, Mono-based (one with `mono-2.0-bdwgc.dll` or `mono.dll`) or IL2CPP (one with `GameAssembly.dll`), the runtime is read through a small in-process worker, without injecting a DLL. As in Cheat Engine, the same `mono_*` functions serve both runtimes. On IL2CPP only metadata is read: there is no JIT, every method already has its code in `GameAssembly.dll`, and nothing runs managed code in the game.
 
 | Function | Result |
 | --- | --- |
-| `mono_isPresent()` | `true` when a Mono runtime is attached. |
-| `mono_initialize()` | Finds and attaches the Mono runtime of the open process; `true` on success. The other functions call it on demand, so it rarely needs calling directly. |
+| `mono_isPresent()` | `true` when a Mono or IL2CPP runtime is attached. |
+| `mono_isIl2Cpp()` | `true` when the game is an IL2CPP build: the attached runtime, or before one is attached, `GameAssembly.dll` in the module list. Starts nothing in the game. |
+| `mono_initialize()` | Finds and attaches the runtime of the open process (IL2CPP first when the game has `GameAssembly.dll`, then Mono); `true` on success. The other functions call it on demand, so it rarely needs calling directly. |
 | `mono_refresh()` | Reads the classes again (after the game has loaded more assemblies). |
-| `mono_enumClasses()` | A list of `{ namespace, name, fullname, image }`, one per class. |
-| `mono_class_getMethods(class)` | A list of the method names of the class (`"Player"` or `"Game.Player"`), or `nil` when the class is unknown. |
-| `mono_class_getFieldOffset(class, field)` | The byte offset of a field, or `nil`. |
-| `mono_getAddress(class, method)` or `mono_getAddress("Class:Method")` | The JIT-compiled address of the method (compiling it if needed), or `nil`. The same names resolve in address expressions and the Auto Assembler, e.g. `Assembly-CSharp:Player:TakeDamage`. |
-| `mono_showDissector()` | Opens the Mono / .NET window (scene and object explorer, class list, inspector), so an autorun script can offer it from its own menu the way the Unreal Engine script does. |
+| `mono_enumClasses()` | A list of `{ namespace, name, fullname, image }`, one per class. Image names come without `.dll`. |
+| `mono_class_getMethods(class)` | A list of the method names of the class (`"Player"`, `"Game.Player"` or `"Assembly-CSharp:Game.Player"`), or `nil` when the class is unknown. |
+| `mono_class_getFieldOffset(class, field)` | The byte offset of an instance field (from the object's start), or `nil`. |
+| `mono_getAddress(class, method)` or `mono_getAddress("Class:Method")` | The address of the method's code, or `nil`: compiled on first use for Mono, read from the method for IL2CPP (`nil` for a method without code of its own, such as an abstract one). The same names resolve in address expressions and the Auto Assembler, also with the assembly in front: `Assembly-CSharp:Player:TakeDamage`. |
+| `mono_showDissector([class])` | Opens the Mono / .NET window (scene and object explorer, class list, inspector), so an autorun script can offer it from its own menu the way the Unreal Engine script does. With a class name (`"Player"`, `"Game.Player"` or `"Assembly-CSharp:Game.Player"`) it opens on that class in the Classes tab. |
 | `mono_shutdown()` | Ends the helper thread in the game and takes the Unity explorer's per-frame callback out, without closing the process. Mono names stop resolving until `mono_initialize()` (or the menu's Load) runs again. |
 
-When Mono is loaded, Structure Dissect uses it automatically: dissecting the address of a Mono object names the structure by its class and fills the fields (names, offsets and types) from the runtime, and following a pointer to another object looks that one up too. No script or manual structure is needed.
+When Mono or IL2CPP is loaded, Structure Dissect uses it automatically: dissecting the address of a managed object names the structure by its class and fills the fields (names, offsets and types) from the runtime, and following a pointer to another object looks that one up too. No script or manual structure is needed. On IL2CPP an object of a class that no assembly lists (a generic instance such as `List<int>`) is named from its class's memory only and its fields are guessed, because such a class pointer is never handed to the runtime.
+
+The scene explorer, the inspector and `mono_showDissector()`'s Scenes and Objects tabs run managed code on the game's main thread and work with Mono games only.
 
 ## Checking a table without the program window
 

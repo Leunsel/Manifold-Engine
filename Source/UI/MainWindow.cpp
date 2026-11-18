@@ -1956,20 +1956,22 @@ namespace Manifold::UI
         Target::MonoBridge& mono = m_engine.Mono();
         if (!m_engine.MonoPresent())
         {
-            if (ImGui::MenuItem(m_engine.MonoLoading() ? ICON_FA_PLUG "  Loading the Mono runtime..." : ICON_FA_PLUG "  Load Mono runtime", nullptr, false, !m_engine.MonoLoading()))
+            const bool il2cpp = m_engine.Process() && Target::MonoBridge::DetectRuntime(*m_engine.Process()) == Target::ManagedRuntime::Il2Cpp;
+            const char* load = il2cpp ? ICON_FA_PLUG "  Load IL2CPP runtime" : ICON_FA_PLUG "  Load Mono runtime";
+            if (ImGui::MenuItem(m_engine.MonoLoading() ? ICON_FA_PLUG "  Loading the runtime..." : load, nullptr, false, !m_engine.MonoLoading()))
                 m_engine.LoadMono();
-            ItemTooltip("Reads the classes and methods of the game's Mono runtime, so method names show in the memory viewer, resolve in addresses and Structure Dissect finds the class of an object.");
+            ItemTooltip("Reads the classes and methods of the game's Mono or IL2CPP runtime, so method names show in the memory viewer, resolve in addresses and Structure Dissect finds the class of an object.");
         }
         else
         {
-            const std::string loaded = mono.Module() + "  ·  " + std::to_string(mono.ClassCount()) + " classes";
+            const std::string loaded = mono.Module() + "  ·  " + Target::MonoBridge::RuntimeName(mono.Runtime()) + "  ·  " + std::to_string(mono.ClassCount()) + " classes";
             SectionLabel(loaded.c_str());
             if (ImGui::MenuItem(ICON_FA_SYNC "  Reload classes", nullptr, false, !m_engine.MonoLoading()))
                 m_engine.ReloadMono();
             ItemTooltip("Reads the class list again, for assemblies the game loaded later");
-            if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut down Mono", nullptr, false, !m_engine.MonoLoading()))
+            if (ImGui::MenuItem(mono.IsIl2Cpp() ? ICON_FA_POWER_OFF "  Shut down IL2CPP" : ICON_FA_POWER_OFF "  Shut down Mono", nullptr, false, !m_engine.MonoLoading()))
                 m_engine.StopMono();
-            ItemTooltip("Ends the helper thread in the game and takes the Unity explorer's callback out. Mono method names and lookups stop until it is loaded again.");
+            ItemTooltip("Ends the helper thread in the game and takes the Unity explorer's callback out. Managed method names and lookups stop until it is loaded again.");
         }
         ImGui::Separator();
         if (CommandItem(ICON_FA_DICE_D6 "  Mono / .NET dissector", Command::OpenMono))

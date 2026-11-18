@@ -34,12 +34,22 @@ namespace Manifold::UI
         m_selected = index;
         m_methods.clear();
         m_fields.clear();
+        m_parent.clear();
+        m_generic = false;
         m_resolved.clear();
         if (index < 0 || index >= static_cast<int>(m_classes.size()))
             return;
-        m_selectedName = m_classes[static_cast<std::size_t>(index)].FullName();
-        m_methods = m_engine.Mono().MethodsOf(m_selectedName);
-        m_fields = m_engine.Mono().FieldsOf(m_selectedName);
+        const Target::MonoClass& picked = m_classes[static_cast<std::size_t>(index)];
+        m_selectedName = picked.FullName();
+        // Asked with the image in front, so a class name two assemblies share
+        // still finds this one.
+        if (const auto details = m_engine.Mono().ClassDetails(picked.Image.empty() ? m_selectedName : picked.Image + ":" + m_selectedName))
+        {
+            m_methods = details->Methods;
+            m_fields = details->Fields;
+            m_parent = details->Parent;
+            m_generic = details->Generic;
+        }
     }
 
     void MonoWindow::SyncUnity(Target::UnityExplorer& unity)
@@ -89,7 +99,7 @@ namespace Manifold::UI
         }
         if (!m_engine.HasProcess())
         {
-            m_workspace.NoProcessState(ICON_FA_DICE_D6, "Open a Mono-based Unity game to explore its scenes, objects and classes.");
+            m_workspace.NoProcessState(ICON_FA_DICE_D6, "Open a Unity game to explore its classes, and for a Mono game its scenes and objects.");
             EndToolWindow();
             return;
         }
@@ -110,9 +120,12 @@ namespace Manifold::UI
                 EndToolWindow();
                 return;
             }
-            std::vector<EmptyAction> actions = { { ICON_FA_PLUG "  Load the Mono runtime", nullptr, true } };
-            if (EmptyState(ICON_FA_DICE_D6, "No Mono runtime loaded",
-                    "This reads the game's Mono runtime by running a small helper inside it. IL2CPP games are not supported.", actions, true) == 0)
+            const bool il2cpp = Target::MonoBridge::DetectRuntime(*m_engine.Process()) == Target::ManagedRuntime::Il2Cpp;
+            std::vector<EmptyAction> actions = { { il2cpp ? ICON_FA_PLUG "  Load the IL2CPP runtime" : ICON_FA_PLUG "  Load the Mono runtime", nullptr, true } };
+            if (EmptyState(ICON_FA_DICE_D6, "No managed runtime loaded",
+                    "This reads the game's Mono or IL2CPP runtime by running a small helper inside it. For IL2CPP games the classes, "
+                    "method addresses and field offsets are read; the scene explorer and inspector need a Mono game.",
+                    actions, true) == 0)
                 m_engine.LoadMono();
             EndToolWindow();
             return;
@@ -123,10 +136,35 @@ namespace Manifold::UI
             m_generation = mono.Generation();
             m_classes = mono.Classes();
             m_lastFilter = "\x01";
+            // Scenes and Objects need the Mono explorer; an IL2CPP game opens
+            // on its classes.
+            if (mono.IsIl2Cpp() && m_leftTab != 2)
+                m_requestLeftTab = 2;
             if (!m_selectedName.empty())
             {
                 const auto found = std::find_if(m_classes.begin(), m_classes.end(), [&](const Target::MonoClass& c) { return c.FullName() == m_selectedName; });
                 SelectClass(found == m_classes.end() ? -1 : static_cast<int>(found - m_classes.begin()));
+            }
+        }
+        if (!m_pendingClass.empty())
+        {
+            // "Player", "Game.Player" or "Assembly-CSharp:Game.Player"; the
+            // full name wins over a bare name of another namespace.
+            const std::string wanted = std::move(m_pendingClass);
+            m_pendingClass.clear();
+            const std::size_t colon = wanted.find(':');
+            const std::string image = colon == std::string::npos ? std::string() : wanted.substr(0, colon);
+            const std::string name = colon == std::string::npos ? wanted : wanted.substr(colon + 1);
+            const auto sameImage = [&](const Target::MonoClass& c)
+                { return image.empty() || EqualsNoCase(c.Image, image) || EqualsNoCase(c.Image + ".dll", image); };
+            auto found = std::find_if(m_classes.begin(), m_classes.end(), [&](const Target::MonoClass& c) { return sameImage(c) && c.FullName() == name; });
+            if (found == m_classes.end())
+                found = std::find_if(m_classes.begin(), m_classes.end(), [&](const Target::MonoClass& c) { return sameImage(c) && c.Name == name; });
+            if (found != m_classes.end())
+            {
+                SelectClass(static_cast<int>(found - m_classes.begin()));
+                m_showClass = true;
+                m_requestLeftTab = 2;
             }
         }
         Target::UnityExplorer& unity = mono.Unity();
@@ -135,7 +173,7 @@ namespace Manifold::UI
         // Toolbar: what is loaded, the explorer's state, reload and shut down.
         // Items wrap onto a second line instead of running off a narrow window.
         ImGui::AlignTextToFramePadding();
-        Muted(mono.Module() + "  ·  " + std::to_string(m_classes.size()) + " classes" +
+        Muted(mono.Module() + "  ·  " + Target::MonoBridge::RuntimeName(mono.Runtime()) + "  ·  " + std::to_string(m_classes.size()) + " classes" +
             (m_status.UnityVersion.empty() ? std::string() : "  ·  Unity " + m_status.UnityVersion));
         if (work)
         {
@@ -279,6 +317,15 @@ namespace Manifold::UI
 
     bool MonoWindow::ExplorerGate(Target::UnityExplorer& unity, const char* icon, const char* what)
     {
+        if (m_engine.Mono().IsIl2Cpp())
+        {
+            EmptyState(icon, "Needs a Mono game",
+                "This game runs IL2CPP. Scenes, objects and the inspector call into the game's managed code on its main thread, "
+                "which Manifold Engine does for Mono games only so far.\n\n"
+                "The Classes tab, method addresses, method names in the disassembler and Structure Dissect's class lookup work for IL2CPP.",
+                {}, false);
+            return false;
+        }
         if (unity.Enabled())
             return true;
         // Honest about the risk: this part runs code inside the game, and on
@@ -625,11 +672,12 @@ namespace Manifold::UI
                 }
                 if (ImGui::BeginPopupContextItem())
                 {
-                    const bool live = m_engine.Mono().Unity().Enabled();
+                    const bool il2cpp = m_engine.Mono().IsIl2Cpp();
+                    const bool live = !il2cpp && m_engine.Mono().Unity().Enabled();
                     if (ImGui::MenuItem(ICON_FA_EYE "  Static members", nullptr, false, live))
                         OpenStatics(info.Handle);
                     if (!live)
-                        ItemTooltip("Needs the explorer, which is off: turn it on under Scenes or Objects");
+                        ItemTooltip(il2cpp ? "Needs the explorer, which works with Mono games only" : "Needs the explorer, which is off: turn it on under Scenes or Objects");
                     if (ImGui::MenuItem(ICON_FA_SEARCH "  Find objects of this class", nullptr, false, live))
                     {
                         m_searchClass = info.FullName();
@@ -653,21 +701,33 @@ namespace Manifold::UI
         const Target::MonoClass* info = m_selected >= 0 && m_selected < static_cast<int>(m_classes.size()) ? &m_classes[static_cast<std::size_t>(m_selected)] : nullptr;
         if (info)
         {
-            if (ImGui::SmallButton(ICON_FA_EYE "  Static members"))
-                OpenStatics(info->Handle);
-            ItemTooltip("Opens the class in the inspector: static fields and properties with their values");
-            ImGui::SameLine();
-            if (ImGui::SmallButton(ICON_FA_SEARCH "  Find objects"))
+            // Static members and the object search go through the explorer,
+            // which IL2CPP does not have yet.
+            if (!m_engine.Mono().IsIl2Cpp())
             {
-                m_searchClass = info->FullName();
-                m_requestLeftTab = 1;
-                m_engine.Mono().Unity().Search({ m_searchClass, std::string(), m_searchHidden });
+                if (ImGui::SmallButton(ICON_FA_EYE "  Static members"))
+                    OpenStatics(info->Handle);
+                ItemTooltip("Opens the class in the inspector: static fields and properties with their values");
+                ImGui::SameLine();
+                if (ImGui::SmallButton(ICON_FA_SEARCH "  Find objects"))
+                {
+                    m_searchClass = info->FullName();
+                    m_requestLeftTab = 1;
+                    m_engine.Mono().Unity().Search({ m_searchClass, std::string(), m_searchHidden });
+                }
+                ItemTooltip("Lists the live objects of this class");
+                ImGui::SameLine();
             }
-            ItemTooltip("Lists the live objects of this class");
-            ImGui::SameLine();
             if (ImGui::SmallButton(ICON_FA_TIMES "##closeclass"))
                 m_showClass = false;
             ItemTooltip("Back to the inspector");
+            std::string about = info->Image;
+            if (!m_parent.empty())
+                about += (about.empty() ? "derives from " : "  ·  derives from ") + m_parent;
+            if (!about.empty())
+                Muted(about);
+            if (m_generic)
+                Muted("An open generic class: its field offsets depend on the type arguments, so none are listed.");
         }
         MethodsPane();
         ImGui::Spacing();
@@ -679,20 +739,28 @@ namespace Manifold::UI
         SectionLabel((std::to_string(m_methods.size()) + " methods").c_str());
         const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp;
         const float height = std::max(Px(120.0f), ImGui::GetContentRegionAvail().y * 0.55f);
-        if (ImGui::BeginTable("##monomethods", 2, flags, ImVec2(0.0f, height)))
+        const bool il2cpp = m_engine.Mono().IsIl2Cpp();
+        const bool counts = std::any_of(m_methods.begin(), m_methods.end(), [](const Target::MonoMethod& method) { return method.ParamCount >= 0; });
+        if (ImGui::BeginTable("##monomethods", counts ? 3 : 2, flags, ImVec2(0.0f, height)))
         {
             ImGui::TableSetupScrollFreeze(0, 1);
             ImGui::TableSetupColumn("Method", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+            if (counts)
+                ImGui::TableSetupColumn("Params", ImGuiTableColumnFlags_WidthFixed, Px(56.0f));
             ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 1.4f);
             ImGui::TableHeadersRow();
             // Resolve (and so JIT-compile) only the methods that are on screen,
             // through the clipper, and cache the result (0 = compile failed) so a
             // class with hundreds of methods does not compile them all at once.
-            const auto resolve = [&](const std::string& method) -> std::uint64_t
+            // IL2CPP methods already carry their code address.
+            const auto resolve = [&](std::size_t index) -> std::uint64_t
                 {
-                    auto it = m_resolved.find(method);
+                    const Target::MonoMethod& method = m_methods[index];
+                    if (method.Address || il2cpp)
+                        return method.Address;
+                    auto it = m_resolved.find(index);
                     if (it == m_resolved.end())
-                        it = m_resolved.emplace(method, m_engine.Mono().AddressOf(m_selectedName + ":" + method).value_or(0)).first;
+                        it = m_resolved.emplace(index, m_engine.Mono().AddressOf(m_selectedName + ":" + method.Name).value_or(0)).first;
                     return it->second;
                 };
             ImGuiListClipper clipper;
@@ -701,8 +769,9 @@ namespace Manifold::UI
             {
                 for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
                 {
-                    const std::string& method = m_methods[static_cast<std::size_t>(i)];
-                    const std::uint64_t address = resolve(method);
+                    const std::string& method = m_methods[static_cast<std::size_t>(i)].Name;
+                    const int params = m_methods[static_cast<std::size_t>(i)].ParamCount;
+                    const std::uint64_t address = resolve(static_cast<std::size_t>(i));
                     ImGui::TableNextRow();
                     ImGui::PushID(i);
                     ImGui::TableNextColumn();
@@ -726,6 +795,12 @@ namespace Manifold::UI
                             ImGui::SetClipboardText((m_selectedName + ":" + method).c_str());
                         ImGui::EndPopup();
                     }
+                    if (counts)
+                    {
+                        ImGui::TableNextColumn();
+                        if (params >= 0)
+                            Muted(std::to_string(params));
+                    }
                     ImGui::TableNextColumn();
                     PushMono();
                     if (address)
@@ -733,6 +808,16 @@ namespace Manifold::UI
                     else
                         Muted("--");
                     PopMono();
+                    if (il2cpp && address && ImGui::IsItemHovered())
+                    {
+                        const std::size_t sharing = m_engine.Mono().MethodsSharingCode(address);
+                        if (sharing > 1)
+                            ImGui::SetTooltip("%zu methods share this code: the compiler folded identical bodies into one, so a breakpoint here stops for all of them.", sharing);
+                    }
+                    else if (il2cpp && !address)
+                    {
+                        ItemTooltip("No code of its own: abstract, or an open generic method");
+                    }
                     ImGui::PopID();
                 }
             }
