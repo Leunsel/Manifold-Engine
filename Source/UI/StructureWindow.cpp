@@ -449,7 +449,7 @@ namespace Manifold::UI
         m_filling.insert(definition);
         const std::weak_ptr<int> alive = m_alive;
         Engine& engine = m_engine;
-        auto finish = [this, &engine, alive, definition, address, size](bool handled)
+        auto finish = [this, &engine, alive, definition, address, size, mono](bool handled)
             {
                 if (!alive.expired())
                     m_filling.erase(definition);
@@ -459,6 +459,8 @@ namespace Manifold::UI
                 if (handled)
                 {
                     live->Sort();
+                    if (!mono && engine.HasProcess() && live->Size() < size)
+                        Table::GuessFields(*engine.Process(), *live, address, live->Size(), size - live->Size());
                 }
                 else if (engine.HasProcess())
                 {
@@ -545,8 +547,27 @@ namespace Manifold::UI
             }
             m_pendingStructure.clear();
         }
+        if (!m_pendingDeletes.empty())
+        {
+            for (const PendingDelete& pending : m_pendingDeletes)
+            {
+                if (Table::StructDefinition* target = m_engine.Structures().Find(pending.Structure))
+                {
+                    const int offset = pending.Offset;
+                    target->Fields.erase(std::remove_if(target->Fields.begin(), target->Fields.end(), [&](const Table::StructField& item) { return item.Offset == offset; }), target->Fields.end());
+                }
+            }
+            m_pendingDeletes.clear();
+            m_engine.Table().Touch();
+        }
         Toolbar();
         Table::StructDefinition* definition = Current();
+        if (m_structure != m_selectionStructure)
+        {
+            m_selected.clear();
+            m_selectAnchor.clear();
+            m_selectionStructure = m_structure;
+        }
         std::vector<std::uint64_t> bases;
         for (Column& column : m_columns)
         {
@@ -786,7 +807,7 @@ namespace Manifold::UI
         {
             Table::StructField& candidate = row.Definition->Fields[static_cast<std::size_t>(row.Field)];
             const Block& block = m_blocks[static_cast<std::size_t>(row.Block)];
-            if (FieldKey(block.Path, candidate.Offset, row.Twin) != m_selectedPath)
+            if (FieldKey(block.Path, candidate.Offset, row.Twin) != m_selectAnchor)
                 continue;
             definition = row.Definition;
             field = &candidate;
@@ -796,7 +817,7 @@ namespace Manifold::UI
         for (const CommandInfo& info : AllCommands())
         {
             if (info.Scope == CommandScope::Structure && !IsWindowCommand(info.Id) && Pressed(info.Id) && field)
-                RunFieldCommand(info.Id, *definition, *field, address, m_selectedPath, pointerSize);
+                RunFieldCommand(info.Id, *definition, *field, address, m_selectAnchor, pointerSize);
         }
     }
 
@@ -828,12 +849,23 @@ namespace Manifold::UI
             m_pendingInsert = true;
             break;
         case Command::DeleteField:
-            m_pendingStructure = definition.Name;
-            m_pendingOffset = field.Offset;
-            m_pendingInsert = false;
+            if (m_selected.size() > 1 && m_selected.count(path))
+            {
+                DeleteSelection();
+            }
+            else
+            {
+                m_pendingStructure = definition.Name;
+                m_pendingOffset = field.Offset;
+                m_pendingInsert = false;
+            }
             break;
         case Command::FieldToAddressList:
-            if (readable)
+            if (m_selected.size() > 1 && m_selected.count(path))
+            {
+                AddSelectionToAddressList();
+            }
+            else if (readable)
             {
                 Table::MemoryRecord& record = m_engine.Table().AddValue(field.Name, m_engine.Symbols().ModuleOffset(address), field.Type);
                 record.Length = field.Size;
@@ -870,6 +902,50 @@ namespace Manifold::UI
         default:
             break;
         }
+    }
+
+    void StructureWindow::AddSelectionToAddressList()
+    {
+        if (!m_engine.HasProcess())
+            return;
+        bool any = false;
+        for (const Row& row : m_rows)
+        {
+            const Table::StructField& field = row.Definition->Fields[static_cast<std::size_t>(row.Field)];
+            const Block& block = m_blocks[static_cast<std::size_t>(row.Block)];
+            if (!m_selected.count(FieldKey(block.Path, field.Offset, row.Twin)))
+                continue;
+            const std::uint64_t address = block.Bases.empty() ? 0 : FieldAddress(block.Bases.front(), field.Offset);
+            if (!address)
+                continue;
+            Table::MemoryRecord& record = m_engine.Table().AddValue(field.Name, m_engine.Symbols().ModuleOffset(address), field.Type);
+            record.Length = field.Size;
+            record.Unicode = field.Unicode;
+            record.ShowHex = field.Display == Table::FieldDisplay::Hex;
+            record.CustomTypeName = field.CustomType;
+            if (field.Type == Scan::ValueType::Binary)
+            {
+                record.BitStart = field.BitStart;
+                record.BitLength = field.BitLength;
+            }
+            any = true;
+        }
+        if (any)
+            m_engine.RefreshValues(true);
+    }
+
+    void StructureWindow::DeleteSelection()
+    {
+        for (const Row& row : m_rows)
+        {
+            const Table::StructField& field = row.Definition->Fields[static_cast<std::size_t>(row.Field)];
+            const Block& block = m_blocks[static_cast<std::size_t>(row.Block)];
+            if (!m_selected.count(FieldKey(block.Path, field.Offset, row.Twin)))
+                continue;
+            m_pendingDeletes.push_back({ row.Definition->Name, field.Offset });
+        }
+        m_selected.clear();
+        m_selectAnchor.clear();
     }
 
     void StructureWindow::Toolbar()
@@ -1184,19 +1260,75 @@ namespace Manifold::UI
         PushMono();
         const std::string offsetText = Hex(static_cast<std::uint64_t>(field.Offset), 4) +
             (field.Type == Scan::ValueType::Binary && field.CustomType.empty() ? ":" + std::to_string(field.BitStart) : std::string());
-        const bool clicked = ImGui::Selectable(offsetText.c_str(), m_selectedPath == fieldPath, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap);
-        if (clicked || ImGui::IsItemClicked(ImGuiMouseButton_Right))
-            m_selectedPath = fieldPath;
+        const bool selected = m_selected.count(fieldPath) > 0;
+        const bool clicked = ImGui::Selectable(offsetText.c_str(), selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap);
+        const ImGuiIO& io = ImGui::GetIO();
+        if (clicked)
+        {
+            bool ranged = false;
+            if (io.KeyShift && !m_selectAnchor.empty())
+            {
+                const auto rowPath = [&](const Row& r) { return FieldKey(m_blocks[static_cast<std::size_t>(r.Block)].Path, r.Definition->Fields[static_cast<std::size_t>(r.Field)].Offset, r.Twin); };
+                int from = -1;
+                int to = -1;
+                for (int i = 0; i < static_cast<int>(m_rows.size()); ++i)
+                {
+                    const std::string candidate = rowPath(m_rows[static_cast<std::size_t>(i)]);
+                    if (candidate == m_selectAnchor)
+                        from = i;
+                    if (candidate == fieldPath)
+                        to = i;
+                }
+                if (from >= 0 && to >= 0)
+                {
+                    if (!io.KeyCtrl)
+                        m_selected.clear();
+                    for (int i = std::min(from, to); i <= std::max(from, to); ++i)
+                        m_selected.insert(rowPath(m_rows[static_cast<std::size_t>(i)]));
+                    ranged = true;
+                }
+            }
+            if (!ranged)
+            {
+                if (io.KeyCtrl)
+                {
+                    if (selected)
+                        m_selected.erase(fieldPath);
+                    else
+                        m_selected.insert(fieldPath);
+                }
+                else
+                {
+                    m_selected.clear();
+                    m_selected.insert(fieldPath);
+                }
+                m_selectAnchor = fieldPath;
+            }
+        }
+        else if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !selected)
+        {
+            m_selected.clear();
+            m_selected.insert(fieldPath);
+            m_selectAnchor = fieldPath;
+        }
         if (clicked && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {
-            m_editPath = fieldPath;
-            m_editName = ImGui::TableGetHoveredColumn() == 1;
-            m_editText = m_editName ? field.Name : "";
-            if (!m_editName && !addresses.empty() && addresses.front() && m_engine.HasProcess())
+            const int column = ImGui::TableGetHoveredColumn();
+            if (column == 2)
             {
-                std::vector<std::uint8_t> bytes(static_cast<std::size_t>(std::max(1, field.Size)));
-                if (m_engine.Process()->ReadExact(addresses.front(), bytes.data(), bytes.size()))
-                    m_editText = FieldText(field, bytes, addresses.front(), pointerSize);
+                ImGui::OpenPopup("##fieldmenu");
+            }
+            else
+            {
+                m_editPath = fieldPath;
+                m_editName = column == 1;
+                m_editText = m_editName ? field.Name : "";
+                if (!m_editName && !addresses.empty() && addresses.front() && m_engine.HasProcess())
+                {
+                    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(std::max(1, field.Size)));
+                    if (m_engine.Process()->ReadExact(addresses.front(), bytes.data(), bytes.size()))
+                        m_editText = FieldText(field, bytes, addresses.front(), pointerSize);
+                }
             }
         }
         PopMono();
@@ -1296,12 +1428,16 @@ namespace Manifold::UI
     {
         const int pointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8;
         const std::uint64_t first = addresses.empty() ? 0 : addresses.front();
+        const bool multi = m_selected.size() > 1 && m_selected.count(path) > 0;
         const auto item = [&](const char* label, Command command, bool enabled = true)
             {
                 if (CommandItem(label, command, false, enabled))
                     RunFieldCommand(command, definition, field, first, path, pointerSize);
             };
-        ImGui::TextDisabled("%s", field.Name.c_str());
+        if (multi)
+            ImGui::TextDisabled("%zu fields selected", m_selected.size());
+        else
+            ImGui::TextDisabled("%s", field.Name.c_str());
         ImGui::Separator();
         item(ICON_FA_EDIT "  Change the value", Command::ChangeFieldValue, first != 0 && m_engine.HasProcess());
         item(ICON_FA_I_CURSOR "  Rename", Command::RenameField);
@@ -1405,7 +1541,8 @@ namespace Manifold::UI
         }
         ImGui::Separator();
         ImGui::BeginDisabled(first == 0);
-        item(ICON_FA_PLUS "  Add to the address list", Command::FieldToAddressList);
+        const std::string addLabel = multi ? ICON_FA_PLUS "  Add " + std::to_string(m_selected.size()) + " fields to the address list" : std::string(ICON_FA_PLUS "  Add to the address list");
+        item(addLabel.c_str(), Command::FieldToAddressList);
         item(ICON_FA_MEMORY "  Browse this memory", Command::BrowseField);
         if (field.Type == Scan::ValueType::Pointer)
             item(ICON_FA_ARROW_RIGHT "  Browse the memory it points to", Command::BrowseFieldPointer);
@@ -1414,7 +1551,8 @@ namespace Manifold::UI
         ImGui::EndDisabled();
         ImGui::Separator();
         item(ICON_FA_PLUS "  Insert 4 bytes after", Command::InsertField);
-        if (DangerCommandItem(ICON_FA_TRASH "  Delete field", Command::DeleteField))
+        const std::string deleteLabel = multi ? ICON_FA_TRASH "  Delete " + std::to_string(m_selected.size()) + " fields" : std::string(ICON_FA_TRASH "  Delete field");
+        if (DangerCommandItem(deleteLabel.c_str(), Command::DeleteField))
             RunFieldCommand(Command::DeleteField, definition, field, first, path, pointerSize);
     }
 }

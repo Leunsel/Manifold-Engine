@@ -450,6 +450,12 @@ namespace Manifold::UI
             bool Whole = false;
         };
 
+        struct PendingDelete
+        {
+            std::string Structure;
+            int Offset = 0;
+        };
+
         void Toolbar();
         void MenuBar();
         static bool IsWindowCommand(Command command);
@@ -462,6 +468,8 @@ namespace Manifold::UI
         bool ReadField(int block, std::size_t column, std::uint64_t address, std::uint8_t* out, std::size_t size) const;
         void DrawRow(int index, int pointerSize);
         void FieldMenu(Table::StructDefinition& definition, Table::StructField& field, const std::vector<std::uint64_t>& addresses, const std::string& path);
+        void AddSelectionToAddressList();
+        void DeleteSelection();
         Table::StructDefinition& Guess(const std::string& name, std::uint64_t address, int size);
         void Fill(Table::StructDefinition* definition, std::uint64_t address, int size, bool mono);
         void LookupName(std::uint64_t address, bool containing, std::function<void(std::optional<Lua::StructureLookup>)> done);
@@ -497,12 +505,15 @@ namespace Manifold::UI
         std::string m_renameText;
         std::string m_editPath;
         std::string m_editText;
-        std::string m_selectedPath;
+        std::set<std::string> m_selected;
+        std::string m_selectAnchor;
+        std::string m_selectionStructure;
         bool m_editName = false;
         std::string m_addOffset;
         std::string m_pendingStructure;
         int m_pendingOffset = 0;
         bool m_pendingInsert = false;
+        std::vector<PendingDelete> m_pendingDeletes;
     };
 
     class ScriptWindow : public ToolWindow
