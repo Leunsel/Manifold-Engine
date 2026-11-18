@@ -276,13 +276,14 @@ namespace Manifold::UI
         else if (m_busySince < 0.0)
             m_busySince = now;
         const bool showBusy = m_status.Busy && now - m_busySince > 0.4;
-        const char* const explorerOn = ICON_FA_EXCLAMATION_TRIANGLE " explorer on";
+        const char* const explorerOn = ICON_FA_INFO_CIRCLE " explorer on";
         const char* const keepLabel = "Keep running in the background";
         if (unity.Enabled())
         {
             FlowNext(ImGui::CalcTextSize(explorerOn).x);
-            ImGui::TextColored(ManifoldTheme::Warning, "%s", explorerOn);
-            ItemTooltip("Code runs inside the game while this is on. It can crash Unity 6 games; Shut down takes it back out.");
+            ImGui::TextColored(ManifoldTheme::Label, "%s", explorerOn);
+            ItemTooltip("Manifold's managed agent answers from the game's frame callback while this is on, a few milliseconds per frame at most. "
+                        "Shut down takes it back out; the assembly itself stays loaded until the game ends.");
         }
         if (m_status.Hooked)
         {

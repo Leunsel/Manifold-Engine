@@ -56,17 +56,22 @@ set MSBuildSDKsPath=
 set MSBuildExtensionsPath=
 set MSBUILD_EXE_PATH=
 dotnet build "$(ProjectDir)..\Managed\ManifoldDumper\ManifoldDumper.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
+dotnet build "$(ProjectDir)..\Managed\FakeUnity\FakeUnity.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
 :embed
 where python &gt;nul 2&gt;nul || exit /b 0
 python "$(ProjectDir)..\Tools\embed_managed.py" --touch</Command>
       <Message>Building the managed dumper and embedding it into the program</Message>
-      <Inputs>$(ProjectDir)..\Managed\ManifoldDumper\Dumper.cs;$(ProjectDir)..\Managed\ManifoldDumper\ManifoldDumper.csproj;$(ProjectDir)..\Tools\embed_managed.py</Inputs>
-      <Outputs>$(ProjectDir)..\Build\Managed\ManifoldDumper2.dll;$(ProjectDir)..\Source\Generated\ManagedDumperImage.cpp</Outputs>
+      <Inputs>$(ProjectDir)..\Managed\FakeUnity\FakeUnity.cs;$(ProjectDir)..\Managed\FakeUnity\FakeUnity.csproj;$(ProjectDir)..\Managed\ManifoldDumper\Agent.cs;$(ProjectDir)..\Managed\ManifoldDumper\Dumper.cs;$(ProjectDir)..\Managed\ManifoldDumper\ManifoldDumper.csproj;$(ProjectDir)..\Managed\ManifoldDumper\Ops.cs;$(ProjectDir)..\Tools\embed_managed.py</Inputs>
+      <Outputs>$(ProjectDir)..\Build\Managed\ManifoldDumper3.dll;$(ProjectDir)..\Build\Managed\UnityEngine.CoreModule.dll;$(ProjectDir)..\Source\Generated\ManagedDumperImage.cpp</Outputs>
     </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <None Include="..\Managed\FakeUnity\FakeUnity.cs" />
+    <None Include="..\Managed\FakeUnity\FakeUnity.csproj" />
+    <None Include="..\Managed\ManifoldDumper\Agent.cs" />
     <None Include="..\Managed\ManifoldDumper\Dumper.cs" />
     <None Include="..\Managed\ManifoldDumper\ManifoldDumper.csproj" />
+    <None Include="..\Managed\ManifoldDumper\Ops.cs" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

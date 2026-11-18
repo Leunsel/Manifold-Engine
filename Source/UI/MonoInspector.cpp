@@ -295,7 +295,7 @@ namespace Manifold::UI
             ImGui::TextColored(ManifoldTheme::Muted, "%.0f ms", tab.ShownMs);
             char detail[220];
             std::snprintf(detail, sizeof(detail),
-                "The last refresh took %.1f ms: %d calls on the game's main thread in %d round trips, %d of them waited for the game's next frame.",
+                "The last refresh took %.1f ms: %d requests to the agent in the game in %d round trips, while the game ran %d frames.",
                 inspection->RefreshMs, inspection->Calls, inspection->RoundTrips, inspection->FrameWaits);
             ItemTooltip(detail);
         }
@@ -349,7 +349,9 @@ namespace Manifold::UI
                 Muted(derives);
             }
         }
-        if (inspection->FromScan)
+        if (inspection->Unheld)
+            TextWithError(ICON_FA_INFO_CIRCLE "  Opened from memory: Manifold does not hold this object, so only fields are shown. Open it from its parent (the scene tree, a field or a property) to call into it.", ManifoldTheme::Label);
+        else if (inspection->FromScan)
             TextWithError(ICON_FA_INFO_CIRCLE "  Found by a memory scan: only fields are shown, nothing is called on it.", ManifoldTheme::Label);
         if (!inspection->Error.empty())
             TextWithError(ICON_FA_EXCLAMATION_TRIANGLE "  " + inspection->Error, ManifoldTheme::Warning);

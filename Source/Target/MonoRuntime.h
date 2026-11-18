@@ -29,6 +29,7 @@ namespace Manifold::Target
         std::size_t MethodsSharingCode(std::uint64_t) override { return 0; }
         bool CompilesOnDemand() const override { return true; }
         std::optional<std::uint64_t> Compile(std::uint64_t method) override;
+        std::uint64_t ManagedClass(std::string_view space, std::string_view name) override;
 
     private:
         using ImageList = std::vector<std::pair<std::uint64_t, std::string>>;
@@ -46,6 +47,8 @@ namespace Manifold::Target
             std::uint64_t Size = 0;
         };
 
+        ImageList ReadImages();
+        Status LoadManagedImage(const ImageList& images);
         std::optional<std::vector<MonoClass>> DumpWithAgent(const ImageList& images, std::int64_t total, WorkProgress* progress);
         Status LoadDumper(const ImageList& images);
         Result<ManagedDump> RunDumper(std::int64_t total, WorkProgress* progress);
@@ -57,6 +60,7 @@ namespace Manifold::Target
         void StopDumper();
 
         DumperHandles m_dumper;
+        std::uint64_t m_managedImage = 0;
         bool m_dumperPending = false;
         bool m_dumperBroken = false;
 

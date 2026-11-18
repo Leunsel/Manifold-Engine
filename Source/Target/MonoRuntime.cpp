@@ -49,6 +49,7 @@ namespace Manifold::Target
             "mono_class_get_element_class", "mono_array_element_size", "mono_class_get_rank", "mono_object_to_string", "mono_free",
             "mono_method_get_param_names",
             "mono_image_open_from_data", "mono_assembly_load_from_full", "mono_class_from_name", "mono_class_get_field_from_name",
+            "mono_method_get_token", "mono_class_get_field_token", "mono_class_get_type_token",
         };
     }
 
@@ -93,23 +94,18 @@ namespace Manifold::Target
         return *address;
     }
 
-    Status MonoRuntime::Enumerate(WorkProgress* progress, bool starting)
+    MonoRuntime::ImageList MonoRuntime::ReadImages()
     {
-        const auto stopped = [progress] { return progress && progress->Cancelled(); };
-        const Status cancelled = Status::Fail(ErrorCode::MonoNotFound, "cancelled");
-        if (progress)
-            progress->SetText("Reading the assemblies");
-
         constexpr int kMaxAssemblies = 4096;
         std::vector<std::uint64_t> assemblies;
         {
             std::lock_guard lock(m_bridge.m_lock);
             if (!m_bridge.m_process || !m_bridge.m_domain)
-                return Status::Fail(ErrorCode::MonoNotFound);
+                return {};
             m_bridge.m_call.ResetScratch();
             const std::uint64_t array = m_bridge.m_call.Scratch(static_cast<std::size_t>(16 + kMaxAssemblies * 8));
             if (!array)
-                return Status::Fail(ErrorCode::MonoNotFound, "no scratch space");
+                return {};
             const std::uint64_t cap = kMaxAssemblies;
             m_bridge.m_process->Write(array + 8, &cap, sizeof(cap));
             m_bridge.CallFn("mono_assembly_foreach", m_bridge.m_call.CollectorAddress(), array);
@@ -121,17 +117,32 @@ namespace Manifold::Target
                 m_bridge.m_process->ReadExact(array + 16, assemblies.data(), static_cast<std::size_t>(count) * 8);
             m_bridge.m_call.ResetScratch();
         }
-
-        std::vector<std::pair<std::uint64_t, std::string>> images;
+        ImageList images;
         for (std::uint64_t assembly : assemblies)
         {
-            if (stopped())
-                return cancelled;
             std::lock_guard lock(m_bridge.m_lock);
             const auto image = m_bridge.CallFn("mono_assembly_get_image", assembly);
             if (image && *image)
                 images.emplace_back(*image, m_bridge.CallString("mono_image_get_name", *image));
         }
+        return images;
+    }
+
+    Status MonoRuntime::Enumerate(WorkProgress* progress, bool starting)
+    {
+        const auto stopped = [progress] { return progress && progress->Cancelled(); };
+        const Status cancelled = Status::Fail(ErrorCode::MonoNotFound, "cancelled");
+        if (progress)
+            progress->SetText("Reading the assemblies");
+
+        {
+            std::lock_guard lock(m_bridge.m_lock);
+            if (!m_bridge.m_process || !m_bridge.m_domain)
+                return Status::Fail(ErrorCode::MonoNotFound);
+        }
+        const ImageList images = ReadImages();
+        if (stopped())
+            return cancelled;
 
         std::vector<int> rows;
         std::int64_t total = 0;
@@ -266,9 +277,9 @@ namespace Manifold::Target
         return std::move(dump->Classes);
     }
 
-    Status MonoRuntime::LoadDumper(const ImageList& images)
+    Status MonoRuntime::LoadManagedImage(const ImageList& images)
     {
-        if (m_dumper.Class)
+        if (m_managedImage)
             return Status::Success();
         for (const char* name : { "mono_class_from_name", "mono_class_get_method_from_name", "mono_runtime_invoke", "mono_class_vtable",
                  "mono_class_get_field_from_name", "mono_field_static_get_value", "mono_field_static_set_value" })
@@ -277,18 +288,13 @@ namespace Manifold::Target
                 return Status::Fail(ErrorCode::MonoCallFailed, std::string("the runtime has no ") + name);
         }
         const std::span<const std::uint8_t> bytes = ManagedDumperImage();
+        if (bytes.empty())
+            return Status::Fail(ErrorCode::MonoCallFailed, "this build carries no managed assembly");
         std::lock_guard lock(m_bridge.m_lock);
         if (!m_bridge.m_process)
             return Status::Fail(ErrorCode::NoProcess);
         Process& process = *m_bridge.m_process;
         RemoteCall& call = m_bridge.m_call;
-        const auto text = [&](std::string_view value) -> std::uint64_t
-            {
-                const std::uint64_t at = call.Scratch(value.size() + 1);
-                if (at && !value.empty())
-                    process.Write(at, value.data(), value.size());
-                return at;
-            };
         call.ResetScratch();
         std::uint64_t image = 0;
         for (const auto& [handle, name] : images)
@@ -315,18 +321,74 @@ namespace Manifold::Target
                 if (status)
                     process.ReadExact(status, &code, sizeof(code));
                 call.ResetScratch();
-                return Status::Fail(ErrorCode::MonoCallFailed, "the runtime did not open the dumper image (status " + std::to_string(code) + ")");
+                return Status::Fail(ErrorCode::MonoCallFailed, "the runtime did not open the managed image (status " + std::to_string(code) + ")");
             }
-            const std::uint64_t path = text(std::string(ManagedDumpFormat::kImageName) + ".dll");
-            const std::uint64_t assembly = m_bridge.CallFn("mono_assembly_load_from_full", opened, path, status, 0).value_or(0);
+            const std::string fileName = std::string(ManagedDumpFormat::kImageName) + ".dll";
+            const std::uint64_t path = call.Scratch(fileName.size() + 1);
+            if (path)
+                process.Write(path, fileName.data(), fileName.size());
+            const std::uint64_t assembly = path ? m_bridge.CallFn("mono_assembly_load_from_full", opened, path, status, 0).value_or(0) : 0;
             image = assembly ? m_bridge.CallFn("mono_assembly_get_image", assembly).value_or(0) : 0;
             if (!image)
             {
                 call.ResetScratch();
-                return Status::Fail(ErrorCode::MonoCallFailed, "the runtime did not load the dumper assembly");
+                return Status::Fail(ErrorCode::MonoCallFailed, "the runtime did not load the managed assembly");
             }
-            LOG_INFO("Mono", "Loaded the managed dumper (" + std::to_string(bytes.size()) + " bytes) into the game");
+            LOG_INFO("Mono", "Loaded the managed assembly (" + std::to_string(bytes.size()) + " bytes) into the game");
         }
+        call.ResetScratch();
+        m_managedImage = image;
+        return Status::Success();
+    }
+
+    std::uint64_t MonoRuntime::ManagedClass(std::string_view space, std::string_view name)
+    {
+        if (!m_managedImage)
+        {
+            if (const Status loaded = LoadManagedImage(ReadImages()); !loaded)
+            {
+                LOG_WARN("Mono", "The managed assembly could not be loaded: " + loaded.Text);
+                return 0;
+            }
+        }
+        std::lock_guard lock(m_bridge.m_lock);
+        if (!m_bridge.m_process)
+            return 0;
+        RemoteCall& call = m_bridge.m_call;
+        call.ResetScratch();
+        const std::uint64_t spaceText = call.Scratch(space.size() + 1);
+        const std::uint64_t nameText = call.Scratch(name.size() + 1);
+        std::uint64_t klass = 0;
+        if (spaceText && nameText)
+        {
+            m_bridge.m_process->Write(spaceText, space.data(), space.size());
+            m_bridge.m_process->Write(nameText, name.data(), name.size());
+            klass = m_bridge.CallFn("mono_class_from_name", m_managedImage, spaceText, nameText).value_or(0);
+        }
+        call.ResetScratch();
+        return klass;
+    }
+
+    Status MonoRuntime::LoadDumper(const ImageList& images)
+    {
+        if (m_dumper.Class)
+            return Status::Success();
+        if (const Status loaded = LoadManagedImage(images); !loaded)
+            return loaded;
+        std::lock_guard lock(m_bridge.m_lock);
+        if (!m_bridge.m_process)
+            return Status::Fail(ErrorCode::NoProcess);
+        Process& process = *m_bridge.m_process;
+        RemoteCall& call = m_bridge.m_call;
+        const auto text = [&](std::string_view value) -> std::uint64_t
+            {
+                const std::uint64_t at = call.Scratch(value.size() + 1);
+                if (at && !value.empty())
+                    process.Write(at, value.data(), value.size());
+                return at;
+            };
+        call.ResetScratch();
+        const std::uint64_t image = m_managedImage;
         DumperHandles found;
         found.Class = m_bridge.CallFn("mono_class_from_name", image, text(ManagedDumpFormat::kNamespace), text(ManagedDumpFormat::kClass)).value_or(0);
         if (found.Class)

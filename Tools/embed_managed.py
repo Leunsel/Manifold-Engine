@@ -68,7 +68,9 @@ def main(image=IMAGE, touch=False):
             handle.write(text)
         print("wrote", os.path.relpath(OUT, ROOT), f"({len(data)} bytes)")
     if touch:
-        for path in (image, OUT):
+        folder = os.path.dirname(image)
+        built = [os.path.join(folder, name) for name in os.listdir(folder) if name.lower().endswith(".dll")] if os.path.isdir(folder) else []
+        for path in built + [OUT]:
             if os.path.isfile(path):
                 os.utime(path)
 

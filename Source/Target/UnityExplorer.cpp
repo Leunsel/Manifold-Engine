@@ -3,10 +3,12 @@
 #include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
+#include "Target/ManagedAgent.h"
 #include "Target/Mono.h"
 #include "Target/Process.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -19,13 +21,15 @@ namespace Manifold::Target
     namespace
     {
         constexpr std::size_t kArgsSize = 0x10000;
-        constexpr std::size_t kBatchCalls = 128;     // calls per main-thread round trip
         constexpr const char* kGoneText = "the object is gone (the game destroyed it, e.g. on a scene change), so nothing was called on it";
-        constexpr auto kVisitBudget = std::chrono::milliseconds(4);
+        constexpr const char* kUnheldText = "Manifold does not hold this object; open it from its parent (the scene tree, a field or a property) first";
+        constexpr auto kHeartbeatEvery = std::chrono::seconds(2);
+        constexpr int kTreeGroup = 1;
+        constexpr int kSearchGroup = 2;
+        constexpr std::size_t kMaxShownElements = 256;
         constexpr std::size_t kMaxNodes = 200000;
         constexpr std::size_t kMaxChildren = 20000;
         constexpr std::size_t kMaxHits = 5000;
-        constexpr std::size_t kMaxArray = 200000;
         constexpr std::size_t kMaxShownChildren = 500;
         constexpr int kMaxMembers = 4096;
         constexpr std::uint32_t kFieldStatic = 0x10;
@@ -41,10 +45,10 @@ namespace Manifold::Target
         // remote calls for names and layouts; drawing code only reads caches.
         thread_local bool t_jobThread = false;
 
-        struct Vector3
+        int InspectionGroup(int id)
         {
-            float X = 0.0f, Y = 0.0f, Z = 0.0f;
-        };
+            return 1000 + id;
+        }
 
         int PrimitiveSize(int code)
         {
@@ -256,14 +260,21 @@ namespace Manifold::Target
             std::pair<std::string, std::function<void()>> job;
             {
                 std::unique_lock lock(m_jobLock);
-                m_jobWake.wait(lock, [this] { return m_stopping || !m_jobs.empty(); });
+                while (!m_stopping && m_jobs.empty())
+                {
+                    if (m_jobWake.wait_for(lock, kHeartbeatEvery) == std::cv_status::timeout && m_agent && m_agent->Connected())
+                    {
+                        lock.unlock();
+                        m_agent->Heartbeat();
+                        lock.lock();
+                    }
+                }
                 if (m_stopping)
                     return;
                 job = std::move(m_jobs.front());
                 m_jobs.pop_front();
                 m_jobAbort = m_abort.load();
             }
-            m_mono.m_call.InterruptMain(false);
             {
                 std::lock_guard state(m_stateLock);
                 m_status.Busy = true;
@@ -278,11 +289,6 @@ namespace Manifold::Target
             catch (const std::exception& error)
             {
                 Fail(std::string("internal error: ") + error.what());
-            }
-            if (m_visiting)
-            {
-                m_mono.m_call.LeaveMain();
-                m_visiting = false;
             }
             bool idle = false;
             {
@@ -324,15 +330,11 @@ namespace Manifold::Target
 
     void UnityExplorer::Cancel()
     {
-        bool running = false;
         {
             std::lock_guard lock(m_jobLock);
             m_jobs.clear();
-            running = m_thread.joinable();
         }
         ++m_abort;
-        if (running)
-            m_mono.m_call.InterruptMain(true);
     }
 
     void UnityExplorer::Shutdown()
@@ -344,82 +346,41 @@ namespace Manifold::Target
         }
         ++m_abort;
         m_jobWake.notify_all();
-        m_mono.m_call.InterruptMain(true);
         if (m_thread.joinable())
             m_thread.join();
         m_thread = std::thread();
-        m_mono.m_call.InterruptMain(false);
 
         // The worker still runs here (the bridge stops it afterwards), so the
-        // callback can be taken out of the game and the pins freed.
+        // agent can be taken out of the frame callback; it sets
+        // Application.runInBackground back and drops its slots on the game's
+        // main thread.
         bool present = false;
         {
             std::lock_guard bridge(m_mono.m_lock);
             present = m_mono.m_present && m_mono.m_process && m_mono.m_process->Alive();
         }
-        if (present && m_hooked)
+        if (m_agent)
         {
-            // Everything that touches onBeforeRender's subscriber list, above all
-            // taking our own callback back out, MUST run on the game's main
-            // thread: that is the thread that iterates the list every frame to
-            // call us, so running there means no other thread mutates the list
-            // while it is being walked. Removing it from the worker corrupted the
-            // list and crashed the game (the whole reason detach was unsafe).
-            const bool entered = m_mono.m_call.EnterMain(std::chrono::milliseconds(2000)).Ok();
-            if (m_originalRunInBackground)
-            {
-                const std::uint64_t setter = Method("UnityEngine.Application", "set_runInBackground", 1);
-                const bool original = *m_originalRunInBackground;
-                const bool restored = setter && entered && Invoke(true, setter, Arg::Ref(0), { Arg::Value<std::uint8_t>(original ? 1 : 0) }).Ok;
-                if (!restored)
-                    LOG_WARN("Unity", "Could not set Application.runInBackground back; it stays until the game restarts");
-            }
-            if (entered)
-                Unhook();
+            if (present)
+                m_agent->Stop();
             else
-                LOG_WARN("Unity", "The game's main thread did not run during detach; the callback was left in (it is harmless and returns at once)");
-            m_mono.m_call.LeaveMain();
+                m_agent->Forget();
+            m_agent.reset();
         }
-        if (present)
-        {
-            Unpin(m_treePins);
-            Unpin(m_searchPins);
-            Unpin(m_keepPins);
-            for (auto& entry : m_inspectionPins)
-                Unpin(entry.second);
-            // m_args is deliberately NOT freed: its addresses were passed to
-            // the runtime as argument and out-parameter pointers, and one page
-            // per session is not worth any doubt. (The detach crash once
-            // blamed on freeing it was the truncated GC handle, see
-            // PointerHandles.)
-        }
-        m_visiting = false;
+        m_agentReady = false;
         m_args = 0;
         m_argsUsed = 0;
-        m_batch = 0;
-        m_hooked = false;
-        m_delegate = 0;
-        m_delegatePin = 0;
-        m_unhook = 0;
         m_dontDestroyHandle = 0;
-        m_originalRunInBackground.reset();
-        m_handleApi.reset();
+        m_classTokens.clear();
         {
             std::lock_guard state(m_stateLock);
             m_classShape = {};
             m_validClasses.clear();
+            m_slotAddress.clear();
+            m_addressSlot.clear();
         }
-        m_methodClasses.clear();
-        m_parents.clear();
-        m_valueClasses.clear();
-        m_methods.clear();
-        m_typeObjects.clear();
         m_types.clear();
         m_chains.clear();
-        m_treePins.clear();
-        m_searchPins.clear();
-        m_keepPins.clear();
-        m_inspectionPins.clear();
         {
             std::lock_guard state(m_stateLock);
             m_process.reset();
@@ -476,8 +437,10 @@ namespace Manifold::Target
         return m_mono.CallFn(function, a0, a1, a2, a3);
     }
 
-    std::optional<std::uint64_t> UnityExplorer::Main(const char* function, std::uint64_t a0, std::uint64_t a1, std::uint64_t a2, std::uint64_t a3)
+    std::optional<std::uint64_t> UnityExplorer::Exec(const char* function, std::uint64_t a0, std::uint64_t a1, std::uint64_t a2, std::uint64_t a3)
     {
+        if (!m_agent || !m_agent->Connected())
+            return Worker(function, a0, a1, a2, a3);
         std::uint64_t fn = 0;
         {
             std::lock_guard bridge(m_mono.m_lock);
@@ -487,72 +450,22 @@ namespace Manifold::Target
         }
         if (!fn)
             return std::nullopt;
-        std::uint64_t result = 0;
-        ++m_statTrips;
-        ++m_statCalls;
-        Status status = BeginVisit();
-        if (status)
-            status = m_mono.m_call.CallMain(fn, a0, a1, a2, a3, result);
-        if (!status)
-        {
-            m_visiting = false;
-            std::lock_guard state(m_stateLock);
-            m_status.Error = status.Text;
+        AgentRequest request;
+        request.Op(AgentProtocol::Native)
+            .I64(static_cast<std::int64_t>(fn))
+            .I64(static_cast<std::int64_t>(a0))
+            .I64(static_cast<std::int64_t>(a1))
+            .I64(static_cast<std::int64_t>(a2))
+            .I64(static_cast<std::int64_t>(a3));
+        const Result<AgentLink::Exchanged> answer = Ask(request);
+        if (!answer || !answer->Replies.front().Ok())
             return std::nullopt;
-        }
-        return result;
+        AgentCursor in(answer->Replies.front().Payload);
+        const std::int64_t value = in.I64();
+        if (!in.Ok())
+            return std::nullopt;
+        return static_cast<std::uint64_t>(value);
     }
-
-    std::optional<std::uint64_t> UnityExplorer::Exec(const char* function, std::uint64_t a0, std::uint64_t a1, std::uint64_t a2, std::uint64_t a3)
-    {
-        // Once the per-frame callback is in, run on the game's main thread (Main
-        // enters it as needed); only before the hook exists, or on a non-Unity
-        // Mono game that has no such event, does this fall back to the worker.
-        if (m_hooked)
-            return Main(function, a0, a1, a2, a3);
-        return Worker(function, a0, a1, a2, a3);
-    }
-
-    Status UnityExplorer::BeginVisit()
-    {
-        if (m_visiting && m_mono.m_call.InsideMain())
-            return Status::Success();
-        // ∑ Enter first, THEN start the clock. The wait for the game's next
-        // frame is not time its main thread spends serving us; with the clock
-        // started before it, the first call already looked like a spent
-        // budget, YieldFrame left, and every following call waited two more
-        // frames to get back in (a 5-child GameObject took 300 ms).
-        if (Status entered = m_mono.m_call.EnterMain(std::chrono::milliseconds(2000)); !entered)
-            return entered;
-        m_visitStart = std::chrono::steady_clock::now();
-        m_visitRuns = m_mono.m_call.MainRuns();
-        m_visiting = true;
-        return Status::Success();
-    }
-
-    void UnityExplorer::YieldFrame()
-    {
-        // Give the frame back to the game once this visit used its budget; the
-        // next main-thread call waits for the following frame.
-        if (!m_visiting)
-            return;
-        const auto now = std::chrono::steady_clock::now();
-        if (now - m_visitStart <= kVisitBudget)
-            return;
-        // The budget is per frame. If the stub has been called again since the
-        // clock started (its run counter moved), the game already had its frame
-        // in between, so this frame's share starts now.
-        const std::uint64_t runs = m_mono.m_call.MainRuns();
-        if (runs != m_visitRuns)
-        {
-            m_visitRuns = runs;
-            m_visitStart = now;
-            return;
-        }
-        m_mono.m_call.LeaveMain();
-        m_visiting = false;
-    }
-
     std::uint64_t UnityExplorer::ArgSpace(std::size_t bytes)
     {
         if (!m_args)
@@ -570,212 +483,6 @@ namespace Manifold::Target
         const std::uint64_t at = m_args + m_argsUsed;
         m_argsUsed += aligned;
         return at;
-    }
-
-    UnityExplorer::Invoked UnityExplorer::Invoke(bool main, std::uint64_t method, const Arg& self, const std::vector<Arg>& params)
-    {
-        Invoked out;
-        const auto process = Proc();
-        if (!method || !process)
-        {
-            out.Error = method ? "no process" : "the method was not found in this Unity version";
-            return out;
-        }
-        if (self.Bytes.empty() && !SelfFits(self.Pointer, method))
-        {
-            out.Error = kGoneText;
-            return out;
-        }
-        m_argsUsed = 0;
-        const std::uint64_t exception = ArgSpace(8);
-        const std::uint64_t array = params.empty() ? 0 : ArgSpace(8 * params.size());
-        if (!exception || (!params.empty() && !array))
-        {
-            out.Error = "no room for the arguments";
-            return out;
-        }
-        std::vector<std::uint64_t> pointers;
-        const auto place = [&](const Arg& arg) -> std::uint64_t
-            {
-                if (arg.Bytes.empty())
-                    return arg.Pointer;
-                const std::uint64_t at = ArgSpace(arg.Bytes.size());
-                if (at)
-                    process->Write(at, arg.Bytes.data(), arg.Bytes.size());
-                return at;
-            };
-        for (const Arg& param : params)
-            pointers.push_back(place(param));
-        const std::uint64_t selfPointer = place(self);
-        const std::uint64_t zero = 0;
-        process->Write(exception, &zero, sizeof(zero));
-        if (array)
-            process->Write(array, pointers.data(), pointers.size() * 8);
-        const auto result = main ? Main("mono_runtime_invoke", method, selfPointer, array, exception)
-                                 : Worker("mono_runtime_invoke", method, selfPointer, array, exception);
-        if (!result)
-        {
-            std::lock_guard state(m_stateLock);
-            out.Error = m_status.Error.empty() ? "the call did not run" : m_status.Error;
-            return out;
-        }
-        std::uint64_t thrown = 0;
-        process->ReadExact(exception, &thrown, sizeof(thrown));
-        if (thrown)
-        {
-            out.Error = ExceptionText(main, thrown);
-            return out;
-        }
-        out.Ok = true;
-        out.Result = *result;
-        return out;
-    }
-
-    std::vector<UnityExplorer::Invoked> UnityExplorer::InvokeMany(const std::vector<BatchInvoke>& calls)
-    {
-        // ∑ One cross-process round trip per call kept the game's main thread
-        // spinning in the stub while this side wrote arguments and polled for
-        // each result: a Transform refresh was ~37 trips, so Auto could only
-        // run once a second. Here every call goes into one record list the
-        // stub runs back to back; one write sends it, one read brings all
-        // results back, and boxed values are copied out while the main thread
-        // still holds them, so no collection can take them before they are read.
-        std::vector<Invoked> out(calls.size());
-        if (calls.empty())
-            return out;
-        const auto fail = [&](std::size_t from, const std::string& text)
-            {
-                for (std::size_t i = from; i < out.size(); ++i)
-                {
-                    if (!out[i].Ok && out[i].Error.empty())
-                        out[i].Error = text;
-                }
-            };
-        std::uint64_t invoke = 0;
-        {
-            std::lock_guard bridge(m_mono.m_lock);
-            if (m_mono.m_present)
-                invoke = m_mono.Fn("mono_runtime_invoke");
-        }
-        const auto process = Proc();
-        if (!invoke || !process)
-        {
-            fail(0, invoke ? "no process" : "this Mono runtime has no mono_runtime_invoke");
-            return out;
-        }
-        if (!m_batch)
-        {
-            const Result<Address> batch = process->Allocate(kBatchCalls * RemoteCall::kMainCallSize, PAGE_READWRITE);
-            if (!batch)
-            {
-                fail(0, "no room for the call list in the game: " + batch.Error().Text);
-                return out;
-            }
-            m_batch = *batch;
-        }
-        std::vector<RemoteCall::MainCall> chunk;
-        std::vector<std::size_t> owners;
-        std::vector<RemoteCall::MainResult> results;
-        for (std::size_t start = 0; start < calls.size(); start += kBatchCalls)
-        {
-            if (Aborted())
-            {
-                fail(start, "cancelled");
-                break;
-            }
-            chunk.clear();
-            owners.clear();
-            const std::size_t end = std::min(calls.size(), start + kBatchCalls);
-            for (std::size_t i = start; i < end; ++i)
-            {
-                const BatchInvoke& request = calls[i];
-                if (!request.Method)
-                {
-                    out[i].Error = "the method was not found in this Unity version";
-                    continue;
-                }
-                if (!SelfFits(request.Self, request.Method))
-                {
-                    out[i].Error = kGoneText;
-                    continue;
-                }
-                const std::size_t slot = chunk.size();
-                RemoteCall::MainCall call;
-                call.Function = invoke;
-                call.Args[0] = request.Method;
-                call.Args[1] = request.Self;
-                call.Args[3] = RemoteCall::MainCallSlot(m_batch, slot);    // MonoObject** exc
-                if (request.IntArg)
-                {
-                    // params = { &value }, both inside the record's data.
-                    const std::uint64_t data = RemoteCall::MainCallData(m_batch, slot);
-                    const std::uint64_t value = data + 8;
-                    std::memcpy(call.Data.data(), &value, sizeof(value));
-                    std::memcpy(call.Data.data() + 8, &*request.IntArg, sizeof(std::int32_t));
-                    call.Args[2] = data;
-                }
-                call.CopyOffset = static_cast<std::uint32_t>(kObjectHeader);
-                call.CopyBytes = std::min<std::uint32_t>(request.ValueBytes, RemoteCall::kMainCallData);
-                chunk.push_back(call);
-                owners.push_back(i);
-            }
-            if (chunk.empty())
-                continue;
-            ++m_statTrips;
-            m_statCalls += static_cast<int>(chunk.size());
-            Status status = BeginVisit();
-            if (status)
-                status = m_mono.m_call.CallMainBatch(m_batch, chunk, results);
-            if (!status)
-            {
-                m_visiting = false;
-                {
-                    std::lock_guard state(m_stateLock);
-                    m_status.Error = status.Text;
-                }
-                for (const std::size_t owner : owners)
-                    out[owner].Error = status.Text;
-                continue;
-            }
-            for (std::size_t k = 0; k < chunk.size(); ++k)
-            {
-                Invoked& got = out[owners[k]];
-                const RemoteCall::MainResult& result = results[k];
-                if (result.Slot)
-                {
-                    got.Error = ExceptionText(true, result.Slot);
-                    continue;
-                }
-                got.Ok = true;
-                got.Result = result.Result;
-                if (chunk[k].CopyBytes && result.Result)
-                    got.Value.assign(result.Data.begin(), result.Data.begin() + chunk[k].CopyBytes);
-            }
-            YieldFrame();
-        }
-        return out;
-    }
-
-    std::string UnityExplorer::ExceptionText(bool main, std::uint64_t exception)
-    {
-        std::string name = ClassNameOf(exception);
-        if (name.empty())
-            name = "an exception";
-        const auto process = Proc();
-        const std::uint64_t slot = ArgSpace(8);
-        if (!process || !slot)
-            return name;
-        const std::uint64_t zero = 0;
-        process->Write(slot, &zero, sizeof(zero));
-        const auto text = main ? Main("mono_object_to_string", exception, slot) : Worker("mono_object_to_string", exception, slot);
-        std::uint64_t nested = 0;
-        process->ReadExact(slot, &nested, sizeof(nested));
-        if (!text || !*text || nested)
-            return name;
-        std::string message = ReadString(*text, 2048);
-        if (const std::size_t line = message.find_first_of("\r\n"); line != std::string::npos)
-            message.resize(line);
-        return message.empty() ? name : message;
     }
 
     std::string UnityExplorer::ReadString(std::uint64_t monoString, std::size_t limit) const
@@ -827,46 +534,6 @@ namespace Manifold::Target
         return value;
     }
 
-    std::optional<std::string> UnityExplorer::CallString(bool main, std::uint64_t method, const Arg& self)
-    {
-        const Invoked call = Invoke(main, method, self, {});
-        if (!call.Ok)
-            return std::nullopt;
-        return ReadString(call.Result);
-    }
-
-    template <typename T>
-    std::optional<T> UnityExplorer::CallValue(bool main, std::uint64_t method, const Arg& self, const std::vector<Arg>& params)
-    {
-        const Invoked call = Invoke(main, method, self, params);
-        if (!call.Ok)
-            return std::nullopt;
-        return Unbox<T>(call.Result);
-    }
-
-    std::uint64_t UnityExplorer::CallObject(bool main, std::uint64_t method, const Arg& self, const std::vector<Arg>& params)
-    {
-        const Invoked call = Invoke(main, method, self, params);
-        return call.Ok ? call.Result : 0;
-    }
-
-    std::uint64_t UnityExplorer::NewString(const std::string& text)
-    {
-        const auto process = Proc();
-        const std::size_t mark = m_argsUsed;
-        const std::uint64_t at = ArgSpace(text.size() + 1);
-        std::uint64_t domain = 0;
-        {
-            std::lock_guard bridge(m_mono.m_lock);
-            domain = m_mono.m_domain;
-        }
-        std::uint64_t made = 0;
-        if (process && at && process->Write(at, text.c_str(), text.size() + 1))
-            made = Exec("mono_string_new", domain, at).value_or(0);
-        m_argsUsed = mark;
-        return made;
-    }
-
     // ---------------------------------------------------------------------
     // Classes, methods and types
 
@@ -893,127 +560,6 @@ namespace Manifold::Target
         std::string name = m_mono.m_call.ReadCString(*text);
         Worker("mono_free", *text);
         return name;
-    }
-
-    std::uint64_t UnityExplorer::Method(std::string_view klassName, std::string_view name, int params, std::string_view firstParam)
-    {
-        const std::string key = std::string(klassName) + ":" + std::string(name) + "/" + std::to_string(params) + "/" + std::string(firstParam);
-        if (const auto found = m_methods.find(key); found != m_methods.end())
-            return found->second;
-        const std::uint64_t klass = FindClass(klassName);
-        std::uint64_t method = 0;
-        const auto process = Proc();
-        if (klass && process)
-        {
-            const std::size_t mark = m_argsUsed;
-            if (firstParam.empty())
-            {
-                const std::uint64_t text = ArgSpace(name.size() + 1);
-                const std::string copy(name);
-                if (text && process->Write(text, copy.c_str(), copy.size() + 1))
-                    method = Worker("mono_class_get_method_from_name", klass, text, static_cast<std::uint64_t>(static_cast<std::int64_t>(params))).value_or(0);
-            }
-            else
-            {
-                const std::uint64_t iter = ArgSpace(8);
-                const std::uint64_t paramIter = ArgSpace(8);
-                const std::uint64_t zero = 0;
-                if (iter && paramIter && process->Write(iter, &zero, 8))
-                {
-                    for (int n = 0; n < kMaxMembers && !method; ++n)
-                    {
-                        const auto candidate = Worker("mono_class_get_methods", klass, iter);
-                        if (!candidate || !*candidate)
-                            break;
-                        if (WorkerString("mono_method_get_name", *candidate) != name)
-                            continue;
-                        const auto signature = Worker("mono_method_signature", *candidate);
-                        if (!signature || !*signature)
-                            continue;
-                        if (static_cast<int>(Worker("mono_signature_get_param_count", *signature).value_or(0) & 0xFFFFFFFFu) != params)
-                            continue;
-                        process->Write(paramIter, &zero, 8);
-                        const auto first = Worker("mono_signature_get_params", *signature, paramIter);
-                        if (first && *first && TypeName(*first) == firstParam)
-                            method = *candidate;
-                    }
-                }
-            }
-            m_argsUsed = mark;
-        }
-        m_methods[key] = method;
-        return method;
-    }
-
-    std::uint64_t UnityExplorer::TypeObject(std::uint64_t klass)
-    {
-        if (!klass)
-            return 0;
-        if (const auto found = m_typeObjects.find(klass); found != m_typeObjects.end())
-            return found->second;
-        std::uint64_t domain = 0;
-        {
-            std::lock_guard bridge(m_mono.m_lock);
-            domain = m_mono.m_domain;
-        }
-        std::uint64_t object = 0;
-        if (const auto type = Worker("mono_class_get_type", klass); type && *type)
-            object = Exec("mono_type_get_object", domain, *type).value_or(0);
-        if (object)
-        {
-            // Probe level 1 deliberately creates the managed object but takes no
-            // GC handle, to tell allocation and handle apart.
-            if (m_probeLevel > 1)
-            {
-                if (const MonoGcHandle pin = Pin(object))
-                    m_keepPins.push_back(pin);
-            }
-            m_typeObjects[klass] = object;
-        }
-        return object;
-    }
-
-    bool UnityExplorer::PointerHandles()
-    {
-        // ∑ Newer Mono hands out pointer-sized GC handles. On Unity 6's
-        // mono-2.0-bdwgc a handle IS the address of an 8-byte slot in an 8 KB
-        // handle page (0x30 header, the handle type at +0x28), and those pages
-        // live on the process heap far above 4 GB. The legacy pair cannot carry
-        // that: mono_gchandle_new is declared guint32, and mono_gchandle_free
-        // starts with `mov ecx, ecx` before jumping into the very same free as
-        // _v2. Freeing a handle that lost its high half rounds down to a page
-        // that does not exist, and the game dies inside that call -- every one
-        // of the CloverPit crash dumps was exactly this, called from our worker.
-        // Decided once per runtime so a handle is always freed by the pair that
-        // made it.
-        if (!m_handleApi)
-        {
-            std::lock_guard bridge(m_mono.m_lock);
-            m_handleApi = m_mono.Fn("mono_gchandle_new_v2") && m_mono.Fn("mono_gchandle_free_v2");
-        }
-        return *m_handleApi;
-    }
-
-    MonoGcHandle UnityExplorer::Pin(std::uint64_t object)
-    {
-        if (!object || !m_pinning)
-            return 0;
-        if (PointerHandles())
-            return Worker("mono_gchandle_new_v2", object, 0).value_or(0);
-        // An older runtime: the handle is a 32-bit index and the upper half of
-        // RAX is not part of the result.
-        return Worker("mono_gchandle_new", object, 0).value_or(0) & 0xFFFFFFFFu;
-    }
-
-    void UnityExplorer::Unpin(std::vector<MonoGcHandle>& pins)
-    {
-        const char* const free = PointerHandles() ? "mono_gchandle_free_v2" : "mono_gchandle_free";
-        for (const MonoGcHandle pin : pins)
-        {
-            if (pin)
-                Worker(free, pin);
-        }
-        pins.clear();
     }
 
     MonoTypeInfo UnityExplorer::TypeInfo(std::uint64_t type)
@@ -1232,46 +778,6 @@ namespace Manifold::Target
         }
     }
 
-    std::uint64_t UnityExplorer::MethodClass(std::uint64_t method)
-    {
-        if (const auto found = m_methodClasses.find(method); found != m_methodClasses.end())
-            return found->second;
-        const std::uint64_t klass = Worker("mono_method_get_class", method).value_or(0);
-        m_methodClasses[method] = klass;
-        return klass;
-    }
-
-    bool UnityExplorer::Derives(std::uint64_t klass, std::uint64_t base)
-    {
-        for (int depth = 0; klass && depth < 48; ++depth)
-        {
-            if (klass == base)
-                return true;
-            auto found = m_parents.find(klass);
-            if (found == m_parents.end())
-                found = m_parents.emplace(klass, Worker("mono_class_get_parent", klass).value_or(0)).first;
-            klass = found->second;
-        }
-        return false;
-    }
-
-    bool UnityExplorer::SelfFits(std::uint64_t self, std::uint64_t method)
-    {
-        if (!self || !method)
-            return true;
-        const std::uint64_t declaring = MethodClass(method);
-        if (!declaring)
-            return true;    // cannot tell; the runtime did not say
-        // A struct's method gets a pointer to the value, not an object.
-        auto value = m_valueClasses.find(declaring);
-        if (value == m_valueClasses.end())
-            value = m_valueClasses.emplace(declaring, (Worker("mono_class_is_valuetype", declaring).value_or(0) & 0xFF) != 0).first;
-        if (value->second)
-            return true;
-        const std::uint64_t klass = ClassOf(self);
-        return klass && Derives(klass, declaring);
-    }
-
     std::string UnityExplorer::ClassNameOf(std::uint64_t object)
     {
         return ClassName(ClassOf(object));
@@ -1323,6 +829,9 @@ namespace Manifold::Target
             return layout;
         layout->Klass = klass;
         layout->Name = ClassName(klass);
+        if (const auto image = Worker("mono_class_get_image", klass); image && *image)
+            layout->Image = WorkerString("mono_image_get_name", *image);
+        layout->TypeToken = static_cast<std::uint32_t>(Worker("mono_class_get_type_token", klass).value_or(0) & 0xFFFFFFFFu);
         layout->Chain = ChainOf(klass);
         const auto has = [&](const char* name) { return std::find(layout->Chain.begin(), layout->Chain.end(), name) != layout->Chain.end(); };
         layout->UnityObject = has("UnityEngine.Object");
@@ -1359,6 +868,13 @@ namespace Manifold::Target
             const std::string declaring = ClassName(current);
             if (declaring == "System.Object" || declaring == "System.ValueType" || declaring == "System.Enum")
                 break;
+            std::string image;
+            if (const auto owner = Worker("mono_class_get_image", current); owner && *owner)
+                image = WorkerString("mono_image_get_name", *owner);
+            const auto token = [&](const char* function, std::uint64_t handle)
+                {
+                    return handle ? static_cast<std::uint32_t>(Worker(function, handle).value_or(0) & 0xFFFFFFFFu) : 0u;
+                };
             std::uint64_t vtable = 0;
             std::uint64_t staticData = 0;
             bool vtableRead = false;
@@ -1383,6 +899,8 @@ namespace Manifold::Target
                 member.Kind = MonoMemberKind::Field;
                 member.Handle = *field;
                 member.Declaring = declaring;
+                member.Image = image;
+                member.Token = token("mono_class_get_field_token", *field);
                 member.Name = WorkerString("mono_field_get_name", *field);
                 const std::uint32_t flags = static_cast<std::uint32_t>(Worker("mono_field_get_flags", *field).value_or(0) & 0xFFFFFFFFu);
                 member.Static = (flags & kFieldStatic) != 0;
@@ -1435,6 +953,9 @@ namespace Manifold::Target
                 member.Name = WorkerString("mono_property_get_name", *property);
                 member.Getter = Worker("mono_property_get_get_method", *property).value_or(0);
                 member.Setter = Worker("mono_property_get_set_method", *property).value_or(0);
+                member.Image = image;
+                member.GetterToken = token("mono_method_get_token", member.Getter);
+                member.SetterToken = token("mono_method_get_token", member.Setter);
                 propertyNames.push_back(member.Name);
                 const std::uint64_t accessor = member.Getter ? member.Getter : member.Setter;
                 if (!accessor)
@@ -1473,6 +994,8 @@ namespace Manifold::Target
                 member.Kind = MonoMemberKind::Method;
                 member.Handle = *method;
                 member.Declaring = declaring;
+                member.Image = image;
+                member.Token = token("mono_method_get_token", *method);
                 member.Name = WorkerString("mono_method_get_name", *method);
                 if (member.Name == ".ctor" || member.Name == ".cctor")
                     continue;
@@ -1816,27 +1339,20 @@ namespace Manifold::Target
     // ---------------------------------------------------------------------
     // The per-frame callback
 
-    Status UnityExplorer::EnsureHook()
+    Status UnityExplorer::EnsureAgent()
     {
-        if (m_hooked)
-            return Status::Success();
-        // Last line of defence: nothing registers a callback in the game unless
-        // the user turned the explorer on for this session.
+        // Last line of defence: nothing goes into the game's frame callback
+        // unless the user turned the explorer on for this session.
         if (!m_enabled.load())
             return Status::Fail(ErrorCode::MonoCallFailed, "the scene explorer is switched off");
         if (m_mono.Runtime() != ManagedRuntime::Mono)
             return Status::Fail(ErrorCode::MonoCallFailed, "the scene explorer needs a Mono runtime");
-        // A runtime that is missing one of these silently loses a feature, so
-        // record them once instead of letting calls fail with an empty reason.
+        if (!m_agent)
+            m_agent = std::make_unique<AgentLink>(m_mono);
+        if (m_agent->Connected() && m_agentReady)
+            return Status::Success();
         {
-            static const char* const kNeeded[] = {
-                "mono_class_get_parent", "mono_class_get_type", "mono_type_get_object", "mono_type_get_name", "mono_class_from_mono_type",
-                "mono_runtime_invoke", "mono_class_get_method_from_name", "mono_method_signature", "mono_signature_get_param_count",
-                "mono_signature_get_params", "mono_signature_get_return_type", "mono_class_get_properties", "mono_property_get_name",
-                "mono_property_get_get_method", "mono_property_get_set_method", "mono_method_get_flags",
-                "mono_string_new", "mono_object_to_string", "mono_free", "mono_class_vtable",
-                "mono_vtable_get_static_field_data", "mono_field_static_get_value", "mono_field_set_value", "mono_method_get_param_names",
-            };
+            static const char* const kNeeded[] = { "mono_method_get_token", "mono_class_get_field_token", "mono_class_get_type_token" };
             std::vector<std::string> missing;
             {
                 std::lock_guard bridge(m_mono.m_lock);
@@ -1851,136 +1367,223 @@ namespace Manifold::Target
             std::lock_guard state(m_stateLock);
             m_status.Missing = std::move(missing);
         }
-        std::string hookName = "Application.onBeforeRender";
-        std::uint64_t add = Method("UnityEngine.Application", "add_onBeforeRender", 1);
-        std::uint64_t remove = Method("UnityEngine.Application", "remove_onBeforeRender", 1);
-        if (!add || !remove)
-        {
-            hookName = "Canvas.willRenderCanvases";
-            add = Method("UnityEngine.Canvas", "add_willRenderCanvases", 1);
-            remove = Method("UnityEngine.Canvas", "remove_willRenderCanvases", 1);
-        }
-        if (!add || !remove)
-            return Status::Fail(ErrorCode::MonoCallFailed, "this game has neither Application.onBeforeRender nor Canvas.willRenderCanvases (not a Unity game, or a very old Unity)");
-        const auto process = Proc();
-        if (!process)
-            return Status::Fail(ErrorCode::NoProcess);
-
-        // The event's delegate type comes from its add method, so it is right
-        // for every Unity version (UnityAction, Canvas.WillRenderCanvases).
-        std::uint64_t delegateClass = 0;
-        if (const auto signature = Worker("mono_method_signature", add); signature && *signature)
-        {
-            const std::size_t mark = m_argsUsed;
-            const std::uint64_t iter = ArgSpace(8);
-            const std::uint64_t zero = 0;
-            if (iter && process->Write(iter, &zero, 8))
-                if (const auto type = Worker("mono_signature_get_params", *signature, iter); type && *type)
-                    delegateClass = Worker("mono_class_from_mono_type", *type).value_or(0);
-            m_argsUsed = mark;
-        }
-        const std::uint64_t delegateType = TypeObject(delegateClass);
-        if (m_probeLevel <= 1)
-        {
-            LOG_INFO("Unity", std::string("Probe: made a Type object without any GC handle (") + (delegateType ? "ok" : "failed") + ")");
-            return Status::Fail(ErrorCode::MonoCallFailed, "probe stopped after creating the Type object");
-        }
-        const std::uint64_t wrap = Method("System.Runtime.InteropServices.Marshal", "GetDelegateForFunctionPointer", 2, "System.IntPtr");
-        const std::uint64_t stub = m_mono.m_call.MainStub();
-        if (!delegateType || !wrap || !stub)
-            return Status::Fail(ErrorCode::MonoCallFailed, "could not build the per-frame callback (Marshal.GetDelegateForFunctionPointer or the delegate type is missing)");
-        const Invoked made = Invoke(false, wrap, Arg::Ref(0), { Arg::Value<std::uint64_t>(stub), Arg::Ref(delegateType) });
-        if (!made.Ok || !made.Result)
-            return Status::Fail(ErrorCode::MonoCallFailed, "could not wrap the per-frame callback: " + made.Error);
-        const MonoGcHandle pin = Pin(made.Result);
-        if (m_probeLevel < 3)
-        {
-            // Probe: the delegate exists and is pinned, but nothing in the game
-            // points at it yet.
-            if (pin)
-                m_keepPins.push_back(pin);
-            m_delegate = made.Result;
-            LOG_INFO("Unity", "Probe: the callback delegate was created but NOT registered");
-            return Status::Fail(ErrorCode::MonoCallFailed, "probe stopped after creating the delegate");
-        }
-        const Invoked added = Invoke(false, add, Arg::Ref(0), { Arg::Ref(made.Result) });
-        if (!added.Ok)
-        {
-            std::vector<MonoGcHandle> pins = { pin };
-            Unpin(pins);
-            return Status::Fail(ErrorCode::MonoCallFailed, "could not register the per-frame callback on " + hookName + ": " + added.Error);
-        }
-        m_hooked = true;
-        m_delegate = made.Result;
-        m_delegatePin = pin;
-        m_unhook = remove;
-        LOG_INFO("Unity", "Registered the main-thread callback on " + hookName);
+        if (Status connected = m_agent->Connect(); !connected)
+            return connected;
+        ForgetSlots();
+        AgentRequest request;
+        request.Op(AgentProtocol::Info);
+        const Result<AgentLink::Exchanged> answer = Ask(request);
+        if (!answer)
+            return answer.Error();
+        const AgentReply& reply = answer->Replies.front();
+        if (!reply.Ok())
+            return Status::Fail(ErrorCode::MonoCallFailed, "the agent could not read the game's Unity version: " + reply.Error());
+        AgentCursor in(reply.Payload);
+        const std::string version = in.Text();
+        const std::int32_t background = in.I32();
+        const std::string hook = in.Text();
+        m_agentReady = true;
         {
             std::lock_guard state(m_stateLock);
             m_status.Hooked = true;
-            m_status.Hook = hookName;
-        }
-        if (m_probeLevel < 4)
-        {
-            // Probe: registered, so the game calls the stub every frame, but we
-            // never ask it to serve anything.
-            LOG_INFO("Unity", "Probe: the callback is registered; not entering the main thread");
-            Publish();
-            return Status::Fail(ErrorCode::MonoCallFailed, "probe stopped after registering the callback");
-        }
-        if (const Status entered = m_mono.m_call.EnterMain(std::chrono::milliseconds(3000)); !entered)
-        {
-            // The run count separates "the game never called us" (not
-            // rendering) from "it did, but the handshake went wrong".
-            const std::uint64_t runs = m_mono.m_call.MainRuns();
-            const std::uint32_t thread = m_mono.m_call.MainThreadId();
-            {
-                std::lock_guard state(m_stateLock);
-                m_status.CallbackRuns = runs;
-                m_status.MainThread = thread;
-            }
-            Publish();
-            return entered;
-        }
-        m_visitStart = std::chrono::steady_clock::now();
-        m_visitRuns = m_mono.m_call.MainRuns();
-        m_visiting = true;
-        const auto version = CallString(true, Method("UnityEngine.Application", "get_unityVersion", 0), Arg::Ref(0));
-        const auto background = CallValue<std::uint8_t>(true, Method("UnityEngine.Application", "get_runInBackground", 0), Arg::Ref(0));
-        {
-            std::lock_guard state(m_stateLock);
-            m_status.CallbackRuns = m_mono.m_call.MainRuns();
-            m_status.MainThread = m_mono.m_call.MainThreadId();
-            m_status.UnityVersion = version.value_or(std::string());
-            if (background)
-                m_status.RunInBackground = *background != 0;
+            m_status.Hook = hook;
+            m_status.UnityVersion = version;
+            if (background >= 0)
+                m_status.RunInBackground = background != 0;
+            m_status.CallbackRuns = m_agent->Frames();
             m_status.Error.clear();
         }
+        LOG_INFO("Unity", "The agent answers from " + hook + " (Unity " + version + ")");
         Publish();
         return Status::Success();
     }
 
-    void UnityExplorer::Unhook()
+    Result<AgentLink::Exchanged> UnityExplorer::Ask(AgentRequest& request, std::chrono::milliseconds timeout)
     {
-        if (!m_hooked)
-            return;
-        // On the MAIN thread (the caller has entered it): remove_onBeforeRender
-        // edits the subscriber list that the same thread is iterating to call
-        // us, so there is no concurrent writer. Doing this from the worker
-        // raced that iteration and crashed the game.
-        const Invoked removed = Invoke(true, m_unhook, Arg::Ref(0), { Arg::Ref(m_delegate) });
-        if (!removed.Ok)
-            LOG_WARN("Unity", "Could not take the main-thread callback out of the game (" + removed.Error + "); it stays harmless and returns at once");
-        else
-            LOG_INFO("Unity", "Took the main-thread callback out of the game");
-        if (m_delegatePin)
+        if (!m_agent || !m_agent->Connected())
+            return Status::Fail(ErrorCode::MonoCallFailed, "the agent is not in the game");
+        const std::size_t requests = request.Count();
+        const int stateBefore = m_agent->RemoteState();
+        Result<AgentLink::Exchanged> answer = m_agent->Exchange(request.Finish(), timeout);
+        ++m_statTrips;
+        m_statCalls += static_cast<int>(requests);
+        if (stateBefore != AgentProtocol::kStateHooked)
+            ForgetSlots();
         {
-            std::vector<MonoGcHandle> pins = { m_delegatePin };
-            Unpin(pins);
+            std::lock_guard state(m_stateLock);
+            m_status.CallbackRuns = m_agent->Frames();
+            m_status.Hooked = m_agent->RemoteState() == AgentProtocol::kStateHooked;
         }
-        m_hooked = false;
-        m_delegate = 0;
-        m_delegatePin = 0;
+        if (!answer)
+            return answer;
+        m_statFrames += static_cast<int>(answer->Frames);
+        if (answer->Replies.size() != requests)
+            return Status::Fail(ErrorCode::MonoCallFailed, "the agent answered " + std::to_string(answer->Replies.size()) + " of " + std::to_string(requests) + " requests");
+        return answer;
+    }
+
+    Status UnityExplorer::Command(AgentRequest& request, const std::string& what)
+    {
+        const Result<AgentLink::Exchanged> answer = Ask(request);
+        if (!answer)
+            return Status::Fail(ErrorCode::MonoCallFailed, what + ": " + answer.Error().Text);
+        for (const AgentReply& reply : answer->Replies)
+        {
+            if (!reply.Ok())
+                return Status::Fail(ErrorCode::MonoCallFailed, what + ": " + reply.Error());
+        }
+        return Status::Success();
+    }
+
+    void UnityExplorer::LearnSlots(const std::vector<int>& slots)
+    {
+        if (!m_agent)
+            return;
+        std::vector<int> unknown;
+        {
+            std::lock_guard state(m_stateLock);
+            for (const int slot : slots)
+            {
+                if (slot > 0 && !m_slotAddress.count(slot))
+                    unknown.push_back(slot);
+            }
+        }
+        if (unknown.empty())
+            return;
+        const std::map<int, std::uint64_t> found = m_agent->Addresses(unknown);
+        std::lock_guard state(m_stateLock);
+        for (const auto& [slot, address] : found)
+        {
+            if (!address)
+                continue;
+            m_slotAddress[slot] = address;
+            m_addressSlot[address] = slot;
+        }
+    }
+
+    int UnityExplorer::SlotOf(std::uint64_t object) const
+    {
+        if (!object)
+            return 0;
+        std::lock_guard state(m_stateLock);
+        const auto found = m_addressSlot.find(object);
+        return found == m_addressSlot.end() ? 0 : found->second;
+    }
+
+    std::uint64_t UnityExplorer::AddressOf(int slot) const
+    {
+        if (slot <= 0)
+            return 0;
+        std::lock_guard state(m_stateLock);
+        const auto found = m_slotAddress.find(slot);
+        return found == m_slotAddress.end() ? 0 : found->second;
+    }
+
+    void UnityExplorer::HoldSlots(int group, const std::vector<int>& slots)
+    {
+        if (slots.empty() || !m_agent || !m_agent->Connected())
+            return;
+        AgentRequest request;
+        request.Op(AgentProtocol::Hold).I32(group).I32(static_cast<std::int32_t>(slots.size()));
+        for (const int slot : slots)
+            request.I32(slot);
+        if (const Status held = Command(request, "Keeping the object"); !held)
+            LOG_WARN("Unity", held.Text);
+    }
+
+    void UnityExplorer::ReleaseGroup(int group)
+    {
+        if (!m_agent || !m_agent->Connected() || m_agent->RemoteState() != AgentProtocol::kStateHooked)
+            return;
+        AgentRequest request;
+        request.Op(AgentProtocol::Release).I32(group);
+        const Result<AgentLink::Exchanged> answer = Ask(request);
+        if (!answer || !answer->Replies.front().Ok())
+            return;
+        AgentCursor in(answer->Replies.front().Payload);
+        const std::int32_t count = in.I32();
+        std::lock_guard state(m_stateLock);
+        for (std::int32_t i = 0; i < count && in.Ok(); ++i)
+        {
+            const int slot = in.I32();
+            const auto found = m_slotAddress.find(slot);
+            if (found == m_slotAddress.end())
+                continue;
+            const auto back = m_addressSlot.find(found->second);
+            if (back != m_addressSlot.end() && back->second == slot)
+                m_addressSlot.erase(back);
+            m_slotAddress.erase(found);
+        }
+    }
+
+    void UnityExplorer::ForgetSlots()
+    {
+        std::lock_guard state(m_stateLock);
+        m_slotAddress.clear();
+        m_addressSlot.clear();
+    }
+
+    std::pair<std::string, std::uint32_t> UnityExplorer::ClassToken(std::uint64_t klass)
+    {
+        if (const auto found = m_classTokens.find(klass); found != m_classTokens.end())
+            return found->second;
+        std::pair<std::string, std::uint32_t> token;
+        if (const auto image = Worker("mono_class_get_image", klass); image && *image)
+            token.first = WorkerString("mono_image_get_name", *image);
+        token.second = static_cast<std::uint32_t>(Worker("mono_class_get_type_token", klass).value_or(0) & 0xFFFFFFFFu);
+        m_classTokens[klass] = token;
+        return token;
+    }
+
+    void UnityExplorer::WriteArg(AgentRequest& request, const AgentArg& arg)
+    {
+        request.U8(arg.Kind);
+        if (arg.Kind == AgentProtocol::ArgSlot)
+            request.I32(arg.Slot);
+        else if (arg.Kind == AgentProtocol::ArgBytes)
+            request.Bytes(arg.Bytes);
+        else if (arg.Kind == AgentProtocol::ArgText)
+            request.Text(arg.Text);
+    }
+
+    UnityExplorer::PendingValue UnityExplorer::ReadValue(AgentCursor& in, const MonoTypeInfo& type)
+    {
+        PendingValue pending;
+        pending.Value.Read = true;
+        switch (in.U8())
+        {
+        case AgentProtocol::ValueBytes:
+            pending.Value.Raw = in.Bytes();
+            break;
+        case AgentProtocol::ValueText:
+            pending.Slot = in.I32();
+            pending.Value.Text = in.Text();
+            pending.Reference = true;
+            break;
+        case AgentProtocol::ValueObject:
+            pending.Slot = in.I32();
+            pending.Reference = true;
+            break;
+        default:
+            if (type.Code != MonoTypeCode::Void)
+                pending.Value.Raw.assign(type.ValueType ? static_cast<std::size_t>(std::max(1, type.Size)) : 8u, 0);
+            break;
+        }
+        if (!in.Ok())
+        {
+            pending.Value = {};
+            pending.Value.Error = "the agent's answer is damaged";
+        }
+        return pending;
+    }
+
+    void UnityExplorer::Resolve(PendingValue& pending)
+    {
+        if (!pending.Reference)
+            return;
+        const std::uint64_t address = AddressOf(pending.Slot);
+        pending.Value.Raw.resize(8);
+        std::memcpy(pending.Value.Raw.data(), &address, 8);
     }
 
     // ---------------------------------------------------------------------
@@ -2021,43 +1624,78 @@ namespace Manifold::Target
         Post("Reading child objects", [this, node] { DoExpandNode(node); });
     }
 
+    namespace
+    {
+        struct NodeReply
+        {
+            int Object = 0;
+            int Transform = 0;
+            std::string Name;
+            bool Active = false;
+            int ChildCount = 0;
+        };
+
+        NodeReply ReadNodeReply(AgentCursor& in)
+        {
+            NodeReply node;
+            node.Object = in.I32();
+            node.Transform = in.I32();
+            node.Name = in.Text();
+            node.Active = in.U8() != 0;
+            node.ChildCount = in.I32();
+            return node;
+        }
+    }
+
     void UnityExplorer::DoReadScenes()
     {
         {
             std::lock_guard state(m_stateLock);
             m_status.Error.clear();
         }
-        if (Status hooked = EnsureHook(); !hooked)
+        if (Status ready = EnsureAgent(); !ready)
         {
-            Fail(hooked.Text);
+            Fail(ready.Text);
             return;
         }
-        const char* manager = "UnityEngine.SceneManagement.SceneManager";
-        const char* sceneClass = "UnityEngine.SceneManagement.Scene";
-        const auto count = CallValue<std::int32_t>(true, Method(manager, "get_sceneCount", 0), Arg::Ref(0));
-        if (!count)
+        ReleaseGroup(kTreeGroup);
+        AgentRequest request;
+        request.Op(AgentProtocol::Scenes).I32(kTreeGroup);
+        const Result<AgentLink::Exchanged> answer = Ask(request);
+        if (!answer)
         {
-            Fail("Could not read SceneManager.sceneCount (this Unity version may be older than 5.3)");
+            Fail("Could not read the scenes: " + answer.Error().Text);
             return;
         }
-        const int active = CallValue<std::int32_t>(true, Method(manager, "GetActiveScene", 0), Arg::Ref(0)).value_or(0);
+        const AgentReply& reply = answer->Replies.front();
+        if (!reply.Ok())
+        {
+            Fail("Could not read the scenes (this Unity version may be older than 5.3): " + reply.Error());
+            return;
+        }
+        AgentCursor in(reply.Payload);
+        const std::int32_t active = in.I32();
+        const std::int32_t count = in.I32();
         UnityTree tree;
         tree.Read = true;
-        for (int i = 0; i < std::min(*count, 256); ++i)
+        for (std::int32_t i = 0; i < count && in.Ok(); ++i)
         {
-            const auto handle = CallValue<std::int32_t>(true, Method(manager, "GetSceneAt", 1), Arg::Ref(0), { Arg::Value<std::int32_t>(i) });
-            if (!handle)
-                continue;
             UnityScene scene;
-            scene.Handle = *handle;
-            const Arg self = Arg::Value<std::int32_t>(*handle);
-            scene.Name = CallString(true, Method(sceneClass, "get_name", 0), self).value_or("?");
-            scene.Loaded = CallValue<std::uint8_t>(true, Method(sceneClass, "get_isLoaded", 0), self).value_or(0) != 0;
-            scene.RootCount = CallValue<std::int32_t>(true, Method(sceneClass, "get_rootCount", 0), self).value_or(-1);
-            scene.BuildIndex = CallValue<std::int32_t>(true, Method(sceneClass, "get_buildIndex", 0), self).value_or(-1);
+            scene.Slot = in.I32();
+            scene.Handle = in.I32();
+            scene.Name = in.Text();
+            scene.BuildIndex = in.I32();
+            scene.RootCount = in.I32();
+            scene.Loaded = in.U8() != 0;
             scene.Active = scene.Handle == active;
+            if (scene.Name.empty())
+                scene.Name = "?";
             tree.Scenes.push_back(std::move(scene));
-            YieldFrame();
+        }
+        if (!in.Ok())
+        {
+            Fail("The agent's scene list is damaged");
+            return;
         }
         UnityScene dontDestroy;
         dontDestroy.Name = "DontDestroyOnLoad";
@@ -2065,61 +1703,12 @@ namespace Manifold::Target
         dontDestroy.Handle = m_dontDestroyHandle;
         dontDestroy.Loaded = true;
         tree.Scenes.push_back(std::move(dontDestroy));
-
-        std::vector<MonoGcHandle> old;
         {
             std::lock_guard state(m_stateLock);
             tree.Generation = m_tree.Generation + 1;
             m_tree = std::move(tree);
-            old.swap(m_treePins);
         }
-        Unpin(old);
         Publish();
-    }
-
-    int UnityExplorer::ResolveDontDestroyScene()
-    {
-        if (m_dontDestroyHandle)
-            return m_dontDestroyHandle;
-        // Unity lists no DontDestroyOnLoad scene; like other explorers, move a
-        // fresh empty GameObject there, read its scene and destroy it again in
-        // the same frame.
-        std::uint64_t domain = 0;
-        {
-            std::lock_guard bridge(m_mono.m_lock);
-            domain = m_mono.m_domain;
-        }
-        const std::uint64_t klass = FindClass("UnityEngine.GameObject");
-        const std::uint64_t probe = klass ? Main("mono_object_new", domain, klass).value_or(0) : 0;
-        if (!probe)
-            return 0;
-        const Invoked made = Invoke(true, Method("UnityEngine.GameObject", ".ctor", 0), Arg::Ref(probe), {});
-        if (!made.Ok)
-            return 0;
-        Invoke(true, Method("UnityEngine.Object", "DontDestroyOnLoad", 1), Arg::Ref(0), { Arg::Ref(probe) });
-        const auto handle = CallValue<std::int32_t>(true, Method("UnityEngine.GameObject", "get_scene", 0), Arg::Ref(probe));
-        Invoke(true, Method("UnityEngine.Object", "DestroyImmediate", 1), Arg::Ref(0), { Arg::Ref(probe) });
-        m_dontDestroyHandle = handle.value_or(0);
-        return m_dontDestroyHandle;
-    }
-
-    bool UnityExplorer::ReadNode(std::uint64_t gameObject, std::uint64_t knownTransform, UnityNode& node)
-    {
-        if (!gameObject)
-            return false;
-        node.Object = gameObject;
-        const MonoGcHandle pin = Pin(gameObject);
-        if (pin)
-            m_treePins.push_back(pin);
-        const Arg self = Arg::Ref(gameObject);
-        node.Name = CallString(true, Method("UnityEngine.Object", "get_name", 0), self).value_or("?");
-        node.Active = CallValue<std::uint8_t>(true, Method("UnityEngine.GameObject", "get_activeSelf", 0), self).value_or(0) != 0;
-        node.Transform = knownTransform ? knownTransform : CallObject(true, Method("UnityEngine.GameObject", "get_transform", 0), self);
-        if (node.Transform && !knownTransform)
-            if (const MonoGcHandle transformPin = Pin(node.Transform))
-                m_treePins.push_back(transformPin);
-        node.ChildCount = node.Transform ? CallValue<std::int32_t>(true, Method("UnityEngine.Transform", "get_childCount", 0), Arg::Ref(node.Transform)).value_or(0) : 0;
-        return true;
     }
 
     void UnityExplorer::DoExpandScene(int sceneIndex)
@@ -2148,59 +1737,59 @@ namespace Manifold::Target
                 else
                     Publish();
             };
-        if (Status hooked = EnsureHook(); !hooked)
-            return finish(hooked.Text);
-        int handle = scene.Handle;
-        if (scene.DontDestroy && !handle)
+        if (Status ready = EnsureAgent(); !ready)
+            return finish(ready.Text);
+        AgentRequest request;
+        request.Op(AgentProtocol::Roots).I32(kTreeGroup).I32(scene.DontDestroy ? 0 : scene.Slot).I32(static_cast<std::int32_t>(kMaxChildren));
+        const Result<AgentLink::Exchanged> answer = Ask(request, std::chrono::seconds(30));
+        if (!answer)
+            return finish("Could not read the scene's objects: " + answer.Error().Text);
+        const AgentReply& reply = answer->Replies.front();
+        if (!reply.Ok())
+            return finish("Could not read the scene's objects: " + reply.Error());
+        AgentCursor in(reply.Payload);
+        const int sceneSlot = in.I32();
+        const int handle = in.I32();
+        const std::int32_t total = in.I32();
+        const std::int32_t count = in.I32();
+        std::vector<NodeReply> replies;
+        std::vector<int> slots;
+        for (std::int32_t i = 0; i < count && in.Ok(); ++i)
         {
-            handle = ResolveDontDestroyScene();
-            if (!handle)
-                return finish("Could not find the DontDestroyOnLoad scene");
+            replies.push_back(ReadNodeReply(in));
+            slots.push_back(replies.back().Object);
+            slots.push_back(replies.back().Transform);
+        }
+        if (!in.Ok())
+            return finish("The agent's list of the scene's objects is damaged");
+        LearnSlots(slots);
+        if (scene.DontDestroy)
+            m_dontDestroyHandle = handle;
+        {
             std::lock_guard state(m_stateLock);
-            if (m_tree.Generation == generation)
-                m_tree.Scenes[static_cast<std::size_t>(sceneIndex)].Handle = handle;
-        }
-        const Invoked roots = Invoke(true, Method("UnityEngine.SceneManagement.Scene", "GetRootGameObjects", 0), Arg::Value<std::int32_t>(handle), {});
-        if (!roots.Ok)
-            return finish("Could not read the scene's objects: " + roots.Error);
-        std::vector<MonoGcHandle> arrayPin = { Pin(roots.Result) };
-        std::size_t total = 0;
-        const std::vector<std::uint64_t> objects = ReadArray(roots.Result, kMaxChildren, &total);
-        std::vector<UnityNode> batch;
-        const auto flush = [&]
+            if (m_tree.Generation != generation)
+                return;
+            UnityScene& target = m_tree.Scenes[static_cast<std::size_t>(sceneIndex)];
+            target.Slot = sceneSlot;
+            target.Handle = handle;
+            target.RootCount = total;
+            for (const NodeReply& reply : replies)
             {
-                std::lock_guard state(m_stateLock);
-                if (m_tree.Generation != generation)
-                    return false;
-                for (UnityNode& node : batch)
-                {
-                    if (m_tree.Nodes.size() >= kMaxNodes)
-                        break;
-                    node.Scene = sceneIndex;
-                    m_tree.Scenes[static_cast<std::size_t>(sceneIndex)].Roots.push_back(static_cast<int>(m_tree.Nodes.size()));
-                    m_tree.Nodes.push_back(std::move(node));
-                }
-                m_tree.Scenes[static_cast<std::size_t>(sceneIndex)].RootCount = static_cast<int>(total);
-                batch.clear();
-                return true;
-            };
-        for (std::size_t i = 0; i < objects.size(); ++i)
-        {
-            if (Aborted())
-                break;
-            UnityNode node;
-            if (ReadNode(objects[i], 0, node))
-                batch.push_back(std::move(node));
-            if (batch.size() >= 64)
-            {
-                if (!flush())
+                if (m_tree.Nodes.size() >= kMaxNodes)
                     break;
-                Publish();
+                UnityNode node;
+                node.Object = m_slotAddress.count(reply.Object) ? m_slotAddress[reply.Object] : 0;
+                node.Transform = m_slotAddress.count(reply.Transform) ? m_slotAddress[reply.Transform] : 0;
+                node.Name = reply.Name.empty() ? std::string("?") : reply.Name;
+                node.Active = reply.Active;
+                node.ChildCount = reply.ChildCount;
+                node.Scene = sceneIndex;
+                if (!node.Object)
+                    continue;
+                target.Roots.push_back(static_cast<int>(m_tree.Nodes.size()));
+                m_tree.Nodes.push_back(std::move(node));
             }
-            YieldFrame();
         }
-        flush();
-        Unpin(arrayPin);
         finish({});
     }
 
@@ -2216,43 +1805,58 @@ namespace Manifold::Target
             generation = m_tree.Generation;
         }
         std::string error;
-        std::vector<UnityNode> children;
-        if (Status hooked = EnsureHook(); !hooked)
-            error = hooked.Text;
-        else if (parent.Transform)
+        std::vector<NodeReply> replies;
+        if (Status ready = EnsureAgent(); !ready)
+            error = ready.Text;
+        else if (const int transform = SlotOf(parent.Transform); !transform)
+            error = "Manifold no longer holds this object; read the scenes again";
+        else
         {
-            const int count = CallValue<std::int32_t>(true, Method("UnityEngine.Transform", "get_childCount", 0), Arg::Ref(parent.Transform)).value_or(0);
-            for (int i = 0; i < std::min<int>(count, static_cast<int>(kMaxChildren)); ++i)
+            AgentRequest request;
+            request.Op(AgentProtocol::Children).I32(kTreeGroup).I32(transform).I32(static_cast<std::int32_t>(kMaxChildren));
+            const Result<AgentLink::Exchanged> answer = Ask(request, std::chrono::seconds(30));
+            if (!answer)
+                error = "Could not read the child objects: " + answer.Error().Text;
+            else if (!answer->Replies.front().Ok())
+                error = "Could not read the child objects: " + answer->Replies.front().Error();
+            else
             {
-                if (Aborted())
-                    break;
-                const std::uint64_t child = CallObject(true, Method("UnityEngine.Transform", "GetChild", 1), Arg::Ref(parent.Transform), { Arg::Value<std::int32_t>(i) });
-                if (!child)
-                    continue;
-                if (const MonoGcHandle pin = Pin(child))
-                    m_treePins.push_back(pin);
-                const std::uint64_t gameObject = CallObject(true, Method("UnityEngine.Component", "get_gameObject", 0), Arg::Ref(child));
-                UnityNode node;
-                if (ReadNode(gameObject, child, node))
+                AgentCursor in(answer->Replies.front().Payload);
+                in.I32();
+                const std::int32_t count = in.I32();
+                std::vector<int> slots;
+                for (std::int32_t i = 0; i < count && in.Ok(); ++i)
                 {
-                    node.Parent = nodeIndex;
-                    node.Scene = parent.Scene;
-                    children.push_back(std::move(node));
+                    replies.push_back(ReadNodeReply(in));
+                    slots.push_back(replies.back().Object);
+                    slots.push_back(replies.back().Transform);
                 }
-                YieldFrame();
+                if (!in.Ok())
+                    error = "The agent's list of child objects is damaged";
+                else
+                    LearnSlots(slots);
             }
         }
         {
             std::lock_guard state(m_stateLock);
             if (m_tree.Generation == generation && nodeIndex < static_cast<int>(m_tree.Nodes.size()))
             {
-                UnityNode& target = m_tree.Nodes[static_cast<std::size_t>(nodeIndex)];
-                target.Loading = false;
-                target.ChildrenLoaded = error.empty();
-                for (UnityNode& node : children)
+                m_tree.Nodes[static_cast<std::size_t>(nodeIndex)].Loading = false;
+                m_tree.Nodes[static_cast<std::size_t>(nodeIndex)].ChildrenLoaded = error.empty();
+                for (const NodeReply& reply : replies)
                 {
                     if (m_tree.Nodes.size() >= kMaxNodes)
                         break;
+                    UnityNode node;
+                    node.Object = m_slotAddress.count(reply.Object) ? m_slotAddress[reply.Object] : 0;
+                    node.Transform = m_slotAddress.count(reply.Transform) ? m_slotAddress[reply.Transform] : 0;
+                    node.Name = reply.Name.empty() ? std::string("?") : reply.Name;
+                    node.Active = reply.Active;
+                    node.ChildCount = reply.ChildCount;
+                    node.Parent = nodeIndex;
+                    node.Scene = parent.Scene;
+                    if (!node.Object)
+                        continue;
                     m_tree.Nodes[static_cast<std::size_t>(nodeIndex)].Children.push_back(static_cast<int>(m_tree.Nodes.size()));
                     m_tree.Nodes.push_back(std::move(node));
                 }
@@ -2300,7 +1904,6 @@ namespace Manifold::Target
                 result.Done = done;
                 m_search = result;
             };
-        Unpin(m_searchPins);
         std::uint64_t klass = FindClass(Trim(request.ClassName));
         if (!klass)
         {
@@ -2325,51 +1928,62 @@ namespace Manifold::Target
         const std::string className = ClassName(klass);
         if (IsUnityObjectClass(klass))
         {
-            if (Status hooked = EnsureHook(); !hooked)
+            if (Status ready = EnsureAgent(); !ready)
             {
-                result.Error = hooked.Text;
+                result.Error = ready.Text;
                 publish(true);
                 Publish();
                 return;
             }
-            const std::uint64_t type = TypeObject(klass);
-            const std::uint64_t finder = request.IncludeHidden ? Method("UnityEngine.Resources", "FindObjectsOfTypeAll", 1, "System.Type")
-                                                               : Method("UnityEngine.Object", "FindObjectsOfType", 1, "System.Type");
-            const Invoked found = Invoke(true, finder, Arg::Ref(0), { Arg::Ref(type) });
-            if (!found.Ok)
+            const auto [image, token] = ClassToken(klass);
+            if (image.empty() || !token)
             {
-                result.Error = "The search failed: " + found.Error;
+                result.Error = "Could not name " + className + " to the agent";
                 publish(true);
                 Publish();
                 return;
             }
-            std::vector<MonoGcHandle> arrayPin = { Pin(found.Result) };
-            const std::vector<std::uint64_t> objects = ReadArray(found.Result, kMaxArray, &result.Total);
-            const std::uint64_t getName = Method("UnityEngine.Object", "get_name", 0);
-            const std::string filter = Trim(request.NameFilter);
-            for (std::size_t i = 0; i < objects.size() && result.Hits.size() < kMaxHits; ++i)
+            ReleaseGroup(kSearchGroup);
+            AgentRequest find;
+            find.Op(AgentProtocol::Find)
+                .I32(kSearchGroup)
+                .Text(image)
+                .U32(token)
+                .U8(request.IncludeHidden ? 1 : 0)
+                .Text(Trim(request.NameFilter))
+                .I32(static_cast<std::int32_t>(kMaxHits));
+            const Result<AgentLink::Exchanged> answer = Ask(find, std::chrono::seconds(30));
+            if (!answer || !answer->Replies.front().Ok())
             {
-                if (Aborted())
-                    break;
-                if (!objects[i])
-                    continue;
+                result.Error = "The search failed: " + (answer ? answer->Replies.front().Error() : answer.Error().Text);
+                publish(true);
+                Publish();
+                return;
+            }
+            AgentCursor in(answer->Replies.front().Payload);
+            result.Total = static_cast<std::size_t>(std::max(0, in.I32()));
+            const std::int32_t count = in.I32();
+            std::vector<std::pair<int, std::string>> found;
+            std::vector<int> slots;
+            for (std::int32_t i = 0; i < count && in.Ok(); ++i)
+            {
+                const int slot = in.I32();
+                found.emplace_back(slot, in.Text());
+                slots.push_back(slot);
+            }
+            LearnSlots(slots);
+            for (const auto& [slot, name] : found)
+            {
                 UnityHit hit;
-                hit.Object = objects[i];
-                hit.Name = CallString(true, getName, Arg::Ref(objects[i])).value_or("?");
-                if (!filter.empty() && !ContainsNoCase(hit.Name, filter))
+                hit.Object = AddressOf(slot);
+                if (!hit.Object)
                     continue;
-                hit.Class = ClassNameOf(objects[i]);
-                if (const MonoGcHandle pin = Pin(objects[i]))
-                    m_searchPins.push_back(pin);
+                hit.Name = name.empty() ? std::string("?") : name;
+                hit.Class = ClassNameOf(hit.Object);
                 result.Hits.push_back(std::move(hit));
-                if (result.Hits.size() % 100 == 0)
-                {
-                    publish(false);
-                    Publish();
-                }
-                YieldFrame();
             }
-            Unpin(arrayPin);
+            if (!in.Ok())
+                result.Error = "The agent's search result is damaged";
             publish(true);
             Publish();
             return;
@@ -2460,6 +2074,7 @@ namespace Manifold::Target
         if (!Allowed())
             return 0;
         const std::uint64_t klass = ClassOf(object);
+        const int slot = SlotOf(object);
         int id = 0;
         {
             std::lock_guard state(m_stateLock);
@@ -2468,12 +2083,18 @@ namespace Manifold::Target
             inspection.Id = id;
             inspection.Object = object;
             inspection.Klass = klass;
-            inspection.FromScan = fromScan;
+            inspection.Unheld = !fromScan && object && !slot;
+            inspection.FromScan = fromScan || inspection.Unheld;
             inspection.Loading = true;
             inspection.Title = Hex(object);
         }
         Publish();
-        Post("Inspecting an object", [this, id] { DoInspect(id, true); });
+        Post("Inspecting an object", [this, id, slot]
+            {
+                if (slot)
+                    HoldSlots(InspectionGroup(id), { slot });
+                DoInspect(id, true);
+            });
         return id;
     }
 
@@ -2513,239 +2134,22 @@ namespace Manifold::Target
             std::lock_guard state(m_stateLock);
             m_inspections.erase(id);
         }
-        Post("Closing an inspector", [this, id]
-            {
-                if (const auto found = m_inspectionPins.find(id); found != m_inspectionPins.end())
-                {
-                    Unpin(found->second);
-                    m_inspectionPins.erase(found);
-                }
-            });
+        Post("Closing an inspector", [this, id] { ReleaseGroup(InspectionGroup(id)); });
         Publish();
     }
 
-    bool UnityExplorer::ReadTransform(std::uint64_t transform, UnityTransform& info)
+    namespace
     {
-        if (!transform)
-            return false;
-        info.Object = transform;
-        const char* klass = "UnityEngine.Transform";
-        const char* const getters[] = { "get_localPosition", "get_localEulerAngles", "get_localScale", "get_position" };
-        float* const targets[] = { info.LocalPosition, info.LocalEuler, info.LocalScale, info.Position };
-        std::vector<BatchInvoke> calls;
-        for (const char* name : getters)
-            calls.push_back({ Method(klass, name, 0), transform, std::nullopt, sizeof(Vector3) });
-        const std::vector<Invoked> got = InvokeMany(calls);
-        for (std::size_t i = 0; i < got.size(); ++i)
+        void ReadTransformReply(AgentCursor& in, UnityTransform& transform)
         {
-            if (const auto value = ValueOf<Vector3>(got[i]))
+            transform.Read = in.U8() != 0;
+            float* const targets[] = { transform.LocalPosition, transform.LocalEuler, transform.LocalScale, transform.Position };
+            for (float* target : targets)
             {
-                targets[i][0] = value->X;
-                targets[i][1] = value->Y;
-                targets[i][2] = value->Z;
+                for (int i = 0; i < 3; ++i)
+                    target[i] = in.F32();
             }
         }
-        info.Read = ValueOf<Vector3>(got[0]).has_value();
-        return info.Read;
-    }
-
-    std::optional<std::string> UnityExplorer::TextOf(const Invoked& call) const
-    {
-        if (!call.Ok)
-            return std::nullopt;
-        return ReadString(call.Result);
-    }
-
-    template <typename T>
-    std::optional<T> UnityExplorer::ValueOf(const Invoked& call)
-    {
-        if (!call.Ok || call.Value.size() < sizeof(T))
-            return std::nullopt;
-        T value{};
-        std::memcpy(&value, call.Value.data(), sizeof(T));
-        return value;
-    }
-
-    void UnityExplorer::ReadGameObject(std::uint64_t gameObject, UnityGameObject& info, std::vector<MonoGcHandle>& pins)
-    {
-        // Batched in stages, each one round trip: the GameObject's own values,
-        // its transform's links, then the chain parent/child -> GameObject ->
-        // name, where each stage needs the results of the one before.
-        info.Object = gameObject;
-        const char* go = "UnityEngine.GameObject";
-        const char* transformClass = "UnityEngine.Transform";
-        const std::uint64_t getName = Method("UnityEngine.Object", "get_name", 0);
-        const std::uint64_t getGameObject = Method("UnityEngine.Component", "get_gameObject", 0);
-        const std::vector<Invoked> own = InvokeMany({
-            { getName, gameObject },
-            { Method(go, "get_tag", 0), gameObject },
-            { Method(go, "get_layer", 0), gameObject, std::nullopt, sizeof(std::int32_t) },
-            { Method(go, "get_activeSelf", 0), gameObject, std::nullopt, sizeof(std::uint8_t) },
-            { Method(go, "get_activeInHierarchy", 0), gameObject, std::nullopt, sizeof(std::uint8_t) },
-            { Method(go, "get_scene", 0), gameObject, std::nullopt, sizeof(std::int32_t) },
-            { Method(go, "get_transform", 0), gameObject },
-        });
-        info.Name = TextOf(own[0]).value_or("?");
-        info.Tag = TextOf(own[1]).value_or(std::string());
-        info.Layer = ValueOf<std::int32_t>(own[2]).value_or(0);
-        info.ActiveSelf = ValueOf<std::uint8_t>(own[3]).value_or(0) != 0;
-        info.ActiveInHierarchy = ValueOf<std::uint8_t>(own[4]).value_or(0) != 0;
-        if (const auto scene = ValueOf<std::int32_t>(own[5]))
-            info.Scene = CallString(true, Method("UnityEngine.SceneManagement.Scene", "get_name", 0), Arg::Value<std::int32_t>(*scene)).value_or(std::string());
-        const std::uint64_t transform = own[6].Ok ? own[6].Result : 0;
-        if (transform)
-        {
-            pins.push_back(Pin(transform));
-            ReadTransform(transform, info.Transform);
-            const std::vector<Invoked> links = InvokeMany({
-                { Method(transformClass, "get_parent", 0), transform },
-                { Method(transformClass, "get_childCount", 0), transform, std::nullopt, sizeof(std::int32_t) },
-            });
-            const std::uint64_t parent = links[0].Ok ? links[0].Result : 0;
-            info.ChildCount = ValueOf<std::int32_t>(links[1]).value_or(0);
-            const int shown = std::clamp(info.ChildCount, 0, static_cast<int>(kMaxShownChildren));
-
-            // Stage 1: the parent's GameObject and every child transform.
-            std::vector<BatchInvoke> first;
-            if (parent)
-                first.push_back({ getGameObject, parent });
-            const std::size_t firstChildren = first.size();
-            const std::uint64_t getChild = Method(transformClass, "GetChild", 1);
-            for (int i = 0; i < shown; ++i)
-                first.push_back({ getChild, transform, i });
-            const std::vector<Invoked> firstGot = InvokeMany(first);
-            if (parent)
-            {
-                info.Parent = firstGot[0].Ok ? firstGot[0].Result : 0;
-                pins.push_back(Pin(parent));
-                pins.push_back(Pin(info.Parent));
-            }
-
-            // Stage 2: the parent's name and the children's GameObjects.
-            std::vector<BatchInvoke> second;
-            if (info.Parent)
-                second.push_back({ getName, info.Parent });
-            const std::size_t secondChildren = second.size();
-            for (std::size_t k = firstChildren; k < firstGot.size(); ++k)
-            {
-                if (firstGot[k].Ok && firstGot[k].Result)
-                    second.push_back({ getGameObject, firstGot[k].Result });
-            }
-            const std::vector<Invoked> secondGot = InvokeMany(second);
-            if (parent)
-                info.ParentName = info.Parent ? TextOf(secondGot[0]).value_or("?") : "?";
-
-            // Stage 3: the children's names.
-            std::vector<BatchInvoke> third;
-            std::vector<std::uint64_t> childObjects;
-            for (std::size_t k = secondChildren; k < secondGot.size(); ++k)
-            {
-                if (!secondGot[k].Ok || !secondGot[k].Result)
-                    continue;
-                childObjects.push_back(secondGot[k].Result);
-                pins.push_back(Pin(secondGot[k].Result));
-                third.push_back({ getName, secondGot[k].Result });
-            }
-            const std::vector<Invoked> names = InvokeMany(third);
-            for (std::size_t k = 0; k < childObjects.size(); ++k)
-                info.Children.push_back({ childObjects[k], TextOf(names[k]).value_or("?"), "GameObject" });
-        }
-        const std::uint64_t componentType = TypeObject(FindClass("UnityEngine.Component"));
-        const std::uint64_t list = CallObject(true, Method(go, "GetComponents", 1, "System.Type"), Arg::Ref(gameObject), { Arg::Ref(componentType) });
-        if (list)
-        {
-            pins.push_back(Pin(list));
-            const std::uint64_t getEnabled = Method("UnityEngine.Behaviour", "get_enabled", 0);
-            std::vector<BatchInvoke> enabled;
-            std::vector<std::size_t> enabledFor;
-            for (const std::uint64_t component : ReadArray(list, 512))
-            {
-                if (!component)
-                    continue;
-                pins.push_back(Pin(component));
-                UnityComponent entry;
-                entry.Object = component;
-                const std::uint64_t klass = ClassOf(component);
-                entry.Class = ClassName(klass);
-                const std::vector<std::string> chain = ChainOf(klass);
-                entry.HasEnabled = std::find(chain.begin(), chain.end(), "UnityEngine.Behaviour") != chain.end();
-                if (entry.HasEnabled)
-                {
-                    enabled.push_back({ getEnabled, component, std::nullopt, sizeof(std::uint8_t) });
-                    enabledFor.push_back(info.Components.size());
-                }
-                info.Components.push_back(std::move(entry));
-            }
-            const std::vector<Invoked> states = InvokeMany(enabled);
-            for (std::size_t k = 0; k < states.size(); ++k)
-                info.Components[enabledFor[k]].Enabled = ValueOf<std::uint8_t>(states[k]).value_or(0) != 0;
-        }
-    }
-
-    MonoReadValue UnityExplorer::ReadResult(const MonoTypeInfo& type, const Invoked& call, std::vector<MonoGcHandle>& pins)
-    {
-        MonoReadValue value;
-        if (!call.Ok)
-        {
-            value.Error = call.Error;
-            return value;
-        }
-        value.Read = true;
-        if (type.Code == MonoTypeCode::Void)
-            return value;
-        const auto process = Proc();
-        if (type.ValueType)
-        {
-            value.Raw.assign(static_cast<std::size_t>(std::max(1, type.Size)), 0);
-            // A batch already copied the boxed value out inside the game.
-            if (!call.Value.empty() && call.Value.size() >= value.Raw.size())
-            {
-                std::memcpy(value.Raw.data(), call.Value.data(), value.Raw.size());
-                return value;
-            }
-            if (!call.Result || !process || !process->ReadExact(call.Result + kObjectHeader, value.Raw.data(), value.Raw.size()))
-            {
-                value.Read = false;
-                value.Error = "no value came back";
-            }
-            return value;
-        }
-        value.Raw.resize(8);
-        std::memcpy(value.Raw.data(), &call.Result, 8);
-        if (call.Result)
-        {
-            pins.push_back(Pin(call.Result));
-            if (type.Code == MonoTypeCode::String || ClassNameOf(call.Result) == "System.String")
-                value.Text = ReadString(call.Result, 1024);
-        }
-        return value;
-    }
-
-    void UnityExplorer::ReadProperties(UnityInspection& inspection, std::vector<MonoGcHandle>& pins)
-    {
-        if (!inspection.Layout || inspection.FromScan)
-            return;
-        // Every getter in one batch; value results come back already copied.
-        std::vector<BatchInvoke> calls;
-        std::vector<std::size_t> members;
-        for (std::size_t i = 0; i < inspection.Layout->Members.size(); ++i)
-        {
-            const MonoMember& member = inspection.Layout->Members[i];
-            if (member.Kind != MonoMemberKind::Property || !member.Getter)
-                continue;
-            if (!member.Static && !inspection.Object)
-                continue;
-            BatchInvoke call;
-            call.Method = member.Getter;
-            call.Self = member.Static ? 0 : inspection.Object;
-            if (member.Type.ValueType && member.Type.Size > 0 && member.Type.Size <= static_cast<int>(RemoteCall::kMainCallData))
-                call.ValueBytes = static_cast<std::uint32_t>(member.Type.Size);
-            calls.push_back(call);
-            members.push_back(i);
-        }
-        const std::vector<Invoked> got = InvokeMany(calls);
-        for (std::size_t k = 0; k < got.size(); ++k)
-            inspection.Values[static_cast<int>(members[k])] = ReadResult(inspection.Layout->Members[members[k]].Type, got[k], pins);
     }
 
     void UnityExplorer::DoInspect(int id, bool properties)
@@ -2756,9 +2160,9 @@ namespace Manifold::Target
         UnityInspection inspection = *copy;
         inspection.Error.clear();
         const auto started = std::chrono::steady_clock::now();
-        const std::uint64_t waitsBefore = m_mono.m_call.FrameWaits();
         m_statTrips = 0;
         m_statCalls = 0;
+        m_statFrames = 0;
         if (!inspection.Klass && inspection.Object)
             inspection.Klass = ClassOf(inspection.Object);
         // Once inspected, the memory must still hold an object of that class.
@@ -2776,132 +2180,270 @@ namespace Manifold::Target
                                "something else, so nothing is read from it or called on it any more.";
         }
         if (!inspection.Klass)
-        {
             inspection.Error = "This address does not hold a managed object.";
-        }
         else
         {
             inspection.Layout = LoadLayout(inspection.Klass);
             inspection.Title = inspection.Layout->Name;
         }
-        std::vector<MonoGcHandle> pins;
-        if (inspection.Layout && inspection.Object && !inspection.FromScan && !inspection.Gone)
+
+        const int group = InspectionGroup(id);
+        const int self = inspection.Object ? SlotOf(inspection.Object) : 0;
+        const bool callable = inspection.Layout && !inspection.FromScan && !inspection.Gone && (!inspection.Object || self);
+        if (callable)
         {
-            pins.push_back(Pin(inspection.Object));
             const MonoClassLayout& layout = *inspection.Layout;
-            if (layout.UnityObject)
+            AgentRequest request;
+            int unityReply = -1;
+            std::vector<std::size_t> getters;
+            int getterFirst = -1;
+            int fieldsReply = -1;
+            std::vector<std::size_t> referenceFields;
+            int elementsReply = -1;
+            int next = 0;
+            if (layout.UnityObject && inspection.Object)
             {
-                if (Status hooked = EnsureHook(); !hooked)
-                    inspection.Error = hooked.Text;
+                if (layout.GameObject)
+                    request.Op(AgentProtocol::GameObject).I32(group).I32(self).I32(static_cast<std::int32_t>(kMaxShownChildren));
+                else
+                    request.Op(AgentProtocol::UnityObject).I32(group).I32(self);
+                unityReply = next++;
+            }
+            if (properties)
+            {
+                for (std::size_t i = 0; i < layout.Members.size(); ++i)
+                {
+                    const MonoMember& member = layout.Members[i];
+                    if (member.Kind != MonoMemberKind::Property || !member.Getter || !member.GetterToken || (!member.Static && !inspection.Object))
+                        continue;
+                    if (getterFirst < 0)
+                        getterFirst = next;
+                    request.Op(AgentProtocol::Invoke)
+                        .I32(group)
+                        .Text(member.Image)
+                        .U32(member.GetterToken)
+                        .I32(member.Static ? 0 : self)
+                        .I32(member.Type.ValueType ? std::max(1, member.Type.Size) : 8)
+                        .I32(0);
+                    getters.push_back(i);
+                    ++next;
+                }
+            }
+            for (std::size_t i = 0; i < layout.Members.size(); ++i)
+            {
+                const MonoMember& member = layout.Members[i];
+                if (member.Kind == MonoMemberKind::Field && !member.Literal && !member.Type.ValueType && member.Token && (member.Static || inspection.Object))
+                    referenceFields.push_back(i);
+            }
+            if (!referenceFields.empty())
+            {
+                request.Op(AgentProtocol::Fields).I32(group).I32(self).I32(static_cast<std::int32_t>(referenceFields.size()));
+                for (const std::size_t i : referenceFields)
+                    request.Text(layout.Members[i].Image).U32(layout.Members[i].Token).I32(8);
+                fieldsReply = next++;
+            }
+            if (layout.Rank > 0 && inspection.Object && !layout.Element.ValueType)
+            {
+                request.Op(AgentProtocol::Elements).I32(group).I32(self).I32(0).I32(static_cast<std::int32_t>(kMaxShownElements));
+                elementsReply = next++;
+            }
+            if (request.Count() > 0)
+            {
+                if (Status ready = EnsureAgent(); !ready)
+                    inspection.Error = ready.Text;
                 else
                 {
-                    // Name, owner and enabled state in one round trip.
-                    std::vector<BatchInvoke> head = { { Method("UnityEngine.Object", "get_name", 0), inspection.Object } };
-                    if (layout.Component && !layout.GameObject)
-                    {
-                        head.push_back({ Method("UnityEngine.Component", "get_gameObject", 0), inspection.Object });
-                        if (layout.Behaviour)
-                            head.push_back({ Method("UnityEngine.Behaviour", "get_enabled", 0), inspection.Object, std::nullopt, sizeof(std::uint8_t) });
-                    }
-                    const std::vector<Invoked> got = InvokeMany(head);
-                    if (got[0].Ok)
-                        inspection.ObjectName = ReadString(got[0].Result);
+                    const Result<AgentLink::Exchanged> answer = Ask(request);
+                    if (!answer)
+                        inspection.Error = answer.Error().Text;
                     else
-                        inspection.Error = got[0].Error;
-                    if (layout.GameObject)
                     {
-                        UnityGameObject info;
-                        ReadGameObject(inspection.Object, info, pins);
-                        inspection.GameObject = std::move(info);
-                    }
-                    else if (layout.Component)
-                    {
-                        inspection.Owner = got[1].Ok ? got[1].Result : 0;
-                        if (inspection.Owner)
+                        const std::vector<AgentReply>& replies = answer->Replies;
+                        std::vector<int> slots;
+                        struct GameObjectReply
                         {
-                            pins.push_back(Pin(inspection.Owner));
-                            inspection.OwnerName = CallString(true, Method("UnityEngine.Object", "get_name", 0), Arg::Ref(inspection.Owner)).value_or("?");
+                            UnityGameObject Info;
+                            int Transform = 0;
+                            int Parent = 0;
+                            std::vector<int> Children;
+                            std::vector<int> Components;
+                        };
+                        std::optional<GameObjectReply> gameObject;
+                        int owner = 0;
+                        std::optional<UnityTransform> transform;
+                        if (unityReply >= 0)
+                        {
+                            const AgentReply& reply = replies[static_cast<std::size_t>(unityReply)];
+                            AgentCursor in(reply.Payload);
+                            if (!reply.Ok())
+                                inspection.Error = reply.Error();
+                            else if (layout.GameObject)
+                            {
+                                GameObjectReply got;
+                                got.Info.Name = in.Text();
+                                got.Info.Tag = in.Text();
+                                got.Info.Layer = in.I32();
+                                got.Info.ActiveSelf = in.U8() != 0;
+                                got.Info.ActiveInHierarchy = in.U8() != 0;
+                                got.Info.Scene = in.Text();
+                                got.Transform = in.I32();
+                                ReadTransformReply(in, got.Info.Transform);
+                                got.Parent = in.I32();
+                                got.Info.ParentName = in.Text();
+                                got.Info.ChildCount = in.I32();
+                                const std::int32_t children = in.I32();
+                                for (std::int32_t k = 0; k < children && in.Ok(); ++k)
+                                {
+                                    got.Children.push_back(in.I32());
+                                    got.Info.Children.push_back({ 0, in.Text(), "GameObject" });
+                                }
+                                const std::int32_t components = in.I32();
+                                for (std::int32_t k = 0; k < components && in.Ok(); ++k)
+                                {
+                                    UnityComponent entry;
+                                    got.Components.push_back(in.I32());
+                                    entry.HasEnabled = in.U8() != 0;
+                                    entry.Enabled = in.U8() != 0;
+                                    got.Info.Components.push_back(std::move(entry));
+                                }
+                                if (in.Ok())
+                                {
+                                    inspection.ObjectName = got.Info.Name;
+                                    slots.push_back(got.Transform);
+                                    slots.push_back(got.Parent);
+                                    slots.insert(slots.end(), got.Children.begin(), got.Children.end());
+                                    slots.insert(slots.end(), got.Components.begin(), got.Components.end());
+                                    gameObject = std::move(got);
+                                }
+                                else
+                                    inspection.Error = "The agent's answer about this GameObject is damaged";
+                            }
+                            else
+                            {
+                                inspection.ObjectName = in.Text();
+                                owner = in.I32();
+                                inspection.OwnerName = in.Text();
+                                const std::uint8_t enabled = in.U8();
+                                UnityTransform read;
+                                ReadTransformReply(in, read);
+                                if (in.Ok())
+                                {
+                                    if (enabled < 2)
+                                        inspection.Enabled = enabled != 0;
+                                    if (read.Read)
+                                        transform = read;
+                                    slots.push_back(owner);
+                                }
+                                else
+                                    inspection.Error = "The agent's answer about this object is damaged";
+                            }
                         }
-                        if (layout.Behaviour)
-                            if (const auto enabled = ValueOf<std::uint8_t>(got[2]))
-                                inspection.Enabled = *enabled != 0;
-                        if (layout.Transform)
+                        std::vector<std::pair<std::size_t, PendingValue>> values;
+                        for (std::size_t k = 0; k < getters.size(); ++k)
                         {
-                            UnityTransform transform;
-                            if (ReadTransform(inspection.Object, transform))
+                            const AgentReply& reply = replies[static_cast<std::size_t>(getterFirst) + k];
+                            const MonoMember& member = layout.Members[getters[k]];
+                            PendingValue pending;
+                            if (!reply.Ok())
+                                pending.Value.Error = reply.Error();
+                            else
+                            {
+                                AgentCursor in(reply.Payload);
+                                pending = ReadValue(in, member.Type);
+                                if (pending.Reference)
+                                    slots.push_back(pending.Slot);
+                            }
+                            values.emplace_back(getters[k], std::move(pending));
+                        }
+                        if (fieldsReply >= 0 && replies[static_cast<std::size_t>(fieldsReply)].Ok())
+                        {
+                            AgentCursor in(replies[static_cast<std::size_t>(fieldsReply)].Payload);
+                            for (const std::size_t i : referenceFields)
+                            {
+                                const PendingValue pending = ReadValue(in, layout.Members[i].Type);
+                                if (pending.Reference)
+                                    slots.push_back(pending.Slot);
+                            }
+                        }
+                        if (elementsReply >= 0 && replies[static_cast<std::size_t>(elementsReply)].Ok())
+                        {
+                            AgentCursor in(replies[static_cast<std::size_t>(elementsReply)].Payload);
+                            in.I32();
+                            const std::int32_t count = in.I32();
+                            for (std::int32_t k = 0; k < count && in.Ok(); ++k)
+                                slots.push_back(in.I32());
+                        }
+                        LearnSlots(slots);
+                        if (gameObject)
+                        {
+                            UnityGameObject info = std::move(gameObject->Info);
+                            info.Object = inspection.Object;
+                            info.Transform.Object = AddressOf(gameObject->Transform);
+                            info.Parent = AddressOf(gameObject->Parent);
+                            if (!info.Parent)
+                                info.ParentName.clear();
+                            else if (info.ParentName.empty())
+                                info.ParentName = "?";
+                            for (std::size_t k = 0; k < info.Children.size(); ++k)
+                            {
+                                info.Children[k].Object = AddressOf(gameObject->Children[k]);
+                                if (info.Children[k].Name.empty())
+                                    info.Children[k].Name = "?";
+                            }
+                            info.Children.erase(std::remove_if(info.Children.begin(), info.Children.end(), [](const UnityHit& hit) { return !hit.Object; }), info.Children.end());
+                            for (std::size_t k = 0; k < info.Components.size(); ++k)
+                            {
+                                info.Components[k].Object = AddressOf(gameObject->Components[k]);
+                                info.Components[k].Class = ClassNameOf(info.Components[k].Object);
+                            }
+                            info.Components.erase(std::remove_if(info.Components.begin(), info.Components.end(), [](const UnityComponent& entry) { return !entry.Object; }), info.Components.end());
+                            inspection.GameObject = std::move(info);
+                        }
+                        if (unityReply >= 0 && !layout.GameObject)
+                        {
+                            inspection.Owner = AddressOf(owner);
+                            if (!inspection.Owner)
+                                inspection.OwnerName.clear();
+                            if (transform)
+                            {
+                                transform->Object = inspection.Object;
                                 inspection.Transform = transform;
+                            }
+                        }
+                        if (!getters.empty())
+                        {
+                            std::map<int, MonoReadValue> kept;
+                            for (const auto& [index, value] : inspection.Values)
+                            {
+                                if (index >= 0 && index < static_cast<int>(layout.Members.size()) &&
+                                    layout.Members[static_cast<std::size_t>(index)].Kind == MonoMemberKind::Method)
+                                    kept.emplace(index, value);
+                            }
+                            for (auto& [index, pending] : values)
+                            {
+                                Resolve(pending);
+                                kept[static_cast<int>(index)] = std::move(pending.Value);
+                            }
+                            inspection.Values = std::move(kept);
                         }
                     }
                 }
             }
         }
-        bool readProperties = false;
-        if (properties && inspection.Layout && (inspection.Object || inspection.Klass) && !inspection.Gone)
-        {
-            bool any = false;
-            for (const MonoMember& member : inspection.Layout->Members)
-                any = any || (member.Kind == MonoMemberKind::Property && member.Getter && (member.Static || inspection.Object));
-            if (any && !inspection.FromScan)
-            {
-                if (Status hooked = EnsureHook(); !hooked)
-                {
-                    if (inspection.Error.empty())
-                        inspection.Error = "Properties were not read: " + hooked.Text;
-                }
-                else
-                {
-                    // Method results stay; property values are read again.
-                    std::map<int, MonoReadValue> kept;
-                    for (const auto& [index, value] : inspection.Values)
-                    {
-                        if (index >= 0 && index < static_cast<int>(inspection.Layout->Members.size()) &&
-                            inspection.Layout->Members[static_cast<std::size_t>(index)].Kind == MonoMemberKind::Method)
-                            kept.emplace(index, value);
-                    }
-                    inspection.Values = std::move(kept);
-                    readProperties = true;
-                }
-            }
-        }
-        // Values carried over keep their objects alive under the new pins.
-        for (const auto& [index, value] : inspection.Values)
-        {
-            if (value.Read && value.Raw.size() == 8 && index >= 0 && index < static_cast<int>(inspection.Layout ? inspection.Layout->Members.size() : 0) &&
-                !inspection.Layout->Members[static_cast<std::size_t>(index)].Type.ValueType)
-            {
-                std::uint64_t pointer = 0;
-                std::memcpy(&pointer, value.Raw.data(), 8);
-                if (pointer)
-                    pins.push_back(Pin(pointer));
-            }
-        }
-        if (readProperties)
-            ReadProperties(inspection, pins);
         inspection.Loading = false;
         inspection.RefreshMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
         inspection.Calls = m_statCalls;
         inspection.RoundTrips = m_statTrips;
-        inspection.FrameWaits = static_cast<int>(m_mono.m_call.FrameWaits() - waitsBefore);
-        std::vector<MonoGcHandle> old;
-        bool alive = false;
+        inspection.FrameWaits = m_statFrames;
         {
             std::lock_guard state(m_stateLock);
             const auto found = m_inspections.find(id);
             if (found != m_inspections.end())
             {
-                alive = true;
                 inspection.Generation = found->second.Generation + 1;
                 found->second = std::move(inspection);
             }
         }
-        if (alive)
-        {
-            old.swap(m_inspectionPins[id]);
-            m_inspectionPins[id] = std::move(pins);
-        }
-        else
-            old = std::move(pins);
-        Unpin(old);
         Publish();
     }
 
@@ -2912,11 +2454,15 @@ namespace Manifold::Target
     {
         Post(active ? "Activating an object" : "Deactivating an object", [this, gameObject, active, refresh]
             {
-                if (Status hooked = EnsureHook(); !hooked)
-                    return Fail(hooked.Text);
-                const Invoked done = Invoke(true, Method("UnityEngine.GameObject", "SetActive", 1), Arg::Ref(gameObject), { Arg::Value<std::uint8_t>(active ? 1 : 0) });
-                if (!done.Ok)
-                    return Fail("SetActive failed: " + done.Error);
+                if (Status ready = EnsureAgent(); !ready)
+                    return Fail(ready.Text);
+                const int slot = SlotOf(gameObject);
+                if (!slot)
+                    return Fail(std::string("SetActive: ") + kUnheldText);
+                AgentRequest request;
+                request.Op(AgentProtocol::SetActive).I32(slot).U8(active ? 1 : 0);
+                if (Status done = Command(request, "SetActive failed"); !done)
+                    return Fail(done.Text);
                 {
                     std::lock_guard state(m_stateLock);
                     for (UnityNode& node : m_tree.Nodes)
@@ -2935,11 +2481,15 @@ namespace Manifold::Target
     {
         Post(enabled ? "Enabling a component" : "Disabling a component", [this, behaviour, enabled, refresh]
             {
-                if (Status hooked = EnsureHook(); !hooked)
-                    return Fail(hooked.Text);
-                const Invoked done = Invoke(true, Method("UnityEngine.Behaviour", "set_enabled", 1), Arg::Ref(behaviour), { Arg::Value<std::uint8_t>(enabled ? 1 : 0) });
-                if (!done.Ok)
-                    return Fail("Setting enabled failed: " + done.Error);
+                if (Status ready = EnsureAgent(); !ready)
+                    return Fail(ready.Text);
+                const int slot = SlotOf(behaviour);
+                if (!slot)
+                    return Fail(std::string("Setting enabled: ") + kUnheldText);
+                AgentRequest request;
+                request.Op(AgentProtocol::SetEnabled).I32(slot).U8(enabled ? 1 : 0);
+                if (Status done = Command(request, "Setting enabled failed"); !done)
+                    return Fail(done.Text);
                 if (refresh)
                     DoInspect(refresh, false);
             });
@@ -2949,14 +2499,15 @@ namespace Manifold::Target
     {
         Post("Renaming an object", [this, object, name, refresh]
             {
-                if (Status hooked = EnsureHook(); !hooked)
-                    return Fail(hooked.Text);
-                const std::uint64_t text = NewString(name);
-                std::vector<MonoGcHandle> pins = { Pin(text) };
-                const Invoked done = text ? Invoke(true, Method("UnityEngine.Object", "set_name", 1), Arg::Ref(object), { Arg::Ref(text) }) : Invoked{ false, 0, "could not make the string" };
-                Unpin(pins);
-                if (!done.Ok)
-                    return Fail("Renaming failed: " + done.Error);
+                if (Status ready = EnsureAgent(); !ready)
+                    return Fail(ready.Text);
+                const int slot = SlotOf(object);
+                if (!slot)
+                    return Fail(std::string("Renaming: ") + kUnheldText);
+                AgentRequest request;
+                request.Op(AgentProtocol::SetName).I32(slot).Text(name);
+                if (Status done = Command(request, "Renaming failed"); !done)
+                    return Fail(done.Text);
                 {
                     std::lock_guard state(m_stateLock);
                     for (UnityNode& node : m_tree.Nodes)
@@ -2973,16 +2524,18 @@ namespace Manifold::Target
 
     void UnityExplorer::SetVector(std::uint64_t transform, int which, const float value[3], int refresh)
     {
-        const Vector3 vector{ value[0], value[1], value[2] };
+        const std::array<float, 3> vector{ value[0], value[1], value[2] };
         Post("Moving an object", [this, transform, which, vector, refresh]
             {
-                if (Status hooked = EnsureHook(); !hooked)
-                    return Fail(hooked.Text);
-                static const char* const kSetters[] = { "set_localPosition", "set_localEulerAngles", "set_localScale" };
-                const char* setter = kSetters[std::clamp(which, 0, 2)];
-                const Invoked done = Invoke(true, Method("UnityEngine.Transform", setter, 1), Arg::Ref(transform), { Arg::Value(vector) });
-                if (!done.Ok)
-                    return Fail(std::string(setter) + " failed: " + done.Error);
+                if (Status ready = EnsureAgent(); !ready)
+                    return Fail(ready.Text);
+                const int slot = SlotOf(transform);
+                if (!slot)
+                    return Fail(std::string("Moving: ") + kUnheldText);
+                AgentRequest request;
+                request.Op(AgentProtocol::SetVector).I32(slot).I32(std::clamp(which, 0, 2)).F32(vector[0]).F32(vector[1]).F32(vector[2]);
+                if (Status done = Command(request, "Moving failed"); !done)
+                    return Fail(done.Text);
                 if (refresh)
                     DoInspect(refresh, false);
             });
@@ -2992,38 +2545,32 @@ namespace Manifold::Target
     {
         Post(enabled ? "Keeping the game running in the background" : "Letting the game pause in the background", [this, enabled]
             {
-                const std::uint64_t setter = Method("UnityEngine.Application", "set_runInBackground", 1);
-                const std::uint64_t getter = Method("UnityEngine.Application", "get_runInBackground", 0);
-                if (!setter)
-                    return Fail("This Unity version has no Application.runInBackground");
-                // runInBackground is a real engine property, so the setter MUST
-                // run on the main thread — never on the worker, where a Unity
-                // engine call crashes the game. If the game is not rendering
-                // (so the main thread never reaches the callback) this cannot be
-                // set; the game has to be in the foreground once to turn it on.
-                if (Status hooked = EnsureHook(); !hooked)
-                    return Fail(hooked.Text);
-                if (!m_mono.m_call.EnterMain(std::chrono::milliseconds(1500)))
-                    return Fail("Bring the game to the foreground once so this can run on its main thread, then try again.");
-                if (!m_originalRunInBackground)
-                {
-                    if (const auto before = CallValue<std::uint8_t>(true, getter, Arg::Ref(0)))
-                        m_originalRunInBackground = *before != 0;
-                }
-                const Invoked done = Invoke(true, setter, Arg::Ref(0), { Arg::Value<std::uint8_t>(enabled ? 1 : 0) });
-                if (!done.Ok)
-                    return Fail("Could not change Application.runInBackground: " + done.Error);
-                const auto now = CallValue<std::uint8_t>(true, getter, Arg::Ref(0));
+                // runInBackground is a real engine property, so the agent sets
+                // it on the main thread. If the game is not rendering (so the
+                // main thread never reaches the agent) this cannot be set; the
+                // game has to be in the foreground once to turn it on.
+                if (Status ready = EnsureAgent(); !ready)
+                    return Fail(ready.Text);
+                AgentRequest request;
+                request.Op(AgentProtocol::RunInBackground).I32(enabled ? 1 : 0);
+                const Result<AgentLink::Exchanged> answer = Ask(request, std::chrono::seconds(5));
+                if (!answer)
+                    return Fail("Bring the game to the foreground once so this can run on its main thread, then try again (" + answer.Error().Text + ")");
+                const AgentReply& reply = answer->Replies.front();
+                if (!reply.Ok())
+                    return Fail("Could not change Application.runInBackground: " + reply.Error());
+                AgentCursor in(reply.Payload);
+                const std::int32_t now = in.I32();
+                const bool changed = in.U8() != 0;
                 std::lock_guard state(m_stateLock);
-                m_status.RunInBackground = now ? *now != 0 : enabled;
-                m_status.ChangedRunInBackground = m_originalRunInBackground && *m_originalRunInBackground != enabled;
-                if (m_originalRunInBackground && *m_originalRunInBackground == enabled)
-                    m_originalRunInBackground.reset();
+                m_status.RunInBackground = now >= 0 ? now != 0 : enabled;
+                m_status.ChangedRunInBackground = changed;
             });
     }
 
-    std::optional<UnityExplorer::Arg> UnityExplorer::ArgumentFor(const MonoTypeInfo& type, const std::string& text, std::string& error)
+    std::optional<UnityExplorer::AgentArg> UnityExplorer::ArgumentFor(const MonoTypeInfo& type, const std::string& text, std::string& error)
     {
+        AgentArg arg;
         if (type.ValueType)
         {
             if (type.Class && !IsPrimitive(type.ValueCode))
@@ -3031,26 +2578,24 @@ namespace Manifold::Target
             const auto bytes = Parse(type, text, &error);
             if (!bytes)
                 return std::nullopt;
-            return Arg::Raw(*bytes);
+            arg.Kind = AgentProtocol::ArgBytes;
+            arg.Bytes = *bytes;
+            return arg;
         }
         const std::string trimmed = Trim(text);
         if (type.Code == MonoTypeCode::String)
         {
             if (trimmed == "null")
-                return Arg::Ref(0);
+                return arg;
             std::string body = text;
             if (body.size() >= 2 && body.front() == '"' && body.back() == '"')
                 body = body.substr(1, body.size() - 2);
-            const std::uint64_t made = NewString(body);
-            if (!made)
-            {
-                error = "could not make the string";
-                return std::nullopt;
-            }
-            return Arg::Ref(made);
+            arg.Kind = AgentProtocol::ArgText;
+            arg.Text = body;
+            return arg;
         }
         if (trimmed.empty() || trimmed == "null")
-            return Arg::Ref(0);
+            return arg;
         std::string digits = trimmed;
         if (digits.rfind("0x", 0) == 0 || digits.rfind("0X", 0) == 0)
             digits = digits.substr(2);
@@ -3060,7 +2605,14 @@ namespace Manifold::Target
             error = "type null, or the address of an object";
             return std::nullopt;
         }
-        return Arg::Ref(*address);
+        arg.Slot = SlotOf(*address);
+        if (!arg.Slot)
+        {
+            error = "Manifold holds no object at that address; open the object in the explorer first";
+            return std::nullopt;
+        }
+        arg.Kind = AgentProtocol::ArgSlot;
+        return arg;
     }
 
     void UnityExplorer::SetMember(int id, int member, std::string text)
@@ -3082,65 +2634,55 @@ namespace Manifold::Target
         // whatever now lives in that memory.
         if (!member.Static && inspection->Object && (inspection->Gone || ClassOf(inspection->Object) != inspection->Klass))
             return Fail(member.Name + ": " + kGoneText);
-        if (member.Kind == MonoMemberKind::Field)
+        if (member.Kind == MonoMemberKind::Field && member.Type.ValueType)
         {
             if (member.Literal)
                 return Fail(member.Name + " is a constant");
             if (!member.Static && !inspection->Object)
                 return Fail(member.Name + " needs an object");
-            if (member.Type.ValueType)
-            {
-                if (member.Type.Class && !IsPrimitive(member.Type.ValueCode))
-                    LoadLayout(member.Type.Class);
-                const auto bytes = Parse(member.Type, text, &error);
-                if (!bytes)
-                    return Fail(member.Name + ": " + error);
-                if (member.Static && (!member.StaticData || member.Offset < 0))
-                    return Fail(member.Name + " is a thread static and cannot be written here");
-                const std::uint64_t address = member.Static ? member.StaticData + static_cast<std::uint64_t>(member.Offset)
-                                                            : inspection->Object + static_cast<std::uint64_t>(member.Offset);
-                if (Status written = process->Write(address, bytes->data(), bytes->size()); !written)
-                    return Fail(member.Name + ": " + written.Text);
-            }
-            else
-            {
-                const auto arg = ArgumentFor(member.Type, text, error);
-                if (!arg)
-                    return Fail(member.Name + ": " + error);
-                std::vector<MonoGcHandle> pins = { Pin(arg->Pointer) };
-                const std::size_t mark = m_argsUsed;
-                const std::uint64_t slot = ArgSpace(8);
-                bool done = false;
-                if (slot && process->Write(slot, &arg->Pointer, 8))
-                {
-                    if (member.Static)
-                        done = member.VTable && Worker("mono_field_static_set_value", member.VTable, member.Handle, slot).has_value();
-                    else
-                        done = Worker("mono_field_set_value", inspection->Object, member.Handle, slot).has_value();
-                }
-                m_argsUsed = mark;
-                Unpin(pins);
-                if (!done)
-                    return Fail("Could not write " + member.Name);
-            }
-        }
-        else if (member.Kind == MonoMemberKind::Property)
-        {
-            if (!member.Setter)
-                return Fail(member.Name + " has no setter");
-            if (!member.Static && !inspection->Object)
-                return Fail(member.Name + " needs an object");
-            if (Status hooked = EnsureHook(); !hooked)
-                return Fail(hooked.Text);
-            const auto arg = ArgumentFor(member.Type, text, error);
-            if (!arg)
+            if (member.Type.Class && !IsPrimitive(member.Type.ValueCode))
+                LoadLayout(member.Type.Class);
+            const auto bytes = Parse(member.Type, text, &error);
+            if (!bytes)
                 return Fail(member.Name + ": " + error);
-            std::vector<MonoGcHandle> pins = { Pin(arg->Pointer) };
-            const Invoked done = Invoke(true, member.Setter, Arg::Ref(member.Static ? 0 : inspection->Object), { *arg });
-            Unpin(pins);
-            if (!done.Ok)
-                return Fail("Setting " + member.Name + " failed: " + done.Error);
+            if (member.Static && (!member.StaticData || member.Offset < 0))
+                return Fail(member.Name + " is a thread static and cannot be written here");
+            const std::uint64_t address = member.Static ? member.StaticData + static_cast<std::uint64_t>(member.Offset)
+                                                        : inspection->Object + static_cast<std::uint64_t>(member.Offset);
+            if (Status written = process->Write(address, bytes->data(), bytes->size()); !written)
+                return Fail(member.Name + ": " + written.Text);
+            DoInspect(id, false);
+            return;
         }
+        if (member.Kind != MonoMemberKind::Field && member.Kind != MonoMemberKind::Property)
+            return;
+        if (member.Kind == MonoMemberKind::Field && member.Literal)
+            return Fail(member.Name + " is a constant");
+        if (member.Kind == MonoMemberKind::Property && (!member.Setter || !member.SetterToken))
+            return Fail(member.Name + " has no setter");
+        if (!member.Static && !inspection->Object)
+            return Fail(member.Name + " needs an object");
+        const int self = member.Static ? 0 : SlotOf(inspection->Object);
+        if (!member.Static && !self)
+            return Fail(member.Name + ": " + kUnheldText);
+        if (Status ready = EnsureAgent(); !ready)
+            return Fail(ready.Text);
+        const auto arg = ArgumentFor(member.Type, text, error);
+        if (!arg)
+            return Fail(member.Name + ": " + error);
+        AgentRequest request;
+        if (member.Kind == MonoMemberKind::Field)
+        {
+            request.Op(AgentProtocol::SetField).I32(self).Text(member.Image).U32(member.Token);
+            WriteArg(request, *arg);
+        }
+        else
+        {
+            request.Op(AgentProtocol::Invoke).I32(InspectionGroup(id)).Text(member.Image).U32(member.SetterToken).I32(self).I32(0).I32(1);
+            WriteArg(request, *arg);
+        }
+        if (Status done = Command(request, "Setting " + member.Name + " failed"); !done)
+            return Fail(done.Text);
         DoInspect(id, member.Kind == MonoMemberKind::Property);
     }
 
@@ -3160,34 +2702,53 @@ namespace Manifold::Target
         if (!member.Static && !inspection->Object)
             return Fail(member.Name + " needs an object");
         MonoReadValue value;
-        std::vector<MonoGcHandle> pins;
-        std::vector<Arg> args;
+        std::vector<AgentArg> args;
         std::string error;
+        const int self = member.Static ? 0 : SlotOf(inspection->Object);
+        if (!member.Static && !self)
+            error = kUnheldText;
+        if (!member.Token)
+            error = "this runtime does not name the method's token";
         for (std::size_t i = 0; i < member.Params.size() && error.empty(); ++i)
         {
             const auto arg = ArgumentFor(member.Params[i], i < arguments.size() ? arguments[i] : std::string(), error);
             if (arg)
-            {
-                if (arg->Pointer)
-                    pins.push_back(Pin(arg->Pointer));
                 args.push_back(*arg);
-            }
             else
                 error = (i < member.ParamNames.size() && !member.ParamNames[i].empty() ? member.ParamNames[i] : "argument " + std::to_string(i + 1)) + ": " + error;
         }
         if (!error.empty())
             value.Error = error;
-        else if (Status hooked = EnsureHook(); !hooked)
-            value.Error = hooked.Text;
+        else if (Status ready = EnsureAgent(); !ready)
+            value.Error = ready.Text;
         else
         {
-            const Invoked call = Invoke(true, member.Handle, Arg::Ref(member.Static ? 0 : inspection->Object), args);
-            std::vector<MonoGcHandle>& kept = m_inspectionPins[id];
-            value = ReadResult(member.Type, call, kept);
-            if (call.Ok)
+            AgentRequest request;
+            request.Op(AgentProtocol::Invoke)
+                .I32(InspectionGroup(id))
+                .Text(member.Image)
+                .U32(member.Token)
+                .I32(self)
+                .I32(member.Type.ValueType ? std::max(1, member.Type.Size) : 8)
+                .I32(static_cast<std::int32_t>(args.size()));
+            for (const AgentArg& arg : args)
+                WriteArg(request, arg);
+            const Result<AgentLink::Exchanged> answer = Ask(request, std::chrono::seconds(30));
+            if (!answer)
+                value.Error = answer.Error().Text;
+            else if (!answer->Replies.front().Ok())
+                value.Error = answer->Replies.front().Error();
+            else
+            {
+                AgentCursor in(answer->Replies.front().Payload);
+                PendingValue pending = ReadValue(in, member.Type);
+                if (pending.Reference)
+                    LearnSlots({ pending.Slot });
+                Resolve(pending);
+                value = std::move(pending.Value);
                 LOG_INFO("Unity", "Called " + member.Declaring + ":" + member.Name);
+            }
         }
-        Unpin(pins);
         {
             std::lock_guard state(m_stateLock);
             if (const auto found = m_inspections.find(id); found != m_inspections.end())

@@ -249,6 +249,9 @@
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\ManagedAgent.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\ManagedDumper.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -589,6 +592,9 @@
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\Il2CppRuntime.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\ManagedAgent.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\ManagedDumper.h">

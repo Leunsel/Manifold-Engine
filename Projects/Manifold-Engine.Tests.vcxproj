@@ -169,6 +169,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
+    <ClCompile Include="..\Source\Target\ManagedAgent.cpp" />
     <ClCompile Include="..\Source\Target\ManagedDumper.cpp" />
     <ClCompile Include="..\Source\Target\Mono.cpp" />
     <ClCompile Include="..\Source\Target\MonoRuntime.cpp" />

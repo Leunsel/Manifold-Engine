@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Core/Errors.h"
+#include "Core/Types.h"
+#include "Target/ManagedAgent.h"
 
 #include <atomic>
 #include <chrono>
@@ -30,12 +32,6 @@ namespace Manifold::Target
                       I8 = 0x0A, U8 = 0x0B, R4 = 0x0C, R8 = 0x0D, String = 0x0E, Ptr = 0x0F, ByRef = 0x10, ValueType = 0x11,
                       Class = 0x12, Array = 0x14, GenericInst = 0x15, I = 0x18, U = 0x19, FnPtr = 0x1B, Object = 0x1C, SzArray = 0x1D;
     }
-
-    // A Mono GC handle as the explorer keeps it. Pointer-sized on purpose:
-    // newer runtimes hand out the address of a slot in a handle page, and
-    // cutting that to 32 bits is what crashed Unity 6 games (see
-    // UnityExplorer::PointerHandles).
-    using MonoGcHandle = std::uint64_t;
 
     struct MonoTypeInfo
     {
@@ -67,6 +63,10 @@ namespace Manifold::Target
         std::vector<std::uint8_t> LiteralBytes;
         std::vector<MonoTypeInfo> Params;
         std::vector<std::string> ParamNames;
+        std::string Image;
+        std::uint32_t Token = 0;
+        std::uint32_t GetterToken = 0;
+        std::uint32_t SetterToken = 0;
     };
 
     struct MonoEnumValue
@@ -79,6 +79,8 @@ namespace Manifold::Target
     {
         std::uint64_t Klass = 0;
         std::string Name;                   // full name
+        std::string Image;
+        std::uint32_t TypeToken = 0;
         std::vector<std::string> Chain;     // this class, then its parents
         std::vector<MonoMember> Members;    // own members first, then inherited ones
         bool ValueType = false;
@@ -107,6 +109,7 @@ namespace Manifold::Target
     struct UnityScene
     {
         int Handle = 0;
+        int Slot = 0;
         std::string Name;
         int BuildIndex = -1;
         int RootCount = -1;           // -1 until known
@@ -225,6 +228,7 @@ namespace Manifold::Target
         std::optional<bool> Enabled;    // a Behaviour
         std::string ObjectName;         // a UnityEngine.Object's name
         bool FromScan = false;          // found by a memory scan: managed calls stay off
+        bool Unheld = false;
         // The object is no longer there: its memory no longer holds an object
         // of Klass (the game destroyed and collected it, e.g. on a scene
         // change). Nothing is called on it or read from it any more.
@@ -232,19 +236,19 @@ namespace Manifold::Target
         bool Loading = false;
         std::string Error;
         std::uint64_t Generation = 0;
-        // The last refresh: wall time, and the main-thread calls it made in
-        // how many round trips to the game.
+        // The last refresh: wall time, the requests it sent to the agent in
+        // how many round trips, and the frames the game ran meanwhile.
         double RefreshMs = 0.0;
         int Calls = 0;
         int RoundTrips = 0;
-        int FrameWaits = 0;             // round trips that waited for the game's next frame
+        int FrameWaits = 0;
     };
 
     struct UnityStatus
     {
-        bool Hooked = false;            // the per-frame callback is in the game
+        bool Hooked = false;            // the agent is in the game's frame callback
         std::string Hook;               // which Unity event it hangs on
-        std::uint64_t CallbackRuns = 0; // times the game has called the stub
+        std::uint64_t CallbackRuns = 0; // frames the agent has seen
         std::uint32_t MainThread = 0;
         std::string UnityVersion;
         std::vector<std::string> Missing;  // mono_* exports this runtime does not have
@@ -258,16 +262,18 @@ namespace Manifold::Target
 
     // The Unity explorer: scenes and their GameObject hierarchy, an object
     // search, and an inspector for any managed object (fields, properties,
-    // methods, and for GameObjects their transform and components), all
-    // through the bridge's remote-call worker without a DLL.
+    // methods, and for GameObjects their transform and components).
     //
-    // Most of the Unity API may only be called on the game's main thread, so
-    // the first request hangs the worker's main-thread stub on a per-frame
-    // Unity event (Application.onBeforeRender, or Canvas.willRenderCanvases on
-    // old versions) through Marshal.GetDelegateForFunctionPointer. Unity calls
-    // then run between two frames, a few milliseconds per frame at most.
-    // Requests run on one job thread here, so the interface never waits for a
-    // frame of the game; it reads the published snapshots instead.
+    // Most of the Unity API may only be called on the game's main thread. The
+    // managed agent (Managed/ManifoldDumper/Agent.cs, loaded with the dumper's
+    // assembly) hangs a managed Tick on a per-frame Unity event and answers
+    // requests from a mailbox in its own memory, a few milliseconds per frame
+    // at most; the game never waits for Manifold. Objects are named by the
+    // agent's slots, members by their metadata tokens, so no pointer from here
+    // is ever handed to the runtime as an object. Field values are still read
+    // straight from the game's memory. Requests run on one job thread here, so
+    // the interface never waits for a frame of the game; it reads the
+    // published snapshots instead.
     class UnityExplorer
     {
     public:
@@ -276,26 +282,17 @@ namespace Manifold::Target
         UnityExplorer(const UnityExplorer&) = delete;
         UnityExplorer& operator=(const UnityExplorer&) = delete;
 
-        // Ends the job thread, takes the callback out of the game, restores
-        // Application.runInBackground when it was changed here, and frees the
-        // pins. The bridge calls it before its worker stops.
+        // Ends the job thread, takes the agent out of the frame callback (it
+        // restores Application.runInBackground itself) and drops every slot it
+        // held. The bridge calls it before its worker stops.
         void Shutdown();
 
-        // Everything here runs code inside the game, which can crash it (see
-        // the note in the .cpp), so it stays switched off until the user says
-        // yes for this Mono session. Reading classes, resolving method
-        // addresses and the Structure Dissect lookup do NOT go through here and
-        // are unaffected.
+        // Everything here runs code inside the game, so it stays switched off
+        // until the user says yes for this Mono session. Reading classes,
+        // resolving method addresses and the Structure Dissect lookup do NOT go
+        // through here and are unaffected.
         void SetEnabled(bool on) { m_enabled.store(on); }
         bool Enabled() const { return m_enabled.load(); }
-
-        // Diagnostics: stop the bootstrap early to find out which step a game
-        // dislikes. 2 = create the delegate but do not register it, 3 = also
-        // register it but never enter the main thread, 4 (default) = normal.
-        void SetProbeLevel(int level) { m_probeLevel = level; }
-        // Diagnostics: take GC handles on the objects the explorer refers to
-        // (off by default, see m_pinning).
-        void SetPinning(bool on) { m_pinning = on; }
 
         UnityStatus State() const;
         std::uint64_t Generation() const { return m_generation.load(); }
@@ -353,39 +350,19 @@ namespace Manifold::Target
         static std::string Signature(const MonoMember& method);
 
     private:
-        struct Arg
+        struct AgentArg
         {
-            std::uint64_t Pointer = 0;           // a reference argument (object or null)
-            std::vector<std::uint8_t> Bytes;      // a value argument, passed by address
-            static Arg Ref(std::uint64_t object) { Arg a; a.Pointer = object; return a; }
-            static Arg Raw(std::vector<std::uint8_t> bytes) { Arg a; a.Bytes = std::move(bytes); return a; }
-            template <typename T> static Arg Value(const T& value)
-            {
-                Arg a;
-                a.Bytes.resize(sizeof(T));
-                std::memcpy(a.Bytes.data(), &value, sizeof(T));
-                return a;
-            }
+            std::uint8_t Kind = 0;
+            int Slot = 0;
+            std::vector<std::uint8_t> Bytes;
+            std::string Text;
         };
 
-        struct Invoked
+        struct PendingValue
         {
-            bool Ok = false;
-            std::uint64_t Result = 0;   // the returned object (boxed for value types)
-            std::string Error;
-            std::vector<std::uint8_t> Value;  // a batch's copied value bytes (empty otherwise)
-        };
-
-        // One managed call of a batch (InvokeMany): method on self, with at
-        // most one int parameter, run through mono_runtime_invoke.
-        struct BatchInvoke
-        {
-            std::uint64_t Method = 0;
-            std::uint64_t Self = 0;
-            std::optional<std::int32_t> IntArg;
-            // > 0: copy that many bytes of the boxed result in the game, right
-            // after the call (at most RemoteCall::kMainCallData).
-            std::uint32_t ValueBytes = 0;
+            MonoReadValue Value;
+            int Slot = 0;
+            bool Reference = false;
         };
 
         // False (and leaves a reason in the status) while the explorer is off,
@@ -398,37 +375,35 @@ namespace Manifold::Target
         bool Aborted() const;
 
         std::optional<std::uint64_t> Worker(const char* function, std::uint64_t a0 = 0, std::uint64_t a1 = 0, std::uint64_t a2 = 0, std::uint64_t a3 = 0);
-        std::optional<std::uint64_t> Main(const char* function, std::uint64_t a0 = 0, std::uint64_t a1 = 0, std::uint64_t a2 = 0, std::uint64_t a3 = 0);
-        // Runs a call that allocates or may run managed code (class init, a Type
-        // object, a string) on the game's main thread once the callback is up,
-        // never off-thread, where a static constructor or GC would crash it.
+        // Runs a call that allocates or may run managed code (class init, a
+        // vtable) on the game's main thread through the agent once it is in
+        // the game, never off-thread; before that it falls back to the worker.
         std::optional<std::uint64_t> Exec(const char* function, std::uint64_t a0 = 0, std::uint64_t a1 = 0, std::uint64_t a2 = 0, std::uint64_t a3 = 0);
         // Learns where MonoClass keeps its image and name from a few enumerated
         // classes (job thread; once per runtime). Until then IsClass accepts
         // enumerated classes only.
         void LearnClassShape();
-        // Whether `self` is still an instance of the class that declares
-        // `method` (or a subclass), so a remembered object that the game has
-        // destroyed and collected is never handed to managed code as `this`.
-        bool SelfFits(std::uint64_t self, std::uint64_t method);
-        std::uint64_t MethodClass(std::uint64_t method);
-        bool Derives(std::uint64_t klass, std::uint64_t base);
-        // Enters the game's main thread if needed and starts the per-frame clock.
-        Status BeginVisit();
-        void YieldFrame();
-        Invoked Invoke(bool main, std::uint64_t method, const Arg& self, const std::vector<Arg>& params);
-        // Runs all calls on the main thread in as few visits as possible (one
-        // round trip per kBatchCalls calls); results come back in call order.
-        std::vector<Invoked> InvokeMany(const std::vector<BatchInvoke>& calls);
-        std::string ExceptionText(bool main, std::uint64_t exception);
         std::uint64_t ArgSpace(std::size_t bytes);
 
+        Status EnsureAgent();
+        Result<AgentLink::Exchanged> Ask(AgentRequest& request, std::chrono::milliseconds timeout = std::chrono::seconds(15));
+        Status Command(AgentRequest& request, const std::string& what);
+        void LearnSlots(const std::vector<int>& slots);
+        int SlotOf(std::uint64_t object) const;
+        std::uint64_t AddressOf(int slot) const;
+        void HoldSlots(int group, const std::vector<int>& slots);
+        void ReleaseGroup(int group);
+        void ForgetSlots();
+        std::pair<std::string, std::uint32_t> ClassToken(std::uint64_t klass);
+        static void WriteArg(AgentRequest& request, const AgentArg& arg);
+        PendingValue ReadValue(AgentCursor& in, const MonoTypeInfo& type);
+        void Resolve(PendingValue& pending);
+
+        std::string ReadString(std::uint64_t monoString, std::size_t limit = 4096) const;
+        std::vector<std::uint64_t> ReadArray(std::uint64_t monoArray, std::size_t limit, std::size_t* total = nullptr) const;
+        template <typename T> std::optional<T> Unbox(std::uint64_t boxed) const;
+
         std::uint64_t FindClass(std::string_view name);
-        std::uint64_t Method(std::string_view klass, std::string_view name, int params, std::string_view firstParam = {});
-        std::uint64_t TypeObject(std::uint64_t klass);
-        bool PointerHandles();
-        MonoGcHandle Pin(std::uint64_t object);
-        void Unpin(std::vector<MonoGcHandle>& pins);
         std::string WorkerString(const char* function, std::uint64_t handle);
         std::string TypeName(std::uint64_t type);
         MonoTypeInfo TypeInfo(std::uint64_t type);
@@ -436,32 +411,14 @@ namespace Manifold::Target
         std::shared_ptr<const MonoClassLayout> LoadLayout(std::uint64_t klass);
         bool IsUnityObjectClass(std::uint64_t klass);
 
-        std::string ReadString(std::uint64_t monoString, std::size_t limit = 4096) const;
-        std::vector<std::uint64_t> ReadArray(std::uint64_t monoArray, std::size_t limit, std::size_t* total = nullptr) const;
-        template <typename T> std::optional<T> Unbox(std::uint64_t boxed) const;
-        std::optional<std::string> CallString(bool main, std::uint64_t method, const Arg& self);
-        std::optional<std::string> TextOf(const Invoked& call) const;          // a string result
-        template <typename T> static std::optional<T> ValueOf(const Invoked& call);  // a copied value
-        template <typename T> std::optional<T> CallValue(bool main, std::uint64_t method, const Arg& self, const std::vector<Arg>& params = {});
-        std::uint64_t CallObject(bool main, std::uint64_t method, const Arg& self, const std::vector<Arg>& params = {});
-        std::uint64_t NewString(const std::string& text);
-
-        Status EnsureHook();
-        void Unhook();
-        int ResolveDontDestroyScene();
         void DoReadScenes();
         void DoExpandScene(int scene);
         void DoExpandNode(int node);
-        bool ReadNode(std::uint64_t gameObject, std::uint64_t knownTransform, UnityNode& node);
         void DoSearch(UnitySearch request);
         void DoInspect(int id, bool properties);
-        void ReadGameObject(std::uint64_t gameObject, UnityGameObject& info, std::vector<MonoGcHandle>& pins);
-        bool ReadTransform(std::uint64_t transform, UnityTransform& info);
-        void ReadProperties(UnityInspection& inspection, std::vector<MonoGcHandle>& pins);
-        MonoReadValue ReadResult(const MonoTypeInfo& type, const Invoked& call, std::vector<MonoGcHandle>& pins);
         void DoSetMember(int id, int member, const std::string& text);
         void DoInvokeMethod(int id, int member, const std::vector<std::string>& arguments);
-        std::optional<Arg> ArgumentFor(const MonoTypeInfo& type, const std::string& text, std::string& error);
+        std::optional<AgentArg> ArgumentFor(const MonoTypeInfo& type, const std::string& text, std::string& error);
 
         MonoBridge& m_mono;
 
@@ -486,11 +443,14 @@ namespace Manifold::Target
         std::map<std::uint64_t, bool> m_layoutQueued;
         int m_nextInspection = 1;
         std::atomic<std::uint64_t> m_generation{ 1 };
+        std::map<int, std::uint64_t> m_slotAddress;
+        std::map<std::uint64_t, int> m_addressSlot;
 
         // Job-thread only.
-        std::uint64_t m_args = 0;                 // argument page in the game
+        std::unique_ptr<AgentLink> m_agent;
+        bool m_agentReady = false;
+        std::uint64_t m_args = 0;                 // argument page in the game (worker calls)
         std::size_t m_argsUsed = 0;
-        std::uint64_t m_batch = 0;                // batch records in the game (never freed, like m_args)
         struct ClassShape
         {
             bool Ready = false;
@@ -500,42 +460,13 @@ namespace Manifold::Target
         };
         mutable ClassShape m_classShape;          // under m_stateLock
         mutable std::unordered_set<std::uint64_t> m_validClasses;   // confirmed MonoClass*, under m_stateLock
-        std::map<std::uint64_t, std::uint64_t> m_methodClasses;    // MonoMethod* -> declaring class (job thread)
-        std::map<std::uint64_t, std::uint64_t> m_parents;          // MonoClass* -> parent (job thread)
-        std::map<std::uint64_t, bool> m_valueClasses;              // MonoClass* -> is a value type (job thread)
-        int m_statTrips = 0;                      // main-thread round trips of the current job
-        int m_statCalls = 0;                      // main-thread calls of the current job
-        std::chrono::steady_clock::time_point m_visitStart{};
-        std::uint64_t m_visitRuns = 0;            // the stub's run counter when the clock started
-        bool m_visiting = false;
-        std::uint64_t m_delegate = 0;
-        MonoGcHandle m_delegatePin = 0;
-        std::uint64_t m_unhook = 0;               // remove_* method of the event
-        bool m_hooked = false;
+        std::map<std::uint64_t, std::pair<std::string, std::uint32_t>> m_classTokens;
+        int m_statTrips = 0;                      // agent round trips of the current job
+        int m_statCalls = 0;                      // agent requests of the current job
+        int m_statFrames = 0;
         int m_dontDestroyHandle = 0;
         std::atomic<bool> m_enabled{ false };
-        int m_probeLevel = 4;
-        // GC handles stay OFF by default. They used to kill Unity 6 games: the
-        // handle was cut to 32 bits and mono_gchandle_free then read a page
-        // that does not exist (PointerHandles has the details). Handles are
-        // pointer-sized and go through the _v2 pair now, but that has not run
-        // against a live game yet, so nothing turns them on except the harness
-        // (--pin).
-        //
-        // Nothing needs them: a registered delegate is rooted by the event's
-        // subscriber list, scene objects by their scene, assets by Unity. Only
-        // values handed back by a call (strings, boxed results) are unrooted,
-        // and those are read immediately.
-        bool m_pinning = false;
-        std::optional<bool> m_handleApi;          // _v2 pair present; decided once per runtime
-        std::optional<bool> m_originalRunInBackground;
-        std::map<std::string, std::uint64_t> m_methods;
-        std::map<std::uint64_t, std::uint64_t> m_typeObjects;
         std::map<std::uint64_t, MonoTypeInfo> m_types;
         std::map<std::uint64_t, std::vector<std::string>> m_chains;
-        std::vector<MonoGcHandle> m_treePins;
-        std::vector<MonoGcHandle> m_searchPins;
-        std::vector<MonoGcHandle> m_keepPins;    // type objects
-        std::map<int, std::vector<MonoGcHandle>> m_inspectionPins;
     };
 }

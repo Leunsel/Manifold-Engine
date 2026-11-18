@@ -183,6 +183,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
+    <ClCompile Include="..\Source\Target\ManagedAgent.cpp" />
     <ClCompile Include="..\Source\Target\ManagedDumper.cpp" />
     <ClCompile Include="..\Source\Target\Mono.cpp" />
     <ClCompile Include="..\Source\Target\MonoRuntime.cpp" />
@@ -299,6 +300,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Table\Structures.h" />
     <ClInclude Include="..\Source\Target\CodeMap.h" />
     <ClInclude Include="..\Source\Target\Il2CppRuntime.h" />
+    <ClInclude Include="..\Source\Target\ManagedAgent.h" />
     <ClInclude Include="..\Source\Target\ManagedDumper.h" />
     <ClInclude Include="..\Source\Target\ManagedRuntime.h" />
     <ClInclude Include="..\Source\Target\Mono.h" />

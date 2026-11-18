@@ -39,6 +39,7 @@ namespace Manifold::Tests
     int RunMonoDump(const std::vector<std::string>& arguments);
     int RunUnityDump(const std::vector<std::string>& arguments);
     int RunManagedDumpClr(const std::vector<std::string>& arguments);
+    int RunManagedAgentClr(const std::vector<std::string>& arguments);
 
     Counter& Totals()
     {
@@ -74,6 +75,8 @@ int main(int argc, char** argv)
             return Manifold::Tests::RunUnityDump(arguments);
         if (argument == "--managed-dump-clr")
             return Manifold::Tests::RunManagedDumpClr(arguments);
+        if (argument == "--managed-agent-clr")
+            return Manifold::Tests::RunManagedAgentClr(arguments);
         if (argument == "--disasm-check")
         {
             for (const std::string& other : arguments)

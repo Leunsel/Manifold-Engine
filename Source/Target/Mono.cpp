@@ -106,6 +106,14 @@ namespace Manifold::Target
         return attached;
     }
 
+    std::uint64_t MonoBridge::ManagedClass(std::string_view space, std::string_view name)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_backend || !m_present)
+            return 0;
+        return m_backend->ManagedClass(space, name);
+    }
+
     std::uint64_t MonoBridge::Fn(const char* name) const
     {
         const auto found = m_functions.find(name);

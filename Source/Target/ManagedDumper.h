@@ -15,7 +15,7 @@ namespace Manifold::Target
     namespace ManagedDumpFormat
     {
         constexpr std::string_view kImagePrefix = "ManifoldDumper";
-        constexpr std::string_view kImageName = "ManifoldDumper2";
+        constexpr std::string_view kImageName = "ManifoldDumper3";
         constexpr std::string_view kNamespace = "Manifold.Managed";
         constexpr std::string_view kClass = "Dumper";
 

@@ -234,6 +234,9 @@
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\ManagedAgent.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\ManagedDumper.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>

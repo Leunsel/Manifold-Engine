@@ -186,7 +186,7 @@ For a Unity game, Mono-based (one with `mono-2.0-bdwgc.dll` or `mono.dll`) or IL
 
 When Mono or IL2CPP is loaded, Structure Dissect uses it automatically: dissecting the address of a managed object names the structure by its class and fills the fields (names, offsets and types) from the runtime, and following a pointer to another object looks that one up too. No script or manual structure is needed. On IL2CPP an object of a class that no assembly lists (a generic instance such as `List<int>`) is named from its class's memory only and its fields are guessed, because such a class pointer is never handed to the runtime.
 
-The scene explorer, the inspector and `mono_showDissector()`'s Scenes and Objects tabs run managed code on the game's main thread and work with Mono games only.
+The scene explorer, the inspector and `mono_showDissector()`'s Scenes and Objects tabs run managed code on the game's main thread and work with Mono games only. They go through Manifold's managed agent, which hangs on the game's per-frame callback (`Application.onBeforeRender`) and answers requests a few milliseconds per frame at most; Shut down takes it back out.
 
 ## Checking a table without the program window
 

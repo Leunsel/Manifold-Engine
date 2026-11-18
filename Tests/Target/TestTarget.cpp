@@ -180,7 +180,7 @@ namespace
     const FakeField kAgentFields[] = { { "State", 0, 0x08, 0x10 }, { "Types", 0, 0x08, 0x10 }, { "Cancel", 0, 0x08, 0x10 }, { "Data", 0, 0x18, 0x10 }, { "Size", 0, 0x08, 0x10 } };
     extern const FakeImage kAgentImage;
     const FakeClass kAgentClass = { "Manifold.Managed", "Dumper", kAgentMethods, 2, kAgentFields, 5, &kAgentImage };
-    const FakeImage kAgentImage = { "ManifoldDumper2", &kAgentClass, 1 };
+    const FakeImage kAgentImage = { "ManifoldDumper3", &kAgentClass, 1 };
     FakeVTable g_agentVT = { &kAgentClass };
     long long g_agentBoxed[4] = {};
     bool g_agentLoaded = false;

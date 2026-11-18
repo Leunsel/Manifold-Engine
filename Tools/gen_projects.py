@@ -249,6 +249,7 @@ set MSBuildSDKsPath=
 set MSBuildExtensionsPath=
 set MSBUILD_EXE_PATH=
 dotnet build "$(ProjectDir)..\\Managed\\ManifoldDumper\\ManifoldDumper.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
+dotnet build "$(ProjectDir)..\\Managed\\FakeUnity\\FakeUnity.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
 :embed
 where python &gt;nul 2&gt;nul || exit /b 0
 python "$(ProjectDir)..\\Tools\\embed_managed.py" --touch"""
@@ -265,7 +266,7 @@ def managed_project():
       <Command>{MANAGED_BUILD}</Command>
       <Message>Building the managed dumper and embedding it into the program</Message>
       <Inputs>{inputs}</Inputs>
-      <Outputs>$(ProjectDir)..\\Build\\Managed\\{embed_managed.assembly_name()}.dll;$(ProjectDir)..\\Source\\Generated\\ManagedDumperImage.cpp</Outputs>
+      <Outputs>$(ProjectDir)..\\Build\\Managed\\{embed_managed.assembly_name()}.dll;$(ProjectDir)..\\Build\\Managed\\UnityEngine.CoreModule.dll;$(ProjectDir)..\\Source\\Generated\\ManagedDumperImage.cpp</Outputs>
     </CustomBuildStep>
   </ItemDefinitionGroup>
 """

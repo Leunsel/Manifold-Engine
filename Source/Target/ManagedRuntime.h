@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace Manifold
@@ -45,6 +46,7 @@ namespace Manifold::Target
         virtual std::size_t MethodsSharingCode(std::uint64_t address) = 0;
         virtual bool CompilesOnDemand() const = 0;
         virtual std::optional<std::uint64_t> Compile(std::uint64_t method) = 0;
+        virtual std::uint64_t ManagedClass(std::string_view, std::string_view) { return 0; }
 
     protected:
         MonoBridge& m_bridge;

@@ -1110,11 +1110,6 @@ namespace Manifold::Tests
         std::uint32_t pid = 0;
         std::string searchClass = "UnityEngine.Camera";
         int idleSeconds = 0;
-        int probe = 4;
-        // Same default as the explorer: no GC handles unless asked for. With
-        // pins on by default a probe run freed the delegate's handle at detach,
-        // which is the crash the probes were meant to find elsewhere.
-        bool pinning = false;
         for (const std::string& argument : arguments)
         {
             if (argument.rfind("--process=", 0) == 0)
@@ -1125,12 +1120,6 @@ namespace Manifold::Tests
                 searchClass = argument.substr(8);
             else if (argument.rfind("--idle-seconds=", 0) == 0)
                 idleSeconds = static_cast<int>(ParseDecimal(argument.substr(15)).value_or(0));
-            else if (argument.rfind("--probe=", 0) == 0)
-                probe = static_cast<int>(ParseDecimal(argument.substr(8)).value_or(4));
-            else if (argument == "--pin")
-                pinning = true;
-            else if (argument == "--no-pin")
-                pinning = false;
         }
         std::setvbuf(stdout, nullptr, _IONBF, 0);
         Settings settings;
@@ -1171,71 +1160,36 @@ namespace Manifold::Tests
             };
 
         // The game must be in the FOREGROUND and rendering: Unity engine calls
-        // run on its main thread, reached through the onBeforeRender callback,
-        // which only fires while the game renders.
+        // run on its main thread, reached through the agent's onBeforeRender
+        // callback, which only fires while the game renders.
         // This harness exists to exercise the explorer, so it opts in for itself.
         unity.SetEnabled(true);
-        unity.SetProbeLevel(probe);
-        unity.SetPinning(pinning);
-        std::printf("GC handles are switched %s for this run\n", pinning ? "ON (--pin)" : "OFF");
-        unity.ReadScenes();  // the first real request installs the hook and enters main
-        if (probe < 4)
-        {
-            // Bisection run: let the bootstrap stop at the probe level, then sit
-            // still and see whether the game minds. Give the job a moment to
-            // start first -- asking "is it idle?" before it ever began reports
-            // the state from before the probe.
-            std::this_thread::sleep_for(std::chrono::milliseconds(400));
-            wait("probe", [&] { return !unity.State().Busy; }, 20);
-            const Target::UnityStatus probed = unity.State();
-            std::printf("probe level %d: hooked %d, callback runs %llu, note: %s\n", probe, probed.Hooked ? 1 : 0,
-                static_cast<unsigned long long>(probed.CallbackRuns), probed.Error.c_str());
-            const int seconds = idleSeconds > 0 ? idleSeconds : 6;
-            for (int i = 0; i < seconds * 2; ++i)
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                if (!engine.Process()->Alive())
-                {
-                    std::printf("the game died %.1f s into probe level %d\n", (i + 1) * 0.5, probe);
-                    return 1;
-                }
-            }
-            std::printf("probe level %d: survived %d s; detaching\n", probe, seconds);
-            return 0;
-        }
-        wait("hook", [&] { return unity.State().Hooked && unity.State().MainThread != 0; }, 20);
+        unity.ReadScenes();
+        wait("agent", [&] { return unity.State().Hooked; }, 20);
         const Target::UnityStatus status = unity.State();
-        std::printf("hooked on %s, callback runs %llu, main thread %lu, Unity %s\n", status.Hook.c_str(),
-            static_cast<unsigned long long>(status.CallbackRuns), static_cast<unsigned long>(status.MainThread),
-            status.UnityVersion.empty() ? "?" : status.UnityVersion.c_str());
+        std::printf("agent on %s, %llu frames seen, Unity %s\n", status.Hook.c_str(),
+            static_cast<unsigned long long>(status.CallbackRuns), status.UnityVersion.empty() ? "?" : status.UnityVersion.c_str());
         if (!status.Missing.empty())
             std::printf("MISSING mono exports: %s\n", Join(status.Missing, ", ").c_str());
-        if (!status.Hooked || status.MainThread == 0)
+        if (!status.Hooked)
         {
-            if (status.CallbackRuns == 0)
-                std::printf("the game never called the callback at all: it is not rendering (background/minimized/loading)\n");
-            else
-                std::printf("the game called the callback %llu times but the handshake did not complete\n",
-                    static_cast<unsigned long long>(status.CallbackRuns));
+            std::printf("the agent did not get into the game's frame callback: %s\n", status.Error.c_str());
             return 1;
         }
 
         if (idleSeconds > 0)
         {
-            // Bare-callback test: the hook is in and the main thread calls the
-            // stub each frame, but nothing else runs. If the game survives this,
-            // the callback itself is harmless and the managed calls are the risk.
-            std::printf("idling %d s with the callback installed, no further calls...\n", idleSeconds);
+            std::printf("idling %d s with the agent in the frame callback, no further requests...\n", idleSeconds);
             for (int i = 0; i < idleSeconds * 2; ++i)
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
                 if (!engine.Process()->Alive())
                 {
-                    std::printf("the game died after %.1f s of just the idle callback\n", (i + 1) * 0.5);
+                    std::printf("the game died after %.1f s with the idle agent\n", (i + 1) * 0.5);
                     return 1;
                 }
             }
-            std::printf("survived %d s with the idle callback; detaching\n", idleSeconds);
+            std::printf("survived %d s with the idle agent; detaching\n", idleSeconds);
             return 0;
         }
 

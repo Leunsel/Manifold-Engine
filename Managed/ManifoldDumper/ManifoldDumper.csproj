@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <TargetFramework>net35</TargetFramework>
-    <AssemblyName>ManifoldDumper2</AssemblyName>
+    <AssemblyName>ManifoldDumper3</AssemblyName>
     <RootNamespace>Manifold.Managed</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>

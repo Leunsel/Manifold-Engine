@@ -103,6 +103,7 @@ namespace Manifold::Target
 
         Status Refresh(WorkProgress* progress = nullptr);
         void SetManagedDumper(bool use) { m_useDumper = use; }
+        std::uint64_t ManagedClass(std::string_view space, std::string_view name);
         bool ManagedDumperUsed() const { return m_readByDumper.load(); }
         std::uint64_t Generation() const { return m_generation.load(); }
 
@@ -170,6 +171,7 @@ namespace Manifold::Target
 
     private:
         friend class UnityExplorer;
+        friend class AgentLink;
         friend class MonoRuntime;
         friend class Il2CppRuntime;
         struct Candidate
