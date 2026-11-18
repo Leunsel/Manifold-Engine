@@ -25,6 +25,7 @@ namespace Manifold::Debug
         constexpr std::uint64_t kResumeFlag = 0x10000;
         constexpr std::size_t kMaxWatchEntries = 4096;
         constexpr std::uint64_t kStaleHardwareMilliseconds = 5000;
+        constexpr std::uint64_t kAttachSettleMilliseconds = 2000;
         constexpr std::uint64_t kHiddenCheckMilliseconds = 15;
         constexpr int kThreadHideFromDebugger = 0x11;
 
@@ -1437,12 +1438,17 @@ namespace Manifold::Debug
         ::DebugSetProcessKillOnExit(FALSE);
         m_attached = true;
         ++m_generation;
-        attached->set_value(Status::Success());
 
+        const std::uint64_t settleUntil = ::GetTickCount64() + kAttachSettleMilliseconds;
         bool exited = false;
         DEBUG_EVENT event{};
         while (!m_stop)
         {
+            if (attached && (m_initialBreakSeen || ::GetTickCount64() >= settleUntil))
+            {
+                attached->set_value(Status::Success());
+                attached.reset();
+            }
             {
                 std::unique_lock lock(m_lock);
                 RunTasks();
@@ -1468,6 +1474,8 @@ namespace Manifold::Debug
                 state->Id = event.dwThreadId;
                 m_mainThread = event.dwThreadId;
                 m_threads[event.dwThreadId] = std::move(state);
+                if (std::any_of(m_breakpoints.begin(), m_breakpoints.end(), [](const auto& item) { return item.second.Hardware; }))
+                    ApplyHardware(event.dwThreadId);
                 break;
             }
             case CREATE_THREAD_DEBUG_EVENT:
@@ -1611,6 +1619,8 @@ namespace Manifold::Debug
             LOG_ERROR("Debugger", ErrorMessage(ErrorCode::DebugDetachFailed, ErrorText(::GetLastError())));
         else
             LOG_INFO("Debugger", "Detached");
+        if (attached)
+            attached->set_value(exited ? Status::Fail(ErrorCode::DebugTargetExited) : Status::Success());
     }
 
     void Debugger::CleanUp()

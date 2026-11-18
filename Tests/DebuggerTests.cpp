@@ -6,8 +6,10 @@
 #include "Core/Text.h"
 #include "Debug/BreakAction.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <thread>
@@ -293,23 +295,137 @@ namespace Manifold::Tests
         CHECK(process.Alive());
     }
 
+    namespace
+    {
+        bool ThreadWatches(HANDLE thread, std::uint64_t address)
+        {
+            alignas(16) CONTEXT context{};
+            context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+            if (!::GetThreadContext(thread, &context))
+                return false;
+            const DWORD64 slots[4] = { context.Dr0, context.Dr1, context.Dr2, context.Dr3 };
+            for (int slot = 0; slot < 4; ++slot)
+            {
+                if (slots[slot] == address && (context.Dr7 & (1ull << (slot * 2))) != 0)
+                    return true;
+            }
+            return false;
+        }
+
+        bool StartTestTarget(PROCESS_INFORMATION& info)
+        {
+            wchar_t self[MAX_PATH] = L"";
+            ::GetModuleFileNameW(nullptr, self, MAX_PATH);
+            const std::filesystem::path targetPath = std::filesystem::path(self).parent_path() / L"TestTarget.exe";
+            std::wstring command = L"\"" + targetPath.wstring() + L"\"";
+            STARTUPINFOW startup{ sizeof(startup) };
+            if (!::CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info))
+            {
+                std::printf("could not start %ls\n", targetPath.c_str());
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(800));
+            return true;
+        }
+
+        void EndTestTarget(PROCESS_INFORMATION& info, DWORD& code)
+        {
+            ::GetExitCodeProcess(info.hProcess, &code);
+            ::TerminateProcess(info.hProcess, 0);
+            ::CloseHandle(info.hThread);
+            ::CloseHandle(info.hProcess);
+        }
+    }
+
+    void CheckAttachArmsMainThread(Engine& engine, HANDLE mainThread, std::uint64_t address)
+    {
+        DWORD_PTR processMask = 0;
+        DWORD_PTR systemMask = 0;
+        const bool pinned = ::GetProcessAffinityMask(::GetCurrentProcess(), &processMask, &systemMask) &&
+                            ::SetProcessAffinityMask(::GetCurrentProcess(), processMask & (0 - processMask));
+        CHECK_MSG(pinned, "could not run the attach check on one processor");
+        for (int round = 1; round <= 3; ++round)
+        {
+            const Status attached = engine.EnsureDebugger();
+            CHECK_MSG(attached.Ok(), attached.Text);
+            if (!attached)
+                break;
+            int writes = 0;
+            const Status started = engine.Debugger().StartWatch(Debug::WatchKind::Writes, address, 4, writes);
+            CHECK_MSG(started.Ok(), started.Text);
+            CHECK_MSG(ThreadWatches(mainThread, address), "attach round " + std::to_string(round) + ": a watch started right after attaching left the main thread out");
+            engine.Debugger().RemoveWatch(writes);
+            engine.Debugger().Detach();
+        }
+        if (pinned)
+            ::SetProcessAffinityMask(::GetCurrentProcess(), processMask);
+    }
+
+    int RunWatchArmCheck(const std::vector<std::string>& arguments)
+    {
+        int rounds = 20;
+        for (const std::string& argument : arguments)
+        {
+            if (argument.rfind("--rounds=", 0) == 0)
+                rounds = std::max(1, std::atoi(argument.c_str() + 9));
+            if (argument == "--one-cpu")
+                ::SetProcessAffinityMask(::GetCurrentProcess(), 1);
+        }
+        PROCESS_INFORMATION info{};
+        if (!StartTestTarget(info))
+            return 2;
+        int unarmed = 0;
+        int stillUnarmed = 0;
+        int unrecorded = 0;
+        {
+            Settings settings;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(info.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            const Target::Process& process = *engine.Process();
+            const std::uint64_t world = process.ReadPointer(engine.Evaluate("TestTarget.g_world").value_or(0)).value_or(0);
+            const std::uint64_t health = world ? process.ReadPointer(world + 8).value_or(0) : 0;
+            CHECK(health != 0);
+            for (int round = 0; round < rounds && opened && health; ++round)
+            {
+                const Status attached = engine.EnsureDebugger();
+                int writes = 0;
+                const Status started = attached ? engine.Debugger().StartWatch(Debug::WatchKind::Writes, health, 4, writes) : attached;
+                CHECK_MSG(started.Ok(), started.Text);
+                const bool armed = ThreadWatches(info.hThread, health);
+                const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(2500);
+                Debug::Watch watch;
+                while (std::chrono::steady_clock::now() < until && !(engine.Debugger().CopyWatch(writes, watch) && !watch.Entries.empty()))
+                    Wait(engine, 20);
+                const bool recorded = engine.Debugger().CopyWatch(writes, watch) && !watch.Entries.empty();
+                const bool armedLater = ThreadWatches(info.hThread, health);
+                unarmed += armed ? 0 : 1;
+                stillUnarmed += armedLater ? 0 : 1;
+                unrecorded += recorded ? 0 : 1;
+                if (!armed || !armedLater || !recorded)
+                    std::printf("  round %d: main thread %s right after the watch started, %s after the wait, %s\n", round + 1, armed ? "armed" : "NOT armed",
+                        armedLater ? "armed" : "NOT armed", recorded ? "write recorded" : "NO write recorded");
+                engine.Debugger().RemoveWatch(writes);
+                engine.Debugger().Detach();
+                Wait(engine, 50);
+            }
+            CHECK(engine.Process()->Alive());
+        }
+        DWORD code = 0;
+        EndTestTarget(info, code);
+        std::printf("watch arming: %d rounds, main thread not armed right after StartWatch in %d, still not armed 2.5 s later in %d, no write recorded in %d\n", rounds,
+            unarmed, stillUnarmed, unrecorded);
+        return unarmed == 0 && stillUnarmed == 0 && unrecorded == 0 && Totals().Failures == 0 ? 0 : 1;
+    }
+
     int RunDebuggerCheck(const std::vector<std::string>& arguments)
     {
         bool veh = false;
         for (const std::string& argument : arguments)
             veh = veh || argument == "--veh";
-        wchar_t self[MAX_PATH] = L"";
-        ::GetModuleFileNameW(nullptr, self, MAX_PATH);
-        const std::filesystem::path targetPath = std::filesystem::path(self).parent_path() / L"TestTarget.exe";
-        std::wstring command = L"\"" + targetPath.wstring() + L"\"";
-        STARTUPINFOW startup{ sizeof(startup) };
         PROCESS_INFORMATION info{};
-        if (!::CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info))
-        {
-            std::printf("could not start %ls\n", targetPath.c_str());
+        if (!StartTestTarget(info))
             return 2;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(800));
         const int before = Totals().Failures;
         {
             Settings settings;
@@ -331,10 +447,7 @@ namespace Manifold::Tests
             }
         }
         DWORD code = 0;
-        ::GetExitCodeProcess(info.hProcess, &code);
-        ::TerminateProcess(info.hProcess, 0);
-        ::CloseHandle(info.hThread);
-        ::CloseHandle(info.hProcess);
+        EndTestTarget(info, code);
         const int failures = Totals().Failures - before;
         std::printf("debugger check (%s): %d checks, %d failed, target %s\n", veh ? "in-process" : "windows", Totals().Checks, failures,
             code == STILL_ACTIVE ? "was alive" : ("had ended " + Hex(code, 8)).c_str());
