@@ -90,6 +90,9 @@
     <ClCompile Include="..\Source\Core\BackgroundWork.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Core\BuildInfo.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Core\Deflate.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
@@ -400,6 +403,9 @@
       <Filter>Source\Asm</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Core\BackgroundWork.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Core\BuildInfo.h">
       <Filter>Source\Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Core\Deflate.h">

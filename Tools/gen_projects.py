@@ -88,7 +88,7 @@ def common_head(name, kind, target):
 
 TOOLSET = "ClangCL"
 DEPENDENCY_INCLUDES = "$(ProjectDir)..\\Dependencies\\ImGui;$(ProjectDir)..\\Dependencies\\ImGui\\backends;$(ProjectDir)..\\Dependencies\\Zydis;$(ProjectDir)..\\Dependencies\\Lua;$(ProjectDir)..\\Dependencies\\stb"
-INCLUDES = "$(ProjectDir)..\\Source;%(AdditionalIncludeDirectories)"
+INCLUDES = "$(ProjectDir)..\\Source;$(IntDir)Info;%(AdditionalIncludeDirectories)"
 CLANG_OPTIONS = """  <ItemDefinitionGroup Condition="'$(PlatformToolset)'=='ClangCL'">
     <ClCompile>
       <AdditionalOptions>-Wno-missing-field-initializers %(AdditionalOptions)</AdditionalOptions>
@@ -226,8 +226,9 @@ def write(name, text):
 PREBUILD = """    <PreBuildEvent>
       <Command>where python &gt;nul 2&gt;nul || exit /b 0
 python "$(ProjectDir)..\\Tools\\embed_lua.py"
-python "$(ProjectDir)..\\Tools\\embed_templates.py"</Command>
-      <Message>Embedding the Lua compatibility scripts and the built-in templates</Message>
+python "$(ProjectDir)..\\Tools\\embed_templates.py"
+python "$(ProjectDir)..\\Tools\\gen_buildinfo.py" "$(IntDir)Info\\ManifoldBuild.h"</Command>
+      <Message>Embedding the Lua compatibility scripts and the built-in templates, writing the build info</Message>
     </PreBuildEvent>
 """
 

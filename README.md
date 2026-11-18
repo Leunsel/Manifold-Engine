@@ -50,13 +50,9 @@ Everything lands in `Build\<Platform>\<Configuration>`, e.g. `Build\x64\Release`
 
 The solution also carries a `Win32` platform, but only the dependencies and the stand-alone `SyscallTest` project build as 32-bit; the app and the injected agent are x64-only.
 
-Without clang-cl, build with the MSVC compiler instead; inline assembly then does not compile:
+The MSVC compiler (`v143`) cannot build the program: the direct system call stubs in `Source/Syscalls/Syscall.h` are naked functions with inline assembly, which only clang-cl compiles.
 
-```bash
-msbuild Manifold-Engine.sln /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /m
-```
-
-`python Tools/gen_projects.py --msvc` writes projects that use MSVC by default.
+Before compiling, the projects run `Tools/embed_lua.py`, `Tools/embed_templates.py` and `Tools/gen_buildinfo.py` with the Python on PATH (without Python the step is skipped). The last one writes the commit into the build, so the log, Help → About and the diagnostics report show the version with it, like `0.1.0 (3e90571)`; a `+` after the commit means the working tree had uncommitted changes.
 
 ## Tests
 
@@ -64,7 +60,16 @@ msbuild Manifold-Engine.sln /p:Configuration=Release /p:Platform=x64 /p:Platform
 Build\x64\Release\Manifold-Engine.Tests.exe
 ```
 
-The tests cover the assembler (557 cases), value parsing, XML and cheat table round trips, the error table, offline Auto Assembler runs, and an integration run against `TestTarget.exe` (built with the solution): scanning, pointers, freezing, a code injection script, the sample table `Tests/Target/TestTarget.CT`, Lua (records, timers, threads), all four "find out what" watches, breakpoints and stepping. `--errors-markdown` prints `Docs/ERRORS.md`, `--shortcuts-markdown` prints `Docs/SHORTCUTS.md`; the tests fail when either file is out of date, and when two commands of one window share a key.
+The tests cover the assembler, value parsing, XML and cheat table round trips, the error table, offline Auto Assembler runs, the Lua APIs and the Autorun modules, and an integration run against `TestTarget.exe` (built with the solution): scanning, pointers, freezing, a code injection script, the sample table `Tests/Target/TestTarget.CT`, Lua (records, timers, threads), all four "find out what" watches, breakpoints, stepping and the direct system calls. `--errors-markdown` prints `Docs/ERRORS.md`, `--shortcuts-markdown` prints `Docs/SHORTCUTS.md` and `--manifold-markdown` prints `Docs/MANIFOLD-API.md`; the tests fail when one of them is out of date, and when two commands of one window share a key.
+
+Run the tests from the repository folder or a folder below it, with `TestTarget.exe` next to them: the documentation checks look for `Docs` and `Source` above the working folder. A check that cannot run there counts as skipped, and skipped checks fail the run; `--allow-skips` accepts them.
+
+## Development
+
+- **Line endings and style**: the repository keeps text files with LF (`.gitattributes`; solution, project and batch files keep CRLF), and `.editorconfig` tells editors to use UTF-8, LF and four spaces. `.clang-format` describes the code style. `python Tools/format_changed.py` shows how clang-format would format the lines changed since `HEAD` and touches nothing; `--commit`, `--staged` and file names narrow it down, `--apply` writes the result. Only changed lines are formatted, so the rest of the code stays as it is. One place where clang-format differs from the existing code: it puts the braces of a lambda assigned to a variable at the level of the statement.
+- **Live install**: `Build\x64\Release` is build output that every build replaces. `Tools\Install.ps1` copies a build into `Install` in the main checkout (or into `-Destination`), and the program there keeps its `configs`, `tables`, `sounds`, `templates`, `logs` and `crashes` apart from the build. The first install copies those folders from `Build\x64\Release` (or `-AdoptFrom`) and leaves the originals in place; later installs replace only the program files, add Autorun modules that are newer, and refuse while that copy of the program runs.
+- **Worktrees**: parallel work, such as several Claude Code sessions, goes into one git worktree each (`.claude/worktrees`, ignored by git) instead of the shared checkout, so no one commits someone else's half-done changes. Each worktree builds into its own `Build` folder, and `Tools\Install.ps1` run from any worktree installs into the main checkout's `Install`.
+- **CI**: `.github/workflows/build.yml` builds `Release|x64` on `windows-2022` with clang-cl and runs the tests on every push to `main`, on pull requests and on demand. Changes to documentation alone do not start a run.
 
 ## Use
 

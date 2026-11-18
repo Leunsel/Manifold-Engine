@@ -7,6 +7,7 @@
 ipch/
 
 /Build/
+/Install/
 
 Manifold-Engine.ini
 Manifold-Engine.ini.tmp

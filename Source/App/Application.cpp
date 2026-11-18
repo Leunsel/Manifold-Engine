@@ -4,6 +4,7 @@
 #include "App/CrashHandler.h"
 #include "App/Diagnostics.h"
 #include "App/Sounds.h"
+#include "Core/BuildInfo.h"
 #include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
@@ -141,7 +142,7 @@ namespace Manifold
         ::UpdateWindow(m_host.Window());
         m_host.NoteInput();
         m_running = true;
-        LOG_INFO("Program", "Manifold Engine started" + std::string(Target::IsElevated() ? " with administrator rights" : ""));
+        LOG_INFO("Program", "Manifold Engine " + VersionText() + " started" + std::string(Target::IsElevated() ? " with administrator rights" : ""));
         return true;
     }
 

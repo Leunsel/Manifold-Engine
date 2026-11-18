@@ -1,0 +1,47 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'Docs/**'
+      - 'Licenses/**'
+      - 'LICENSE'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'Docs/**'
+      - 'Licenses/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release x64
+        run: msbuild Manifold-Engine.sln /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+
+      - name: Test
+        run: Build\x64\Release\Manifold-Engine.Tests.exe
+
+      - name: Keep logs and crash reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            Build/x64/Release/logs/
+            Build/x64/Release/crashes/
+          if-no-files-found: ignore
+          retention-days: 7

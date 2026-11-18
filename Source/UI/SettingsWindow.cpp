@@ -5,7 +5,7 @@
 #include "Core/Profiler.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
-#include "Core/Version.h"
+#include "Core/BuildInfo.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Target/Process.h"
 #include "UI/Fonts.h"
@@ -662,7 +662,7 @@ namespace Manifold::UI
         {
             ImGui::SetCursorScreenPos(ImVec2(left, bottom - line));
             ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.7f));
-            ImGui::TextUnformatted("Manifold Engine " MANIFOLD_VERSION_TEXT);
+            ImGui::TextUnformatted(("Manifold Engine " + VersionText()).c_str());
             ImGui::PopStyleColor();
         }
         ImGui::EndChild();

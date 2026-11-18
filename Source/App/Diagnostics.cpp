@@ -4,7 +4,7 @@
 #include "App/Settings.h"
 #include "Core/Profiler.h"
 #include "Core/Text.h"
-#include "Core/Version.h"
+#include "Core/BuildInfo.h"
 #include "Lua/LuaEngine.h"
 #include "Target/Process.h"
 
@@ -1279,6 +1279,7 @@ namespace Manifold::Diagnostics
 
         InfoGroup build{ "Build", {} };
         build.Rows.push_back({ "Version", MANIFOLD_VERSION_TEXT });
+        build.Rows.push_back({ "Commit", BuildCommit().empty() ? std::string("unknown") : BuildCommit() });
         build.Rows.push_back({ "Build", BuildKind() });
         build.Rows.push_back({ "Compiler", CompilerText() });
         build.Rows.push_back({ "Built", std::string(__DATE__) + " " + __TIME__ });
@@ -1838,7 +1839,7 @@ namespace Manifold::Diagnostics
         char stamp[64];
         std::strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", &local);
         out << "# Manifold Engine diagnostics\n\n";
-        out << "Created " << stamp << " by Manifold Engine " << MANIFOLD_VERSION_TEXT << ".\n\n";
+        out << "Created " << stamp << " by Manifold Engine " << VersionText() << ".\n\n";
 
         out << "## Checks\n\n";
         for (const Check& check : RunChecks(engine))

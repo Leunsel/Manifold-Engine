@@ -75,6 +75,9 @@
     <ClCompile Include="..\Source\Core\BackgroundWork.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Core\BuildInfo.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Core\Deflate.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>

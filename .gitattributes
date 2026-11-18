@@ -1,4 +1,4 @@
-* text=auto
+* text=auto eol=lf
 *.sln text eol=crlf
 *.vcxproj text eol=crlf
 *.vcxproj.filters text eol=crlf
@@ -10,3 +10,7 @@
 *.ico binary
 *.png binary
 *.lib binary
+*.mp3 binary
+*.wav binary
+*.dll binary
+*.exe binary

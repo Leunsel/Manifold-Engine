@@ -2,7 +2,7 @@
 
 #include "Core/Profiler.h"
 #include "Core/Text.h"
-#include "Core/Version.h"
+#include "Core/BuildInfo.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
 #include "Table/CheatTable.h"
@@ -1033,7 +1033,7 @@ namespace Manifold::UI
         ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
         if (BeginModal(id, ICON_FA_MICROCHIP, "About Manifold Engine", ImVec2(460.0f, 0.0f), &m_aboutOpen))
         {
-            ImGui::Text("Version %s", MANIFOLD_VERSION_TEXT);
+            ImGui::Text("Version %s", VersionText().c_str());
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
             {
                 const double now = ImGui::GetTime();

@@ -62,7 +62,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\Source;$(ProjectDir)..\Tests;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Source;$(IntDir)Info;$(ProjectDir)..\Tests;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_CONSOLE;MANIFOLD_TESTS;WIN32_LEAN_AND_MEAN;NOMINMAX;ZYDIS_STATIC_BUILD;ZYCORE_STATIC_BUILD;IMGUI_IMPL_WIN32_DISABLE_GAMEPAD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
@@ -75,8 +75,9 @@
     <PreBuildEvent>
       <Command>where python &gt;nul 2&gt;nul || exit /b 0
 python "$(ProjectDir)..\Tools\embed_lua.py"
-python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
-      <Message>Embedding the Lua compatibility scripts and the built-in templates</Message>
+python "$(ProjectDir)..\Tools\embed_templates.py"
+python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"</Command>
+      <Message>Embedding the Lua compatibility scripts and the built-in templates, writing the build info</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
@@ -113,6 +114,7 @@ python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
     <ClCompile Include="..\Source\Asm\AutoAssembler.cpp" />
     <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp" />
     <ClCompile Include="..\Source\Core\BackgroundWork.cpp" />
+    <ClCompile Include="..\Source\Core\BuildInfo.cpp" />
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
     <ClCompile Include="..\Source\Core\JobQueue.cpp" />

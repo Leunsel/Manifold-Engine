@@ -64,7 +64,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\Source;$(IntDir)Info;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_WINDOWS;WIN32_LEAN_AND_MEAN;NOMINMAX;ZYDIS_STATIC_BUILD;ZYCORE_STATIC_BUILD;IMGUI_IMPL_WIN32_DISABLE_GAMEPAD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
@@ -78,8 +78,9 @@
     <PreBuildEvent>
       <Command>where python &gt;nul 2&gt;nul || exit /b 0
 python "$(ProjectDir)..\Tools\embed_lua.py"
-python "$(ProjectDir)..\Tools\embed_templates.py"</Command>
-      <Message>Embedding the Lua compatibility scripts and the built-in templates</Message>
+python "$(ProjectDir)..\Tools\embed_templates.py"
+python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"</Command>
+      <Message>Embedding the Lua compatibility scripts and the built-in templates, writing the build info</Message>
     </PreBuildEvent>
     <PostBuildEvent>
       <Command>if not exist "$(ProjectDir)..\Autorun\*" exit /b 0
@@ -127,6 +128,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Asm\AutoAssembler.cpp" />
     <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp" />
     <ClCompile Include="..\Source\Core\BackgroundWork.cpp" />
+    <ClCompile Include="..\Source\Core\BuildInfo.cpp" />
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
     <ClCompile Include="..\Source\Core\JobQueue.cpp" />
@@ -235,6 +237,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Asm\Assembler.h" />
     <ClInclude Include="..\Source\Asm\AutoAssembler.h" />
     <ClInclude Include="..\Source\Core\BackgroundWork.h" />
+    <ClInclude Include="..\Source\Core\BuildInfo.h" />
     <ClInclude Include="..\Source\Core\Deflate.h" />
     <ClInclude Include="..\Source\Core\Errors.h" />
     <ClInclude Include="..\Source\Core\JobQueue.h" />
