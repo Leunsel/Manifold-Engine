@@ -1,0 +1,46 @@
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
+#include "Core/ImageDecode.h"
+
+#include <climits>
+#include <cstdlib>
+#include <cstring>
+
+#pragma warning(push, 0)
+#pragma warning(disable : 4505)
+#define STB_IMAGE_STATIC
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_BMP
+#define STBI_ONLY_TGA
+#define STBI_ONLY_GIF
+#define STBI_NO_STDIO
+#define STBI_NO_LINEAR
+#define STBI_NO_HDR
+#define STBI_NO_FAILURE_STRINGS
+#include "stb_image.h"
+#pragma warning(pop)
+
+namespace Manifold
+{
+    std::optional<DecodedImage> DecodeImage(std::span<const std::uint8_t> bytes)
+    {
+        if (bytes.empty() || bytes.size() > static_cast<std::size_t>(INT_MAX))
+            return std::nullopt;
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        stbi_uc* pixels = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &width, &height, &channels, 4);
+        if (!pixels)
+            return std::nullopt;
+        DecodedImage image;
+        image.Width = width;
+        image.Height = height;
+        image.Rgba.assign(pixels, pixels + static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
+        stbi_image_free(pixels);
+        return image;
+    }
+}

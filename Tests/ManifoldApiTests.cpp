@@ -3,9 +3,11 @@
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/RuntimeLog.h"
+#include "Core/Text.h"
 #include "Lua/DocRegistry.h"
 #include "Lua/LuaApi.h"
 #include "Lua/LuaEngine.h"
+#include "Lua/UiModel.h"
 
 #include "lua.hpp"
 
@@ -56,29 +58,39 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 4 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 5 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
-                for areaName, members in pairs(manifold) do
-                  if type(members) == "table" then
-                    if not areaName:match("^%l+$") then return "area name " .. areaName end
-                    local functions = {}
-                    for name, value in pairs(members) do
-                      if type(value) ~= "function" then return "non-function " .. areaName .. "." .. name end
-                      if not name:match("^%l%w*$") then return "function name " .. areaName .. "." .. name end
+                local function lint(path, members, nested)
+                  local functions = {}
+                  for name, value in pairs(members) do
+                    if type(value) == "table" and not nested then
+                      if not name:match("^%l+$") then return "sub-area name " .. path .. "." .. name end
+                      local problem = lint(path .. "." .. name, value, true)
+                      if problem then return problem end
+                    else
+                      if type(value) ~= "function" then return "non-function " .. path .. "." .. name end
+                      if not name:match("^%l%w*$") then return "function name " .. path .. "." .. name end
                       local doc = manifold.doc.entry(value)
                       local returns = doc and doc.signatures and doc.signatures[1] and doc.signatures[1].returns
-                      if not doc or doc.origin ~= "manifold" or doc.text == "" or returns == nil then return "undocumented " .. areaName .. "." .. name end
-                      if doc.path ~= "manifold." .. areaName .. "." .. name then return "documented as " .. doc.path end
+                      if not doc or doc.origin ~= "manifold" or doc.text == "" or returns == nil then return "undocumented " .. path .. "." .. name end
+                      if doc.path ~= "manifold." .. path .. "." .. name then return "documented as " .. doc.path end
                       if (name:match("^is%u") or name:match("^has%u")) and returns ~= "boolean" then return "predicate " .. name .. " returns " .. returns end
                       functions[name] = true
                       count = count + 1
                     end
-                    for name in pairs(functions) do
-                      local setting = name:match("^set(%u%w*)$")
-                      if setting and not functions["get" .. setting] then return "set without get: " .. name end
-                      local getter = name:match("^get(%u%w*)$")
-                      if getter and not functions["set" .. getter] then return "get without set: " .. name end
-                    end
+                  end
+                  for name in pairs(functions) do
+                    local setting = name:match("^set(%u%w*)$")
+                    if setting and not functions["get" .. setting] then return "set without get: " .. path .. "." .. name end
+                    local getter = name:match("^get(%u%w*)$")
+                    if getter and not functions["set" .. getter] then return "get without set: " .. path .. "." .. name end
+                  end
+                end
+                for areaName, members in pairs(manifold) do
+                  if type(members) == "table" then
+                    if not areaName:match("^%l+$") then return "area name " .. areaName end
+                    local problem = lint(areaName, members, false)
+                    if problem then return problem end
                   elseif type(members) == "function" then
                     if areaName ~= "has" then return "top-level function " .. areaName end
                   elseif not areaName:match("^%l%w*$") then
@@ -595,6 +607,235 @@ return M
             CHECK_MSG(lua.Docs().Size() <= before + 2, std::to_string(lua.Docs().Size()) + " after " + std::to_string(before));
         }
 
+        int LuaInteger(Engine& engine, const char* name, const std::string& code)
+        {
+            std::string result;
+            const Status status = engine.Lua().RunWithResult(code, name, result);
+            CHECK_MSG(status.Ok(), std::string(name) + ": " + status.Text);
+            return static_cast<int>(ParseDecimal(result).value_or(0));
+        }
+
+        void UiApi(Engine& engine)
+        {
+            Lua::UiModel& model = engine.Lua().Ui();
+            LuaCheck(engine, "ui widgets", R"LUA(
+                local w = manifold.ui.window.create("Probe", { icon = "map-marker-alt", width = 300 })
+                if w.kind ~= "window" or type(w.id) ~= "number" or not w.isOpen() then return "window" end
+                local row = w.add("row")
+                local x = row.add("number", { label = "X", value = 1.5, step = 0.1 })
+                local name = row.add("input", { label = "Name", value = "hero" })
+                local flag = w.add("checkbox", { label = "God mode", value = true })
+                local pick = w.add("combo", { items = { "one", "two", "three" }, value = 2 })
+                local grid = w.add("table", { columns = { "Name", { title = "Value", width = 80, align = "right" } }, rows = { { "a", 1 }, { "b", 2 } } })
+                local tree = w.add("tree", { items = { { text = "root", id = "r", children = { "leaf" } } } })
+                local bar = w.add("progress", { value = 0.25 })
+                if x.get() ~= 1.5 or name.get() ~= "hero" or flag.get() ~= true or pick.get() ~= 2 then return "initial values" end
+                if grid.get() ~= nil or tree.get() ~= nil or bar.get() ~= 0.25 then return "initial selections" end
+                x.set(7); name.set("champ"); flag.set(false); pick.set(3); grid.set(2); tree.set("leaf"); bar.set(2)
+                if x.get() ~= 7 or name.get() ~= "champ" or flag.get() ~= false or pick.get() ~= 3 or grid.get() ~= 2 or tree.get() ~= "leaf" or bar.get() ~= 1 then return "set values" end
+                if not grid.update({ rows = { { "only" } } }) or grid.get() ~= nil then return "rows reset the selection" end
+                local tabs = w.add("tabs")
+                local first = tabs.add("tab", { title = "First" })
+                first.add("text", { text = "inside", color = "muted", wrap = true })
+                local function raises(fn, needle)
+                  local ok, problem = pcall(fn)
+                  if ok then return "no error for " .. needle end
+                  if not manifold.error.is(problem) or problem.code ~= "ME-7007" then return "not a misuse error: " .. tostring(problem) end
+                  if not problem.message:find(needle, 1, true) then return "message lacks '" .. needle .. "': " .. problem.message end
+                end
+                local failure = raises(function() w:add("text") end, "with a dot")
+                  or raises(function() w.add("knob") end, 'must be one of "button"')
+                  or raises(function() w.add("text", { colour = "red" }) end, "options.colour is not an option")
+                  or raises(function() w.add("text", { color = "red" }) end, "is no theme colour")
+                  or raises(function() w.add("button", { icon = "nope-nope" }) end, "is no Font Awesome icon")
+                  or raises(function() w.add("button", { style = "loud" }) end, 'options.style must be one of')
+                  or raises(function() flag.add("text") end, "holds no widgets")
+                  or raises(function() tabs.add("text") end, "tabs hold tab widgets only")
+                  or raises(function() w.add("tab") end, "goes into a tabs widget")
+                  or raises(function() x.draw({}) end, "only a canvas draws")
+                if failure then return failure end
+                local gone = w.add("text", { text = "bye" })
+                if not gone.remove() or gone.remove() then return "remove twice" end
+                local value, problem = gone.get()
+                if value ~= nil or problem.code ~= "ME-7010" then return "gone widget" end
+                if not w.remove() or w.isOpen() then return "window remove" end
+                value, problem = x.set(1)
+                if value ~= nil or problem.code ~= "ME-7010" then return "child of a removed window" end
+                return "ok")LUA");
+            CHECK_EQ(model.Windows().size(), 0u);
+
+            const int button = LuaInteger(engine, "ui events", R"LUA(
+                uiProbe = {}
+                local w = manifold.ui.window.create("Events", { key = "events probe", onClose = function(window) uiProbe.closed = window.kind end })
+                local b = w.add("button", { text = "Go", onClick = function(widget) uiProbe.clicks = (uiProbe.clicks or 0) + 1; uiProbe.kind = widget.kind end })
+                uiProbeChange = w.add("number", { value = 1, onChange = function(value) uiProbe.value = value end })
+                uiProbeWindow = w
+                return tostring(b.id))LUA");
+            CHECK(button > 0);
+            const Lua::UiNode* number = nullptr;
+            for (const int id : model.Windows())
+            {
+                if (const Lua::UiNode* window = model.Find(id); window && window->Title == "Events" && window->Children.size() == 2)
+                    number = model.Find(window->Children[1]);
+            }
+            CHECK(number && number->Kind == Lua::UiKind::Number && (number->Handlers & Lua::UiHandler::Change));
+            model.Post({ button, "click", {} });
+            model.Post({ button, "click", {} });
+            if (number)
+                model.Post({ number->Id, "change", { 42.0 } });
+            if (!model.Windows().empty())
+                model.Post({ model.Windows().back(), "close", {} });
+            engine.Lua().Tick(1000.0);
+            LuaCheck(engine, "ui events seen", R"LUA(
+                if uiProbe.clicks ~= 2 or uiProbe.kind ~= "button" then return "clicks " .. tostring(uiProbe.clicks) end
+                if uiProbe.value ~= 42 then return "change " .. tostring(uiProbe.value) end
+                if uiProbe.closed ~= "window" then return "close" end
+                local again = manifold.ui.window.create("Events again", { key = "events probe" })
+                if uiProbeWindow.isOpen() then return "key did not replace the window" end
+                again.remove()
+                return "ok")LUA");
+
+            CHECK(engine.Lua().Run(R"LUA(manifold.ui.window.create("Owned one"); manifold.ui.menu.add("Probe/Owned"))LUA", "ui owner").Ok());
+            const std::size_t windows = model.Windows().size();
+            const std::size_t menus = model.Slots(Lua::UiSlotKind::Menu).size();
+            CHECK(windows >= 1 && menus >= 1);
+            CHECK(engine.Lua().Run(R"LUA(manifold.ui.window.create("Owned two"))LUA", "ui owner").Ok());
+            CHECK_EQ(model.Windows().size(), windows);
+            CHECK_EQ(model.Slots(Lua::UiSlotKind::Menu).size(), menus - 1);
+            CHECK(engine.Lua().Run("", "ui owner").Ok());
+            CHECK_EQ(model.Windows().size(), windows - 1);
+
+            CHECK(engine.Lua().StartTask(R"LUA(manifold.ui.window.create("Task one"))LUA", "ui task", {}) > 0);
+            engine.Lua().RunTasks(1.0);
+            const std::size_t taskWindows = model.Windows().size();
+            CHECK(taskWindows >= 1);
+            CHECK(engine.Lua().StartTask(R"LUA(manifold.ui.window.create("Task two"))LUA", "ui task", {}) > 0);
+            CHECK_EQ(model.Windows().size(), taskWindows - 1);
+            engine.Lua().RunTasks(1.0);
+            CHECK_EQ(model.Windows().size(), taskWindows);
+            CHECK(engine.Lua().Run("", "ui task").Ok());
+            CHECK_EQ(model.Windows().size(), taskWindows - 1);
+
+            const std::size_t fragmentMenus = model.Slots(Lua::UiSlotKind::Menu).size();
+            CHECK(engine.Lua().Run(R"LUA(uiFragmentOne = manifold.ui.menu.add("Probe/Fragment one"))LUA", "{$lua}").Ok());
+            CHECK(engine.Lua().Run(R"LUA(uiFragmentTwo = manifold.ui.menu.add("Probe/Fragment two"))LUA", "{$lua}").Ok());
+            CHECK_EQ(model.Slots(Lua::UiSlotKind::Menu).size(), fragmentMenus + 2);
+            LuaCheck(engine, "ui fragments", R"LUA(
+                if not uiFragmentOne.remove() or not uiFragmentTwo.remove() then return "remove" end
+                return "ok")LUA");
+            CHECK_EQ(model.Slots(Lua::UiSlotKind::Menu).size(), fragmentMenus);
+
+            LuaCheck(engine, "ui canvas", R"LUA(
+                local w = manifold.ui.window.create("Canvas")
+                local c = w.add("canvas", { height = 200, background = "surface", zoom = true, menu = { "Mark", "-", "Clear" } })
+                local ok = c.draw({
+                  { kind = "line", x = 0, y = 0, x2 = 10, y2 = 10, color = "accent", thickness = 2 },
+                  { kind = "rect", x = 1, y = 1, width = 5, height = 5, filled = true, color = "#FF8800" },
+                  { kind = "circle", x = 5, y = 5, radius = 3, color = "#11223344" },
+                  { kind = "polygon", points = { 0, 0, 4, 0, 2, 3 }, filled = true },
+                  { kind = "text", x = 2, y = 2, text = "hi", size = 14 },
+                })
+                if not ok then return "draw" end
+                if not c.draw({ { kind = "line", x = 1, y = 1, x2 = 2, y2 = 2 } }, { append = true }) then return "append" end
+                local function raises(fn, needle)
+                  local okay, problem = pcall(fn)
+                  if okay or not problem.message:find(needle, 1, true) then return "missing error " .. needle end
+                end
+                local failure = raises(function() c.draw({ { kind = "star" } }) end, "kind must be one of")
+                  or raises(function() c.draw({ { kind = "line", x = 1, depth = 2 } }) end, "has no depth")
+                  or raises(function() c.draw({ { kind = "line", color = "rainbow" } }) end, "is no theme colour")
+                  or raises(function() c.draw({ { kind = "image", x = 0, y = 0 } }) end, "needs an image")
+                if failure then return failure end
+                local view = c.getView()
+                if view.x ~= 0 or view.y ~= 0 or view.scale ~= 1 then return "view" end
+                c.setView({ x = 10, y = 20, scale = 2 })
+                view = c.getView()
+                if view.x ~= 10 or view.y ~= 20 or view.scale ~= 2 then return "set view" end
+                if not c.clear() then return "clear" end
+                w.remove()
+                return "ok")LUA");
+
+            LuaCheck(engine, "ui notice", R"LUA(
+                local n = manifold.ui.notice.show("Loading", { progress = 0.2 })
+                if not n.isShown() then return "shown" end
+                if not n.update({ text = "Loaded", progress = 1, level = "success" }) then return "update" end
+                if not n.remove() or n.isShown() then return "remove" end
+                local value, problem = n.update({ text = "again" })
+                if value ~= nil or problem.code ~= "ME-7010" then return "gone notice" end
+                local ok = pcall(manifold.ui.notice.show, "x", { level = "loud" })
+                if ok then return "level not checked" end
+                return "ok")LUA");
+
+            const int slot = LuaInteger(engine, "ui slots", R"LUA(
+                uiSlotProbe = 0
+                local entry = manifold.ui.menu.add("Probe/Teleport", { icon = "map-marker-alt", onClick = function(e) uiSlotProbe = uiSlotProbe + e.id end })
+                local tool = manifold.ui.toolbar.add("play", { tooltip = "Run", onClick = function() end })
+                local state = manifold.ui.status.add("Ready", { icon = "check", color = "success" })
+                if not tool.update({ enabled = false }) or not state.update({ text = "Busy" }) then return "0" end
+                uiSlotEntries = { entry, tool, state }
+                return tostring(entry.id))LUA");
+            CHECK(slot > 0);
+            CHECK(!model.Slots(Lua::UiSlotKind::Toolbar).empty() && !model.Slots(Lua::UiSlotKind::Status).empty());
+            model.Post({ slot, "click", {} });
+            engine.Lua().Tick(1001.0);
+            LuaCheck(engine, "ui slot click", R"LUA(
+                if uiSlotProbe ~= uiSlotEntries[1].id then return "click " .. tostring(uiSlotProbe) end
+                for _, entry in ipairs(uiSlotEntries) do
+                  if not entry.remove() then return "remove" end
+                end
+                return "ok")LUA");
+            CHECK(model.Slots(Lua::UiSlotKind::Status).empty());
+
+            LuaCheck(engine, "ui dialog", R"LUA(
+                uiDialogAnswer = "none"
+                uiDialog = manifold.ui.dialog.confirm("Really?", { title = "Probe", onClose = function(answer) uiDialogAnswer = answer end })
+                return "ok")LUA");
+            CHECK_EQ(model.Dialogs().size(), 1u);
+            if (!model.Dialogs().empty())
+            {
+                const int dialog = model.Dialogs().front().Id;
+                model.Post({ dialog, "dialog", { true } });
+                model.RemoveDialog(dialog);
+            }
+            engine.Lua().Tick(1002.0);
+            LuaCheck(engine, "ui dialog answer", R"LUA(
+                if uiDialogAnswer ~= true then return "answer " .. tostring(uiDialogAnswer) end
+                local pick = manifold.ui.dialog.choose("Which?", { "a", "b" })
+                if not pick.close() or pick.close() then return "close" end
+                return "ok")LUA");
+            CHECK(model.Dialogs().empty());
+
+            LuaCheck(engine, "ui theme and images", R"LUA(
+                local colors = manifold.ui.theme.colors()
+                local found = false
+                for _, name in ipairs(colors) do found = found or name == "accent" end
+                if not found then return "colors" end
+                local icons = manifold.ui.theme.icons("marker")
+                found = false
+                for _, name in ipairs(icons) do found = found or name == "map-marker-alt" end
+                if not found or not manifold.ui.theme.isIcon("play") or manifold.ui.theme.isIcon("nope") then return "icons" end
+                local image, problem = manifold.ui.image.load("no such picture.png")
+                if image ~= nil or problem.code ~= "ME-7009" then return "missing image" end
+                return "ok")LUA");
+
+            LuaCheck(engine, "ui update", R"LUA(
+                uiUpdates = 0
+                uiUpdateWindow = manifold.ui.window.create("Ticker", { interval = 0.5, onUpdate = function() uiUpdates = uiUpdates + 1 end })
+                return "ok")LUA");
+            engine.Lua().Tick(2000.0);
+            engine.Lua().Tick(2000.1);
+            engine.Lua().Tick(2000.6);
+            LuaCheck(engine, "ui update ran", R"LUA(
+                if uiUpdates ~= 2 then return "updates " .. uiUpdates end
+                uiUpdateWindow.hide()
+                return "ok")LUA");
+            engine.Lua().Tick(2002.0);
+            LuaCheck(engine, "ui update stops when hidden", R"LUA(
+                if uiUpdates ~= 2 then return "hidden window updated" end
+                uiUpdateWindow.remove()
+                return "ok")LUA");
+        }
+
         void Documentation(Engine& engine)
         {
             const std::string markdown = Lua::ManifoldApiMarkdown(engine.Lua());
@@ -640,6 +881,7 @@ return M
         Assist(engine);
         DocApi(engine);
         Documentation(engine);
+        UiApi(engine);
         engine.CloseProcess();
         return Totals().Failures - before;
     }

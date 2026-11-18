@@ -123,6 +123,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
     <ClCompile Include="..\Source\Core\Handle.cpp" />
+    <ClCompile Include="..\Source\Core\ImageDecode.cpp" />
     <ClCompile Include="..\Source\Core\Ini.cpp" />
     <ClCompile Include="..\Source\Core\JobQueue.cpp" />
     <ClCompile Include="..\Source\Core\MainThread.cpp" />
@@ -138,6 +139,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
+    <ClCompile Include="..\Source\Generated\IconNames.cpp" />
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp" />
     <ClCompile Include="..\Source\Generated\ManagedDumperImage.cpp" />
@@ -159,6 +161,8 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp" />
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
+    <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
     <ClCompile Include="..\Source\Syscalls\Syscall.cpp">

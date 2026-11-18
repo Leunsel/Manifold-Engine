@@ -6,7 +6,7 @@ This file is generated from the API itself (`Manifold-Engine.Tests.exe --manifol
 
 ## Schema
 
-1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`.
+1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`. An area may group its functions into sub-areas one level down (`manifold.ui.window`, `manifold.ui.dialog`).
 2. **Names.** Areas are lower-case nouns. Functions are lowerCamelCase: a lookup without side effects is named after what it returns (`process.module`, `log.channel`), everything else starts with a verb (`open`, `read`, `create`). Predicates start with `is` or `has` and return a boolean. Settings come in `get…`/`set…` pairs. The five log functions are named after their level. Constants are lowerCamelCase fields. There are no aliases and no capitalised duplicates.
 3. **Calls use a dot.** `manifold.log.info("ready")`, never `manifold.log:info("ready")`. No function takes `self`, and the objects the API returns (channels) work the same way. A colon call raises an error that says so.
 4. **Arguments.** Required arguments come first, optional ones after them, and settings go into one `options` table at the end. A `?` after a name marks it optional. A missing, extra or wrongly typed argument and an unknown option key raise `ME-7007`, naming the function and the argument. Addresses are integers or address expressions such as `"game.exe+10"`.
@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 4 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 5 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -168,3 +168,164 @@ The documentation behind completion, signature help, hover tooltips and the docs
 | `manifold.doc.find(query, options?)` | list of `{ path, kind, summary }` | Searches names and texts, best matches first. `options.limit` (default 50) caps the list; `options.kind` keeps one kind, such as `"function"` or `"table"`. |
 | `manifold.doc.annotations(fn)` | `{ … }` like `entry`, or nil, error | Reads the LuaLS annotations above a function's definition without registering anything. |
 | `manifold.doc.markdown(prefix)` | string, or nil, error | Markdown tables of everything documented under `prefix`, the way Docs/MANIFOLD-API.md is written. |
+
+## manifold.ui
+
+Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.
+
+
+### Menu, toolbar and status entries
+
+`menu.add`, `toolbar.add` and `status.add` return an entry object; it takes the options its `add` took.
+
+| Name | Returns | |
+| --- | --- | --- |
+| `entry.update(options)` | boolean | Changes the entry: the options its `add` took. |
+| `entry.remove()` | boolean | Takes the entry out. |
+| `entry.id` | integer | The entry's number. |
+
+## manifold.ui.window
+
+Tool windows that dock into the workspace like Manifold's own. A window holds widgets; containers (`row`, `column`, `section`, `tabs` with `tab`, `split`) hold more widgets.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.ui.window.create(title, options?)` | window | Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one. |
+
+### Window objects
+
+`manifold.ui.window.create` returns a window object: dot calls only, read-only, unknown names raise. A call on a window that is gone (removed, or its script ran again) returns `nil, error` with code `ME-7010`.
+
+| Name | Returns | |
+| --- | --- | --- |
+| `window.add(kind, options?)` | widget | Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object). |
+| `window.clear()` | boolean | Removes every widget of the window. |
+| `window.remove()` | boolean | Removes the window and its widgets for good. |
+| `window.update(options)` | boolean | Changes the title, icon, update interval or handlers. |
+| `window.show()` | boolean | Shows the window again after the user or `hide` closed it. |
+| `window.hide()` | boolean | Hides the window; `show` brings it back with its widgets. |
+| `window.focus()` | boolean | Shows the window and brings it to the front. |
+| `window.isOpen()` | boolean | Whether the window exists and is shown. |
+| `window.id` | integer | The window's number. |
+| `window.kind` | string | Always `window`. |
+
+### Widget objects
+
+`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic). Handlers get the widget as their last argument.
+- `row`, `column`: lay out their widgets side by side or one below the other.
+- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it.
+- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).
+- `text` (`text`, `color`, `wrap`, `mono`), `heading` (`text`, `icon`), `separator`, `spacer`.
+- `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`.
+- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `onSubmit(text, widget)` on Enter), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number): all call `onChange(value, widget)`.
+- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.
+- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.
+- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).
+- `canvas`: draws what `draw` gave it on the GPU. `background` is a colour, `zoom = true` lets the user zoom with the wheel and pan by dragging; `onClick(x, y, button, widget)`, `onHover(x, y, widget)`, `onView(x, y, scale, widget)` and `menu` with `onMenu(choice, text, x, y, widget)` get canvas coordinates.
+
+| Name | Returns | |
+| --- | --- | --- |
+| `widget.add(kind, options?)` | widget | Adds a widget to a container (`row`, `column`, `section`, `tab`, `split`; `tabs` take `tab` widgets only). |
+| `widget.clear()` | boolean | Removes a container's widgets, or a canvas's drawings. |
+| `widget.remove()` | boolean | Removes the widget and everything in it. |
+| `widget.update(options)` | boolean | Changes options of the widget: the same keys `add` takes for its kind, handlers included. |
+| `widget.get()` | value | The widget's value: a checkbox's boolean, an input's text, a number, the chosen combo item's or table row's number, the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected. |
+| `widget.set(value?)` | boolean | Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`. |
+| `widget.draw(drawings, options?)` | boolean | Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`). |
+| `widget.getView()` | table | A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom. |
+| `widget.setView(view)` | boolean | Moves or zooms a canvas's view. |
+| `widget.id` | integer | The widget's number. |
+| `widget.kind` | string | The kind it was added as. |
+
+## manifold.ui.dialog
+
+Dialogs on top of the program. They do not block the script: each takes `onClose`, which gets the answer, or nil when the user cancelled.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.ui.dialog.confirm(text, options?)` | dialog | Asks a yes/no question. `onClose(answer)` gets true or false; `danger = true` shows the yes button in the warning colour. |
+| `manifold.ui.dialog.input(text, options?)` | dialog | Asks for a line of text, starting from `value`. `onClose(text)` gets the text, or nil. |
+| `manifold.ui.dialog.choose(text, items, options?)` | dialog | Lets the user pick one of `items`. `onClose(number, text)` gets the chosen item's number and text, or nil. |
+| `manifold.ui.dialog.openFile(options?)` | dialog | The Windows file dialog for opening a file. `filters` is a list of `{ "Lua scripts", "*.lua" }` pairs; `onClose(path)` gets the full path, or nil. |
+| `manifold.ui.dialog.saveFile(options?)` | dialog | The Windows file dialog for saving, starting with `name`. `filters` is a list of `{ "Lua scripts", "*.lua" }` pairs; `onClose(path)` gets the full path, or nil. |
+
+### Dialog objects
+
+The dialog functions return at once; the dialog shows on top of the program and calls `onClose` with the answer when the user is done.
+
+| Name | Returns | |
+| --- | --- | --- |
+| `dialog.close()` | boolean | Closes the dialog without an answer; `onClose` is not called. |
+| `dialog.id` | integer | The dialog's number. |
+
+## manifold.ui.notice
+
+Short notices in the lower right corner, the same ones Manifold shows. A notice fades after a few seconds unless it is `sticky` or has a `progress`; a right click dismisses it.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.ui.notice.show(text, options?)` | notice | Shows a notice. `level` is `info` (default), `success`, `warning` or `error`; `progress` (0..1) adds a bar and keeps the notice up until it reaches 1; `sticky` keeps it until it is removed or dismissed. |
+
+### Notice objects
+
+`manifold.ui.notice.show` returns a notice object.
+
+| Name | Returns | |
+| --- | --- | --- |
+| `notice.update(options)` | boolean | Changes the text, level, progress or stickiness, and shows the notice for its full time again. |
+| `notice.remove()` | boolean | Takes the notice down. |
+| `notice.isShown()` | boolean | Whether the notice is still up. |
+| `notice.id` | integer | The notice's number. |
+
+## manifold.ui.menu
+
+Entries in the main window's Scripts menu, which shows as soon as a script adds one.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.ui.menu.add(path, options?)` | entry | Adds an entry. `path` may name submenus with slashes (`Teleporter/Save position`); `-` as the last part is a separator. Options: `icon`, `enabled`, `checked` (shows a check mark), `onClick(entry)`. |
+
+## manifold.ui.toolbar
+
+Buttons in the main window's process bar, left of the Memory view button.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.ui.toolbar.add(icon, options?)` | entry | Adds an icon button. Options: `text` beside the icon, `tooltip`, `enabled`, `onClick(entry)`. |
+
+## manifold.ui.status
+
+Entries in the main window's status bar, after the administrator note.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.ui.status.add(text, options?)` | entry | Adds a status entry. Options: `icon`, `tooltip`, `color` (a theme name), `onClick(entry)`. |
+
+## manifold.ui.image
+
+Pictures for `image` widgets and canvas drawings.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.ui.image.load(path)` | image | Loads a PNG, JPEG, BMP, TGA or GIF file (a relative path starts at the program folder) and returns an image object with `width`, `height` and `remove()`, or nil and an `ME-7009` error. |
+
+### Image objects
+
+`manifold.ui.image.load` returns an image object.
+
+| Name | Returns | |
+| --- | --- | --- |
+| `image.remove()` | boolean | Frees the picture; widgets and drawings that show it go blank. |
+| `image.id` | integer | The image's number. |
+| `image.width` | integer | Width in pixels. |
+| `image.height` | integer | Height in pixels. |
+
+## manifold.ui.theme
+
+The names `manifold.ui` takes for colours and icons.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.ui.theme.colors()` | table | The theme colour names, which follow the theme and light or dark mode. |
+| `manifold.ui.theme.icons(filter?)` | table | The Font Awesome icon names, all of them or those that contain `filter`. |
+| `manifold.ui.theme.isIcon(name)` | boolean | Whether `name` is a Font Awesome icon name. |

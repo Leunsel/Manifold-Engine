@@ -137,6 +137,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
     <ClCompile Include="..\Source\Core\Handle.cpp" />
+    <ClCompile Include="..\Source\Core\ImageDecode.cpp" />
     <ClCompile Include="..\Source\Core\Ini.cpp" />
     <ClCompile Include="..\Source\Core\JobQueue.cpp" />
     <ClCompile Include="..\Source\Core\MainThread.cpp" />
@@ -152,6 +153,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
+    <ClCompile Include="..\Source\Generated\IconNames.cpp" />
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp" />
     <ClCompile Include="..\Source\Generated\ManagedDumperImage.cpp" />
@@ -173,6 +175,8 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp" />
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
+    <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
     <ClCompile Include="..\Source\Syscalls\Syscall.cpp">
@@ -234,6 +238,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\TemplateManager.cpp" />
     <ClCompile Include="..\Source\UI\Templates.cpp" />
     <ClCompile Include="..\Source\UI\ToolWindows.cpp" />
+    <ClCompile Include="..\Source\UI\UiHost.cpp" />
     <ClCompile Include="..\Source\UI\WatchWindow.cpp" />
     <ClCompile Include="..\Source\UI\Widgets.cpp" />
     <ClCompile Include="..\Source\UI\Workspace.cpp" />
@@ -260,6 +265,8 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Core\Deflate.h" />
     <ClInclude Include="..\Source\Core\Errors.h" />
     <ClInclude Include="..\Source\Core\Handle.h" />
+    <ClInclude Include="..\Source\Core\IconNames.h" />
+    <ClInclude Include="..\Source\Core\ImageDecode.h" />
     <ClInclude Include="..\Source\Core\Ini.h" />
     <ClInclude Include="..\Source\Core\JobQueue.h" />
     <ClInclude Include="..\Source\Core\MainThread.h" />
@@ -292,6 +299,8 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Lua\LuaDocs.h" />
     <ClInclude Include="..\Source\Lua\LuaEngine.h" />
     <ClInclude Include="..\Source\Lua\LuaSnapshot.h" />
+    <ClInclude Include="..\Source\Lua\LuaUi.h" />
+    <ClInclude Include="..\Source\Lua\UiModel.h" />
     <ClInclude Include="..\Source\Scan\Scanner.h" />
     <ClInclude Include="..\Source\Scan\ValueType.h" />
     <ClInclude Include="..\Source\Syscalls\Syscall.h" />
@@ -341,6 +350,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\TemplateManager.h" />
     <ClInclude Include="..\Source\UI\Templates.h" />
     <ClInclude Include="..\Source\UI\Theme.h" />
+    <ClInclude Include="..\Source\UI\UiHost.h" />
     <ClInclude Include="..\Source\UI\UiScale.h" />
     <ClInclude Include="..\Source\UI\Widgets.h" />
     <ClInclude Include="..\Source\UI\Windows.h" />

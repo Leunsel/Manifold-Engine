@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 4
+local API_VERSION = 5
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -1344,6 +1344,960 @@ do
   end)
 end
 
+local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
+
+local function subarea(parent, name, summary)
+  local path = parent.path .. "." .. name
+  local proxy, members = strict(path)
+  local section = { path = path, name = name, proxy = proxy, members = members }
+  rawset(parent.members, name, proxy)
+  native.docDefine(nil, path, { kind = "table", doc = summary })
+  return section
+end
+
+local UI_COLORS = {
+  "accent", "accentHovered", "success", "warning", "error", "text", "label", "muted", "changed",
+  "page", "card", "cardBorder", "surface", "border", "rowSeparator", "frame", "button", "popup", "sidebar", "titleBar",
+  "addressText", "bytesText", "codeKeyword", "codeRegister", "codeNumber", "codeString", "codeComment", "codeSection", "codeLabel",
+  "flowJump", "flowCall", "flowReturn", "breakpoint", "currentLine", "shadow",
+}
+local UI_COLOR_SET = {}
+for _, name in ipairs(UI_COLORS) do
+  UI_COLOR_SET[name] = true
+end
+
+local UI_HANDLER_BITS = { onClick = 1, onChange = 2, onSelect = 4, onActivate = 8, onMenu = 16, onHover = 32, onSubmit = 64, onClose = 128, onView = 256 }
+local UI_EVENTS = { click = "onClick", change = "onChange", select = "onSelect", activate = "onActivate", menu = "onMenu", hover = "onHover", submit = "onSubmit", close = "onClose", view = "onView" }
+
+local COMMON_KEYS = { visible = "boolean", enabled = "boolean", tooltip = "string", width = "number", height = "number" }
+
+local function withCommon(keys)
+  local all = {}
+  for key, kind in pairs(COMMON_KEYS) do
+    all[key] = kind
+  end
+  for key, kind in pairs(keys) do
+    all[key] = kind
+  end
+  return all
+end
+
+local WIDGET_KEYS = {
+  row = withCommon({}),
+  column = withCommon({}),
+  section = withCommon({ title = "string", icon = "string", badge = "string", collapsible = "boolean" }),
+  tabs = withCommon({}),
+  tab = withCommon({ title = "string", icon = "string" }),
+  split = withCommon({ vertical = "boolean", ratio = "number" }),
+  text = withCommon({ text = "string", color = "string", wrap = "boolean", mono = "boolean" }),
+  heading = withCommon({ text = "string", icon = "string" }),
+  separator = withCommon({}),
+  spacer = withCommon({}),
+  button = withCommon({ text = "string", icon = "string", style = "string", onClick = "function" }),
+  checkbox = withCommon({ label = "string", value = "boolean", onChange = "function" }),
+  input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", onChange = "function", onSubmit = "function" }),
+  number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", onChange = "function" }),
+  slider = withCommon({ label = "string", value = "number", min = "number", max = "number", integer = "boolean", format = "string", onChange = "function" }),
+  combo = withCommon({ label = "string", items = "table", value = "integer", onChange = "function" }),
+  table = withCommon({ columns = "table", rows = "table", value = "integer", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
+  tree = withCommon({ items = "table", value = "string", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
+  progress = withCommon({ value = "number", text = "string" }),
+  image = withCommon({ image = "table" }),
+  canvas = withCommon({ background = "string", zoom = "boolean", menu = "table", onClick = "function", onHover = "function", onMenu = "function", onView = "function" }),
+}
+local WIDGET_KINDS = {}
+for kind in pairs(WIDGET_KEYS) do
+  WIDGET_KINDS[#WIDGET_KINDS + 1] = kind
+end
+table.sort(WIDGET_KINDS)
+local CONTAINERS = { row = true, column = true, section = true, tabs = true, tab = true, split = true }
+local BUTTON_STYLES = { default = true, accent = true, danger = true }
+
+local DRAW_KEYS = {
+  line = { kind = true, x = true, y = true, x2 = true, y2 = true, color = true, thickness = true },
+  rect = { kind = true, x = true, y = true, width = true, height = true, x2 = true, y2 = true, color = true, filled = true, rounding = true, thickness = true },
+  circle = { kind = true, x = true, y = true, radius = true, color = true, filled = true, thickness = true },
+  polygon = { kind = true, points = true, color = true, filled = true, thickness = true },
+  text = { kind = true, x = true, y = true, text = true, color = true, size = true },
+  image = { kind = true, image = true, x = true, y = true, width = true, height = true, x2 = true, y2 = true },
+}
+
+local uiEntries = {}
+local uiOwned = {}
+local imageIds = setmetatable({}, { __mode = "k" })
+
+local function ownerSource()
+  local info = callerFrame()
+  return info and info.source or ""
+end
+
+local function remember(owner, key, remove)
+  local list = uiOwned[owner]
+  if not list then
+    list = {}
+    uiOwned[owner] = list
+  end
+  list[key] = remove
+end
+
+local function forget(owner, key)
+  local list = uiOwned[owner]
+  if list then
+    list[key] = nil
+  end
+end
+
+local function gone(what)
+  return nil, makeError("ME-7010", "The " .. what .. " is gone")
+end
+
+local function checkColor(path, name, value)
+  if value == nil then
+    return
+  end
+  if not UI_COLOR_SET[value] and not value:match("^#%x%x%x%x%x%x$") and not value:match("^#%x%x%x%x%x%x%x%x$") then
+    misuse(("%s: %s %q is no theme colour (%s) and no #RRGGBB or #RRGGBBAA"):format(path, name, value, table.concat(UI_COLORS, ", ")))
+  end
+end
+
+local function checkIcon(path, value)
+  if value ~= nil and value ~= "" and not native.uiIsIcon(value) then
+    local near = native.uiIcons(value:sub(1, math.min(#value, 4)))
+    local hint = #near > 0 and (" (similar: " .. table.concat(near, ", ", 1, math.min(#near, 6)) .. ")") or ""
+    misuse(("%s: icon %q is no Font Awesome icon%s; manifold.ui.theme.icons lists them"):format(path, value, hint))
+  end
+end
+
+local function checkOptions(path, keys, options)
+  if options == nil then
+    return {}
+  end
+  if type(options) ~= "table" then
+    misuse(("%s: options must be a table, got %s"):format(path, kindOf(options)))
+  end
+  local names = nil
+  for key, value in pairs(options) do
+    local kind = type(key) == "string" and keys[key]
+    if not kind then
+      names = names or table.concat(sortedNames(keys), ", ")
+      misuse(("%s: options.%s is not an option (known options: %s)"):format(path, tostring(key), names))
+    end
+    if not CHECKS[kind](value) then
+      misuse(("%s: options.%s must be %s, got %s"):format(path, key, NOUNS[kind], kindOf(value)))
+    end
+  end
+  checkColor(path, "options.color", options.color)
+  checkColor(path, "options.background", options.background)
+  checkIcon(path, options.icon)
+  if options.style ~= nil and not BUTTON_STYLES[options.style] then
+    misuse(('%s: options.style must be one of "default", "accent", "danger", got %q'):format(path, options.style))
+  end
+  return options
+end
+
+local function handlerBits(options)
+  local bits = 0
+  for name, bit in pairs(UI_HANDLER_BITS) do
+    if options[name] ~= nil then
+      bits = bits | bit
+    end
+  end
+  return bits
+end
+
+local function props(options)
+  local copy = {}
+  for key, value in pairs(options) do
+    if type(value) ~= "function" then
+      copy[key] = value
+    end
+  end
+  if options.image ~= nil then
+    copy.image = imageIds[options.image]
+    if not copy.image then
+      misuse("options.image must be an image from manifold.ui.image.load")
+    end
+  end
+  copy.handlers = handlerBits(options)
+  return copy
+end
+
+local function keepHandlers(entry, options)
+  for name in pairs(UI_HANDLER_BITS) do
+    if options[name] ~= nil then
+      entry[name] = options[name]
+    end
+  end
+end
+
+local function dropEntry(id)
+  local entry = uiEntries[id]
+  if not entry then
+    return
+  end
+  uiEntries[id] = nil
+  for child in pairs(entry.children) do
+    dropEntry(child)
+  end
+  local parent = entry.parent and uiEntries[entry.parent]
+  if parent then
+    parent.children[id] = nil
+  end
+end
+
+local widgetObject
+
+local function addTo(path, parentEntry, kind, options)
+  if not WIDGET_KEYS[kind] then
+    misuse(('%s: argument 1 (kind) must be one of "%s", got %q'):format(path, table.concat(WIDGET_KINDS, '", "'), kind))
+  end
+  if parentEntry.kind ~= "window" and not CONTAINERS[parentEntry.kind] then
+    misuse(("%s: a %s holds no widgets; add to a window, row, column, section, tab or split"):format(path, parentEntry.kind))
+  end
+  if parentEntry.kind == "tabs" and kind ~= "tab" then
+    misuse(path .. ": tabs hold tab widgets only")
+  end
+  if kind == "tab" and parentEntry.kind ~= "tabs" then
+    misuse(path .. ": a tab goes into a tabs widget")
+  end
+  options = checkOptions(path .. "(" .. kind .. ")", WIDGET_KEYS[kind], options)
+  if not native.uiExists(parentEntry.id) then
+    return gone(parentEntry.kind)
+  end
+  local id, code, message = native.uiCreate(kind, parentEntry.id, parentEntry.owner, props(options))
+  if not id then
+    return result(nil, code, message)
+  end
+  local entry = { id = id, kind = kind, owner = parentEntry.owner, parent = parentEntry.id, children = {} }
+  keepHandlers(entry, options)
+  uiEntries[id] = entry
+  parentEntry.children[id] = true
+  entry.handle = widgetObject(entry)
+  return entry.handle
+end
+
+local function liveEntry(entry)
+  return uiEntries[entry.id] == entry and native.uiExists(entry.id)
+end
+
+local function updateEntry(path, entry, keys, options)
+  options = checkOptions(path, keys, options)
+  if not liveEntry(entry) then
+    return gone(entry.kind)
+  end
+  keepHandlers(entry, options)
+  local copy = props(options)
+  local bits = 0
+  for name, bit in pairs(UI_HANDLER_BITS) do
+    if entry[name] ~= nil then
+      bits = bits | bit
+    end
+  end
+  copy.handlers = bits
+  return result(native.uiUpdate(entry.id, copy))
+end
+
+local WIDGET_DOC = "manifold.ui.window.Widget."
+
+widgetObject = function(entry)
+  local prefix = ("widget(%s %d)"):format(entry.kind, entry.id)
+  local proxy, members = strict(prefix)
+  local function method(name, spec, body)
+    bind(proxy, prefix .. "." .. name, members, name, spec, body, WIDGET_DOC .. name)
+  end
+  method("add", { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } } }, function(kind, options)
+    return addTo(prefix .. ".add", entry, kind, options)
+  end)
+  method("clear", {}, function()
+    if not liveEntry(entry) then
+      return gone(entry.kind)
+    end
+    for child in pairs(entry.children) do
+      dropEntry(child)
+    end
+    entry.children = {}
+    return result(native.uiClear(entry.id))
+  end)
+  method("remove", {}, function()
+    if uiEntries[entry.id] ~= entry then
+      return false
+    end
+    dropEntry(entry.id)
+    return native.uiRemove(entry.id)
+  end)
+  method("update", { params = { { name = "options", type = "table" } } }, function(options)
+    return updateEntry(prefix .. ".update", entry, WIDGET_KEYS[entry.kind], options)
+  end)
+  method("get", {}, function()
+    if not liveEntry(entry) then
+      return gone(entry.kind)
+    end
+    return native.uiGet(entry.id)
+  end)
+  method("set", { params = { { name = "value", type = "any", optional = true } } }, function(value)
+    if not liveEntry(entry) then
+      return gone(entry.kind)
+    end
+    return result(native.uiSet(entry.id, value))
+  end)
+  method("draw", { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } } }, function(drawings, options)
+    if entry.kind ~= "canvas" then
+      misuse(prefix .. ".draw: only a canvas draws")
+    end
+    if not liveEntry(entry) then
+      return gone("canvas")
+    end
+    local prepared = {}
+    for index, drawing in ipairs(drawings) do
+      if type(drawing) ~= "table" then
+        misuse(("%s.draw: drawing %d must be a table, got %s"):format(prefix, index, kindOf(drawing)))
+      end
+      local allowed = DRAW_KEYS[drawing.kind]
+      if not allowed then
+        misuse(('%s.draw: drawing %d: kind must be one of "circle", "image", "line", "polygon", "rect", "text", got %s'):format(prefix, index, tostring(drawing.kind)))
+      end
+      for key in pairs(drawing) do
+        if not allowed[key] then
+          misuse(("%s.draw: drawing %d (%s) has no %s"):format(prefix, index, drawing.kind, tostring(key)))
+        end
+      end
+      if drawing.color ~= nil then
+        checkColor(prefix .. ".draw", "drawing " .. index .. " color", drawing.color)
+      end
+      if drawing.kind == "image" then
+        local copy = {}
+        for key, value in pairs(drawing) do
+          copy[key] = value
+        end
+        copy.image = imageIds[drawing.image]
+        if not copy.image then
+          misuse(("%s.draw: drawing %d needs an image from manifold.ui.image.load"):format(prefix, index))
+        end
+        drawing = copy
+      end
+      prepared[index] = drawing
+    end
+    return result(native.uiDraw(entry.id, prepared, options and options.append))
+  end)
+  method("getView", {}, function()
+    if entry.kind ~= "canvas" then
+      misuse(prefix .. ".getView: only a canvas has a view")
+    end
+    if not liveEntry(entry) then
+      return gone("canvas")
+    end
+    return native.uiView(entry.id)
+  end)
+  method("setView", { params = { { name = "view", type = "table", keys = { x = "number", y = "number", scale = "number" } } } }, function(view)
+    if entry.kind ~= "canvas" then
+      misuse(prefix .. ".setView: only a canvas has a view")
+    end
+    if not liveEntry(entry) then
+      return gone("canvas")
+    end
+    return result(native.uiSetView(entry.id, view))
+  end)
+  rawset(members, "id", entry.id)
+  rawset(members, "kind", entry.kind)
+  return proxy
+end
+
+local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open = "boolean", dock = "boolean", interval = "number", key = "string", onClose = "function", onUpdate = "function" }
+local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", onClose = "function", onUpdate = "function" }
+local WINDOW_DOC = "manifold.ui.window.Window."
+local windowKeys = {}
+
+local function windowObject(entry)
+  local prefix = ("window(%q)"):format(entry.title)
+  local proxy, members = strict(prefix)
+  local function method(name, spec, body)
+    bind(proxy, prefix .. "." .. name, members, name, spec, body, WINDOW_DOC .. name)
+  end
+  method("add", { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } } }, function(kind, options)
+    return addTo(prefix .. ".add", entry, kind, options)
+  end)
+  method("clear", {}, function()
+    if not liveEntry(entry) then
+      return gone("window")
+    end
+    for child in pairs(entry.children) do
+      dropEntry(child)
+    end
+    entry.children = {}
+    return result(native.uiClear(entry.id))
+  end)
+  method("remove", {}, function()
+    if uiEntries[entry.id] ~= entry then
+      return false
+    end
+    dropEntry(entry.id)
+    forget(entry.owner, entry.id)
+    if entry.key and windowKeys[entry.key] == entry then
+      windowKeys[entry.key] = nil
+    end
+    return native.uiRemove(entry.id)
+  end)
+  method("update", { params = { { name = "options", type = "table" } } }, function(options)
+    options = checkOptions(prefix .. ".update", WINDOW_UPDATE_KEYS, options)
+    if not liveEntry(entry) then
+      return gone("window")
+    end
+    if options.onClose ~= nil then
+      entry.onClose = options.onClose
+    end
+    if options.onUpdate ~= nil then
+      entry.onUpdate = options.onUpdate
+    end
+    local copy = { title = options.title, icon = options.icon, interval = options.interval, handlers = entry.onClose and UI_HANDLER_BITS.onClose or 0 }
+    if options.onUpdate ~= nil then
+      copy.updates = true
+    end
+    return result(native.uiUpdate(entry.id, copy))
+  end)
+  method("show", {}, function()
+    if not liveEntry(entry) then
+      return gone("window")
+    end
+    return result(native.uiShow(entry.id, true, false))
+  end)
+  method("hide", {}, function()
+    if not liveEntry(entry) then
+      return gone("window")
+    end
+    return result(native.uiShow(entry.id, false, false))
+  end)
+  method("focus", {}, function()
+    if not liveEntry(entry) then
+      return gone("window")
+    end
+    return result(native.uiShow(entry.id, true, true))
+  end)
+  method("isOpen", {}, function()
+    return liveEntry(entry) and native.uiIsOpen(entry.id)
+  end)
+  rawset(members, "id", entry.id)
+  rawset(members, "kind", "window")
+  return proxy
+end
+
+local window = subarea(ui, "window", "Tool windows that dock into the workspace like Manifold's own. A window holds widgets; containers (`row`, `column`, `section`, `tabs` with `tab`, `split`) hold more widgets.")
+
+define(window, "create", {
+  params = {
+    { name = "title", type = "string" },
+    { name = "options", type = "table", optional = true, keys = WINDOW_KEYS },
+  },
+  returns = "window",
+  doc = "Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one.",
+}, function(title, options)
+  options = options or {}
+  checkIcon("manifold.ui.window.create", options.icon)
+  local owner = ownerSource()
+  if options.key and windowKeys[options.key] then
+    local earlier = windowKeys[options.key]
+    if uiEntries[earlier.id] == earlier then
+      earlier.handle.remove()
+    end
+  end
+  local id = native.uiCreate("window", 0, owner, {
+    title = title,
+    icon = options.icon,
+    width = options.width,
+    height = options.height,
+    dock = options.dock,
+    interval = options.interval,
+    updates = options.onUpdate ~= nil,
+    handlers = options.onClose and UI_HANDLER_BITS.onClose or 0,
+  })
+  if options.open == false then
+    native.uiShow(id, false, false)
+  end
+  local entry = { id = id, kind = "window", owner = owner, children = {}, title = title, key = options.key, onClose = options.onClose, onUpdate = options.onUpdate }
+  uiEntries[id] = entry
+  entry.handle = windowObject(entry)
+  if options.key then
+    windowKeys[options.key] = entry
+  end
+  remember(owner, id, entry.handle.remove)
+  return entry.handle
+end)
+
+native.docDefine(nil, "manifold.ui.window.Window", {
+  kind = "class",
+  title = "Window objects",
+  doc = "`manifold.ui.window.create` returns a window object: dot calls only, read-only, unknown names raise. A call on a window that is gone (removed, or its script ran again) returns `nil, error` with code `ME-7010`.",
+})
+local WINDOW_METHOD_DOCS = {
+  add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object)." },
+  clear = { returns = "boolean", doc = "Removes every widget of the window." },
+  remove = { returns = "boolean", doc = "Removes the window and its widgets for good." },
+  update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, update interval or handlers." },
+  show = { returns = "boolean", doc = "Shows the window again after the user or `hide` closed it." },
+  hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
+  focus = { returns = "boolean", doc = "Shows the window and brings it to the front." },
+  isOpen = { returns = "boolean", doc = "Whether the window exists and is shown." },
+}
+for _, name in ipairs({ "add", "clear", "remove", "update", "show", "hide", "focus", "isOpen" }) do
+  native.docDefine(nil, WINDOW_DOC .. name, WINDOW_METHOD_DOCS[name])
+end
+native.docDefine(nil, WINDOW_DOC .. "id", { kind = "field", type = "integer", doc = "The window's number." })
+native.docDefine(nil, WINDOW_DOC .. "kind", { kind = "field", type = "string", doc = "Always `window`." })
+
+native.docDefine(nil, "manifold.ui.window.Widget", {
+  kind = "class",
+  title = "Widget objects",
+  doc = table.concat({
+    "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic). Handlers get the widget as their last argument.",
+    "- `row`, `column`: lay out their widgets side by side or one below the other.",
+    "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it.",
+    "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
+    "- `text` (`text`, `color`, `wrap`, `mono`), `heading` (`text`, `icon`), `separator`, `spacer`.",
+    "- `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`.",
+    "- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `onSubmit(text, widget)` on Enter), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number): all call `onChange(value, widget)`.",
+    "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
+    "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
+    "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
+    "- `canvas`: draws what `draw` gave it on the GPU. `background` is a colour, `zoom = true` lets the user zoom with the wheel and pan by dragging; `onClick(x, y, button, widget)`, `onHover(x, y, widget)`, `onView(x, y, scale, widget)` and `menu` with `onMenu(choice, text, x, y, widget)` get canvas coordinates.",
+  }, "\n"),
+})
+local WIDGET_METHOD_DOCS = {
+  add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget to a container (`row`, `column`, `section`, `tab`, `split`; `tabs` take `tab` widgets only)." },
+  clear = { returns = "boolean", doc = "Removes a container's widgets, or a canvas's drawings." },
+  remove = { returns = "boolean", doc = "Removes the widget and everything in it." },
+  update = { params = { { name = "options", type = "table" } }, returns = "boolean", doc = "Changes options of the widget: the same keys `add` takes for its kind, handlers included." },
+  get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a number, the chosen combo item's or table row's number, the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
+  set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
+  draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
+  getView = { returns = "table", doc = "A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom." },
+  setView = { params = { { name = "view", type = "table", keys = { x = "number", y = "number", scale = "number" } } }, returns = "boolean", doc = "Moves or zooms a canvas's view." },
+}
+for _, name in ipairs({ "add", "clear", "remove", "update", "get", "set", "draw", "getView", "setView" }) do
+  native.docDefine(nil, WIDGET_DOC .. name, WIDGET_METHOD_DOCS[name])
+end
+native.docDefine(nil, WIDGET_DOC .. "id", { kind = "field", type = "integer", doc = "The widget's number." })
+native.docDefine(nil, WIDGET_DOC .. "kind", { kind = "field", type = "string", doc = "The kind it was added as." })
+
+local function plainObject(entry, prefix, docPrefix, methods, fields)
+  local proxy, members = strict(prefix)
+  for name, spec in pairs(methods) do
+    bind(proxy, prefix .. "." .. name, members, name, spec, spec.body, docPrefix .. name)
+  end
+  rawset(members, "id", entry.id)
+  for key, value in pairs(fields or {}) do
+    rawset(members, key, value)
+  end
+  return proxy
+end
+
+local function dialogObject(entry)
+  return plainObject(entry, ("dialog(%d)"):format(entry.id), "manifold.ui.dialog.Dialog.", {
+    close = {
+      body = function()
+        if uiEntries[entry.id] ~= entry then
+          return false
+        end
+        uiEntries[entry.id] = nil
+        forget(entry.owner, entry.id)
+        return native.uiDialogClose(entry.id)
+      end,
+    },
+  })
+end
+
+native.docDefine(nil, "manifold.ui.dialog.Dialog", {
+  kind = "class",
+  title = "Dialog objects",
+  doc = "The dialog functions return at once; the dialog shows on top of the program and calls `onClose` with the answer when the user is done.",
+})
+native.docDefine(nil, "manifold.ui.dialog.Dialog.close", { returns = "boolean", doc = "Closes the dialog without an answer; `onClose` is not called." })
+native.docDefine(nil, "manifold.ui.dialog.Dialog.id", { kind = "field", type = "integer", doc = "The dialog's number." })
+
+local dialog = subarea(ui, "dialog", "Dialogs on top of the program. They do not block the script: each takes `onClose`, which gets the answer, or nil when the user cancelled.")
+
+local function openDialog(kind, props, onClose)
+  local owner = ownerSource()
+  local id = native.uiDialog(kind, owner, props)
+  local entry = { id = id, kind = "dialog", owner = owner, children = {}, onDialog = onClose }
+  uiEntries[id] = entry
+  entry.handle = dialogObject(entry)
+  remember(owner, id, entry.handle.close)
+  return entry.handle
+end
+
+local DIALOG_KEYS = { title = "string", onClose = "function" }
+
+define(dialog, "confirm", {
+  params = {
+    { name = "text", type = "string" },
+    { name = "options", type = "table", optional = true, keys = { title = "string", danger = "boolean", onClose = "function" } },
+  },
+  returns = "dialog",
+  doc = "Asks a yes/no question. `onClose(answer)` gets true or false; `danger = true` shows the yes button in the warning colour.",
+}, function(text, options)
+  options = options or {}
+  return openDialog("confirm", { text = text, title = options.title, danger = options.danger }, options.onClose)
+end)
+
+define(dialog, "input", {
+  params = {
+    { name = "text", type = "string" },
+    { name = "options", type = "table", optional = true, keys = { title = "string", value = "string", onClose = "function" } },
+  },
+  returns = "dialog",
+  doc = "Asks for a line of text, starting from `value`. `onClose(text)` gets the text, or nil.",
+}, function(text, options)
+  options = options or {}
+  return openDialog("input", { text = text, title = options.title, value = options.value }, options.onClose)
+end)
+
+define(dialog, "choose", {
+  params = {
+    { name = "text", type = "string" },
+    { name = "items", type = "table" },
+    { name = "options", type = "table", optional = true, keys = DIALOG_KEYS },
+  },
+  returns = "dialog",
+  doc = "Lets the user pick one of `items`. `onClose(number, text)` gets the chosen item's number and text, or nil.",
+}, function(text, items, options)
+  options = options or {}
+  local names = {}
+  for index, item in ipairs(items) do
+    names[index] = tostring(item)
+  end
+  return openDialog("choose", { text = text, title = options.title, items = names }, options.onClose)
+end)
+
+local FILE_KEYS = { title = "string", filters = "table", name = "string", onClose = "function" }
+local FILE_TEXT = " `filters` is a list of `{ \"Lua scripts\", \"*.lua\" }` pairs; `onClose(path)` gets the full path, or nil."
+
+local function flatFilters(path, filters)
+  if filters == nil then
+    return nil
+  end
+  local flat = {}
+  for index, pair in ipairs(filters) do
+    if type(pair) ~= "table" or type(pair[1]) ~= "string" or type(pair[2]) ~= "string" then
+      misuse(("%s: filter %d must be { description, pattern }"):format(path, index))
+    end
+    flat[#flat + 1] = pair[1]
+    flat[#flat + 1] = pair[2]
+  end
+  return flat
+end
+
+define(dialog, "openFile", {
+  params = { { name = "options", type = "table", optional = true, keys = FILE_KEYS } },
+  returns = "dialog",
+  doc = "The Windows file dialog for opening a file." .. FILE_TEXT,
+}, function(options)
+  options = options or {}
+  return openDialog("openFile", { title = options.title, value = options.name, filters = flatFilters("manifold.ui.dialog.openFile", options.filters) }, options.onClose)
+end)
+
+define(dialog, "saveFile", {
+  params = { { name = "options", type = "table", optional = true, keys = FILE_KEYS } },
+  returns = "dialog",
+  doc = "The Windows file dialog for saving, starting with `name`." .. FILE_TEXT,
+}, function(options)
+  options = options or {}
+  return openDialog("saveFile", { title = options.title, value = options.name, filters = flatFilters("manifold.ui.dialog.saveFile", options.filters) }, options.onClose)
+end)
+
+local NOTICE_LEVELS = { "info", "success", "warning", "error" }
+local NOTICE_KEYS = { level = "string", progress = "number", sticky = "boolean" }
+
+local notice = subarea(ui, "notice", "Short notices in the lower right corner, the same ones Manifold shows. A notice fades after a few seconds unless it is `sticky` or has a `progress`; a right click dismisses it.")
+
+local function checkLevel(path, level)
+  if level ~= nil then
+    local known = false
+    for _, name in ipairs(NOTICE_LEVELS) do
+      known = known or name == level
+    end
+    if not known then
+      misuse(('%s: options.level must be one of "info", "success", "warning", "error", got %q'):format(path, level))
+    end
+  end
+end
+
+local function noticeObject(entry)
+  local state = entry.state
+  return plainObject(entry, ("notice(%d)"):format(entry.id), "manifold.ui.notice.Notice.", {
+    update = {
+      params = { { name = "options", type = "table", keys = { text = "string", level = "string", progress = "number", sticky = "boolean" } } },
+      body = function(options)
+        checkLevel("notice.update", options.level)
+        state.text = options.text or state.text
+        state.level = options.level or state.level
+        if options.progress ~= nil then
+          state.progress = options.progress
+        end
+        if options.sticky ~= nil then
+          state.sticky = options.sticky
+        end
+        local sticky = state.sticky or (state.progress >= 0 and state.progress < 1)
+        if not native.uiNoticeUpdate(entry.id, state.text, state.level, state.progress, sticky) then
+          return gone("notice")
+        end
+        return true
+      end,
+    },
+    remove = {
+      body = function()
+        forget(entry.owner, "notice" .. entry.id)
+        return native.uiNoticeRemove(entry.id)
+      end,
+    },
+    isShown = {
+      body = function()
+        return native.uiNoticeExists(entry.id)
+      end,
+    },
+  })
+end
+
+define(notice, "show", {
+  params = {
+    { name = "text", type = "string" },
+    { name = "options", type = "table", optional = true, keys = NOTICE_KEYS },
+  },
+  returns = "notice",
+  doc = "Shows a notice. `level` is `info` (default), `success`, `warning` or `error`; `progress` (0..1) adds a bar and keeps the notice up until it reaches 1; `sticky` keeps it until it is removed or dismissed.",
+}, function(text, options)
+  options = options or {}
+  checkLevel("manifold.ui.notice.show", options.level)
+  local progress = options.progress or -1
+  local sticky = options.sticky or (progress >= 0 and progress < 1)
+  local owner = ownerSource()
+  local id = native.uiNotice(text, options.level or "info", progress, sticky)
+  local entry = { id = id, owner = owner, state = { text = text, level = options.level or "info", progress = progress, sticky = options.sticky or false } }
+  local handle = noticeObject(entry)
+  remember(owner, "notice" .. id, handle.remove)
+  return handle
+end)
+
+native.docDefine(nil, "manifold.ui.notice.Notice", { kind = "class", title = "Notice objects", doc = "`manifold.ui.notice.show` returns a notice object." })
+native.docDefine(nil, "manifold.ui.notice.Notice.update", { params = { { name = "options", type = "table", keys = { text = "string", level = "string", progress = "number", sticky = "boolean" } } }, returns = "boolean", doc = "Changes the text, level, progress or stickiness, and shows the notice for its full time again." })
+native.docDefine(nil, "manifold.ui.notice.Notice.remove", { returns = "boolean", doc = "Takes the notice down." })
+native.docDefine(nil, "manifold.ui.notice.Notice.isShown", { returns = "boolean", doc = "Whether the notice is still up." })
+native.docDefine(nil, "manifold.ui.notice.Notice.id", { kind = "field", type = "integer", doc = "The notice's number." })
+
+local ENTRY_DOC = "manifold.ui.Entry."
+
+local function entryObject(entry, keys)
+  return plainObject(entry, ("%s(%d)"):format(entry.kind, entry.id), ENTRY_DOC, {
+    update = {
+      params = { { name = "options", type = "table" } },
+      body = function(options)
+        options = checkOptions(entry.kind .. ".update", keys, options)
+        if uiEntries[entry.id] ~= entry then
+          return gone("entry")
+        end
+        if options.onClick ~= nil then
+          entry.onClick = options.onClick
+        end
+        local copy = {}
+        for key, value in pairs(options) do
+          if type(value) ~= "function" then
+            copy[key] = value
+          end
+        end
+        return result(native.uiSlotUpdate(entry.id, copy))
+      end,
+    },
+    remove = {
+      body = function()
+        if uiEntries[entry.id] ~= entry then
+          return false
+        end
+        uiEntries[entry.id] = nil
+        forget(entry.owner, entry.id)
+        return native.uiSlotRemove(entry.id)
+      end,
+    },
+  })
+end
+
+local function addEntry(kind, keys, values, options)
+  options = checkOptions("manifold.ui." .. kind .. ".add", keys, options)
+  local owner = ownerSource()
+  local copy = {}
+  for key, value in pairs(values) do
+    copy[key] = value
+  end
+  for key, value in pairs(options) do
+    if type(value) ~= "function" then
+      copy[key] = value
+    end
+  end
+  local id = native.uiSlotAdd(kind, owner, copy)
+  local entry = { id = id, kind = kind, owner = owner, children = {}, onClick = options.onClick }
+  uiEntries[id] = entry
+  entry.handle = entryObject(entry, keys)
+  remember(owner, id, entry.handle.remove)
+  return entry.handle
+end
+
+native.docDefine(nil, "manifold.ui.Entry", { kind = "class", title = "Menu, toolbar and status entries", doc = "`menu.add`, `toolbar.add` and `status.add` return an entry object; it takes the options its `add` took." })
+native.docDefine(nil, ENTRY_DOC .. "update", { params = { { name = "options", type = "table" } }, returns = "boolean", doc = "Changes the entry: the options its `add` took." })
+native.docDefine(nil, ENTRY_DOC .. "remove", { returns = "boolean", doc = "Takes the entry out." })
+native.docDefine(nil, ENTRY_DOC .. "id", { kind = "field", type = "integer", doc = "The entry's number." })
+
+local MENU_KEYS = { icon = "string", enabled = "boolean", checked = "boolean", onClick = "function" }
+local menu = subarea(ui, "menu", "Entries in the main window's Scripts menu, which shows as soon as a script adds one.")
+
+define(menu, "add", {
+  params = {
+    { name = "path", type = "string" },
+    { name = "options", type = "table", optional = true, keys = MENU_KEYS },
+  },
+  returns = "entry",
+  doc = "Adds an entry. `path` may name submenus with slashes (`Teleporter/Save position`); `-` as the last part is a separator. Options: `icon`, `enabled`, `checked` (shows a check mark), `onClick(entry)`.",
+}, function(path, options)
+  local text = path:match("([^/]+)$") or path
+  return addEntry("menu", MENU_KEYS, { path = path, text = text }, options)
+end)
+
+local TOOLBAR_KEYS = { text = "string", tooltip = "string", enabled = "boolean", onClick = "function", icon = "string" }
+local toolbar = subarea(ui, "toolbar", "Buttons in the main window's process bar, left of the Memory view button.")
+
+define(toolbar, "add", {
+  params = {
+    { name = "icon", type = "string" },
+    { name = "options", type = "table", optional = true, keys = TOOLBAR_KEYS },
+  },
+  returns = "entry",
+  doc = "Adds an icon button. Options: `text` beside the icon, `tooltip`, `enabled`, `onClick(entry)`.",
+}, function(icon, options)
+  checkIcon("manifold.ui.toolbar.add", icon)
+  return addEntry("toolbar", TOOLBAR_KEYS, { icon = icon }, options)
+end)
+
+local STATUS_KEYS = { icon = "string", tooltip = "string", color = "string", onClick = "function", text = "string" }
+local status = subarea(ui, "status", "Entries in the main window's status bar, after the administrator note.")
+
+define(status, "add", {
+  params = {
+    { name = "text", type = "string" },
+    { name = "options", type = "table", optional = true, keys = STATUS_KEYS },
+  },
+  returns = "entry",
+  doc = "Adds a status entry. Options: `icon`, `tooltip`, `color` (a theme name), `onClick(entry)`.",
+}, function(text, options)
+  return addEntry("status", STATUS_KEYS, { text = text }, options)
+end)
+
+local image = subarea(ui, "image", "Pictures for `image` widgets and canvas drawings.")
+
+define(image, "load", {
+  params = { { name = "path", type = "string" } },
+  returns = "image",
+  doc = "Loads a PNG, JPEG, BMP, TGA or GIF file (a relative path starts at the program folder) and returns an image object with `width`, `height` and `remove()`, or nil and an `ME-7009` error.",
+}, function(path)
+  local owner = ownerSource()
+  local id, width, height = native.uiImageLoad(path, owner)
+  if not id then
+    return result(nil, width, height)
+  end
+  local entry = { id = id, owner = owner }
+  local handle = plainObject(entry, ("image(%d)"):format(id), "manifold.ui.image.Image.", {
+    remove = {
+      body = function()
+        forget(owner, "image" .. id)
+        return native.uiImageRemove(id)
+      end,
+    },
+  }, { width = width, height = height })
+  imageIds[handle] = id
+  remember(owner, "image" .. id, handle.remove)
+  return handle
+end)
+
+native.docDefine(nil, "manifold.ui.image.Image", { kind = "class", title = "Image objects", doc = "`manifold.ui.image.load` returns an image object." })
+native.docDefine(nil, "manifold.ui.image.Image.remove", { returns = "boolean", doc = "Frees the picture; widgets and drawings that show it go blank." })
+native.docDefine(nil, "manifold.ui.image.Image.id", { kind = "field", type = "integer", doc = "The image's number." })
+native.docDefine(nil, "manifold.ui.image.Image.width", { kind = "field", type = "integer", doc = "Width in pixels." })
+native.docDefine(nil, "manifold.ui.image.Image.height", { kind = "field", type = "integer", doc = "Height in pixels." })
+
+local theme = subarea(ui, "theme", "The names `manifold.ui` takes for colours and icons.")
+
+define(theme, "colors", {
+  returns = "table",
+  doc = "The theme colour names, which follow the theme and light or dark mode.",
+}, function()
+  return table.move(UI_COLORS, 1, #UI_COLORS, 1, {})
+end)
+
+define(theme, "icons", {
+  params = { { name = "filter", type = "string", optional = true } },
+  returns = "table",
+  doc = "The Font Awesome icon names, all of them or those that contain `filter`.",
+}, function(filter)
+  return native.uiIcons(filter)
+end)
+
+define(theme, "isIcon", {
+  params = { { name = "name", type = "string" } },
+  returns = "boolean",
+  doc = "Whether `name` is a Font Awesome icon name.",
+}, function(name)
+  return native.uiIsIcon(name)
+end)
+
+local function forgetSource(source)
+  local list = uiOwned[source]
+  if list then
+    uiOwned[source] = nil
+    for _, remove in pairs(list) do
+      pcall(remove)
+    end
+  end
+  native.uiForgetOwner(source)
+  for key, entry in pairs(windowKeys) do
+    if entry.owner == source then
+      windowKeys[key] = nil
+    end
+  end
+end
+
+debug.getregistry()["Manifold.ChunkStarting"] = forgetSource
+
+local function callHandler(handler, ...)
+  local ok, problem = xpcall(handler, raisedHandler, ...)
+  if not ok then
+    emit("error", "manifold.ui", problem)
+  end
+  return ok
+end
+
+debug.getregistry()["Manifold.UiTick"] = function(now)
+  for _, id in ipairs(native.uiDue(now)) do
+    local entry = uiEntries[id]
+    if entry and entry.onUpdate and not callHandler(entry.onUpdate, entry.handle) then
+      native.uiUpdate(id, { updates = false })
+    end
+  end
+  for _, event in ipairs(native.uiTakeEvents()) do
+    local entry = uiEntries[event.target]
+    if entry then
+      if event.name == "dialog" then
+        uiEntries[event.target] = nil
+        forget(entry.owner, entry.id)
+        if entry.onDialog then
+          callHandler(entry.onDialog, table.unpack(event, 1, event.n))
+        end
+      else
+        local handler = entry[UI_EVENTS[event.name] or ""]
+        if handler then
+          local values = table.move(event, 1, event.n, 1, {})
+          values[event.n + 1] = entry.handle
+          callHandler(handler, table.unpack(values, 1, event.n + 1))
+        end
+      end
+    end
+  end
+end
+
 rawset(_G, "manifold", manifold)
 
 local INTRO = [[
@@ -1357,7 +2311,7 @@ This file is generated from the API itself (`Manifold-Engine.Tests.exe --manifol
 local RULES = [[
 ## Schema
 
-1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`.
+1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`. An area may group its functions into sub-areas one level down (`manifold.ui.window`, `manifold.ui.dialog`).
 2. **Names.** Areas are lower-case nouns. Functions are lowerCamelCase: a lookup without side effects is named after what it returns (`process.module`, `log.channel`), everything else starts with a verb (`open`, `read`, `create`). Predicates start with `is` or `has` and return a boolean. Settings come in `get…`/`set…` pairs. The five log functions are named after their level. Constants are lowerCamelCase fields. There are no aliases and no capitalised duplicates.
 3. **Calls use a dot.** `manifold.log.info("ready")`, never `manifold.log:info("ready")`. No function takes `self`, and the objects the API returns (channels) work the same way. A colon call raises an error that says so.
 4. **Arguments.** Required arguments come first, optional ones after them, and settings go into one `options` table at the end. A `?` after a name marks it optional. A missing, extra or wrongly typed argument and an unknown option key raise `ME-7007`, naming the function and the argument. Addresses are integers or address expressions such as `"game.exe+10"`.

@@ -7,6 +7,7 @@
 #include "Lua/LuaCompatScripts.h"
 #include "Lua/LuaDocBinding.h"
 #include "Lua/LuaEngine.h"
+#include "Lua/LuaUi.h"
 #include "Scan/Scanner.h"
 #include "Target/Process.h"
 #include "Target/Symbols.h"
@@ -769,6 +770,7 @@ namespace Manifold::Lua
             lua_createtable(state, 0, static_cast<int>(std::size(natives)) + 10);
             luaL_setfuncs(state, natives, 0);
             RegisterDocNatives(state, -1);
+            RegisterUiNatives(state, -1);
             if (lua_pcall(state, 1, 1, 0) != LUA_OK)
             {
                 std::string message = lua_tostring(state, -1) ? lua_tostring(state, -1) : "";

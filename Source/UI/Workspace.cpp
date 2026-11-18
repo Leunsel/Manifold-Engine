@@ -13,6 +13,7 @@
 #include "UI/ScriptUi.h"
 #include "UI/Shortcuts.h"
 #include "UI/TemplateManager.h"
+#include "UI/UiHost.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 #include "UI/Windows.h"
@@ -64,6 +65,7 @@ namespace Manifold::UI
     {
         m_main = std::make_unique<MainWindow>(*this);
         m_scriptForms = std::make_unique<ScriptForms>(engine);
+        m_ui = std::make_unique<UiHost>(engine, shell);
         InstallTextMeasurer();
     }
 
@@ -139,6 +141,10 @@ namespace Manifold::UI
         {
             PROFILE_ZONE("Script forms");
             m_scriptForms->Draw();
+        }
+        {
+            PROFILE_ZONE("Script windows");
+            m_ui->Draw();
         }
         Prune(m_memoryViewers);
         m_engine.MemoryViewerVisible = std::any_of(m_memoryViewers.begin(), m_memoryViewers.end(), [](const auto& viewer) { return !viewer->Closed(); });
@@ -927,7 +933,7 @@ namespace Manifold::UI
             const Notice& notice = *it;
             const std::string id = "##notice" + std::to_string(notice.Id);
             const float age = static_cast<float>(now - notice.At);
-            const float alpha = age > kNoticeSeconds - 0.6 ? std::max(0.0f, static_cast<float>((kNoticeSeconds - age) / 0.6)) : 1.0f;
+            const float alpha = !notice.Sticky && age > kNoticeSeconds - 0.6 ? std::max(0.0f, static_cast<float>((kNoticeSeconds - age) / 0.6)) : 1.0f;
             ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x + viewport->Size.x - Px(20.0f), y), ImGuiCond_Always, ImVec2(1.0f, 1.0f));
             ImGui::SetNextWindowSizeConstraints(ImVec2(Px(200.0f), 0.0f), ImVec2(width, FLT_MAX));
             ImGui::SetNextWindowBgAlpha(0.97f * alpha);
@@ -947,6 +953,12 @@ namespace Manifold::UI
             const std::string text = (m_engine.Options().ReleaseMode ? WithoutCodes(notice.Text) : notice.Text) + (notice.Count > 1 ? " (" + std::to_string(notice.Count) + "x)" : std::string());
             ImGui::TextUnformatted(text.c_str());
             ImGui::PopTextWrapPos();
+            if (notice.Progress >= 0.0)
+            {
+                ImGui::PushStyleColor(ImGuiCol_PlotHistogram, LevelColor(notice.Level));
+                ImGui::ProgressBar(static_cast<float>(std::clamp(notice.Progress, 0.0, 1.0)), ImVec2(width - Px(30.0f), Px(4.0f)), "");
+                ImGui::PopStyleColor();
+            }
             ErrorTooltip(notice.Text);
             if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
                 m_engine.Notifications().Expire(notice.Id, now - kNoticeSeconds);

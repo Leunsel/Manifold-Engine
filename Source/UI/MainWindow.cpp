@@ -8,6 +8,7 @@
 #include "UI/ProfilerWindow.h"
 #include "UI/ScriptUi.h"
 #include "UI/Shortcuts.h"
+#include "UI/UiHost.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
@@ -538,6 +539,7 @@ namespace Manifold::UI
                 ImGui::EndMenu();
             }
         }
+        workspace.Ui().DrawMenu();
         if (ImGui::BeginMenu("Help"))
         {
             if (CommandItem(ICON_FA_KEYBOARD "  Keyboard shortcuts", Command::OpenShortcuts))
@@ -595,6 +597,10 @@ namespace Manifold::UI
         float x = right;
         if (!m_release)
             x -= ImGui::CalcTextSize(ICON_FA_MEMORY "  Memory view").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        const float scriptTools = m_workspace.Ui().ToolbarWidth();
+        const float scriptToolsEnd = m_release ? x : x - Px(8.0f);
+        if (scriptTools > 0.0f)
+            x = scriptToolsEnd - scriptTools - Px(8.0f);
         const float debugWidth = debugText.empty() ? 0.0f : ImGui::CalcTextSize(debugText.c_str()).x + Px(16.0f);
         const float textRoom = x - debugWidth - Px(12.0f) - ImGui::GetCursorPosX();
         if (hasProcess)
@@ -618,13 +624,18 @@ namespace Manifold::UI
         {
             TextFitted(m_release ? "No game opened yet." : "No process opened. Pick one to scan, view memory or run scripts.", textRoom, ManifoldTheme::Muted);
         }
+        if (scriptTools > 0.0f)
+        {
+            ImGui::SameLine();
+            m_workspace.Ui().DrawToolbar(scriptToolsEnd, y);
+        }
         if (m_release)
         {
             EndCard();
             return;
         }
         ImGui::SameLine();
-        ImGui::SetCursorPos(ImVec2(x, y));
+        ImGui::SetCursorPos(ImVec2(scriptTools > 0.0f ? scriptToolsEnd + Px(8.0f) : x, y));
         if (ImGui::Button(ICON_FA_MEMORY "  Memory view"))
             m_workspace.OpenMemoryViewer(0);
         ItemTooltip(WithKeys("Disassembler and hex view of the process", Command::OpenMemoryViewer).c_str());
@@ -3285,9 +3296,10 @@ namespace Manifold::UI
 
         const auto rightsWidth = [&]() { return measure(rightsShort ? std::string_view(rightsIcon) : std::string_view(rightsFull)); };
         const auto framesWidth = [&]() { return framesLevel == 0 ? framesFullWidth : framesLevel == 1 ? framesRateWidth : 0.0f; };
+        const float scriptStatus = m_workspace.Ui().StatusWidth(gap);
         const auto overflow = [&]()
         {
-            float total = tableWidth + gap + rightsWidth();
+            float total = tableWidth + gap + rightsWidth() + scriptStatus;
             if (framesLevel < 2)
                 total += gap + framesWidth();
             if (logWant > 0.0f)
@@ -3326,6 +3338,8 @@ namespace Manifold::UI
         if (rightsShort)
             ItemTooltip(rightsText);
         x += rights + gap;
+        if (scriptStatus > 0.0f)
+            m_workspace.Ui().DrawStatus(x, y, gap);
 
         if (framesLevel < 2)
         {

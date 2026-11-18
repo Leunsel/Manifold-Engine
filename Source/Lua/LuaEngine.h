@@ -2,6 +2,7 @@
 
 #include "Core/Errors.h"
 #include "Lua/LuaConsole.h"
+#include "Lua/UiModel.h"
 
 #include <array>
 #include <atomic>
@@ -404,6 +405,7 @@ namespace Manifold::Lua
 
         std::vector<std::string> FunctionNames() const;
         DocRegistry& Docs() { return *m_docs; }
+        UiModel& Ui() { return m_ui; }
         std::shared_ptr<DocRegistry> SharedDocs() const { return m_docs; }
         void RememberChunk(std::string name, std::string text);
         std::string ChunkText(std::string_view name) const;
@@ -473,6 +475,9 @@ namespace Manifold::Lua
         std::thread::id m_thread = std::this_thread::get_id();
         int m_onOpenProcess = 0;
         bool m_inTick = false;
+        UiModel m_ui;
+        void TickUi(double now);
+        void ChunkStarting(const std::string& name);
         double m_callDeadline = 0.0;
         int m_callLimit = 0;
         std::vector<std::unique_ptr<Task>> m_tasks;

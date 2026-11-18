@@ -128,6 +128,8 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-7006 | Lua: …. | A Manifold function got an argument of the wrong type or value. | See Docs/LUA-API.md for the arguments. |
 | ME-7007 | The manifold API was called the wrong way: …. | A manifold function was called with a colon, got a missing, extra or wrong argument or an unknown option, or a name that does not exist was read. | The message names the function and the argument. Docs/MANIFOLD-API.md has the rules and every function. |
 | ME-7008 | There is no documentation for …. | Nothing documents the function or name: no Manifold, Cheat Engine or Lua entry, no manifold.doc.register call and no LuaLS annotation above its definition. | Check the name, or document it with manifold.doc.register, or with ---@param annotations and manifold.doc.registerModule. |
+| ME-7009 | The image … could not be read. | manifold.ui.image.load reads PNG, JPEG, BMP, TGA and GIF files; the file is missing, unreadable or in another format. | Check the path (relative paths start at the program folder) and that the file opens in an image viewer. |
+| ME-7010 | The … is gone. | The window, widget, menu entry or dialog was removed, closed for good, or its script ran again, which removes everything the script made before. | Keep the new handle the script's next run returns, or test with isOpen before using an old one. |
 
 ## Addresses and symbols
 

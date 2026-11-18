@@ -26,6 +26,7 @@ namespace Manifold::UI
         virtual void AddDragArea(float left, float top, float right, float bottom) = 0;
         virtual float CornerRadius() const = 0;
         virtual void* NativeWindow() const = 0;
+        virtual void* Device() const = 0;
         virtual void RestartElevated() = 0;
         virtual void Restyle() = 0;
 
@@ -64,6 +65,7 @@ namespace Manifold::UI
     class ShortcutsWindow;
     class TemplateManager;
     class ScriptForms;
+    class UiHost;
     class BreakpointWindow;
     class ThreadListWindow;
     class TraceWindow;
@@ -89,6 +91,7 @@ namespace Manifold::UI
         void Draw();
         Engine& Core() { return m_engine; }
         Shell& Window() { return m_shell; }
+        UiHost& Ui() { return *m_ui; }
         void RequestRestyle() { m_restyle = true; }
 
         void OpenMemoryViewer(std::uint64_t address, bool hexView = false, bool newWindow = false);
@@ -185,6 +188,7 @@ namespace Manifold::UI
         std::unique_ptr<ShortcutsWindow> m_shortcuts;
         std::unique_ptr<TemplateManager> m_templateManager;
         std::unique_ptr<ScriptForms> m_scriptForms;
+        std::unique_ptr<UiHost> m_ui;
         std::unique_ptr<BreakpointWindow> m_breakpoints;
         std::unique_ptr<ThreadListWindow> m_threadList;
         std::unique_ptr<MonoWindow> m_mono;

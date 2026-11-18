@@ -121,6 +121,7 @@ namespace Manifold::Lua
         m_engine.Symbols().SetLookupCallback({});
         if (m_state)
             lua_close(m_state);
+        m_ui.Reset();
     }
 
     void LuaEngine::Open()
@@ -242,6 +243,7 @@ namespace Manifold::Lua
             LOG_ERROR("Lua", ErrorMessage(ErrorCode::LuaSyntax, message));
             return Status::Fail(ErrorCode::LuaSyntax, message);
         }
+        ChunkStarting(name);
         if (lua_pcall(m_state, 0, 1, top + 1) != LUA_OK)
         {
             const std::string message = lua_tostring(m_state, -1) ? lua_tostring(m_state, -1) : "unknown error";
@@ -1109,7 +1111,40 @@ namespace Manifold::Lua
         }
 
         ResumeThreads(*this, m_state, now);
+        TickUi(now);
         m_inTick = false;
+    }
+
+    void LuaEngine::TickUi(double now)
+    {
+        if (!m_state || (!m_ui.HasEvents() && now < m_ui.NextUpdate()))
+            return;
+        if (lua_getfield(m_state, LUA_REGISTRYINDEX, "Manifold.UiTick") != LUA_TFUNCTION)
+        {
+            lua_pop(m_state, 1);
+            m_ui.TakeEvents();
+            return;
+        }
+        lua_pushnumber(m_state, now);
+        std::string error;
+        if (!CallStack(1, 0, error))
+            m_engine.Notify(Status::Fail(ErrorCode::LuaRuntime, FirstLine(error)));
+    }
+
+    void LuaEngine::ChunkStarting(const std::string& name)
+    {
+        static constexpr std::string_view kShared[] = { "=input", "={$lua}", "=OnActivate", "=OnDeactivate", "=check" };
+        if (name.rfind("=[", 0) == 0 || std::find(std::begin(kShared), std::end(kShared), name) != std::end(kShared))
+            return;
+        if (lua_getfield(m_state, LUA_REGISTRYINDEX, "Manifold.ChunkStarting") != LUA_TFUNCTION)
+        {
+            lua_pop(m_state, 1);
+            return;
+        }
+        lua_pushlstring(m_state, name.data(), name.size());
+        std::string error;
+        if (!CallStack(1, 0, error))
+            m_engine.Notify(Status::Fail(ErrorCode::LuaRuntime, FirstLine(error)));
     }
 
     bool LuaEngine::HasBreakpointCallback(std::uint64_t address) const

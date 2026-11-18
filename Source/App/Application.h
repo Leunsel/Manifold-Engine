@@ -45,6 +45,7 @@ namespace Manifold
         void AddDragArea(float left, float top, float right, float bottom) override { m_host.AddDragArea(left, top, right, bottom); }
         float CornerRadius() const override { return m_host.CornerRadius(); }
         void* NativeWindow() const override { return m_host.Window(); }
+        void* Device() const override { return m_host.Device(); }
         void RestartElevated() override;
         void Restyle() override;
 

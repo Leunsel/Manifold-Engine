@@ -294,6 +294,8 @@ def main():
     embed_templates.main()
     import embed_managed
     embed_managed.main()
+    import gen_icon_names
+    gen_icon_names.main()
     os.makedirs(PROJECTS, exist_ok=True)
     source = os.path.join(ROOT, "Source")
     app_sources = collect(source, {".cpp"})

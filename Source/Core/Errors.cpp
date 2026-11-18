@@ -319,6 +319,12 @@ namespace Manifold
             { ErrorCode::LuaDocMissing, "There is no documentation for {}.",
                 "Nothing documents the function or name: no Manifold, Cheat Engine or Lua entry, no manifold.doc.register call and no LuaLS annotation above its definition.",
                 "Check the name, or document it with manifold.doc.register, or with ---@param annotations and manifold.doc.registerModule." },
+            { ErrorCode::LuaImageUnreadable, "The image {} could not be read.",
+                "manifold.ui.image.load reads PNG, JPEG, BMP, TGA and GIF files; the file is missing, unreadable or in another format.",
+                "Check the path (relative paths start at the program folder) and that the file opens in an image viewer." },
+            { ErrorCode::LuaUiGone, "The {} is gone.",
+                "The window, widget, menu entry or dialog was removed, closed for good, or its script ran again, which removes everything the script made before.",
+                "Keep the new handle the script's next run returns, or test with isOpen before using an old one." },
 
             { ErrorCode::ExprSyntax, "\"{}\" is not a valid address.",
                 "The address expression could not be read.",

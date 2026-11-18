@@ -46,6 +46,7 @@ namespace Manifold::Lua
                 done(Status::Fail(ErrorCode::LuaSyntax, message), {});
             return 0;
         }
+        ChunkStarting(name);
         lua_sethook(thread, &LuaEngine::TaskHook, LUA_MASKCOUNT, kHookInstructions);
         auto task = std::make_unique<Task>();
         task->Id = m_nextTask++;
