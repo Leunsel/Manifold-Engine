@@ -54,6 +54,7 @@ namespace Manifold::Disasm
         std::optional<std::uint64_t> Target;
         MemoryOperand Memory;
         bool IsNop = false;
+        std::uint8_t InlineBytes = 0;
 
         std::string Text() const { return Operands.empty() ? Mnemonic : Mnemonic + " " + Operands; }
         std::string BytesText() const;
@@ -131,12 +132,14 @@ namespace Manifold::Disasm
         // Where the instructions between from and to start when decoding begins
         // at from, cut at the hints the same way DecodeMany cuts them.
         std::vector<std::uint64_t> Starts(const Target::Process& process, std::uint64_t from, std::uint64_t to, const CodeHints* hints = nullptr) const;
+        std::optional<std::uint64_t> InlineHolder(const Target::Process& process, std::uint64_t address) const;
 
         static std::string RegisterName(int zydisRegister);
 
     private:
-        std::size_t Window(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::size_t offset, std::uint64_t at,
-            const CodeHints* hints) const;
+        std::size_t Window(const std::vector<bool>& readable, std::size_t offset, std::uint64_t at, const CodeHints* hints) const;
+        Instruction DecodeWindow(std::uint64_t address, const std::uint8_t* bytes, std::size_t available, std::size_t raw, const Target::Symbols* symbols) const;
+        std::size_t StepLength(const std::uint8_t* bytes, std::size_t window, std::size_t raw) const;
 
         struct State;
         State* m_state = nullptr;

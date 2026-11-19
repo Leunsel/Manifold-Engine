@@ -99,18 +99,59 @@ namespace Manifold
         }
         if (map)
         {
-            if (const auto below = map->StartBelow(address + 1, kReach); below && *below >= clues.Floor)
+            if (const auto section = map->SectionAt(address); section && !section->Code)
+            {
+                if (!clues.Exact(address))
+                    return std::nullopt;
+            }
+            else if (section)
+            {
+                if (section->Begin >= clues.Floor)
+                {
+                    clues.Floor = section->Begin;
+                    clues.FloorIsBoundary = true;
+                }
+                clues.Ceiling = std::min(clues.Ceiling, section->End);
+            }
+            if (const auto below = map->StartBelow(address + 1, kReach, Target::CodeMap::Anchors::Code); below && *below >= clues.Floor)
             {
                 clues.Floor = *below;
                 clues.FloorIsBoundary = true;
             }
-            if (const auto above = map->BoundaryIn(address, address + kReach))
+            if (const auto above = map->BoundaryIn(address, address + kReach, Target::CodeMap::Anchors::Code))
                 clues.Ceiling = std::min(clues.Ceiling, *above);
         }
         std::optional<Disasm::FunctionSpan> span = Disasm::FindFunction(Disassembler(), *Process(), address, map, clues);
         if (span && span->Last == 0)
             span->Last = Disassembler().BackUp(*Process(), span->End, 1, map);
         return span;
+    }
+
+    std::uint64_t Engine::SymbolEnd(std::uint64_t start)
+    {
+        constexpr std::uint64_t kReach = 0x1000;
+        if (!HasProcess() || start == 0)
+            return start;
+        const Target::Process& process = *Process();
+        const Target::CodeMap* map = CodeMap();
+        if (Disassembler().InlineHolder(process, start))
+            return start;
+        if (map)
+        {
+            if (const auto function = map->FunctionAt(start))
+                return function->second;
+            if (const auto section = map->SectionAt(start); section && !section->Code)
+            {
+                const std::vector<Disasm::Instruction> row = Disassembler().ReadMany(process, start, 1, nullptr, map);
+                return row.empty() ? start : row.front().Next();
+            }
+        }
+        if (MonoPresent())
+        {
+            if (const auto method = Mono().MethodRange(start))
+                return method->second;
+        }
+        return Disasm::CodeExtent(Disassembler(), process, start, start + kReach, map);
     }
 
     Status Engine::OpenProcess(ProcessId id)

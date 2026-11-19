@@ -796,10 +796,10 @@ namespace Manifold::UI
         std::string functionName;
         if (showSymbols && m_top)
         {
-            if (const auto symbol = m_engine.Symbols().Containing(m_top, kSymbolReach))
+            if (const auto symbol = m_engine.Symbols().Containing(m_top, kSymbolReach); symbol && m_top < SymbolEnd(symbol->first))
             {
                 functionStart = symbol->first;
-                functionEnd = symbol->first + kSymbolReach;
+                functionEnd = SymbolEnd(symbol->first);
                 functionName = symbol->second;
             }
             if (m_engine.MonoPresent())
@@ -819,7 +819,7 @@ namespace Manifold::UI
         const float stickyHeight = sticky ? rowHeight : 0.0f;
         m_visibleLines = std::max(4, static_cast<int>((bodyHeight - stickyHeight) / rowHeight));
         {
-            std::vector<std::uint8_t> buffer(static_cast<std::size_t>(m_visibleLines + 1) * 15 + 16);
+            std::vector<std::uint8_t> buffer(static_cast<std::size_t>(m_visibleLines + 1) * 16 + 16);
             std::vector<bool> readable(buffer.size(), false);
             for (std::size_t page = 0; page < buffer.size();)
             {
@@ -882,7 +882,7 @@ namespace Manifold::UI
                 if (header)
                 {
                     functionStart = line.Address;
-                    functionEnd = line.Address + kSymbolReach;
+                    functionEnd = std::max(SymbolEnd(line.Address), line.Next());
                 }
                 else if (m_engine.MonoPresent())
                 {
@@ -1114,7 +1114,7 @@ namespace Manifold::UI
                 comment = *methodHeader;
                 commentColor = ImGui::GetColorU32(ManifoldTheme::Accent);
             }
-            else if (line.Memory.Present && line.Memory.Absolute)
+            else if (line.Memory.Present && line.Memory.Absolute && !line.InlineBytes)
             {
                 std::uint8_t value[8]{};
                 const int size = std::clamp(line.Memory.Size, 1, 8);
@@ -2622,13 +2622,43 @@ namespace Manifold::UI
         return m_function.Span;
     }
 
+    std::string MemoryViewer::NoFunctionReason(std::uint64_t address) const
+    {
+        if (const Target::CodeMap* map = m_engine.CodeMap())
+        {
+            if (const auto section = map->SectionAt(address); section && !section->Code)
+                return "It lies outside the module's code sections, in its headers or data.";
+        }
+        return "There is no unwind data or managed method here, and nothing above it within 64 KB both looks like a start and leads here.";
+    }
+
+    std::uint64_t MemoryViewer::SymbolEnd(std::uint64_t start)
+    {
+        const std::uint64_t generation = m_engine.ProcessGeneration();
+        const std::uint64_t symbols = m_engine.Symbols().Generation();
+        const std::uint64_t writes = m_engine.Writes().Revision();
+        const double now = m_engine.Now();
+        SymbolEndCache& cache = m_symbolEnds;
+        if (cache.Generation != generation || cache.Symbols != symbols || cache.Writes != writes || now - cache.Stamp > 1.0)
+        {
+            cache.Ends.clear();
+            cache.Generation = generation;
+            cache.Symbols = symbols;
+            cache.Writes = writes;
+            cache.Stamp = now;
+        }
+        const auto [entry, added] = cache.Ends.try_emplace(start, start);
+        if (added)
+            entry->second = m_engine.SymbolEnd(start);
+        return entry->second;
+    }
+
     void MemoryViewer::JumpToFunction(Command command)
     {
         const std::optional<Disasm::FunctionSpan> span = FunctionOf(m_selected);
         if (!span)
         {
-            m_engine.Notify(LogLevel::Info, "No function start found for " + m_engine.Describe(m_selected) +
-                ": there is no unwind data or managed method here, and nothing above it within 64 KB both looks like a start and leads here.");
+            m_engine.Notify(LogLevel::Info, "No function start found for " + m_engine.Describe(m_selected) + ". " + NoFunctionReason(m_selected));
             return;
         }
         if (command == Command::GotoFunctionEnd)
@@ -2659,7 +2689,7 @@ namespace Manifold::UI
         else
         {
             ImGui::TextDisabled("No function start found here");
-            ItemTooltip("There is no unwind data or managed method here, and nothing above it within 64 KB both looks like a start and leads here.");
+            ItemTooltip(NoFunctionReason(instruction.Address).c_str());
         }
         ImGui::Separator();
         item(ICON_FA_ANGLE_DOUBLE_UP "  Go to the start", Command::GotoFunctionStart, span.has_value());

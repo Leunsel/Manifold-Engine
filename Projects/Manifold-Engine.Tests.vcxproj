@@ -223,6 +223,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\ManagedDumperTests.cpp" />
     <ClCompile Include="..\Tests\ManifoldApiTests.cpp" />
     <ClCompile Include="..\Tests\MonoTests.cpp" />
+    <ClCompile Include="..\Tests\RelayTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
     <ClCompile Include="..\Tests\TextTests.cpp" />
     <ClCompile Include="..\Tests\UnrealTests.cpp" />

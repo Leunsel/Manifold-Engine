@@ -109,6 +109,7 @@ namespace Manifold
         std::shared_ptr<const Disasm::DissectResult> CodeDissect() const { return m_codeDissect; }
         void SetCodeDissect(std::shared_ptr<const Disasm::DissectResult> result) { m_codeDissect = std::move(result); }
         std::optional<Disasm::FunctionSpan> FunctionAround(std::uint64_t address);
+        std::uint64_t SymbolEnd(std::uint64_t start);
         Scan::Scanner& Scanner() { return m_scanner; }
         Debug::Debugger& Debugger() { return m_debugger; }
         Debug::Tracer& Tracer() { return m_tracer; }

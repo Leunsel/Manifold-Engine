@@ -2,6 +2,7 @@
 
 #include "Target/Mono.h"
 #include "Target/Process.h"
+#include "Target/Symbols.h"
 
 #include <algorithm>
 #include <cstring>
@@ -25,6 +26,7 @@ namespace Manifold::Target
         constexpr std::uint32_t kMaxUnwindInfo = 4 + 256 * 2 + 12;
         constexpr std::uint8_t kChainedInfo = 0x4;
         constexpr int kMaxChain = 8;
+        constexpr WORD kMaxSections = 96;
 
         struct UnwindEntry
         {
@@ -35,18 +37,19 @@ namespace Manifold::Target
         static_assert(sizeof(UnwindEntry) == 12);
     }
 
-    void CodeMap::Attach(std::shared_ptr<Process> process, MonoBridge* mono)
+    void CodeMap::Attach(std::shared_ptr<Process> process, MonoBridge* mono, const Symbols* symbols)
     {
         std::lock_guard lock(m_lock);
         m_process = std::move(process);
         m_mono = mono;
+        m_symbols = symbols;
         m_tables.clear();
         m_last.reset();
     }
 
     void CodeMap::Detach()
     {
-        Attach(nullptr, nullptr);
+        Attach(nullptr, nullptr, nullptr);
     }
 
     std::shared_ptr<const CodeMap::Table> CodeMap::LoadTable(std::uint64_t base, std::uint64_t size) const
@@ -61,9 +64,47 @@ namespace Manifold::Target
         }
         if (!process)
             return table;
+        table->Sections = ReadSections(*process, base, size);
+        if (!process->Is64Bit())
+            return table;
         for (const auto& [begin, end] : UnwindFunctions(*process, base, size))
             table->Functions.push_back({ begin, end });
         return table;
+    }
+
+    std::vector<CodeMap::Section> CodeMap::ReadSections(const Process& process, std::uint64_t base, std::uint64_t size)
+    {
+        std::vector<Section> sections;
+        IMAGE_DOS_HEADER dos{};
+        if (!process.ReadExact(base, &dos, sizeof(dos)) || dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew <= 0 || static_cast<std::uint64_t>(dos.e_lfanew) >= size)
+            return sections;
+        const std::uint64_t nt = base + static_cast<std::uint64_t>(dos.e_lfanew);
+        DWORD signature = 0;
+        IMAGE_FILE_HEADER file{};
+        DWORD alignment = 0;
+        const std::uint64_t optional = nt + sizeof(signature) + sizeof(file);
+        if (!process.ReadExact(nt, &signature, sizeof(signature)) || signature != IMAGE_NT_SIGNATURE || !process.ReadExact(nt + sizeof(signature), &file, sizeof(file)) ||
+            file.NumberOfSections == 0 || file.NumberOfSections > kMaxSections ||
+            !process.ReadExact(optional + offsetof(IMAGE_OPTIONAL_HEADER64, SectionAlignment), &alignment, sizeof(alignment)))
+            return sections;
+        if (alignment == 0 || (alignment & (alignment - 1)) != 0)
+            alignment = static_cast<DWORD>(kPage);
+        std::vector<IMAGE_SECTION_HEADER> headers(file.NumberOfSections);
+        if (!process.ReadExact(optional + file.SizeOfOptionalHeader, headers.data(), headers.size() * sizeof(IMAGE_SECTION_HEADER)))
+            return sections;
+        for (const IMAGE_SECTION_HEADER& header : headers)
+        {
+            const std::uint64_t span = header.Misc.VirtualSize ? header.Misc.VirtualSize : header.SizeOfRawData;
+            if (span == 0 || header.VirtualAddress >= size)
+                continue;
+            const std::uint64_t end = std::min<std::uint64_t>(size, (static_cast<std::uint64_t>(header.VirtualAddress) + span + alignment - 1) & ~static_cast<std::uint64_t>(alignment - 1));
+            sections.push_back({ header.VirtualAddress, static_cast<std::uint32_t>(end), (header.Characteristics & (IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_CNT_CODE)) != 0 });
+        }
+        std::sort(sections.begin(), sections.end(), [](const Section& a, const Section& b)
+            {
+                return a.Begin < b.Begin;
+            });
+        return sections;
     }
 
     std::vector<std::pair<std::uint32_t, std::uint32_t>> CodeMap::UnwindFunctions(const Process& process, std::uint64_t base, std::uint64_t size)
@@ -209,14 +250,7 @@ namespace Manifold::Target
         }
         // A 32-bit process has no unwind table; the empty table still marks the
         // module, so its addresses are not handed to the Mono lookup.
-        std::shared_ptr<const Table> table = process->Is64Bit() ? LoadTable(module->Base, module->Size) : nullptr;
-        if (!table)
-        {
-            auto empty = std::make_shared<Table>();
-            empty->Base = module->Base;
-            empty->Size = module->Size;
-            table = std::move(empty);
-        }
+        std::shared_ptr<const Table> table = LoadTable(module->Base, module->Size);
         std::lock_guard lock(m_lock);
         m_tables[module->Base] = table;
         m_last = table;
@@ -243,6 +277,43 @@ namespace Manifold::Target
     {
         const auto table = TableFor(moduleBase);
         return table ? table->Functions.size() : 0;
+    }
+
+    std::optional<CodeMap::ImageSpan> CodeMap::SectionAt(std::uint64_t address) const
+    {
+        const auto table = TableFor(address);
+        if (!table)
+            return std::nullopt;
+        const std::uint64_t rva = address - table->Base;
+        for (const Section& section : table->Sections)
+        {
+            if (rva >= section.Begin && rva < section.End)
+                return ImageSpan{ table->Base + section.Begin, table->Base + section.End, section.Code };
+        }
+        const std::uint64_t headers = table->Sections.empty() ? std::min(kPage, table->Size) : table->Sections.front().Begin;
+        if (rva < headers)
+            return ImageSpan{ table->Base, table->Base + headers, false };
+        return std::nullopt;
+    }
+
+    std::optional<std::uint64_t> CodeMap::NamedIn(std::uint64_t from, std::uint64_t to) const
+    {
+        const Symbols* symbols = nullptr;
+        {
+            std::lock_guard lock(m_lock);
+            symbols = m_symbols;
+        }
+        return symbols ? symbols->NamedIn(from, to) : std::nullopt;
+    }
+
+    std::optional<std::uint64_t> CodeMap::NamedBelow(std::uint64_t address, std::uint64_t floor) const
+    {
+        const Symbols* symbols = nullptr;
+        {
+            std::lock_guard lock(m_lock);
+            symbols = m_symbols;
+        }
+        return symbols ? symbols->NamedBelow(address, floor) : std::nullopt;
     }
 
     std::optional<std::pair<std::uint64_t, std::uint64_t>> CodeMap::MonoRange(std::uint64_t address) const
@@ -272,6 +343,16 @@ namespace Manifold::Target
 
     std::optional<std::uint64_t> CodeMap::BoundaryIn(std::uint64_t from, std::uint64_t to) const
     {
+        return BoundaryIn(from, to, Anchors::CodeAndNames);
+    }
+
+    std::optional<std::uint64_t> CodeMap::StartBelow(std::uint64_t address, std::uint64_t reach) const
+    {
+        return StartBelow(address, reach, Anchors::CodeAndNames);
+    }
+
+    std::optional<std::uint64_t> CodeMap::BoundaryIn(std::uint64_t from, std::uint64_t to, Anchors anchors) const
+    {
         if (to <= from + 1)
             return std::nullopt;
         std::optional<std::uint64_t> best;
@@ -280,6 +361,7 @@ namespace Manifold::Target
                 if (value > from && value < to && (!best || value < *best))
                     best = value;
             };
+        bool inside = false;
         if (const auto table = TableFor(from))
         {
             // Inside a module: the next function start, or the end of the
@@ -294,7 +376,10 @@ namespace Manifold::Target
             {
                 const Function& holder = *std::prev(next);
                 if (rva < holder.End)
+                {
                     consider(table->Base + holder.End);
+                    inside = true;
+                }
             }
         }
         else
@@ -302,9 +387,17 @@ namespace Manifold::Target
             // A window is at most 16 bytes and every method is longer, so a method
             // that starts inside it still holds the window's last byte.
             if (const auto range = MonoRange(from))
+            {
                 consider(range->second);
+                inside = true;
+            }
             if (const auto range = MonoRange(to - 1))
                 consider(range->first);
+        }
+        if (anchors == Anchors::CodeAndNames && !inside)
+        {
+            if (const auto named = NamedIn(from, to))
+                consider(*named);
         }
         const std::uint64_t page = (to - 1) & ~(kPage - 1);
         if (page > from && AllocationStart(page))
@@ -312,7 +405,7 @@ namespace Manifold::Target
         return best;
     }
 
-    std::optional<std::uint64_t> CodeMap::StartBelow(std::uint64_t address, std::uint64_t reach) const
+    std::optional<std::uint64_t> CodeMap::StartBelow(std::uint64_t address, std::uint64_t reach, Anchors anchors) const
     {
         if (address == 0)
             return std::nullopt;
@@ -335,13 +428,29 @@ namespace Manifold::Target
             if (it != table->Functions.begin())
             {
                 const Function& holder = *std::prev(it);
-                consider(table->Base + (rva < holder.End ? holder.Begin : holder.End));
+                if (rva < holder.End)
+                {
+                    consider(table->Base + holder.Begin);
+                    return best;
+                }
+                consider(table->Base + holder.End);
+            }
+            else
+            {
+                consider(table->Base);
+            }
+            if (anchors == Anchors::CodeAndNames)
+            {
+                if (const auto named = NamedBelow(address, floor))
+                    consider(*named);
             }
             return best;
         }
+        bool inside = false;
         if (const auto range = MonoRange(last))
         {
             consider(range->first);
+            inside = true;
         }
         else
         {
@@ -356,6 +465,11 @@ namespace Manifold::Target
         }
         if (const auto run = RunStart(last, floor))
             consider(*run);
+        if (anchors == Anchors::CodeAndNames && !inside)
+        {
+            if (const auto named = NamedBelow(address, floor))
+                consider(*named);
+        }
         return best;
     }
 

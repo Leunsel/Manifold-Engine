@@ -43,6 +43,11 @@ namespace Manifold::Disasm
             return line.Valid && (line.IsNop || line.Mnemonic == "nop" || IsTrap(line));
         }
 
+        bool ZeroPair(const Instruction& line)
+        {
+            return line.Valid && line.Length == 2 && line.Bytes[0] == 0 && line.Bytes[1] == 0;
+        }
+
         bool EndsFlow(const Instruction& line)
         {
             const std::string_view mnemonic = line.Mnemonic;
@@ -178,6 +183,30 @@ namespace Manifold::Disasm
             }
         }
         return span;
+    }
+
+    std::uint64_t CodeExtent(const Disassembler& disassembler, const Target::Process& process, std::uint64_t start, std::uint64_t limit, const CodeHints* hints)
+    {
+        std::uint64_t end = start;
+        std::uint64_t pending = 0;
+        while (end < limit)
+        {
+            const std::vector<Instruction> chunk = disassembler.ReadMany(process, end, kChunk, nullptr, hints);
+            if (chunk.empty())
+                break;
+            for (const Instruction& line : chunk)
+            {
+                if (line.Address >= limit || (line.Address != start && (!line.Valid || IsTrap(line) || ZeroPair(line))))
+                    return end;
+                end = line.Next();
+                const bool branch = line.Kind == Flow::Jump || line.Kind == Flow::ConditionalJump;
+                if (branch && line.Target && *line.Target > line.Address && *line.Target < limit)
+                    pending = std::max(pending, *line.Target);
+                if (EndsFlow(line) && pending < end)
+                    return end;
+            }
+        }
+        return end;
     }
 
     const char* FunctionSourceText(FunctionSource source)
