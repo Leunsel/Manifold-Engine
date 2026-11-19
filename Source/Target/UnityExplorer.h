@@ -16,6 +16,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_set>
 #include <vector>
@@ -258,6 +259,14 @@ namespace Manifold::Target
         std::optional<bool> RunInBackground;
         bool ChangedRunInBackground = false;
         std::uint64_t Generation = 0;
+        std::string LastTask;
+        std::chrono::steady_clock::time_point HookedSince{};
+    };
+
+    struct ExplorerExitNote
+    {
+        std::string Text;
+        bool Crashed = false;
     };
 
     // The Unity explorer: scenes and their GameObject hierarchy, an object
@@ -348,6 +357,7 @@ namespace Manifold::Target
 
         static std::string ShortTypeName(const MonoTypeInfo& type);
         static std::string Signature(const MonoMember& method);
+        static ExplorerExitNote ExitNote(const UnityStatus& status, std::string_view process, std::optional<std::uint32_t> exitCode, double seconds);
 
     private:
         struct AgentArg

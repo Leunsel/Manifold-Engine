@@ -222,6 +222,14 @@ namespace Manifold::Target
         return *m_unity;
     }
 
+    std::optional<UnityStatus> MonoBridge::UnityState()
+    {
+        std::lock_guard lock(m_unityLock);
+        if (!m_unity)
+            return std::nullopt;
+        return m_unity->State();
+    }
+
     void MonoBridge::Stop()
     {
         // The explorer first, without holding m_lock: its job thread takes

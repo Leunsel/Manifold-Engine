@@ -102,6 +102,7 @@ namespace Manifold
         bool ShowRegistersOnBreak = true;
         bool ShowSymbols = true;
         int DisassemblerRows = 0;
+        bool AutoExplorer = true;
 
         std::vector<std::string> RecentTables;
         std::string LastProcess;

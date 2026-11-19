@@ -1474,6 +1474,7 @@ namespace Manifold::Diagnostics
         options.Rows.push_back({ "Scan threads", settings.ScanThreads == 0 ? std::string("auto") : std::to_string(settings.ScanThreads) });
         options.Rows.push_back({ "Mode", std::string(settings.ReleaseMode ? "release" : "developer") + (settings.CompactMode ? ", compact" : "") });
         options.Rows.push_back({ "Debugger", settings.UseInProcessDebugger ? "in-process (VEH)" : "Windows" });
+        options.Rows.push_back({ "Scene explorer", settings.AutoExplorer ? "starts by itself" : "on request" });
         options.Rows.push_back({ "Profiler", Profiler::Enabled() ? "on" : "off" });
         groups.push_back(std::move(options));
         return groups;

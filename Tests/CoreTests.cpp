@@ -803,6 +803,8 @@ data:
 
         Settings settings;
         settings.NopSledBest = 77;
+        CHECK(settings.AutoExplorer);
+        settings.AutoExplorer = false;
         SettingsStore store(settings, file);
         CHECK(!store.Pending() && !store.Due(100.0));
         store.Changed(10.0);
@@ -810,7 +812,7 @@ data:
         CHECK(store.Flush().Ok());
         CHECK(!store.Pending());
         Settings loaded;
-        CHECK(loaded.Load(file) && loaded.NopSledBest == 77);
+        CHECK(loaded.Load(file) && loaded.NopSledBest == 77 && !loaded.AutoExplorer);
         std::error_code ignored;
         std::filesystem::remove_all(file.parent_path(), ignored);
 

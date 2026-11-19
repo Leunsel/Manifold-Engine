@@ -24,6 +24,7 @@ namespace Manifold::Target
 {
     class Process;
     class UnityExplorer;
+    struct UnityStatus;
 
     struct MonoMethod
     {
@@ -102,6 +103,7 @@ namespace Manifold::Target
         // bridge (Mono only). Created on first use; it starts nothing in the
         // game until a scene or object request needs the game's main thread.
         UnityExplorer& Unity();
+        std::optional<UnityStatus> UnityState();
 
         // Whether one of the known runtime DLLs (a Mono DLL or IL2CPP's
         // GameAssembly.dll) is in the target's module list, and which. Only

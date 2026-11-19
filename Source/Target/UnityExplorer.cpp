@@ -279,6 +279,7 @@ namespace Manifold::Target
                 std::lock_guard state(m_stateLock);
                 m_status.Busy = true;
                 m_status.Task = job.first;
+                m_status.LastTask = job.first;
             }
             Publish();
             try
@@ -1063,6 +1064,29 @@ namespace Manifold::Target
         return type.Name.empty() ? std::string("?") : ShortName(type.Name);
     }
 
+    ExplorerExitNote UnityExplorer::ExitNote(const UnityStatus& status, std::string_view process, std::optional<std::uint32_t> exitCode, double seconds)
+    {
+        ExplorerExitNote note;
+        note.Crashed = exitCode && *exitCode >= 0xC0000000u;
+        std::string text(process);
+        if (note.Crashed)
+            text += " crashed with exit code 0x" + Hex(*exitCode, 8);
+        else if (exitCode)
+            text += " ended with exit code " + std::to_string(*exitCode);
+        else
+            text += " ended";
+        text += Manifold::Format(" while the scene explorer's agent was in it: %.0f s on %s, %llu frames", std::max(0.0, seconds),
+            status.Hook.empty() ? "the frame callback" : status.Hook.c_str(), static_cast<unsigned long long>(status.CallbackRuns));
+        if (!status.LastTask.empty())
+            text += ", last request \"" + status.LastTask + "\"" + (status.Busy ? " (still running)" : "");
+        if (!status.UnityVersion.empty())
+            text += ", Unity " + status.UnityVersion;
+        if (!status.Error.empty())
+            text += ", last error: " + status.Error;
+        note.Text = std::move(text);
+        return note;
+    }
+
     std::string UnityExplorer::Signature(const MonoMember& method)
     {
         std::string text = "(";
@@ -1385,6 +1409,8 @@ namespace Manifold::Target
         m_agentReady = true;
         {
             std::lock_guard state(m_stateLock);
+            if (!m_status.Hooked)
+                m_status.HookedSince = std::chrono::steady_clock::now();
             m_status.Hooked = true;
             m_status.Hook = hook;
             m_status.UnityVersion = version;

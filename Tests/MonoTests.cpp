@@ -647,6 +647,26 @@ namespace Manifold::Tests
         method.Params[1].Name = "System.Single";
         method.ParamNames = { "x", "y" };
         CHECK_EQ(Target::UnityExplorer::Signature(method), std::string("(float x, float y)"));
+
+        Target::UnityStatus status;
+        status.Hooked = true;
+        status.Hook = "Application.onBeforeRender";
+        status.CallbackRuns = 1234;
+        status.LastTask = "Reading the scenes";
+        status.UnityVersion = "6000.2.6f2";
+        const Target::ExplorerExitNote crashed = Target::UnityExplorer::ExitNote(status, "CloverPit.exe", 0xC0000005u, 42.4);
+        CHECK(crashed.Crashed);
+        CHECK_MSG(crashed.Text.rfind("CloverPit.exe crashed with exit code 0xC0000005 while the scene explorer's agent was in it", 0) == 0 &&
+            crashed.Text.find("42 s on Application.onBeforeRender, 1234 frames") != std::string::npos &&
+            crashed.Text.find("last request \"Reading the scenes\"") != std::string::npos && crashed.Text.find("Unity 6000.2.6f2") != std::string::npos, crashed.Text);
+        status.Busy = true;
+        status.Error = "the agent is not in the game";
+        const Target::ExplorerExitNote quit = Target::UnityExplorer::ExitNote(status, "CloverPit.exe", 0u, 3.0);
+        CHECK(!quit.Crashed);
+        CHECK_MSG(quit.Text.rfind("CloverPit.exe ended with exit code 0 while", 0) == 0 && quit.Text.find("(still running)") != std::string::npos &&
+            quit.Text.find("last error: the agent is not in the game") != std::string::npos, quit.Text);
+        CHECK(!Target::UnityExplorer::ExitNote(status, "Game.exe", std::nullopt, 1.0).Crashed);
+        CHECK(Target::UnityExplorer::ExitNote(status, "Game.exe", std::nullopt, 1.0).Text.rfind("Game.exe ended while", 0) == 0);
     }
 
     void CheckMono(Engine& engine)

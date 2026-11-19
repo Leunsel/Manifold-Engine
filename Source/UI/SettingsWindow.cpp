@@ -40,7 +40,7 @@ namespace Manifold::UI
             { ICON_FA_PALETTE, "Appearance", "Theme, light or dark, accent, colors and sizes. Changes show at once." },
             { ICON_FA_SEARCH, "Scanner", "The scan options start with these values each time the program opens." },
             { ICON_FA_SCROLL, "Scripts", "Lua at start, scripts inside tables and opening processes by name." },
-            { ICON_FA_BUG, "Debugger", "Breakpoints, the in-process debugger and the log." },
+            { ICON_FA_BUG, "Debugger", "Breakpoints, the in-process debugger, the Unity scene explorer and the log." },
             { ICON_FA_KEYBOARD, "Keyboard", "The shortcuts of every window. Click keys to record new ones, right-click to remove them." },
         };
         constexpr int kPageCount = static_cast<int>(std::size(kPages));
@@ -1346,6 +1346,17 @@ namespace Manifold::UI
         if (list.Row("Registers on break", "Show the registers when the process stops at a breakpoint.", toggle))
         {
             changed |= ToggleSwitch("##registers", &settings.ShowRegistersOnBreak);
+            list.EndRow();
+        }
+
+        list.Section("Unity");
+        if (list.Row("Start the scene explorer by itself",
+                "Turns the scene explorer on when a Mono game's runtime is loaded, so the Mono window shows scenes, objects and the inspector at once. "
+                "Its agent then runs in the game while the window uses it. If the game ends while the agent is in it, the log notes how long it ran, "
+                "its last request and the game's exit code.",
+                toggle))
+        {
+            changed |= ToggleSwitch("##autoexplorer", &settings.AutoExplorer);
             list.EndRow();
         }
 

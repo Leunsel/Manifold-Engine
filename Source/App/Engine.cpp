@@ -5,6 +5,7 @@
 #include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
+#include "Target/UnityExplorer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -105,6 +106,7 @@ namespace Manifold
         m_work.CancelGroup(kMonoWork);
         m_work.CompleteGroup(kMonoWork);
         m_tracer.Stop();
+        NoteExplorer(false);
         m_target.Mono().Stop();
         m_debugger.Detach();
         m_scanner.Reset();
@@ -210,6 +212,7 @@ namespace Manifold
         if (!m_target.Mono().Present())
             return;
         const std::string runtime = Target::MonoBridge::RuntimeName(m_target.Mono().Runtime());
+        NoteExplorer(false);
         m_target.Mono().Stop();
         m_target.RefreshSymbolProvider();
         LOG_INFO("Mono", "Shut down the " + runtime + " helper in the game");
@@ -225,6 +228,11 @@ namespace Manifold
         {
             if (starting)
                 m_target.RefreshSymbolProvider();
+            if (starting && m_settings.AutoExplorer && !m_target.Mono().IsIl2Cpp() && !m_target.Mono().Unity().Enabled())
+            {
+                m_target.Mono().Unity().SetEnabled(true);
+                LOG_INFO("Unity", "Turned the scene explorer on by itself (Settings > Debugger > Start the scene explorer by itself)");
+            }
             if (!fromScript)
                 Notify(LogLevel::Success, Format("%s %zu %s classes", starting ? "Loaded" : "Reloaded", m_target.Mono().ClassCount(), Target::MonoBridge::RuntimeName(m_target.Mono().Runtime())));
             return;
@@ -238,6 +246,36 @@ namespace Manifold
             LOG_WARN("Mono", status.Text);
         else
             Notify(status);
+    }
+
+    void Engine::NoteExplorer(bool exited)
+    {
+        const std::shared_ptr<Target::Process> process = m_target.Process();
+        if (!process || !m_target.Mono().Present() || m_target.Mono().IsIl2Cpp())
+            return;
+        const std::optional<Target::UnityStatus> unity = m_target.Mono().UnityState();
+        if (!unity || !unity->Hooked)
+            return;
+        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - unity->HookedSince).count();
+        if (!exited)
+        {
+            if (process->Alive())
+                LOG_INFO("Unity", Format("The scene explorer's agent ran %.0f s in %s (%llu frames) until it was taken out", seconds, process->Name().c_str(),
+                    static_cast<unsigned long long>(unity->CallbackRuns)));
+            return;
+        }
+        DWORD code = 0;
+        std::optional<std::uint32_t> exitCode;
+        if (::GetExitCodeProcess(process->Handle(), &code) && code != STILL_ACTIVE)
+            exitCode = static_cast<std::uint32_t>(code);
+        const Target::ExplorerExitNote note = Target::UnityExplorer::ExitNote(*unity, process->Name(), exitCode, seconds);
+        if (!note.Crashed)
+        {
+            LOG_INFO("Unity", note.Text);
+            return;
+        }
+        LOG_WARN("Unity", note.Text);
+        Notify(LogLevel::Warning, process->Name() + " crashed while the scene explorer was active. The log has the details.");
     }
 
     void Engine::LookUpProcessLater(std::string name, std::function<void(std::optional<ProcessId>)> found)
@@ -434,6 +472,7 @@ namespace Manifold
             m_lastAliveCheck = now;
             if (!m_target.Process()->Alive())
             {
+                NoteExplorer(true);
                 Notify(LogLevel::Warning, ErrorMessage(ErrorCode::ProcessExited));
                 CloseProcess();
             }

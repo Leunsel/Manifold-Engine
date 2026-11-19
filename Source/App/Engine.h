@@ -193,6 +193,7 @@ namespace Manifold
         SettingsStore m_settingsStore;
         TargetSession m_target;
         void FinishMono(const Status& status, bool cancelled, bool starting, bool fromScript, std::uint64_t generation);
+        void NoteExplorer(bool exited);
         static constexpr const char* kMonoWork = "mono";
         std::unique_ptr<Disasm::Disassembler> m_disassembler64;
         std::unique_ptr<Disasm::Disassembler> m_disassembler32;
