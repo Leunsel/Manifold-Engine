@@ -69,8 +69,8 @@ namespace Manifold::Tests
 
         void Properties()
         {
-            CeProperty property = ParseCeProperty("string - The value in stringform.");
-            CHECK(property.Type == "string" && property.Text == "The value in stringform.");
+            CeProperty property = ParseCeProperty("string - The record's value as a string.");
+            CHECK(property.Type == "string" && property.Text == "The record's value as a string.");
             property = ParseCeProperty("'dsFocus', 'dsSelected', 'dsNormal', 'dsTransparent'");
             CHECK(property.Type == "string" && property.Choices.size() == 4 && property.Choices[1] == "dsSelected" && property.Text.empty());
             property = ParseCeProperty("Integer");
@@ -79,8 +79,8 @@ namespace Manifold::Tests
             CHECK(property.Type == "function(sender)" && property.Text.empty());
             property = ParseCeProperty("function(sender) - Called when clicked");
             CHECK(property.Type == "function(sender)" && property.Text == "Called when clicked");
-            property = ParseCeProperty("Array to access each child menuitem");
-            CHECK(property.Type.empty() && property.Text == "Array to access each child menuitem");
+            property = ParseCeProperty("The child menu items, by index");
+            CHECK(property.Type.empty() && property.Text == "The child menu items, by index");
         }
 
         void Types()
@@ -272,14 +272,14 @@ end
             if (read)
             {
                 CHECK_EQ(FormatCall(*read, 0, true), std::string("readInteger(address)"));
-                CHECK_EQ(read->Summary, std::string("Reads a 32-bit integer from the specified address"));
+                CHECK_EQ(read->Summary, std::string("Reads four bytes (32 bits) at the address and returns an integer."));
             }
             DocPtr scan = base->Find("AOBScan");
-            CHECK(scan && scan->Signatures.size() == 2 && scan->Text == "see above but here you just input one string");
+            CHECK(scan && scan->Signatures.size() == 2 && scan->Text.rfind("Scans memory for the given AOB pattern, given as separate values", 0) == 0);
             DocPtr dialog = base->Find("messageDialog");
             CHECK(dialog && dialog->Signatures.size() == 3);
             if (dialog)
-                CHECK(dialog->Text.rfind("pops up", 0) == 0);
+                CHECK(dialog->Text.rfind("Shows a message box with an icon", 0) == 0);
 
             CHECK_EQ(base->ResolveClass("TMainForm"), std::string("Form"));
             CHECK_EQ(base->ResolveClass("tcheckbox"), std::string("CheckBox"));
@@ -294,7 +294,7 @@ end
             CHECK(has("Caption", DocItemKind::Property));
             CHECK(has("Name", DocItemKind::Property));
             DocPtr value = base->Find("MemoryRecord.Value");
-            CHECK(value && value->Kind == DocItemKind::Property && value->Type == "string" && value->Text == "The value in stringform." && value->OwnerIsClass);
+            CHECK(value && value->Kind == DocItemKind::Property && value->Type == "string" && value->Text == "The record's value as a string." && value->OwnerIsClass);
 
             DocRegistry engine(base);
             const std::uint64_t generation = engine.Generation();
@@ -324,7 +324,7 @@ end
 
             const auto found = engine.Search("readint", 5);
             CHECK(!found.empty() && found.front()->Path == "readInteger");
-            const auto byText = engine.Search("stringform", 5);
+            const auto byText = engine.Search("record's value as a string", 5);
             CHECK(std::any_of(byText.begin(), byText.end(), [](const DocPtr& record) { return record->Path == "MemoryRecord.Value"; }));
             const auto all = engine.All();
             CHECK_EQ(all.size(), base->Size() + 1);
