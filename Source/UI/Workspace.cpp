@@ -19,6 +19,7 @@
 #include "UI/ByteSearch.h"
 #include "UI/CodeTools.h"
 #include "UI/DebugWindows.h"
+#include "UI/LogWindow.h"
 #include "UI/LuaWindow.h"
 #include "UI/MainWindow.h"
 #include "UI/MemoryViewer.h"

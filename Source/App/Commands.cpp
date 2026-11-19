@@ -203,6 +203,10 @@ namespace Manifold
             { FlowGraphFit, "FlowGraphFit", Scope::FlowGraph, "Fit the graph into the window", ImGuiKey_F, 0, Own },
             { FlowGraphActualSize, "FlowGraphActualSize", Scope::FlowGraph, "Actual size", ImGuiKey_0, 0, Own },
             { FlowGraphBack, "FlowGraphBack", Scope::FlowGraph, "Back to the function before", ImGuiKey_Backspace, 0, Own },
+
+            { LogCopy, "LogCopy", Scope::Log, "Copy the selected entries", Ctrl | ImGuiKey_C, 0, Own },
+            { LogSelectAll, "LogSelectAll", Scope::Log, "Select all shown entries", Ctrl | ImGuiKey_A, 0, Own },
+            { LogFind, "LogFind", Scope::Log, "Search the log", Ctrl | ImGuiKey_F, 0, Own },
         };
 
         static_assert(std::size(kCommands) == static_cast<std::size_t>(Command::Count));
@@ -469,6 +473,7 @@ namespace Manifold
         case CommandScope::LuaEngine: return "Lua engine";
         case CommandScope::CodeEditor: return "Code editors";
         case CommandScope::FlowGraph: return "Flow graph";
+        case CommandScope::Log: return "Log";
         case CommandScope::Count: break;
         }
         return "";
@@ -490,6 +495,7 @@ namespace Manifold
         case CommandScope::LuaEngine: return "While the Lua engine window has the focus.";
         case CommandScope::CodeEditor: return "While the cursor is in a code editor: the Lua engine, Auto Assembler and script windows, the template manager and table files.";
         case CommandScope::FlowGraph: return "While the flow graph window has the focus.";
+        case CommandScope::Log: return "While the log window has the focus.";
         case CommandScope::Count: break;
         }
         return "";

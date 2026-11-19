@@ -402,6 +402,9 @@
     <ClCompile Include="..\Source\UI\Loading.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\LogWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\LuaDialogs.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -820,6 +823,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Loading.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\LogWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\LuaDialogs.h">

@@ -201,11 +201,18 @@ namespace Manifold::Lua
             }
             if (level >= 3)
             {
-                std::string first = entry.Text.substr(0, entry.Text.find('\n'));
+                const std::size_t cut = entry.Text.find('\n');
+                std::string first = entry.Text.substr(0, cut);
                 if (!where.empty())
                     first = where + ": " + first;
                 if (!entry.Code.empty())
                     first += " (" + entry.Code + ")";
+                if (cut != std::string::npos)
+                    first += entry.Text.substr(cut);
+                if (!entry.FieldsText.empty())
+                    first += "  " + entry.FieldsText;
+                if (!entry.Traceback.empty())
+                    first += "\n" + entry.Traceback;
                 const std::string chunk = entry.Source.Chunk.empty() ? std::string("lua") : entry.Source.Chunk;
                 const std::string function = entry.Source.Function.empty() ? std::string("chunk") : entry.Source.Function;
                 RuntimeLog::Write(kLevels[level], "Lua", chunk.c_str(), function.c_str(), entry.Source.Line, entry.Channel.empty() ? first : "[" + entry.Channel + "] " + first);

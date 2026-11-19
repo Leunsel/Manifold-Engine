@@ -1,6 +1,9 @@
 #include "Core/RuntimeLog.h"
 
+#include "Core/MainThread.h"
+
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <ctime>
 #include <deque>
@@ -8,6 +11,8 @@
 #include <share.h>
 #include <system_error>
 #include <utility>
+
+#include <windows.h>
 
 namespace Manifold::RuntimeLog
 {
@@ -20,14 +25,16 @@ namespace Manifold::RuntimeLog
         std::filesystem::path g_path;
         bool g_verbose = false;
         std::deque<std::uint64_t> g_errorGenerations;
+        std::uint64_t g_serial = 0;
+        const std::chrono::steady_clock::time_point g_started = std::chrono::steady_clock::now();
 
-        std::string TimeText()
+        std::string TimeText(int& milliseconds)
         {
-            const std::time_t now = std::time(nullptr);
-            std::tm local{};
-            char text[16] = "??:??:??";
-            if (::localtime_s(&local, &now) == 0)
-                std::strftime(text, sizeof(text), "%H:%M:%S", &local);
+            SYSTEMTIME local{};
+            ::GetLocalTime(&local);
+            milliseconds = local.wMilliseconds;
+            char text[16] = {};
+            std::snprintf(text, sizeof(text), "%02u:%02u:%02u", local.wHour, local.wMinute, local.wSecond);
             return text;
         }
 
@@ -64,7 +71,7 @@ namespace Manifold::RuntimeLog
             {
                 return std::search(where.begin(), where.end(), text.begin(), text.end(), [&](char a, char b) { return lower(a) == lower(b); }) != where.end();
             };
-        return text.empty() || contains(entry.Message) || contains(entry.Trace) || contains(entry.Area);
+        return text.empty() || contains(entry.Text()) || contains(entry.Trace) || contains(entry.Area);
     }
 
     std::string TraceText(const char* file, const char* function, int line)
@@ -121,18 +128,24 @@ namespace Manifold::RuntimeLog
     void Write(LogLevel level, std::string_view area, const char* file, const char* function, int line, std::string_view message)
     {
         LogEntry entry;
-        entry.Time = TimeText();
+        entry.Time = TimeText(entry.Milliseconds);
+        entry.Clock = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_started).count();
+        entry.Thread = ::GetCurrentThreadId();
+        entry.MainThread = OnMainThread();
         entry.Level = level;
         entry.Area = std::string(area);
         entry.Trace = TraceText(file, function, line);
         entry.Message = OneLine(message);
+        if (entry.Message != message)
+            entry.Full = std::string(message);
 
         std::lock_guard lock(g_lock);
         if (level == LogLevel::Debug && !g_verbose)
             return;
+        entry.Serial = ++g_serial;
         if (g_file)
         {
-            std::fprintf(g_file, "[%s] [%-5s] [%s] [%s] %s\n", entry.Time.c_str(), LevelName(level), entry.Area.c_str(), entry.Trace.c_str(), entry.Message.c_str());
+            std::fprintf(g_file, "[%s.%03d] [%-5s] [%s] [%s] %s\n", entry.Time.c_str(), entry.Milliseconds, LevelName(level), entry.Area.c_str(), entry.Trace.c_str(), entry.Message.c_str());
             std::fflush(g_file);
         }
         g_entries.push_back(std::move(entry));

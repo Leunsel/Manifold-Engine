@@ -36,22 +36,6 @@ namespace Manifold::UI
         IconCache m_icons;
     };
 
-    class LogWindow : public ToolWindowBase
-    {
-    public:
-        explicit LogWindow(Workspace& workspace);
-        void Draw() override;
-        void Show() { m_open = true; m_bringToFront = true; }
-
-    private:
-        Workspace& m_workspace;
-        int m_level = 1;
-        std::string m_search;
-        bool m_follow = true;
-        std::uint64_t m_generation = 0;
-        std::vector<LogEntry> m_entries;
-    };
-
     class SymbolsWindow : public ToolWindowBase
     {
     public:

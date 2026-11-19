@@ -13,6 +13,7 @@
 #include "Core/MainThread.h"
 #include "Core/Types.h"
 #include "Core/Profiler.h"
+#include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Core/Xml.h"
 #include "Debug/BreakAction.h"
@@ -91,6 +92,27 @@ namespace Manifold::Tests
             CHECK_EQ(ReplaceAll("a.b.c", ".", "::"), "a::b::c");
             CHECK(EqualsNoCase("Game.EXE", "game.exe"));
             CHECK_EQ(HexBytes(std::vector<std::uint8_t>{ 0x0A, 0xFF }), "0A FF");
+        }
+
+        void LogEntries()
+        {
+            const auto before = RuntimeLog::Last();
+            RuntimeLog::Write(LogLevel::Warning, "LogTest", __FILE__, __func__, __LINE__, "first line\nsecond line");
+            const auto entry = RuntimeLog::Last();
+            CHECK(entry.has_value());
+            if (!entry)
+                return;
+            CHECK(entry->Area == "LogTest" && entry->Level == LogLevel::Warning);
+            CHECK(entry->Message == "first line second line");
+            CHECK(entry->Full == "first line\nsecond line" && entry->Text() == entry->Full);
+            CHECK(entry->Milliseconds >= 0 && entry->Milliseconds < 1000 && entry->Time.size() == 8);
+            CHECK(entry->Thread == ::GetCurrentThreadId());
+            CHECK(entry->Clock > 0.0);
+            CHECK(!before || entry->Serial > before->Serial);
+            RuntimeLog::Write(LogLevel::Info, "LogTest", __FILE__, __func__, __LINE__, "plain");
+            const auto plain = RuntimeLog::Last();
+            CHECK(plain && plain->Full.empty() && plain->Text() == "plain" && plain->Serial == entry->Serial + 1 && plain->Clock >= entry->Clock);
+            CHECK(RuntimeLog::EntryMatches(*entry, LogLevel::Info, "SECOND LINE"));
         }
 
         void Errors()
@@ -1249,6 +1271,7 @@ data:
         ValueTypes();
         TextHelpers();
         Errors();
+        LogEntries();
         XmlParsing();
         TableRoundTrip();
         AutoAssemblerOffline();

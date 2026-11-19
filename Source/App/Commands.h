@@ -25,6 +25,7 @@ namespace Manifold
         LuaEngine,
         CodeEditor,
         FlowGraph,
+        Log,
         Count
     };
 
@@ -210,6 +211,10 @@ namespace Manifold
         FlowGraphFit,
         FlowGraphActualSize,
         FlowGraphBack,
+
+        LogCopy,
+        LogSelectAll,
+        LogFind,
 
         Count
     };

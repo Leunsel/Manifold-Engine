@@ -26,6 +26,14 @@ namespace Manifold
         std::string Area;
         std::string Trace;
         std::string Message;
+        std::string Full;
+        int Milliseconds = 0;
+        double Clock = 0.0;
+        std::uint32_t Thread = 0;
+        bool MainThread = false;
+        std::uint64_t Serial = 0;
+
+        const std::string& Text() const { return Full.empty() ? Message : Full; }
     };
 
     namespace RuntimeLog

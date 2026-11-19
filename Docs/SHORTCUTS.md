@@ -258,3 +258,13 @@ While the flow graph window has the focus.
 | `F` | Fit the graph into the window | `FlowGraphFit` | Manifold |
 | `0` | Actual size | `FlowGraphActualSize` | Manifold |
 | `Backspace` | Back to the function before | `FlowGraphBack` | Manifold |
+
+## Log
+
+While the log window has the focus.
+
+| Keys | Command | Name in the settings | Origin |
+|---|---|---|---|
+| `Ctrl+C` | Copy the selected entries | `LogCopy` | Manifold |
+| `Ctrl+A` | Select all shown entries | `LogSelectAll` | Manifold |
+| `Ctrl+F` | Search the log | `LogFind` | Manifold |

@@ -234,6 +234,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\FlowGraphWindow.cpp" />
     <ClCompile Include="..\Source\UI\Fonts.cpp" />
     <ClCompile Include="..\Source\UI\Loading.cpp" />
+    <ClCompile Include="..\Source\UI\LogWindow.cpp" />
     <ClCompile Include="..\Source\UI\LuaDialogs.cpp" />
     <ClCompile Include="..\Source\UI\LuaWindow.cpp" />
     <ClCompile Include="..\Source\UI\MainWindow.cpp" />
@@ -376,6 +377,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\FlowGraphWindow.h" />
     <ClInclude Include="..\Source\UI\Fonts.h" />
     <ClInclude Include="..\Source\UI\Loading.h" />
+    <ClInclude Include="..\Source\UI\LogWindow.h" />
     <ClInclude Include="..\Source\UI\LuaDialogs.h" />
     <ClInclude Include="..\Source\UI\LuaWindow.h" />
     <ClInclude Include="..\Source\UI\MainWindow.h" />
