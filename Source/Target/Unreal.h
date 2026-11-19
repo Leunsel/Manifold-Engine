@@ -198,6 +198,7 @@ namespace Manifold::Target
         std::uint64_t ClassOf(std::uint64_t object) const;
         std::uint64_t OuterOf(std::uint64_t object) const;
         std::uint64_t SuperOf(std::uint64_t type) const;
+        bool HasStructLayout(std::uint64_t type) const;
         std::string FullName(std::uint64_t object) const;
         UnrealKind KindOf(std::uint64_t type) const;
 

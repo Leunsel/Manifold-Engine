@@ -915,6 +915,12 @@ namespace Manifold::Target
         return IsPtr(type) && m_layout.Super >= 0 ? ReadObject(type + static_cast<std::uint64_t>(m_layout.Super)) : 0;
     }
 
+    bool UnrealRuntime::HasStructLayout(std::uint64_t type) const
+    {
+        const UnrealKind kind = KindOf(ClassOf(type));
+        return kind == UnrealKind::Class || kind == UnrealKind::Struct || kind == UnrealKind::Function;
+    }
+
     bool UnrealRuntime::ResolveClassAndOuter(const LiveArray& live)
     {
         std::uint64_t objectClass = 0;

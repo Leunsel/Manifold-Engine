@@ -990,6 +990,9 @@ namespace Manifold::Tests
 
                 if errorOnLookupFailure(false) ~= true or getAddress("no.such.symbol+1") ~= 0 then return "lookup without errors" end
                 if errorOnLookupFailure(true) ~= false or pcall(getAddress, "no.such.symbol+1") then return "lookup errors" end
+                local _, lookupError = pcall(getAddress, "no.such.symbol+1")
+                if lookupError ~= "Failure determining what no.such.symbol+1 means" then return "lookup error text: " .. tostring(lookupError) end
+                if getAddressSafe("no.such.symbol") ~= nil then return "getAddressSafe" end
 
                 registerSymbol("ManifoldCompatSymbol", 0x1234)
                 local found = false

@@ -535,7 +535,7 @@ namespace Manifold::Lua
         {
             return TypeQuery(state, [&](const UnrealRuntime& runtime, std::uint64_t type)
                 {
-                    PushAddress(state, runtime.SuperOf(type));
+                    PushAddress(state, runtime.HasStructLayout(type) ? runtime.SuperOf(type) : 0);
                     return 1;
                 });
         }
@@ -544,7 +544,7 @@ namespace Manifold::Lua
         {
             return TypeQuery(state, [&](const UnrealRuntime& runtime, std::uint64_t type)
                 {
-                    if (const auto size = runtime.StructSize(type))
+                    if (const auto size = runtime.HasStructLayout(type) ? runtime.StructSize(type) : std::nullopt)
                         lua_pushinteger(state, *size);
                     else
                         lua_pushnil(state);
@@ -567,7 +567,7 @@ namespace Manifold::Lua
             const bool own = lua_toboolean(state, 2) != 0;
             return TypeQuery(state, [&](const UnrealRuntime& runtime, std::uint64_t type)
                 {
-                    PushFields(state, runtime, runtime.Fields(type, own));
+                    PushFields(state, runtime, runtime.HasStructLayout(type) ? runtime.Fields(type, own) : std::vector<Target::UnrealField>{});
                     return 1;
                 });
         }

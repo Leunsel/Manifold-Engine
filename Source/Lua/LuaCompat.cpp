@@ -1058,6 +1058,12 @@ namespace Manifold::Lua
             return 0;
         }
 
+        int LookupFailure(lua_State* state, const char* text)
+        {
+            lua_pushfstring(state, "Failure determining what %s means", text);
+            return lua_error(state);
+        }
+
         int GetAddressCompat(lua_State* state)
         {
             if (lua_type(state, 1) == LUA_TNUMBER)
@@ -1070,12 +1076,11 @@ namespace Manifold::Lua
             {
                 const std::uint64_t address = LocalAddress(text);
                 if (!address)
-                    return luaL_error(state, "%s", ErrorMessage(ErrorCode::ExprUnknownSymbol, text).c_str());
+                    return LookupFailure(state, text);
                 lua_pushinteger(state, static_cast<lua_Integer>(address));
                 return 1;
             }
-            Status error;
-            const auto value = Owner(state).Evaluate(text, &error);
+            const auto value = Owner(state).Evaluate(text, nullptr);
             if (!value)
             {
                 if (!LookupErrors(state))
@@ -1083,7 +1088,7 @@ namespace Manifold::Lua
                     lua_pushinteger(state, 0);
                     return 1;
                 }
-                return luaL_error(state, "%s", error.Text.c_str());
+                return LookupFailure(state, text);
             }
             lua_pushinteger(state, static_cast<lua_Integer>(*value));
             return 1;

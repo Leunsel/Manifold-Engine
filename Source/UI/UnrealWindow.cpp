@@ -321,15 +321,20 @@ namespace Manifold::UI
         const auto row = [&](std::size_t type, const std::string& label, int index)
             {
                 const bool selected = type == m_selected;
-                if (ImGui::Selectable((label + "##" + std::to_string(index)).c_str(), selected))
+                const char* badge = KindBadge(types[type].Kind);
+                const float badgeWidth = *badge ? ImGui::CalcTextSize(badge).x : 0.0f;
+                const float left = ImGui::GetCursorPosX();
+                const float width = ImGui::GetContentRegionAvail().x;
+                if (ImGui::Selectable(("##" + std::to_string(index)).c_str(), selected))
                 {
                     m_selected = type;
                     m_tab = types[type].Kind == Target::UnrealKind::Enum ? Tab::Entries : Tab::Properties;
                 }
-                const char* badge = KindBadge(types[type].Kind);
+                ImGui::SameLine(left);
+                TextFitted(label, width - (*badge ? badgeWidth + Px(14.0f) : Px(4.0f)), ManifoldTheme::Text);
                 if (*badge)
                 {
-                    ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::CalcTextSize(badge).x - Px(4.0f));
+                    ImGui::SameLine(left + width - badgeWidth - Px(4.0f));
                     Muted(badge);
                 }
             };
@@ -350,7 +355,8 @@ namespace Manifold::UI
         }
         const Target::UnrealType& entry = types[m_selected];
         const std::uint64_t type = entry.Object;
-        const std::uint64_t super = runtime.SuperOf(type);
+        const bool isEnum = entry.Kind == Target::UnrealKind::Enum;
+        const std::uint64_t super = isEnum ? 0 : runtime.SuperOf(type);
         ImGui::PushFont(Fonts::Bold(), 0.0f);
         ImGui::TextUnformatted(runtime.CppName(type).c_str());
         ImGui::PopFont();
@@ -364,7 +370,14 @@ namespace Manifold::UI
             ItemTooltip("Shows the parent type");
         }
         ImGui::SameLine();
-        Muted(Format("size 0x%X  Â·  %s", static_cast<unsigned>(runtime.StructSize(type).value_or(0)), runtime.FullName(type).c_str()));
+        const auto size = isEnum ? std::nullopt : runtime.StructSize(type);
+        const std::string where = runtime.FullName(type);
+        if (isEnum)
+            Muted(Format("enum  ·  %s", where.c_str()));
+        else if (size)
+            Muted(Format("size 0x%X  ·  %s", static_cast<unsigned>(*size), where.c_str()));
+        else
+            Muted(where);
         {
             const GhostButtons ghost;
             if (entry.Kind == Target::UnrealKind::Class)
