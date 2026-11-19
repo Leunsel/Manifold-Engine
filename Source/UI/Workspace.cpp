@@ -31,6 +31,7 @@
 #include "UI/TableFilesWindow.h"
 #include "UI/ToolWindows.h"
 #include "UI/WatchWindow.h"
+#include "UI/WriteHistoryWindow.h"
 
 #include "imgui_internal.h"
 
@@ -152,6 +153,7 @@ namespace Manifold::UI
         drawOne("Template manager", m_templateManager);
         drawOne("Profiler", m_profiler);
         drawOne("NOP Sled", m_nopSled);
+        drawOne("Write history", m_writeHistory);
         {
             PROFILE_ZONE("Script forms");
             m_scriptForms->Draw();
@@ -533,6 +535,13 @@ namespace Manifold::UI
         if (!m_nopSled)
             m_nopSled = std::make_unique<NopSledWindow>(*this);
         m_nopSled->Show();
+    }
+
+    void Workspace::OpenWriteHistory()
+    {
+        if (!m_writeHistory)
+            m_writeHistory = std::make_unique<WriteHistoryWindow>(*this);
+        m_writeHistory->Show();
     }
 
     bool Workspace::Animating() const

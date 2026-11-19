@@ -34,13 +34,6 @@ namespace Manifold::UI
             RegionFill
         };
 
-        struct MemoryEdit
-        {
-            std::uint64_t Generation = 0;
-            std::uint64_t Address = 0;
-            std::vector<std::uint8_t> Original;
-        };
-
         void MenuBar();
         void Toolbar();
         void Disassembly(float height);
@@ -73,13 +66,14 @@ namespace Manifold::UI
         void PublishSelection();
         void RunCommand(Command command);
         void Bookmark(bool set, int slot);
-        Status WriteBytes(std::uint64_t address, std::span<const std::uint8_t> bytes);
+        Status WriteBytes(std::uint64_t address, std::span<const std::uint8_t> bytes, std::string source);
+        std::size_t UndoableEdits() const;
         void UndoEdit();
         void Nop(const Disasm::Instruction& instruction);
         int HexValueSize() const;
         Scan::ValueType HexValueType() const;
 
-        std::vector<MemoryEdit> m_undo;
+        int m_nibbleWrite = 0;
         std::array<std::uint64_t, 10> m_bookmarks{};
         std::vector<std::uint64_t> m_hexHistory;
         int m_regionMode = RegionSave;

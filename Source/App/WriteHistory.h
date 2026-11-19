@@ -1,0 +1,65 @@
+#pragma once
+
+#include "Core/Errors.h"
+
+#include <chrono>
+#include <cstdint>
+#include <deque>
+#include <optional>
+#include <span>
+#include <string>
+#include <vector>
+
+namespace Manifold
+{
+    namespace Target
+    {
+        class Process;
+    }
+
+    struct MemoryWrite
+    {
+        int Id = 0;
+        std::uint64_t Generation = 0;
+        std::uint64_t Address = 0;
+        std::vector<std::uint8_t> Original;
+        std::vector<std::uint8_t> Written;
+        std::string Source;
+        std::chrono::system_clock::time_point At;
+        bool Undone = false;
+    };
+
+    enum class WriteState
+    {
+        InMemory,
+        Undone,
+        ChangedSince,
+        Unreadable
+    };
+
+    class WriteHistory
+    {
+    public:
+        static constexpr std::size_t kLimit = 500;
+
+        Status Write(const Target::Process& process, std::uint64_t generation, std::uint64_t address, std::span<const std::uint8_t> bytes, std::string source);
+        void Amend(int id, std::span<const std::uint8_t> written);
+        Status Undo(const Target::Process& process, std::uint64_t generation, int id);
+        Status Redo(const Target::Process& process, std::uint64_t generation, int id);
+        std::optional<int> LastUndoable(std::uint64_t generation) const;
+        std::size_t Undoable(std::uint64_t generation) const;
+        WriteState StateOf(const Target::Process& process, const MemoryWrite& write) const;
+        const MemoryWrite* Find(int id) const;
+        const std::deque<MemoryWrite>& Entries() const { return m_entries; }
+        int LastId() const { return m_nextId - 1; }
+        std::uint64_t Revision() const { return m_revision; }
+        void Clear(std::uint64_t generation);
+
+    private:
+        MemoryWrite* Entry(int id);
+
+        std::deque<MemoryWrite> m_entries;
+        int m_nextId = 1;
+        std::uint64_t m_revision = 0;
+    };
+}

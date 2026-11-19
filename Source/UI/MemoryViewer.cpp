@@ -633,8 +633,11 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenu("Tools", process))
         {
-            const std::string undo = ICON_FA_UNDO_ALT "  Undo the last memory edit" + (m_undo.empty() ? std::string() : " (" + std::to_string(m_undo.size()) + ")");
-            item(undo.c_str(), Command::UndoMemoryEdit, !m_undo.empty());
+            const std::size_t undoable = UndoableEdits();
+            const std::string undo = ICON_FA_UNDO_ALT "  Undo the last memory edit" + (undoable == 0 ? std::string() : " (" + std::to_string(undoable) + ")");
+            item(undo.c_str(), Command::UndoMemoryEdit, undoable > 0);
+            if (ImGui::MenuItem(ICON_FA_HISTORY "  Write history..."))
+                m_workspace.OpenWriteHistory();
             ImGui::Separator();
             item(ICON_FA_PLUS_SQUARE "  Allocate memory...", Command::AllocateMemory);
             item(ICON_FA_FILL_DRIP "  Fill memory...", Command::FillMemory);
@@ -1278,38 +1281,33 @@ namespace Manifold::UI
             m_engine.Notify(LogLevel::Info, "Bookmark " + std::to_string(slot) + " is not set. Set it with " + ChordText((CurrentBinding(Command::SetBookmark).Chord & ImGuiMod_Mask_) | (ImGuiKey_0 + slot)) + ".");
     }
 
-    Status MemoryViewer::WriteBytes(std::uint64_t address, std::span<const std::uint8_t> bytes)
+    Status MemoryViewer::WriteBytes(std::uint64_t address, std::span<const std::uint8_t> bytes, std::string source)
     {
-        const Target::Process& process = *m_engine.Process();
-        MemoryEdit edit{ m_engine.ProcessGeneration(), address, std::vector<std::uint8_t>(bytes.size()) };
-        const bool saved = process.ReadExact(address, edit.Original.data(), edit.Original.size());
-        const Status status = process.Write(address, bytes);
-        if (status && saved)
-        {
-            m_undo.push_back(std::move(edit));
-            if (m_undo.size() > 256)
-                m_undo.erase(m_undo.begin());
-        }
-        return status;
+        return m_engine.Writes().Write(*m_engine.Process(), m_engine.ProcessGeneration(), address, bytes, std::move(source));
+    }
+
+    std::size_t MemoryViewer::UndoableEdits() const
+    {
+        return m_engine.Writes().Undoable(m_engine.ProcessGeneration());
     }
 
     void MemoryViewer::UndoEdit()
     {
-        const std::uint64_t generation = m_engine.ProcessGeneration();
-        while (!m_undo.empty() && m_undo.back().Generation != generation)
-            m_undo.pop_back();
-        if (m_undo.empty())
+        WriteHistory& history = m_engine.Writes();
+        const auto id = history.LastUndoable(m_engine.ProcessGeneration());
+        const MemoryWrite* write = id ? history.Find(*id) : nullptr;
+        if (!write || !m_engine.HasProcess())
         {
-            m_engine.Notify(LogLevel::Info, "There is no memory edit to undo in this window.");
+            m_engine.Notify(LogLevel::Info, "There is no memory edit to undo.");
             return;
         }
-        const MemoryEdit edit = std::move(m_undo.back());
-        m_undo.pop_back();
-        const Status status = m_engine.Process()->Write(edit.Address, edit.Original);
+        const std::uint64_t address = write->Address;
+        const std::size_t size = write->Original.size();
+        const Status status = history.Undo(*m_engine.Process(), m_engine.ProcessGeneration(), *id);
         if (status)
         {
-            m_nopped.erase(edit.Address);
-            m_engine.Notify(LogLevel::Info, "Restored " + std::to_string(edit.Original.size()) + (edit.Original.size() == 1 ? " byte at " : " bytes at ") + m_engine.Describe(edit.Address));
+            m_nopped.erase(address);
+            m_engine.Notify(LogLevel::Info, "Restored " + std::to_string(size) + (size == 1 ? " byte at " : " bytes at ") + m_engine.Describe(address));
         }
         m_workspace.Report(status);
     }
@@ -1509,7 +1507,7 @@ namespace Manifold::UI
             if (!bytes || bytes->empty())
                 m_engine.Notify(LogLevel::Warning, "The clipboard holds no hex bytes, like \"48 8B 05\".");
             else
-                m_workspace.Report(WriteBytes(hexAddress, *bytes));
+                m_workspace.Report(WriteBytes(hexAddress, *bytes, "Paste"));
             break;
         }
         case Command::HexAccesses: m_workspace.StartWatch(Debug::WatchKind::Accesses, hexAddress, watchSize); break;
@@ -1632,7 +1630,7 @@ namespace Manifold::UI
                     {
                         std::vector<std::uint8_t> data(static_cast<std::size_t>(length));
                         file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
-                        const Status status = WriteBytes(*address, data);
+                        const Status status = WriteBytes(*address, data, "Load file");
                         m_workspace.Report(status);
                         if (status)
                         {
@@ -1652,7 +1650,7 @@ namespace Manifold::UI
                     std::vector<std::uint8_t> data(static_cast<std::size_t>(size));
                     for (std::size_t i = 0; i < data.size(); ++i)
                         data[i] = (*pattern)[i % pattern->size()];
-                    const Status status = WriteBytes(*address, data);
+                    const Status status = WriteBytes(*address, data, "Fill");
                     m_workspace.Report(status);
                     if (status)
                     {
@@ -1729,7 +1727,7 @@ namespace Manifold::UI
         }
         std::vector<std::uint8_t> original(instruction.Bytes.begin(), instruction.Bytes.begin() + instruction.Length);
         std::vector<std::uint8_t> nops(original.size(), 0x90);
-        const Status status = WriteBytes(instruction.Address, nops);
+        const Status status = WriteBytes(instruction.Address, nops, "NOP");
         if (status)
             m_nopped[instruction.Address] = std::move(original);
         m_workspace.Report(status);
@@ -1766,7 +1764,7 @@ namespace Manifold::UI
         ImGui::Separator();
         item(ICON_FA_EDIT "  Assemble", Command::AssembleInstruction);
         item(m_nopped.count(instruction.Address) ? ICON_FA_UNDO "  Restore original code" : ICON_FA_BAN "  Replace with code that does nothing", Command::NopInstruction);
-        item(ICON_FA_UNDO_ALT "  Undo the last memory edit", Command::UndoMemoryEdit, !m_undo.empty());
+        item(ICON_FA_UNDO_ALT "  Undo the last memory edit", Command::UndoMemoryEdit, UndoableEdits() > 0);
         if (ImGui::BeginMenu(ICON_FA_MAGIC "  Create script"))
         {
             m_templates.MenuItems(instruction.Address);
@@ -2509,7 +2507,7 @@ namespace Manifold::UI
                 Scan::ValueFormat format;
                 format.Hex = m_hexDisplay >= 1 && m_hexDisplay <= 3;
                 if (const auto bytes = Scan::ParseValue(type, m_valueBuffer, format))
-                    m_workspace.Report(WriteBytes(m_hexSelected, *bytes));
+                    m_workspace.Report(WriteBytes(m_hexSelected, *bytes, "Value"));
                 else
                     m_workspace.Report(Status::Fail(ErrorCode::ScanBadValue, m_valueBuffer));
                 ImGui::CloseCurrentPopup();
@@ -2551,12 +2549,16 @@ namespace Manifold::UI
             if (!m_engine.Process()->ReadExact(m_hexSelected, &byte, 1))
                 break;
             byte = m_hexNibble == 0 ? static_cast<std::uint8_t>((byte & 0x0F) | (digit << 4)) : static_cast<std::uint8_t>((byte & 0xF0) | digit);
-            const Status status = m_hexNibble == 0 ? WriteBytes(m_hexSelected, std::span<const std::uint8_t>(&byte, 1)) : m_engine.Process()->Write(m_hexSelected, &byte, 1);
+            const Status status = m_hexNibble == 0 ? WriteBytes(m_hexSelected, std::span<const std::uint8_t>(&byte, 1), "Hex typing") : m_engine.Process()->Write(m_hexSelected, &byte, 1);
             if (!status)
             {
                 m_workspace.Report(status);
                 break;
             }
+            if (m_hexNibble == 0)
+                m_nibbleWrite = m_engine.Writes().LastId();
+            else
+                m_engine.Writes().Amend(m_nibbleWrite, std::span<const std::uint8_t>(&byte, 1));
             if (m_hexNibble == 0)
                 m_hexNibble = 1;
             else
@@ -2647,7 +2649,7 @@ namespace Manifold::UI
             ImGui::EndMenu();
         }
         item(ICON_FA_PASTE "  Paste bytes", Command::HexPaste);
-        item(ICON_FA_UNDO_ALT "  Undo the last memory edit", Command::UndoMemoryEdit, !m_undo.empty());
+        item(ICON_FA_UNDO_ALT "  Undo the last memory edit", Command::UndoMemoryEdit, UndoableEdits() > 0);
         if (ImGui::BeginMenu(ICON_FA_TH "  Show"))
         {
             const Command modes[] = { Command::HexBytes, Command::HexTwoBytes, Command::HexFourBytes, Command::HexEightBytes, Command::HexFourBytesDecimal, Command::HexFloat, Command::HexDouble };
@@ -2787,7 +2789,7 @@ namespace Manifold::UI
                         covered = m_engine.Disassembler().Read(process, covered, nullptr).Next();
                     bytes.resize(static_cast<std::size_t>(covered - m_assembleAddress), 0x90);
                 }
-                const Status status = WriteBytes(m_assembleAddress, bytes);
+                const Status status = WriteBytes(m_assembleAddress, bytes, "Assemble");
                 m_workspace.Report(status);
                 if (status)
                 {

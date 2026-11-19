@@ -226,6 +226,8 @@ namespace Manifold
                 m_workspace->OpenProfiler(UI::ProfilerWindow::InfoTab);
             else if (window == "nopsled")
                 m_workspace->OpenNopSled();
+            else if (window == "writehistory")
+                m_workspace->OpenWriteHistory();
         }
         if (!m_options.ProfileReport.empty())
         {

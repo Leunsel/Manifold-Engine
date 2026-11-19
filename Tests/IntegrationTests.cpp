@@ -1,6 +1,7 @@
 #include "TestKit.h"
 
 #include "App/Engine.h"
+#include "App/WriteHistory.h"
 #include "Core/Text.h"
 #include "Core/CheckedMutex.h"
 #include "Core/RuntimeLog.h"
@@ -575,6 +576,46 @@ namespace Manifold::Tests
         else
         {
             CHECK_MSG(false, "TestTarget exports no Touch");
+        }
+
+        if (const Result<Address> scratch = process.Allocate(0x100, PAGE_READWRITE))
+        {
+            WriteHistory history;
+            const std::uint64_t generation = engine.ProcessGeneration();
+            const std::uint64_t at = *scratch;
+            const std::uint8_t first[4] = { 1, 2, 3, 4 };
+            const std::uint8_t second[2] = { 9, 9 };
+            CHECK(history.Write(process, generation, at, first, "Paste").Ok());
+            CHECK(history.Write(process, generation, at + 1, second, "Hex typing").Ok());
+            CHECK_EQ(history.Entries().size(), std::size_t(2));
+            CHECK_EQ(history.Undoable(generation), std::size_t(2));
+            CHECK(history.Entries()[0].Original == std::vector<std::uint8_t>({ 0, 0, 0, 0 }) && history.Entries()[0].Source == "Paste");
+            CHECK(history.StateOf(process, history.Entries()[0]) == WriteState::ChangedSince);
+            CHECK(history.StateOf(process, history.Entries()[1]) == WriteState::InMemory);
+            const std::uint8_t amended = 7;
+            CHECK(process.Write(at + 1, &amended, 1).Ok());
+            history.Amend(history.LastId(), std::span<const std::uint8_t>(&amended, 1));
+            CHECK(history.StateOf(process, history.Entries()[1]) == WriteState::ChangedSince);
+            const std::uint8_t both[2] = { 7, 9 };
+            history.Amend(history.LastId(), both);
+            CHECK(history.StateOf(process, history.Entries()[1]) == WriteState::InMemory);
+            const auto last = history.LastUndoable(generation);
+            CHECK(last && *last == history.LastId());
+            CHECK(history.Undo(process, generation, *last).Ok());
+            std::uint8_t now[4]{};
+            CHECK(process.ReadExact(at, now, sizeof(now)) && now[0] == 1 && now[1] == 2 && now[2] == 3 && now[3] == 4);
+            CHECK(history.StateOf(process, history.Entries()[1]) == WriteState::Undone && history.Undoable(generation) == 1);
+            CHECK(history.Redo(process, generation, *last).Ok());
+            CHECK(process.ReadExact(at, now, sizeof(now)) && now[1] == 7 && now[2] == 9);
+            CHECK(!history.Undo(process, generation + 1, *last).Ok());
+            CHECK(!history.LastUndoable(generation + 1));
+            history.Clear(generation);
+            CHECK(history.Entries().empty() && !history.Find(*last));
+            process.Free(at);
+        }
+        else
+        {
+            CHECK_MSG(false, scratch.Error().Text);
         }
 
         lua = engine.Lua().RunWithResult(R"LUA(
