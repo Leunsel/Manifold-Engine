@@ -50,34 +50,222 @@ namespace Manifold::UI
             });
     }
 
+    namespace
+    {
+        struct ProcessGroup
+        {
+            std::string Key;
+            std::vector<std::size_t> Members;
+            std::size_t Primary = 0;
+            bool App = false;
+            bool Matched = false;
+        };
+
+        struct PickerRow
+        {
+            int Kind = 0;
+            std::size_t Group = 0;
+            std::size_t Entry = 0;
+            std::string Id;
+        };
+
+        void Pill(ImDrawList* draw, float& right, float centerY, const char* text, ImVec4 color)
+        {
+            const ImVec2 size = ImGui::CalcTextSize(text);
+            const float padX = Px(6.0f);
+            const float height = std::round(size.y + Px(3.0f));
+            const ImVec2 max(right, std::round(centerY + height * 0.5f));
+            const ImVec2 min(right - size.x - padX * 2.0f, max.y - height);
+            draw->AddRectFilled(min, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(color, 0.14f)), height * 0.5f);
+            draw->AddText(ImVec2(min.x + padX, std::round(min.y + (height - size.y) * 0.5f)), ImGui::GetColorU32(color), text);
+            right = min.x - Px(6.0f);
+        }
+    }
+
     void ProcessPicker::Draw()
     {
-        if (!BeginToolWindow(ICON_FA_DESKTOP "  Processes###processes", &m_open, ImVec2(560.0f, 520.0f), 0, ImVec2(520.0f, 320.0f)))
+        if (!BeginToolWindow(ICON_FA_DESKTOP "  Processes###processes", &m_open, ImVec2(620.0f, 580.0f), 0, ImVec2(460.0f, 340.0f)))
         {
             EndToolWindow();
             return;
         }
         Engine& engine = m_workspace.Core();
+        const ImGuiStyle& style = ImGui::GetStyle();
+
+        const float refreshSide = ImGui::GetFrameHeight();
+        const float segmentWidth = std::round(Px(124.0f));
         if (m_focusFilter)
         {
             ImGui::SetKeyboardFocusHere();
             m_focusFilter = false;
         }
-        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - Px(250.0f));
-        InputTextWithHint("##filter", ICON_FA_SEARCH " Name, title or pid", m_filter);
+        ImGui::SetNextItemWidth(std::max(Px(120.0f), ImGui::GetContentRegionAvail().x - segmentWidth - refreshSide - style.ItemSpacing.x * 2.0f));
+        InputTextWithHint("##filter", ICON_FA_SEARCH "  Name, window title or pid", m_filter);
         ImGui::SameLine();
-        ImGui::Checkbox("With window", &m_windowsOnly);
+        int mode = m_windowsOnly ? 0 : 1;
+        if (Segmented("##mode", &mode, { "Apps", "All" }, segmentWidth))
+            m_windowsOnly = mode == 0;
+        ItemTooltip("Apps are programs with a window. All adds the background processes.");
         ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_SYNC "  Refresh"))
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.08f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.14f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Label);
+        if (IconButton(ICON_FA_SYNC "##refresh", "Read the process list again"))
             Refresh();
+        ImGui::PopStyleColor(4);
+
         if (!Target::IsElevated())
         {
-            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Warning);
-            ImGui::TextUnformatted(ICON_FA_SHIELD_ALT "  Without administrator rights some processes cannot be opened.");
-            ImGui::PopStyleColor();
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const float width = ImGui::GetContentRegionAvail().x;
+            const float height = ImGui::GetFrameHeight() + Px(6.0f);
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            draw->AddRectFilled(at, ImVec2(at.x + width, at.y + height), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.09f)), Px(6.0f));
+            draw->AddRect(at, ImVec2(at.x + width, at.y + height), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.30f)), Px(6.0f));
+            const char* restart = ICON_FA_SHIELD_ALT "  Restart as administrator";
+            const float button = ImGui::CalcTextSize(restart).x + style.FramePadding.x * 2.0f;
+            ImGui::SetCursorScreenPos(ImVec2(at.x + Px(10.0f), at.y + Px(3.0f)));
+            ImGui::AlignTextToFramePadding();
+            TextFitted("Some processes can only be opened with administrator rights.", std::max(Px(40.0f), width - button - Px(30.0f)), ManifoldTheme::Warning);
             ImGui::SameLine();
-            if (ImGui::SmallButton("Restart as administrator"))
+            ImGui::SetCursorScreenPos(ImVec2(at.x + width - button - Px(3.0f), at.y + Px(3.0f)));
+            if (ImGui::Button(restart))
                 m_workspace.Window().RestartElevated();
+            ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + height + style.ItemSpacing.y));
+        }
+
+        const std::string filter = Trim(m_filter);
+        const bool pidFilter = !filter.empty() && std::all_of(filter.begin(), filter.end(), [](char c) { return c >= '0' && c <= '9'; });
+        const ProcessId current = engine.HasProcess() ? engine.Process()->Id() : ProcessId::None;
+        const std::string last = Lower(engine.Options().LastProcess);
+        std::vector<ProcessGroup> groups;
+        std::map<std::string, std::size_t> byKey;
+        for (std::size_t i = 0; i < m_list.size(); ++i)
+        {
+            const Target::ProcessEntry& entry = m_list[i];
+            const std::string key = Lower(entry.Name);
+            auto found = byKey.find(key);
+            if (found == byKey.end())
+            {
+                found = byKey.emplace(key, groups.size()).first;
+                groups.push_back({ key, {}, i, false, false });
+            }
+            ProcessGroup& group = groups[found->second];
+            group.Members.push_back(i);
+            if (!entry.WindowTitle.empty() && !group.App)
+            {
+                group.App = true;
+                group.Primary = i;
+            }
+            if (entry.Id == current && !group.App)
+                group.Primary = i;
+            if (filter.empty() || ContainsNoCase(entry.Name, filter) || ContainsNoCase(entry.WindowTitle, filter) || ToText(entry.Id).find(filter) != std::string::npos)
+                group.Matched = true;
+        }
+        std::vector<std::size_t> apps;
+        std::vector<std::size_t> background;
+        for (std::size_t g = 0; g < groups.size(); ++g)
+        {
+            if (!groups[g].Matched)
+                continue;
+            if (groups[g].App)
+                apps.push_back(g);
+            else if (!m_windowsOnly)
+                background.push_back(g);
+        }
+        const auto ordered = [&](std::size_t a, std::size_t b)
+            {
+                const bool lastA = !last.empty() && groups[a].Key == last;
+                const bool lastB = !last.empty() && groups[b].Key == last;
+                if (lastA != lastB)
+                    return lastA;
+                return groups[a].Key < groups[b].Key;
+            };
+        std::sort(apps.begin(), apps.end(), ordered);
+        std::sort(background.begin(), background.end(), ordered);
+
+        std::vector<PickerRow> rows;
+        std::vector<std::size_t> selectable;
+        const auto addGroups = [&](const std::vector<std::size_t>& list)
+            {
+                for (const std::size_t g : list)
+                {
+                    const ProcessGroup& group = groups[g];
+                    selectable.push_back(rows.size());
+                    rows.push_back({ 2, g, group.Primary, "g:" + group.Key });
+                    const bool expanded = group.Members.size() > 1 && (m_expanded.count(group.Key) > 0 || pidFilter);
+                    if (!expanded)
+                        continue;
+                    for (const std::size_t member : group.Members)
+                    {
+                        selectable.push_back(rows.size());
+                        rows.push_back({ 3, g, member, "m:" + ToText(m_list[member].Id) });
+                    }
+                }
+            };
+        if (!apps.empty())
+        {
+            rows.push_back({ 0, 0, apps.size(), {} });
+            addGroups(apps);
+        }
+        if (!background.empty())
+        {
+            rows.push_back({ 1, 0, background.size(), {} });
+            addGroups(background);
+        }
+
+        const auto select = [&](const PickerRow& row)
+            {
+                m_selectedRow = row.Id;
+                m_selected = Raw(m_list[row.Entry].Id);
+            };
+        const auto selectedIndex = [&]() -> int
+            {
+                for (std::size_t s = 0; s < selectable.size(); ++s)
+                {
+                    if (rows[selectable[s]].Id == m_selectedRow)
+                        return static_cast<int>(s);
+                }
+                return -1;
+            };
+        if (filter != m_lastFilter || m_windowsOnly != m_lastMode)
+        {
+            m_lastFilter = filter;
+            m_lastMode = m_windowsOnly;
+            if (!filter.empty() && !selectable.empty())
+            {
+                select(rows[selectable.front()]);
+                m_scrollToSelected = true;
+            }
+            else if (filter.empty() && selectedIndex() < 0 && !last.empty())
+            {
+                for (const std::size_t index : selectable)
+                {
+                    if (rows[index].Kind == 2 && groups[rows[index].Group].Key == last)
+                    {
+                        select(rows[index]);
+                        m_scrollToSelected = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (selectedIndex() < 0 && !m_selectedRow.empty())
+        {
+            m_selectedRow.clear();
+            m_selected = 0;
+        }
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !selectable.empty())
+        {
+            const int step = ImGui::IsKeyPressed(ImGuiKey_DownArrow) ? 1 : ImGui::IsKeyPressed(ImGuiKey_UpArrow) ? -1 : 0;
+            if (step != 0)
+            {
+                const int at = selectedIndex();
+                const int next = std::clamp(at < 0 ? (step > 0 ? 0 : static_cast<int>(selectable.size()) - 1) : at + step, 0, static_cast<int>(selectable.size()) - 1);
+                select(rows[selectable[static_cast<std::size_t>(next)]]);
+                m_scrollToSelected = true;
+            }
         }
 
         const auto open = [&](ProcessId id)
@@ -87,52 +275,198 @@ namespace Manifold::UI
                 if (status)
                     m_open = false;
             };
-        const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp;
-        if (ImGui::BeginTable("##list", 4, flags, ImVec2(0.0f, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing())))
+        std::optional<ProcessId> openNow;
+        const float footer = ImGui::GetFrameHeight() + style.ItemSpacing.y + Px(2.0f);
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ManifoldTheme::Card);
+        ImGui::PushStyleColor(ImGuiCol_Border, ManifoldTheme::CardBorder);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, Px(6.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, Px(6.0f, 6.0f));
+        ImGui::BeginChild("##processlist", ImVec2(0.0f, ImGui::GetContentRegionAvail().y - footer), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor(2);
+        if (rows.empty())
         {
-            ImGui::TableSetupScrollFreeze(0, 1);
-            ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, Px(60.0f));
-            ImGui::TableSetupColumn("Process", ImGuiTableColumnFlags_WidthStretch, 1.2f);
-            ImGui::TableSetupColumn("Window", ImGuiTableColumnFlags_WidthStretch, 1.6f);
-            ImGui::TableSetupColumn("Bits", ImGuiTableColumnFlags_WidthFixed, Px(40.0f));
-            ImGui::TableHeadersRow();
-            const ProcessId current = engine.HasProcess() ? engine.Process()->Id() : ProcessId::None;
-            for (const Target::ProcessEntry& entry : m_list)
-            {
-                if (m_windowsOnly && entry.WindowTitle.empty())
-                    continue;
-                if (!m_filter.empty() && !ContainsNoCase(entry.Name, m_filter) && !ContainsNoCase(entry.WindowTitle, m_filter) && ToText(entry.Id).find(m_filter) == std::string::npos)
-                    continue;
-                ImGui::TableNextRow();
-                ImGui::TableNextColumn();
-                ImGui::PushID(static_cast<int>(Raw(entry.Id)));
-                const bool selected = m_selected == Raw(entry.Id);
-                if (ImGui::Selectable(ToText(entry.Id).c_str(), selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
-                {
-                    m_selected = Raw(entry.Id);
-                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                        open(entry.Id);
-                }
-                ImGui::TableNextColumn();
-                ImGui::PushStyleColor(ImGuiCol_Text, !entry.Accessible ? ManifoldTheme::Muted : entry.Id == current ? ManifoldTheme::Accent : ManifoldTheme::Text);
-                ImGui::TextUnformatted(entry.Name.c_str());
-                ImGui::PopStyleColor();
-                if (!entry.Path.empty())
-                    ItemTooltip(WideToUtf8(entry.Path).c_str());
-                ImGui::TableNextColumn();
-                Muted(entry.WindowTitle);
-                ImGui::TableNextColumn();
-                Muted(entry.Is64Bit ? "64" : "32");
-                ImGui::PopID();
-            }
-            ImGui::EndTable();
+            EmptyState(ICON_FA_SEARCH, "No process matches", filter.empty() ? std::string("No process is running that Manifold can list.") : "Nothing is called \"" + filter + "\".", {}, false);
         }
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, Px(2.0f)));
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const float rowWidth = ImGui::GetContentRegionAvail().x;
+        const float line = ImGui::GetTextLineHeight();
+        for (std::size_t r = 0; r < rows.size(); ++r)
+        {
+            const PickerRow& row = rows[r];
+            if (row.Kind <= 1)
+            {
+                if (r > 0)
+                    ImGui::Dummy(ImVec2(0.0f, Px(6.0f)));
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + Px(6.0f));
+                ImGui::PushFont(Fonts::Bold(), 0.0f);
+                ImGui::TextColored(ManifoldTheme::Label, "%s", row.Kind == 0 ? "Apps" : "Background processes");
+                ImGui::PopFont();
+                ImGui::SameLine();
+                Muted(std::to_string(row.Entry));
+                ImGui::Dummy(ImVec2(0.0f, Px(1.0f)));
+                continue;
+            }
+            const Target::ProcessEntry& entry = m_list[row.Entry];
+            const ProcessGroup& group = groups[row.Group];
+            const bool member = row.Kind == 3;
+            const bool tall = !member && group.App;
+            const float height = std::round(tall ? Px(42.0f) : Px(28.0f));
+            ImGui::PushID(row.Id.c_str());
+            const ImVec2 min = ImGui::GetCursorScreenPos();
+            const ImVec2 max(min.x + rowWidth, min.y + height);
+            const bool clicked = ImGui::InvisibleButton("##row", ImVec2(rowWidth, height));
+            const bool hovered = ImGui::IsItemHovered();
+            const bool doubleClicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+            const bool selected = row.Id == m_selectedRow;
+            if (selected && m_scrollToSelected)
+            {
+                ImGui::SetScrollHereY(0.5f);
+                m_scrollToSelected = false;
+            }
+            const bool visible = ImGui::IsRectVisible(min, max);
+            if (visible)
+            {
+                const float rounding = Px(6.0f);
+                if (selected)
+                    draw->AddRectFilled(min, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, hovered ? 0.22f : 0.17f)), rounding);
+                else if (hovered)
+                    draw->AddRectFilled(min, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.05f)), rounding);
+                if (entry.Id == current)
+                    draw->AddRectFilled(ImVec2(min.x, min.y + Px(7.0f)), ImVec2(min.x + Px(3.0f), max.y - Px(7.0f)), ImGui::GetColorU32(ManifoldTheme::Accent), Px(2.0f));
+            }
+
+            float right = max.x - Px(10.0f);
+            const float centerY = (min.y + max.y) * 0.5f;
+            bool caretHit = false;
+            if (!member && group.Members.size() > 1)
+            {
+                const bool expanded = m_expanded.count(group.Key) > 0 || pidFilter;
+                const char* caret = expanded ? ICON_FA_CHEVRON_DOWN : ICON_FA_CHEVRON_RIGHT;
+                const float caretSize = std::round(ImGui::GetFontSize() * 0.72f);
+                const float caretWidth = ImGui::GetFont()->CalcTextSizeA(caretSize, FLT_MAX, 0.0f, caret).x;
+                const ImRect caretRect(ImVec2(right - caretWidth - Px(8.0f), min.y), ImVec2(max.x, max.y));
+                caretHit = caretRect.Contains(ImGui::GetIO().MousePos);
+                if (visible)
+                    draw->AddText(ImGui::GetFont(), caretSize, ImVec2(right - caretWidth, std::round(centerY - caretSize * 0.5f)),
+                        ImGui::GetColorU32(caretHit && hovered ? ManifoldTheme::Accent : ManifoldTheme::Muted), caret);
+                right -= caretWidth + Px(8.0f);
+                if (visible)
+                    Pill(draw, right, centerY, std::to_string(group.Members.size()).c_str(), ManifoldTheme::Label);
+            }
+            if (visible)
+            {
+                if (!member || group.Members.size() == 1)
+                {
+                    const std::string pid = ToText(entry.Id);
+                    const float pidWidth = ImGui::CalcTextSize(pid.c_str()).x;
+                    draw->AddText(ImVec2(right - pidWidth, std::round(centerY - line * 0.5f)), ImGui::GetColorU32(ManifoldTheme::Muted), pid.c_str());
+                    right -= pidWidth + Px(10.0f);
+                }
+                if (entry.Id == current)
+                    Pill(draw, right, centerY, "opened", ManifoldTheme::Accent);
+                else if (!member && !last.empty() && group.Key == last)
+                    Pill(draw, right, centerY, "last", ManifoldTheme::Label);
+                if (!entry.Is64Bit)
+                    Pill(draw, right, centerY, "32-bit", ManifoldTheme::Label);
+                if (!entry.Accessible)
+                {
+                    const float lockWidth = ImGui::CalcTextSize(ICON_FA_LOCK).x;
+                    draw->AddText(ImVec2(right - lockWidth, std::round(centerY - line * 0.5f)), ImGui::GetColorU32(ManifoldTheme::Warning), ICON_FA_LOCK);
+                    right -= lockWidth + Px(8.0f);
+                }
+
+                float x = min.x + Px(12.0f);
+                if (member)
+                {
+                    x += Px(26.0f);
+                    draw->AddCircleFilled(ImVec2(x - Px(10.0f), centerY), Px(2.0f), ImGui::GetColorU32(ManifoldTheme::Muted));
+                    const std::string pid = "pid " + ToText(entry.Id);
+                    PushMono();
+                    draw->AddText(ImVec2(x, std::round(centerY - line * 0.5f)), ImGui::GetColorU32(ManifoldTheme::Label), pid.c_str());
+                    const float pidWidth = ImGui::CalcTextSize(pid.c_str()).x;
+                    PopMono();
+                    x += pidWidth + Px(12.0f);
+                    const std::string title = entry.WindowTitle.empty() ? std::string("no window") : entry.WindowTitle;
+                    ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
+                    ImGui::RenderTextEllipsis(draw, ImVec2(x, std::round(centerY - line * 0.5f)), ImVec2(right, std::round(centerY + line * 0.5f)), right, title.c_str(), nullptr, nullptr);
+                    ImGui::PopStyleColor();
+                }
+                else
+                {
+                    const float icon = std::round(tall ? Px(22.0f) : line);
+                    const ImVec2 iconAt(x, std::round(centerY - icon * 0.5f));
+                    void* texture = m_icons.Texture(m_workspace.Window(), entry.Path, static_cast<int>(icon), 4);
+                    if (texture)
+                        draw->AddImage(ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(texture))), iconAt, ImVec2(iconAt.x + icon, iconAt.y + icon));
+                    else
+                    {
+                        const char* glyph = group.App ? ICON_FA_WINDOW_MAXIMIZE : ICON_FA_COG;
+                        const ImVec2 glyphSize = ImGui::CalcTextSize(glyph);
+                        draw->AddText(ImVec2(std::round(iconAt.x + (icon - glyphSize.x) * 0.5f), std::round(centerY - glyphSize.y * 0.5f)), ImGui::GetColorU32(ManifoldTheme::Muted), glyph);
+                    }
+                    x += icon + Px(10.0f);
+                    const float nameY = tall ? std::round(centerY - line - Px(1.0f)) : std::round(centerY - line * 0.5f);
+                    ImGui::PushFont(Fonts::Bold(), 0.0f);
+                    ImGui::PushStyleColor(ImGuiCol_Text, !entry.Accessible ? ManifoldTheme::Muted : entry.Id == current ? ManifoldTheme::Accent : ManifoldTheme::Text);
+                    ImGui::RenderTextEllipsis(draw, ImVec2(x, nameY), ImVec2(right, nameY + line), right, entry.Name.c_str(), nullptr, nullptr);
+                    ImGui::PopStyleColor();
+                    ImGui::PopFont();
+                    if (tall)
+                    {
+                        const float titleY = std::round(centerY + Px(1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
+                        ImGui::RenderTextEllipsis(draw, ImVec2(x, titleY), ImVec2(right, titleY + line), right, entry.WindowTitle.c_str(), nullptr, nullptr);
+                        ImGui::PopStyleColor();
+                    }
+                }
+            }
+
+            if (clicked)
+            {
+                if (caretHit)
+                {
+                    if (!m_expanded.erase(group.Key))
+                        m_expanded.insert(group.Key);
+                }
+                else
+                    select(row);
+            }
+            if (doubleClicked && !caretHit)
+                openNow = entry.Id;
+            if (hovered && !caretHit)
+            {
+                std::string tip = entry.Name + "  ·  pid " + ToText(entry.Id) + "  ·  " + (entry.Is64Bit ? "64-bit" : "32-bit");
+                if (!entry.WindowTitle.empty())
+                    tip += "\n" + entry.WindowTitle;
+                if (!entry.Path.empty())
+                    tip += "\n" + WideToUtf8(entry.Path);
+                if (!entry.Accessible)
+                    tip += "\n\nNeeds administrator rights to open.";
+                if (!member && group.Members.size() > 1)
+                    tip += "\n" + std::to_string(group.Members.size()) + " processes with this name; the arrow lists them.";
+                ItemTooltip(tip.c_str());
+            }
+            else if (hovered && caretHit)
+                ItemTooltip(m_expanded.count(group.Key) ? "Hide the processes of this name" : "Show every process of this name");
+            ImGui::PopID();
+        }
+        ImGui::PopStyleVar();
+        ImGui::EndChild();
+
         ImGui::BeginDisabled(m_selected == 0);
         if (AccentButton(ICON_FA_PLUG "  Open", Px(110.0f, 0.0f)) || (m_selected && ImGui::IsKeyPressed(ImGuiKey_Enter, false) && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)))
-            open(MakeProcessId(m_selected));
+            openNow = MakeProcessId(m_selected);
         ImGui::EndDisabled();
         ImGui::SameLine();
-        Muted(std::to_string(m_list.size()) + " processes");
+        ImGui::AlignTextToFramePadding();
+        std::size_t appCount = 0;
+        for (const ProcessGroup& group : groups)
+            appCount += group.App ? 1 : 0;
+        Muted(Format("%zu processes  ·  %zu apps", m_list.size(), appCount));
+        if (openNow)
+            open(*openNow);
         EndToolWindow();
     }
 

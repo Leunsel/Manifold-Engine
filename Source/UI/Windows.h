@@ -253,7 +253,13 @@ namespace Manifold::UI
         std::string m_filter;
         bool m_windowsOnly = false;
         std::uint32_t m_selected = 0;
+        std::string m_selectedRow;
         bool m_focusFilter = true;
+        bool m_scrollToSelected = false;
+        std::string m_lastFilter = "\x01";
+        bool m_lastMode = false;
+        std::set<std::string> m_expanded;
+        IconCache m_icons;
     };
 
     class MemoryViewer : public ToolWindow
