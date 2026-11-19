@@ -6,6 +6,7 @@
 #include "App/Settings.h"
 #include "App/TableRuntime.h"
 #include "App/TargetSession.h"
+#include "App/UnrealSession.h"
 #include "App/WriteHistory.h"
 #include "App/SettingsStore.h"
 #include "Asm/AutoAssembler.h"
@@ -115,6 +116,8 @@ namespace Manifold
         Status EnsureDebugger();
         ManagedSession& Managed() { return m_managed; }
         const ManagedSession& Managed() const { return m_managed; }
+        UnrealSession& Unreal() { return m_unreal; }
+        const UnrealSession& Unreal() const { return m_unreal; }
         WriteHistory& Writes() { return m_writes; }
         Target::MonoBridge& Mono() { return m_target.Mono(); }
         bool MonoPresent() const { return m_target.Mono().Present(); }
@@ -208,5 +211,6 @@ namespace Manifold
         BackgroundWork m_work;
         WriteHistory m_writes;
         ManagedSession m_managed{ m_target, m_work, m_settings, [this](LogLevel level, std::string text) { Notify(level, std::move(text)); } };
+        UnrealSession m_unreal{ m_target, m_work, [this](LogLevel level, std::string text) { Notify(level, std::move(text)); } };
     };
 }

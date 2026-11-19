@@ -4524,11 +4524,11 @@ if string.endsWith == nil then
 end
 )MLUA"),
         };
-        constexpr std::array<std::string_view, 8> kManifold0 = {
+        constexpr std::array<std::string_view, 10> kManifold0 = {
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 5
+local API_VERSION = 6
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -5587,8 +5587,8 @@ define(symbol, "removeResolver", {
   return removeSymbolResolver(id)
 end)
 
-local EVENTS = { "processOpened", "processClosed" }
-local subscribers = { processOpened = {}, processClosed = {} }
+local EVENTS = { "processOpened", "processClosed", "unrealReady" }
+local subscribers = { processOpened = {}, processClosed = {}, unrealReady = {} }
 local subscriberNames = {}
 local nextSubscriber = 1
 
@@ -5625,7 +5625,7 @@ define(event, "subscribe", {
     KEY_OPTION,
   },
   returns = "id",
-  doc = "Calls `handler` on an event. `processOpened` passes the process as `manifold.process.info()` gives it, also when the same process is opened again; `processClosed` passes nothing and comes before the next `processOpened`." .. KEY_TEXT,
+  doc = "Calls `handler` on an event. `processOpened` passes the process as `manifold.process.info()` gives it, also when the same process is opened again; `processClosed` passes nothing and comes before the next `processOpened`; `unrealReady` passes nothing and follows when the Unreal tool has resolved the game." .. KEY_TEXT,
 }, function(name, handler, options)
   return subscribe({ name = name, handler = handler }, options)
 end)
@@ -5767,6 +5767,322 @@ local DOC_SPEC = {
   see = "table",
 }
 
+local unreal = area("unreal", "Unreal Engine 4 and 5 reflection, built into the program: it finds the game's name table, object array and reflection layout itself, without an SDK or game offsets, and only reads. Structure Dissect then knows Unreal objects (real property names, nested structs, bitfield bools, the native gaps), the custom types `UE FName`, `UE FString` and `UE Object Index` show names, strings and weak references, and `<Type>_<Property>` symbols such as `Actor_RootComponent` resolve to offsets in every session. It starts by itself when an Unreal game is opened, unless `configure{ autoStart = false }` says otherwise, and the window is in Extensions > Unreal Engine. The queries need it resolved and return `nil` and an `ME-4201` error before that. Types are given by name (`\"Actor\"`, without the U, A or F prefix) or by address.")
+
+local function many(first, ...)
+  if first == nil and select("#", ...) > 0 and (...) ~= nil then
+    return result(first, ...)
+  end
+  return first, ...
+end
+
+local PATTERN_TEXT = "A pattern is an AOB string, or `{ pattern, offset, length, relative, add, module }`: the hit plus `offset` holds a 32-bit displacement relative to the end of the instruction (`length` bytes long, `offset + 4` by default), or with `relative = false` an absolute pointer; `add` is added to the result, and `module` (the executable by default) is where the pattern is searched."
+
+define(unreal, "status", {
+  returns = "`{ state, text, failure, objects, types, namePool, objectArray, objectArraySource, legacyNames, doubleVectors, seconds }`",
+  doc = "Where the Unreal tool stands. `state` is `idle`, `notUnreal` (the opened game is no Unreal game), `resolving`, `ready`, `failed` (with `failure`) or `stopped`; `text` is the line the menu shows. The counts and addresses are there once it is ready.",
+}, function()
+  return native.unrealStatus()
+end)
+
+define(unreal, "start", {
+  params = { { name = "options", type = "table", optional = true, keys = { wait = "boolean" } } },
+  returns = "true, or nil, error",
+  doc = "Resolves the opened process again, in any process, not only one that looks like Unreal. It runs in the background and the `unrealReady` event follows; with `options.wait` it resolves before it returns and gives the error when it fails. After `stop` this is what turns the tool on again.",
+}, function(options)
+  return result(native.unrealStart((options or EMPTY).wait == true))
+end)
+
+define(unreal, "stop", {
+  returns = "true",
+  doc = "Shuts the Unreal tool down: it drops what was resolved, its symbols and dissects stop, and nothing starts by itself again until `start`, also in the next game.",
+}, function()
+  return native.unrealStop()
+end)
+
+define(unreal, "configure", {
+  params = {
+    { name = "options", type = "table", keys = {
+      autoStart = "boolean", dissect = "boolean", names = "boolean", symbols = "boolean", types = "boolean",
+      namePool = "any", objectArray = "any", legacyNames = "boolean", layout = "any", patterns = "any",
+    } },
+  },
+  returns = "true, or nil, error",
+  doc = "Changes how the tool works; keys that are left out keep their value, and the settings last until the program closes, so an autorun script sets them once. `autoStart` (true): resolve when an Unreal game is opened. `dissect`, `names`, `symbols`, `types` (all true): Structure Dissect fields, structure names, the `<Type>_<Property>` and `GObjects` symbols, the custom types. For a game the search does not find: `namePool` (the FNamePool, or with `legacyNames = true` the TNameEntryArray of UE 4.22 and older) and `objectArray` (FUObjectArray or its ObjObjects) as addresses or expressions, `layout` as a table of offsets that replace what the probes find (`index`, `class`, `name`, `outer`, `super`, `childProperties`, `structSize`, `children`, `childNext`, `functionFlags`, `fField`, `fieldClass`, `fieldName`, `next`, `offset`, `size`, `extra`, `itemSize`, `itemOffset`), and `patterns = { names = {...}, objects = {...} }` searched before the built-in search. " .. PATTERN_TEXT .. " `false` clears an address, the layout or the patterns. A change to the addresses, layout or patterns applies at the next `start`.",
+}, function(options)
+  return result(native.unrealConfigure(options))
+end)
+
+define(unreal, "config", {
+  returns = "`{ autoStart, dissect, names, symbols, types, namePool, objectArray, legacyNames, layout, patterns }`",
+  doc = "The settings `configure` changes, as it would take them.",
+}, function()
+  return native.unrealConfig()
+end)
+
+define(unreal, "layout", {
+  returns = "table of offsets, or nil, error",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "The layout the tool found: the object array items (`itemSize`, `itemOffset`, `chunked`), UObject (`index`, `class`, `name`, `outer`), UStruct (`super`, `childProperties`, `structSize`, `children`, `childNext`, `functionFlags`) and the properties (`fField`, `fieldClass`, `fieldName`, `next`, `offset`, `size`, `extra`, `component` 4 or 8 for float or double vectors). The keys are the ones `configure{ layout = ... }` takes.",
+}, function()
+  return result(native.unrealLayout())
+end)
+
+define(unreal, "count", {
+  returns = "integer, or nil, error",
+  doc = "How many slots the object array has in use.",
+}, function()
+  return result(native.unrealCount())
+end)
+
+define(unreal, "objectAt", {
+  params = { { name = "index", type = "integer" } },
+  returns = "address or nil, or nil, error",
+  doc = "The object in a slot of the object array; nil for an empty slot.",
+}, function(index)
+  return many(native.unrealObjectAt(index))
+end)
+
+define(unreal, "isObject", {
+  params = { { name = "address", type = "address" } },
+  returns = "boolean",
+  doc = "Whether a live UObject starts at the address: its index points back at it in the object array. False before the tool is ready.",
+}, function(address)
+  return native.unrealIsObject(address) == true
+end)
+
+define(unreal, "name", {
+  params = { { name = "address", type = "address" } },
+  returns = "string or nil, or nil, error",
+  doc = "The FName stored at an address, with its number as `Name_1`.",
+}, function(address)
+  return many(native.unrealName(address))
+end)
+
+define(unreal, "nameOf", {
+  params = { { name = "object", type = "address" } },
+  returns = "string or nil, or nil, error",
+  doc = "An object's name.",
+}, function(object)
+  return many(native.unrealNameOf(object))
+end)
+
+define(unreal, "fullName", {
+  params = { { name = "object", type = "address" } },
+  returns = "string, or nil, error",
+  doc = "An object's path through its outers, such as `/Game/Maps/Level.Level.PersistentLevel.Pawn_1`.",
+}, function(object)
+  return result(native.unrealFullName(object))
+end)
+
+define(unreal, "classOf", {
+  params = { { name = "object", type = "address" } },
+  returns = "address or nil, or nil, error",
+  doc = "An object's class.",
+}, function(object)
+  return many(native.unrealClassOf(object))
+end)
+
+define(unreal, "type", {
+  params = { { name = "name", type = "string" } },
+  returns = "address or nil, or nil, error",
+  doc = "A class or struct by name, any case, without the U, A or F prefix.",
+}, function(name)
+  return many(native.unrealType(name))
+end)
+
+define(unreal, "types", {
+  params = { { name = "filter", type = "string", optional = true } },
+  returns = "list of `{ name, kind, address }`, or nil, error",
+  doc = "Every class, struct and enum, sorted by name; with `filter`, the ones whose name contains it. `kind` is `class`, `struct` or `enum`.",
+}, function(filter)
+  return result(native.unrealTypes(filter))
+end)
+
+define(unreal, "super", {
+  params = { { name = "type", type = "string|integer" } },
+  returns = "address or nil, or nil, error",
+  doc = "The parent of a class or struct.",
+}, function(type)
+  return many(native.unrealSuper(type))
+end)
+
+define(unreal, "size", {
+  params = { { name = "type", type = "string|integer" } },
+  returns = "integer or nil, or nil, error",
+  doc = "The size of a class or struct in bytes.",
+}, function(type)
+  return many(native.unrealSize(type))
+end)
+
+define(unreal, "cppName", {
+  params = { { name = "type", type = "string|integer" } },
+  returns = "string, or nil, error",
+  doc = "A type's C++ spelling: `F` for structs, `A` for actors, `U` for other classes.",
+}, function(type)
+  return result(native.unrealCppName(type))
+end)
+
+local FIELD_TEXT = "A field is `{ name, type, typeText, owner, offset, start, size, dim, flags, address, inner, metaClass, byteOffset, bitMask }`: `type` is the property class (`FloatProperty`), `typeText` the C++ type (`TArray<AActor*>`), `start` the offset of the first byte (a bitfield bool adds `byteOffset` and has `bitMask`), `inner` the struct, class or enum it refers to."
+
+define(unreal, "fields", {
+  params = {
+    { name = "type", type = "string|integer" },
+    { name = "ownOnly", type = "boolean", optional = true },
+  },
+  returns = "list of fields, or nil, error",
+  doc = "The reflected properties of a class or struct, its parents' included unless `ownOnly`, sorted by offset. " .. FIELD_TEXT,
+}, function(type, ownOnly)
+  return result(native.unrealFields(type, ownOnly == true))
+end)
+
+define(unreal, "field", {
+  params = {
+    { name = "type", type = "string|integer" },
+    { name = "name", type = "string" },
+  },
+  returns = "field, or nil, error",
+  doc = "One property by name, any case, searched in the parents too; `ME-4203` when there is none. " .. FIELD_TEXT,
+}, function(type, name)
+  return result(native.unrealField(type, name))
+end)
+
+define(unreal, "offset", {
+  params = {
+    { name = "type", type = "string|integer" },
+    { name = "name", type = "string" },
+  },
+  returns = "symbol, offset, or nil, error",
+  doc = "The offset symbol of a property (`Actor_RootComponent`) and its value. The symbol works in address expressions in every session, so records written with it keep working after a game update.",
+}, function(type, name)
+  return many(native.unrealSymbol(type, name))
+end)
+
+define(unreal, "functions", {
+  params = {
+    { name = "type", type = "string|integer" },
+    { name = "inherited", type = "boolean", optional = true },
+  },
+  returns = "list of `{ name, owner, address, flags, parameters }`, or nil, error",
+  doc = "The UFunctions a class declares, and with `inherited` its parents' too. `parameters` are fields; the return value is the one with the return flag (`0x400` in `flags`).",
+}, function(type, inherited)
+  return result(native.unrealFunctions(type, inherited == true))
+end)
+
+define(unreal, "enum", {
+  params = { { name = "enum", type = "string|integer" } },
+  returns = "list of `{ name, value }`, or nil, error",
+  doc = "The entries of an enum, by name or address.",
+}, function(enum)
+  return result(native.unrealEnum(enum))
+end)
+
+define(unreal, "instances", {
+  params = {
+    { name = "type", type = "string|integer" },
+    { name = "limit", type = "integer", optional = true },
+  },
+  returns = "list of addresses, or nil, error",
+  doc = "The live objects of a class and its subclasses, without the class default objects. One pass over the object array; `limit` stops early.",
+}, function(type, limit)
+  return result(native.unrealInstances(type, limit))
+end)
+
+define(unreal, "find", {
+  params = { { name = "name", type = "string" } },
+  returns = "address or nil, or nil, error",
+  doc = "The first object with that name, or with that full name when `name` has a dot in it.",
+}, function(name)
+  return many(native.unrealFind(name))
+end)
+
+define(unreal, "owner", {
+  params = { { name = "address", type = "address" } },
+  returns = "object, class, or nil, error",
+  doc = "The object an address belongs to and its class; `ME-4204` when no live object holds it.",
+}, function(address)
+  return many(native.unrealOwner(address))
+end)
+
+define(unreal, "whois", {
+  params = { { name = "address", type = "address" } },
+  returns = "string, or nil, error",
+  doc = "One line about an address: the object, its class, the offset, the property path down to the innermost field and that field's type, such as `BP_Pawn_C_1 (ABP_Pawn_C) +130: RootComponent  USceneComponent*`.",
+}, function(address)
+  return result(native.unrealWhois(address))
+end)
+
+define(unreal, "locate", {
+  params = { { name = "address", type = "address" } },
+  returns = "`{ object, class, offset, path, field, within, struct }`, or nil, error",
+  doc = "What `whois` says, as a table: `path` is the property path as text, `field` the innermost field, `within` the offset inside it, and `struct` the outermost struct property that starts exactly at the address.",
+}, function(address)
+  return result(native.unrealLocate(address))
+end)
+
+define(unreal, "engine", {
+  returns = "address or nil, or nil, error",
+  doc = "The GameEngine object (or the Engine of an editor build).",
+}, function()
+  return many(native.unrealEngine())
+end)
+
+define(unreal, "world", {
+  returns = "address or nil, or nil, error",
+  doc = "The world the engine's game viewport shows; nil while no level is loaded.",
+}, function()
+  return many(native.unrealWorld())
+end)
+
+define(unreal, "controller", {
+  returns = "address or nil, or nil, error",
+  doc = "The first local player's PlayerController.",
+}, function()
+  return many(native.unrealController())
+end)
+
+define(unreal, "pawn", {
+  returns = "address or nil, or nil, error",
+  doc = "The pawn the local PlayerController possesses.",
+}, function()
+  return many(native.unrealPawn())
+end)
+
+define(unreal, "offline", {
+  returns = "boolean or nil, or nil, error",
+  doc = "true when the world has no net driver or one without connections, false when it is connected or hosts remote players, nil when it cannot tell. Writes in an online session can get the account banned.",
+}, function()
+  return many(native.unrealIsOffline())
+end)
+
+define(unreal, "walk", {
+  params = {
+    { name = "object", type = "address" },
+    { name = "steps", type = "table" },
+    { name = "root", type = "string", optional = true },
+  },
+  returns = "address, expression, field, or nil, error",
+  doc = "Follows properties by name from an object: `walk(manifold.unreal.pawn(), { \"RootComponent\", \"RelativeLocation\" })`. Object properties are followed, structs entered, and `Name[i]` picks a TArray element. Gives the address of the last step, an address expression from `root` (the object's address by default) with offset symbols, such as `[GameEngine+GameEngine_GameViewport]+...`, and the last field.",
+}, function(object, steps, root)
+  return many(native.unrealWalk(object, steps, root))
+end)
+
+define(unreal, "dump", {
+  params = { { name = "type", type = "string|integer" } },
+  returns = "list of lines, or nil, error",
+  doc = "A class or struct as C++-like lines: its name, parent and size, then one line per property with offset, type, name and the class that declares it.",
+}, function(type)
+  return result(native.unrealDump(type))
+end)
+
+define(unreal, "claims", {
+  params = { { name = "address", type = "any" } },
+  returns = "boolean",
+  doc = "Whether the tool names the address itself (a live object or a remembered array), for other dissect scripts that step aside for Unreal objects. Never raises, false before it is ready.",
+}, function(address)
+  return native.unrealClaims(address) == true
+end)
+
 local doc = area("doc", "The documentation behind completion, signature help, hover tooltips and the docs panel. Manifold, Cheat Engine and Lua functions are documented already. A module documents its own functions with `register`, or writes LuaLS annotations (`---@param name type`) above them and calls `registerModule`. A script never replaces Manifold's own documentation.")
 
 define(doc, "register", {
@@ -5787,7 +6103,8 @@ define(doc, "registerModule", {
     { name = "options", type = "table", optional = true, keys = { doc = "string" } },
   },
   returns = "number of registered functions, or nil, error",
-  doc = "Documents every function of a module table under `path` (such as `\"ManifoldUE\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Documents every function of a module table under `path` (such as `\"ManifoldUE\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
 }, function(path, module, options)
   return docResult(native.docRegisterModule(path, module, options))
 end)
@@ -5874,8 +6191,7 @@ do
   end)
 end
 
-)MLUA"),
-            std::string_view(R"MLUA(local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
+local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
 
 local function subarea(parent, name, summary)
   local path = parent.path .. "." .. name
@@ -6063,7 +6379,8 @@ end
 
 local function dropEntry(id)
   local entry = uiEntries[id]
-  if not entry then
+)MLUA"),
+            std::string_view(R"MLUA(  if not entry then
     return
   end
   uiEntries[id] = nil
@@ -6171,8 +6488,7 @@ widgetObject = function(entry)
     end
     return result(native.uiSet(entry.id, value))
   end)
-)MLUA"),
-            std::string_view(R"MLUA(  method("draw", { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } } }, function(drawings, options)
+  method("draw", { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } } }, function(drawings, options)
     if entry.kind ~= "canvas" then
       misuse(prefix .. ".draw: only a canvas draws")
     end
@@ -6365,7 +6681,8 @@ local WINDOW_METHOD_DOCS = {
   remove = { returns = "boolean", doc = "Removes the window and its widgets for good." },
   update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, update interval or handlers." },
   show = { returns = "boolean", doc = "Shows the window again after the user or `hide` closed it." },
-  hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
+)MLUA"),
+            std::string_view(R"MLUA(  hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
   focus = { returns = "boolean", doc = "Shows the window and brings it to the front." },
   isOpen = { returns = "boolean", doc = "Whether the window exists and is shown." },
 }
@@ -6397,8 +6714,7 @@ local WIDGET_METHOD_DOCS = {
   clear = { returns = "boolean", doc = "Removes a container's widgets, or a canvas's drawings." },
   remove = { returns = "boolean", doc = "Removes the widget and everything in it." },
   update = { params = { { name = "options", type = "table" } }, returns = "boolean", doc = "Changes options of the widget: the same keys `add` takes for its kind, handlers included." },
-)MLUA"),
-            std::string_view(R"MLUA(  get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a number, the chosen combo item's or table row's number, the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
+  get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a number, the chosen combo item's or table row's number, the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
   set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
   draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
   getView = { returns = "table", doc = "A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom." },
@@ -6569,7 +6885,8 @@ local function noticeObject(entry)
           state.sticky = options.sticky
         end
         local sticky = state.sticky or (state.progress >= 0 and state.progress < 1)
-        if not native.uiNoticeUpdate(entry.id, state.text, state.level, state.progress, sticky) then
+)MLUA"),
+            std::string_view(R"MLUA(        if not native.uiNoticeUpdate(entry.id, state.text, state.level, state.progress, sticky) then
           return gone("notice")
         end
         return true
@@ -6659,8 +6976,7 @@ local function addEntry(kind, keys, values, options)
     copy[key] = value
   end
   for key, value in pairs(options) do
-)MLUA"),
-            std::string_view(R"MLUA(    if type(value) ~= "function" then
+    if type(value) ~= "function" then
       copy[key] = value
     end
   end
@@ -6847,7 +7163,8 @@ local RULES = [[
 
 1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`. An area may group its functions into sub-areas one level down (`manifold.ui.window`, `manifold.ui.dialog`).
 2. **Names.** Areas are lower-case nouns. Functions are lowerCamelCase: a lookup without side effects is named after what it returns (`process.module`, `log.channel`), everything else starts with a verb (`open`, `read`, `create`). Predicates start with `is` or `has` and return a boolean. Settings come in `get…`/`set…` pairs. The five log functions are named after their level. Constants are lowerCamelCase fields. There are no aliases and no capitalised duplicates.
-3. **Calls use a dot.** `manifold.log.info("ready")`, never `manifold.log:info("ready")`. No function takes `self`, and the objects the API returns (channels) work the same way. A colon call raises an error that says so.
+)MLUA"),
+            std::string_view(R"MLUA(3. **Calls use a dot.** `manifold.log.info("ready")`, never `manifold.log:info("ready")`. No function takes `self`, and the objects the API returns (channels) work the same way. A colon call raises an error that says so.
 4. **Arguments.** Required arguments come first, optional ones after them, and settings go into one `options` table at the end. A `?` after a name marks it optional. A missing, extra or wrongly typed argument and an unknown option key raise `ME-7007`, naming the function and the argument. Addresses are integers or address expressions such as `"game.exe+10"`.
 5. **Results.** A function that can fail while the script runs (no process, unreadable memory, unknown symbol) returns its value on success, or `true` when it has none, and `nil, error` on failure. It does not raise for those. Predicates never fail.
 6. **Errors.** An error is a table `{ code, message, where, traceback }`: `code` is the `ME-` code from [ERRORS.md](ERRORS.md) or a script's own code, `message` the text, `where` the script line that made the call (`chunk:line`), `traceback` the stack when `manifold.error.try` caught it. `tostring(error)` gives `where: message (code)`. Using the API the wrong way (rules 3 and 4, unknown names) raises such an error instead of returning it.

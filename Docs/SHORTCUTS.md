@@ -24,6 +24,7 @@ Works in every window, unless the focused window uses the same keys for somethin
 | `F1` | Keyboard shortcuts | `OpenShortcuts` | Manifold |
 | `Ctrl+Shift+L` | Log | `OpenLog` | Manifold |
 | `Ctrl+Alt+M` | Mono / .NET dissector | `OpenMono` | Manifold |
+| `Ctrl+Alt+U` | Unreal Engine types and properties | `OpenUnreal` | Manifold |
 | `Ctrl+Shift+F12` | Profiler and diagnostics | `OpenProfiler` | Manifold |
 
 ## Main window

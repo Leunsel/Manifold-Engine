@@ -22,6 +22,7 @@ Outside the program: `Agent` is the in-process debugger DLL (VEH) that is inject
 - **Engine** (`App/Engine`) ties the parts together. It opens and closes the process, runs the tick, and posts notices. It owns:
   - **TargetSession**: the opened process, its generation number, symbols, PDB symbols, the Mono bridge and the code map.
   - **ManagedSession**: loads, reloads and shuts down the Mono or IL2CPP helper as background work, starts the scene explorer, and logs how a game ended while the agent was in it.
+  - **UnrealSession**: resolves an Unreal Engine game as background work (`Target/UnrealRuntime`: name table, object array, reflection layout and the type index), keeps the `manifold.unreal` settings, registers `GObjects` and friends, answers `<Type>_<Property>` symbols, and provides the custom types `UE FName`, `UE FString` and `UE Object Index`. Structure Dissect asks it (`Table/UnrealStructures`) before Mono and before the Lua dissectors.
   - **TableRuntime**: the address list, structures, table symbols, record values, freezes, hotkeys, and table load and save.
   - **ActivationRunner**: turns scripts on and off on its worker thread, and runs Lua for it on the main thread.
   - **BackgroundWork**: jobs with progress and cancel. A job's `Finish` callback runs on the main thread in `Drain`, which the tick calls. Serial lanes run the jobs of one group one after another.

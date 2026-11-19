@@ -30,6 +30,15 @@ namespace Manifold::Lua
             return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
         }
 
+        bool BuiltInUnrealScript(const std::filesystem::path& path)
+        {
+            std::ifstream file(path, std::ios::binary);
+            std::string head(16384, '\0');
+            file.read(head.data(), static_cast<std::streamsize>(head.size()));
+            head.resize(static_cast<std::size_t>(file.gcount()));
+            return head.find("__MANIFOLD_UE_RUNTIME__") != std::string::npos;
+        }
+
         int Traceback(lua_State* state)
         {
             const char* message = lua_tostring(state, 1);
@@ -298,6 +307,12 @@ namespace Manifold::Lua
         Status first;
         for (const auto& script : scripts)
         {
+            if (BuiltInUnrealScript(script))
+            {
+                LOG_INFO("Autorun", "Skipped " + WideToUtf8(script.filename().wstring()) +
+                    ": Unreal Engine support is built into the program now (Extensions > Unreal Engine, manifold.unreal). The file stays in the autorun folder and can be deleted.");
+                continue;
+            }
             const Status status = RunFile(script);
             if (!status)
             {
@@ -642,6 +657,15 @@ namespace Manifold::Lua
 
     bool LuaEngine::CustomToText(const CustomType& type, std::span<const std::uint8_t> bytes, std::uint64_t address, std::string& text)
     {
+        if (type.NativeText)
+        {
+            if (static_cast<int>(bytes.size()) < type.ByteCount())
+                return false;
+            const auto native = type.NativeText(bytes.first(static_cast<std::size_t>(type.ByteCount())));
+            if (native)
+                text = *native;
+            return native.has_value();
+        }
         if (type.String)
         {
             if (type.ToValue <= 0 || static_cast<int>(bytes.size()) < type.ByteCount())
@@ -683,6 +707,16 @@ namespace Manifold::Lua
 
     bool LuaEngine::CustomFromText(const CustomType& type, std::string_view text, std::uint64_t address, std::vector<std::uint8_t>& bytes)
     {
+        if (type.NativeText)
+        {
+            if (!type.NativeBytes)
+                return false;
+            auto native = type.NativeBytes(text);
+            if (!native)
+                return false;
+            bytes = std::move(*native);
+            return true;
+        }
         if (type.ToBytes <= 0)
             return false;
         const std::string trimmed = Trim(text);

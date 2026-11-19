@@ -4,6 +4,7 @@
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
 #include "Table/ManagedStructures.h"
+#include "Table/UnrealStructures.h"
 #include "Target/Mono.h"
 #include "UI/Fonts.h"
 #include "UI/Shortcuts.h"
@@ -39,6 +40,27 @@ namespace Manifold::UI
         WorkOptions ManagedLookup()
         {
             return { .Title = "Reading the managed class", .Group = "structure", .Cancellable = false, .Quiet = true, .Serial = true };
+        }
+
+        WorkOptions UnrealLookup()
+        {
+            return { .Title = "Reading the Unreal object", .Group = "structure", .Cancellable = false, .Quiet = true, .Serial = true };
+        }
+
+        Table::UnrealArrayLookup UnrealArrays(Engine& engine)
+        {
+            return [&engine](std::uint64_t data) -> std::optional<std::pair<Target::UnrealField, std::uint64_t>>
+                {
+                    const auto array = engine.Unreal().ArrayAt(data);
+                    if (!array)
+                        return std::nullopt;
+                    return std::make_pair(array->Field, array->Header);
+                };
+        }
+
+        bool NativeLookups(Engine& engine)
+        {
+            return engine.MonoPresent() || engine.Unreal().Names() || engine.Lua().HasStructureNameLookups();
         }
     }
 
@@ -277,31 +299,57 @@ namespace Manifold::UI
                             done(std::move(found));
                     });
             };
-        if (!engine.MonoPresent())
+        auto managed = [&engine, alive, address, containing, scripts, done]()
+            {
+                if (alive.expired())
+                    return;
+                if (!engine.MonoPresent())
+                {
+                    scripts();
+                    return;
+                }
+                engine.Work().Start(ManagedLookup(), [&engine, alive, address, containing, scripts, done](WorkProgress&) -> BackgroundWork::Finish
+                    {
+                        std::optional<Lua::StructureLookup> found;
+                        if (containing)
+                        {
+                            if (const auto instance = engine.Mono().ClassAt(address))
+                                found = Lua::StructureLookup{ instance->Name, instance->Base };
+                        }
+                        else if (const auto name = engine.Mono().ClassNameAt(address))
+                        {
+                            found = Lua::StructureLookup{ *name, address };
+                        }
+                        return [alive, found, scripts, done]()
+                            {
+                                if (alive.expired())
+                                    return;
+                                if (found)
+                                    done(found);
+                                else
+                                    scripts();
+                            };
+                        });
+            };
+        if (!engine.Unreal().Names())
         {
-            scripts();
+            managed();
             return;
         }
-        engine.Work().Start(ManagedLookup(), [&engine, alive, address, containing, scripts, done](WorkProgress&) -> BackgroundWork::Finish
+        const auto runtime = engine.Unreal().Runtime();
+        engine.Work().Start(UnrealLookup(), [&engine, runtime, alive, address, containing, managed, done](WorkProgress&) -> BackgroundWork::Finish
             {
                 std::optional<Lua::StructureLookup> found;
-                if (containing)
-                {
-                    if (const auto instance = engine.Mono().ClassAt(address))
-                        found = Lua::StructureLookup{ instance->Name, instance->Base };
-                }
-                else if (const auto name = engine.Mono().ClassNameAt(address))
-                {
-                    found = Lua::StructureLookup{ *name, address };
-                }
-                return [alive, found, scripts, done]()
+                if (const auto name = Table::UnrealStructureName(*runtime, address, containing, UnrealArrays(engine)))
+                    found = Lua::StructureLookup{ name->first, name->second };
+                return [alive, found, managed, done]()
                     {
                         if (alive.expired())
                             return;
                         if (found)
                             done(found);
                         else
-                            scripts();
+                            managed();
                     };
             });
     }
@@ -314,7 +362,7 @@ namespace Manifold::UI
         m_suggestedName = m_newName;
         m_lookupRunning = false;
         const std::uint64_t serial = ++m_lookupSerial;
-        if (!address || !m_engine.HasProcess() || (!m_engine.MonoPresent() && !m_engine.Lua().HasStructureNameLookups()))
+        if (!address || !m_engine.HasProcess() || !NativeLookups(m_engine))
             return;
         m_lookupRunning = true;
         LookupName(address, true, [this, serial](std::optional<Lua::StructureLookup> found)
@@ -335,7 +383,7 @@ namespace Manifold::UI
 
     void StructureWindow::ExpandPointer(Table::StructDefinition& parent, Table::StructField& field, std::uint64_t target, const std::string& path)
     {
-        const bool lookups = target && m_engine.HasProcess() && (m_engine.MonoPresent() || m_engine.Lua().HasStructureNameLookups());
+        const bool lookups = target && m_engine.HasProcess() && NativeLookups(m_engine);
         if (!lookups)
         {
             field.ChildStructure = Guess(parent.Name + "." + field.Name, target, 256).Name;
@@ -426,7 +474,7 @@ namespace Manifold::UI
         if (!m_engine.HasProcess())
             return definition;
         const bool mono = address && m_engine.MonoPresent();
-        if (mono || (address && m_engine.Lua().HasDissectOverrides()))
+        if (mono || (address && (m_engine.Unreal().Dissects() || m_engine.Lua().HasDissectOverrides())))
         {
             Fill(&definition, address, size, mono);
             return definition;
@@ -442,7 +490,7 @@ namespace Manifold::UI
         m_filling.insert(definition);
         const std::weak_ptr<int> alive = m_alive;
         Engine& engine = m_engine;
-        auto finish = [this, &engine, alive, definition, address, size, mono](bool handled)
+        auto finish = [this, &engine, alive, definition, address, size, mono](bool handled, bool native)
             {
                 if (!alive.expired())
                     m_filling.erase(definition);
@@ -452,7 +500,7 @@ namespace Manifold::UI
                 if (handled)
                 {
                     live->Sort();
-                    if (!mono && engine.HasProcess() && live->Size() < size)
+                    if (!mono && !native && engine.HasProcess() && live->Size() < size)
                         Table::GuessFields(*engine.Process(), *live, address, live->Size(), size - live->Size());
                 }
                 else if (engine.HasProcess())
@@ -466,11 +514,41 @@ namespace Manifold::UI
             {
                 if (!LiveStructure(engine, definition) || !engine.Lua().HasDissectOverrides())
                 {
-                    finish(false);
+                    finish(false, false);
                     return;
                 }
-                engine.Lua().DissectStructureLater(definition, address, finish);
+                engine.Lua().DissectStructureLater(definition, address, [finish](bool handled) { finish(handled, false); });
             };
+        if (!mono && engine.Unreal().Dissects())
+        {
+            const auto runtime = engine.Unreal().Runtime();
+            const bool customTypes = engine.Unreal().Config().Types;
+            engine.Work().Start(UnrealLookup(), [&engine, runtime, definition, address, customTypes, scripts, finish](WorkProgress&) -> BackgroundWork::Finish
+                {
+                    Table::UnrealFill fill = Table::FillFromUnreal(*runtime, address, UnrealArrays(engine), customTypes);
+                    return [&engine, definition, fill = std::move(fill), scripts, finish]()
+                        {
+                            if (!fill.Handled)
+                            {
+                                scripts();
+                                return;
+                            }
+                            Table::StructDefinition* live = LiveStructure(engine, definition);
+                            if (!live)
+                            {
+                                finish(false, true);
+                                return;
+                            }
+                            live->Fields = fill.Fields;
+                            std::vector<std::pair<std::uint64_t, UnrealArray>> arrays;
+                            for (const Table::UnrealArrayRef& array : fill.Arrays)
+                                arrays.push_back({ array.Data, UnrealArray{ array.Field, array.Header } });
+                            engine.Unreal().RememberArrays(arrays);
+                            finish(true, true);
+                        };
+                });
+            return;
+        }
         if (!mono)
         {
             scripts();
@@ -495,13 +573,13 @@ namespace Manifold::UI
                         Table::StructDefinition* live = LiveStructure(engine, definition);
                         if (!live)
                         {
-                            finish(false);
+                            finish(false, false);
                             return;
                         }
                         Table::FillFromManaged(*live, fields, 0, nested);
                         const int header = 2 * (engine.HasProcess() ? engine.Process()->PointerSize() : 8);
                         Table::AddManagedLayouts(engine.Structures(), nested, header, live->Name);
-                        finish(true);
+                        finish(true, false);
                     };
             });
     }

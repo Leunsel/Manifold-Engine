@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 5 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 6 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -138,7 +138,7 @@ Notifications from the program. Handlers run in the order they subscribed; an er
 
 | Function | Returns | |
 | --- | --- | --- |
-| `manifold.event.subscribe(name, handler, options?)` | id | Calls `handler` on an event. `processOpened` passes the process as `manifold.process.info()` gives it, also when the same process is opened again; `processClosed` passes nothing and comes before the next `processOpened`. `options.key` replaces an earlier registration with the same key, so a module that runs again does not register twice. |
+| `manifold.event.subscribe(name, handler, options?)` | id | Calls `handler` on an event. `processOpened` passes the process as `manifold.process.info()` gives it, also when the same process is opened again; `processClosed` passes nothing and comes before the next `processOpened`; `unrealReady` passes nothing and follows when the Unreal tool has resolved the game. `options.key` replaces an earlier registration with the same key, so a module that runs again does not register twice. |
 | `manifold.event.unsubscribe(id)` | boolean | Removes a handler; false when the id is unknown. |
 
 ## manifold.structure
@@ -153,6 +153,49 @@ Hooks into Structure Dissect. Hooks are asked in the order they were added, and 
 | `manifold.structure.removeDissector(id)` | boolean | Removes a dissector; false when the id is unknown. |
 | `manifold.structure.resolveName(address)` | name and start, nil when no resolver answers, or nil, error | Asks the name resolvers in order, as Structure Dissect does, and returns the first answer: the name and the address where the object starts (the given address when the resolver names none). Resolvers that Cheat Engine scripts registered are asked too; the program's own Mono lookup is not. |
 | `manifold.structure.dissect(structure, address)` | boolean, or nil, error | Asks the dissectors in order, as Structure Dissect does before it guesses, to fill `structure` (a Cheat Engine structure object, e.g. from `createStructure`) for the object at `address`. True when one of them filled it. |
+
+## manifold.unreal
+
+Unreal Engine 4 and 5 reflection, built into the program: it finds the game's name table, object array and reflection layout itself, without an SDK or game offsets, and only reads. Structure Dissect then knows Unreal objects (real property names, nested structs, bitfield bools, the native gaps), the custom types `UE FName`, `UE FString` and `UE Object Index` show names, strings and weak references, and `<Type>_<Property>` symbols such as `Actor_RootComponent` resolve to offsets in every session. It starts by itself when an Unreal game is opened, unless `configure{ autoStart = false }` says otherwise, and the window is in Extensions > Unreal Engine. The queries need it resolved and return `nil` and an `ME-4201` error before that. Types are given by name (`"Actor"`, without the U, A or F prefix) or by address.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.unreal.status()` | `{ state, text, failure, objects, types, namePool, objectArray, objectArraySource, legacyNames, doubleVectors, seconds }` | Where the Unreal tool stands. `state` is `idle`, `notUnreal` (the opened game is no Unreal game), `resolving`, `ready`, `failed` (with `failure`) or `stopped`; `text` is the line the menu shows. The counts and addresses are there once it is ready. |
+| `manifold.unreal.start(options?)` | true, or nil, error | Resolves the opened process again, in any process, not only one that looks like Unreal. It runs in the background and the `unrealReady` event follows; with `options.wait` it resolves before it returns and gives the error when it fails. After `stop` this is what turns the tool on again. |
+| `manifold.unreal.stop()` | true | Shuts the Unreal tool down: it drops what was resolved, its symbols and dissects stop, and nothing starts by itself again until `start`, also in the next game. |
+| `manifold.unreal.configure(options)` | true, or nil, error | Changes how the tool works; keys that are left out keep their value, and the settings last until the program closes, so an autorun script sets them once. `autoStart` (true): resolve when an Unreal game is opened. `dissect`, `names`, `symbols`, `types` (all true): Structure Dissect fields, structure names, the `<Type>_<Property>` and `GObjects` symbols, the custom types. For a game the search does not find: `namePool` (the FNamePool, or with `legacyNames = true` the TNameEntryArray of UE 4.22 and older) and `objectArray` (FUObjectArray or its ObjObjects) as addresses or expressions, `layout` as a table of offsets that replace what the probes find (`index`, `class`, `name`, `outer`, `super`, `childProperties`, `structSize`, `children`, `childNext`, `functionFlags`, `fField`, `fieldClass`, `fieldName`, `next`, `offset`, `size`, `extra`, `itemSize`, `itemOffset`), and `patterns = { names = {...}, objects = {...} }` searched before the built-in search. A pattern is an AOB string, or `{ pattern, offset, length, relative, add, module }`: the hit plus `offset` holds a 32-bit displacement relative to the end of the instruction (`length` bytes long, `offset + 4` by default), or with `relative = false` an absolute pointer; `add` is added to the result, and `module` (the executable by default) is where the pattern is searched. `false` clears an address, the layout or the patterns. A change to the addresses, layout or patterns applies at the next `start`. |
+| `manifold.unreal.config()` | `{ autoStart, dissect, names, symbols, types, namePool, objectArray, legacyNames, layout, patterns }` | The settings `configure` changes, as it would take them. |
+| `manifold.unreal.layout()` | table of offsets, or nil, error | The layout the tool found: the object array items (`itemSize`, `itemOffset`, `chunked`), UObject (`index`, `class`, `name`, `outer`), UStruct (`super`, `childProperties`, `structSize`, `children`, `childNext`, `functionFlags`) and the properties (`fField`, `fieldClass`, `fieldName`, `next`, `offset`, `size`, `extra`, `component` 4 or 8 for float or double vectors). The keys are the ones `configure{ layout = ... }` takes. |
+| `manifold.unreal.count()` | integer, or nil, error | How many slots the object array has in use. |
+| `manifold.unreal.objectAt(index)` | address or nil, or nil, error | The object in a slot of the object array; nil for an empty slot. |
+| `manifold.unreal.isObject(address)` | boolean | Whether a live UObject starts at the address: its index points back at it in the object array. False before the tool is ready. |
+| `manifold.unreal.name(address)` | string or nil, or nil, error | The FName stored at an address, with its number as `Name_1`. |
+| `manifold.unreal.nameOf(object)` | string or nil, or nil, error | An object's name. |
+| `manifold.unreal.fullName(object)` | string, or nil, error | An object's path through its outers, such as `/Game/Maps/Level.Level.PersistentLevel.Pawn_1`. |
+| `manifold.unreal.classOf(object)` | address or nil, or nil, error | An object's class. |
+| `manifold.unreal.type(name)` | address or nil, or nil, error | A class or struct by name, any case, without the U, A or F prefix. |
+| `manifold.unreal.types(filter?)` | list of `{ name, kind, address }`, or nil, error | Every class, struct and enum, sorted by name; with `filter`, the ones whose name contains it. `kind` is `class`, `struct` or `enum`. |
+| `manifold.unreal.super(type)` | address or nil, or nil, error | The parent of a class or struct. |
+| `manifold.unreal.size(type)` | integer or nil, or nil, error | The size of a class or struct in bytes. |
+| `manifold.unreal.cppName(type)` | string, or nil, error | A type's C++ spelling: `F` for structs, `A` for actors, `U` for other classes. |
+| `manifold.unreal.fields(type, ownOnly?)` | list of fields, or nil, error | The reflected properties of a class or struct, its parents' included unless `ownOnly`, sorted by offset. A field is `{ name, type, typeText, owner, offset, start, size, dim, flags, address, inner, metaClass, byteOffset, bitMask }`: `type` is the property class (`FloatProperty`), `typeText` the C++ type (`TArray<AActor*>`), `start` the offset of the first byte (a bitfield bool adds `byteOffset` and has `bitMask`), `inner` the struct, class or enum it refers to. |
+| `manifold.unreal.field(type, name)` | field, or nil, error | One property by name, any case, searched in the parents too; `ME-4203` when there is none. A field is `{ name, type, typeText, owner, offset, start, size, dim, flags, address, inner, metaClass, byteOffset, bitMask }`: `type` is the property class (`FloatProperty`), `typeText` the C++ type (`TArray<AActor*>`), `start` the offset of the first byte (a bitfield bool adds `byteOffset` and has `bitMask`), `inner` the struct, class or enum it refers to. |
+| `manifold.unreal.offset(type, name)` | symbol, offset, or nil, error | The offset symbol of a property (`Actor_RootComponent`) and its value. The symbol works in address expressions in every session, so records written with it keep working after a game update. |
+| `manifold.unreal.functions(type, inherited?)` | list of `{ name, owner, address, flags, parameters }`, or nil, error | The UFunctions a class declares, and with `inherited` its parents' too. `parameters` are fields; the return value is the one with the return flag (`0x400` in `flags`). |
+| `manifold.unreal.enum(enum)` | list of `{ name, value }`, or nil, error | The entries of an enum, by name or address. |
+| `manifold.unreal.instances(type, limit?)` | list of addresses, or nil, error | The live objects of a class and its subclasses, without the class default objects. One pass over the object array; `limit` stops early. |
+| `manifold.unreal.find(name)` | address or nil, or nil, error | The first object with that name, or with that full name when `name` has a dot in it. |
+| `manifold.unreal.owner(address)` | object, class, or nil, error | The object an address belongs to and its class; `ME-4204` when no live object holds it. |
+| `manifold.unreal.whois(address)` | string, or nil, error | One line about an address: the object, its class, the offset, the property path down to the innermost field and that field's type, such as `BP_Pawn_C_1 (ABP_Pawn_C) +130: RootComponent  USceneComponent*`. |
+| `manifold.unreal.locate(address)` | `{ object, class, offset, path, field, within, struct }`, or nil, error | What `whois` says, as a table: `path` is the property path as text, `field` the innermost field, `within` the offset inside it, and `struct` the outermost struct property that starts exactly at the address. |
+| `manifold.unreal.engine()` | address or nil, or nil, error | The GameEngine object (or the Engine of an editor build). |
+| `manifold.unreal.world()` | address or nil, or nil, error | The world the engine's game viewport shows; nil while no level is loaded. |
+| `manifold.unreal.controller()` | address or nil, or nil, error | The first local player's PlayerController. |
+| `manifold.unreal.pawn()` | address or nil, or nil, error | The pawn the local PlayerController possesses. |
+| `manifold.unreal.offline()` | boolean or nil, or nil, error | true when the world has no net driver or one without connections, false when it is connected or hosts remote players, nil when it cannot tell. Writes in an online session can get the account banned. |
+| `manifold.unreal.walk(object, steps, root?)` | address, expression, field, or nil, error | Follows properties by name from an object: `walk(manifold.unreal.pawn(), { "RootComponent", "RelativeLocation" })`. Object properties are followed, structs entered, and `Name[i]` picks a TArray element. Gives the address of the last step, an address expression from `root` (the object's address by default) with offset symbols, such as `[GameEngine+GameEngine_GameViewport]+...`, and the last field. |
+| `manifold.unreal.dump(type)` | list of lines, or nil, error | A class or struct as C++-like lines: its name, parent and size, then one line per property with offset, type, name and the class that declares it. |
+| `manifold.unreal.claims(address)` | boolean | Whether the tool names the address itself (a live object or a remembered array), for other dissect scripts that step aside for Unreal objects. Never raises, false before it is ready. |
 
 ## manifold.doc
 

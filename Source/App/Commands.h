@@ -42,6 +42,7 @@ namespace Manifold
         OpenShortcuts,
         OpenLog,
         OpenMono,
+        OpenUnreal,
         OpenProfiler,
 
         NewTable,

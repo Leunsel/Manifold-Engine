@@ -400,7 +400,7 @@ namespace Manifold::UI
         RefreshScriptMenu();
         DetectMono();
         const bool scriptRoots = std::any_of(m_scriptMenu.begin(), m_scriptMenu.end(), [&](const Lua::ScriptMenuItem& root) { return !MergedIntoOwnMenu(root) && root.Caption != "-"; });
-        const bool extensions = scriptRoots || m_workspace.Ui().HasMenu();
+        const bool extensions = scriptRoots || m_workspace.Ui().HasMenu() || !m_release;
         const float buttonWidth = Px(46.0f);
         const float buttonsStart = width - buttonWidth * 3.0f;
         const float menusRoom = buttonsStart - menusStart - Px(8.0f);
@@ -502,7 +502,6 @@ namespace Manifold::UI
             Item(ICON_FA_SITEMAP "  Structure dissect", Command::OpenStructureDissect);
             Item(ICON_FA_CODE "  Auto Assembler", Command::OpenAutoAssembler);
             Item(ICON_FA_MOON "  Lua engine", Command::OpenLuaEngine);
-            Item(ICON_FA_DICE_D6 "  Mono / .NET dissector", Command::OpenMono);
             Item(ICON_FA_STREAM "  Log", Command::OpenLog);
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_PLAY "  Run autorun scripts again"))
@@ -517,10 +516,15 @@ namespace Manifold::UI
             SectionLabel("Code, memory and debugger tools are in the memory viewer's menus");
             ImGui::EndMenu();
         }
-        if (m_monoDetected && !m_release)
-            MonoMenu();
         if (extensions && ImGui::BeginMenu("Extensions"))
         {
+            if (!m_release)
+            {
+                UnrealMenu();
+                UnityMenu();
+                if (scriptRoots || workspace.Ui().HasMenu())
+                    ImGui::Separator();
+            }
             const ScriptMenuClicks clicks = DrawScriptMenuRoots(m_scriptMenu, "##mainscript", &MergedIntoOwnMenu);
             if (clicks.Opened)
                 scriptOpened = clicks.Opened;
@@ -2156,12 +2160,68 @@ namespace Manifold::UI
         m_monoDetected = Target::MonoBridge::HasRuntime(*process);
     }
 
-    void MainWindow::MonoMenu()
+    void MainWindow::UnrealMenu()
     {
-        if (!ImGui::BeginMenu("Mono"))
+        if (!ImGui::BeginMenu(ICON_FA_CUBES "  Unreal Engine"))
+            return;
+        UnrealSession& unreal = m_engine.Unreal();
+        Target::UnrealConfig& config = unreal.Config();
+        const bool process = m_engine.HasProcess();
+        const auto runtime = unreal.Runtime();
+        SectionLabel(process ? unreal.StatusText().c_str() : "No process is open");
+        if (unreal.Resolving())
+        {
+            ImGui::MenuItem(ICON_FA_SPINNER "  Reading the reflection...", nullptr, false, false);
+        }
+        else if (ImGui::MenuItem(runtime ? ICON_FA_SYNC "  Resolve again" : ICON_FA_PLAY "  Start", nullptr, false, process))
+        {
+            unreal.Start(false);
+        }
+        ItemTooltip("Reads the game's name table, object array and reflection layout, also in a game that does not look like Unreal.");
+        if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut down", nullptr, false, !unreal.Stopped()))
+            unreal.Stop();
+        ItemTooltip("Drops what was resolved; dissects, symbols and types stop until Start, also in the next game.");
+        ImGui::Separator();
+        const auto dissect = [&](const char* label, std::uint64_t (Target::UnrealRuntime::*get)() const, const char* what)
+            {
+                if (!ImGui::MenuItem(label, nullptr, false, runtime != nullptr) || !runtime)
+                    return;
+                const std::uint64_t address = ((*runtime).*get)();
+                if (address)
+                    m_workspace.OpenStructure(address);
+                else
+                    m_engine.Notify(LogLevel::Info, std::string(what) + " was not found. Is a level loaded?");
+            };
+        dissect(ICON_FA_COGS "  Dissect the engine", &Target::UnrealRuntime::Engine, "The engine object");
+        dissect(ICON_FA_GLOBE "  Dissect the world", &Target::UnrealRuntime::World, "The world");
+        dissect(ICON_FA_GAMEPAD "  Dissect the player controller", &Target::UnrealRuntime::Controller, "The local player controller");
+        dissect(ICON_FA_USER "  Dissect the pawn", &Target::UnrealRuntime::Pawn, "The local pawn");
+        ImGui::Separator();
+        Item(ICON_FA_CUBES "  Types, properties and who owns an address", Command::OpenUnreal);
+        ImGui::Separator();
+        SectionLabel("Built in");
+        ImGui::MenuItem("Start by itself in Unreal games", nullptr, &config.AutoStart);
+        ImGui::MenuItem("Structure Dissect fields", nullptr, &config.Dissect);
+        ItemTooltip("Structure Dissect fills Unreal objects with their reflected properties, nested structs, bitfield bools and the native gaps.");
+        ImGui::MenuItem("Structure names", nullptr, &config.Names);
+        ItemTooltip("New structures are named after the object's class and start at the object, also for an address inside it.");
+        ImGui::MenuItem("Offset symbols", nullptr, &config.Symbols);
+        ItemTooltip("Type_Property symbols such as Actor_RootComponent, and GObjects, FNamePool and GameEngine, work in addresses.");
+        ImGui::MenuItem("Custom types", nullptr, &config.Types);
+        ItemTooltip("UE FName, UE FString and UE Object Index show names, strings and weak references as text.");
+        ImGui::EndMenu();
+    }
+
+    void MainWindow::UnityMenu()
+    {
+        if (!ImGui::BeginMenu(ICON_FA_DICE_D6 "  Unity (Mono / IL2CPP)"))
             return;
         Target::MonoBridge& mono = m_engine.Mono();
-        if (!m_engine.MonoPresent())
+        if (!m_engine.MonoPresent() && !m_monoDetected)
+        {
+            SectionLabel(m_engine.HasProcess() ? "No Mono or IL2CPP runtime in this process" : "No process is open");
+        }
+        else if (!m_engine.MonoPresent())
         {
             const bool il2cpp = m_engine.Process() && Target::MonoBridge::DetectRuntime(*m_engine.Process()) == Target::ManagedRuntime::Il2Cpp;
             const char* load = il2cpp ? ICON_FA_PLUG "  Load IL2CPP runtime" : ICON_FA_PLUG "  Load Mono runtime";

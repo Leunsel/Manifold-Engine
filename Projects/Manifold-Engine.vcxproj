@@ -129,6 +129,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\App\Sounds.cpp" />
     <ClCompile Include="..\Source\App\TableRuntime.cpp" />
     <ClCompile Include="..\Source\App\TargetSession.cpp" />
+    <ClCompile Include="..\Source\App\UnrealSession.cpp" />
     <ClCompile Include="..\Source\App\WindowHost.cpp" />
     <ClCompile Include="..\Source\App\WriteHistory.cpp" />
     <ClCompile Include="..\Source\Asm\Assembler.cpp" />
@@ -182,6 +183,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp" />
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaUnreal.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
@@ -192,6 +194,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
+    <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
     <ClCompile Include="..\Source\Target\ManagedAgent.cpp" />
@@ -204,6 +207,8 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Target\RemoteCall.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
     <ClCompile Include="..\Source\Target\UnityExplorer.cpp" />
+    <ClCompile Include="..\Source\Target\Unreal.cpp" />
+    <ClCompile Include="..\Source\Target\UnrealReflection.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateCheck.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateEngine.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateFiles.cpp" />
@@ -249,6 +254,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\Templates.cpp" />
     <ClCompile Include="..\Source\UI\ToolWindows.cpp" />
     <ClCompile Include="..\Source\UI\UiHost.cpp" />
+    <ClCompile Include="..\Source\UI\UnrealWindow.cpp" />
     <ClCompile Include="..\Source\UI\WatchWindow.cpp" />
     <ClCompile Include="..\Source\UI\Widgets.cpp" />
     <ClCompile Include="..\Source\UI\Workspace.cpp" />
@@ -269,6 +275,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\App\Sounds.h" />
     <ClInclude Include="..\Source\App\TableRuntime.h" />
     <ClInclude Include="..\Source\App\TargetSession.h" />
+    <ClInclude Include="..\Source\App\UnrealSession.h" />
     <ClInclude Include="..\Source\App\WindowHost.h" />
     <ClInclude Include="..\Source\App\WriteHistory.h" />
     <ClInclude Include="..\Source\Asm\Assembler.h" />
@@ -317,6 +324,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Lua\LuaEngine.h" />
     <ClInclude Include="..\Source\Lua\LuaSnapshot.h" />
     <ClInclude Include="..\Source\Lua\LuaUi.h" />
+    <ClInclude Include="..\Source\Lua\LuaUnreal.h" />
     <ClInclude Include="..\Source\Lua\UiModel.h" />
     <ClInclude Include="..\Source\Scan\Scanner.h" />
     <ClInclude Include="..\Source\Scan\ValueType.h" />
@@ -325,6 +333,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Table\CheatTable.h" />
     <ClInclude Include="..\Source\Table\ManagedStructures.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
+    <ClInclude Include="..\Source\Table\UnrealStructures.h" />
     <ClInclude Include="..\Source\Target\CodeMap.h" />
     <ClInclude Include="..\Source\Target\Il2CppRuntime.h" />
     <ClInclude Include="..\Source\Target\ManagedAgent.h" />
@@ -338,6 +347,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Target\RemoteCall.h" />
     <ClInclude Include="..\Source\Target\Symbols.h" />
     <ClInclude Include="..\Source\Target\UnityExplorer.h" />
+    <ClInclude Include="..\Source\Target\Unreal.h" />
     <ClInclude Include="..\Source\Templates\BuiltinTemplates.h" />
     <ClInclude Include="..\Source\Templates\TemplateCheck.h" />
     <ClInclude Include="..\Source\Templates\TemplateEngine.h" />
@@ -387,6 +397,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\ToolWindows.h" />
     <ClInclude Include="..\Source\UI\UiHost.h" />
     <ClInclude Include="..\Source\UI\UiScale.h" />
+    <ClInclude Include="..\Source\UI\UnrealWindow.h" />
     <ClInclude Include="..\Source\UI\WatchWindow.h" />
     <ClInclude Include="..\Source\UI\Widgets.h" />
     <ClInclude Include="..\Source\UI\Workspace.h" />

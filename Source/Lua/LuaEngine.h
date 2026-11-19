@@ -72,6 +72,8 @@ namespace Manifold::Lua
         int ToBytes = 0;
         bool Float = false;
         bool String = false;
+        std::function<std::optional<std::string>(std::span<const std::uint8_t> bytes)> NativeText;
+        std::function<std::optional<std::vector<std::uint8_t>>(std::string_view text)> NativeBytes;
         std::shared_ptr<CustomTypeObject> Object = std::make_shared<CustomTypeObject>();
 
         int ByteCount() const;

@@ -81,7 +81,8 @@ namespace Manifold::UI
         void DeleteSelectedRecords(bool ask);
         void RunRecordCommand(Command command, Table::MemoryRecord* record);
         void DetectMono();
-        void MonoMenu();
+        void UnityMenu();
+        void UnrealMenu();
 
         struct ValueUndo
         {

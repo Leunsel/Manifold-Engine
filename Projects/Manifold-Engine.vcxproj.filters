@@ -93,6 +93,9 @@
     <ClCompile Include="..\Source\App\TargetSession.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\UnrealSession.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\WindowHost.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -252,6 +255,9 @@
     <ClCompile Include="..\Source\Lua\LuaUi.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaUnreal.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\UiModel.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -274,6 +280,9 @@
       <Filter>Source\Table</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Table\Structures.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\UnrealStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\CodeMap.cpp">
@@ -310,6 +319,12 @@
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\UnityExplorer.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\Unreal.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\UnrealReflection.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Templates\TemplateCheck.cpp">
@@ -447,6 +462,9 @@
     <ClCompile Include="..\Source\UI\UiHost.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\UnrealWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\WatchWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -499,6 +517,9 @@
       <Filter>Source\App</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\TargetSession.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\UnrealSession.h">
       <Filter>Source\App</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\WindowHost.h">
@@ -645,6 +666,9 @@
     <ClInclude Include="..\Source\Lua\LuaUi.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaUnreal.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Lua\UiModel.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
@@ -667,6 +691,9 @@
       <Filter>Source\Table</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Table\Structures.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Table\UnrealStructures.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\CodeMap.h">
@@ -706,6 +733,9 @@
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\UnityExplorer.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\Unreal.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Templates\BuiltinTemplates.h">
@@ -853,6 +883,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\UiScale.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\UnrealWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\WatchWindow.h">

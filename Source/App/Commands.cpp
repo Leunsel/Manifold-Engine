@@ -35,6 +35,7 @@ namespace Manifold
             { OpenShortcuts, "OpenShortcuts", Scope::Global, "Keyboard shortcuts", ImGuiKey_F1, 0, Own },
             { OpenLog, "OpenLog", Scope::Global, "Log", Ctrl | Shift | ImGuiKey_L, 0, Own },
             { OpenMono, "OpenMono", Scope::Global, "Mono / .NET dissector", Ctrl | Alt | ImGuiKey_M, 0, Own },
+            { OpenUnreal, "OpenUnreal", Scope::Global, "Unreal Engine types and properties", Ctrl | Alt | ImGuiKey_U, 0, Own },
             { OpenProfiler, "OpenProfiler", Scope::Global, "Profiler and diagnostics", Ctrl | Shift | ImGuiKey_F12, 0, Own },
 
             { NewTable, "NewTable", Scope::Main, "New table", Ctrl | ImGuiKey_N, 0, Own },

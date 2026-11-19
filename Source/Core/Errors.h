@@ -71,6 +71,10 @@
     X(DebugTraceFailed, 4012) \
     X(MonoNotFound, 4101) \
     X(MonoCallFailed, 4102) \
+    X(UnrealNotResolved, 4201) \
+    X(UnrealUnknownType, 4202) \
+    X(UnrealNoProperty, 4203) \
+    X(UnrealNoObject, 4204) \
     X(WindowClassFailed, 5001) \
     X(WindowFailed, 5002) \
     X(DeviceFailed, 5003) \

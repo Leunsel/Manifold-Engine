@@ -23,6 +23,7 @@
 #include "UI/MainWindow.h"
 #include "UI/MemoryViewer.h"
 #include "UI/MonoWindow.h"
+#include "UI/UnrealWindow.h"
 #include "UI/PatchScanWindow.h"
 #include "UI/RecordEditor.h"
 #include "UI/ScriptWindow.h"
@@ -149,6 +150,7 @@ namespace Manifold::UI
         drawOne("Breakpoints", m_breakpoints);
         drawOne("Thread list", m_threadList);
         drawOne("Mono / .NET", m_mono);
+        drawOne("Unreal Engine", m_unrealWindow);
         drawAll("Traces", m_traces);
         drawOne("Keyboard shortcuts", m_shortcuts);
         drawOne("Template manager", m_templateManager);
@@ -208,6 +210,7 @@ namespace Manifold::UI
         case Command::OpenAutoAssembler:
         case Command::OpenLuaEngine:
         case Command::OpenMono:
+        case Command::OpenUnreal:
         case Command::OpenLog:
             return !m_engine.Options().ReleaseMode;
         default:
@@ -232,6 +235,7 @@ namespace Manifold::UI
         case Command::OpenAutoAssembler: OpenScript(Asm::CheatTableTemplate()); break;
         case Command::OpenLuaEngine: OpenLua(); break;
         case Command::OpenMono: OpenMono(); break;
+        case Command::OpenUnreal: OpenUnreal(); break;
         case Command::OpenLog: OpenLog(); break;
         case Command::OpenProfiler: OpenProfiler(); break;
         default: break;
@@ -523,6 +527,17 @@ namespace Manifold::UI
         m_mono->Show();
         if (!className.empty())
             m_mono->ShowClass(className);
+    }
+
+    void Workspace::OpenUnreal(const std::string& type, std::uint64_t address)
+    {
+        if (!m_unrealWindow)
+            m_unrealWindow = std::make_unique<UnrealWindow>(*this);
+        m_unrealWindow->Show();
+        if (!type.empty())
+            m_unrealWindow->ShowType(type);
+        if (address)
+            m_unrealWindow->ShowAddress(address);
     }
 
     void Workspace::OpenProfiler(int tab)

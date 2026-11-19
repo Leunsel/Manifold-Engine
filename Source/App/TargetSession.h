@@ -37,6 +37,7 @@ namespace Manifold
         void Detach();
         bool LoadSymbols(bool windowsSymbols, double now);
         void RefreshSymbolProvider();
+        void SetExtraSymbols(Target::SymbolForward forward);
 
     private:
         std::shared_ptr<Target::Process> m_process;
@@ -46,6 +47,7 @@ namespace Manifold
         Target::MonoBridge m_mono;
         Target::CodeMap m_codeMap;
         bool m_pdbActive = false;
+        Target::SymbolForward m_extraSymbols;
         double m_symbolsStarted = 0.0;
     };
 }

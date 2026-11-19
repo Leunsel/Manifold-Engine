@@ -116,6 +116,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\App\Sounds.cpp" />
     <ClCompile Include="..\Source\App\TableRuntime.cpp" />
     <ClCompile Include="..\Source\App\TargetSession.cpp" />
+    <ClCompile Include="..\Source\App\UnrealSession.cpp" />
     <ClCompile Include="..\Source\App\WriteHistory.cpp" />
     <ClCompile Include="..\Source\Asm\Assembler.cpp" />
     <ClCompile Include="..\Source\Asm\AutoAssembler.cpp" />
@@ -168,6 +169,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp" />
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaUnreal.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
@@ -178,6 +180,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
+    <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
     <ClCompile Include="..\Source\Target\ManagedAgent.cpp" />
@@ -190,6 +193,8 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Target\RemoteCall.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
     <ClCompile Include="..\Source\Target\UnityExplorer.cpp" />
+    <ClCompile Include="..\Source\Target\Unreal.cpp" />
+    <ClCompile Include="..\Source\Target\UnrealReflection.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateCheck.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateEngine.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateFiles.cpp" />
@@ -218,6 +223,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\MonoTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
     <ClCompile Include="..\Tests\TextTests.cpp" />
+    <ClCompile Include="..\Tests\UnrealTests.cpp" />
     <ClCompile Include="..\Tests\WatchStress.cpp" />
     <ClCompile Include="..\Tests\WorkTests.cpp" />
   </ItemGroup>

@@ -86,6 +86,10 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-4012 | The trace could not be started: …. | A trace runs from a breakpoint and needs the debugger and a free breakpoint. | Attach the debugger, free a debug register or remove the breakpoint at that address first. |
 | ME-4101 | No Mono or IL2CPP runtime was found in this process…. | The .NET features need a 64-bit Unity game: a Mono build (with mono-2.0-bdwgc.dll or mono.dll) or an IL2CPP build (with GameAssembly.dll). An IL2CPP build without il2cpp_image_get_class (before Unity 2018.3) or with renamed exports is not supported. | Open the game's process once it has finished loading, or check that it is a Unity game at all. |
 | ME-4102 | A Mono call into the process failed: …. | The in-process helper could not call a mono function, or the call did not return. | The process may have closed, or the Mono runtime may be an unexpected version. |
+| ME-4201 | Unreal Engine is not resolved: …. | The game's name table, object array or reflection layout was not found, it is still being read, or the Unreal tool is shut down. | Start it in Extensions > Unreal Engine once the game shows its menu. For a game the search does not find, manifold.unreal.configure takes the addresses, layout offsets or search patterns. |
+| ME-4202 | No Unreal class or struct is named …. | The name is not among the game's reflected types. Type names have no U, A or F prefix: Actor, not AActor. | Look the type up in the Unreal Engine window (Extensions > Unreal Engine > Types and properties). |
+| ME-4203 | No reflected property …. | The class or struct and its parents have no property of that name. Native members that are not reflected have no name. | Check the spelling in the Unreal Engine window; for an array element write Name[index]. |
+| ME-4204 | No Unreal object contains …. | The address is not inside a live UObject: it is a struct on the heap, freed memory, or not Unreal data at all. | Use an address inside a live object, for example one from a dissect of the engine, the world or the pawn. |
 
 ## The program
 

@@ -71,6 +71,7 @@ namespace Manifold::UI
     class ThreadListWindow;
     class TraceWindow;
     class MonoWindow;
+    class UnrealWindow;
     class ProfilerWindow;
     class NopSledWindow;
     class WriteHistoryWindow;
@@ -129,6 +130,7 @@ namespace Manifold::UI
         // With a class name ("Player", "Game.Player" or "Assembly-CSharp:Game.Player")
         // the window opens on that class in its Classes tab.
         void OpenMono(const std::string& className = {});
+        void OpenUnreal(const std::string& type = {}, std::uint64_t address = 0);
         void OpenProfiler(int tab = -1);
         void OpenNopSled();
         void OpenWriteHistory();
@@ -199,6 +201,7 @@ namespace Manifold::UI
         std::unique_ptr<BreakpointWindow> m_breakpoints;
         std::unique_ptr<ThreadListWindow> m_threadList;
         std::unique_ptr<MonoWindow> m_mono;
+        std::unique_ptr<UnrealWindow> m_unrealWindow;
         std::unique_ptr<ProfilerWindow> m_profiler;
         std::unique_ptr<NopSledWindow> m_nopSled;
         std::unique_ptr<WriteHistoryWindow> m_writeHistory;

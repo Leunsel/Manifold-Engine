@@ -141,7 +141,7 @@ Notes:
 - `BaseAddressRegister` comes from a memory operand like `[rax]` or `[rbx+30]`. For anything else the program asks for the register.
 - `HasManifoldCommands` is true when `ManifoldScanModule` is registered as an Auto Assembler command, so it is exact rather than a guess. `ScanModule` and `AssertBytes` fall back to `aobScanModule` and `assert` without the framework.
 - Module names with characters the address parser does not read, such as `-`, are written in quotes in `Address` and `InjectionInfo`.
-- `MonoAvailable` is true while a Mono or IL2CPP runtime is loaded (Mono menu, or a `mono_*` Lua call). `MonoIsIl2Cpp` is true for an IL2CPP build, from the loaded runtime or, before it is loaded, from `GameAssembly.dll` in the module list.
+- `MonoAvailable` is true while a Mono or IL2CPP runtime is loaded (Extensions → Unity, or a `mono_*` Lua call). `MonoIsIl2Cpp` is true for an IL2CPP build, from the loaded runtime or, before it is loaded, from `GameAssembly.dll` in the module list.
 - The method values (`MonoClass`, `MonoMethod`, `MonoDescriptor`, `MonoResolve` and the others) are still empty, so templates that require `MonoDescriptor` say so instead of generating.
 
 ## When a generation fails

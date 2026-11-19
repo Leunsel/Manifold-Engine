@@ -186,6 +186,8 @@ namespace Manifold
                 m_workspace->OpenLua();
             else if (window == "mono")
                 m_workspace->OpenMono();
+            else if (window == "unreal")
+                m_workspace->OpenUnreal();
             else if (window == "log")
                 m_workspace->OpenLog();
             else if (window == "settings")
