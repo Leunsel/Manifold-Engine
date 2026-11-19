@@ -3,10 +3,10 @@
     --------------------------------
 
     AUTHOR  : Leunsel
-    VERSION : 2.0.0
+    VERSION : 2.0.1
     LICENSE : MIT
     CREATED : 2026-11-15
-    UPDATED : 2026-11-17
+    UPDATED : 2026-11-19
 
     MIT License:
         Copyright (c) 2026 Leunsel
@@ -32,6 +32,10 @@
     This file is part of the Manifold CE system, ported to Manifold Engine.
 
     CHANGELOG:
+        ∂ v2.0.1 (2026-11-19)
+            - Unreal objects are left to the program's built-in Unreal tool
+              (manifold.unreal.claims, API 6); the Manifold-UE script it
+              replaced is gone.
         ∂ v2.0.0 (2026-11-17)
             - ported to Manifold Engine's manifold API 2; stock Cheat Engine
               is no longer supported. Logging goes through a manifold.log
@@ -91,7 +95,7 @@ end
 -- CONFIG
 ----------------------------------------
 local RUNTIME_STATE_KEY = "__MANIFOLD_RTTI_RUNTIME__"
-local VERSION           = "2.0.0"
+local VERSION           = "2.0.1"
 local MENU_CAPTION      = "RTTI"
 
 -- ∑ One key for every manifold registration of this script: running the
@@ -1046,24 +1050,32 @@ end
 ----------------------------------------
 
 --
---- ∑ Unreal and Godot objects belong to Manifold-UE and Manifold-Godot,
---- which know their real property names and engine members; a game with
---- either gives the address to that script first. Only their claims are
---- asked, never ManifoldUE.owner: owner resolves with the full search and
---- does not remember a failure, so in a game that is not Unreal it would
---- search the whole process again on every name RTTI looks up.
+--- ∑ Unreal and Godot objects belong to the program's Unreal tool and to
+--- Manifold-Godot, which know their real property names and engine members;
+--- a game with either gives the address to them first. Only their claims are
+--- asked: they never raise and answer false before their engine resolved, so
+--- in a game that is neither, every name RTTI looks up costs two cheap calls.
+--- ∑ The Unreal tool is built into Manifold Engine since API 6; an older
+--- program has no manifold.unreal, and manifold.has keeps the strict API from
+--- raising on the missing name.
 --
-local ENGINE_SCRIPTS = { "ManifoldUE", "ManifoldGodot" }
+local ENGINE_SCRIPTS = { "ManifoldGodot" }
 
 local function AskClaims(engine, address)
     local claims = engine.claims
     return type(claims) == "function" and claims(address) or false
 end
 
+local function UnrealOwns(address)
+    return manifold.has("unreal.claims") and manifold.unreal.claims(address) == true
+end
+
 -- ∑ The claims are another script's code: an error in them must not cost
 -- this script its answer, so they run protected and an error counts as no
 -- claim.
 local function EngineOwns(address)
+    local ok, unreal = pcall(UnrealOwns, address)
+    if ok and unreal then return true end
     for _, name in ipairs(ENGINE_SCRIPTS) do
         local engine = rawget(_G, name)
         if type(engine) == "table" then

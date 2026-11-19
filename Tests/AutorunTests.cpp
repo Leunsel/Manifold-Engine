@@ -91,7 +91,8 @@ namespace Manifold::Tests
         mark = Mark(lua);
         std::string result;
         const Status probed = lua.RunWithResult(R"LUA(
-            for _, name in ipairs({ "UE", "Godot" }) do
+            if manifold.unreal.claims(manifold.process.mainModule().base) then return "the Unreal tool claims the test program" end
+            for _, name in ipairs({ "Godot" }) do
               local engine = rawget(_G, "Manifold" .. name)
               if engine ~= nil and type(engine.claims) == "function" then
                 local ok, claimed = pcall(engine.claims, manifold.process.mainModule().base)

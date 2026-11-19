@@ -206,7 +206,7 @@ local Channel = {
 --
 --- ∑ Resolve failures carry their own codes, so Ready tells the cases apart:
 --- a process that is no 64-bit Godot 4 game is declined quietly (every other
---- game ends there, and Manifold-UE and Manifold-RTTI share the process), a
+--- game ends there, and the Unreal tool and Manifold-RTTI share the process), a
 --- Godot 3 game gets a warning, and a Godot 4 game whose bookkeeping was not
 --- found is an error that names the stage. Anything else is a bug of this
 --- script and is logged with its traceback.
@@ -314,7 +314,7 @@ end
 -- registered for the old process need no list here: the engine drops every
 -- registered symbol when its process closes or another one opens, so the
 -- engine method names of one game (thousands of addresses) never name code
--- of the next game under Manifold-UE's and Manifold-RTTI's labels.
+-- of the next game under the Unreal tool's and Manifold-RTTI's labels.
 local S
 local L = {}
 
@@ -1659,7 +1659,7 @@ end
 
 --
 --- ∑ Every symbol of this script starts with "Godot" (method names aside,
---- which are Class::method). Manifold-UE answers any <Type>_<Property>, so
+--- which are Class::method). The Unreal tool answers any <Type>_<Property>, so
 --- a plain Node_parent could have meant a property of an Unreal type called
 --- Node; with the prefix the two namespaces cannot meet.
 --
@@ -2194,7 +2194,7 @@ end
 --- symbols first. Node paths are looked up fresh every time and never
 --- registered: the node is a new object after every scene change. Every
 --- other name is not this script's and is answered with nil at once, before
---- anything resolves, so Manifold-UE's <Type>_<Property> names and any
+--- anything resolves, so the Unreal tool's <Type>_<Property> names and any
 --- other resolver keep their turn.
 --
 local function SymbolLookup(token)
