@@ -205,17 +205,26 @@ namespace Manifold::Target
         std::size_t limit) const
     {
         const auto pattern = Scan::ParsePattern(text);
-        if (!pattern || !m_process)
+        if (!pattern || !m_process || Cancelled())
             return {};
         Scan::PatternFilter filter;
         if (writable)
             filter.Writable = Scan::Tristate::Yes;
         filter.Divisor = alignment > 1 ? alignment : 0;
-        std::vector<std::uint64_t> hits = Scan::FindPattern(*m_process, *pattern, start, stop, filter, limit * 4 + 16);
+        Scan::PatternProgress progress;
+        progress.Stop = [this] { return Cancelled(); };
+        std::vector<std::uint64_t> hits = Scan::FindPattern(*m_process, *pattern, start, stop, filter, limit * 4 + 16, &progress);
+        if (Cancelled())
+            return {};
         std::sort(hits.begin(), hits.end());
         if (hits.size() > limit)
             hits.resize(limit);
         return hits;
+    }
+
+    bool UnrealRuntime::Cancelled() const
+    {
+        return m_progress && m_progress->Cancelled();
     }
 
     bool UnrealRuntime::InImage(std::uint64_t address) const
@@ -414,18 +423,23 @@ namespace Manifold::Target
         const std::size_t cut = text.rfind('_');
         if (cut != std::string_view::npos && cut + 1 < text.size() && std::all_of(text.begin() + static_cast<std::ptrdiff_t>(cut) + 1, text.end(), [](char c) { return c >= '0' && c <= '9'; }))
         {
-            base = std::string(text.substr(0, cut));
-            number = static_cast<std::uint32_t>(std::stoul(std::string(text.substr(cut + 1)))) + 1;
+            const auto suffix = cut + 11 >= text.size() ? ParseDecimal(text.substr(cut + 1)) : std::nullopt;
+            if (suffix && *suffix >= 0 && *suffix < 0xFFFFFFFFll)
+            {
+                base = std::string(text.substr(0, cut));
+                number = static_cast<std::uint32_t>(*suffix) + 1;
+            }
         }
+        std::optional<std::uint64_t> numbered;
         std::lock_guard lock(m_lock);
         for (const auto& [index, name] : m_names)
         {
             if (name == text)
                 return static_cast<std::uint64_t>(index);
-            if (!base.empty() && name == base)
-                return static_cast<std::uint64_t>(index) | (static_cast<std::uint64_t>(number) << 32);
+            if (!base.empty() && name == base && (!numbered || index < (*numbered & 0xFFFFFFFFull)))
+                numbered = static_cast<std::uint64_t>(index) | (static_cast<std::uint64_t>(number) << 32);
         }
-        return std::nullopt;
+        return numbered;
     }
 
     std::uint64_t UnrealRuntime::NamePoolAmong(const std::vector<std::uint64_t>& slots) const
@@ -863,7 +877,7 @@ namespace Manifold::Target
 
     std::optional<std::uint64_t> UnrealRuntime::ObjectAt(int index) const
     {
-        if (index < 0 || !m_array)
+        if (index < 0 || !m_array || index >= Count())
             return std::nullopt;
         const std::uint64_t item = ItemAddress(index);
         const std::uint64_t object = item ? ReadObject(item + static_cast<std::uint64_t>(m_layout.ItemOffset)) : 0;

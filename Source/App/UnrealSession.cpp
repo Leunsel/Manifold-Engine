@@ -287,7 +287,7 @@ namespace Manifold
             m_arrays[data] = array;
     }
 
-    std::optional<UnrealArray> UnrealSession::ArrayAt(std::uint64_t data) const
+    std::optional<UnrealArray> UnrealSession::ArrayAt(std::uint64_t data, const Target::Process* reader) const
     {
         std::optional<UnrealArray> found;
         {
@@ -295,8 +295,15 @@ namespace Manifold
             if (const auto it = m_arrays.find(data); it != m_arrays.end())
                 found = it->second;
         }
-        const auto process = m_target.Process();
-        if (!found || !process || process->ReadPointer(found->Header) != data)
+        if (!found)
+            return std::nullopt;
+        std::shared_ptr<Target::Process> current;
+        if (!reader)
+        {
+            current = m_target.Process();
+            reader = current.get();
+        }
+        if (!reader || reader->ReadPointer(found->Header) != data)
             return std::nullopt;
         return found;
     }

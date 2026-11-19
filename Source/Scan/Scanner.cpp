@@ -2151,7 +2151,7 @@ namespace Manifold::Scan
                 for (;;)
                 {
                     const std::size_t item = next.fetch_add(1);
-                    if (item >= chunks.size() || (limit && total >= limit) || (progress && progress->Cancel))
+                    if (item >= chunks.size() || (limit && total >= limit) || (progress && progress->Stopped()))
                         break;
                     if (progress)
                         ++progress->Done;

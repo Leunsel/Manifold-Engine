@@ -70,6 +70,7 @@ namespace Manifold::Target
         };
 
         const std::vector<std::string> kControllerPath = { "GameViewport", "World", "OwningGameInstance", "LocalPlayers[0]", "PlayerController" };
+        constexpr std::int64_t kMaxWalkIndex = 0x00FFFFFF;
 
         void SortFields(std::vector<UnrealField>& list)
         {
@@ -87,10 +88,22 @@ namespace Manifold::Target
             if (open == std::string::npos || step.back() != ']' || open + 2 > step.size() - 1)
                 return { step, std::nullopt };
             const std::string digits = step.substr(open + 1, step.size() - open - 2);
-            if (digits.empty() || !std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; }))
+            if (digits.empty() || digits.size() > 9 || !std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; }))
                 return { step, std::nullopt };
-            return { step.substr(0, open), std::stoi(digits) };
+            const auto index = ParseDecimal(digits);
+            if (!index || *index < 0 || *index > kMaxWalkIndex)
+                return { step, std::nullopt };
+            return { step.substr(0, open), static_cast<int>(*index) };
         }
+
+        struct ProgressScope
+        {
+            ProgressScope(WorkProgress*& slot, WorkProgress* progress) : Slot(slot) { Slot = progress; }
+            ~ProgressScope() { Slot = nullptr; }
+            ProgressScope(const ProgressScope&) = delete;
+            ProgressScope& operator=(const ProgressScope&) = delete;
+            WorkProgress*& Slot;
+        };
     }
 
     Status UnrealRuntime::Resolve(std::shared_ptr<const Process> process, const UnrealConfig& config, bool full, WorkProgress* progress)
@@ -103,6 +116,7 @@ namespace Manifold::Target
                     progress->SetText(text);
             };
         Stages stages;
+        const ProgressScope scope(m_progress, progress);
         m_process = std::move(process);
         m_full = full;
         m_overrides = config.Layout;
@@ -920,22 +934,34 @@ namespace Manifold::Target
             if (!f)
                 return Status::Fail(ErrorCode::UnrealNoProperty, NameOf(type).value_or("?") + "." + steps[i]);
             walk.Field = f;
-            walk.Address += static_cast<std::uint64_t>(f->Offset);
+            walk.Address += static_cast<std::uint64_t>(f->Start());
             walk.Expression += "+" + OffsetSymbol(f->Owner, f->Name);
             bool isObject = IsObjectProperty(f->Type);
-            if (f->Type == "StructProperty")
+            bool isStruct = f->Type == "StructProperty";
+            if (isStruct)
             {
                 type = f->Inner;
             }
             else if (f->Type == "ArrayProperty" && index)
             {
                 const auto data = ReadPointer(walk.Address);
-                if (!data || !*data)
+                const auto count = ReadInt(walk.Address + 8);
+                if (!data || !*data || !count)
                     return Status::Fail(ErrorCode::ReadFailed, Hex(walk.Address));
-                walk.Address = *data + static_cast<std::uint64_t>(*index) * 8;
-                walk.Expression = Format("[%s]+%X", walk.Expression.c_str(), static_cast<unsigned>(*index * 8));
-                isObject = true;
+                if (*index >= *count)
+                    return Status::Fail(ErrorCode::UnrealNoProperty, NameOf(type).value_or("?") + "." + steps[i] + " (the array has " + std::to_string(std::max(*count, 0)) + " elements)");
+                const auto element = f->InnerProperty ? Describe(f->InnerProperty, f->InnerType, f->Owner) : std::nullopt;
+                const std::uint64_t stride = element && element->Size > 0 ? static_cast<std::uint64_t>(element->Size) : 8;
+                const std::uint64_t offset = static_cast<std::uint64_t>(*index) * stride;
+                walk.Address = *data + offset;
+                walk.Expression = Format("[%s]+%llX", walk.Expression.c_str(), static_cast<unsigned long long>(offset));
+                isObject = !element || IsObjectProperty(element->Type);
+                isStruct = element && element->Type == "StructProperty";
+                if (isStruct)
+                    type = element->Inner;
             }
+            if (i + 1 < steps.size() && !isObject && !isStruct)
+                return Status::Fail(ErrorCode::UnrealNoProperty, NameOf(type).value_or("?") + "." + steps[i] + " (a " + f->Type + " has no properties)");
             if (isObject && i + 1 < steps.size())
             {
                 const auto next = ReadPointer(walk.Address);
@@ -966,9 +992,9 @@ namespace Manifold::Target
         {
             std::lock_guard lock(m_lock);
             if (const auto it = m_symbols.find(key); it != m_symbols.end())
-                return it->second ? std::optional<std::uint64_t>(it->second) : std::nullopt;
+                return it->second;
         }
-        std::uint64_t value = 0;
+        std::optional<std::uint64_t> value;
         for (std::size_t cut = name.find('_', 1); cut != std::string_view::npos; cut = name.find('_', cut + 1))
         {
             const std::uint64_t type = Type(name.substr(0, cut));
@@ -976,12 +1002,12 @@ namespace Manifold::Target
                 continue;
             if (const auto f = FindField(type, name.substr(cut + 1)))
             {
-                value = static_cast<std::uint64_t>(f->Offset);
+                value = static_cast<std::uint64_t>(f->Start());
                 break;
             }
         }
         std::lock_guard lock(m_lock);
         m_symbols[key] = value;
-        return value ? std::optional<std::uint64_t>(value) : std::nullopt;
+        return value;
     }
 }

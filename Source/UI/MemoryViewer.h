@@ -189,6 +189,7 @@ namespace Manifold::UI
         std::string m_injectPath;
         std::map<std::uint64_t, std::vector<std::uint8_t>> m_nopped;
         std::weak_ptr<Target::Process> m_noppedProcess;
+        std::uint64_t m_noppedWrites = 0;
 
         ImGuiID m_viewport = 0;
         bool m_commentOpen = false;

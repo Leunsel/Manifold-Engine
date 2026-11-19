@@ -23,8 +23,11 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <new>
+#include <optional>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <windows.h>
 #include <intrin.h>
@@ -658,11 +661,33 @@ namespace Manifold::Lua
             return 1;
         }
 
+        constexpr std::size_t kMaxCopyBytes = 0x40000000;
+        constexpr std::size_t kMemoryBlock = 0x100000;
+
+        std::optional<std::vector<std::uint8_t>> Block(std::size_t size)
+        {
+            if (size > kMaxCopyBytes)
+                return std::nullopt;
+            try
+            {
+                return std::vector<std::uint8_t>(size);
+            }
+            catch (const std::bad_alloc&)
+            {
+                return std::nullopt;
+            }
+        }
+
+        bool ReadLocal(std::uint64_t address, std::uint8_t* into, std::size_t size)
+        {
+            SIZE_T done = 0;
+            return ::ReadProcessMemory(::GetCurrentProcess(), reinterpret_cast<LPCVOID>(address), into, size, &done) && done == size;
+        }
+
         std::optional<std::vector<std::uint8_t>> ReadLocalBytes(std::uint64_t address, std::size_t size)
         {
-            std::vector<std::uint8_t> bytes(size);
-            SIZE_T done = 0;
-            if (!::ReadProcessMemory(::GetCurrentProcess(), reinterpret_cast<LPCVOID>(address), bytes.data(), size, &done) || done != size)
+            auto bytes = Block(size);
+            if (!bytes || !ReadLocal(address, bytes->data(), size))
                 return std::nullopt;
             return bytes;
         }
@@ -678,8 +703,8 @@ namespace Manifold::Lua
             const auto& process = engine.Process();
             if (!process)
                 return std::nullopt;
-            std::vector<std::uint8_t> bytes(size);
-            if (!process->ReadExact(address, bytes.data(), size))
+            auto bytes = Block(size);
+            if (!bytes || !process->ReadExact(address, bytes->data(), size))
                 return std::nullopt;
             return bytes;
         }
@@ -689,6 +714,12 @@ namespace Manifold::Lua
             Engine& engine = Owner(state);
             const std::uint64_t source = AddressArgument(state, 1);
             const auto size = static_cast<std::size_t>(std::max<lua_Integer>(luaL_checkinteger(state, 2), 0));
+            if (size > kMaxCopyBytes)
+            {
+                lua_pushnil(state);
+                lua_pushstring(state, "the size is larger than 1 GB");
+                return 2;
+            }
             const int method = static_cast<int>(luaL_optinteger(state, 4, 0));
             const bool fromTarget = method == 0 || method == 1;
             const bool toTarget = method == 0 || method == 2;
@@ -736,23 +767,32 @@ namespace Manifold::Lua
             const std::uint64_t second = AddressArgument(state, 2);
             const auto size = static_cast<std::size_t>(std::max<lua_Integer>(luaL_checkinteger(state, 3), 0));
             const int method = static_cast<int>(luaL_optinteger(state, 4, 0));
-            const auto left = method == 2 ? ReadLocalBytes(first, size) : ReadTargetBytes(engine, first, size);
-            const auto right = method == 0 ? ReadTargetBytes(engine, second, size) : ReadLocalBytes(second, size);
-            if (!left || !right)
+            const auto& process = engine.Process();
+            const auto read = [&](bool local, std::uint64_t address, std::uint8_t* into, std::size_t count)
+                {
+                    return local ? ReadLocal(address, into, count) : process && process->ReadExact(address, into, count);
+                };
+            std::vector<std::uint8_t> left(std::min(size, kMemoryBlock));
+            std::vector<std::uint8_t> right(left.size());
+            for (std::size_t at = 0; at < size; at += kMemoryBlock)
             {
-                lua_pushnil(state);
-                lua_pushstring(state, "the memory could not be read");
-                return 2;
+                const std::size_t count = std::min(kMemoryBlock, size - at);
+                if (!read(method == 2, first + at, left.data(), count) || !read(method != 0, second + at, right.data(), count))
+                {
+                    lua_pushnil(state);
+                    lua_pushstring(state, "the memory could not be read");
+                    return 2;
+                }
+                const auto difference = std::mismatch(left.begin(), left.begin() + static_cast<std::ptrdiff_t>(count), right.begin());
+                if (difference.first != left.begin() + static_cast<std::ptrdiff_t>(count))
+                {
+                    lua_pushboolean(state, 0);
+                    lua_pushinteger(state, static_cast<lua_Integer>(at + static_cast<std::size_t>(difference.first - left.begin())));
+                    return 2;
+                }
             }
-            const auto difference = std::mismatch(left->begin(), left->end(), right->begin());
-            if (difference.first == left->end())
-            {
-                lua_pushboolean(state, 1);
-                return 1;
-            }
-            lua_pushboolean(state, 0);
-            lua_pushinteger(state, static_cast<lua_Integer>(difference.first - left->begin()));
-            return 2;
+            lua_pushboolean(state, 1);
+            return 1;
         }
 
         bool Flag(lua_State* state, int table, const char* upper, const char* lower)
@@ -815,17 +855,24 @@ namespace Manifold::Lua
             const std::uint64_t address = AddressArgument(state, 2);
             const auto size = static_cast<std::size_t>(std::max<lua_Integer>(luaL_checkinteger(state, 3), 0));
             const auto& process = engine.Process();
-            std::vector<std::uint8_t> bytes(size);
-            const std::size_t read = process ? process->Read(address, bytes.data(), size) : 0;
-            bytes.resize(read);
             std::ofstream file(Utf8ToWide(path), std::ios::binary | std::ios::trunc);
             if (!file)
             {
                 lua_pushinteger(state, 0);
                 return 1;
             }
-            file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-            lua_pushinteger(state, file ? static_cast<lua_Integer>(bytes.size()) : 0);
+            std::vector<std::uint8_t> bytes(std::min(size, kMemoryBlock));
+            std::size_t written = 0;
+            while (process && written < size)
+            {
+                const std::size_t count = std::min(kMemoryBlock, size - written);
+                const std::size_t read = process->Read(address + written, bytes.data(), count);
+                file.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(read));
+                written += read;
+                if (read < count || !file)
+                    break;
+            }
+            lua_pushinteger(state, file ? static_cast<lua_Integer>(written) : 0);
             return 1;
         }
 
@@ -1127,11 +1174,23 @@ namespace Manifold::Lua
             }
             std::string output;
             char buffer[4096];
-            DWORD read = 0;
-            while (::ReadFile(readEnd, buffer, sizeof(buffer), &read, nullptr) && read > 0)
-                output.append(buffer, read);
+            const auto drain = [&]
+                {
+                    for (;;)
+                    {
+                        DWORD waiting = 0;
+                        if (!::PeekNamedPipe(readEnd, nullptr, 0, nullptr, &waiting, nullptr) || waiting == 0)
+                            return;
+                        DWORD read = 0;
+                        if (!::ReadFile(readEnd, buffer, std::min<DWORD>(waiting, sizeof(buffer)), &read, nullptr) || read == 0)
+                            return;
+                        output.append(buffer, read);
+                    }
+                };
+            while (::WaitForSingleObject(created.hProcess, 10) == WAIT_TIMEOUT)
+                drain();
+            drain();
             ::CloseHandle(readEnd);
-            ::WaitForSingleObject(created.hProcess, INFINITE);
             DWORD exitCode = 0;
             ::GetExitCodeProcess(created.hProcess, &exitCode);
             ::CloseHandle(created.hThread);
@@ -1188,10 +1247,12 @@ namespace Manifold::Lua
             Engine& engine = Owner(state);
             const bool merge = lua_toboolean(state, 2) != 0;
             std::filesystem::path path;
+            bool fromStream = false;
             if (lua_type(state, 1) == LUA_TSTRING)
                 path = Utf8ToWide(lua_tostring(state, 1));
             else if (const auto data = StreamData(state, 1))
             {
+                fromStream = true;
                 path = StreamFile("stream-table");
                 std::ofstream file(path, std::ios::binary | std::ios::trunc);
                 file.write(reinterpret_cast<const char*>(data->data()), static_cast<std::streamsize>(data->size()));
@@ -1200,7 +1261,17 @@ namespace Manifold::Lua
             }
             else
                 return luaL_argerror(state, 1, "a file name or a stream");
-            return PushStatus(state, engine.LoadTable(path, merge));
+            const Status status = engine.LoadTable(path, merge);
+            if (fromStream)
+            {
+                const std::string temporary = WideToUtf8(path.wstring());
+                std::erase_if(engine.Options().RecentTables, [&](const std::string& known) { return EqualsNoCase(known, temporary); });
+                if (status && !merge)
+                    engine.Table().FilePath.clear();
+                std::error_code ignored;
+                std::filesystem::remove(path, ignored);
+            }
+            return PushStatus(state, status);
         }
 
         int SaveTableCompat(lua_State* state)

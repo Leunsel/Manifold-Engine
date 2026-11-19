@@ -47,11 +47,11 @@ namespace Manifold::UI
             return { .Title = "Reading the Unreal object", .Group = "structure", .Cancellable = false, .Quiet = true, .Serial = true };
         }
 
-        Table::UnrealArrayLookup UnrealArrays(Engine& engine)
+        Table::UnrealArrayLookup UnrealArrays(Engine& engine, std::shared_ptr<const Target::UnrealRuntime> runtime)
         {
-            return [&engine](std::uint64_t data) -> std::optional<std::pair<Target::UnrealField, std::uint64_t>>
+            return [&engine, runtime = std::move(runtime)](std::uint64_t data) -> std::optional<std::pair<Target::UnrealField, std::uint64_t>>
                 {
-                    const auto array = engine.Unreal().ArrayAt(data);
+                    const auto array = engine.Unreal().ArrayAt(data, runtime->ProcessHandle().get());
                     if (!array)
                         return std::nullopt;
                     return std::make_pair(array->Field, array->Header);
@@ -340,7 +340,7 @@ namespace Manifold::UI
         engine.Work().Start(UnrealLookup(), [&engine, runtime, alive, address, containing, managed, done](WorkProgress&) -> BackgroundWork::Finish
             {
                 std::optional<Lua::StructureLookup> found;
-                if (const auto name = Table::UnrealStructureName(*runtime, address, containing, UnrealArrays(engine)))
+                if (const auto name = Table::UnrealStructureName(*runtime, address, containing, UnrealArrays(engine, runtime)))
                     found = Lua::StructureLookup{ name->first, name->second };
                 return [alive, found, managed, done]()
                     {
@@ -523,11 +523,18 @@ namespace Manifold::UI
         {
             const auto runtime = engine.Unreal().Runtime();
             const bool customTypes = engine.Unreal().Config().Types;
-            engine.Work().Start(UnrealLookup(), [&engine, runtime, definition, address, customTypes, scripts, finish](WorkProgress&) -> BackgroundWork::Finish
+            const std::uint64_t generation = engine.ProcessGeneration();
+            engine.Work().Start(UnrealLookup(), [this, &engine, runtime, alive, generation, definition, address, customTypes, scripts, finish](WorkProgress&) -> BackgroundWork::Finish
                 {
-                    Table::UnrealFill fill = Table::FillFromUnreal(*runtime, address, UnrealArrays(engine), customTypes);
-                    return [&engine, definition, fill = std::move(fill), scripts, finish]()
+                    Table::UnrealFill fill = Table::FillFromUnreal(*runtime, address, UnrealArrays(engine, runtime), customTypes);
+                    return [this, &engine, alive, generation, definition, fill = std::move(fill), scripts, finish]()
                         {
+                            if (generation != engine.ProcessGeneration())
+                            {
+                                if (!alive.expired())
+                                    m_filling.erase(definition);
+                                return;
+                            }
                             if (!fill.Handled)
                             {
                                 scripts();

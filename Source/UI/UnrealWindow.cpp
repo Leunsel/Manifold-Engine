@@ -67,6 +67,7 @@ namespace Manifold::UI
         if (runtime != m_runtime)
         {
             m_runtime = runtime;
+            m_view = TypeView{};
             m_appliedFilter = "\x01";
             m_appliedKind = -1;
             m_selected = kNone;
@@ -356,22 +357,33 @@ namespace Manifold::UI
         const Target::UnrealType& entry = types[m_selected];
         const std::uint64_t type = entry.Object;
         const bool isEnum = entry.Kind == Target::UnrealKind::Enum;
-        const std::uint64_t super = isEnum ? 0 : runtime.SuperOf(type);
+        if (m_view.Runtime != &runtime || m_view.Type != type)
+        {
+            m_view = TypeView{};
+            m_view.Runtime = &runtime;
+            m_view.Type = type;
+            m_view.Super = isEnum ? 0 : runtime.SuperOf(type);
+            m_view.Name = runtime.CppName(type);
+            m_view.SuperName = m_view.Super ? runtime.CppName(m_view.Super) : std::string();
+            m_view.Size = isEnum ? std::nullopt : runtime.StructSize(type);
+            m_view.Where = runtime.FullName(type);
+        }
+        const std::uint64_t super = m_view.Super;
         ImGui::PushFont(Fonts::Bold(), 0.0f);
-        ImGui::TextUnformatted(runtime.CppName(type).c_str());
+        ImGui::TextUnformatted(m_view.Name.c_str());
         ImGui::PopFont();
         if (super)
         {
             ImGui::SameLine();
             Muted(":");
             ImGui::SameLine();
-            if (ImGui::SmallButton((runtime.CppName(super) + "##super").c_str()))
+            if (ImGui::SmallButton((m_view.SuperName + "##super").c_str()))
                 m_pendingType = runtime.NameOf(super).value_or("");
             ItemTooltip("Shows the parent type");
         }
         ImGui::SameLine();
-        const auto size = isEnum ? std::nullopt : runtime.StructSize(type);
-        const std::string where = runtime.FullName(type);
+        const std::optional<int> size = m_view.Size;
+        const std::string& where = m_view.Where;
         if (isEnum)
             Muted(Format("enum  ·  %s", where.c_str()));
         else if (size)
@@ -455,7 +467,13 @@ namespace Manifold::UI
     void UnrealWindow::Properties(const Target::UnrealRuntime& runtime, std::uint64_t type)
     {
         ImGui::Checkbox("Declared here only", &m_ownOnly);
-        const std::vector<Target::UnrealField> fields = runtime.Fields(type, m_ownOnly);
+        if (m_view.Runtime != &runtime || m_view.Type != type || !m_view.HasFields || m_view.OwnOnly != m_ownOnly)
+        {
+            m_view.Fields = runtime.Fields(type, m_ownOnly);
+            m_view.OwnOnly = m_ownOnly;
+            m_view.HasFields = true;
+        }
+        const std::vector<Target::UnrealField>& fields = m_view.Fields;
         if (fields.empty())
         {
             Muted("No reflected properties.");
@@ -497,7 +515,13 @@ namespace Manifold::UI
     void UnrealWindow::Functions(const Target::UnrealRuntime& runtime, std::uint64_t type)
     {
         ImGui::Checkbox("With the parents' functions", &m_inherited);
-        const std::vector<Target::UnrealFunction> functions = runtime.Functions(type, m_inherited);
+        if (m_view.Runtime != &runtime || m_view.Type != type || !m_view.HasFunctions || m_view.Inherited != m_inherited)
+        {
+            m_view.Functions = runtime.Functions(type, m_inherited);
+            m_view.Inherited = m_inherited;
+            m_view.HasFunctions = true;
+        }
+        const std::vector<Target::UnrealFunction>& functions = m_view.Functions;
         if (functions.empty())
         {
             Muted(runtime.Layout().Children < 0 ? "The function list layout was not found in this game." : "No functions.");

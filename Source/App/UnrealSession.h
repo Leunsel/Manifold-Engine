@@ -71,7 +71,7 @@ namespace Manifold
         bool Names() const { return m_config.Names && Ready(); }
 
         void RememberArrays(const std::vector<std::pair<std::uint64_t, UnrealArray>>& arrays);
-        std::optional<UnrealArray> ArrayAt(std::uint64_t data) const;
+        std::optional<UnrealArray> ArrayAt(std::uint64_t data, const Target::Process* reader = nullptr) const;
         std::optional<std::uint64_t> ResolveSymbol(std::string_view name) const;
 
     private:

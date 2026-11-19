@@ -426,6 +426,18 @@ namespace Manifold::UI
             m_nopped.clear();
             m_noppedProcess = process;
         }
+        if (const std::uint64_t writes = m_engine.Writes().Revision(); writes != m_noppedWrites)
+        {
+            m_noppedWrites = writes;
+            if (const std::shared_ptr<Target::Process> process = m_engine.Process())
+            {
+                std::erase_if(m_nopped, [&](const auto& entry)
+                    {
+                        std::vector<std::uint8_t> now(entry.second.size());
+                        return !process->ReadExact(entry.first, now.data(), now.size()) || std::any_of(now.begin(), now.end(), [](std::uint8_t byte) { return byte != 0x90; });
+                    });
+            }
+        }
         if (m_bringToFront)
         {
             ImGui::SetNextWindowFocus();
@@ -1732,11 +1744,12 @@ namespace Manifold::UI
 
     void MemoryViewer::Nop(const Disasm::Instruction& instruction)
     {
-        const Target::Process& process = *m_engine.Process();
-        if (m_nopped.count(instruction.Address))
+        if (const auto nopped = m_nopped.find(instruction.Address); nopped != m_nopped.end())
         {
-            m_workspace.Report(process.Write(instruction.Address, m_nopped[instruction.Address]));
-            m_nopped.erase(instruction.Address);
+            const Status restored = WriteBytes(instruction.Address, nopped->second, "Restore");
+            if (restored)
+                m_nopped.erase(nopped);
+            m_workspace.Report(restored);
             return;
         }
         std::vector<std::uint8_t> original(instruction.Bytes.begin(), instruction.Bytes.begin() + instruction.Length);
@@ -2564,7 +2577,9 @@ namespace Manifold::UI
             if (!m_engine.Process()->ReadExact(m_hexSelected, &byte, 1))
                 break;
             byte = m_hexNibble == 0 ? static_cast<std::uint8_t>((byte & 0x0F) | (digit << 4)) : static_cast<std::uint8_t>((byte & 0xF0) | digit);
-            const Status status = m_hexNibble == 0 ? WriteBytes(m_hexSelected, std::span<const std::uint8_t>(&byte, 1), "Hex typing") : m_engine.Process()->Write(m_hexSelected, &byte, 1);
+            const std::span<const std::uint8_t> typed(&byte, 1);
+            const Status status = m_hexNibble == 0 ? WriteBytes(m_hexSelected, typed, "Hex typing")
+                : m_engine.Writes().WriteOrAmend(*m_engine.Process(), m_engine.ProcessGeneration(), m_nibbleWrite, m_hexSelected, typed, "Hex typing");
             if (!status)
             {
                 m_workspace.Report(status);
@@ -2572,8 +2587,6 @@ namespace Manifold::UI
             }
             if (m_hexNibble == 0)
                 m_nibbleWrite = m_engine.Writes().LastId();
-            else
-                m_engine.Writes().Amend(m_nibbleWrite, std::span<const std::uint8_t>(&byte, 1));
             if (m_hexNibble == 0)
                 m_hexNibble = 1;
             else

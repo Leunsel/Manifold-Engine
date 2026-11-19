@@ -980,6 +980,16 @@ namespace Manifold::Tests
                 writeBytesLocal(copy + 2, 9)
                 local same, index = compareMemory(source, copy, 4, 2)
                 if same ~= false or index ~= 2 then return "compareMemory" end
+                if copyMemory(source, 0x7FFFFFFF0000, nil, 3) ~= nil then return "copyMemory accepted more than 1 GB" end
+                if compareMemory(source, source, 0x7FFFFFFFFFFF, 2) ~= nil then return "compareMemory past the mapping" end
+                if compareMemory(source, copy, 0, 2) ~= true then return "compareMemory of nothing" end
+                local block = executeCodeLocalEx("kernel32.LocalAlloc", 0x40, 0x300000)
+                if not block or block == 0 then return "LocalAlloc for compareMemory" end
+                if compareMemory(block, block + 0x180000, 0x180000, 2) ~= true then return "compareMemory over several blocks" end
+                writeBytesLocal(block + 0x180000 + 0x123456, 7)
+                local equal, where = compareMemory(block, block + 0x180000, 0x180000, 2)
+                executeCodeLocalEx("kernel32.LocalFree", block)
+                if equal ~= false or where ~= 0x123456 then return "compareMemory difference in a later block: " .. tostring(where) end
 
                 setComment(0x1000, "comment")
                 setHeader(0x1000, "header")
@@ -1010,6 +1020,11 @@ namespace Manifold::Tests
                 if processes.Count < 1 or not processes[0]:match("^%x%x%x%x%x%x%x%x%-") then return "process list strings" end
                 local output, code = runCommand("cmd.exe", { "/c", "echo", "manifold" })
                 if code ~= 0 or not tostring(output):find("manifold") then return "runCommand" end
+                local _, failed = runCommand("cmd.exe", { "/c", "exit", "7" })
+                if failed ~= 7 then return "runCommand exit code " .. tostring(failed) end
+                local started = os.clock()
+                runCommand("cmd.exe", { "/c", "start", "/b", "ping", "-n", "6", "127.0.0.1" })
+                if os.clock() - started > 3 then return "runCommand waited for a program its command left behind" end
                 return "ok")LUA");
 
             LuaCheck(engine, "cheat engine objects", R"LUA(
@@ -1234,6 +1249,27 @@ namespace Manifold::Tests
         }
     }
 
+    void StreamTables(Engine& engine)
+    {
+        const std::vector<std::string> recent = engine.Options().RecentTables;
+        const std::string path = engine.Table().FilePath;
+        LuaCheck(engine, "merging a table from a stream", R"LUA(
+            local stream = createStringStream('<CheatTable><CheatEntries><CheatEntry><ID>9001</ID><Description>"From a stream"</Description><VariableType>4 Bytes</VariableType><Address>1000</Address></CheatEntry></CheatEntries></CheatTable>')
+            if not __manifoldLoadTable(stream, true) then return "merge" end
+            if not getAddressList().getMemoryRecordByDescription("From a stream") then return "record" end
+            return "ok")LUA");
+        CHECK(engine.Options().RecentTables == recent);
+        CHECK_EQ(engine.Table().FilePath, path);
+        LuaCheck(engine, "loading a table from a stream", R"LUA(
+            local stream = createStringStream('<CheatTable><CheatEntries><CheatEntry><ID>9002</ID><Description>"Only this"</Description><VariableType>4 Bytes</VariableType><Address>1000</Address></CheatEntry></CheatEntries></CheatTable>')
+            if not __manifoldLoadTable(stream, false) then return "load" end
+            if getAddressList().Count ~= 1 then return "count " .. tostring(getAddressList().Count) end
+            return "ok")LUA");
+        CHECK(engine.Options().RecentTables == recent);
+        CHECK(engine.Table().FilePath.empty());
+        engine.NewTable();
+    }
+
     int RunCompatTests()
     {
         const int before = Totals().Failures;
@@ -1265,6 +1301,7 @@ namespace Manifold::Tests
         PaintBoxCanvas(engine);
         ScriptSettings(engine);
         CheatEngineCoverage(engine);
+        StreamTables(engine);
         return Totals().Failures - before;
     }
 }

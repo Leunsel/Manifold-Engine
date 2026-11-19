@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -233,6 +234,9 @@ namespace Manifold::Scan
         std::atomic<bool> Cancel{ false };
         std::atomic<std::uint64_t> Done{ 0 };
         std::atomic<std::uint64_t> Total{ 0 };
+        std::function<bool()> Stop;
+
+        bool Stopped() const { return Cancel || (Stop && Stop()); }
     };
 
     std::vector<std::uint64_t> FindPattern(const Target::Process& process, const Pattern& pattern, std::uint64_t start, std::uint64_t stop, const PatternFilter& filter,

@@ -611,6 +611,69 @@ namespace Manifold::Tests
             CHECK(!history.LastUndoable(generation + 1));
             history.Clear(generation);
             CHECK(history.Entries().empty() && !history.Find(*last));
+
+            WriteHistory order;
+            const std::uint64_t spot = at + 0x40;
+            const std::uint8_t nops[2] = { 0x90, 0x90 };
+            const std::uint8_t jump[2] = { 0xEB, 0xFE };
+            std::uint8_t pair[2]{};
+            CHECK(order.Write(process, generation, spot, nops, "NOP").Ok());
+            CHECK(order.Write(process, generation, spot, jump, "Assemble").Ok());
+            const int earlier = order.Entries()[0].Id;
+            const int later = order.Entries()[1].Id;
+            CHECK(order.BlockedBy(order.Entries()[0]) == later && !order.BlockedBy(order.Entries()[1]).has_value());
+            CHECK(!order.Undo(process, generation, earlier).Ok());
+            CHECK(process.ReadExact(spot, pair, sizeof(pair)) && pair[0] == 0xEB && pair[1] == 0xFE);
+            CHECK(order.Undo(process, generation, later).Ok() && order.Undo(process, generation, earlier).Ok());
+            CHECK(process.ReadExact(spot, pair, sizeof(pair)) && pair[0] == 0 && pair[1] == 0);
+            CHECK(order.BlockedBy(order.Entries()[1]) == earlier);
+            CHECK(!order.Redo(process, generation, later).Ok());
+            CHECK(order.Redo(process, generation, earlier).Ok() && order.Redo(process, generation, later).Ok());
+            CHECK(process.ReadExact(spot, pair, sizeof(pair)) && pair[0] == 0xEB && pair[1] == 0xFE);
+            while (const auto id = order.LastUndoable(generation))
+            {
+                if (!order.Undo(process, generation, *id))
+                    break;
+            }
+            CHECK(order.Undoable(generation) == 0 && process.ReadExact(spot, pair, sizeof(pair)) && pair[0] == 0 && pair[1] == 0);
+
+            const std::uint8_t high = 0x10;
+            const std::uint8_t whole = 0x12;
+            CHECK(order.Write(process, generation, spot + 8, std::span<const std::uint8_t>(&high, 1), "Hex typing").Ok());
+            const int typed = order.LastId();
+            CHECK(order.WriteOrAmend(process, generation, typed, spot + 8, std::span<const std::uint8_t>(&whole, 1), "Hex typing").Ok());
+            CHECK(order.Entries().size() == 3 && order.Find(typed) && order.Find(typed)->Written[0] == 0x12 && order.Find(typed)->Original[0] == 0);
+            CHECK(order.Undo(process, generation, typed).Ok());
+            CHECK(order.WriteOrAmend(process, generation, typed, spot + 8, std::span<const std::uint8_t>(&whole, 1), "Hex typing").Ok());
+            CHECK(order.Entries().size() == 4 && order.LastId() != typed && order.Find(typed)->Undone);
+
+            CHECK(!order.Write(process, generation, 0x10, nops, "Paste").Ok());
+            CHECK_EQ(order.Entries().size(), std::size_t(4));
+            CHECK(order.Write(process, generation + 1, spot + 16, nops, "Paste").Ok());
+            CHECK(order.Entries().size() == 1 && order.Entries()[0].Generation == generation + 1);
+
+            WriteHistory many;
+            const std::uint8_t tick = 1;
+            for (std::size_t i = 0; i < WriteHistory::kLimit + 5; ++i)
+                many.Write(process, generation, spot + 24, std::span<const std::uint8_t>(&tick, 1), "Hex typing");
+            CHECK(many.Entries().size() == WriteHistory::kLimit && many.Dropped(generation) == 5 && many.Dropped(generation + 1) == 0);
+
+            if (const Result<Address> wide = process.Allocate(0x40000, PAGE_READWRITE))
+            {
+                WriteHistory blocks;
+                const std::vector<std::uint8_t> fill(0x30000, 0x5A);
+                CHECK(blocks.Write(process, generation, *wide, fill, "Fill").Ok());
+                CHECK(blocks.StateOf(process, blocks.Entries()[0]) == WriteState::InMemory);
+                const std::uint8_t other = 1;
+                CHECK(process.Write(*wide + 0x2FFFF, &other, 1).Ok());
+                CHECK(blocks.StateOf(process, blocks.Entries()[0]) == WriteState::ChangedSince);
+                CHECK(blocks.Undo(process, generation, blocks.LastId()).Ok() && blocks.StateOf(process, blocks.Entries()[0]) == WriteState::Undone);
+                process.Free(*wide);
+            }
+            else
+            {
+                CHECK_MSG(false, wide.Error().Text);
+            }
             process.Free(at);
         }
         else

@@ -2,6 +2,7 @@
 
 #include "App/Engine.h"
 #include "App/Settings.h"
+#include "Core/BackgroundWork.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
 #include "Table/UnrealStructures.h"
@@ -334,6 +335,37 @@ namespace Manifold::Tests
             const auto walk = runtime.Walk(fake.ActorInstance, "A", { "RootComponent", "RelativeLocation" });
             CHECK(walk.Ok() && walk->Address == fake.SceneInstance + 0x11C && walk->Expression == "[A+Actor_RootComponent]+SceneComponent_RelativeLocation");
             CHECK(!runtime.Walk(fake.ActorInstance, "A", { "Nope" }).Ok());
+
+            const auto firstMember = runtime.ResolveSymbol("Vector_X");
+            CHECK(firstMember.has_value() && *firstMember == 0);
+            const auto firstMemberAgain = runtime.ResolveSymbol("Vector_X");
+            CHECK(firstMemberAgain.has_value() && *firstMemberAgain == 0);
+            CHECK(!runtime.ResolveSymbol("Vector_W").has_value() && !runtime.ResolveSymbol("Vector_W").has_value());
+
+            std::uint64_t tagData = 0;
+            std::memcpy(&tagData, reinterpret_cast<const void*>(fake.ActorInstance + 0x208), sizeof(tagData));
+            const auto element = runtime.Walk(fake.ActorInstance, "A", { "Tags[1]" });
+            CHECK(element.Ok() && element->Address == tagData + 8 && element->Expression == "[A+Actor_Tags]+8");
+            CHECK(!runtime.Walk(fake.ActorInstance, "A", { "Tags[2]" }).Ok());
+            CHECK(!runtime.Walk(fake.ActorInstance, "A", { "Tags[99999999999]" }).Ok());
+            CHECK(!runtime.Walk(fake.ActorInstance, "A", { "Tags[1]", "Health" }).Ok());
+            CHECK(!runtime.Walk(fake.ActorInstance, "A", { "Health", "RootComponent" }).Ok());
+
+            const auto actorName = runtime.FindName("Actor");
+            const auto numbered = runtime.FindName("Actor_5");
+            CHECK(actorName.has_value() && numbered.has_value() && *numbered == (*actorName | (6ull << 32)));
+            CHECK(!runtime.FindName("Actor_4294967296").has_value());
+            CHECK(!runtime.FindName("Actor_99999999999999999999").has_value());
+            CHECK(!runtime.FindName("NoSuchNameAnywhere_3").has_value());
+
+            CHECK(runtime.ObjectAt(0).has_value());
+            CHECK(!runtime.ObjectAt(kObjectCount).has_value() && !runtime.ObjectAt(0x7FFFFFFF).has_value() && !runtime.ObjectAt(-1).has_value());
+
+            WorkProgress stopped;
+            stopped.Cancel();
+            Target::UnrealRuntime abandoned;
+            const Status search = abandoned.Resolve(engine.Process(), Target::UnrealConfig{}, true, &stopped);
+            CHECK_MSG(!search.Ok() && search.Text.find("cancelled") != std::string::npos, search.Text);
 
             const auto instances = runtime.Instances(fake.Actor, 0);
             CHECK(instances.size() == 1 && instances.front() == fake.ActorInstance);

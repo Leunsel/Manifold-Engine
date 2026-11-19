@@ -577,7 +577,7 @@ namespace Manifold::Lua
             const std::string name = luaL_checkstring(state, 2);
             return TypeQuery(state, [&](const UnrealRuntime& runtime, std::uint64_t type)
                 {
-                    const auto field = runtime.FindField(type, name);
+                    const auto field = runtime.HasStructLayout(type) ? runtime.FindField(type, name) : std::nullopt;
                     if (!field)
                         return PushFailure(state, ErrorCode::UnrealNoProperty, runtime.NameOf(type).value_or("?") + "." + name);
                     PushField(state, runtime, *field);
@@ -590,7 +590,7 @@ namespace Manifold::Lua
             const bool inherited = lua_toboolean(state, 2) != 0;
             return TypeQuery(state, [&](const UnrealRuntime& runtime, std::uint64_t type)
                 {
-                    const auto functions = runtime.Functions(type, inherited);
+                    const auto functions = runtime.HasStructLayout(type) ? runtime.Functions(type, inherited) : std::vector<Target::UnrealFunction>{};
                     lua_createtable(state, static_cast<int>(functions.size()), 0);
                     for (std::size_t i = 0; i < functions.size(); ++i)
                     {
@@ -766,6 +766,8 @@ namespace Manifold::Lua
         {
             return TypeQuery(state, [&](const UnrealRuntime& runtime, std::uint64_t type)
                 {
+                    if (!runtime.HasStructLayout(type))
+                        return PushFailure(state, ErrorCode::UnrealUnknownType, runtime.NameOf(type).value_or(Hex(type)));
                     const std::uint64_t super = runtime.SuperOf(type);
                     std::vector<std::string> lines;
                     lines.push_back(Format("%s%s  // size 0x%X", runtime.CppName(type).c_str(), super ? (" : " + runtime.CppName(super)).c_str() : "",
@@ -812,7 +814,7 @@ namespace Manifold::Lua
                         return PushFailure(state, ErrorCode::UnrealNoProperty, type + "." + field);
                     const std::string symbol = Target::UnrealRuntime::OffsetSymbol(f->Owner, f->Name);
                     lua_pushlstring(state, symbol.data(), symbol.size());
-                    lua_pushinteger(state, f->Offset);
+                    lua_pushinteger(state, f->Start());
                     return 2;
                 });
         }

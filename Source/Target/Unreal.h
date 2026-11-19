@@ -252,6 +252,7 @@ namespace Manifold::Target
         std::optional<std::string> ReadWide(std::uint64_t address, std::size_t length) const;
         std::optional<std::string> ReadText(std::uint64_t address, std::size_t length) const;
         std::vector<std::uint64_t> FindBytes(const std::string& pattern, std::uint64_t start, std::uint64_t stop, bool writable, std::uint64_t alignment, std::size_t limit) const;
+        bool Cancelled() const;
         bool InImage(std::uint64_t address) const;
         std::vector<std::pair<std::uint64_t, std::uint64_t>> WritableSections(const ModuleInfo& image) const;
 
@@ -298,6 +299,7 @@ namespace Manifold::Target
         bool Descend(std::uint64_t type, int offset, std::vector<std::string>& path, int depth, UnrealLocation& found) const;
 
         std::shared_ptr<const Process> m_process;
+        WorkProgress* m_progress = nullptr;
         std::vector<std::pair<std::uint64_t, std::uint64_t>> m_images;
         ModuleInfo m_main;
         bool m_full = false;
@@ -327,7 +329,7 @@ namespace Manifold::Target
         mutable std::unordered_map<std::uint64_t, std::string> m_cpp;
         mutable std::unordered_map<std::uint64_t, std::vector<UnrealEnumEntry>> m_enumEntries;
         mutable std::unordered_map<std::uint64_t, bool> m_vtables;
-        mutable std::unordered_map<std::string, std::uint64_t> m_symbols;
+        mutable std::unordered_map<std::string, std::optional<std::uint64_t>> m_symbols;
     };
 
     const char* UnrealKindName(UnrealKind kind);

@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,23 @@ namespace Manifold::UI
         {
             std::string Text;
             std::size_t Type = 0;
+        };
+
+        struct TypeView
+        {
+            const Target::UnrealRuntime* Runtime = nullptr;
+            std::uint64_t Type = 0;
+            std::uint64_t Super = 0;
+            std::string Name;
+            std::string SuperName;
+            std::string Where;
+            std::optional<int> Size;
+            bool HasFields = false;
+            bool OwnOnly = false;
+            std::vector<Target::UnrealField> Fields;
+            bool HasFunctions = false;
+            bool Inherited = false;
+            std::vector<Target::UnrealFunction> Functions;
         };
 
         void Header(const Target::UnrealRuntime& runtime);
@@ -68,6 +86,7 @@ namespace Manifold::UI
         std::string m_whoisText;
         std::string m_whoisResult;
         std::uint64_t m_whoisObject = 0;
+        TypeView m_view;
         float m_listWidth = 300.0f;
     };
 }

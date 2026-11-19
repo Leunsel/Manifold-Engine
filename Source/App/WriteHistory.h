@@ -41,13 +41,17 @@ namespace Manifold
     {
     public:
         static constexpr std::size_t kLimit = 500;
+        static constexpr std::size_t kByteLimit = 256u * 1024u * 1024u;
 
         Status Write(const Target::Process& process, std::uint64_t generation, std::uint64_t address, std::span<const std::uint8_t> bytes, std::string source);
         void Amend(int id, std::span<const std::uint8_t> written);
+        Status WriteOrAmend(const Target::Process& process, std::uint64_t generation, int id, std::uint64_t address, std::span<const std::uint8_t> bytes, std::string source);
         Status Undo(const Target::Process& process, std::uint64_t generation, int id);
         Status Redo(const Target::Process& process, std::uint64_t generation, int id);
+        std::optional<int> BlockedBy(const MemoryWrite& write) const;
         std::optional<int> LastUndoable(std::uint64_t generation) const;
         std::size_t Undoable(std::uint64_t generation) const;
+        std::size_t Dropped(std::uint64_t generation) const;
         WriteState StateOf(const Target::Process& process, const MemoryWrite& write) const;
         const MemoryWrite* Find(int id) const;
         const std::deque<MemoryWrite>& Entries() const { return m_entries; }
@@ -57,9 +61,12 @@ namespace Manifold
 
     private:
         MemoryWrite* Entry(int id);
+        void Trim();
 
         std::deque<MemoryWrite> m_entries;
         int m_nextId = 1;
         std::uint64_t m_revision = 0;
+        std::uint64_t m_droppedGeneration = 0;
+        std::size_t m_dropped = 0;
     };
 }

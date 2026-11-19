@@ -55,8 +55,22 @@ namespace Manifold::UI
 
         bool CodeEdit(const MemoryWrite& write)
         {
-            return write.Source == "Assemble" || write.Source == "NOP";
+            return write.Source == "Assemble" || write.Source == "NOP" || write.Source == "Restore";
         }
+    }
+
+    WriteState WriteHistoryWindow::StateOf(const MemoryWrite& write)
+    {
+        Engine& engine = m_workspace.Core();
+        KnownState& known = m_states[write.Id];
+        const double now = ImGui::GetTime();
+        const double interval = 0.5 + static_cast<double>(write.Written.size()) / (8.0 * 1024.0 * 1024.0);
+        if (known.At < 0.0 || now - known.At >= interval)
+        {
+            known.State = engine.Writes().StateOf(*engine.Process(), write);
+            known.At = now;
+        }
+        return known.State;
     }
 
     void WriteHistoryWindow::Draw()
@@ -79,11 +93,20 @@ namespace Manifold::UI
                 rows.push_back(&*it);
         }
 
+        if (history.Revision() != m_statesRevision)
+        {
+            m_states.clear();
+            m_statesRevision = history.Revision();
+        }
         const std::size_t undoable = history.Undoable(generation);
+        const std::size_t dropped = history.Dropped(generation);
         const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
         ImGui::AlignTextToFramePadding();
-        Muted(rows.empty() ? std::string("No edits in this process yet")
-                           : Format("%zu %s in this process, %zu not undone", rows.size(), rows.size() == 1 ? "edit" : "edits", undoable));
+        std::string summary = rows.empty() ? std::string("No edits in this process yet")
+                                           : Format("%zu %s in this process, %zu not undone", rows.size(), rows.size() == 1 ? "edit" : "edits", undoable);
+        if (dropped > 0)
+            summary += Format(", %zu older %s left the list and cannot be undone here", dropped, dropped == 1 ? "one" : "ones");
+        Muted(summary);
         const float undoWidth = ImGui::CalcTextSize(ICON_FA_UNDO_ALT "  Undo all").x + ImGui::GetStyle().FramePadding.x * 2.0f;
         const float clearWidth = ImGui::CalcTextSize(ICON_FA_TRASH "  Clear the list").x + ImGui::GetStyle().FramePadding.x * 2.0f;
         ImGui::SameLine();
@@ -119,14 +142,14 @@ namespace Manifold::UI
             ClippedRows(static_cast<int>(rows.size()), [&](int index)
                 {
                     const MemoryWrite& write = *rows[static_cast<std::size_t>(index)];
-                    Row(write, history.StateOf(*engine.Process(), write));
+                    Row(write, StateOf(write), history.BlockedBy(write).has_value());
                 });
             ImGui::EndTable();
         }
         EndToolWindow();
     }
 
-    void WriteHistoryWindow::Row(const MemoryWrite& write, WriteState state)
+    void WriteHistoryWindow::Row(const MemoryWrite& write, WriteState state, bool blocked)
     {
         Engine& engine = m_workspace.Core();
         ImGui::TableNextRow();
@@ -141,7 +164,7 @@ namespace Manifold::UI
         if (ImGui::BeginPopupContextItem("##writemenu"))
         {
             m_selected = write.Id;
-            RowMenu(write);
+            RowMenu(write, blocked);
             ImGui::EndPopup();
         }
         ImGui::TableNextColumn();
@@ -159,14 +182,18 @@ namespace Manifold::UI
         if (state == WriteState::ChangedSince)
             ItemTooltip("The game or a script wrote to these bytes after the edit. Undo still writes back the bytes from before it.");
         ImGui::TableNextColumn();
+        ImGui::BeginDisabled(blocked);
         if (ImGui::SmallButton(write.Undone ? "Redo" : "Undo"))
             Toggle(write);
+        ImGui::EndDisabled();
+        if (blocked && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("Another edit overlaps these bytes and comes first.");
     }
 
-    void WriteHistoryWindow::RowMenu(const MemoryWrite& write)
+    void WriteHistoryWindow::RowMenu(const MemoryWrite& write, bool blocked)
     {
         Engine& engine = m_workspace.Core();
-        if (ImGui::MenuItem(write.Undone ? ICON_FA_REDO "  Redo" : ICON_FA_UNDO_ALT "  Undo"))
+        if (ImGui::MenuItem(write.Undone ? ICON_FA_REDO "  Redo" : ICON_FA_UNDO_ALT "  Undo", nullptr, false, !blocked))
             Toggle(write);
         ImGui::Separator();
         if (ImGui::MenuItem(ICON_FA_CODE "  Show in the disassembler"))
