@@ -4,13 +4,12 @@ This page is for working on Manifold Engine itself: how the program is put toget
 
 ## Layers
 
-Lower layers never include higher ones. `Core` includes nothing from the other folders, and `Target`, `Debug` and `Scan` include nothing from `App`, `Lua` or `UI`.
+Lower layers never include higher ones. `Core` includes nothing from the other folders. Nothing in the engine core includes `App`, `Lua` or `UI`. Inside the engine core, code and target work together: the disassembler reads process memory and names, and the code map uses the disassembler.
 
 | Layer | Folders | Holds |
 | --- | --- | --- |
 | Foundation | `Source/Core`, `Source/Text` | error codes and `Status`/`Result<T>`, the log, text helpers, ini and XML, paths, `BackgroundWork`, main-thread helpers, `CheckedMutex`, the profiler; JSON and other text formats |
-| Code | `Source/Disasm`, `Source/Asm`, `Source/Syscalls` | Zydis disassembler, code dissect and the code map; the assembler and the Auto Assembler; direct system calls |
-| Target | `Source/Target`, `Source/Scan`, `Source/Debug`, `Source/Table` | process access, modules, symbols and address expressions; Mono/IL2CPP (`MonoBridge`, `RemoteCall`, `UnityExplorer`, the managed agent link); the scanner; the debugger, watches and tracer; the address list, cheat table files and structures |
+| Engine core | `Source/Disasm`, `Source/Asm`, `Source/Syscalls`, `Source/Target`, `Source/Scan`, `Source/Debug`, `Source/Table` | Zydis disassembler, code dissect; the assembler and the Auto Assembler; direct system calls; process access, modules, symbols, address expressions and the code map; Mono/IL2CPP (`MonoBridge`, `RemoteCall`, `UnityExplorer`, the managed agent link); the scanner; the debugger, watches and tracer; the address list, cheat table files and structures |
 | Application | `Source/App`, `Source/Templates` | `Engine` and its parts, settings, commands, diagnostics, the window host; the template engine |
 | Scripting | `Source/Lua` | the Lua engine, the Cheat Engine compatible API, the `manifold.*` API and its documentation registry |
 | Interface | `Source/UI` | `Workspace`, the main window and every tool window, widgets and theme |

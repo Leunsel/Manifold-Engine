@@ -1,7 +1,7 @@
 #include "Scan/Scanner.h"
 
-#include "App/Settings.h"
 #include "Core/MainThread.h"
+#include "Core/Paths.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Target/Process.h"
