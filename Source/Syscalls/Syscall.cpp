@@ -92,7 +92,6 @@ int GetSysCalls()
 			funcBytes[3] == 0xB8)
 		{
 			DWORD syscallNumber = *(DWORD*)(funcBytes + 4);
-			//std::cout << name << " -> " << syscallNumber << std::endl;
 			SysCalls[name] = syscallNumber;
 		}
 #else
@@ -102,7 +101,6 @@ int GetSysCalls()
 		if (funcBytes[0] == 0xB8)
 		{
 			DWORD syscallNumber = *(DWORD*)(funcBytes + 1);
-			//std::cout << name << " -> " << syscallNumber << std::endl;
 			SysCalls[name] = syscallNumber;
 		}
 #endif

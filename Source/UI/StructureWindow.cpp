@@ -35,6 +35,11 @@ namespace Manifold::UI
         {
             return field.Type != Scan::ValueType::Pointer && !field.ChildStructure.empty();
         }
+
+        WorkOptions ManagedLookup()
+        {
+            return { .Title = "Reading the managed class", .Group = "structure", .Cancellable = false, .Quiet = true, .Serial = true };
+        }
     }
 
     namespace
@@ -277,7 +282,7 @@ namespace Manifold::UI
             scripts();
             return;
         }
-        engine.Jobs().Post([&engine, alive, address, containing, scripts, done]() -> JobQueue::Finish
+        engine.Work().Start(ManagedLookup(), [&engine, alive, address, containing, scripts, done](WorkProgress&) -> BackgroundWork::Finish
             {
                 std::optional<Lua::StructureLookup> found;
                 if (containing)
@@ -471,7 +476,7 @@ namespace Manifold::UI
             scripts();
             return;
         }
-        engine.Jobs().Post([&engine, definition, address, scripts, finish]() -> JobQueue::Finish
+        engine.Work().Start(ManagedLookup(), [&engine, definition, address, scripts, finish](WorkProgress&) -> BackgroundWork::Finish
             {
                 std::vector<Target::MonoField> fields;
                 Table::ManagedLayouts nested;

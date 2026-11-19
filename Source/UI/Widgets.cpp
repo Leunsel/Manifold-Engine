@@ -461,16 +461,6 @@ namespace Manifold::UI
         return clicked;
     }
 
-    bool ToolbarButton(const char* icon, const char* text, const char* tooltip, bool enabled)
-    {
-        ImGui::BeginDisabled(!enabled);
-        const std::string label = std::string(icon) + "  " + text;
-        const bool clicked = ImGui::Button(label.c_str());
-        ImGui::EndDisabled();
-        ItemTooltip(tooltip);
-        return clicked && enabled;
-    }
-
     bool DangerMenuItem(const char* label, const char* shortcut, bool enabled)
     {
         ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Error);
@@ -986,14 +976,6 @@ namespace Manifold::UI
             ImGui::PopItemFlag();
         if (clicked)
             state = (state + 1) % 3;
-        return clicked;
-    }
-
-    bool ColorDot(const char* id, ImVec4 color, float size)
-    {
-        const ImVec2 pos = ImGui::GetCursorScreenPos();
-        const bool clicked = ImGui::InvisibleButton(id, ImVec2(size, size));
-        ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(pos.x + size * 0.5f, pos.y + size * 0.5f), size * 0.35f, ImGui::GetColorU32(color));
         return clicked;
     }
 

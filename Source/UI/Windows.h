@@ -90,7 +90,6 @@ namespace Manifold::UI
         bool ValueChoices(const std::vector<Table::DropDownEntry>& entries);
         void AddAddressDialog();
         void DescriptionDialog();
-        void HotkeyHandling();
         void DoFirstScan();
         void DoNextScan();
         void NewScan();
@@ -190,7 +189,6 @@ namespace Manifold::UI
         int m_liveScan = -1;
 
         int m_lastClickedRecord = -1;
-        int m_dragRecord = 0;
 
         bool m_valueDialog = false;
         std::string m_valueText;

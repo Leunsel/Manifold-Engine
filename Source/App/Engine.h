@@ -9,7 +9,6 @@
 #include "Asm/AutoAssembler.h"
 #include "Core/BackgroundWork.h"
 #include "Core/Errors.h"
-#include "Core/JobQueue.h"
 #include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 #include "Debug/Debugger.h"
@@ -79,7 +78,6 @@ namespace Manifold
         Settings& Options() { return m_settings; }
         void SaveOptionsSoon();
         Status SaveOptionsNow();
-        JobQueue& Jobs() { return m_jobs; }
         BackgroundWork& Work() { return m_work; }
         std::vector<WorkInfo> BusyWork() const;
         void CancelWork(int id);
@@ -215,6 +213,5 @@ namespace Manifold
         ActivationRunner m_activation{ *this };
         bool m_attachLookup = false;
         BackgroundWork m_work;
-        JobQueue m_jobs{ m_work };
     };
 }

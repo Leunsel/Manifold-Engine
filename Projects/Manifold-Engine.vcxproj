@@ -139,7 +139,6 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Core\Handle.cpp" />
     <ClCompile Include="..\Source\Core\ImageDecode.cpp" />
     <ClCompile Include="..\Source\Core\Ini.cpp" />
-    <ClCompile Include="..\Source\Core\JobQueue.cpp" />
     <ClCompile Include="..\Source\Core\MainThread.cpp" />
     <ClCompile Include="..\Source\Core\Paths.cpp" />
     <ClCompile Include="..\Source\Core\Profiler.cpp" />
@@ -271,7 +270,6 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Core\IconNames.h" />
     <ClInclude Include="..\Source\Core\ImageDecode.h" />
     <ClInclude Include="..\Source\Core\Ini.h" />
-    <ClInclude Include="..\Source\Core\JobQueue.h" />
     <ClInclude Include="..\Source\Core\MainThread.h" />
     <ClInclude Include="..\Source\Core\Paths.h" />
     <ClInclude Include="..\Source\Core\Profiler.h" />

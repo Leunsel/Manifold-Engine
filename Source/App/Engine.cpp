@@ -37,7 +37,6 @@ namespace Manifold
 
     Engine::~Engine()
     {
-        m_jobs.Stop();
         m_work.Stop();
         CancelActivations();
         m_activation.WaitForActivation();

@@ -317,27 +317,6 @@ namespace Manifold::Lua
             return 1;
         }
 
-        int GetAddress(lua_State* state)
-        {
-            PushAddress(state, AddressArgument(state, 1));
-            return 1;
-        }
-
-        int GetAddressSafe(lua_State* state)
-        {
-            if (lua_type(state, 1) == LUA_TNUMBER)
-            {
-                lua_pushvalue(state, 1);
-                return 1;
-            }
-            const auto value = Owner(state).Evaluate(luaL_checkstring(state, 1));
-            if (value)
-                PushAddress(state, *value);
-            else
-                lua_pushnil(state);
-            return 1;
-        }
-
         int NameFromAddress(lua_State* state)
         {
             const std::uint64_t address = AddressArgument(state, 1);
@@ -1118,9 +1097,6 @@ namespace Manifold::Lua
             { "getProcessList", &ProcessList },
             { "getForegroundProcess", &ForegroundProcess },
             { "targetIs64Bit", &TargetIs64Bit },
-            { "getAddress", &GetAddress },
-            { "getAddressFromName", &GetAddress },
-            { "getAddressSafe", &GetAddressSafe },
             { "getNameFromAddress", &NameFromAddress },
             { "registerSymbol", &RegisterSymbol },
             { "unregisterSymbol", &UnregisterSymbol },

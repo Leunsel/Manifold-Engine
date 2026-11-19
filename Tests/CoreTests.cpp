@@ -7,9 +7,9 @@
 #include "App/Sounds.h"
 #include "App/Notifications.h"
 #include "App/SettingsStore.h"
+#include "Core/BackgroundWork.h"
 #include "Core/Handle.h"
 #include "Core/Ini.h"
-#include "Core/JobQueue.h"
 #include "Core/MainThread.h"
 #include "Core/Types.h"
 #include "Core/Profiler.h"
@@ -713,10 +713,10 @@ data:
         CHECK(Sounds::DecodeToWave({ 1, 2, 3, 4, 5 }).empty());
     }
 
-    void Jobs()
+    void SerialWork()
     {
         BackgroundWork work;
-        JobQueue jobs(work);
+        const auto post = [&work](BackgroundWork::Job job) { work.Start({ .Title = "Serial job", .Group = "serial", .Cancellable = false, .Quiet = true, .Serial = true }, std::move(job)); };
         int finished = 0;
         std::vector<int> order;
         std::atomic<int> ran{ 0 };
@@ -725,7 +725,7 @@ data:
         std::atomic<std::thread::id> worker{ std::thread::id() };
         for (int i = 0; i < 3; ++i)
         {
-            jobs.Post([&, i]() -> JobQueue::Finish
+            post([&, i](WorkProgress&) -> BackgroundWork::Finish
                 {
                     if (++running > 1)
                         ++overlaps;
@@ -744,28 +744,28 @@ data:
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         CHECK_EQ(ran.load(), 3);
         CHECK_EQ(finished, 0);
-        for (int wait = 0; wait < 400 && jobs.Busy(); ++wait)
+        for (int wait = 0; wait < 400 && work.Busy("serial"); ++wait)
         {
             work.Drain();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        CHECK(!jobs.Busy());
+        CHECK(!work.Busy("serial"));
         CHECK_EQ(finished, 6);
         CHECK(order == std::vector<int>({ 0, 1, 2 }));
         CHECK_EQ(overlaps.load(), 0);
         CHECK(worker.load() != std::thread::id() && worker.load() != std::this_thread::get_id());
-        jobs.Post([]() -> JobQueue::Finish { throw std::runtime_error("job failed on purpose"); });
-        jobs.Post([&finished]() -> JobQueue::Finish { return [&finished]() { finished = 100; }; });
-        for (int wait = 0; wait < 400 && jobs.Busy(); ++wait)
+        post([](WorkProgress&) -> BackgroundWork::Finish { throw std::runtime_error("job failed on purpose"); });
+        post([&finished](WorkProgress&) -> BackgroundWork::Finish { return [&finished]() { finished = 100; }; });
+        for (int wait = 0; wait < 400 && work.Busy("serial"); ++wait)
         {
             work.Drain();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         CHECK_EQ(finished, 100);
         work.Stop();
-        jobs.Post([&finished]() -> JobQueue::Finish { return [&finished]() { finished = -1; }; });
+        post([&finished](WorkProgress&) -> BackgroundWork::Finish { return [&finished]() { finished = -1; }; });
         work.Drain();
-        CHECK(!jobs.Busy());
+        CHECK(!work.Busy("serial"));
         CHECK_EQ(finished, 100);
     }
 
@@ -1175,7 +1175,7 @@ data:
         ScanKinds();
         Conditions();
         BreakExpressions();
-        Jobs();
+        SerialWork();
         Foundations();
         SoundDecoding();
         FolderMigration();

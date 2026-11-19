@@ -41,7 +41,6 @@ namespace Manifold::UI
     bool IconButton(const char* icon, const char* tooltip, bool danger = false, float side = 0.0f);
     bool AccentButton(const char* label, ImVec2 size = ImVec2(0.0f, 0.0f));
     bool DangerButton(const char* label, ImVec2 size = ImVec2(0.0f, 0.0f));
-    bool ToolbarButton(const char* icon, const char* text, const char* tooltip = nullptr, bool enabled = true);
     bool DangerMenuItem(const char* label, const char* shortcut = nullptr, bool enabled = true);
 
     void ItemTooltip(const char* text);
@@ -63,7 +62,6 @@ namespace Manifold::UI
     float ToggleSwitchWidth();
     bool Segmented(const char* id, int* value, const std::vector<const char*>& options, float width);
     bool TriStateCheckbox(const char* label, int& state);
-    bool ColorDot(const char* id, ImVec4 color, float size);
 
     bool KeepOutOfCentralDock(const char* title);
     float CheckboxWidth(const char* label);

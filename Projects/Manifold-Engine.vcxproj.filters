@@ -123,9 +123,6 @@
     <ClCompile Include="..\Source\Core\Ini.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
-    <ClCompile Include="..\Source\Core\JobQueue.cpp">
-      <Filter>Source\Core</Filter>
-    </ClCompile>
     <ClCompile Include="..\Source\Core\MainThread.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
@@ -505,9 +502,6 @@
       <Filter>Source\Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Core\Ini.h">
-      <Filter>Source\Core</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Source\Core\JobQueue.h">
       <Filter>Source\Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Core\MainThread.h">

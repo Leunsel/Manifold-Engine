@@ -108,9 +108,6 @@
     <ClCompile Include="..\Source\Core\Ini.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
-    <ClCompile Include="..\Source\Core\JobQueue.cpp">
-      <Filter>Source\Core</Filter>
-    </ClCompile>
     <ClCompile Include="..\Source\Core\MainThread.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
