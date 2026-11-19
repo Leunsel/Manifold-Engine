@@ -74,6 +74,7 @@ namespace Manifold::UI
     class ProfilerWindow;
     class NopSledWindow;
     class WriteHistoryWindow;
+    class FlowGraphWindow;
 
     struct FileFilter
     {
@@ -131,6 +132,7 @@ namespace Manifold::UI
         void OpenProfiler(int tab = -1);
         void OpenNopSled();
         void OpenWriteHistory();
+        void OpenFlowGraph(std::uint64_t address = 0);
         bool Animating() const;
         bool OnlySpinnersAnimating() const;
         void AddAddress(std::uint64_t address, Scan::ValueType type, std::string description = {});
@@ -200,6 +202,7 @@ namespace Manifold::UI
         std::unique_ptr<ProfilerWindow> m_profiler;
         std::unique_ptr<NopSledWindow> m_nopSled;
         std::unique_ptr<WriteHistoryWindow> m_writeHistory;
+        std::unique_ptr<FlowGraphWindow> m_flowGraph;
         std::vector<std::unique_ptr<TraceWindow>> m_traces;
         int m_nextTrace = 1;
         MemoryViewer& ActiveMemoryViewer();

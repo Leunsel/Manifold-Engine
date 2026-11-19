@@ -228,6 +228,8 @@ namespace Manifold
                 m_workspace->OpenNopSled();
             else if (window == "writehistory")
                 m_workspace->OpenWriteHistory();
+            else if (window == "flowgraph")
+                m_workspace->OpenFlowGraph();
         }
         if (!m_options.ProfileReport.empty())
         {

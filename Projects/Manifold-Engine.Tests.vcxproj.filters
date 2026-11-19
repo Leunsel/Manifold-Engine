@@ -108,6 +108,9 @@
     <ClCompile Include="..\Source\Core\Errors.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Core\GraphLayout.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Core\Handle.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
@@ -151,6 +154,9 @@
       <Filter>Source\Disasm</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Disasm\FlowGraph.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp">
@@ -343,6 +349,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\DocTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\FlowGraphTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\Il2CppTests.cpp">

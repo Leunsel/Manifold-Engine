@@ -127,6 +127,7 @@ namespace Manifold
             { CopyInstructionBytes, "CopyInstructionBytes", Scope::Disassembler, "Copy only the bytes", Ctrl | Alt | ImGuiKey_C, 0, CE },
             { InstructionAccesses, "InstructionAccesses", Scope::Disassembler, "Find out what addresses this instruction accesses", Ctrl | Alt | ImGuiKey_I, 0, Own },
             { CodeReferences, "CodeReferences", Scope::Disassembler, "Code that references this address", ImGuiKey_X, 0, Own },
+            { FlowGraph, "FlowGraph", Scope::Disassembler, "Show the flow graph of the function", ImGuiKey_G, 0, Own },
             { AddInstructionToList, "AddInstructionToList", Scope::Disassembler, "Add this address to the address list", Ctrl | ImGuiKey_KeypadAdd, 0, CE },
             { SetBookmark, "SetBookmark", Scope::Disassembler, "Set a bookmark", Ctrl | Alt | ImGuiKey_0, 0, CE, true },
             { GotoBookmark, "GotoBookmark", Scope::Disassembler, "Go to a bookmark", Ctrl | ImGuiKey_0, 0, CE, true },
@@ -194,6 +195,10 @@ namespace Manifold
             { EditorMoveLinesDown, "EditorMoveLinesDown", Scope::CodeEditor, "Move the lines down", Alt | ImGuiKey_DownArrow, 0, Own },
             { EditorDeleteLines, "EditorDeleteLines", Scope::CodeEditor, "Delete the lines", Ctrl | Shift | ImGuiKey_K, 0, Own },
             { EditorGotoLine, "EditorGotoLine", Scope::CodeEditor, "Go to a line", Ctrl | ImGuiKey_G, 0, Own },
+
+            { FlowGraphFit, "FlowGraphFit", Scope::FlowGraph, "Fit the graph into the window", ImGuiKey_F, 0, Own },
+            { FlowGraphActualSize, "FlowGraphActualSize", Scope::FlowGraph, "Actual size", ImGuiKey_0, 0, Own },
+            { FlowGraphBack, "FlowGraphBack", Scope::FlowGraph, "Back to the function before", ImGuiKey_Backspace, 0, Own },
         };
 
         static_assert(std::size(kCommands) == static_cast<std::size_t>(Command::Count));
@@ -459,6 +464,7 @@ namespace Manifold
         case CommandScope::ScriptEditor: return "Auto Assembler and script editor";
         case CommandScope::LuaEngine: return "Lua engine";
         case CommandScope::CodeEditor: return "Code editors";
+        case CommandScope::FlowGraph: return "Flow graph";
         case CommandScope::Count: break;
         }
         return "";
@@ -479,6 +485,7 @@ namespace Manifold
         case CommandScope::ScriptEditor: return "While an Auto Assembler or script window has the focus. Template keys come from each template's Shortcut setting; the ones listed are the built-in templates.";
         case CommandScope::LuaEngine: return "While the Lua engine window has the focus.";
         case CommandScope::CodeEditor: return "While the cursor is in a code editor: the Lua engine, Auto Assembler and script windows, the template manager and table files.";
+        case CommandScope::FlowGraph: return "While the flow graph window has the focus.";
         case CommandScope::Count: break;
         }
         return "";

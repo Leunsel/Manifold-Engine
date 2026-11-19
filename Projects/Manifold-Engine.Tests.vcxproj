@@ -125,6 +125,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Core\CheckedMutex.cpp" />
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
+    <ClCompile Include="..\Source\Core\GraphLayout.cpp" />
     <ClCompile Include="..\Source\Core\Handle.cpp" />
     <ClCompile Include="..\Source\Core\ImageDecode.cpp" />
     <ClCompile Include="..\Source\Core\Ini.cpp" />
@@ -140,6 +141,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp" />
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
+    <ClCompile Include="..\Source\Disasm\FlowGraph.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\IconNames.cpp" />
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
@@ -206,6 +208,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\DebuggerTests.cpp" />
     <ClCompile Include="..\Tests\DisasmTests.cpp" />
     <ClCompile Include="..\Tests\DocTests.cpp" />
+    <ClCompile Include="..\Tests\FlowGraphTests.cpp" />
     <ClCompile Include="..\Tests\Il2CppTests.cpp" />
     <ClCompile Include="..\Tests\IntegrationTests.cpp" />
     <ClCompile Include="..\Tests\Main.cpp" />

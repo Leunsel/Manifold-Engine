@@ -32,6 +32,7 @@
 #include "UI/ToolWindows.h"
 #include "UI/WatchWindow.h"
 #include "UI/WriteHistoryWindow.h"
+#include "UI/FlowGraphWindow.h"
 
 #include "imgui_internal.h"
 
@@ -154,6 +155,7 @@ namespace Manifold::UI
         drawOne("Profiler", m_profiler);
         drawOne("NOP Sled", m_nopSled);
         drawOne("Write history", m_writeHistory);
+        drawOne("Flow graph", m_flowGraph);
         {
             PROFILE_ZONE("Script forms");
             m_scriptForms->Draw();
@@ -542,6 +544,16 @@ namespace Manifold::UI
         if (!m_writeHistory)
             m_writeHistory = std::make_unique<WriteHistoryWindow>(*this);
         m_writeHistory->Show();
+    }
+
+    void Workspace::OpenFlowGraph(std::uint64_t address)
+    {
+        if (!m_flowGraph)
+            m_flowGraph = std::make_unique<FlowGraphWindow>(*this);
+        if (address)
+            m_flowGraph->ShowFunction(address);
+        else
+            m_flowGraph->Show();
     }
 
     bool Workspace::Animating() const

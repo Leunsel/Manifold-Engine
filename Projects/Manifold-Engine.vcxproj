@@ -139,6 +139,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Core\CheckedMutex.cpp" />
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
+    <ClCompile Include="..\Source\Core\GraphLayout.cpp" />
     <ClCompile Include="..\Source\Core\Handle.cpp" />
     <ClCompile Include="..\Source\Core\ImageDecode.cpp" />
     <ClCompile Include="..\Source\Core\Ini.cpp" />
@@ -154,6 +155,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp" />
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
+    <ClCompile Include="..\Source\Disasm\FlowGraph.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\IconNames.cpp" />
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
@@ -221,6 +223,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\DocView.cpp" />
     <ClCompile Include="..\Source\UI\EditorShared.cpp" />
     <ClCompile Include="..\Source\UI\EditorView.cpp" />
+    <ClCompile Include="..\Source\UI\FlowGraphWindow.cpp" />
     <ClCompile Include="..\Source\UI\Fonts.cpp" />
     <ClCompile Include="..\Source\UI\Loading.cpp" />
     <ClCompile Include="..\Source\UI\LuaDialogs.cpp" />
@@ -274,6 +277,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Core\CheckedMutex.h" />
     <ClInclude Include="..\Source\Core\Deflate.h" />
     <ClInclude Include="..\Source\Core\Errors.h" />
+    <ClInclude Include="..\Source\Core\GraphLayout.h" />
     <ClInclude Include="..\Source\Core\Handle.h" />
     <ClInclude Include="..\Source\Core\IconNames.h" />
     <ClInclude Include="..\Source\Core\ImageDecode.h" />
@@ -294,6 +298,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Disasm\AssemblySearch.h" />
     <ClInclude Include="..\Source\Disasm\CodeDissect.h" />
     <ClInclude Include="..\Source\Disasm\Disassembler.h" />
+    <ClInclude Include="..\Source\Disasm\FlowGraph.h" />
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h" />
     <ClInclude Include="..\Source\Lua\ConsoleHistory.h" />
     <ClInclude Include="..\Source\Lua\DocAnnotations.h" />
@@ -353,6 +358,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\DocView.h" />
     <ClInclude Include="..\Source\UI\EditorShared.h" />
     <ClInclude Include="..\Source\UI\EditorView.h" />
+    <ClInclude Include="..\Source\UI\FlowGraphWindow.h" />
     <ClInclude Include="..\Source\UI\Fonts.h" />
     <ClInclude Include="..\Source\UI\Loading.h" />
     <ClInclude Include="..\Source\UI\LuaDialogs.h" />

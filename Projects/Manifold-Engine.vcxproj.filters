@@ -123,6 +123,9 @@
     <ClCompile Include="..\Source\Core\Errors.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Core\GraphLayout.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Core\Handle.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
@@ -166,6 +169,9 @@
       <Filter>Source\Disasm</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Disasm\FlowGraph.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp">
@@ -363,6 +369,9 @@
     <ClCompile Include="..\Source\UI\EditorView.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\FlowGraphWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\Fonts.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -516,6 +525,9 @@
     <ClInclude Include="..\Source\Core\Errors.h">
       <Filter>Source\Core</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Core\GraphLayout.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Core\Handle.h">
       <Filter>Source\Core</Filter>
     </ClInclude>
@@ -574,6 +586,9 @@
       <Filter>Source\Disasm</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Disasm\Disassembler.h">
+      <Filter>Source\Disasm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Disasm\FlowGraph.h">
       <Filter>Source\Disasm</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h">
@@ -751,6 +766,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\EditorView.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\FlowGraphWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Fonts.h">

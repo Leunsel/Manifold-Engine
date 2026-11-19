@@ -146,6 +146,7 @@ While the disassembler pane has the focus. The keys act on the selected instruct
 | `Ctrl+Alt+C` | Copy only the bytes | `CopyInstructionBytes` | CE |
 | `Ctrl+Alt+I` | Find out what addresses this instruction accesses | `InstructionAccesses` | Manifold |
 | `X` | Code that references this address | `CodeReferences` | Manifold |
+| `G` | Show the flow graph of the function | `FlowGraph` | Manifold |
 | `Ctrl+Num +` | Add this address to the address list | `AddInstructionToList` | CE |
 | `Ctrl+Alt+0-9` | Set a bookmark | `SetBookmark` | CE |
 | `Ctrl+0-9` | Go to a bookmark | `GotoBookmark` | CE |
@@ -243,3 +244,13 @@ While the cursor is in a code editor: the Lua engine, Auto Assembler and script 
 | `Alt+Down` | Move the lines down | `EditorMoveLinesDown` | Manifold |
 | `Ctrl+Shift+K` | Delete the lines | `EditorDeleteLines` | Manifold |
 | `Ctrl+G` | Go to a line | `EditorGotoLine` | Manifold |
+
+## Flow graph
+
+While the flow graph window has the focus.
+
+| Keys | Command | Name in the settings | Origin |
+|---|---|---|---|
+| `F` | Fit the graph into the window | `FlowGraphFit` | Manifold |
+| `0` | Actual size | `FlowGraphActualSize` | Manifold |
+| `Backspace` | Back to the function before | `FlowGraphBack` | Manifold |

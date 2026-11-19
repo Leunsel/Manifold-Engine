@@ -591,6 +591,7 @@ namespace Manifold::UI
             item(ICON_FA_TAGS "  Modules and symbols", Command::SymbolsAndModules);
             item(ICON_FA_PROJECT_DIAGRAM "  Referenced functions", Command::ReferencedFunctions);
             item(ICON_FA_QUOTE_LEFT "  Referenced strings", Command::ReferencedStrings);
+            item(ICON_FA_CODE_BRANCH "  Flow graph of the selected function", Command::FlowGraph);
             ImGui::Separator();
             if (ImGui::BeginMenu(ICON_FA_TH "  Hex view shows"))
             {
@@ -1468,6 +1469,7 @@ namespace Manifold::UI
                 m_engine.Notify(LogLevel::Info, "The selected instruction does not access memory.");
             break;
         case Command::CodeReferences: m_workspace.OpenCodeDissect(CodeDissectWindow::References, m_selected); break;
+        case Command::FlowGraph: m_workspace.OpenFlowGraph(m_selected); break;
         case Command::AddInstructionToList:
             m_workspace.AddAddress(m_selected, Scan::ValueType::ByteArray, disassembler.Read(process, m_selected, &m_engine.Symbols()).Text());
             break;
@@ -1793,6 +1795,7 @@ namespace Manifold::UI
                     m_workspace.OpenCodeDissect(CodeDissectWindow::References, operand);
             }
         }
+        item(ICON_FA_CODE_BRANCH "  Show the flow graph", Command::FlowGraph);
         if (broken)
             item(ICON_FA_MAP_MARKER_ALT "  Set the instruction pointer here", Command::SetInstructionPointer);
         ImGui::Separator();

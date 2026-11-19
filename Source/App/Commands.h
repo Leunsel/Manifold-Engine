@@ -24,6 +24,7 @@ namespace Manifold
         ScriptEditor,
         LuaEngine,
         CodeEditor,
+        FlowGraph,
         Count
     };
 
@@ -133,6 +134,7 @@ namespace Manifold
         CopyInstructionBytes,
         InstructionAccesses,
         CodeReferences,
+        FlowGraph,
         AddInstructionToList,
         SetBookmark,
         GotoBookmark,
@@ -200,6 +202,10 @@ namespace Manifold
         EditorMoveLinesDown,
         EditorDeleteLines,
         EditorGotoLine,
+
+        FlowGraphFit,
+        FlowGraphActualSize,
+        FlowGraphBack,
 
         Count
     };
