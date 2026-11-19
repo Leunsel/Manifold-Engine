@@ -307,6 +307,35 @@ namespace Manifold::Debug
                 return false;
             return first < breakpoint.Address + static_cast<std::uint64_t>(breakpoint.Size) && breakpoint.Address < last;
         }
+
+        Disasm::RegisterValues FromAgent(const Veh::Registers& raw, bool is64Bit)
+        {
+            Disasm::RegisterValues r;
+            r.Rax = raw.Rax; r.Rbx = raw.Rbx; r.Rcx = raw.Rcx; r.Rdx = raw.Rdx;
+            r.Rsi = raw.Rsi; r.Rdi = raw.Rdi; r.Rbp = raw.Rbp; r.Rsp = raw.Rsp;
+            r.R8 = raw.R8; r.R9 = raw.R9; r.R10 = raw.R10; r.R11 = raw.R11;
+            r.R12 = raw.R12; r.R13 = raw.R13; r.R14 = raw.R14; r.R15 = raw.R15;
+            r.Rip = raw.Rip;
+            r.Flags = raw.Flags;
+            if (is64Bit)
+                r.GsBase = raw.GsBase;
+            else
+                r.FsBase = raw.GsBase;
+            return r;
+        }
+
+        Veh::Registers ToAgent(const Disasm::RegisterValues& r, bool is64Bit)
+        {
+            Veh::Registers raw{};
+            raw.Rax = r.Rax; raw.Rbx = r.Rbx; raw.Rcx = r.Rcx; raw.Rdx = r.Rdx;
+            raw.Rsi = r.Rsi; raw.Rdi = r.Rdi; raw.Rbp = r.Rbp; raw.Rsp = r.Rsp;
+            raw.R8 = r.R8; raw.R9 = r.R9; raw.R10 = r.R10; raw.R11 = r.R11;
+            raw.R12 = r.R12; raw.R13 = r.R13; raw.R14 = r.R14; raw.R15 = r.R15;
+            raw.Rip = r.Rip;
+            raw.Flags = r.Flags;
+            raw.GsBase = is64Bit ? r.GsBase : r.FsBase;
+            return raw;
+        }
     }
 
     struct Debugger::ThreadState
@@ -1151,7 +1180,27 @@ namespace Manifold::Debug
         LOG_INFO("Debugger", reason + " at " + Hex(m_break.Address) + " in thread " + std::to_string(threadId));
     }
 
-    unsigned long Debugger::HandleException(void* rawEvent, bool& enterBreak, std::string& reason, std::uint64_t& breakpointAddress)
+    std::uint32_t Debugger::Wow64BreakThread(std::uint32_t breakIn) const
+    {
+        const auto runs32 = [this](std::uint32_t id)
+            {
+                const auto found = m_threads.find(id);
+                if (found == m_threads.end() || !StillRunning(found->second->Handle))
+                    return false;
+                ContextHolder context(false);
+                return context.Read(found->second->Handle, ContextHolder::Scope::Control) && context.Ip() != 0;
+            };
+        if (m_mainThread != breakIn && runs32(m_mainThread))
+            return m_mainThread;
+        for (const auto& [id, thread] : m_threads)
+        {
+            if (id != breakIn && runs32(id))
+                return id;
+        }
+        return breakIn;
+    }
+
+    unsigned long Debugger::HandleException(void* rawEvent, bool& enterBreak, std::string& reason, std::uint64_t& breakpointAddress, std::uint32_t& breakThread)
     {
         const DEBUG_EVENT& event = *static_cast<const DEBUG_EVENT*>(rawEvent);
         const EXCEPTION_RECORD& record = event.u.Exception.ExceptionRecord;
@@ -1255,6 +1304,8 @@ namespace Manifold::Debug
                 m_breakRequested = false;
                 enterBreak = true;
                 reason = "Break";
+                if (!m_is64Bit)
+                    breakThread = Wow64BreakThread(event.dwThreadId);
                 return DBG_CONTINUE;
             }
             return DBG_EXCEPTION_NOT_HANDLED;
@@ -1454,6 +1505,7 @@ namespace Manifold::Debug
             bool enterBreak = false;
             std::string reason;
             std::uint64_t breakpointAddress = 0;
+            std::uint32_t breakThread = event.dwThreadId;
             std::unique_lock lock(m_lock);
             switch (event.dwDebugEventCode)
             {
@@ -1490,7 +1542,7 @@ namespace Manifold::Debug
                     ::CloseHandle(event.u.LoadDll.hFile);
                 break;
             case EXCEPTION_DEBUG_EVENT:
-                status = HandleException(&event, enterBreak, reason, breakpointAddress);
+                status = HandleException(&event, enterBreak, reason, breakpointAddress, breakThread);
                 if (status == DBG_EXCEPTION_NOT_HANDLED)
                 {
                     const EXCEPTION_RECORD& record = event.u.Exception.ExceptionRecord;
@@ -1529,13 +1581,13 @@ namespace Manifold::Debug
 
             if (enterBreak && !m_stop)
             {
-                EnterBreak(event.dwThreadId, reason, breakpointAddress);
+                EnterBreak(breakThread, reason, breakpointAddress);
                 while (m_break.Broken && !m_resumeRequested && !m_stop)
                 {
                     m_wake.wait_for(lock, std::chrono::milliseconds(50));
                     RunTasks();
                 }
-                auto threadFound = m_threads.find(event.dwThreadId);
+                auto threadFound = m_threads.find(m_break.ThreadId);
                 if (threadFound != m_threads.end() && m_break.Broken)
                 {
                     ThreadState& thread = *threadFound->second;
@@ -1641,7 +1693,12 @@ namespace Manifold::Debug
     {
         wchar_t self[MAX_PATH] = L"";
         ::GetModuleFileNameW(nullptr, self, MAX_PATH);
-        return (std::filesystem::path(self).parent_path() / L"ManifoldAgent.dll").wstring();
+        return (std::filesystem::path(self).parent_path() / AgentName()).wstring();
+    }
+
+    std::wstring Debugger::AgentName() const
+    {
+        return m_is64Bit ? L"ManifoldAgent.dll" : L"ManifoldAgent32.dll";
     }
 
     int Debugger::VehFreeSlot() const
@@ -1861,12 +1918,7 @@ namespace Manifold::Debug
         std::lock_guard lock(m_lock);
         if (!m_break.Broken || !m_vehBlock || !m_process)
             return;
-        Veh::Registers regs{};
-        regs.Rax = registers.Rax; regs.Rbx = registers.Rbx; regs.Rcx = registers.Rcx; regs.Rdx = registers.Rdx;
-        regs.Rsi = registers.Rsi; regs.Rdi = registers.Rdi; regs.Rbp = registers.Rbp; regs.Rsp = registers.Rsp;
-        regs.R8 = registers.R8; regs.R9 = registers.R9; regs.R10 = registers.R10; regs.R11 = registers.R11;
-        regs.R12 = registers.R12; regs.R13 = registers.R13; regs.R14 = registers.R14; regs.R15 = registers.R15;
-        regs.Rip = registers.Rip; regs.Flags = registers.Flags; regs.GsBase = registers.GsBase;
+        const Veh::Registers regs = ToAgent(registers, m_is64Bit);
         m_process->Write(m_vehBlock + offsetof(Veh::Block, NewRegs), &regs, sizeof(regs));
         const std::uint32_t dirty = 1;
         m_process->Write(m_vehBlock + offsetof(Veh::Block, RegsDirty), &dirty, sizeof(dirty));
@@ -1906,12 +1958,7 @@ namespace Manifold::Debug
                 }
             }
             VehClearTempSlots();
-            Disasm::RegisterValues regs;
-            regs.Rax = head.Regs.Rax; regs.Rbx = head.Regs.Rbx; regs.Rcx = head.Regs.Rcx; regs.Rdx = head.Regs.Rdx;
-            regs.Rsi = head.Regs.Rsi; regs.Rdi = head.Regs.Rdi; regs.Rbp = head.Regs.Rbp; regs.Rsp = head.Regs.Rsp;
-            regs.R8 = head.Regs.R8; regs.R9 = head.Regs.R9; regs.R10 = head.Regs.R10; regs.R11 = head.Regs.R11;
-            regs.R12 = head.Regs.R12; regs.R13 = head.Regs.R13; regs.R14 = head.Regs.R14; regs.R15 = head.Regs.R15;
-            regs.Rip = head.Regs.Rip; regs.Flags = head.Regs.Flags; regs.GsBase = head.Regs.GsBase;
+            const Disasm::RegisterValues regs = FromAgent(head.Regs, m_is64Bit);
             m_break = {};
             Veh::Vectors vectors{};
             if (m_process->ReadExact(m_vehBlock + offsetof(Veh::Block, BreakXmm), &vectors, sizeof(vectors)) && vectors.Count > 0 && vectors.Count <= 16)
@@ -1941,12 +1988,11 @@ namespace Manifold::Debug
 
     Status Debugger::VehAttach()
     {
-        if (!m_is64Bit)
-            return Status::Fail(ErrorCode::DebugAttachFailed, "the in-process debugger supports 64-bit targets only");
         const std::wstring agent = AgentPath();
+        const std::string agentName = WideToUtf8(AgentName());
         std::error_code ignore;
         if (!std::filesystem::exists(agent, ignore))
-            return Status::Fail(ErrorCode::InjectFailed, "ManifoldAgent.dll was not found next to the program");
+            return Status::Fail(ErrorCode::InjectFailed, agentName + " was not found next to the program");
 
         const Result<Address> allocated = m_process->Allocate(sizeof(Veh::Block), PAGE_READWRITE);
         if (!allocated)
@@ -1961,13 +2007,13 @@ namespace Manifold::Debug
             m_process->Free(block);
             return written;
         }
-        const bool loadedBefore = m_process->FindModule("ManifoldAgent.dll").has_value();
+        const bool loadedBefore = m_process->FindModule(agentName).has_value();
         if (Status injected = m_process->InjectLibrary(agent); !injected)
         {
             m_process->Free(block);
             return injected;
         }
-        const std::uint64_t start = m_process->FindExport("ManifoldAgent.dll", "ManifoldAgentStart");
+        const std::uint64_t start = m_process->FindExport(agentName, "ManifoldAgentStart");
         if (!start)
         {
             m_process->Free(block);
@@ -2210,12 +2256,7 @@ namespace Manifold::Debug
                 for (std::uint64_t i = 0; i < entryCount; ++i)
                 {
                     const Veh::Entry& raw = shared->Entries[i];
-                    Disasm::RegisterValues regs;
-                    regs.Rax = raw.Regs.Rax; regs.Rbx = raw.Regs.Rbx; regs.Rcx = raw.Regs.Rcx; regs.Rdx = raw.Regs.Rdx;
-                    regs.Rsi = raw.Regs.Rsi; regs.Rdi = raw.Regs.Rdi; regs.Rbp = raw.Regs.Rbp; regs.Rsp = raw.Regs.Rsp;
-                    regs.R8 = raw.Regs.R8; regs.R9 = raw.Regs.R9; regs.R10 = raw.Regs.R10; regs.R11 = raw.Regs.R11;
-                    regs.R12 = raw.Regs.R12; regs.R13 = raw.Regs.R13; regs.R14 = raw.Regs.R14; regs.R15 = raw.Regs.R15;
-                    regs.Rip = raw.Regs.Rip; regs.Flags = raw.Regs.Flags; regs.GsBase = raw.Regs.GsBase;
+                    const Disasm::RegisterValues regs = FromAgent(raw.Regs, m_is64Bit);
                     WatchEntry entry;
                     entry.Count = raw.Count;
                     entry.ThreadId = raw.ThreadId;
@@ -2225,6 +2266,11 @@ namespace Manifold::Debug
                         const auto previous = PreviousInstruction(raw.Instruction);
                         entry.Instruction = previous.value_or(raw.Instruction);
                         entry.Accessed = target.Address;
+                    }
+                    else if (target.Kind == WatchKind::Calls && raw.Accessed)
+                    {
+                        entry.Instruction = PreviousInstruction(raw.Accessed).value_or(raw.Accessed);
+                        entry.Accessed = raw.Accessed;
                     }
                     else
                     {

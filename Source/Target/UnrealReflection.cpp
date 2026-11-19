@@ -120,14 +120,14 @@ namespace Manifold::Target
         if (!main)
             return fail("the process has no main module");
         m_main = *main;
-        if (!m_process->Is64Bit())
-            return fail("only 64-bit games are supported");
         m_rejected = false;
         if (!full && !LooksUnreal(*m_process))
         {
             m_rejected = true;
             return fail("not an Unreal Engine process (no CoreUObject in " + m_main.Name + ")");
         }
+        if (!m_process->Is64Bit())
+            return fail("only 64-bit games are supported");
 
         step("Finding the name table");
         m_pool = 0;

@@ -19,6 +19,8 @@ namespace Manifold::UI
     {
         using QueryThread = LONG(NTAPI*)(HANDLE, int, PVOID, ULONG, PULONG);
 
+        constexpr std::uint64_t kWow64TebOffset = 0x2000;
+
         QueryThread NtQueryThread()
         {
             static const QueryThread query = reinterpret_cast<QueryThread>(
@@ -308,8 +310,8 @@ namespace Manifold::UI
                 {
                     QueryThreadInfo(thread, 9, row.Start);
                     struct Basic { LONG ExitStatus; PVOID TebBaseAddress; PVOID Pid; PVOID Tid; ULONG_PTR Affinity; LONG Priority; LONG BasePriority; } basic{};
-                    if (QueryThreadInfo(thread, 0, basic))
-                        row.Teb = reinterpret_cast<std::uint64_t>(basic.TebBaseAddress);
+                    if (QueryThreadInfo(thread, 0, basic) && basic.TebBaseAddress)
+                        row.Teb = reinterpret_cast<std::uint64_t>(basic.TebBaseAddress) + (process.Is64Bit() ? 0 : kWow64TebOffset);
                     const int priority = ::GetThreadPriority(thread);
                     if (priority != THREAD_PRIORITY_ERROR_RETURN)
                         row.Priority = priority;

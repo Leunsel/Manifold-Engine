@@ -18,7 +18,7 @@ msbuild Manifold-Engine.sln /p:Configuration=Release /p:Platform=x64 /m
 
 Everything lands in `Build\<Platform>\<Configuration>`, e.g. `Build\x64\Release`. All dependencies are in `Dependencies` and build with the solution: Dear ImGui 1.92 (docking), Zydis 5 (amalgamated), Lua 5.4. New source files are picked up by running `python Tools/gen_projects.py`, which writes the projects in `Projects` and the solution.
 
-The solution also carries a `Win32` platform, but only the dependencies and the stand-alone `SyscallTest` project build as 32-bit; the app and the injected agent are x64-only.
+The program is x64-only. Every x64 build also builds the in-process debugger agent and the test target a second time as 32-bit, as `ManifoldAgent32.dll` and `TestTarget32.exe` next to the program: the program injects the 32-bit agent into 32-bit games, and the tests use the 32-bit target. The solution's `Win32` platform builds only the dependencies, these two projects and the stand-alone `SyscallTest` project.
 
 The MSVC compiler (`v143`) cannot build the program: the direct system call stubs in `Source/Syscalls/Syscall.h` are naked functions with inline assembly, which only clang-cl compiles.
 
@@ -30,7 +30,7 @@ Before compiling, the projects run `Tools/embed_lua.py`, `Tools/embed_templates.
 Build\x64\Release\Manifold-Engine.Tests.exe
 ```
 
-The tests cover the assembler, value parsing, XML and cheat table round trips, the error table, offline Auto Assembler runs, the Lua APIs and the Autorun modules, and an integration run against `TestTarget.exe` (built with the solution): scanning, pointers, freezing, a code injection script, the sample table `Tests/Target/TestTarget.CT`, Lua (records, timers, threads), all four "find out what" watches, breakpoints, stepping and the direct system calls. `--errors-markdown` prints `Docs/ERRORS.md`, `--shortcuts-markdown` prints `Docs/SHORTCUTS.md` and `--manifold-markdown` prints `Docs/MANIFOLD-API.md`; the tests fail when one of them is out of date, and when two commands of one window share a key.
+The tests cover the assembler, value parsing, XML and cheat table round trips, the error table, offline Auto Assembler runs, the Lua APIs and the Autorun modules, and an integration run against `TestTarget.exe` (built with the solution): scanning, pointers, freezing, a code injection script, the sample table `Tests/Target/TestTarget.CT`, Lua (records, timers, threads), all four "find out what" watches, breakpoints, stepping and the direct system calls. The `wow64` suite does the same for a 32-bit game against `TestTarget32.exe`: pointers, a code injection script, Lua, and both debuggers (watches, int3 and hardware breakpoints, conditions, stepping, Break, trace). `--errors-markdown` prints `Docs/ERRORS.md`, `--shortcuts-markdown` prints `Docs/SHORTCUTS.md` and `--manifold-markdown` prints `Docs/MANIFOLD-API.md`; the tests fail when one of them is out of date, and when two commands of one window share a key.
 
 Run the tests from the repository folder or a folder below it, with `TestTarget.exe` next to them: the documentation checks look for `Docs` and `Source` above the working folder. A check that cannot run there counts as skipped, and skipped checks fail the run; `--allow-skips` accepts them. `--list` names the suites and `--filter=core,text` runs only those. A test run keeps its settings and logs in a folder of its own under `%TEMP%\Manifold-Engine-Tests`, so the `configs` folder next to the program stays as it is.
 

@@ -275,6 +275,27 @@ def managed_project():
     return project
 
 
+def with_x86_twin(project, name):
+    # A 32-bit game needs the 32-bit agent, and the 32-bit tests need a 32-bit
+    # target. Each x64 build of these projects also builds the project as Win32
+    # under the name <name>32, next to the x64 program, so one Debug|x64 or
+    # Release|x64 build has everything the program and the tests load.
+    head_end = f"    <TargetName>{name}</TargetName>\n"
+    at = project.index(head_end)
+    group_end = project.index("  </PropertyGroup>\n", at) + len("  </PropertyGroup>\n")
+    twin = f"""  <PropertyGroup Condition="'$(Platform)'=='Win32'">
+    <OutDir>$(ProjectDir)..\\Build\\x64\\$(Configuration)\\</OutDir>
+    <TargetName>{name}32</TargetName>
+  </PropertyGroup>
+"""
+    project = project[:group_end] + twin + project[group_end:]
+    target = """  <Target Name="BuildX86Twin" AfterTargets="Build" Condition="'$(Platform)'=='x64'">
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Properties="Configuration=$(Configuration);Platform=Win32" />
+  </Target>
+"""
+    return project.replace("</Project>\n", target + "</Project>\n")
+
+
 def with_prebuild(project):
     return project.replace("  </ItemDefinitionGroup>\n", PREBUILD + "  </ItemDefinitionGroup>\n", 1)
 
@@ -366,11 +387,12 @@ def main():
     target = target.replace("<PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>", "<PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>")
     target += items("ClCompile", target_sources)
     target += tail()
+    target = with_x86_twin(target, "TestTarget")
     write("TestTarget.vcxproj", target)
 
     # Stand-alone console test for the direct-syscall stub. It compiles only the
-    # syscall unit plus a driver, so it builds for Win32 too (unlike the app and
-    # the injected agent, which are x64-only).
+    # syscall unit plus a driver, so it builds for Win32 too (unlike the app,
+    # which is x64-only).
     syscall_sources = ["Source/Syscalls/Syscall.cpp", "Tests/Syscalls/SyscallSelfTest.cpp"]
     syscall_test = common_head("SyscallTest", "Application", "SyscallTest")
     syscall_test += config_groups(False, "Console", True)
@@ -422,6 +444,7 @@ def main():
     agent += items("ClCompile", agent_sources)
     agent += items("ClInclude", ["Source/Debug/VehProtocol.h", "Source/Debug/BreakProgram.h"])
     agent += tail()
+    agent = with_x86_twin(agent, "ManifoldAgent")
     write("ManifoldAgent.vcxproj", agent)
 
     write("ManagedDumper.vcxproj", managed_project())

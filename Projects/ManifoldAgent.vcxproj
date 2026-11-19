@@ -49,6 +49,10 @@
     <IntDir>$(ProjectDir)..\Build\obj\$(Platform)\$(Configuration)\Agent\</IntDir>
     <TargetName>ManifoldAgent</TargetName>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Platform)'=='Win32'">
+    <OutDir>$(ProjectDir)..\Build\x64\$(Configuration)\</OutDir>
+    <TargetName>ManifoldAgent32</TargetName>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
@@ -94,4 +98,7 @@
     <ClInclude Include="..\Source\Debug\BreakProgram.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="BuildX86Twin" AfterTargets="Build" Condition="'$(Platform)'=='x64'">
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Properties="Configuration=$(Configuration);Platform=Win32" />
+  </Target>
 </Project>

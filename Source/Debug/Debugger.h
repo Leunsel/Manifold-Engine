@@ -176,7 +176,8 @@ namespace Manifold::Debug
         Status Post(std::function<Status()> work, unsigned timeoutMilliseconds = 3000);
         void Loop(std::shared_ptr<std::promise<Status>> attached);
         void RunTasks();
-        unsigned long HandleException(void* event, bool& enterBreak, std::string& reason, std::uint64_t& breakpointAddress);
+        unsigned long HandleException(void* event, bool& enterBreak, std::string& reason, std::uint64_t& breakpointAddress, std::uint32_t& breakThread);
+        std::uint32_t Wow64BreakThread(std::uint32_t breakIn) const;
         void EnterBreak(std::uint32_t threadId, const std::string& reason, std::uint64_t breakpointAddress);
         Status ApplyHardware(std::uint32_t onlyThread = 0);
         void LeaveOut(ThreadState& thread);
@@ -227,6 +228,7 @@ namespace Manifold::Debug
         std::vector<std::uint64_t> VehStepTargets(const Disasm::Instruction& instruction, const Disasm::RegisterValues& registers, ResumeMode mode) const;
         void VehClearTempSlots();
         std::wstring AgentPath() const;
+        std::wstring AgentName() const;
 
         std::shared_ptr<Target::Process> m_process;
         std::unique_ptr<Disasm::Disassembler> m_disassembler;

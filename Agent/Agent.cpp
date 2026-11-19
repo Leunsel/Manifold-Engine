@@ -13,6 +13,7 @@ namespace
 {
     constexpr std::uint64_t kResumeFlag = 0x10000;
     constexpr std::uint64_t kDataSingleStep = 0x80000004;
+    constexpr DWORD kWx86SingleStep = 0x4000001E;
     constexpr ULONGLONG kActiveWindowMs = 150;
     constexpr DWORD kSweepMs = 20;
     constexpr int kRecentSlots = 1024;
@@ -116,20 +117,173 @@ namespace
         }
     };
 
+#if defined(_M_X64)
+    std::uint64_t InstructionPointer(const CONTEXT& c)
+    {
+        return c.Rip;
+    }
+
+    std::uint64_t ReturnAddress(const CONTEXT& c)
+    {
+        return *reinterpret_cast<const std::uint64_t*>(c.Rsp);
+    }
+
+    void CaptureRegs(Registers& r, const CONTEXT& c)
+    {
+        r.Rax = c.Rax; r.Rbx = c.Rbx; r.Rcx = c.Rcx; r.Rdx = c.Rdx;
+        r.Rsi = c.Rsi; r.Rdi = c.Rdi; r.Rbp = c.Rbp; r.Rsp = c.Rsp;
+        r.R8 = c.R8; r.R9 = c.R9; r.R10 = c.R10; r.R11 = c.R11;
+        r.R12 = c.R12; r.R13 = c.R13; r.R14 = c.R14; r.R15 = c.R15;
+        r.Rip = c.Rip;
+        r.Flags = c.EFlags;
+        r.GsBase = reinterpret_cast<std::uint64_t>(NtCurrentTeb());
+    }
+
+    void ApplyRegs(CONTEXT& c, const Registers& r)
+    {
+        c.Rax = r.Rax; c.Rbx = r.Rbx; c.Rcx = r.Rcx; c.Rdx = r.Rdx;
+        c.Rsi = r.Rsi; c.Rdi = r.Rdi; c.Rbp = r.Rbp; c.Rsp = r.Rsp;
+        c.R8 = r.R8; c.R9 = r.R9; c.R10 = r.R10; c.R11 = r.R11;
+        c.R12 = r.R12; c.R13 = r.R13; c.R14 = r.R14; c.R15 = r.R15;
+        c.Rip = r.Rip;
+        c.EFlags = static_cast<DWORD>(r.Flags);
+    }
+
+    void SetDebugRegisters(CONTEXT& c, const std::uint64_t (&addresses)[4], std::uint64_t dr7)
+    {
+        c.Dr0 = addresses[0];
+        c.Dr1 = addresses[1];
+        c.Dr2 = addresses[2];
+        c.Dr3 = addresses[3];
+        c.Dr6 = 0;
+        c.Dr7 = dr7;
+    }
+
+    constexpr DWORD kFullContext = CONTEXT_FULL;
+    constexpr int kVectorCount = 16;
+
+    bool HasVectors(const CONTEXT& c)
+    {
+        return (c.ContextFlags & CONTEXT_FLOATING_POINT) == CONTEXT_FLOATING_POINT;
+    }
+
+    unsigned char* VectorAt(CONTEXT& c, int index)
+    {
+        return reinterpret_cast<unsigned char*>(&c.FltSave.XmmRegisters[index]);
+    }
+
+    const unsigned char* VectorAt(const CONTEXT& c, int index)
+    {
+        return reinterpret_cast<const unsigned char*>(&c.FltSave.XmmRegisters[index]);
+    }
+
+    std::uint32_t Mxcsr(const CONTEXT& c)
+    {
+        return c.MxCsr;
+    }
+
+    void SetMxcsr(CONTEXT& c, std::uint32_t value)
+    {
+        c.MxCsr = value;
+        c.FltSave.MxCsr = value;
+    }
+#else
+    constexpr int kFxsaveMxcsr = 24;
+    constexpr int kFxsaveXmm = 160;
+
+    std::uint64_t InstructionPointer(const CONTEXT& c)
+    {
+        return c.Eip;
+    }
+
+    std::uint64_t ReturnAddress(const CONTEXT& c)
+    {
+        return *reinterpret_cast<const std::uint32_t*>(static_cast<std::uintptr_t>(c.Esp));
+    }
+
+    void CaptureRegs(Registers& r, const CONTEXT& c)
+    {
+        r = {};
+        r.Rax = c.Eax; r.Rbx = c.Ebx; r.Rcx = c.Ecx; r.Rdx = c.Edx;
+        r.Rsi = c.Esi; r.Rdi = c.Edi; r.Rbp = c.Ebp; r.Rsp = c.Esp;
+        r.Rip = c.Eip;
+        r.Flags = c.EFlags;
+        r.GsBase = reinterpret_cast<std::uintptr_t>(NtCurrentTeb());
+    }
+
+    void ApplyRegs(CONTEXT& c, const Registers& r)
+    {
+        c.Eax = static_cast<DWORD>(r.Rax); c.Ebx = static_cast<DWORD>(r.Rbx); c.Ecx = static_cast<DWORD>(r.Rcx); c.Edx = static_cast<DWORD>(r.Rdx);
+        c.Esi = static_cast<DWORD>(r.Rsi); c.Edi = static_cast<DWORD>(r.Rdi); c.Ebp = static_cast<DWORD>(r.Rbp); c.Esp = static_cast<DWORD>(r.Rsp);
+        c.Eip = static_cast<DWORD>(r.Rip);
+        c.EFlags = static_cast<DWORD>(r.Flags);
+    }
+
+    void SetDebugRegisters(CONTEXT& c, const std::uint64_t (&addresses)[4], std::uint64_t dr7)
+    {
+        c.Dr0 = static_cast<DWORD>(addresses[0]);
+        c.Dr1 = static_cast<DWORD>(addresses[1]);
+        c.Dr2 = static_cast<DWORD>(addresses[2]);
+        c.Dr3 = static_cast<DWORD>(addresses[3]);
+        c.Dr6 = 0;
+        c.Dr7 = static_cast<DWORD>(dr7);
+    }
+
+    constexpr DWORD kFullContext = CONTEXT_FULL | CONTEXT_EXTENDED_REGISTERS;
+    constexpr int kVectorCount = 8;
+
+    bool HasVectors(const CONTEXT& c)
+    {
+        return (c.ContextFlags & CONTEXT_EXTENDED_REGISTERS) == CONTEXT_EXTENDED_REGISTERS;
+    }
+
+    unsigned char* VectorAt(CONTEXT& c, int index)
+    {
+        return c.ExtendedRegisters + kFxsaveXmm + index * 16;
+    }
+
+    const unsigned char* VectorAt(const CONTEXT& c, int index)
+    {
+        return c.ExtendedRegisters + kFxsaveXmm + index * 16;
+    }
+
+    std::uint32_t Mxcsr(const CONTEXT& c)
+    {
+        std::uint32_t value = 0;
+        __movsb(reinterpret_cast<unsigned char*>(&value), c.ExtendedRegisters + kFxsaveMxcsr, sizeof(value));
+        return value;
+    }
+
+    void SetMxcsr(CONTEXT& c, std::uint32_t value)
+    {
+        __movsb(c.ExtendedRegisters + kFxsaveMxcsr, reinterpret_cast<const unsigned char*>(&value), sizeof(value));
+    }
+
+#pragma comment(linker, "/EXPORT:ManifoldAgentStart=_ManifoldAgentStart@4")
+#endif
+
     void ToArray(const CONTEXT& c, std::uint64_t (&r)[Manifold::Debug::Program::kRegisterCount])
     {
-        r[0] = c.Rax; r[1] = c.Rbx; r[2] = c.Rcx; r[3] = c.Rdx; r[4] = c.Rsi; r[5] = c.Rdi; r[6] = c.Rbp; r[7] = c.Rsp;
-        r[8] = c.R8; r[9] = c.R9; r[10] = c.R10; r[11] = c.R11; r[12] = c.R12; r[13] = c.R13; r[14] = c.R14; r[15] = c.R15;
-        r[16] = c.Rip;
-        r[17] = c.EFlags;
+        Registers captured{};
+        CaptureRegs(captured, c);
+        r[0] = captured.Rax; r[1] = captured.Rbx; r[2] = captured.Rcx; r[3] = captured.Rdx;
+        r[4] = captured.Rsi; r[5] = captured.Rdi; r[6] = captured.Rbp; r[7] = captured.Rsp;
+        r[8] = captured.R8; r[9] = captured.R9; r[10] = captured.R10; r[11] = captured.R11;
+        r[12] = captured.R12; r[13] = captured.R13; r[14] = captured.R14; r[15] = captured.R15;
+        r[16] = captured.Rip;
+        r[17] = captured.Flags;
     }
 
     void FromArray(CONTEXT& c, const std::uint64_t (&r)[Manifold::Debug::Program::kRegisterCount])
     {
-        c.Rax = r[0]; c.Rbx = r[1]; c.Rcx = r[2]; c.Rdx = r[3]; c.Rsi = r[4]; c.Rdi = r[5]; c.Rbp = r[6]; c.Rsp = r[7];
-        c.R8 = r[8]; c.R9 = r[9]; c.R10 = r[10]; c.R11 = r[11]; c.R12 = r[12]; c.R13 = r[13]; c.R14 = r[14]; c.R15 = r[15];
-        c.Rip = r[16];
-        c.EFlags = static_cast<DWORD>(r[17]);
+        Registers changed{};
+        changed.Rax = r[0]; changed.Rbx = r[1]; changed.Rcx = r[2]; changed.Rdx = r[3];
+        changed.Rsi = r[4]; changed.Rdi = r[5]; changed.Rbp = r[6]; changed.Rsp = r[7];
+        changed.R8 = r[8]; changed.R9 = r[9]; changed.R10 = r[10]; changed.R11 = r[11];
+        changed.R12 = r[12]; changed.R13 = r[13]; changed.R14 = r[14]; changed.R15 = r[15];
+        changed.Rip = r[16];
+        changed.Flags = r[17];
+        ApplyRegs(c, changed);
     }
 
     // The condition and the register changes run here, inside the hit, so a
@@ -188,7 +342,8 @@ namespace
     void Record(Block* block, int slot, const CONTEXT& context)
     {
         Watch& watch = block->Watches[slot];
-        const std::uint64_t ip = context.Rip;
+        const std::uint64_t ip = InstructionPointer(context);
+        const std::uint64_t caller = watch.Mode == ModeCalls ? ReturnAddress(context) : 0;
         while (_InterlockedCompareExchange(LockOf(block), 1, 0) != 0)
             _mm_pause();
         std::uint64_t count = watch.EntryCount;
@@ -196,7 +351,7 @@ namespace
         Entry* hit = nullptr;
         for (std::uint64_t i = 0; i < count; ++i)
         {
-            if (entries[i].Instruction == ip)
+            if (entries[i].Instruction == ip && entries[i].Accessed == caller)
             {
                 hit = &entries[i];
                 break;
@@ -206,18 +361,11 @@ namespace
         {
             hit = &entries[count];
             hit->Instruction = ip;
-            hit->Accessed = 0;
+            hit->Accessed = caller;
             hit->Count = 0;
             hit->ThreadId = ::GetCurrentThreadId();
             hit->Pad = 0;
-            Registers& r = hit->Regs;
-            r.Rax = context.Rax; r.Rbx = context.Rbx; r.Rcx = context.Rcx; r.Rdx = context.Rdx;
-            r.Rsi = context.Rsi; r.Rdi = context.Rdi; r.Rbp = context.Rbp; r.Rsp = context.Rsp;
-            r.R8 = context.R8; r.R9 = context.R9; r.R10 = context.R10; r.R11 = context.R11;
-            r.R12 = context.R12; r.R13 = context.R13; r.R14 = context.R14; r.R15 = context.R15;
-            r.Rip = context.Rip;
-            r.Flags = context.EFlags;
-            r.GsBase = reinterpret_cast<std::uint64_t>(NtCurrentTeb());
+            CaptureRegs(hit->Regs, context);
             watch.EntryCount = count + 1;
         }
         if (hit)
@@ -227,48 +375,26 @@ namespace
         _InterlockedExchange(LockOf(block), 0);
     }
 
-    void CaptureRegs(Registers& r, const CONTEXT& c)
-    {
-        r.Rax = c.Rax; r.Rbx = c.Rbx; r.Rcx = c.Rcx; r.Rdx = c.Rdx;
-        r.Rsi = c.Rsi; r.Rdi = c.Rdi; r.Rbp = c.Rbp; r.Rsp = c.Rsp;
-        r.R8 = c.R8; r.R9 = c.R9; r.R10 = c.R10; r.R11 = c.R11;
-        r.R12 = c.R12; r.R13 = c.R13; r.R14 = c.R14; r.R15 = c.R15;
-        r.Rip = c.Rip;
-        r.Flags = c.EFlags;
-        r.GsBase = reinterpret_cast<std::uint64_t>(NtCurrentTeb());
-    }
-
-    void ApplyRegs(CONTEXT& c, const Registers& r)
-    {
-        c.Rax = r.Rax; c.Rbx = r.Rbx; c.Rcx = r.Rcx; c.Rdx = r.Rdx;
-        c.Rsi = r.Rsi; c.Rdi = r.Rdi; c.Rbp = r.Rbp; c.Rsp = r.Rsp;
-        c.R8 = r.R8; c.R9 = r.R9; c.R10 = r.R10; c.R11 = r.R11;
-        c.R12 = r.R12; c.R13 = r.R13; c.R14 = r.R14; c.R15 = r.R15;
-        c.Rip = r.Rip;
-        c.EFlags = static_cast<DWORD>(r.Flags);
-    }
-
     void CaptureVectors(Vectors& v, const CONTEXT& c)
     {
-        if ((c.ContextFlags & CONTEXT_FLOATING_POINT) != CONTEXT_FLOATING_POINT)
+        if (!HasVectors(c))
         {
             v.Count = 0;
             return;
         }
-        for (int i = 0; i < 16; ++i)
-            __movsb(v.Xmm[i], reinterpret_cast<const unsigned char*>(&c.FltSave.XmmRegisters[i]), 16);
-        v.Mxcsr = c.MxCsr;
-        v.Count = 16;
+        for (int i = 0; i < kVectorCount; ++i)
+            __movsb(v.Xmm[i], VectorAt(c, i), 16);
+        v.Mxcsr = Mxcsr(c);
+        v.Count = kVectorCount;
     }
 
     void ApplyVectors(CONTEXT& c, const Vectors& v)
     {
-        if ((c.ContextFlags & CONTEXT_FLOATING_POINT) != CONTEXT_FLOATING_POINT || v.Count != 16)
+        if (!HasVectors(c) || v.Count != static_cast<std::uint32_t>(kVectorCount))
             return;
-        for (int i = 0; i < 16; ++i)
-            __movsb(reinterpret_cast<unsigned char*>(&c.FltSave.XmmRegisters[i]), v.Xmm[i], 16);
-        c.MxCsr = v.Mxcsr;
-        c.FltSave.MxCsr = v.Mxcsr;
+        for (int i = 0; i < kVectorCount; ++i)
+            __movsb(VectorAt(c, i), v.Xmm[i], 16);
+        SetMxcsr(c, v.Mxcsr);
     }
 
     void SuspendOthers()
@@ -357,7 +483,7 @@ namespace
         if (!block || block->Magic != kMagic)
             return EXCEPTION_CONTINUE_SEARCH;
         const DWORD code = info->ExceptionRecord->ExceptionCode;
-        if (code != static_cast<DWORD>(EXCEPTION_SINGLE_STEP) && code != static_cast<DWORD>(kDataSingleStep))
+        if (code != static_cast<DWORD>(EXCEPTION_SINGLE_STEP) && code != static_cast<DWORD>(kDataSingleStep) && code != kWx86SingleStep)
             return EXCEPTION_CONTINUE_SEARCH;
         CONTEXT& context = *info->ContextRecord;
         const std::uint64_t dr6 = context.Dr6;
@@ -381,7 +507,7 @@ namespace
             {
                 if (Breaks(watch.Mode))
                 {
-                    const std::uint64_t at = context.Rip;
+                    const std::uint64_t at = InstructionPointer(context);
                     if (RunAction(block->Actions[slot], context, tid) && !breakHit)
                     {
                         breakHit = true;
@@ -401,12 +527,7 @@ namespace
         std::uint64_t addresses[4] = {};
         std::uint64_t dr7 = 0;
         BuildRegisters(block, addresses, dr7);
-        context.Dr0 = addresses[0];
-        context.Dr1 = addresses[1];
-        context.Dr2 = addresses[2];
-        context.Dr3 = addresses[3];
-        context.Dr7 = dr7;
-        context.Dr6 = 0;
+        SetDebugRegisters(context, addresses, dr7);
         context.EFlags |= kResumeFlag;
         return EXCEPTION_CONTINUE_EXECUTION;
     }
@@ -420,12 +541,7 @@ namespace
         {
             alignas(16) CONTEXT context{};
             context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
-            context.Dr0 = addresses[0];
-            context.Dr1 = addresses[1];
-            context.Dr2 = addresses[2];
-            context.Dr3 = addresses[3];
-            context.Dr6 = 0;
-            context.Dr7 = dr7;
+            SetDebugRegisters(context, addresses, dr7);
             if (::SetThreadContext(thread, &context))
             {
                 g_block->AppliedThreads = g_block->AppliedThreads + 1;
@@ -494,14 +610,14 @@ namespace
                 const DWORD target = g_suspendedCount > 0 ? g_suspended[0] : 0;
                 HANDLE thread = target ? ::OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, target) : nullptr;
                 alignas(16) CONTEXT ctx{};
-                ctx.ContextFlags = CONTEXT_FULL;
+                ctx.ContextFlags = kFullContext;
                 if (thread && ::GetThreadContext(thread, &ctx))
                 {
                     CaptureRegs(block->BreakRegs, ctx);
                     CaptureVectors(block->BreakXmm, ctx);
                     block->XmmDirty = 0;
                     block->BreakRegs.GsBase = 0;
-                    block->BreakAddress = ctx.Rip;
+                    block->BreakAddress = InstructionPointer(ctx);
                     block->BreakSlot = 0xFFFFFFFFu;
                     block->BrokenThread = target;
                     block->ResumeCmd = ResumeNone;

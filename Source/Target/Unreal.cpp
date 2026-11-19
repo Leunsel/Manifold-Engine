@@ -262,10 +262,11 @@ namespace Manifold::Target
             return false;
         const std::string name = main->Name;
         const std::string path = Lower(WideToUtf8(main->Path));
-        if (name.find("-Win64-") != std::string::npos || name.find("-WinGDK-") != std::string::npos || name.find("Shipping") != std::string::npos ||
-            name.find("UE4") != std::string::npos)
+        if (name.find("-Win64-") != std::string::npos || name.find("-Win32-") != std::string::npos || name.find("-WinGDK-") != std::string::npos ||
+            name.find("Shipping") != std::string::npos || name.find("UE4") != std::string::npos)
             return true;
-        if (path.find("\\binaries\\win64\\") != std::string::npos || path.find("\\binaries\\wingdk\\") != std::string::npos)
+        if (path.find("\\binaries\\win64\\") != std::string::npos || path.find("\\binaries\\win32\\") != std::string::npos ||
+            path.find("\\binaries\\wingdk\\") != std::string::npos)
             return true;
         if (const auto modules = process.Modules())
         {

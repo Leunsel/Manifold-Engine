@@ -50,6 +50,10 @@
     <TargetName>TestTarget</TargetName>
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Platform)'=='Win32'">
+    <OutDir>$(ProjectDir)..\Build\x64\$(Configuration)\</OutDir>
+    <TargetName>TestTarget32</TargetName>
+  </PropertyGroup>
   <PropertyGroup>
     <ExternalIncludePath>$(ProjectDir)..\Dependencies\ImGui;$(ProjectDir)..\Dependencies\ImGui\backends;$(ProjectDir)..\Dependencies\Zydis;$(ProjectDir)..\Dependencies\Lua;$(ProjectDir)..\Dependencies\stb;$(ExternalIncludePath)</ExternalIncludePath>
   </PropertyGroup>
@@ -103,4 +107,7 @@
     <ClCompile Include="..\Tests\Target\TestTarget.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="BuildX86Twin" AfterTargets="Build" Condition="'$(Platform)'=='x64'">
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Properties="Configuration=$(Configuration);Platform=Win32" />
+  </Target>
 </Project>

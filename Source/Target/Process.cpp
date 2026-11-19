@@ -129,6 +129,26 @@ namespace Manifold::Target
 
         bool IsSystemPath(const std::wstring& path);
 
+        std::wstring Wow64DiskPath(std::wstring path)
+        {
+            static const std::pair<std::wstring, std::wstring> folders = []
+                {
+                    wchar_t system[MAX_PATH] = L"";
+                    wchar_t wow64[MAX_PATH] = L"";
+                    const UINT systemLength = ::GetSystemDirectoryW(system, MAX_PATH);
+                    const UINT wow64Length = ::GetSystemWow64DirectoryW(wow64, MAX_PATH);
+                    if (systemLength == 0 || systemLength >= MAX_PATH || wow64Length == 0 || wow64Length >= MAX_PATH)
+                        return std::pair<std::wstring, std::wstring>();
+                    return std::pair<std::wstring, std::wstring>(std::wstring(system, systemLength), std::wstring(wow64, wow64Length));
+                }();
+            const std::wstring& system = folders.first;
+            if (system.empty() || path.size() <= system.size() || (path[system.size()] != L'\\' && path[system.size()] != L'/'))
+                return path;
+            if (::CompareStringOrdinal(path.c_str(), static_cast<int>(system.size()), system.c_str(), static_cast<int>(system.size()), TRUE) != CSTR_EQUAL)
+                return path;
+            return folders.second + path.substr(system.size());
+        }
+
         // Read a block / a POD value out of the target address space through
         // the existing TryReadVm wrapper (which goes through the direct
         // NtReadVirtualMemory system call when it resolved).
@@ -273,7 +293,7 @@ namespace Manifold::Target
                     ModuleInfo module;
                     module.Base = dllBase;
                     module.Size = sizeOfImage;
-                    module.Path = ReadUnicodeString(handle, fullLen, fullBuffer);
+                    module.Path = Wow64DiskPath(ReadUnicodeString(handle, fullLen, fullBuffer));
                     const std::wstring base = ReadUnicodeString(handle, baseLen, baseBuffer);
                     if (!base.empty())
                         module.Name = WideToUtf8(base);

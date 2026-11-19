@@ -113,4 +113,12 @@ namespace Manifold::Debug::Veh
         volatile std::uint32_t HostLost;
         std::uint32_t Pad5;
     };
+
+    static_assert(alignof(std::uint64_t) == 8, "the 32-bit and the 64-bit agent share this layout");
+    static_assert(sizeof(Registers) == 19 * 8);
+    static_assert(sizeof(Vectors) == 16 * 16 + 8);
+    static_assert(sizeof(Entry) == 32 + sizeof(Registers));
+    static_assert(sizeof(Watch) == 48 + kMaxEntries * sizeof(Entry));
+    static_assert(sizeof(Program::Change) == 4 + Program::kMaxCode);
+    static_assert(sizeof(Action) == 32 + Program::kMaxCode + Program::kMaxChanges * sizeof(Program::Change));
 }

@@ -229,6 +229,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\UnrealTests.cpp" />
     <ClCompile Include="..\Tests\WatchStress.cpp" />
     <ClCompile Include="..\Tests\WorkTests.cpp" />
+    <ClCompile Include="..\Tests\Wow64Tests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Tests\TestKit.h" />
