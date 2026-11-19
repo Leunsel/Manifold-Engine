@@ -156,6 +156,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
     <ClCompile Include="..\Source\Disasm\FlowGraph.cpp" />
+    <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\IconNames.cpp" />
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
@@ -299,6 +300,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Disasm\CodeDissect.h" />
     <ClInclude Include="..\Source\Disasm\Disassembler.h" />
     <ClInclude Include="..\Source\Disasm\FlowGraph.h" />
+    <ClInclude Include="..\Source\Disasm\FunctionBounds.h" />
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h" />
     <ClInclude Include="..\Source\Lua\ConsoleHistory.h" />
     <ClInclude Include="..\Source\Lua\DocAnnotations.h" />

@@ -3,8 +3,11 @@
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/GraphLayout.h"
+#include "Core/Text.h"
 #include "Disasm/FlowGraph.h"
+#include "Disasm/FunctionBounds.h"
 #include "Lua/LuaEngine.h"
+#include "Target/CodeMap.h"
 #include "Target/Process.h"
 
 #include <windows.h>
@@ -13,6 +16,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <vector>
@@ -21,12 +25,10 @@ namespace Manifold::Tests
 {
     namespace
     {
-        // xor eax,eax / test ecx,ecx / je L2 / mov eax,1 / jmp L3 / L2: mov eax,2 / L3: dec eax / jne L3 / ret
         const std::uint8_t kDiamondLoop[] = {
             0x31, 0xC0, 0x85, 0xC9, 0x74, 0x07, 0xB8, 0x01, 0x00, 0x00, 0x00, 0xEB, 0x05, 0xB8, 0x02, 0x00, 0x00, 0x00, 0xFF, 0xC8, 0x75, 0xFC, 0xC3,
         };
 
-        // call +0x40 / jmp +0x40, and at +0x40 a ret: a tail jump into the called function.
         const std::uint8_t kTailJump[] = { 0xE8, 0x3B, 0x00, 0x00, 0x00, 0xEB, 0x39 };
         constexpr std::size_t kTailAt = 0x100;
         constexpr std::size_t kCalleeAt = 0x140;
@@ -90,7 +92,7 @@ namespace Manifold::Tests
         {
             const auto base = reinterpret_cast<std::uint64_t>(code);
             const std::uint64_t callee = base + kCalleeAt;
-            const auto other = [&](std::uint64_t target) { return target == callee; };
+            const auto other = [&](std::uint64_t target, Disasm::EdgeKind) { return target == callee; };
             const Disasm::FlowGraph tail = Disasm::BuildFlowGraph(engine.Disassembler(), *engine.Process(), base + kTailAt, nullptr, nullptr, other);
             CHECK(tail.Blocks.size() == 1);
             CHECK(tail.Edges.empty());
@@ -177,6 +179,122 @@ namespace Manifold::Tests
             CHECK(upward == 0);
         }
 
+        constexpr std::size_t kSearchAt = 0x400;
+
+        const std::pair<std::size_t, std::vector<std::uint8_t>> kSearchCode[] = {
+            { 0x10, { 0x85, 0xC9, 0x74, 0x03, 0x31, 0xC0, 0xC3, 0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3 } },
+            { 0x20, { 0x31, 0xC0, 0xC3 } },
+            { 0x30, { 0x85, 0xC9, 0x75, 0x06, 0xE8, 0xE7, 0xFF, 0xFF, 0xFF, 0xCC, 0xB8, 0x02, 0x00, 0x00, 0x00, 0xC3 } },
+            { 0x50, { 0x85, 0xC9, 0x74, 0x0C, 0x31, 0xC0, 0x48, 0x83, 0xC0, 0x01, 0x48, 0x83, 0xC0, 0x01, 0x50, 0xC3, 0xB8, 0x03, 0x00, 0x00, 0x00, 0xC3 } },
+            { 0x70, { 0x31, 0xC0, 0xC3, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 } },
+            { 0x80, { 0xB8, 0x05, 0x00, 0x00, 0x00, 0xC3 } },
+            { 0x90, { 0x31, 0xC0, 0xEB, 0x0C } },
+            { 0xA0, { 0xB8, 0x07, 0x00, 0x00, 0x00, 0xC3 } },
+        };
+
+        void FunctionSearch(Engine& engine, std::uint8_t* code)
+        {
+            for (const auto& [offset, bytes] : kSearchCode)
+                std::memcpy(code + kSearchAt + offset, bytes.data(), bytes.size());
+            const std::uint64_t base = reinterpret_cast<std::uint64_t>(code) + kSearchAt;
+            Disasm::FunctionClues clues;
+            clues.Floor = base;
+            clues.Ceiling = base + 0x100;
+            clues.FloorIsBoundary = true;
+            const auto find = [&](std::uint64_t offset) { return Disasm::FindFunction(engine.Disassembler(), *engine.Process(), base + offset, nullptr, clues); };
+            const auto expect = [&](std::uint64_t offset, std::uint64_t start, std::uint64_t end, std::uint64_t last, Disasm::FunctionSource source)
+                {
+                    const auto span = find(offset);
+                    CHECK_MSG(span.has_value(), "offset " + std::to_string(offset));
+                    if (!span)
+                        return;
+                    CHECK_MSG(span->Start == base + start, "offset " + std::to_string(offset) + " start +" + std::to_string(span->Start - base));
+                    CHECK_MSG(span->End == base + end, "offset " + std::to_string(offset) + " end +" + std::to_string(span->End - base));
+                    CHECK_MSG(span->Last == base + last, "offset " + std::to_string(offset) + " last +" + std::to_string(span->Last - base));
+                    CHECK_MSG(span->Source == source, "offset " + std::to_string(offset));
+                };
+            expect(0x17, 0x10, 0x1D, 0x1C, Disasm::FunctionSource::Padding);
+            expect(0x10, 0x10, 0x1D, 0x1C, Disasm::FunctionSource::Padding);
+            expect(0x21, 0x20, 0x23, 0x22, Disasm::FunctionSource::Padding);
+            expect(0x1D, 0x10, 0x1D, 0x1C, Disasm::FunctionSource::Padding);
+            expect(0x3A, 0x30, 0x40, 0x3F, Disasm::FunctionSource::Padding);
+            expect(0x60, 0x50, 0x66, 0x65, Disasm::FunctionSource::Padding);
+            expect(0x80, 0x80, 0x86, 0x85, Disasm::FunctionSource::Guess);
+            expect(0x92, 0x90, 0x94, 0x92, Disasm::FunctionSource::Padding);
+            expect(0xA0, 0xA0, 0xA6, 0xA5, Disasm::FunctionSource::Padding);
+            CHECK(!find(0x08).has_value());
+
+            clues.KnownStart = [&](std::uint64_t address) { return address == base + 0x3A; };
+            expect(0x3F, 0x3A, 0x40, 0x3F, Disasm::FunctionSource::Padding);
+            clues.KnownStart = {};
+
+            Disasm::FunctionClues blind = clues;
+            blind.Floor = base + 0x10;
+            blind.FloorIsBoundary = false;
+            CHECK(!Disasm::FindFunction(engine.Disassembler(), *engine.Process(), base + 0x17, nullptr, blind).has_value());
+
+            clues.Exact = [&](std::uint64_t address) -> std::optional<Disasm::FunctionSpan>
+                {
+                    if (address == base + 0x17)
+                        return Disasm::FunctionSpan{ base + 0x12, base + 0x1D, base + 0x1C, Disasm::FunctionSource::Unwind };
+                    return std::nullopt;
+                };
+            expect(0x17, 0x12, 0x1D, 0x1C, Disasm::FunctionSource::Unwind);
+        }
+
+        void FunctionOfExport(Engine& engine)
+        {
+            const HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
+            const auto proc = reinterpret_cast<std::uint64_t>(ntdll ? ::GetProcAddress(ntdll, "RtlEqualUnicodeString") : nullptr);
+            CHECK(proc != 0);
+            if (!proc)
+                return;
+            const auto span = engine.FunctionAround(proc + 0x10);
+            CHECK(span.has_value());
+            if (!span)
+                return;
+            CHECK(span->Source == Disasm::FunctionSource::Unwind);
+            CHECK(span->Start == proc);
+            CHECK(span->End > proc + 0x10);
+            CHECK(span->Last > span->Start && span->Last < span->End);
+            CHECK(engine.Disassembler().Read(*engine.Process(), span->Last, nullptr).Next() == span->End);
+
+            const auto module = engine.Process()->ModuleAt(proc);
+            CHECK(module.has_value());
+            if (!module)
+                return;
+            const auto functions = Target::CodeMap::UnwindFunctions(*engine.Process(), module->Base, module->Size);
+            int leaves = 0;
+            int inside = 0;
+            for (std::size_t f = 0; f + 1 < functions.size() && leaves < 40; ++f)
+            {
+                const std::uint64_t gap = module->Base + functions[f].second;
+                const std::uint64_t next = module->Base + functions[f + 1].first;
+                if (next <= gap + 4)
+                    continue;
+                std::optional<std::uint64_t> code;
+                for (const Disasm::Instruction& line : engine.Disassembler().ReadMany(*engine.Process(), gap, 16))
+                {
+                    if (line.Address >= next)
+                        break;
+                    if (line.Valid && !line.IsNop && line.Mnemonic != "nop" && line.Mnemonic != "int3")
+                    {
+                        code = line.Address;
+                        break;
+                    }
+                }
+                if (!code)
+                    continue;
+                ++leaves;
+                const auto leaf = engine.FunctionAround(*code);
+                if (leaf && leaf->Start >= gap && leaf->Start <= *code && leaf->End > *code && leaf->End <= next && leaf->Source != Disasm::FunctionSource::Unwind)
+                    ++inside;
+            }
+            std::printf("  %d of %d leaf functions between unwind entries of %s found inside their gap\n", inside, leaves, module->Name.c_str());
+            CHECK(leaves > 0);
+            CHECK(inside == leaves);
+        }
+
         void LayoutShapes()
         {
             CHECK(Layout::LayeredLayout({}, {}, 0).Positions.empty());
@@ -241,9 +359,11 @@ namespace Manifold::Tests
             code[kIndirectAt] = 0xFF;
             code[kIndirectAt + 1] = 0xE0;
             DiamondAndLoop(engine, code);
+            FunctionSearch(engine, code);
             TailJumpsAndIndirect(engine, code);
             ::VirtualFree(code, 0, MEM_RELEASE);
         }
+        FunctionOfExport(engine);
         engine.CloseProcess();
         return Totals().Failures - before;
     }
@@ -251,5 +371,124 @@ namespace Manifold::Tests
 
 namespace Manifold::Tests
 {
+    namespace
+    {
+        struct SearchTally
+        {
+            int Right = 0;
+            int Early = 0;
+            int Late = 0;
+            int Missing = 0;
+        };
+
+        int RunFunctionSearchCheck(const std::vector<std::string>& arguments)
+        {
+            int perModule = 150;
+            bool boundary = false;
+            bool dump = false;
+            for (const std::string& argument : arguments)
+            {
+                if (argument.rfind("--functions=", 0) == 0)
+                    perModule = std::max(1, std::atoi(argument.c_str() + 12));
+                if (argument == "--boundary")
+                    boundary = true;
+                if (argument == "--dump")
+                    dump = true;
+            }
+            Settings settings;
+            Engine engine(settings);
+            engine.Lua().Run("__manifoldHeadless = true", "headless");
+            const Status opened = engine.OpenProcess(MakeProcessId(::GetCurrentProcessId()));
+            if (!opened)
+            {
+                std::printf("%s\n", opened.Text.c_str());
+                return 1;
+            }
+            const Target::Process& process = *engine.Process();
+            const Disasm::Disassembler& disassembler = engine.Disassembler();
+            const char* names[] = { "ntdll.dll", "KERNELBASE.dll", "ucrtbase.dll", "Manifold-Engine.Tests.exe" };
+            SearchTally total;
+            int worst = 0;
+            const auto started = std::chrono::steady_clock::now();
+            for (const Target::ModuleInfo& module : *process.Modules())
+            {
+                if (std::none_of(std::begin(names), std::end(names), [&](const char* name) { return EqualsNoCase(module.Name, name); }))
+                    continue;
+                const auto functions = Target::CodeMap::UnwindFunctions(process, module.Base, module.Size);
+                if (functions.size() < 2)
+                    continue;
+                SearchTally tally;
+                const std::size_t step = std::max<std::size_t>(1, functions.size() / static_cast<std::size_t>(perModule));
+                for (std::size_t f = 1; f < functions.size(); f += step)
+                {
+                    const std::uint64_t begin = module.Base + functions[f].first;
+                    const std::uint64_t end = module.Base + functions[f].second;
+                    const std::vector<std::uint64_t> starts = disassembler.Starts(process, begin, end);
+                    if (starts.empty())
+                        continue;
+                    for (const std::uint64_t address : { starts.front(), starts[starts.size() / 2], starts.back() })
+                    {
+                        Disasm::FunctionClues clues;
+                        clues.Floor = boundary ? module.Base + functions[f - 1].second : std::max(module.Base, address > 0x10000 ? address - 0x10000 : 0);
+                        clues.FloorIsBoundary = boundary;
+                        clues.Ceiling = std::min(module.Base + module.Size, address + 0x10000);
+                        const auto span = Disasm::FindFunction(disassembler, process, address, nullptr, clues);
+                        if (!span && dump && worst < 24)
+                        {
+                            ++worst;
+                            std::printf("    %s+%llX: none, unwind data says %s+%llX..%llX (%llu bytes, %zu instructions)\n", module.Name.c_str(), static_cast<unsigned long long>(address - module.Base),
+                                module.Name.c_str(), static_cast<unsigned long long>(begin - module.Base), static_cast<unsigned long long>(end - module.Base),
+                                static_cast<unsigned long long>(end - begin), starts.size());
+                            if (address == begin)
+                            {
+                                for (const Disasm::Instruction& line : disassembler.ReadMany(process, begin - 0x18, 16))
+                                {
+                                    if (line.Address > begin + 4)
+                                        break;
+                                    std::printf("      %s+%llX  %s  %s\n", module.Name.c_str(), static_cast<unsigned long long>(line.Address - module.Base), line.BytesText().c_str(), line.Text().c_str());
+                                }
+                            }
+                        }
+                        if (!span)
+                            ++tally.Missing;
+                        else if (span->Start == begin)
+                            ++tally.Right;
+                        else if (span->Start < begin)
+                            ++tally.Early;
+                        else
+                            ++tally.Late;
+                        if (span && span->Start != begin && worst < 12)
+                        {
+                            ++worst;
+                            std::printf("    %s+%llX: found %s+%llX (%s), unwind data says %s+%llX..%llX\n", module.Name.c_str(), static_cast<unsigned long long>(address - module.Base),
+                                module.Name.c_str(), static_cast<unsigned long long>(span->Start - module.Base), span->Source == Disasm::FunctionSource::Guess ? "guess" : "padding",
+                                module.Name.c_str(), static_cast<unsigned long long>(begin - module.Base), static_cast<unsigned long long>(end - module.Base));
+                            if (dump)
+                            {
+                                for (const Disasm::Instruction& line : disassembler.ReadMany(process, span->Start > begin + 0x30 ? span->Start - 0x30 : begin, 24))
+                                {
+                                    if (line.Address > span->Start + 8)
+                                        break;
+                                    std::printf("      %s+%llX  %s\n", module.Name.c_str(), static_cast<unsigned long long>(line.Address - module.Base), line.Text().c_str());
+                                }
+                            }
+                        }
+                    }
+                }
+                std::printf("  %-28s right %4d  too early %3d  too late %3d  none %3d\n", module.Name.c_str(), tally.Right, tally.Early, tally.Late, tally.Missing);
+                total.Right += tally.Right;
+                total.Early += tally.Early;
+                total.Late += tally.Late;
+                total.Missing += tally.Missing;
+            }
+            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+            const int all = total.Right + total.Early + total.Late + total.Missing;
+            std::printf("%d searches in %.1f s: right %d, too early %d, too late %d, none %d\n", all, seconds, total.Right, total.Early, total.Late, total.Missing);
+            engine.CloseProcess();
+            return 0;
+        }
+    }
+
     MANIFOLD_SUITE("flowgraph", "Flow graph", 35, [](const SuiteContext&) { return RunFlowGraphTests(); });
+    MANIFOLD_MODE("--function-search-check", [](const std::vector<std::string>& arguments) { return RunFunctionSearchCheck(arguments); });
 }

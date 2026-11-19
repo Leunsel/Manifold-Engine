@@ -1470,6 +1470,9 @@ namespace Manifold::UI
             break;
         case Command::CodeReferences: m_workspace.OpenCodeDissect(CodeDissectWindow::References, m_selected); break;
         case Command::FlowGraph: m_workspace.OpenFlowGraph(m_selected); break;
+        case Command::GotoFunctionStart:
+        case Command::GotoFunctionEnd:
+        case Command::SelectFunction: JumpToFunction(command); break;
         case Command::AddInstructionToList:
             m_workspace.AddAddress(m_selected, Scan::ValueType::ByteArray, disassembler.Read(process, m_selected, &m_engine.Symbols()).Text());
             break;
@@ -1795,7 +1798,7 @@ namespace Manifold::UI
                     m_workspace.OpenCodeDissect(CodeDissectWindow::References, operand);
             }
         }
-        item(ICON_FA_CODE_BRANCH "  Show the flow graph", Command::FlowGraph);
+        FunctionMenu(instruction);
         if (broken)
             item(ICON_FA_MAP_MARKER_ALT "  Set the instruction pointer here", Command::SetInstructionPointer);
         ImGui::Separator();
@@ -2578,15 +2581,98 @@ namespace Manifold::UI
         std::vector<Disasm::Instruction> lines;
         if (!m_engine.HasProcess())
             return lines;
-        const std::uint64_t first = std::min(m_selected, m_selectionEnd);
-        const std::uint64_t last = std::max(m_selected, m_selectionEnd);
-        for (const Disasm::Instruction& instruction : m_engine.Disassembler().ReadMany(*m_engine.Process(), first, 512, names ? &m_engine.Symbols() : nullptr))
+        return InstructionsBetween(std::min(m_selected, m_selectionEnd), std::max(m_selected, m_selectionEnd), names);
+    }
+
+    std::vector<Disasm::Instruction> MemoryViewer::InstructionsBetween(std::uint64_t first, std::uint64_t last, bool names) const
+    {
+        constexpr std::size_t kMaxLines = 100000;
+        std::vector<Disasm::Instruction> lines;
+        if (!m_engine.HasProcess())
+            return lines;
+        std::uint64_t at = first;
+        while (at <= last && lines.size() < kMaxLines)
         {
-            if (instruction.Address > last)
+            const std::vector<Disasm::Instruction> chunk = m_engine.Disassembler().ReadMany(*m_engine.Process(), at, 512, names ? &m_engine.Symbols() : nullptr);
+            if (chunk.empty())
                 break;
-            lines.push_back(instruction);
+            for (const Disasm::Instruction& instruction : chunk)
+            {
+                if (instruction.Address > last)
+                    return lines;
+                lines.push_back(instruction);
+                at = instruction.Next();
+            }
         }
         return lines;
+    }
+
+    std::optional<Disasm::FunctionSpan> MemoryViewer::FunctionOf(std::uint64_t address)
+    {
+        const std::uint64_t generation = m_engine.ProcessGeneration();
+        const std::uint64_t writes = m_engine.Writes().Revision();
+        if (!m_function.Valid || m_function.Address != address || m_function.Generation != generation || m_function.Writes != writes)
+        {
+            m_function.Span = m_engine.FunctionAround(address);
+            m_function.Address = address;
+            m_function.Generation = generation;
+            m_function.Writes = writes;
+            m_function.Valid = true;
+        }
+        return m_function.Span;
+    }
+
+    void MemoryViewer::JumpToFunction(Command command)
+    {
+        const std::optional<Disasm::FunctionSpan> span = FunctionOf(m_selected);
+        if (!span)
+        {
+            m_engine.Notify(LogLevel::Info, "No function start found for " + m_engine.Describe(m_selected) +
+                ": there is no unwind data or managed method here, and nothing above it within 64 KB both looks like a start and leads here.");
+            return;
+        }
+        if (command == Command::GotoFunctionEnd)
+            Navigate(span->Last);
+        else
+            Navigate(span->Start);
+        if (command == Command::SelectFunction)
+            m_selectionEnd = span->Last;
+        if (span->Source == Disasm::FunctionSource::Padding || span->Source == Disasm::FunctionSource::Guess)
+            m_engine.Notify(LogLevel::Info, "Function start " + m_engine.Describe(span->Start) + " " + Disasm::FunctionSourceText(span->Source) + ".");
+    }
+
+    void MemoryViewer::FunctionMenu(const Disasm::Instruction& instruction)
+    {
+        if (!ImGui::BeginMenu(ICON_FA_CODE_BRANCH "  Function"))
+            return;
+        const auto item = [&](const char* label, Command command, bool enabled = true)
+            {
+                if (CommandItem(label, command, false, enabled))
+                    RunCommand(command);
+            };
+        const std::optional<Disasm::FunctionSpan> span = FunctionOf(instruction.Address);
+        if (span)
+        {
+            ImGui::TextDisabled("%s, %s bytes", m_engine.Describe(span->Start).c_str(), Hex(span->End - span->Start).c_str());
+            ItemTooltip((std::string("The start is ") + Disasm::FunctionSourceText(span->Source) + ".").c_str());
+        }
+        else
+        {
+            ImGui::TextDisabled("No function start found here");
+            ItemTooltip("There is no unwind data or managed method here, and nothing above it within 64 KB both looks like a start and leads here.");
+        }
+        ImGui::Separator();
+        item(ICON_FA_ANGLE_DOUBLE_UP "  Go to the start", Command::GotoFunctionStart, span.has_value());
+        item(ICON_FA_ANGLE_DOUBLE_DOWN "  Go to the last instruction", Command::GotoFunctionEnd, span.has_value());
+        item(ICON_FA_I_CURSOR "  Select the whole function", Command::SelectFunction, span.has_value());
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the whole function", nullptr, false, span.has_value()))
+        {
+            const Target::AddressStyle style = m_engine.Options().ShowSymbols ? Target::AddressStyle::Name : Target::AddressStyle::ModuleOffset;
+            ImGui::SetClipboardText(Disasm::CopyText(InstructionsBetween(span->Start, span->Last, true), m_engine.Symbols(), style).c_str());
+        }
+        ImGui::Separator();
+        item(ICON_FA_CODE_BRANCH "  Show the flow graph", Command::FlowGraph);
+        ImGui::EndMenu();
     }
 
     void MemoryViewer::CopyInstructions(Target::AddressStyle style)

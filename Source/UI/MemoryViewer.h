@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App/Commands.h"
+#include "Disasm/FunctionBounds.h"
 #include "Lua/LuaEngine.h"
 #include "UI/Templates.h"
 #include "UI/ToolWindowBase.h"
@@ -45,6 +46,10 @@ namespace Manifold::UI
         void CodeMenu(const Disasm::Instruction& instruction);
         void HexMenu(std::uint64_t address);
         std::vector<Disasm::Instruction> SelectedInstructions(bool names) const;
+        std::vector<Disasm::Instruction> InstructionsBetween(std::uint64_t first, std::uint64_t last, bool names) const;
+        std::optional<Disasm::FunctionSpan> FunctionOf(std::uint64_t address);
+        void FunctionMenu(const Disasm::Instruction& instruction);
+        void JumpToFunction(Command command);
         void CopyInstructions(Target::AddressStyle style);
         void AddressCopyItems(std::uint64_t address);
         void BookmarkItems();
@@ -98,6 +103,15 @@ namespace Manifold::UI
         std::uint64_t m_top = 0;
         std::uint64_t m_selected = 0;
         std::uint64_t m_selectionEnd = 0;
+        struct FunctionCache
+        {
+            std::uint64_t Address = 0;
+            std::uint64_t Generation = 0;
+            std::uint64_t Writes = 0;
+            bool Valid = false;
+            std::optional<Disasm::FunctionSpan> Span;
+        };
+        FunctionCache m_function;
         std::vector<std::uint64_t> m_history;
         std::vector<Disasm::Instruction> m_lines;
         int m_visibleLines = 30;

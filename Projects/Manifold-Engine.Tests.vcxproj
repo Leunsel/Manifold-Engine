@@ -142,6 +142,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
     <ClCompile Include="..\Source\Disasm\FlowGraph.cpp" />
+    <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\IconNames.cpp" />
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />

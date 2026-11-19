@@ -17,6 +17,7 @@
 #include "Debug/Trace.h"
 #include "Disasm/CodeDissect.h"
 #include "Disasm/Disassembler.h"
+#include "Disasm/FunctionBounds.h"
 #include "Scan/Scanner.h"
 #include "Table/AddressList.h"
 #include "Table/CheatTable.h"
@@ -106,6 +107,7 @@ namespace Manifold
         const Target::CodeMap* CodeMap() const { return m_target.Attached() ? &m_target.CodeMap() : nullptr; }
         std::shared_ptr<const Disasm::DissectResult> CodeDissect() const { return m_codeDissect; }
         void SetCodeDissect(std::shared_ptr<const Disasm::DissectResult> result) { m_codeDissect = std::move(result); }
+        std::optional<Disasm::FunctionSpan> FunctionAround(std::uint64_t address);
         Scan::Scanner& Scanner() { return m_scanner; }
         Debug::Debugger& Debugger() { return m_debugger; }
         Debug::Tracer& Tracer() { return m_tracer; }

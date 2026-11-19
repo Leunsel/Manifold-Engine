@@ -59,14 +59,14 @@ namespace Manifold::Disasm
         std::deque<std::uint64_t> work{ entry };
         int decoded = 0;
 
-        const auto inside = [&](std::uint64_t target)
+        const auto inside = [&](std::uint64_t target, EdgeKind kind)
             {
                 if (target == entry)
                     return true;
                 const std::uint64_t distance = target > entry ? target - entry : entry - target;
                 if (distance > limits.Reach)
                     return false;
-                return !(otherFunction && otherFunction(target));
+                return !(otherFunction && otherFunction(target, kind));
             };
         const auto containing = [&](std::uint64_t address) -> std::optional<std::size_t>
             {
@@ -171,7 +171,7 @@ namespace Manifold::Disasm
                     {
                         if (!line.Target)
                             draft.Block.Indirect = true;
-                        else if (inside(*line.Target))
+                        else if (inside(*line.Target, EdgeKind::Jump))
                         {
                             draft.Next.push_back({ *line.Target, EdgeKind::Jump });
                             work.push_back(*line.Target);
@@ -182,7 +182,7 @@ namespace Manifold::Disasm
                     }
                     else if (line.Kind == Flow::ConditionalJump)
                     {
-                        if (line.Target && inside(*line.Target))
+                        if (line.Target && inside(*line.Target, EdgeKind::Taken))
                         {
                             draft.Next.push_back({ *line.Target, EdgeKind::Taken });
                             work.push_back(*line.Target);
@@ -207,8 +207,14 @@ namespace Manifold::Disasm
                 }
             }
             draft.Block.End = draft.Block.Lines.empty() ? start + 1 : draft.Block.Lines.back().Next();
+            const bool reached = limits.StopAt && limits.StopAt >= start && limits.StopAt < draft.Block.End;
             byStart[start] = drafts.size();
             drafts.push_back(std::move(draft));
+            if (reached)
+            {
+                graph.Truncated = true;
+                break;
+            }
         }
 
         std::vector<std::size_t> order;

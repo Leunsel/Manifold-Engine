@@ -174,6 +174,9 @@
     <ClCompile Include="..\Source\Disasm\FlowGraph.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp">
       <Filter>Source\Generated</Filter>
     </ClCompile>
@@ -589,6 +592,9 @@
       <Filter>Source\Disasm</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Disasm\FlowGraph.h">
+      <Filter>Source\Disasm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Disasm\FunctionBounds.h">
       <Filter>Source\Disasm</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h">

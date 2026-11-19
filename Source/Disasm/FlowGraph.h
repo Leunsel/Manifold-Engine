@@ -55,9 +55,10 @@ namespace Manifold::Disasm
         int MaxInstructions = 6000;
         int MaxBlocks = 800;
         std::uint64_t Reach = 0x80000;
+        std::uint64_t StopAt = 0;
     };
 
-    using OtherFunction = std::function<bool(std::uint64_t target)>;
+    using OtherFunction = std::function<bool(std::uint64_t target, EdgeKind kind)>;
 
     FlowGraph BuildFlowGraph(const Disassembler& disassembler, const Target::Process& process, std::uint64_t entry, const Target::Symbols* symbols,
         const CodeHints* hints, const OtherFunction& otherFunction, const FlowLimits& limits = {});

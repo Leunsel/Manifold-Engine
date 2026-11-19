@@ -56,6 +56,61 @@ namespace Manifold
         return (!m_target.Process() || m_target.Process()->Is64Bit()) ? *m_disassembler64 : *m_disassembler32;
     }
 
+    std::optional<Disasm::FunctionSpan> Engine::FunctionAround(std::uint64_t address)
+    {
+        constexpr std::uint64_t kReach = 0x10000;
+        if (!HasProcess() || address == 0)
+            return std::nullopt;
+        const Target::CodeMap* map = CodeMap();
+        const bool managed = MonoPresent();
+        const std::shared_ptr<const Disasm::DissectResult> dissect = m_codeDissect;
+        Disasm::FunctionClues clues;
+        clues.Exact = [&](std::uint64_t at) -> std::optional<Disasm::FunctionSpan>
+            {
+                if (map)
+                {
+                    if (const auto function = map->FunctionAt(at))
+                        return Disasm::FunctionSpan{ function->first, function->second, 0, Disasm::FunctionSource::Unwind };
+                }
+                if (managed)
+                {
+                    if (const auto method = Mono().MethodRange(at))
+                        return Disasm::FunctionSpan{ method->first, method->second, 0, Disasm::FunctionSource::Managed };
+                }
+                return std::nullopt;
+            };
+        clues.KnownStart = [&](std::uint64_t at)
+            {
+                if (Symbols().ExactName(at))
+                    return true;
+                if (!dissect)
+                    return false;
+                const std::span<const Disasm::CodeRef> references = dissect->To(at);
+                return std::any_of(references.begin(), references.end(), [](const Disasm::CodeRef& reference) { return reference.Kind() == Disasm::RefKind::Call; });
+            };
+        clues.Floor = address > kReach ? address - kReach : 0;
+        clues.Ceiling = address + kReach;
+        if (const auto module = Process()->ModuleAt(address))
+        {
+            clues.Floor = std::max(clues.Floor, module->Base);
+            clues.Ceiling = std::min(clues.Ceiling, module->Base + module->Size);
+        }
+        if (map)
+        {
+            if (const auto below = map->StartBelow(address + 1, kReach); below && *below >= clues.Floor)
+            {
+                clues.Floor = *below;
+                clues.FloorIsBoundary = true;
+            }
+            if (const auto above = map->BoundaryIn(address, address + kReach))
+                clues.Ceiling = std::min(clues.Ceiling, *above);
+        }
+        std::optional<Disasm::FunctionSpan> span = Disasm::FindFunction(Disassembler(), *Process(), address, map, clues);
+        if (span && span->Last == 0)
+            span->Last = Disassembler().BackUp(*Process(), span->End, 1, map);
+        return span;
+    }
+
     Status Engine::OpenProcess(ProcessId id)
     {
         m_activation.WaitForActivation();

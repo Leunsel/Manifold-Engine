@@ -159,6 +159,9 @@
     <ClCompile Include="..\Source\Disasm\FlowGraph.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp">
       <Filter>Source\Generated</Filter>
     </ClCompile>

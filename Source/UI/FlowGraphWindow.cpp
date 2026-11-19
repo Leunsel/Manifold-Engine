@@ -87,23 +87,8 @@ namespace Manifold::UI
 
     std::uint64_t FlowGraphWindow::FunctionStart(std::uint64_t address) const
     {
-        Engine& engine = m_workspace.Core();
-        if (const Target::CodeMap* map = engine.CodeMap())
-        {
-            if (const auto function = map->FunctionAt(address))
-                return function->first;
-        }
-        if (engine.MonoPresent())
-        {
-            if (const auto range = engine.Mono().MethodRange(address))
-                return range->first;
-        }
-        if (const auto symbol = engine.Symbols().Containing(address, 0x4000))
-        {
-            const auto module = engine.Process()->ModuleAt(address);
-            if (!module || symbol->first != module->Base)
-                return symbol->first;
-        }
+        if (const auto span = m_workspace.Core().FunctionAround(address))
+            return span->Start;
         return address;
     }
 
@@ -116,7 +101,7 @@ namespace Manifold::UI
         const Target::CodeMap* map = engine.CodeMap();
         const Target::Symbols& symbols = engine.Symbols();
         const bool mono = engine.MonoPresent();
-        const auto other = [&](std::uint64_t target)
+        const auto other = [&](std::uint64_t target, Disasm::EdgeKind)
             {
                 if (map)
                 {

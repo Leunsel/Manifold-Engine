@@ -147,6 +147,9 @@ While the disassembler pane has the focus. The keys act on the selected instruct
 | `Ctrl+Alt+I` | Find out what addresses this instruction accesses | `InstructionAccesses` | Manifold |
 | `X` | Code that references this address | `CodeReferences` | Manifold |
 | `G` | Show the flow graph of the function | `FlowGraph` | Manifold |
+| `Home` | Go to the start of the function | `GotoFunctionStart` | Manifold |
+| `End` | Go to the last instruction of the function | `GotoFunctionEnd` | Manifold |
+| `Ctrl+Shift+A` | Select the whole function | `SelectFunction` | Manifold |
 | `Ctrl+Num +` | Add this address to the address list | `AddInstructionToList` | CE |
 | `Ctrl+Alt+0-9` | Set a bookmark | `SetBookmark` | CE |
 | `Ctrl+0-9` | Go to a bookmark | `GotoBookmark` | CE |
