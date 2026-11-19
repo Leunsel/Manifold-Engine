@@ -267,3 +267,8 @@ namespace Manifold::Tests
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("console", "Lua console", 70, [](const SuiteContext&) { return RunConsoleTests(); });
+}

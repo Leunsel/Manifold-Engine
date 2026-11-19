@@ -1,3 +1,5 @@
+#include "TestKit.h"
+
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/RuntimeLog.h"
@@ -234,4 +236,9 @@ namespace Manifold::Tests
         std::printf("%s\n", result == 0 ? "target survived" : "target died");
         return result;
     }
+}
+
+namespace Manifold::Tests
+{
+    MANIFOLD_MODE("--watch-stress", &RunWatchStress);
 }

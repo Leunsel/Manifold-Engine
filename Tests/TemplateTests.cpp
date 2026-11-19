@@ -506,3 +506,8 @@ namespace Manifold::Tests
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("templates", "Templates", 110, [](const SuiteContext&) { return RunTemplateTests(); });
+}

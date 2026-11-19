@@ -1185,3 +1185,9 @@ namespace Manifold::Tests
         return failures == 0 ? 0 : 10 + std::min(failures, 200);
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_MODE("--managed-dump-clr", &RunManagedDumpClr);
+    MANIFOLD_MODE("--managed-agent-clr", &RunManagedAgentClr);
+}

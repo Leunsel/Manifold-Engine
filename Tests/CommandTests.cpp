@@ -178,3 +178,8 @@ namespace Manifold::Tests
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("commands", "Commands and shortcuts", 40, [](const SuiteContext&) { return RunCommandTests(); });
+}

@@ -1,3 +1,5 @@
+#include "TestKit.h"
+
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/RuntimeLog.h"
@@ -297,4 +299,9 @@ end
         std::printf("\n%d Lua errors\n", printer.Errors);
         return printer.Errors;
     }
+}
+
+namespace Manifold::Tests
+{
+    MANIFOLD_MODE("--compat", &RunCompatHarness);
 }

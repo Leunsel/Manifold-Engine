@@ -5,49 +5,53 @@
 #include "Core/MainThread.h"
 #include "Core/Paths.h"
 #include "Core/RuntimeLog.h"
+#include "Core/Text.h"
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <windows.h>
 
 namespace Manifold::Tests
 {
-    int RunAssemblerTests();
-    int RunCoreTests();
-    int RunWorkTests();
-    int RunDisasmTests();
-    int RunDisasmLive(const std::vector<std::string>& arguments);
-    int RunCommandTests();
-    int RunTextTests();
-    int RunDocTests();
-    int RunConsoleTests();
-    int RunIntegrationTests(const std::filesystem::path& target);
-    int RunCompatHarness(const std::vector<std::string>& arguments);
-    int RunCompatTests();
-    int RunManifoldApiTests();
-    int RunAutorunTests();
-    std::string ManifoldMarkdown();
-    int RunTemplateTests();
-    int RunWatchStress(const std::vector<std::string>& arguments);
-    int RunDebuggerCheck(const std::vector<std::string>& arguments);
-    int RunWatchArmCheck(const std::vector<std::string>& arguments);
-    int RunMonoCheck(const std::vector<std::string>& arguments);
-    int RunIl2CppCheck(const std::vector<std::string>& arguments);
-    int RunMonoDump(const std::vector<std::string>& arguments);
-    int RunUnityDump(const std::vector<std::string>& arguments);
-    int RunManagedDumpClr(const std::vector<std::string>& arguments);
-    int RunManagedAgentClr(const std::vector<std::string>& arguments);
-
     Counter& Totals()
     {
         static Counter counter;
         return counter;
     }
+
+    int RunAssemblerTests();
+
+    std::vector<Suite>& Suites()
+    {
+        static std::vector<Suite> suites;
+        return suites;
+    }
+
+    std::vector<Mode>& Modes()
+    {
+        static std::vector<Mode> modes;
+        return modes;
+    }
+
+    MANIFOLD_SUITE("assembler", "Assembler", 0, [](const SuiteContext&) { return RunAssemblerTests(); });
+
+    MANIFOLD_MODE("--errors-markdown", [](const std::vector<std::string>&)
+        {
+            std::fputs(ErrorsMarkdown().c_str(), stdout);
+            return 0;
+        });
+
+    MANIFOLD_MODE("--shortcuts-markdown", [](const std::vector<std::string>&)
+        {
+            std::fputs(ShortcutsMarkdown().c_str(), stdout);
+            return 0;
+        });
 
     class DataFolder
     {
@@ -95,107 +99,83 @@ namespace Manifold::Tests
 
 int main(int argc, char** argv)
 {
+    using namespace Manifold::Tests;
     Manifold::BindMainThread();
-    const Manifold::Tests::DataFolder data;
-    std::filesystem::path target;
-    bool assemblerOnly = false;
-    bool allowSkips = false;
+    const DataFolder data;
     const std::vector<std::string> arguments(argv + 1, argv + argc);
     for (const std::string& argument : arguments)
     {
-        if (argument == "--compat")
-            return Manifold::Tests::RunCompatHarness(arguments);
-        if (argument == "--watch-stress")
-            return Manifold::Tests::RunWatchStress(arguments);
-        if (argument == "--debugger-check")
-            return Manifold::Tests::RunDebuggerCheck(arguments);
-        if (argument == "--watch-arm-check")
-            return Manifold::Tests::RunWatchArmCheck(arguments);
-        if (argument == "--mono-check")
-            return Manifold::Tests::RunMonoCheck(arguments);
-        if (argument == "--il2cpp-check")
-            return Manifold::Tests::RunIl2CppCheck(arguments);
-        if (argument == "--mono-dump")
-            return Manifold::Tests::RunMonoDump(arguments);
-        if (argument == "--unity-dump")
-            return Manifold::Tests::RunUnityDump(arguments);
-        if (argument == "--managed-dump-clr")
-            return Manifold::Tests::RunManagedDumpClr(arguments);
-        if (argument == "--managed-agent-clr")
-            return Manifold::Tests::RunManagedAgentClr(arguments);
-        if (argument == "--disasm-check")
+        for (const Mode& mode : Modes())
         {
-            for (const std::string& other : arguments)
-            {
-                if (other.rfind("--process=", 0) == 0)
-                    return Manifold::Tests::RunDisasmLive(arguments);
-            }
-            const int failed = Manifold::Tests::RunDisasmTests();
-            std::printf("%d checks, %d failed\n", Manifold::Tests::Totals().Checks, failed);
-            return failed;
+            if (argument == mode.Flag)
+                return mode.Run(arguments);
         }
     }
-    for (int i = 1; i < argc; ++i)
+
+    SuiteContext context;
+    bool allowSkips = false;
+    bool list = false;
+    std::vector<std::string> filters;
+    for (const std::string& argument : arguments)
     {
-        const std::string argument = argv[i];
-        if (argument == "--errors-markdown")
-        {
-            std::fputs(Manifold::ErrorsMarkdown().c_str(), stdout);
-            return 0;
-        }
-        if (argument == "--shortcuts-markdown")
-        {
-            std::fputs(Manifold::ShortcutsMarkdown().c_str(), stdout);
-            return 0;
-        }
-        if (argument == "--manifold-markdown")
-        {
-            std::fputs(Manifold::Tests::ManifoldMarkdown().c_str(), stdout);
-            return 0;
-        }
         if (argument.rfind("--target=", 0) == 0)
-            target = argument.substr(9);
-        if (argument == "--assembler")
-            assemblerOnly = true;
-        if (argument == "--allow-skips")
+            context.Target = argument.substr(9);
+        else if (argument == "--assembler")
+            filters.push_back("assembler");
+        else if (argument.rfind("--filter=", 0) == 0)
+        {
+            for (const std::string& part : Manifold::Split(argument.substr(9), ','))
+            {
+                if (!Manifold::Trim(part).empty())
+                    filters.push_back(Manifold::Lower(Manifold::Trim(part)));
+            }
+        }
+        else if (argument == "--list")
+            list = true;
+        else if (argument == "--allow-skips")
             allowSkips = true;
     }
-    if (target.empty())
+    if (context.Target.empty())
     {
         wchar_t self[MAX_PATH] = L"";
         ::GetModuleFileNameW(nullptr, self, MAX_PATH);
-        target = std::filesystem::path(self).parent_path() / L"TestTarget.exe";
+        context.Target = std::filesystem::path(self).parent_path() / L"TestTarget.exe";
     }
 
-    std::printf("Assembler\n");
-    const int assembler = Manifold::Tests::RunAssemblerTests();
-    if (assemblerOnly)
-        return assembler;
-    std::printf("Core\n");
-    Manifold::Tests::RunCoreTests();
-    std::printf("Background work\n");
-    Manifold::Tests::RunWorkTests();
-    std::printf("Disassembler\n");
-    Manifold::Tests::RunDisasmTests();
-    std::printf("Commands and shortcuts\n");
-    Manifold::Tests::RunCommandTests();
-    std::printf("Text\n");
-    Manifold::Tests::RunTextTests();
-    std::printf("Documentation\n");
-    Manifold::Tests::RunDocTests();
-    std::printf("Lua console\n");
-    Manifold::Tests::RunConsoleTests();
-    std::printf("Compatibility\n");
-    Manifold::Tests::RunCompatTests();
-    std::printf("Manifold Lua API\n");
-    Manifold::Tests::RunManifoldApiTests();
-    std::printf("Autorun modules\n");
-    Manifold::Tests::RunAutorunTests();
-    std::printf("Templates\n");
-    Manifold::Tests::RunTemplateTests();
-    std::printf("Integration (%ls)\n", target.c_str());
-    Manifold::Tests::RunIntegrationTests(target);
-    const auto& totals = Manifold::Tests::Totals();
+    std::vector<Suite> suites = Suites();
+    std::stable_sort(suites.begin(), suites.end(), [](const Suite& a, const Suite& b) { return a.Order < b.Order; });
+    if (list)
+    {
+        for (const Suite& suite : suites)
+            std::printf("%-14s %s\n", suite.Name, suite.Title);
+        return 0;
+    }
+    const auto chosen = [&](const Suite& suite)
+        {
+            if (filters.empty())
+                return true;
+            const std::string name = Manifold::Lower(suite.Name);
+            return std::any_of(filters.begin(), filters.end(), [&](const std::string& filter) { return name.find(filter) != std::string::npos; });
+        };
+
+    int assembler = 0;
+    int ran = 0;
+    for (const Suite& suite : suites)
+    {
+        if (!chosen(suite))
+            continue;
+        ++ran;
+        std::printf("%s\n", suite.Title);
+        const int result = suite.Run(context);
+        if (std::string_view(suite.Name) == "assembler")
+            assembler = result;
+    }
+    if (ran == 0)
+    {
+        std::printf("No suite matches the filter; --list shows the suites.\n");
+        return 1;
+    }
+    const Counter& totals = Totals();
     std::printf("\n%d checks, %d failed, %d skipped; assembler suite: %d failed\n", totals.Checks, totals.Failures, totals.Skipped, assembler);
     if (totals.Skipped && !allowSkips)
         std::printf("Skipped checks fail the run. Run from the repository with TestTarget.exe beside the tests, or pass --allow-skips.\n");

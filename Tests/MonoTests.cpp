@@ -1155,3 +1155,10 @@ namespace Manifold::Tests
         return failures == 0 ? 0 : 1;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_MODE("--mono-check", &RunMonoCheck);
+    MANIFOLD_MODE("--mono-dump", &RunMonoDump);
+    MANIFOLD_MODE("--unity-dump", &RunUnityDump);
+}

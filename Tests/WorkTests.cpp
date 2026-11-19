@@ -149,3 +149,8 @@ namespace Manifold::Tests
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("work", "Background work", 20, [](const SuiteContext&) { return RunWorkTests(); });
+}

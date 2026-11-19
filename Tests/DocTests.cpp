@@ -390,3 +390,8 @@ end
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("docs", "Documentation", 60, [](const SuiteContext&) { return RunDocTests(); });
+}

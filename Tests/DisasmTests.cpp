@@ -454,3 +454,19 @@ namespace Manifold::Tests
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("disasm", "Disassembler", 30, [](const SuiteContext&) { return RunDisasmTests(); });
+    MANIFOLD_MODE("--disasm-check", [](const std::vector<std::string>& arguments)
+        {
+            for (const std::string& other : arguments)
+            {
+                if (other.rfind("--process=", 0) == 0)
+                    return RunDisasmLive(arguments);
+            }
+            const int failed = RunDisasmTests();
+            std::printf("%d checks, %d failed\n", Totals().Checks, failed);
+            return failed;
+        });
+}

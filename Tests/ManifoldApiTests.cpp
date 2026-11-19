@@ -886,3 +886,13 @@ return M
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("manifold-api", "Manifold Lua API", 90, [](const SuiteContext&) { return RunManifoldApiTests(); });
+    MANIFOLD_MODE("--manifold-markdown", [](const std::vector<std::string>&)
+        {
+            std::fputs(ManifoldMarkdown().c_str(), stdout);
+            return 0;
+        });
+}

@@ -454,3 +454,9 @@ namespace Manifold::Tests
         return failures == 0 ? 0 : 1;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_MODE("--debugger-check", &RunDebuggerCheck);
+    MANIFOLD_MODE("--watch-arm-check", &RunWatchArmCheck);
+}

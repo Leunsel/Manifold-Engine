@@ -604,3 +604,8 @@ namespace Manifold::Tests
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("text", "Text", 50, [](const SuiteContext&) { return RunTextTests(); });
+}

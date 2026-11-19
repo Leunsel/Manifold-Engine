@@ -357,3 +357,8 @@ namespace Manifold::Tests
         return failures == 0 ? 0 : 1;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_MODE("--il2cpp-check", &RunIl2CppCheck);
+}

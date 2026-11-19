@@ -1010,3 +1010,12 @@ namespace Manifold::Tests
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("integration", "Integration", 120, [](const SuiteContext& context)
+        {
+            std::printf("  target %ls\n", context.Target.c_str());
+            return RunIntegrationTests(context.Target);
+        });
+}

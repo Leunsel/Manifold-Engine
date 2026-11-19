@@ -1267,3 +1267,8 @@ data:
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("core", "Core", 10, [](const SuiteContext&) { return RunCoreTests(); });
+}

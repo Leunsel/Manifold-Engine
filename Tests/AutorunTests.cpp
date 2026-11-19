@@ -109,3 +109,8 @@ namespace Manifold::Tests
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("autorun", "Autorun modules", 100, [](const SuiteContext&) { return RunAutorunTests(); });
+}

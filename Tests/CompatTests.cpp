@@ -952,3 +952,8 @@ namespace Manifold::Tests
         return Totals().Failures - before;
     }
 }
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("compat", "Compatibility", 80, [](const SuiteContext&) { return RunCompatTests(); });
+}
