@@ -7,6 +7,13 @@ Visual Studio 2022 with the C++ desktop workload and clang-cl (C++20). In the Vi
 - C++ Clang Compiler for Windows
 - MSBuild support for LLVM (clang-cl) toolset
 
+The build also uses two tools from PATH:
+
+- Python 3, for the scripts in `Tools` that write the generated sources and the build info.
+- The .NET SDK (`dotnet`), to build the managed dumper for Mono games (`Managed`).
+
+The program builds without either, with a warning, but then something is missing: without the .NET SDK the build has no managed dumper and the tests report that as skipped, which fails the run; without Python the generated sources are not refreshed and the build info has no commit.
+
 1. Open `Manifold-Engine.sln`.
 2. Build `Release|x64`.
 
@@ -18,11 +25,17 @@ msbuild Manifold-Engine.sln /p:Configuration=Release /p:Platform=x64 /m
 
 Everything lands in `Build\<Platform>\<Configuration>`, e.g. `Build\x64\Release`. All dependencies are in `Dependencies` and build with the solution: Dear ImGui 1.92 (docking), Zydis 5 (amalgamated), Lua 5.4. New source files are picked up by running `python Tools/gen_projects.py`, which writes the projects in `Projects` and the solution.
 
-The program is x64-only. Every x64 build also builds the in-process debugger agent and the test target a second time as 32-bit, as `ManifoldAgent32.dll` and `TestTarget32.exe` next to the program: the program injects the 32-bit agent into 32-bit games, and the tests use the 32-bit target. The solution's `Win32` platform builds only the dependencies, these two projects and the stand-alone `SyscallTest` project.
+The program is x64-only. Every x64 build also builds the in-process debugger agent and the test target a second time as 32-bit, as `ManifoldAgent32.dll` and `TestTarget32.exe` next to the program: the program injects the 32-bit agent into 32-bit games, and the tests use the 32-bit target. The solution also lists a `Win32` platform, which that second build uses; building the whole solution as `Win32` is not something CI or the tests do.
 
-The MSVC compiler (`v143`) cannot build the program: the direct system call stubs in `Source/Syscalls/Syscall.h` are naked functions with inline assembly, which only clang-cl compiles.
+The MSVC compiler (`v143`) cannot build the program: the direct system call stubs in `Source/Syscalls/Syscall.h` are naked functions with inline assembly, which only clang-cl compiles. `Tools/gen_projects.py --msvc` writes such projects all the same, for trying parts of the code with MSVC.
 
-Before compiling, the projects run `Tools/embed_lua.py`, `Tools/embed_templates.py` and `Tools/gen_buildinfo.py` with the Python on PATH (without Python the build warns with ME0001 and uses the committed generated files). The last one writes the commit into the build, so the log, Help → About and the diagnostics report show the version with it, like `0.1.0 (3e90571)`; a `+` after the commit means the working tree had uncommitted changes.
+Before compiling, the projects run `Tools/embed_lua.py`, `Tools/embed_templates.py` and `Tools/gen_buildinfo.py` with the Python on PATH; a script that fails stops the build. The last one writes the commit into the build, so the log, Help → About and the diagnostics report show the version with it, like `0.1.0 (3e90571)`; a `+` after the commit means the working tree had uncommitted changes. The `ManagedDumper` project builds `Managed` with `dotnet` and writes `Source/Generated/ManagedDumperImage.cpp`, the one generated source that is not committed, because it holds the built assembly. The build warns when a tool is missing:
+
+| Warning | Meaning |
+| --- | --- |
+| ME0001 | Python was not found: the committed generated sources are used as they are. |
+| ME0002 | The .NET SDK was not found: the program is built without the managed dumper. |
+| ME0003 | Python was not found and there is no `ManagedDumperImage.cpp` yet: an empty one is copied from `Tools/ManagedDumperImage.empty.cpp`. |
 
 ## Tests
 
@@ -30,18 +43,38 @@ Before compiling, the projects run `Tools/embed_lua.py`, `Tools/embed_templates.
 Build\x64\Release\Manifold-Engine.Tests.exe
 ```
 
-The tests cover the assembler, value parsing, XML and cheat table round trips, the error table, offline Auto Assembler runs, the Lua APIs and the Autorun modules, and an integration run against `TestTarget.exe` (built with the solution): scanning, pointers, freezing, a code injection script, the sample table `Tests/Target/TestTarget.CT`, Lua (records, timers, threads), all four "find out what" watches, breakpoints, stepping and the direct system calls. The `wow64` suite does the same for a 32-bit game against `TestTarget32.exe`: pointers, a code injection script, Lua, both debuggers (watches, int3 and hardware breakpoints, conditions, stepping, Break, trace), and the fake Mono, IL2CPP and managed dumper runtimes of the target (`--wow64-managed-check` runs only those). `--errors-markdown` prints `Docs/ERRORS.md`, `--shortcuts-markdown` prints `Docs/SHORTCUTS.md` and `--manifold-markdown` prints `Docs/MANIFOLD-API.md`; the tests fail when one of them is out of date, and when two commands of one window share a key.
+The run goes through these suites in order; `--list` names them and `--filter=core,text` runs only those:
 
-Run the tests from the repository folder or a folder below it, with `TestTarget.exe` next to them: the documentation checks look for `Docs` and `Source` above the working folder. A check that cannot run there counts as skipped, and skipped checks fail the run; `--allow-skips` accepts them. `--list` names the suites and `--filter=core,text` runs only those. A test run keeps its settings and logs in a folder of its own under `%TEMP%\Manifold-Engine-Tests`, so the `configs` folder next to the program stays as it is.
+| Suite | Covers |
+| --- | --- |
+| `assembler`, `core`, `text`, `work` | the assembler, value parsing, XML and cheat table round trips, the limits for tables from elsewhere, the error table, offline Auto Assembler runs, syntax highlighting, JSON and the editor's text buffer, background work |
+| `disasm`, `flowgraph`, `relays` | the disassembler, function bounds and the flow graph, relays in a module header and symbol offsets |
+| `unreal` | the Unreal Engine reader against a made-up name table, object array and reflection |
+| `commands`, `docs`, `console`, `templates` | commands and shortcuts, the generated documentation, the Lua console, script templates |
+| `compat`, `manifold-api`, `autorun` | the Cheat Engine Lua API, the `manifold` API, the Autorun modules |
+| `managed` | the managed dumper: its data format, the embedded assembly, and a run on the .NET Framework |
+| `integration` | a run against `TestTarget.exe` (built with the solution): scanning, pointers, freezing, a code injection script, the sample table `Tests/Target/TestTarget.CT`, Lua (records, timers, threads), the write history, all four "find out what" watches, breakpoints and stepping with the Windows debugger, the fake Mono, IL2CPP and managed dumper runtimes of the target, the direct system calls |
+| `inprocess` | the in-process debugger in a 64-bit target: breakpoints with conditions and register changes, watches on one instruction, and the agent letting the target go when the program falls silent |
+| `wow64` | the same as `integration` for a 32-bit game against `TestTarget32.exe`, with both debuggers and the fake Mono, IL2CPP and managed dumper runtimes (`--wow64-managed-check` runs only those) |
+
+Four documentation files are generated by the tests program, and the tests fail when one of them is out of date: `--errors-markdown` prints `Docs/ERRORS.md`, `--shortcuts-markdown` prints `Docs/SHORTCUTS.md`, `--manifold-markdown` prints `Docs/MANIFOLD-API.md` and `--ce-compat-markdown` prints `Docs/CE-COMPAT.md`. They also fail when two commands of one window share a key.
+
+Run the tests from the repository folder or a folder below it, with `TestTarget.exe` next to them (`--target=` names another one): the documentation checks look for `Docs` and `Source` above the working folder. A check that cannot run there counts as skipped, and skipped checks fail the run; `--allow-skips` accepts them.
+
+A test run keeps its settings, its log (`logs\Manifold-Engine.log`) and a crash dump, should the tests program crash, in a folder of its own under `%TEMP%\Manifold-Engine-Tests`, so the `configs` folder next to the program stays as it is. The folder goes away when the run passes. After a failed run or a crash it stays for a week and the run prints where it is. The environment variable `MANIFOLD_TEST_DATA` names another place for these folders, and nothing is removed there; CI uses it to keep them.
+
+`--crash-check` crashes the tests program on purpose, to see that the dump is written.
+
+Some checks need a real game, a long run or a special situation and are not part of the default run or of CI. Each is started with its own option: `--debugger-check` (with `--veh` for the in-process debugger), `--watch-arm-check`, `--watch-stress`, `--mono-check`, `--mono-dump`, `--unity-dump`, `--il2cpp-check`, `--unreal-check`, `--disasm-check`, `--function-search-check`, `--relay-check`, and `--compat` to run a cheat table without a window. With the environment variable `MANIFOLD_TEMPLATE_CHECK` set to a folder of templates, the `templates` suite also generates each of them for an instruction of the tests program itself, prints whether the result assembles and writes it into `_rendered` there; this prints only and fails nothing.
 
 ## Working on the code
 
 - **Line endings and style**: the repository keeps text files with LF (`.gitattributes`; solution, project and batch files keep CRLF), and `.editorconfig` tells editors to use UTF-8, LF and four spaces. `.clang-format` describes the code style. `python Tools/format_changed.py` shows how clang-format would format the lines changed since `HEAD` and touches nothing; `--commit`, `--staged` and file names narrow it down, `--apply` writes the result. Only changed lines are formatted, so the rest of the code stays as it is. One place where clang-format differs from the existing code: it puts the braces of a lambda assigned to a variable at the level of the statement.
 - **Commands and shortcuts** are defined once in `Source/App/Commands.cpp`; a window asks `Pressed(Command::…)` and shows the keys with `CommandItem`.
-- **Cheat Engine API docs**: `Source/Lua/Docs/CheatEngine.txt` lists the classes, functions, methods and properties of Cheat Engine 7.5's Lua API with descriptions written for this project; `python Tools/gen_lua_docs.py` turns it into `Source/Generated/LuaDocs.cpp` for the documentation panel.
+- **Cheat Engine API docs**: `Source/Lua/Docs/CheatEngine.txt` lists the classes, functions, methods and properties of Cheat Engine 7.5's Lua API with descriptions written for this project; `python Tools/gen_lua_docs.py` turns it into `Source/Generated/LuaDocs.cpp` for the documentation panel, and `Tools/gen_projects.py` runs it too, so CI notices a `LuaDocs.cpp` that was not regenerated.
 - **Live install**: `Build\x64\Release` is build output that every build replaces. `Tools\Install.ps1` copies a build into `Install` in the main checkout (or into `-Destination`), and the program there keeps its `configs`, `tables`, `sounds`, `templates`, `logs` and `crashes` apart from the build. The first install copies those folders from `Build\x64\Release` (or `-AdoptFrom`) and leaves the originals in place; later installs replace only the program files, add Autorun modules that are newer, and refuse while that copy of the program runs.
 - **Worktrees**: parallel work goes into one git worktree each (`.claude/worktrees`) instead of the shared checkout, so no one commits someone else's half-done changes. Each worktree builds into its own `Build` folder, and `Tools\Install.ps1` run from any worktree installs into the main checkout's `Install`.
-- **CI**: `.github/workflows/build.yml` builds `Release|x64` on `windows-2022` with clang-cl, checks that the generated files and projects are committed, runs the tests and builds `Debug|x64`, on every push to `main`, on pull requests and on demand. A change to `README.md` or the licenses alone does not start a run.
+- **CI**: `.github/workflows/build.yml` runs on `windows-2022` with clang-cl on every push to `main`, on pull requests and on demand. It checks that Python and the .NET SDK are there, builds `Release|x64`, checks that the generated files and projects are committed, and runs all tests. Then it builds `Debug|x64` and runs all tests again with that build. When a step fails, the run keeps the test folders with their logs and crash dumps as the artifact `test-data` for a week. A change to `README.md` or the licenses alone does not start a run.
 - **Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md) describes the layers, the main objects, which thread runs what, and where a new command, window, setting, Lua function, error or test suite goes.
 
 ## Layout

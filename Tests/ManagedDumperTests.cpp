@@ -545,7 +545,10 @@ namespace Manifold::Tests
         {
             CheckValueTypes(targetPath, L"--mono-values");
             if (Target::ManagedDumperImage().empty())
+            {
+                Skip("this build embedded no managed dumper, so the agent was not run in " + targetPath.filename().string());
                 return;
+            }
             CheckValueTypes(targetPath, L"--mono-agent --mono-values");
             for (const wchar_t* mode : { L"--mono-agent", L"--mono-agent=bad-handles", L"--mono-agent=bad-offsets", L"--mono-agent=unsure", L"--mono-agent=fail" })
                 CheckAgentMode(targetPath, mode);
@@ -722,15 +725,18 @@ namespace Manifold::Tests
         CheckAgentTarget(targetPath);
     }
 
-    void CheckManagedDumper(const std::filesystem::path& targetPath)
+    int RunManagedDumperTests()
     {
+        const int before = Totals().Failures;
         CheckParser();
         CheckAgentProtocol();
         CheckEmbeddedImage();
         CheckOnClr();
-        CheckAgentTarget(targetPath);
         CheckAgentOnClr();
+        return Totals().Failures - before;
     }
+
+    MANIFOLD_SUITE("managed", "Managed dumper", 115, [](const SuiteContext&) { return RunManagedDumperTests(); });
 
     int RunManagedDumpClr(const std::vector<std::string>& arguments)
     {

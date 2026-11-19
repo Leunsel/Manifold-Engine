@@ -22,10 +22,18 @@ jobs:
   windows:
     runs-on: windows-2022
     timeout-minutes: 75
+    env:
+      MANIFOLD_TEST_DATA: ${{ github.workspace }}\TestData
     steps:
       - uses: actions/checkout@v4
 
       - uses: microsoft/setup-msbuild@v2
+
+      - name: Tools the build needs
+        shell: pwsh
+        run: |
+          python --version
+          dotnet --version
 
       - name: Build Release x64
         run: msbuild Manifold-Engine.sln /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
@@ -43,13 +51,14 @@ jobs:
       - name: Build Debug x64
         run: msbuild Manifold-Engine.sln /m /nologo /v:minimal /p:Configuration=Debug /p:Platform=x64
 
+      - name: Test Debug
+        run: Build\x64\Debug\Manifold-Engine.Tests.exe
+
       - name: Keep logs and crash reports
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: logs
-          path: |
-            Build/x64/Release/logs/
-            Build/x64/Release/crashes/
+          name: test-data
+          path: TestData/
           if-no-files-found: ignore
           retention-days: 7

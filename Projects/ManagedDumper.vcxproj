@@ -51,14 +51,19 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <CustomBuildStep>
-      <Command>where dotnet &gt;nul 2&gt;nul || goto embed
+      <Command>where dotnet &gt;nul 2&gt;nul || (echo ManagedDumper : warning ME0002 : The .NET SDK was not found, so this build has no managed dumper for Mono games &amp; goto embed)
 set MSBuildSDKsPath=
 set MSBuildExtensionsPath=
 set MSBUILD_EXE_PATH=
 dotnet build "$(ProjectDir)..\Managed\ManifoldDumper\ManifoldDumper.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
 dotnet build "$(ProjectDir)..\Managed\FakeUnity\FakeUnity.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
 :embed
-where python &gt;nul 2&gt;nul || exit /b 0
+where python &gt;nul 2&gt;nul &amp;&amp; goto generate
+if exist "$(ProjectDir)..\Source\Generated\ManagedDumperImage.cpp" exit /b 0
+echo ManagedDumper : warning ME0003 : Python was not found, so an empty managed dumper is embedded
+copy /Y "$(ProjectDir)..\Tools\ManagedDumperImage.empty.cpp" "$(ProjectDir)..\Source\Generated\ManagedDumperImage.cpp" &gt;nul
+exit /b 0
+:generate
 python "$(ProjectDir)..\Tools\embed_managed.py" --touch</Command>
       <Message>Building the managed dumper and embedding it into the program</Message>
       <Inputs>$(ProjectDir)..\Managed\FakeUnity\FakeUnity.cs;$(ProjectDir)..\Managed\FakeUnity\FakeUnity.csproj;$(ProjectDir)..\Managed\ManifoldDumper\Agent.cs;$(ProjectDir)..\Managed\ManifoldDumper\Dumper.cs;$(ProjectDir)..\Managed\ManifoldDumper\ManifoldDumper.csproj;$(ProjectDir)..\Managed\ManifoldDumper\Ops.cs;$(ProjectDir)..\Tools\embed_managed.py</Inputs>

@@ -77,8 +77,8 @@
     </Link>
     <PreBuildEvent>
       <Command>where python &gt;nul 2&gt;nul || (echo Manifold : warning ME0001 : Python was not found, so the generated sources in Source\Generated were not refreshed &amp; exit /b 0)
-python "$(ProjectDir)..\Tools\embed_lua.py"
-python "$(ProjectDir)..\Tools\embed_templates.py"
+python "$(ProjectDir)..\Tools\embed_lua.py" || exit /b 1
+python "$(ProjectDir)..\Tools\embed_templates.py" || exit /b 1
 python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"</Command>
       <Message>Embedding the Lua compatibility scripts and the built-in templates, writing the build info</Message>
     </PreBuildEvent>

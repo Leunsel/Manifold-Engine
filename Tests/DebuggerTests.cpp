@@ -312,11 +312,15 @@ namespace Manifold::Tests
             return false;
         }
 
-        bool StartTestTarget(PROCESS_INFORMATION& info)
+        std::filesystem::path TargetBesideTests()
         {
             wchar_t self[MAX_PATH] = L"";
             ::GetModuleFileNameW(nullptr, self, MAX_PATH);
-            const std::filesystem::path targetPath = std::filesystem::path(self).parent_path() / L"TestTarget.exe";
+            return std::filesystem::path(self).parent_path() / L"TestTarget.exe";
+        }
+
+        bool StartTestTarget(PROCESS_INFORMATION& info, const std::filesystem::path& targetPath = TargetBesideTests())
+        {
             std::wstring command = L"\"" + targetPath.wstring() + L"\"";
             STARTUPINFOW startup{ sizeof(startup) };
             if (!::CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info))
@@ -453,10 +457,50 @@ namespace Manifold::Tests
             code == STILL_ACTIVE ? "was alive" : ("had ended " + Hex(code, 8)).c_str());
         return failures == 0 ? 0 : 1;
     }
+
+    int RunInProcessTests(const std::filesystem::path& targetPath)
+    {
+        const int before = Totals().Failures;
+        PROCESS_INFORMATION info{};
+        if (!StartTestTarget(info, targetPath))
+        {
+            Skip("the test target " + targetPath.string() + " could not be started");
+            return 0;
+        }
+        {
+            Settings settings;
+            settings.UseInProcessDebugger = true;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(info.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            const Status attached = opened ? engine.EnsureDebugger() : opened;
+            CHECK_MSG(attached.Ok(), attached.Text);
+            if (attached)
+            {
+                CHECK(engine.Debugger().UsingVeh());
+                CheckBreakActions(engine, true);
+                CheckWatchesOnOneInstruction(engine, true);
+                CheckHostSilence(engine);
+                engine.Debugger().Detach();
+                Wait(engine, 400);
+                CHECK(engine.Process()->Alive());
+            }
+        }
+        DWORD code = 0;
+        EndTestTarget(info, code);
+        CHECK_MSG(code == STILL_ACTIVE, "the target of the in-process debugger ended with " + Hex(code, 8));
+        return Totals().Failures - before;
+    }
 }
 
 namespace Manifold::Tests
 {
+    MANIFOLD_SUITE("inprocess", "In-process debugger (64-bit)", 122, [](const SuiteContext& context)
+        {
+            std::printf("  target %ls\n", context.Target.c_str());
+            return RunInProcessTests(context.Target);
+        });
+
     MANIFOLD_MODE("--debugger-check", &RunDebuggerCheck);
     MANIFOLD_MODE("--watch-arm-check", &RunWatchArmCheck);
 }

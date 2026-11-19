@@ -17,10 +17,14 @@ def assembly_name():
 
 IMAGE = os.path.join(ROOT, "Build", "Managed", assembly_name() + ".dll")
 OUT = os.path.join(ROOT, "Source", "Generated", "ManagedDumperImage.cpp")
+EMPTY = os.path.join(ROOT, "Tools", "ManagedDumperImage.empty.cpp")
 PER_LINE = 24
 
 
 def render(data):
+    if not data:
+        with open(EMPTY, encoding="utf-8", newline="") as handle:
+            return handle.read().replace("\r\n", "\n")
     lines = [
         '#include "Target/ManagedDumper.h"',
         "",
@@ -28,23 +32,18 @@ def render(data):
         "{",
         "    namespace",
         "    {",
+        f"        alignas(16) constexpr std::uint8_t kImage[{len(data)}] = {{",
     ]
-    if data:
-        lines.append(f"        alignas(16) constexpr std::uint8_t kImage[{len(data)}] = {{")
-        for start in range(0, len(data), PER_LINE):
-            chunk = data[start:start + PER_LINE]
-            lines.append("            " + ", ".join(f"0x{byte:02X}" for byte in chunk) + ",")
-        lines.append("        };")
-        size = "sizeof(kImage)"
-    else:
-        lines.append("        constexpr std::uint8_t kImage[1] = { 0 };")
-        size = "0"
+    for start in range(0, len(data), PER_LINE):
+        chunk = data[start:start + PER_LINE]
+        lines.append("            " + ", ".join(f"0x{byte:02X}" for byte in chunk) + ",")
     lines += [
+        "        };",
         "    }",
         "",
         "    std::span<const std::uint8_t> ManagedDumperImage()",
         "    {",
-        f"        return std::span<const std::uint8_t>(kImage, {size});",
+        "        return std::span<const std::uint8_t>(kImage, sizeof(kImage));",
         "    }",
         "}",
         "",

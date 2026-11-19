@@ -226,8 +226,8 @@ def write(name, text):
 
 PREBUILD = """    <PreBuildEvent>
       <Command>where python &gt;nul 2&gt;nul || (echo Manifold : warning ME0001 : Python was not found, so the generated sources in Source\\Generated were not refreshed &amp; exit /b 0)
-python "$(ProjectDir)..\\Tools\\embed_lua.py"
-python "$(ProjectDir)..\\Tools\\embed_templates.py"
+python "$(ProjectDir)..\\Tools\\embed_lua.py" || exit /b 1
+python "$(ProjectDir)..\\Tools\\embed_templates.py" || exit /b 1
 python "$(ProjectDir)..\\Tools\\gen_buildinfo.py" "$(IntDir)Info\\ManifoldBuild.h"</Command>
       <Message>Embedding the Lua compatibility scripts and the built-in templates, writing the build info</Message>
     </PreBuildEvent>
@@ -244,14 +244,19 @@ exit /b 0</Command>
 """
 
 
-MANAGED_BUILD = """where dotnet &gt;nul 2&gt;nul || goto embed
+MANAGED_BUILD = """where dotnet &gt;nul 2&gt;nul || (echo ManagedDumper : warning ME0002 : The .NET SDK was not found, so this build has no managed dumper for Mono games &amp; goto embed)
 set MSBuildSDKsPath=
 set MSBuildExtensionsPath=
 set MSBUILD_EXE_PATH=
 dotnet build "$(ProjectDir)..\\Managed\\ManifoldDumper\\ManifoldDumper.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
 dotnet build "$(ProjectDir)..\\Managed\\FakeUnity\\FakeUnity.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
 :embed
-where python &gt;nul 2&gt;nul || exit /b 0
+where python &gt;nul 2&gt;nul &amp;&amp; goto generate
+if exist "$(ProjectDir)..\\Source\\Generated\\ManagedDumperImage.cpp" exit /b 0
+echo ManagedDumper : warning ME0003 : Python was not found, so an empty managed dumper is embedded
+copy /Y "$(ProjectDir)..\\Tools\\ManagedDumperImage.empty.cpp" "$(ProjectDir)..\\Source\\Generated\\ManagedDumperImage.cpp" &gt;nul
+exit /b 0
+:generate
 python "$(ProjectDir)..\\Tools\\embed_managed.py" --touch"""
 
 
@@ -317,6 +322,8 @@ def main():
     embed_managed.main()
     import gen_icon_names
     gen_icon_names.main()
+    import gen_lua_docs
+    gen_lua_docs.main()
     os.makedirs(PROJECTS, exist_ok=True)
     source = os.path.join(ROOT, "Source")
     app_sources = collect(source, {".cpp"})

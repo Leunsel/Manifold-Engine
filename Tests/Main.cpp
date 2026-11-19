@@ -8,6 +8,7 @@
 #include "Core/Text.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include <windows.h>
+#include <dbghelp.h>
 
 namespace Manifold::Tests
 {
@@ -53,18 +55,60 @@ namespace Manifold::Tests
             return 0;
         });
 
+    MANIFOLD_MODE("--crash-check", [](const std::vector<std::string>&)
+        {
+            ::RaiseException(0xE0C0FFEE, 0, 0, nullptr);
+            return 0;
+        });
+
+    constexpr const wchar_t* kKeptMarker = L"kept.txt";
+    constexpr auto kKeptFor = std::chrono::hours(24 * 7);
+
+    wchar_t g_dumpPath[MAX_PATH * 2] = L"";
+    wchar_t g_keptPath[MAX_PATH * 2] = L"";
+
+    LONG WINAPI WriteCrashDump(EXCEPTION_POINTERS* info)
+    {
+        std::printf("\nCRASH: exception %08lX at %p\n", info->ExceptionRecord->ExceptionCode, info->ExceptionRecord->ExceptionAddress);
+        if (g_keptPath[0])
+        {
+            const HANDLE marker = ::CreateFileW(g_keptPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (marker != INVALID_HANDLE_VALUE)
+                ::CloseHandle(marker);
+        }
+        if (g_dumpPath[0])
+        {
+            const HANDLE file = ::CreateFileW(g_dumpPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file != INVALID_HANDLE_VALUE)
+            {
+                MINIDUMP_EXCEPTION_INFORMATION exception{ ::GetCurrentThreadId(), info, FALSE };
+                const BOOL written = ::MiniDumpWriteDump(::GetCurrentProcess(), ::GetCurrentProcessId(), file, MiniDumpNormal, &exception, nullptr, nullptr);
+                ::CloseHandle(file);
+                std::printf("%s %ls\n", written ? "The crash dump is" : "No crash dump could be written to", g_dumpPath);
+            }
+        }
+        std::fflush(stdout);
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+
     class DataFolder
     {
     public:
         DataFolder()
         {
+            wchar_t given[MAX_PATH + 1] = L"";
+            const DWORD givenLength = ::GetEnvironmentVariableW(L"MANIFOLD_TEST_DATA", given, MAX_PATH + 1);
+            m_given = givenLength > 0 && givenLength <= MAX_PATH;
             wchar_t temp[MAX_PATH + 1] = L"";
             const DWORD length = ::GetTempPathW(MAX_PATH + 1, temp);
-            m_folder = (length ? std::filesystem::path(temp) : std::filesystem::current_path()) / L"Manifold-Engine-Tests" / std::to_wstring(::GetCurrentProcessId());
+            const std::filesystem::path root = m_given ? std::filesystem::path(given) : (length ? std::filesystem::path(temp) : std::filesystem::current_path()) / L"Manifold-Engine-Tests";
+            m_folder = root / std::to_wstring(::GetCurrentProcessId());
             std::error_code ignored;
             std::vector<std::filesystem::path> stale;
-            for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(m_folder.parent_path(), ignored))
+            for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(root, ignored))
             {
+                if (m_given)
+                    break;
                 const std::wstring name = entry.path().filename().wstring();
                 if (name.empty() || name.size() > 10 || !std::all_of(name.begin(), name.end(), [](wchar_t c) { return c >= L'0' && c <= L'9'; }))
                     continue;
@@ -72,7 +116,10 @@ namespace Manifold::Tests
                 const bool running = process && ::WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
                 if (process)
                     ::CloseHandle(process);
-                if (!running)
+                std::error_code unmarked;
+                const std::filesystem::file_time_type marked = std::filesystem::last_write_time(entry.path() / kKeptMarker, unmarked);
+                const bool kept = !unmarked && std::filesystem::file_time_type::clock::now() - marked < kKeptFor;
+                if (!running && !kept)
                     stale.push_back(entry.path());
             }
             for (const std::filesystem::path& folder : stale)
@@ -80,20 +127,40 @@ namespace Manifold::Tests
             std::filesystem::remove_all(m_folder, ignored);
             std::filesystem::create_directories(m_folder, ignored);
             Paths::SetDataFolder(m_folder);
+            std::filesystem::create_directories(Paths::CrashFolder(), ignored);
+            ::wcsncpy_s(g_dumpPath, (Paths::CrashFolder() / (L"tests-" + std::to_wstring(::GetCurrentProcessId()) + L".dmp")).c_str(), _TRUNCATE);
+            ::wcsncpy_s(g_keptPath, (m_folder / kKeptMarker).c_str(), _TRUNCATE);
+            ::SetUnhandledExceptionFilter(&WriteCrashDump);
         }
 
         ~DataFolder()
         {
+            RuntimeLog::OpenFile({});
             Paths::SetDataFolder({});
+            g_dumpPath[0] = 0;
+            g_keptPath[0] = 0;
             std::error_code ignored;
-            std::filesystem::remove_all(m_folder, ignored);
+            if (!m_keep && !m_given)
+                std::filesystem::remove_all(m_folder, ignored);
         }
 
         DataFolder(const DataFolder&) = delete;
         DataFolder& operator=(const DataFolder&) = delete;
 
+        const std::filesystem::path& Folder() const { return m_folder; }
+
+        void Keep()
+        {
+            m_keep = true;
+            const HANDLE marker = ::CreateFileW(g_keptPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (marker != INVALID_HANDLE_VALUE)
+                ::CloseHandle(marker);
+        }
+
     private:
         std::filesystem::path m_folder;
+        bool m_given = false;
+        bool m_keep = false;
     };
 }
 
@@ -101,7 +168,7 @@ int main(int argc, char** argv)
 {
     using namespace Manifold::Tests;
     Manifold::BindMainThread();
-    const DataFolder data;
+    DataFolder data;
     const std::vector<std::string> arguments(argv + 1, argv + argc);
     for (const std::string& argument : arguments)
     {
@@ -158,6 +225,7 @@ int main(int argc, char** argv)
             return std::any_of(filters.begin(), filters.end(), [&](const std::string& filter) { return name.find(filter) != std::string::npos; });
         };
 
+    Manifold::RuntimeLog::OpenFile(Manifold::Paths::LogFile());
     int assembler = 0;
     int ran = 0;
     for (const Suite& suite : suites)
@@ -179,5 +247,11 @@ int main(int argc, char** argv)
     std::printf("\n%d checks, %d failed, %d skipped; assembler suite: %d failed\n", totals.Checks, totals.Failures, totals.Skipped, assembler);
     if (totals.Skipped && !allowSkips)
         std::printf("Skipped checks fail the run. Run from the repository with TestTarget.exe beside the tests, or pass --allow-skips.\n");
-    return totals.Failures + assembler + (allowSkips ? 0 : totals.Skipped);
+    const int result = totals.Failures + assembler + (allowSkips ? 0 : totals.Skipped);
+    if (result != 0)
+    {
+        data.Keep();
+        std::printf("The log and the settings of this run stay in %ls\n", data.Folder().c_str());
+    }
+    return result;
 }

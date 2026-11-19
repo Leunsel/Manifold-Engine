@@ -78,4 +78,4 @@ Outside the program: `Agent` is the in-process debugger DLL (VEH) that is inject
 - `--filter=core,text` runs a part of them.
 - `--allow-skips` accepts checks that could not run.
 
-The run writes settings, logs and crash reports into its own folder under `%TEMP%\Manifold-Engine-Tests` and removes it at the end, so the configs folder next to the program is never touched. The integration suite starts `TestTarget.exe`, a small program with known values, code and a fake Mono and IL2CPP runtime. It never attaches to a real game.
+The run writes its settings, its log and a crash dump of the tests program into its own folder under `%TEMP%\Manifold-Engine-Tests`, so the configs folder next to the program is never touched. The folder is removed when the run passes and stays for a week when it failed; `MANIFOLD_TEST_DATA` names another place, which CI uses to keep the folders. The integration suite starts `TestTarget.exe`, a small program with known values, code and a fake Mono and IL2CPP runtime. It never attaches to a real game.

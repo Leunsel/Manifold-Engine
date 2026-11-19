@@ -2,7 +2,7 @@
 //
 // It exercises both halves of Source/Syscalls/Syscall.cpp without pulling in
 // the rest of the engine, so it can be built for x86 as well as x64 (the full
-// app and the injected agent are x64-only). InitSysCalls() must read the
+// app is x64-only). InitSysCalls() must read the
 // correct service number out of whichever ntdll this build maps, and the naked
 // stub must issue the call for the matching architecture; opening our own
 // process is the simplest call that should always succeed.

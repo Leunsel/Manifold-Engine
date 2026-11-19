@@ -27,7 +27,7 @@ namespace Manifold::Tests
     void CheckAttachArmsMainThread(Engine& engine, HANDLE mainThread, std::uint64_t address);
     void CheckMono(Engine& engine);
     void CheckIl2CppTarget(const std::filesystem::path& targetPath);
-    void CheckManagedDumper(const std::filesystem::path& targetPath);
+    void CheckManagedDumperTarget(const std::filesystem::path& targetPath);
 
     namespace
     {
@@ -1126,7 +1126,7 @@ namespace Manifold::Tests
         engine.CloseProcess();
         DirectSystemCalls(target.Info.dwProcessId, health);
         CheckIl2CppTarget(targetPath);
-        CheckManagedDumper(targetPath);
+        CheckManagedDumperTarget(targetPath);
         CHECK_MSG(UnheldLockNotes() == 0, std::to_string(UnheldLockNotes()) + " calls into the game ran without the Mono lock; the log names the places");
         return Totals().Failures - before;
     }
