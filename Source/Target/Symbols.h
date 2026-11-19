@@ -22,6 +22,7 @@ namespace Manifold::Target
         std::string Name;
         std::uint64_t Address = 0;
         std::string Owner;
+        std::uint64_t Size = 0;
     };
 
     struct ExportSymbol
@@ -60,6 +61,9 @@ namespace Manifold::Target
 
         Status Register(std::string_view name, std::uint64_t address, std::string_view owner = {}, bool replace = true);
         bool Unregister(std::string_view name);
+        bool SetSize(std::string_view name, std::uint64_t size);
+        std::optional<std::string> RegisteredName(std::uint64_t address) const;
+        std::uint64_t RegisteredSize(std::uint64_t address) const;
         void UnregisterOwner(std::string_view owner);
         std::optional<std::uint64_t> FindRegistered(std::string_view name) const;
         std::vector<UserSymbol> Registered() const;
@@ -102,6 +106,7 @@ namespace Manifold::Target
         std::shared_ptr<Process> m_process;
         LookupCallback m_lookup;
         const UserSymbol* RegisteredAt(std::uint64_t address) const;
+        const UserSymbol* SizedAt(std::uint64_t address) const;
         void ForgetAddress(std::uint64_t address, const std::string& key);
 
         std::map<std::string, UserSymbol> m_registered;

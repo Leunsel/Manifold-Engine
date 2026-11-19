@@ -1131,7 +1131,7 @@ namespace Manifold::UI
                 {
                     std::uint64_t number = 0;
                     std::memcpy(&number, value, static_cast<std::size_t>(size));
-                    comment = "[" + Hex(*line.Memory.Absolute) + "]=" + Hex(number);
+                    comment = "[" + m_engine.Symbols().RegisteredName(*line.Memory.Absolute).value_or(Hex(*line.Memory.Absolute)) + "]=" + Hex(number);
                 }
             }
             else if (info.Broken && isIp && line.Memory.Present)

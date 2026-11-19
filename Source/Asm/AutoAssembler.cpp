@@ -364,6 +364,7 @@ namespace Manifold::Asm
                     return Abort();
                 if (!Layout())
                     return Abort();
+                MeasureLabels();
                 if (!CheckAsserts())
                     return Abort();
                 if (m_options.CheckOnly)
@@ -1073,11 +1074,17 @@ namespace Manifold::Asm
                         }
                         else
                         {
-                            AssembleResult assembled = AssembleAt(statement, *current, previousLabels, true);
+                            AssembleResult assembled = AssembleAt(statement, *current, previousLabels, true, false);
                             if (!assembled.Ok)
-                                assembled = AssembleAt(statement, *current, previousLabels, false);
+                                assembled = AssembleAt(statement, *current, previousLabels, false, false);
                             if (!assembled.Ok)
                                 return Fail(CodeFor(assembled.Error), statement.Line, assembled.Message, statement.Text.front() == '\x01' ? statement.Text.substr(1) : statement.Text);
+                            if (assembled.Bytes.size() < reserved[i])
+                            {
+                                AssembleResult longer = AssembleAt(statement, *current, previousLabels, true, true);
+                                if (longer.Ok && longer.Bytes.size() > assembled.Bytes.size() && longer.Bytes.size() <= reserved[i])
+                                    assembled = std::move(longer);
+                            }
                             bytes = std::move(assembled.Bytes);
                         }
                         if (bytes.size() > reserved[i])
@@ -1110,13 +1117,47 @@ namespace Manifold::Asm
                 return Fail(ErrorCode::AaLayoutUnstable, 0, "");
             }
 
-            AssembleResult AssembleAt(const Statement& statement, std::uint64_t address, const std::map<std::string, std::uint64_t>& previousLabels, bool farGuess)
+            static bool IsData(const Statement& statement)
+            {
+                if (statement.Type == Statement::Kind::Bytes)
+                    return true;
+                if (statement.Type != Statement::Kind::Code)
+                    return false;
+                const std::string text = Lower(Trim(statement.Text));
+                const std::string word = text.substr(0, text.find_first_of(" \t"));
+                return word == "db" || word == "dw" || word == "dd" || word == "dq";
+            }
+
+            void MeasureLabels()
+            {
+                std::size_t written = 0;
+                for (std::size_t i = 0; i < m_statements.size(); ++i)
+                {
+                    const Statement& statement = m_statements[i];
+                    if (statement.Type != Statement::Kind::Place)
+                    {
+                        ++written;
+                        continue;
+                    }
+                    const std::string key = Lower(statement.Text);
+                    if (!m_labels.count(key))
+                        continue;
+                    std::uint64_t size = 0;
+                    for (std::size_t next = i + 1, output = written; next < m_statements.size() && IsData(m_statements[next]) && output < m_output.size(); ++next, ++output)
+                        size += m_output[output].Bytes.size();
+                    if (size)
+                        m_sizes[key] = size;
+                }
+            }
+
+            AssembleResult AssembleAt(const Statement& statement, std::uint64_t address, const std::map<std::string, std::uint64_t>& previousLabels, bool farGuess, bool longBranches)
             {
                 AssembleOptions options;
                 options.Is64Bit = m_is64;
                 options.Address = address;
                 options.AllowFarBranches = true;
                 options.DefaultToDword = true;
+                options.LongBranches = longBranches;
                 options.Resolve = [&](std::string_view name) -> SymbolValue
                     {
                         const std::string key = Lower(name);
@@ -1272,9 +1313,16 @@ namespace Manifold::Asm
                         m_result.Notes.push_back("registersymbol: " + name + " has no address");
                         continue;
                     }
+                    const auto size = defined == m_defines.end() ? m_sizes.find(Lower(name)) : m_sizes.end();
                     if (m_host.Symbols)
+                    {
                         m_host.Symbols->Register(name, *value, m_options.Owner);
+                        if (size != m_sizes.end())
+                            m_host.Symbols->SetSize(name, size->second);
+                    }
                     m_result.Symbols[name] = *value;
+                    if (size != m_sizes.end())
+                        m_result.SymbolSizes[name] = size->second;
                     if (std::find_if(m_memory.Registered.begin(), m_memory.Registered.end(), [&](const std::string& known) { return EqualsNoCase(known, name); }) ==
                         m_memory.Registered.end())
                         m_memory.Registered.push_back(name);
@@ -1408,6 +1456,7 @@ namespace Manifold::Asm
 
             std::map<std::string, std::uint64_t> m_values;
             std::map<std::string, std::uint64_t> m_placed;
+            std::map<std::string, std::uint64_t> m_sizes;
             std::vector<AaAllocation> m_newAllocations;
             std::vector<std::uint64_t> m_allocatedBlocks;
             std::vector<AaWrite> m_output;

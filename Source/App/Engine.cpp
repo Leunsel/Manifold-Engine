@@ -146,6 +146,8 @@ namespace Manifold
         };
         if (Symbols().LabelOnly(start))
             return ownRow();
+        if (const std::uint64_t size = Symbols().RegisteredSize(start))
+            return std::max(ownRow(), start + size);
         if (map)
         {
             if (const auto function = map->FunctionAt(start))

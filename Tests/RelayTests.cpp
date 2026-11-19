@@ -2,6 +2,7 @@
 
 #include "App/Engine.h"
 #include "App/Settings.h"
+#include "Asm/AutoAssembler.h"
 #include "Core/Text.h"
 #include "Disasm/Disassembler.h"
 #include "Disasm/FlowGraph.h"
@@ -35,6 +36,7 @@ namespace Manifold::Tests
         constexpr std::uint32_t kSecondAt = 0x40;
         constexpr std::uint32_t kHookFunctionAt = 0x60;
         constexpr std::uint32_t kHookAt = 0x67;
+        constexpr std::uint32_t kPlayerAt = 0x80;
         constexpr std::uint64_t kSlots = 0x500;
         constexpr std::uint64_t kFarCall = 0x540;
         constexpr std::uint64_t kNearCall = 0x560;
@@ -46,6 +48,7 @@ namespace Manifold::Tests
         const std::uint8_t kFrame[] = { 0x48, 0x83, 0xEC, 0x28, 0x31, 0xC0, 0x48, 0x83, 0xC4, 0x28, 0xC3 };
         const std::uint8_t kLeaf[] = { 0xB8, 0x07, 0x00, 0x00, 0x00, 0xC3 };
         const std::uint8_t kHooked[] = { 0x85, 0xC9, 0x74, 0x03, 0x31, 0xC0, 0xC3, 0xB8, 0x05, 0x00, 0x00, 0x00, 0xC3 };
+        const std::uint8_t kPlayer[] = { 0x8B, 0x9A, 0x44, 0x13, 0x00, 0x00, 0x89, 0x4D, 0xF8, 0x8D, 0x0C, 0x24, 0xC3 };
         const char* const kSlotNames[] = { "PlayerController", "World", "HealthDec" };
 
         struct UnwindEntry
@@ -124,6 +127,7 @@ namespace Manifold::Tests
             std::memcpy(text + kLeafAt, kLeaf, sizeof(kLeaf));
             std::memcpy(text + kSecondAt, kFrame, sizeof(kFrame));
             std::memcpy(text + kHookFunctionAt, kHooked, sizeof(kHooked));
+            std::memcpy(text + kPlayerAt, kPlayer, sizeof(kPlayer));
             const std::uint8_t unwindInfo[] = { 0x01, 0x04, 0x01, 0x00, 0x04, 0x42, 0x00, 0x00 };
             std::memcpy(file.data() + kFileAlignment * 2, unwindInfo, sizeof(unwindInfo));
             std::memcpy(file.data() + kFileAlignment * 2 + 0x100, kFrame, sizeof(kFrame));
@@ -574,6 +578,161 @@ namespace Manifold::Tests
             ::VirtualFree(cave, 0, MEM_RELEASE);
         }
 
+        std::string PlayerCave(bool is64Bit)
+        {
+            const std::string reg = is64Bit ? "rdx" : "edx";
+            return "  cmp dword ptr [" + reg + "+000013C0],(int)20\n"
+                                               "  je @f\n"
+                                               "    mov [PlayerPtr],edx\n"
+                                               "    jmp o_Player\n"
+                                               "  @@:\n"
+                                               "    mov [PlayerPtr+4],edx\n"
+                                               "o_Player:\n"
+                                               "  mov ebx,[" +
+                   reg + "+00001344]\n"
+                         "  jmp r_Player\n"
+                         "PlayerPtr:\n"
+                         " dd 0\n"
+                         " dd 0\n";
+        }
+
+        void CheckPlayerCave(const Disasm::Disassembler& disassembler, const Target::Process& process, const Target::Symbols& symbols, const Asm::AaResult& result,
+            const Asm::AaMemory& memory, const std::string& label)
+        {
+            CHECK_MSG(result.Ok(), label + ": " + result.Error.Text + " (line " + std::to_string(result.Line) + ")");
+            const auto cave = std::find_if(memory.Allocations.begin(), memory.Allocations.end(), [](const Asm::AaAllocation& allocation)
+                {
+                    return EqualsNoCase(allocation.Name, "n_Player");
+                });
+            const auto pointer = result.Symbols.find("PlayerPtr");
+            CHECK_MSG(cave != memory.Allocations.end() && pointer != result.Symbols.end(), label + ": no cave or no PlayerPtr");
+            if (!result.Ok() || cave == memory.Allocations.end() || pointer == result.Symbols.end())
+                return;
+            const std::uint64_t ptr = pointer->second;
+            const std::vector<Disasm::Instruction> rows = disassembler.ReadMany(process, cave->Address, 8, &symbols, nullptr);
+            std::vector<std::string> mnemonics;
+            for (const Disasm::Instruction& row : rows)
+            {
+                if (row.Address >= ptr)
+                    break;
+                mnemonics.push_back(row.Mnemonic);
+            }
+            std::string listing;
+            for (const std::string& mnemonic : mnemonics)
+                listing += mnemonic + " ";
+            CHECK_MSG(mnemonics == (std::vector<std::string>{ "cmp", "jz", "mov", "jmp", "mov", "mov", "jmp" }), label + ": " + listing);
+            if (mnemonics.size() != 7)
+                return;
+            CHECK_MSG(rows[1].Length == 6 && rows[1].Bytes[0] == 0x0F && rows[1].Bytes[1] == 0x84, label + ": je is " + rows[1].BytesText());
+            CHECK_MSG(rows[3].Length == 5 && rows[3].Bytes[0] == 0xE9, label + ": jmp is " + rows[3].BytesText());
+            CHECK_MSG(rows[1].Target && *rows[1].Target == rows[4].Address, label + ": je lands on the second store");
+            CHECK_MSG(rows[3].Target && *rows[3].Target == rows[5].Address, label + ": jmp lands on o_Player");
+            CHECK_MSG(rows[6].Next() == ptr, label + ": PlayerPtr follows the last jmp");
+            CHECK_MSG(rows[2].Operands.find("[PlayerPtr]") != std::string::npos, label + ": " + rows[2].Text());
+            CHECK_MSG(rows[4].Operands.find("[PlayerPtr+4]") != std::string::npos, label + ": " + rows[4].Text());
+            const auto size = result.SymbolSizes.find("PlayerPtr");
+            CHECK_MSG(size != result.SymbolSizes.end() && size->second == 8, label + ": PlayerPtr has no size of 8");
+            CHECK(symbols.RegisteredSize(ptr) == 8);
+            CHECK(symbols.RegisteredName(ptr + 4) == std::optional<std::string>("PlayerPtr+4"));
+            CHECK(symbols.Describe(ptr + 6) == "PlayerPtr+6");
+            CHECK(!symbols.RegisteredName(ptr + 8));
+            CHECK(!symbols.LabelOnly(ptr));
+        }
+
+        void AutoAssembled(Engine& engine, const RelayImage& image)
+        {
+            Target::Process& process = *engine.Process();
+            const std::string module = process.ModuleAt(image.Base)->Name;
+            const std::string script = "aobscanmodule(PlayerHook," + module + ",8B 9A ? ? ? ? 89 4D ? 8D 0C)\n"
+                                                                              "alloc(n_Player,$1000,PlayerHook)\n"
+                                                                              "label(o_Player r_Player)\n"
+                                                                              "label(PlayerPtr)\n"
+                                                                              "n_Player:\n" +
+                                       PlayerCave(true) +
+                                       "PlayerHook:\n"
+                                       "  jmp n_Player\n"
+                                       "  db 90\n"
+                                       "r_Player:\n"
+                                       "registersymbol(PlayerHook PlayerPtr)\n";
+            Asm::AaHost host;
+            host.Process = &process;
+            host.Symbols = &engine.Symbols();
+            Asm::AaMemory memory;
+            Asm::AaOptions options;
+            options.Owner = kOwner;
+            const Asm::AaResult result = Asm::RunAutoAssembler(script, host, memory, options);
+            CheckPlayerCave(engine.Disassembler(), process, engine.Symbols(), result, memory, "64-bit");
+            const std::uint64_t hook = image.Base + kText + kPlayerAt;
+            const auto registered = result.Symbols.find("PlayerHook");
+            CHECK(registered != result.Symbols.end() && registered->second == hook);
+            CHECK(!result.SymbolSizes.count("PlayerHook"));
+            CHECK(engine.Symbols().LabelOnly(hook));
+            CHECK_MSG(engine.SymbolEnd(hook) == hook + 5, "PlayerHook ends at +" + Hex(engine.SymbolEnd(hook) - hook));
+            const Disasm::Instruction jump = engine.Disassembler().Read(process, hook, &engine.Symbols());
+            const auto cave = std::find_if(memory.Allocations.begin(), memory.Allocations.end(), [](const Asm::AaAllocation& allocation)
+                {
+                    return EqualsNoCase(allocation.Name, "n_Player");
+                });
+            CHECK(jump.Mnemonic == "jmp" && jump.Length == 5 && cave != memory.Allocations.end() && jump.Target && *jump.Target == cave->Address);
+            const auto pointer = result.Symbols.find("PlayerPtr");
+            if (pointer != result.Symbols.end())
+                CHECK_MSG(engine.SymbolEnd(pointer->second) == pointer->second + 8, "PlayerPtr ends at +" + Hex(engine.SymbolEnd(pointer->second) - pointer->second));
+            for (const Asm::AaAllocation& allocation : memory.Allocations)
+                process.Free(allocation.Block ? allocation.Block : allocation.Address);
+        }
+
+        void AutoAssembled32()
+        {
+            wchar_t folder[MAX_PATH]{};
+            if (!::GetSystemWow64DirectoryW(folder, MAX_PATH))
+            {
+                Skip("32-bit auto assembler listing: this Windows has no 32-bit system folder");
+                return;
+            }
+            std::wstring path = std::wstring(folder) + L"\\cmd.exe";
+            STARTUPINFOW startup{};
+            startup.cb = sizeof(startup);
+            PROCESS_INFORMATION info{};
+            if (!::CreateProcessW(path.c_str(), nullptr, nullptr, nullptr, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info))
+            {
+                Skip("32-bit auto assembler listing: no 32-bit process could be started");
+                return;
+            }
+            {
+                Result<std::shared_ptr<Target::Process>> opened = Target::Process::Open(MakeProcessId(info.dwProcessId));
+                CHECK_MSG(opened.Ok(), opened.Ok() ? std::string() : opened.Error().Text);
+                if (opened.Ok())
+                {
+                    std::shared_ptr<Target::Process> process = std::move(opened).Value();
+                    CHECK(!process->Is64Bit());
+                    Target::Symbols symbols;
+                    symbols.Attach(process);
+                    const std::string script = "alloc(n_Player,$1000)\n"
+                                               "label(o_Player r_Player)\n"
+                                               "label(PlayerPtr)\n"
+                                               "n_Player:\n" +
+                                               PlayerCave(false) +
+                                               "r_Player:\n"
+                                               "  ret\n"
+                                               "registersymbol(PlayerPtr)\n";
+                    Asm::AaHost host;
+                    host.Process = process.get();
+                    host.Symbols = &symbols;
+                    Asm::AaMemory memory;
+                    Asm::AaOptions options;
+                    options.Owner = kOwner;
+                    const Asm::AaResult result = Asm::RunAutoAssembler(script, host, memory, options);
+                    const Disasm::Disassembler legacy(false);
+                    CheckPlayerCave(legacy, *process, symbols, result, memory, "32-bit");
+                    symbols.Detach();
+                }
+            }
+            ::TerminateProcess(info.hProcess, 0);
+            ::WaitForSingleObject(info.hProcess, 5000);
+            ::CloseHandle(info.hThread);
+            ::CloseHandle(info.hProcess);
+        }
+
         int RunRelayListing()
         {
             RelayImage image;
@@ -617,6 +776,8 @@ namespace Manifold::Tests
         Functions(engine, image);
         Graphs(engine, image);
         Labels(engine, image);
+        AutoAssembled(engine, image);
+        AutoAssembled32();
         engine.Symbols().UnregisterOwner(kOwner);
         engine.CloseProcess();
         return Totals().Failures - before;

@@ -45,6 +45,7 @@ namespace Manifold::Asm
         bool AllowPending = false;
         bool AllowFarBranches = true;
         bool DefaultToDword = false;
+        bool LongBranches = false;
     };
 
     struct AssembleResult

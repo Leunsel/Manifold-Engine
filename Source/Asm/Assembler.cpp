@@ -1677,6 +1677,7 @@ namespace Manifold::Asm
             const Value& target = instruction.Operands.front().Immediate;
             const bool farCapable = CanUseFarForm(mnemonic);
             const bool farAllowed = options.Is64Bit && options.AllowFarBranches && farCapable && instruction.Hint != BranchHint::Near;
+            const BranchHint hint = options.LongBranches && instruction.Hint == BranchHint::None && !IsCounterBranch(mnemonic) ? BranchHint::Near : instruction.Hint;
             if (instruction.Hint == BranchHint::Far)
             {
                 if (!options.Is64Bit || !farCapable)
@@ -1709,7 +1710,7 @@ namespace Manifold::Asm
                 }
                 destination = WrappedTarget32(destination, options.Address);
             }
-            if (const std::optional<Encoded> encoded = EncodeRelative(mnemonic, instruction.Prefixes, instruction.Hint, destination, options))
+            if (const std::optional<Encoded> encoded = EncodeRelative(mnemonic, instruction.Prefixes, hint, destination, options))
             {
                 return ToVector(*encoded);
             }

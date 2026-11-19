@@ -492,6 +492,17 @@ namespace Manifold::Tests
             ExpectBytes(report, "jmp 2000", near, "E9 FB 0F 00 00");
             ExpectBytes(report, "jmp short 1010", near, "EB 0E");
             ExpectBytes(report, "jmp near 1010", near, "E9 0B 00 00 00");
+            AssembleOptions longer = Mode64(0x1000);
+            longer.LongBranches = true;
+            ExpectBytes(report, "jmp 1010", longer, "E9 0B 00 00 00");
+            ExpectBytes(report, "je 1010", longer, "0F 84 0A 00 00 00");
+            ExpectBytes(report, "call 1010", longer, "E8 0B 00 00 00");
+            ExpectBytes(report, "jmp short 1010", longer, "EB 0E");
+            ExpectBytes(report, "loop 1010", longer, "E2 0E");
+            AssembleOptions longer32 = Mode32(0x401000);
+            longer32.LongBranches = true;
+            ExpectBytes(report, "jmp 401010", longer32, "E9 0B 00 00 00");
+            ExpectBytes(report, "jne 401010", longer32, "0F 85 0A 00 00 00");
             ExpectBytes(report, "je 1010", near, "74 0E");
             ExpectBytes(report, "jz short 1010", near, "74 0E");
             ExpectBytes(report, "jne 2000", near, "0F 85 FA 0F 00 00");

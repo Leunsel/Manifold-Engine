@@ -63,6 +63,7 @@ namespace Manifold::Asm
         std::vector<AaWrite> Writes;
         std::vector<std::string> Notes;
         std::map<std::string, std::uint64_t> Symbols;
+        std::map<std::string, std::uint64_t> SymbolSizes;
 
         bool Ok() const { return Error.Ok(); }
     };

@@ -379,6 +379,60 @@ namespace Manifold::Target
         return true;
     }
 
+    bool Symbols::SetSize(std::string_view name, std::uint64_t size)
+    {
+        std::lock_guard lock(m_registeredLock);
+        const auto found = m_registered.find(Lower(Trim(name)));
+        if (found == m_registered.end())
+            return false;
+        found->second.Size = size;
+        ++m_generation;
+        return true;
+    }
+
+    const UserSymbol* Symbols::SizedAt(std::uint64_t address) const
+    {
+        auto below = m_registeredByAddress.upper_bound(address);
+        if (below == m_registeredByAddress.begin())
+            return nullptr;
+        --below;
+        const auto [first, last] = m_registeredByAddress.equal_range(below->first);
+        const UserSymbol* best = nullptr;
+        for (auto it = first; it != last; ++it)
+        {
+            const auto found = m_registered.find(it->second);
+            if (found == m_registered.end())
+                continue;
+            const UserSymbol& symbol = found->second;
+            if (symbol.Size && address - symbol.Address < symbol.Size && (!best || it->second < Lower(best->Name)))
+                best = &symbol;
+        }
+        return best;
+    }
+
+    std::optional<std::string> Symbols::RegisteredName(std::uint64_t address) const
+    {
+        std::lock_guard lock(m_registeredLock);
+        if (const UserSymbol* symbol = RegisteredAt(address))
+            return symbol->Name;
+        if (const UserSymbol* symbol = SizedAt(address))
+            return symbol->Name + "+" + Hex(address - symbol->Address);
+        return std::nullopt;
+    }
+
+    std::uint64_t Symbols::RegisteredSize(std::uint64_t address) const
+    {
+        std::lock_guard lock(m_registeredLock);
+        std::uint64_t size = 0;
+        const auto [first, last] = m_registeredByAddress.equal_range(address);
+        for (auto it = first; it != last; ++it)
+        {
+            if (const auto found = m_registered.find(it->second); found != m_registered.end())
+                size = std::max(size, found->second.Size);
+        }
+        return size;
+    }
+
     void Symbols::UnregisterOwner(std::string_view owner)
     {
         std::lock_guard lock(m_registeredLock);
@@ -785,11 +839,8 @@ namespace Manifold::Target
 
     std::string Symbols::Describe(std::uint64_t address) const
     {
-        {
-            std::lock_guard lock(m_registeredLock);
-            if (const UserSymbol* symbol = RegisteredAt(address))
-                return symbol->Name;
-        }
+        if (auto name = RegisteredName(address))
+            return std::move(*name);
         if (!m_process)
             return Hex(address);
         const auto module = m_process->ModuleAt(address);
