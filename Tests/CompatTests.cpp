@@ -37,6 +37,8 @@ namespace Manifold::Tests
             LuaCheck(engine, "defines", R"LUA(
                 if vtDword ~= 2 or vtAutoAssembler ~= 11 or soExactValue ~= 1 or mrhToggleActivation ~= 0 or mrhDecreaseValue ~= 7 then return "constants" end
                 if clDefault ~= 0x20000000 or rtTruncated ~= 2 or fsmAligned ~= 1 then return "more constants" end
+                if bptExecute ~= 0 or bptAccess ~= 1 or bptWrite ~= 2 then return "breakpoint triggers " .. tostring(bptAccess) .. "/" .. tostring(bptWrite) end
+                if mrOK ~= 1 or mrOk ~= 1 or mrYes ~= 6 or mbOK ~= 2 or co_runtill ~= 3 or VK_F1 ~= 0x70 or PAGE_EXECUTE_READWRITE ~= 0x40 then return "dialog and key constants" end
                 return "ok")LUA");
             LuaCheck(engine, "no process", R"LUA(
                 local modules = enumModules()

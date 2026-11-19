@@ -543,6 +543,23 @@ namespace Manifold::Tests
         CHECK_MSG(parts.size() == 4 && parts[0] == "7.25" && parts[1] == "1234.5" && parts[2] != "0" && parts[3] == "TestTarget.exe", luaResult);
 
         lua = engine.Lua().RunWithResult(R"LUA(
+            local memory = allocateMemory(16)
+            local record = getAddressList().createMemoryRecord()
+            record.Address = memory
+            record.Type = vtDword
+            record.Description = 100
+            record.Value = 100
+            local plain = readInteger(memory)
+            record.ShowAsHex = true
+            record.Value = 100
+            local hex = readInteger(memory)
+            local description = record.Description
+            record.destroy()
+            deAlloc(memory)
+            return string.format('%s|%d|%d', description, plain, hex))LUA", "record numbers", luaResult);
+        CHECK_MSG(lua.Ok() && luaResult == "100|100|256", lua.Ok() ? luaResult : lua.Text);
+
+        lua = engine.Lua().RunWithResult(R"LUA(
             local base = getAddress('TestTarget.exe') + 0x1000
             local bytes = readBytes(base, 12, true)
             local parts = {}

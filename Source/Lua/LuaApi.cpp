@@ -1196,23 +1196,7 @@ namespace Manifold::Lua
         };
 
         const Constant kConstants[] = {
-            { "vtByte", 0 }, { "vtWord", 1 }, { "vtDword", 2 }, { "vtQword", 3 }, { "vtSingle", 4 }, { "vtDouble", 5 }, { "vtString", 6 },
-            { "vtUnicodeString", 7 }, { "vtByteArray", 8 }, { "vtBinary", 9 }, { "vtAll", 10 }, { "vtAutoAssembler", 11 }, { "vtPointer", 12 },
-            { "vtCustom", 13 }, { "vtGrouped", 14 },
-            { "mtWarning", 0 }, { "mtError", 1 }, { "mtInformation", 2 }, { "mtConfirmation", 3 },
-            { "mbYes", 0 }, { "mbNo", 1 }, { "mbOK", 2 }, { "mbCancel", 3 },
-            { "mrNone", 0 }, { "mrOk", 1 }, { "mrCancel", 2 }, { "mrAbort", 3 }, { "mrRetry", 4 }, { "mrIgnore", 5 }, { "mrYes", 6 }, { "mrNo", 7 },
-            { "co_run", 0 }, { "co_stepinto", 1 }, { "co_stepover", 2 }, { "co_runtill", 3 },
-            { "bptExecute", 0 }, { "bptWrite", 1 }, { "bptAccess", 2 },
-            { "PAGE_EXECUTE_READWRITE", PAGE_EXECUTE_READWRITE }, { "PAGE_READWRITE", PAGE_READWRITE }, { "PAGE_EXECUTE_READ", PAGE_EXECUTE_READ },
-            { "VK_LBUTTON", VK_LBUTTON }, { "VK_RBUTTON", VK_RBUTTON }, { "VK_MBUTTON", VK_MBUTTON }, { "VK_BACK", VK_BACK }, { "VK_TAB", VK_TAB },
-            { "VK_RETURN", VK_RETURN }, { "VK_SHIFT", VK_SHIFT }, { "VK_CONTROL", VK_CONTROL }, { "VK_MENU", VK_MENU }, { "VK_PAUSE", VK_PAUSE },
-            { "VK_CAPITAL", VK_CAPITAL }, { "VK_ESCAPE", VK_ESCAPE }, { "VK_SPACE", VK_SPACE }, { "VK_PRIOR", VK_PRIOR }, { "VK_NEXT", VK_NEXT },
-            { "VK_END", VK_END }, { "VK_HOME", VK_HOME }, { "VK_LEFT", VK_LEFT }, { "VK_UP", VK_UP }, { "VK_RIGHT", VK_RIGHT }, { "VK_DOWN", VK_DOWN },
-            { "VK_INSERT", VK_INSERT }, { "VK_DELETE", VK_DELETE }, { "VK_MULTIPLY", VK_MULTIPLY }, { "VK_ADD", VK_ADD }, { "VK_SUBTRACT", VK_SUBTRACT },
-            { "VK_DIVIDE", VK_DIVIDE }, { "VK_DECIMAL", VK_DECIMAL }, { "VK_NUMLOCK", VK_NUMLOCK }, { "VK_SCROLL", VK_SCROLL },
-            { "VK_LSHIFT", VK_LSHIFT }, { "VK_RSHIFT", VK_RSHIFT }, { "VK_LCONTROL", VK_LCONTROL }, { "VK_RCONTROL", VK_RCONTROL },
-            { "VK_LMENU", VK_LMENU }, { "VK_RMENU", VK_RMENU },
+            { "mrOk", 1 }, { "co_runtill", 3 },
         };
     }
 

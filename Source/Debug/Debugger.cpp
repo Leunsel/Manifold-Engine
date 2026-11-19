@@ -1,5 +1,6 @@
 #include "Debug/Debugger.h"
 
+#include "Core/Handle.h"
 #include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
@@ -315,6 +316,7 @@ namespace Manifold::Debug
     struct Debugger::ThreadState
     {
         HANDLE Handle = nullptr;
+        UniqueHandle Owned;
         std::uint32_t Id = 0;
         std::uint64_t Reinsert = 0;
         std::uint64_t StepInstruction = 0;
@@ -1149,6 +1151,7 @@ namespace Manifold::Debug
             if (!handle)
                 return DBG_EXCEPTION_NOT_HANDLED;
             auto state = std::make_unique<ThreadState>();
+            state->Owned = UniqueHandle(handle);
             state->Handle = handle;
             state->Id = event.dwThreadId;
             threadFound = m_threads.emplace(event.dwThreadId, std::move(state)).first;

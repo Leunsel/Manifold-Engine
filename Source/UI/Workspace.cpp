@@ -204,6 +204,8 @@ namespace Manifold::UI
             OpenScript(Asm::CheatTableTemplate());
         if (Pressed(Command::OpenLuaEngine) && !release)
             OpenLua();
+        if (Pressed(Command::OpenMono) && !release)
+            OpenMono();
         if (Pressed(Command::OpenLog) && !release)
             OpenLog();
         if (Pressed(Command::OpenProfiler))

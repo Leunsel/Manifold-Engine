@@ -103,13 +103,18 @@ namespace Manifold::Lua
 
         std::string TextArgument(lua_State* state, int index)
         {
-            if (lua_isinteger(state, index))
-                return Hex(static_cast<std::uint64_t>(lua_tointeger(state, index)));
             std::size_t length = 0;
             const char* text = luaL_tolstring(state, index, &length);
             std::string result(text, length);
             lua_pop(state, 1);
             return result;
+        }
+
+        std::string AddressArgument(lua_State* state, int index)
+        {
+            if (lua_isinteger(state, index))
+                return Hex(static_cast<std::uint64_t>(lua_tointeger(state, index)));
+            return TextArgument(state, index);
         }
 
         bool FindMethod(lua_State* state, const luaL_Reg* methods, const std::string& key)
@@ -499,7 +504,7 @@ namespace Manifold::Lua
                 { "setaddress", [](lua_State* s) -> int
                     {
                         Table::MemoryRecord& target = CheckRecord(s, 1);
-                        target.Address = TextArgument(s, 2);
+                        target.Address = AddressArgument(s, 2);
                         if (lua_istable(s, 3))
                         {
                             target.Offsets.clear();
@@ -507,7 +512,7 @@ namespace Manifold::Lua
                             for (lua_Integer i = count; i >= 1; --i)
                             {
                                 lua_rawgeti(s, 3, i);
-                                target.Offsets.push_back(TextArgument(s, -1));
+                                target.Offsets.push_back(AddressArgument(s, -1));
                                 lua_pop(s, 1);
                             }
                         }
@@ -531,7 +536,7 @@ namespace Manifold::Lua
                             return luaL_error(s, "offset index out of range");
                         if (index >= static_cast<lua_Integer>(target.Offsets.size()))
                             target.Offsets.insert(target.Offsets.begin(), static_cast<std::size_t>(index) + 1 - target.Offsets.size(), "0");
-                        target.Offsets[target.Offsets.size() - 1 - static_cast<std::size_t>(index)] = TextArgument(s, 3);
+                        target.Offsets[target.Offsets.size() - 1 - static_cast<std::size_t>(index)] = AddressArgument(s, 3);
                         Owner(s).Table().Touch();
                         return 0;
                     } },
@@ -624,7 +629,7 @@ namespace Manifold::Lua
                 record.Description = TextArgument(state, 3);
             else if (key == "address")
             {
-                record.Address = TextArgument(state, 3);
+                record.Address = AddressArgument(state, 3);
                 record.AddressOk = false;
             }
             else if (key == "type" || key == "vartype")
@@ -885,7 +890,7 @@ namespace Manifold::Lua
             {
                 if (index >= static_cast<lua_Integer>(record->Offsets.size()))
                     record->Offsets.insert(record->Offsets.begin(), static_cast<std::size_t>(index) + 1 - record->Offsets.size(), "0");
-                record->Offsets[record->Offsets.size() - 1 - static_cast<std::size_t>(index)] = TextArgument(state, 3);
+                record->Offsets[record->Offsets.size() - 1 - static_cast<std::size_t>(index)] = AddressArgument(state, 3);
                 record->AddressOk = false;
                 Owner(state).Table().Touch();
             }
@@ -1506,7 +1511,7 @@ namespace Manifold::Lua
             Status status = engine.EnsureDebugger();
             if (status)
             {
-                const Debug::BreakpointType type = trigger == 1 ? Debug::BreakpointType::Write : trigger == 2 ? Debug::BreakpointType::Access : Debug::BreakpointType::Execute;
+                const Debug::BreakpointType type = trigger == 1 ? Debug::BreakpointType::Access : trigger == 2 ? Debug::BreakpointType::Write : Debug::BreakpointType::Execute;
                 status = engine.Debugger().SetBreakpoint(address, type, std::max(1, size), type != Debug::BreakpointType::Execute);
             }
             if (!status)
