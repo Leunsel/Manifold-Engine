@@ -48,6 +48,7 @@ namespace Manifold::UI
         std::vector<Disasm::Instruction> SelectedInstructions(bool names) const;
         std::vector<Disasm::Instruction> InstructionsBetween(std::uint64_t first, std::uint64_t last, bool names) const;
         std::optional<Disasm::FunctionSpan> FunctionOf(std::uint64_t address);
+        std::string NoFunctionReason(std::uint64_t address) const;
         void FunctionMenu(const Disasm::Instruction& instruction);
         void JumpToFunction(Command command);
         void CopyInstructions(Target::AddressStyle style);

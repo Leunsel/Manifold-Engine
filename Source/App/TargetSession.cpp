@@ -10,7 +10,7 @@ namespace Manifold
     {
         m_process = std::move(process);
         m_symbols.Attach(m_process);
-        m_codeMap.Attach(m_process, &m_mono);
+        m_codeMap.Attach(m_process, &m_mono, &m_symbols);
         ++m_generation;
         if (m_extraSymbols)
             RefreshSymbolProvider();
@@ -22,7 +22,7 @@ namespace Manifold
             return;
         m_process->RefreshModules();
         m_symbols.Attach(m_process);
-        m_codeMap.Attach(m_process, &m_mono);
+        m_codeMap.Attach(m_process, &m_mono, &m_symbols);
     }
 
     void TargetSession::Detach()

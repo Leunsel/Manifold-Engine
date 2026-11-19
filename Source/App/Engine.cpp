@@ -99,12 +99,26 @@ namespace Manifold
         }
         if (map)
         {
-            if (const auto below = map->StartBelow(address + 1, kReach); below && *below >= clues.Floor)
+            if (const auto section = map->SectionAt(address); section && !section->Code)
+            {
+                if (!clues.Exact(address))
+                    return std::nullopt;
+            }
+            else if (section)
+            {
+                if (section->Begin >= clues.Floor)
+                {
+                    clues.Floor = section->Begin;
+                    clues.FloorIsBoundary = true;
+                }
+                clues.Ceiling = std::min(clues.Ceiling, section->End);
+            }
+            if (const auto below = map->StartBelow(address + 1, kReach, Target::CodeMap::Anchors::Code); below && *below >= clues.Floor)
             {
                 clues.Floor = *below;
                 clues.FloorIsBoundary = true;
             }
-            if (const auto above = map->BoundaryIn(address, address + kReach))
+            if (const auto above = map->BoundaryIn(address, address + kReach, Target::CodeMap::Anchors::Code))
                 clues.Ceiling = std::min(clues.Ceiling, *above);
         }
         std::optional<Disasm::FunctionSpan> span = Disasm::FindFunction(Disassembler(), *Process(), address, map, clues);

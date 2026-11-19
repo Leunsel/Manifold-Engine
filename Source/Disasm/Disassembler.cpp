@@ -20,6 +20,41 @@ namespace Manifold::Disasm
         // be swept forward from when backing up (a long Mono method or a big
         // native function fits; beyond that the backward guess takes over).
         constexpr std::uint64_t kSweepReach = 0x10000;
+        constexpr std::size_t kPointer = 8;
+        constexpr std::size_t kWindow = 16;
+
+        std::size_t Readable(const std::vector<bool>& readable, std::size_t offset)
+        {
+            std::size_t available = 0;
+            while (offset + available < readable.size() && readable[offset + available] && available < kWindow)
+                ++available;
+            return available;
+        }
+
+        bool ZeroPair(const std::uint8_t* bytes, std::size_t length)
+        {
+            return length == 2 && bytes[0] == 0 && bytes[1] == 0;
+        }
+
+        bool LoneZero(const std::uint8_t* bytes, std::size_t window, bool zeros)
+        {
+            return zeros && window >= 2 && bytes[0] == 0 && bytes[1] != 0;
+        }
+
+        std::size_t InlinePointer(const ZydisDecodedInstruction& instruction, const std::uint8_t* bytes, std::size_t raw)
+        {
+            if (instruction.machine_mode != ZYDIS_MACHINE_MODE_LONG_64 || instruction.opcode_map != ZYDIS_OPCODE_MAP_DEFAULT || instruction.opcode != 0xFF ||
+                !(instruction.attributes & ZYDIS_ATTRIB_HAS_MODRM) || instruction.raw.modrm.mod != 0 || instruction.raw.modrm.rm != 5 || instruction.operand_width != 64)
+                return 0;
+            const std::size_t length = instruction.length;
+            const ZyanU8 kind = instruction.raw.modrm.reg;
+            std::size_t folded = 0;
+            if ((kind == 2 || kind == 4) && instruction.raw.disp.value == 0)
+                folded = kPointer;
+            else if (kind == 2 && instruction.raw.disp.value == 2 && raw >= length + 2 && bytes[length] == 0xEB && bytes[length + 1] == 0x08)
+                folded = 2 + kPointer;
+            return folded && length + folded <= raw && length + folded <= kWindow ? folded : 0;
+        }
 
         void ReadSpan(const Target::Process& process, std::uint64_t address, std::vector<std::uint8_t>& buffer, std::vector<bool>& readable)
         {
@@ -265,6 +300,11 @@ namespace Manifold::Disasm
 
     Instruction Disassembler::Decode(std::uint64_t address, const std::uint8_t* bytes, std::size_t available, const Target::Symbols* symbols) const
     {
+        return DecodeWindow(address, bytes, available, available, symbols);
+    }
+
+    Instruction Disassembler::DecodeWindow(std::uint64_t address, const std::uint8_t* bytes, std::size_t available, std::size_t raw, const Target::Symbols* symbols) const
+    {
         Instruction result;
         result.Address = address;
         ZydisDecodedInstruction instruction{};
@@ -365,6 +405,16 @@ namespace Manifold::Disasm
                 }
             }
         }
+        if (const std::size_t folded = InlinePointer(instruction, bytes, raw))
+        {
+            std::uint64_t pointer = 0;
+            std::memcpy(&pointer, bytes + instruction.length + folded - kPointer, kPointer);
+            result.Length = static_cast<std::uint8_t>(instruction.length + folded);
+            result.InlineBytes = static_cast<std::uint8_t>(folded);
+            std::memcpy(result.Bytes.data(), bytes, result.Length);
+            result.Target = pointer;
+            result.Operands = Hex(pointer);
+        }
         if (symbols)
         {
             const auto replace = [&](std::uint64_t value)
@@ -389,6 +439,8 @@ namespace Manifold::Disasm
                 };
             if (result.Memory.Absolute)
                 replace(*result.Memory.Absolute);
+            if (result.InlineBytes && result.Target)
+                replace(*result.Target);
             for (ZyanU8 i = 0; i < instruction.operand_count_visible; ++i)
             {
                 if (operands[i].type != ZYDIS_OPERAND_TYPE_IMMEDIATE)
@@ -433,18 +485,15 @@ namespace Manifold::Disasm
     {
         if (count <= 0)
             return {};
-        std::vector<std::uint8_t> buffer(static_cast<std::size_t>(count) * 15 + 16);
+        std::vector<std::uint8_t> buffer(static_cast<std::size_t>(count) * kWindow + kWindow);
         std::vector<bool> readable;
         ReadSpan(process, address, buffer, readable);
         return DecodeMany(buffer, readable, address, count, symbols, hints);
     }
 
-    std::size_t Disassembler::Window(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::size_t offset, std::uint64_t at,
-        const CodeHints* hints) const
+    std::size_t Disassembler::Window(const std::vector<bool>& readable, std::size_t offset, std::uint64_t at, const CodeHints* hints) const
     {
-        std::size_t available = 0;
-        while (offset + available < buffer.size() && readable[offset + available] && available < 16)
-            ++available;
+        std::size_t available = Readable(readable, offset);
         // An instruction that would run across a known start is wrong: the bytes
         // in front of it are padding or data. Decoding only up to that start
         // turns them into short lines (or db) and the next line begins exactly there.
@@ -462,6 +511,7 @@ namespace Manifold::Disasm
         std::vector<Instruction> list;
         list.reserve(static_cast<std::size_t>(std::max(0, count)));
         std::size_t offset = 0;
+        bool zeros = false;
         for (int i = 0; i < count; ++i)
         {
             const std::uint64_t at = address + offset;
@@ -473,10 +523,13 @@ namespace Manifold::Disasm
                 unreadable.Mnemonic = "??";
                 list.push_back(unreadable);
                 ++offset;
+                zeros = false;
                 continue;
             }
-            const std::size_t available = Window(buffer, readable, offset, at, hints);
-            Instruction instruction = Decode(at, buffer.data() + offset, available, symbols);
+            const std::uint8_t* bytes = buffer.data() + offset;
+            const std::size_t window = Window(readable, offset, at, hints);
+            Instruction instruction = DecodeWindow(at, bytes, LoneZero(bytes, window, zeros) ? 1 : window, Readable(readable, offset), symbols);
+            zeros = instruction.Valid && ZeroPair(bytes, instruction.Length);
             offset += instruction.Length ? instruction.Length : 1;
             list.push_back(std::move(instruction));
         }
@@ -492,20 +545,56 @@ namespace Manifold::Disasm
         std::vector<bool> readable;
         ReadSpan(process, from, buffer, readable);
         std::size_t offset = 0;
+        bool zeros = false;
         while (from + offset < to)
         {
             starts.push_back(from + offset);
             std::size_t length = 1;
+            bool pair = false;
             if (readable[offset])
             {
-                const std::size_t available = Window(buffer, readable, offset, from + offset, hints);
-                ZydisDecodedInstruction instruction{};
-                if (ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(&m_state->Decoder, nullptr, buffer.data() + offset, available, &instruction)) && instruction.length)
-                    length = instruction.length;
+                const std::uint8_t* bytes = buffer.data() + offset;
+                const std::size_t window = Window(readable, offset, from + offset, hints);
+                if (const std::size_t step = LoneZero(bytes, window, zeros) ? 1 : StepLength(bytes, window, Readable(readable, offset)))
+                {
+                    length = step;
+                    pair = ZeroPair(bytes, step);
+                }
             }
+            zeros = pair;
             offset += length;
         }
         return starts;
+    }
+
+    std::size_t Disassembler::StepLength(const std::uint8_t* bytes, std::size_t window, std::size_t raw) const
+    {
+        ZydisDecodedInstruction instruction{};
+        if (window == 0 || !ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(&m_state->Decoder, nullptr, bytes, window, &instruction)) || instruction.length == 0)
+            return 0;
+        return instruction.length + InlinePointer(instruction, bytes, raw);
+    }
+
+    std::optional<std::uint64_t> Disassembler::InlineHolder(const Target::Process& process, std::uint64_t address) const
+    {
+        if (!m_is64Bit || address < kWindow)
+            return std::nullopt;
+        std::uint8_t bytes[kWindow * 2]{};
+        const std::size_t got = process.Read(address - kWindow, bytes, sizeof(bytes));
+        if (got < kWindow)
+            return std::nullopt;
+        for (std::size_t back = 1; back < kWindow; ++back)
+        {
+            const std::size_t offset = kWindow - back;
+            const std::size_t raw = std::min(got - offset, kWindow);
+            ZydisDecodedInstruction instruction{};
+            if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(&m_state->Decoder, nullptr, bytes + offset, raw, &instruction)))
+                continue;
+            const std::size_t folded = InlinePointer(instruction, bytes + offset, raw);
+            if (folded && back >= instruction.length && back < instruction.length + folded)
+                return address - back;
+        }
+        return std::nullopt;
     }
 
     std::optional<std::uint64_t> Disassembler::EffectiveAddress(const Instruction& instruction, const RegisterValues& registers) const
@@ -552,17 +641,21 @@ namespace Manifold::Disasm
             std::uint64_t previous = 0;
             int chain = 0;
             bool valid = true;
+            bool zeros = false;
             while (at < address)
             {
-                ZydisDecodedInstruction instruction{};
                 const std::size_t offset = static_cast<std::size_t>(at - base);
-                if (!ZYAN_SUCCESS(ZydisDecoderDecodeInstruction(&m_state->Decoder, nullptr, buffer + offset, size - offset, &instruction)))
+                const std::uint8_t* bytes = buffer + offset;
+                const std::size_t raw = std::min(size - offset, kWindow);
+                const std::size_t length = LoneZero(bytes, raw, zeros) ? 1 : StepLength(bytes, size - offset, raw);
+                if (length == 0)
                 {
                     valid = false;
                     break;
                 }
+                zeros = ZeroPair(bytes, length);
                 previous = at;
-                at += instruction.length;
+                at += length;
                 ++chain;
             }
             if (valid && at == address && chain > bestChain)
@@ -592,11 +685,12 @@ namespace Manifold::Disasm
                 // of the function before it.
                 if (const auto anchor = hints->StartBelow(at, kSweepReach); anchor && *anchor < at && at - *anchor <= kSweepReach)
                 {
-                    const std::vector<std::uint64_t> starts = Starts(process, *anchor, at, hints);
+                    const std::uint64_t from = InlineHolder(process, *anchor).value_or(*anchor);
+                    const std::vector<std::uint64_t> starts = Starts(process, from, at, hints);
                     if (starts.size() >= static_cast<std::size_t>(lines))
                         return starts[starts.size() - static_cast<std::size_t>(lines)];
                     lines -= static_cast<int>(starts.size());
-                    at = *anchor;
+                    at = from;
                     continue;
                 }
             }
