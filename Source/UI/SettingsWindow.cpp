@@ -214,10 +214,11 @@ namespace Manifold::UI
                 ImGui::Dummy(ImVec2(frame, frame));
                 return false;
             }
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
-            const bool pressed = ImGui::Button(ICON_FA_UNDO "##reset", ImVec2(frame, frame));
-            ImGui::PopStyleColor(2);
+            bool pressed = false;
+            {
+                const GhostButtons ghost(ManifoldTheme::Muted);
+                pressed = ImGui::Button(ICON_FA_UNDO "##reset", ImVec2(frame, frame));
+            }
             ItemTooltip("Back to the default");
             return pressed;
         }
@@ -576,14 +577,14 @@ namespace Manifold::UI
                 const float frame = ImGui::GetFrameHeight();
                 const ImVec2 after = ImGui::GetCursorScreenPos();
                 ImGui::SetCursorScreenPos(ImVec2(field.x + inner - frame, field.y));
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
-                if (ImGui::Button(ICON_FA_TIMES "##clearsearch", ImVec2(frame, frame)))
                 {
-                    m_search.clear();
-                    m_scrollTop = true;
+                    const GhostButtons ghost(ManifoldTheme::Muted);
+                    if (ImGui::Button(ICON_FA_TIMES "##clearsearch", ImVec2(frame, frame)))
+                    {
+                        m_search.clear();
+                        m_scrollTop = true;
+                    }
                 }
-                ImGui::PopStyleColor(2);
                 ItemTooltip("Clear the search");
                 ImGui::SetCursorScreenPos(after);
             }

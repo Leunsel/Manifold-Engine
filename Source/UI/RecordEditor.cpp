@@ -284,19 +284,17 @@ namespace Manifold::UI
         const std::string text = Hex(address);
         const bool copied = m_copied == text && ImGui::GetTime() - m_copiedAt < 1.5;
         PushMono();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.07f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.12f));
-        ImGui::PushStyleColor(ImGuiCol_Text, copied ? ManifoldTheme::Accent : ManifoldTheme::AddressText);
-        ImGui::PushID(id);
-        if (ImGui::Button((text + "  " + (copied ? ICON_FA_CHECK : ICON_FA_COPY)).c_str()))
         {
-            ImGui::SetClipboardText(text.c_str());
-            m_copied = text;
-            m_copiedAt = ImGui::GetTime();
+            const GhostButtons ghost(copied ? ManifoldTheme::Accent : ManifoldTheme::AddressText);
+            ImGui::PushID(id);
+            if (ImGui::Button((text + "  " + (copied ? ICON_FA_CHECK : ICON_FA_COPY)).c_str()))
+            {
+                ImGui::SetClipboardText(text.c_str());
+                m_copied = text;
+                m_copiedAt = ImGui::GetTime();
+            }
+            ImGui::PopID();
         }
-        ImGui::PopID();
-        ImGui::PopStyleColor(4);
         PopMono();
         ItemTooltip(copied ? "Copied" : "Copy this address");
     }

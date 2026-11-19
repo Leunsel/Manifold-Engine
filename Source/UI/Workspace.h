@@ -1,5 +1,6 @@
 #pragma once
 
+#include "App/Commands.h"
 #include "App/Engine.h"
 
 #include <cstdint>
@@ -89,6 +90,8 @@ namespace Manifold::UI
         Workspace& operator=(const Workspace&) = delete;
 
         void Draw();
+        bool CanRun(Command command);
+        void Run(Command command);
         Engine& Core() { return m_engine; }
         Shell& Window() { return m_shell; }
         UiHost& Ui() { return *m_ui; }

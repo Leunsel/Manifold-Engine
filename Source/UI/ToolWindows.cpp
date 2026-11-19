@@ -61,9 +61,17 @@ namespace Manifold::UI
             bool Matched = false;
         };
 
+        enum class RowKind
+        {
+            AppsHeader,
+            BackgroundHeader,
+            Group,
+            Member
+        };
+
         struct PickerRow
         {
-            int Kind = 0;
+            RowKind Kind = RowKind::Group;
             std::size_t Group = 0;
             std::size_t Entry = 0;
             std::string Id;
@@ -107,13 +115,11 @@ namespace Manifold::UI
             m_windowsOnly = mode == 0;
         ItemTooltip("Apps are programs with a window. All adds the background processes.");
         ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.08f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.14f));
-        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Label);
-        if (IconButton(ICON_FA_SYNC "##refresh", "Read the process list again"))
-            Refresh();
-        ImGui::PopStyleColor(4);
+        {
+            const GhostButtons ghost;
+            if (IconButton(ICON_FA_SYNC "##refresh", "Read the process list again"))
+                Refresh();
+        }
 
         if (!Target::IsElevated())
         {
@@ -193,25 +199,25 @@ namespace Manifold::UI
                 {
                     const ProcessGroup& group = groups[g];
                     selectable.push_back(rows.size());
-                    rows.push_back({ 2, g, group.Primary, "g:" + group.Key });
+                    rows.push_back({ RowKind::Group, g, group.Primary, "g:" + group.Key });
                     const bool expanded = group.Members.size() > 1 && (m_expanded.count(group.Key) > 0 || pidFilter);
                     if (!expanded)
                         continue;
                     for (const std::size_t member : group.Members)
                     {
                         selectable.push_back(rows.size());
-                        rows.push_back({ 3, g, member, "m:" + ToText(m_list[member].Id) });
+                        rows.push_back({ RowKind::Member, g, member, "m:" + ToText(m_list[member].Id) });
                     }
                 }
             };
         if (!apps.empty())
         {
-            rows.push_back({ 0, 0, apps.size(), {} });
+            rows.push_back({ RowKind::AppsHeader, 0, apps.size(), {} });
             addGroups(apps);
         }
         if (!background.empty())
         {
-            rows.push_back({ 1, 0, background.size(), {} });
+            rows.push_back({ RowKind::BackgroundHeader, 0, background.size(), {} });
             addGroups(background);
         }
 
@@ -242,7 +248,7 @@ namespace Manifold::UI
             {
                 for (const std::size_t index : selectable)
                 {
-                    if (rows[index].Kind == 2 && groups[rows[index].Group].Key == last)
+                    if (rows[index].Kind == RowKind::Group && groups[rows[index].Group].Key == last)
                     {
                         select(rows[index]);
                         m_scrollToSelected = true;
@@ -295,13 +301,13 @@ namespace Manifold::UI
         for (std::size_t r = 0; r < rows.size(); ++r)
         {
             const PickerRow& row = rows[r];
-            if (row.Kind <= 1)
+            if (row.Kind == RowKind::AppsHeader || row.Kind == RowKind::BackgroundHeader)
             {
                 if (r > 0)
                     ImGui::Dummy(ImVec2(0.0f, Px(6.0f)));
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + Px(6.0f));
                 ImGui::PushFont(Fonts::Bold(), 0.0f);
-                ImGui::TextColored(ManifoldTheme::Label, "%s", row.Kind == 0 ? "Apps" : "Background processes");
+                ImGui::TextColored(ManifoldTheme::Label, "%s", row.Kind == RowKind::AppsHeader ? "Apps" : "Background processes");
                 ImGui::PopFont();
                 ImGui::SameLine();
                 Muted(std::to_string(row.Entry));
@@ -310,7 +316,7 @@ namespace Manifold::UI
             }
             const Target::ProcessEntry& entry = m_list[row.Entry];
             const ProcessGroup& group = groups[row.Group];
-            const bool member = row.Kind == 3;
+            const bool member = row.Kind == RowKind::Member;
             const bool tall = !member && group.App;
             const float height = std::round(tall ? Px(42.0f) : Px(28.0f));
             ImGui::PushID(row.Id.c_str());

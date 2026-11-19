@@ -660,39 +660,17 @@ namespace Manifold::UI
             m_scriptMenuGeneration = lua.MenuGeneration();
             m_scriptMenu = lua.MenuItems(Lua::ScriptMenu::MemoryViewMenu);
         }
-        int clicked = 0;
-        int opened = 0;
-        for (const Lua::ScriptMenuItem& root : m_scriptMenu)
-        {
-            if (root.Caption == "-")
-                continue;
-            const std::string label = root.Caption + "##script" + std::to_string(root.Id);
-            if (root.Children.empty())
-            {
-                if (ImGui::MenuItem(label.c_str(), nullptr, root.Checked, root.Enabled))
-                    clicked = root.Id;
-                continue;
-            }
-            if (ImGui::BeginMenu(label.c_str(), root.Enabled))
-            {
-                if (ImGui::IsWindowAppearing())
-                    opened = root.Id;
-                if (const int inner = DrawScriptMenuItems(root.Children))
-                    clicked = inner;
-                ImGui::EndMenu();
-            }
-        }
-        if (opened || clicked)
+        const ScriptMenuClicks clicks = DrawScriptMenuRoots(m_scriptMenu, "##script");
+        if (clicks.Opened || clicks.Clicked)
             PublishSelection();
-        if (opened)
-            lua.ClickMenuItem(opened);
-        if (clicked)
-            lua.ClickMenuItem(clicked);
+        if (clicks.Opened)
+            lua.ClickMenuItem(clicks.Opened);
+        if (clicks.Clicked)
+            lua.ClickMenuItem(clicks.Clicked);
     }
 
     void MemoryViewer::ScriptShortcuts(std::vector<ImGuiKeyChord>& taken)
     {
-        static std::set<std::pair<int, ImGuiKeyChord>> reported;
         const bool code = m_focusCode;
         const bool hex = !m_focusCode && m_hexFocus;
         std::vector<ImGuiKeyChord> cheatEngine;
@@ -706,29 +684,7 @@ namespace Manifold::UI
             if (binding.Alternate)
                 cheatEngine.push_back(binding.Alternate);
         }
-        std::vector<const Lua::ScriptMenuItem*> pending;
-        for (const Lua::ScriptMenuItem& root : m_scriptMenu)
-            pending.push_back(&root);
-        int clicked = 0;
-        while (!pending.empty())
-        {
-            const Lua::ScriptMenuItem* item = pending.back();
-            pending.pop_back();
-            for (const Lua::ScriptMenuItem& child : item->Children)
-                pending.push_back(&child);
-            const ImGuiKeyChord chord = ScriptChord(item->Shortcut);
-            if (!chord || !item->Enabled || !item->Children.empty())
-                continue;
-            if (std::find(cheatEngine.begin(), cheatEngine.end(), chord) != cheatEngine.end())
-            {
-                if (reported.insert({ item->Id, chord }).second)
-                    LOG_INFO("Lua", "The memory viewer keeps " + ChordText(chord) + " for its own command, so the script entry \"" + item->Caption + "\" does not get it");
-                continue;
-            }
-            taken.push_back(chord);
-            if (!clicked && ChordPressed(chord, CommandScope::MemoryViewer))
-                clicked = item->Id;
-        }
+        const int clicked = ScriptShortcutPressed(m_scriptMenu, cheatEngine, CommandScope::MemoryViewer, &taken, "memory viewer");
         if (clicked)
         {
             PublishSelection();
@@ -2714,7 +2670,8 @@ namespace Manifold::UI
             ImGui::SetKeyboardFocusHere();
         ImGui::SetNextItemWidth(Px(360.0f));
         const bool enter = InputText("##commenttext", m_commentText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
-        if (enter || ImGui::Button("Save", Px(80.0f, 0.0f)))
+        const DialogChoice choice = DialogButtons("Save", true, false);
+        if (enter || choice == DialogChoice::Ok)
         {
             const std::string key = m_engine.Symbols().ModuleOffset(m_commentAddress);
             Table::AddressList::DisasmNote& note = m_engine.Table().DisasmNotes[key];
@@ -2725,11 +2682,9 @@ namespace Manifold::UI
             m_commentOpen = false;
             ImGui::CloseCurrentPopup();
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", Px(80.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        else if (choice == DialogChoice::Cancel)
         {
             m_commentOpen = false;
-            ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
     }

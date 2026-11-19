@@ -129,6 +129,11 @@ namespace Manifold::UI
             return true;
         }
 
+        bool MergedIntoOwnMenu(const Lua::ScriptMenuItem& item)
+        {
+            return item.Merge == "file" || item.Merge == "edit" || item.Merge == "table" || item.Merge == "help";
+        }
+
         bool WindowButton(const char* id, const char* icon, float width, float height, bool danger)
         {
             const ImVec2 pos = ImGui::GetCursorScreenPos();
@@ -251,45 +256,76 @@ namespace Manifold::UI
 
     void MainWindow::MainShortcuts()
     {
-        Engine& engine = m_engine;
-        Scan::Scanner& scanner = engine.Scanner();
-        const bool scannerShown = !engine.Options().CompactMode;
-        if (Pressed(Command::NewTable))
-            m_workspace.NewTable();
-        if (Pressed(Command::OpenLastProcess))
-            m_workspace.OpenLastProcess();
-        if (Pressed(Command::DeactivateAll))
-            m_workspace.TurnOffEverything();
-        if (Pressed(Command::CompactMode))
-            ToggleCompactMode();
-        if (Pressed(Command::ReleaseMode))
-            ToggleReleaseMode();
-        if (Pressed(Command::FocusScanValue) && scannerShown)
-            m_focusValue = true;
-        if (Pressed(Command::FirstScan) && scannerShown && !scanner.Busy())
+        for (const CommandInfo& info : AllCommands())
         {
-            if (scanner.HasResults())
+            if (info.Scope == CommandScope::Main && Pressed(info.Id))
+                Run(info.Id);
+        }
+        ScriptMenuShortcuts();
+    }
+
+    bool MainWindow::CanRun(Command command)
+    {
+        Scan::Scanner& scanner = m_engine.Scanner();
+        const bool scannerShown = !m_engine.Options().CompactMode;
+        switch (command)
+        {
+        case Command::OpenLastProcess: return m_workspace.CanOpenLastProcess();
+        case Command::FocusScanValue: return scannerShown;
+        case Command::FirstScan: return scannerShown && !scanner.Busy();
+        case Command::NewScan: return scannerShown && !scanner.Busy() && scanner.HasResults();
+        case Command::UndoScan: return !m_release && !scanner.Busy() && scanner.CanUndo();
+        case Command::TableLuaScript:
+        case Command::TableFiles:
+        case Command::AddAddress:
+        case Command::AddGroup:
+        case Command::AddScript:
+            return !m_release;
+        case Command::NewTable:
+        case Command::DeactivateAll:
+        case Command::CompactMode:
+        case Command::ReleaseMode:
+            return true;
+        default:
+            return m_workspace.CanRun(command);
+        }
+    }
+
+    void MainWindow::Run(Command command)
+    {
+        if (!CanRun(command))
+            return;
+        switch (command)
+        {
+        case Command::NewTable: m_workspace.NewTable(); break;
+        case Command::OpenLastProcess: m_workspace.OpenLastProcess(); break;
+        case Command::DeactivateAll: m_workspace.TurnOffEverything(); break;
+        case Command::CompactMode: ToggleCompactMode(); break;
+        case Command::ReleaseMode: ToggleReleaseMode(); break;
+        case Command::FocusScanValue: m_focusValue = true; break;
+        case Command::FirstScan:
+            if (m_engine.Scanner().HasResults())
                 DoNextScan();
             else
                 DoFirstScan();
+            break;
+        case Command::NewScan: NewScan(); break;
+        case Command::UndoScan: m_engine.Scanner().Undo(); break;
+        case Command::TableLuaScript: m_workspace.OpenScript(m_engine.Table().TableLuaScript, kTableLuaScript, true); break;
+        case Command::TableFiles: m_workspace.OpenTableFiles(); break;
+        case Command::AddAddress: OpenAddDialog(); break;
+        case Command::AddGroup: m_engine.Table().AddGroup("Group"); break;
+        case Command::AddScript: AddScriptRecord(); break;
+        default: m_workspace.Run(command); break;
         }
-        if (Pressed(Command::NewScan) && scannerShown && !scanner.Busy() && scanner.HasResults())
-            NewScan();
-        if (Pressed(Command::UndoScan) && scannerShown && !scanner.Busy() && scanner.CanUndo())
-            scanner.Undo();
-        ScriptMenuShortcuts();
-        if (m_release)
-            return;
-        if (Pressed(Command::TableLuaScript))
-            m_workspace.OpenScript(engine.Table().TableLuaScript, kTableLuaScript, true);
-        if (Pressed(Command::TableFiles))
-            m_workspace.OpenTableFiles();
-        if (Pressed(Command::AddAddress))
-            OpenAddDialog();
-        if (Pressed(Command::AddGroup))
-            engine.Table().AddGroup("Group");
-        if (Pressed(Command::AddScript))
-            AddScriptRecord();
+    }
+
+    bool MainWindow::Item(const char* label, Command command, bool selected)
+    {
+        if (!CommandItem(label, command, selected, CanRun(command)))
+            return false;
+        Run(command);
+        return true;
     }
 
     void MainWindow::ToggleCompactMode()
@@ -362,39 +398,26 @@ namespace Manifold::UI
         const float menusStart = ImGui::GetCursorPosX();
         RefreshScriptMenu();
         DetectMono();
-        const bool scriptRoots = std::any_of(m_scriptMenu.begin(), m_scriptMenu.end(), [&](const Lua::ScriptMenuItem& root) { return !ScriptMenuMerged(root) && root.Caption != "-"; });
+        const bool scriptRoots = std::any_of(m_scriptMenu.begin(), m_scriptMenu.end(), [&](const Lua::ScriptMenuItem& root) { return !MergedIntoOwnMenu(root) && root.Caption != "-"; });
         const bool extensions = scriptRoots || m_workspace.Ui().HasMenu();
-        std::vector<const char*> menuLabels = { "File", "Edit", "Process", "Table", "View" };
-        if (!m_release)
-            menuLabels.push_back("Tools");
-        if (m_monoDetected && !m_release)
-            menuLabels.push_back("Mono");
-        if (extensions)
-            menuLabels.push_back("Extensions");
-        menuLabels.push_back("Help");
-        float menusWidth = Px(16.0f);
-        for (const char* label : menuLabels)
-            menusWidth += ImGui::CalcTextSize(label).x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
         const float buttonWidth = Px(46.0f);
         const float buttonsStart = width - buttonWidth * 3.0f;
-        const float menuChildWidth = std::max(Px(120.0f), std::min(menusWidth, buttonsStart - menusStart - Px(8.0f)));
+        const float menusRoom = buttonsStart - menusStart - Px(8.0f);
+        const float menuChildWidth = std::max(Px(120.0f), m_menusWidth > 0.0f ? std::min(m_menusWidth, menusRoom) : menusRoom);
         ImGui::BeginChild("##menus", ImVec2(menuChildWidth, menuHeight), ImGuiChildFlags_None, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
         ImGui::PopStyleVar();
         float menusEnd = origin.x + menusStart;
 
         Engine& engine = m_engine;
         Workspace& workspace = m_workspace;
-        const bool hasProcess = engine.HasProcess();
         Table::AddressList& list = engine.Table();
         int scriptOpened = 0;
         int scriptClicked = 0;
         ImGui::BeginMenuBar();
         if (ImGui::BeginMenu("File"))
         {
-            if (CommandItem(ICON_FA_FILE "  New table", Command::NewTable))
-                workspace.NewTable();
-            if (CommandItem(ICON_FA_FOLDER_OPEN "  Open table...", Command::OpenTable))
-                workspace.OpenTableDialog(false);
+            Item(ICON_FA_FILE "  New table", Command::NewTable);
+            Item(ICON_FA_FOLDER_OPEN "  Open table...", Command::OpenTable);
             if (!m_release && ImGui::MenuItem(ICON_FA_OBJECT_GROUP "  Merge table..."))
                 workspace.OpenTableDialog(true);
             if (ImGui::BeginMenu(ICON_FA_HISTORY "  Recent tables", !engine.Options().RecentTables.empty()))
@@ -407,10 +430,8 @@ namespace Manifold::UI
                 }
                 ImGui::EndMenu();
             }
-            if (CommandItem(ICON_FA_SAVE "  Save", Command::SaveTable))
-                workspace.SaveTable(false);
-            if (CommandItem(ICON_FA_SAVE "  Save as...", Command::SaveTableAs))
-                workspace.SaveTable(true);
+            Item(ICON_FA_SAVE "  Save", Command::SaveTable);
+            Item(ICON_FA_SAVE "  Save as...", Command::SaveTableAs);
             ScriptMenuInto("file", scriptOpened, scriptClicked);
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_SIGN_OUT_ALT "  Exit"))
@@ -421,8 +442,7 @@ namespace Manifold::UI
         {
             if (!m_release)
             {
-                if (CommandItem(ICON_FA_UNDO "  Undo last scan", Command::UndoScan, false, engine.Scanner().CanUndo() && !engine.Scanner().Busy()))
-                    engine.Scanner().Undo();
+                Item(ICON_FA_UNDO "  Undo last scan", Command::UndoScan);
                 if (CommandItem(ICON_FA_UNDO_ALT "  Undo last value change", Command::UndoRecordValue, false, !m_valueUndo.empty()))
                     UndoValueChange();
                 ImGui::Separator();
@@ -439,72 +459,50 @@ namespace Manifold::UI
                     RunRecordCommand(Command::DeleteRecords, nullptr);
                 ImGui::Separator();
             }
-            if (CommandItem(ICON_FA_COG "  Settings", Command::OpenSettings))
-                workspace.OpenSettings();
+            Item(ICON_FA_COG "  Settings", Command::OpenSettings);
             ScriptMenuInto("edit", scriptOpened, scriptClicked);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Process"))
         {
-            if (CommandItem(ICON_FA_DESKTOP "  Open process...", Command::OpenProcess))
-                workspace.OpenProcessPicker();
-            const std::string& last = engine.Options().LastProcess;
-            const std::string lastLabel = ICON_FA_HISTORY "  Open " + (last.empty() ? std::string("the last process") : last);
-            if (CommandItem(lastLabel.c_str(), Command::OpenLastProcess, false, workspace.CanOpenLastProcess()))
-                workspace.OpenLastProcess();
-            if (ImGui::MenuItem(ICON_FA_TIMES "  Close process", nullptr, false, hasProcess))
-                engine.CloseProcess();
+            ProcessItems();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Table"))
         {
             if (!m_release)
             {
-                if (CommandItem(ICON_FA_PLUS "  Add address manually", Command::AddAddress))
-                    OpenAddDialog();
-                if (CommandItem(ICON_FA_FOLDER_PLUS "  Add group", Command::AddGroup))
-                    list.AddGroup("Group");
-                if (CommandItem(ICON_FA_CODE "  Add Auto Assembler script", Command::AddScript))
-                    AddScriptRecord();
+                Item(ICON_FA_PLUS "  Add address manually", Command::AddAddress);
+                Item(ICON_FA_FOLDER_PLUS "  Add group", Command::AddGroup);
+                Item(ICON_FA_CODE "  Add Auto Assembler script", Command::AddScript);
                 ImGui::Separator();
-                if (CommandItem(ICON_FA_SCROLL "  Table Lua script", Command::TableLuaScript))
-                    workspace.OpenScript(list.TableLuaScript, kTableLuaScript, true);
-                if (CommandItem(ICON_FA_FILE_ARCHIVE "  Table files", Command::TableFiles))
-                    workspace.OpenTableFiles();
+                Item(ICON_FA_SCROLL "  Table Lua script", Command::TableLuaScript);
+                Item(ICON_FA_FILE_ARCHIVE "  Table files", Command::TableFiles);
                 ImGui::Separator();
             }
-            if (CommandItem(ICON_FA_TOGGLE_OFF "  Deactivate all records", Command::DeactivateAll))
-                workspace.TurnOffEverything();
+            Item(ICON_FA_TOGGLE_OFF "  Deactivate all records", Command::DeactivateAll);
             ScriptMenuInto("table", scriptOpened, scriptClicked);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View"))
         {
             Settings& options = engine.Options();
-            if (CommandItem(ICON_FA_COMPRESS_ALT "  Compact mode", Command::CompactMode, options.CompactMode))
-                ToggleCompactMode();
+            Item(ICON_FA_COMPRESS_ALT "  Compact mode", Command::CompactMode, options.CompactMode);
             ItemTooltip("Only the address list, without the scanner");
-            if (CommandItem(ICON_FA_GAMEPAD "  Release mode", Command::ReleaseMode, options.ReleaseMode))
-                ToggleReleaseMode();
+            Item(ICON_FA_GAMEPAD "  Release mode", Command::ReleaseMode, options.ReleaseMode);
             ItemTooltip("Hides addresses, types and the developer tools, so a table is simple to use. Turn it off here again.");
             ImGui::EndMenu();
         }
         if (!m_release && ImGui::BeginMenu("Tools"))
         {
-            if (CommandItem(ICON_FA_MEMORY "  Memory viewer", Command::OpenMemoryViewer))
-                workspace.OpenMemoryViewer(0);
+            Item(ICON_FA_MEMORY "  Memory viewer", Command::OpenMemoryViewer);
             if (ImGui::MenuItem(ICON_FA_CLONE "  New memory viewer window"))
                 workspace.OpenMemoryViewer(0, false, true);
-            if (CommandItem(ICON_FA_SITEMAP "  Structure dissect", Command::OpenStructureDissect))
-                workspace.OpenStructure(0);
-            if (CommandItem(ICON_FA_CODE "  Auto Assembler", Command::OpenAutoAssembler))
-                workspace.OpenScript(Asm::CheatTableTemplate());
-            if (CommandItem(ICON_FA_MOON "  Lua engine", Command::OpenLuaEngine))
-                workspace.OpenLua();
-            if (CommandItem(ICON_FA_DICE_D6 "  Mono / .NET dissector", Command::OpenMono))
-                workspace.OpenMono();
-            if (CommandItem(ICON_FA_STREAM "  Log", Command::OpenLog))
-                workspace.OpenLog();
+            Item(ICON_FA_SITEMAP "  Structure dissect", Command::OpenStructureDissect);
+            Item(ICON_FA_CODE "  Auto Assembler", Command::OpenAutoAssembler);
+            Item(ICON_FA_MOON "  Lua engine", Command::OpenLuaEngine);
+            Item(ICON_FA_DICE_D6 "  Mono / .NET dissector", Command::OpenMono);
+            Item(ICON_FA_STREAM "  Log", Command::OpenLog);
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_PLAY "  Run autorun scripts again"))
                 workspace.Report(engine.Lua().RunAutorun(Paths::AutorunFolder()));
@@ -522,26 +520,11 @@ namespace Manifold::UI
             MonoMenu();
         if (extensions && ImGui::BeginMenu("Extensions"))
         {
-            for (const Lua::ScriptMenuItem& root : m_scriptMenu)
-            {
-                if (ScriptMenuMerged(root) || root.Caption == "-")
-                    continue;
-                const std::string label = root.Caption + "##mainscript" + std::to_string(root.Id);
-                if (root.Children.empty())
-                {
-                    if (ImGui::MenuItem(label.c_str(), nullptr, root.Checked, root.Enabled))
-                        scriptClicked = root.Id;
-                    continue;
-                }
-                if (ImGui::BeginMenu(label.c_str(), root.Enabled))
-                {
-                    if (ImGui::IsWindowAppearing())
-                        scriptOpened = root.Id;
-                    if (const int inner = DrawScriptMenuItems(root.Children))
-                        scriptClicked = inner;
-                    ImGui::EndMenu();
-                }
-            }
+            const ScriptMenuClicks clicks = DrawScriptMenuRoots(m_scriptMenu, "##mainscript", &MergedIntoOwnMenu);
+            if (clicks.Opened)
+                scriptOpened = clicks.Opened;
+            if (clicks.Clicked)
+                scriptClicked = clicks.Clicked;
             if (workspace.Ui().HasMenu())
             {
                 if (scriptRoots)
@@ -552,12 +535,11 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenu("Help"))
         {
-            if (CommandItem(ICON_FA_KEYBOARD "  Keyboard shortcuts", Command::OpenShortcuts))
-                workspace.OpenShortcuts();
+            Item(ICON_FA_KEYBOARD "  Keyboard shortcuts", Command::OpenShortcuts);
             if (!m_release && ImGui::MenuItem(ICON_FA_LIST_OL "  Error codes"))
                 workspace.OpenLog();
-            if (engine.Options().ProfilerEnabled && CommandItem(ICON_FA_TACHOMETER_ALT "  Profiler and diagnostics", Command::OpenProfiler))
-                workspace.OpenProfiler();
+            if (engine.Options().ProfilerEnabled)
+                Item(ICON_FA_TACHOMETER_ALT "  Profiler and diagnostics", Command::OpenProfiler);
             if (!Target::IsElevated() && ImGui::MenuItem(ICON_FA_SHIELD_ALT "  Restart as administrator"))
                 workspace.Window().RestartElevated();
             ImGui::Separator();
@@ -569,6 +551,7 @@ namespace Manifold::UI
         menusEnd = ImGui::GetItemRectMax().x;
         ImGui::EndMenuBar();
         ImGui::EndChild();
+        m_menusWidth = menusEnd - (origin.x + menusStart) + Px(16.0f);
         if (scriptOpened)
             engine.Lua().ClickMenuItem(scriptOpened);
         if (scriptClicked)
@@ -595,25 +578,23 @@ namespace Manifold::UI
         const float frame = ImGui::GetFrameHeight();
         const float y = std::round((height - frame) * 0.5f);
         float x = right;
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.08f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.14f));
-        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Label);
-        if (!m_release && x - frame > left)
         {
-            x -= frame;
-            ImGui::SetCursorPos(ImVec2(x, y));
-            if (IconButton(ICON_FA_MEMORY "##titlememory", WithKeys("Memory view: the disassembler and hex view of the process", Command::OpenMemoryViewer).c_str()))
-                m_workspace.OpenMemoryViewer(0);
-            x -= Px(4.0f);
+            const GhostButtons ghost;
+            if (!m_release && x - frame > left)
+            {
+                x -= frame;
+                ImGui::SetCursorPos(ImVec2(x, y));
+                if (IconButton(ICON_FA_MEMORY "##titlememory", WithKeys("Memory view: the disassembler and hex view of the process", Command::OpenMemoryViewer).c_str()))
+                    Run(Command::OpenMemoryViewer);
+                x -= Px(4.0f);
+            }
+            const float tools = m_workspace.Ui().ToolbarWidth();
+            if (tools > 0.0f && x - tools > left)
+            {
+                m_workspace.Ui().DrawToolbar(x, y);
+                x -= tools + Px(4.0f);
+            }
         }
-        const float tools = m_workspace.Ui().ToolbarWidth();
-        if (tools > 0.0f && x - tools > left)
-        {
-            m_workspace.Ui().DrawToolbar(x, y);
-            x -= tools + Px(4.0f);
-        }
-        ImGui::PopStyleColor(4);
         return ProcessChip(left, x - Px(6.0f), y, frame);
     }
 
@@ -699,14 +680,10 @@ namespace Manifold::UI
         const float hover = m_chipHover;
         const float rounding = height * 0.5f;
         const ImVec4 accent = ManifoldTheme::Accent;
-        const auto blend = [](ImVec4 from, ImVec4 to, float amount)
-            {
-                return ImVec4(from.x + (to.x - from.x) * amount, from.y + (to.y - from.y) * amount, from.z + (to.z - from.z) * amount, from.w + (to.w - from.w) * amount);
-            };
         const float press = active ? 1.0f : 0.0f;
         const ImVec4 fill = callToAction ? ManifoldTheme::WithAlpha(accent, 0.18f + 0.09f * hover + 0.07f * press)
-                                         : blend(ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.045f), ManifoldTheme::WithAlpha(accent, 0.11f + 0.06f * press), hover);
-        const ImVec4 edge = callToAction ? ManifoldTheme::WithAlpha(accent, 0.55f + 0.30f * hover) : blend(ManifoldTheme::Border, ManifoldTheme::WithAlpha(accent, 0.70f), hover);
+                                         : ManifoldTheme::Mix(ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.045f), ManifoldTheme::WithAlpha(accent, 0.11f + 0.06f * press), hover);
+        const ImVec4 edge = callToAction ? ManifoldTheme::WithAlpha(accent, 0.55f + 0.30f * hover) : ManifoldTheme::Mix(ManifoldTheme::Border, ManifoldTheme::WithAlpha(accent, 0.70f), hover);
         if (hover > 0.01f)
         {
             for (int ring = 1; ring <= 3; ++ring)
@@ -805,7 +782,7 @@ namespace Manifold::UI
         {
             cx += gap;
             draw->AddText(ImGui::GetFont(), chevronSize, ImVec2(cx, std::round(min.y + (height - chevronSize) * 0.5f + Px(1.5f) * hover)),
-                ImGui::GetColorU32(blend(ManifoldTheme::Muted, accent, hover)), ICON_FA_CHEVRON_DOWN);
+                ImGui::GetColorU32(ManifoldTheme::Mix(ManifoldTheme::Muted, accent, hover)), ICON_FA_CHEVRON_DOWN);
         }
 
         const bool onBadge = badgeWidth > 0.0f && badgeRect.Contains(ImGui::GetIO().MousePos);
@@ -839,20 +816,23 @@ namespace Manifold::UI
         return x;
     }
 
+    void MainWindow::ProcessItems()
+    {
+        Item(ICON_FA_DESKTOP "  Open process...", Command::OpenProcess);
+        const std::string& last = m_engine.Options().LastProcess;
+        const std::string lastLabel = ICON_FA_HISTORY "  Open " + (last.empty() ? std::string("the last process") : last);
+        Item(lastLabel.c_str(), Command::OpenLastProcess);
+        if (ImGui::MenuItem(ICON_FA_TIMES "  Close process", nullptr, false, m_engine.HasProcess()))
+            m_engine.CloseProcess();
+    }
+
     void MainWindow::ProcessChipMenu()
     {
         if (!ImGui::BeginPopup("##processchipmenu"))
             return;
         Engine& engine = m_engine;
         const bool hasProcess = engine.HasProcess();
-        if (CommandItem(ICON_FA_DESKTOP "  Open process...", Command::OpenProcess))
-            m_workspace.OpenProcessPicker();
-        const std::string& last = engine.Options().LastProcess;
-        const std::string lastLabel = ICON_FA_HISTORY "  Open " + (last.empty() ? std::string("the last process") : last);
-        if (CommandItem(lastLabel.c_str(), Command::OpenLastProcess, false, m_workspace.CanOpenLastProcess()))
-            m_workspace.OpenLastProcess();
-        if (ImGui::MenuItem(ICON_FA_TIMES "  Close process", nullptr, false, hasProcess))
-            engine.CloseProcess();
+        ProcessItems();
         if (hasProcess && engine.HasProcess())
         {
             const Target::Process& process = *engine.Process();
@@ -862,8 +842,7 @@ namespace Manifold::UI
             if (!m_release)
             {
                 ImGui::Separator();
-                if (CommandItem(ICON_FA_MEMORY "  Memory viewer", Command::OpenMemoryViewer))
-                    m_workspace.OpenMemoryViewer(0);
+                Item(ICON_FA_MEMORY "  Memory viewer", Command::OpenMemoryViewer);
                 if (engine.Debugger().Broken() && ImGui::MenuItem(ICON_FA_PAUSE_CIRCLE "  Show the break"))
                     m_workspace.OpenMemoryViewer(engine.Debugger().Break().Address);
             }
@@ -1199,8 +1178,7 @@ namespace Manifold::UI
             ImGui::SetKeyboardFocusHere();
         ImGui::SetNextItemWidth(-1.0f);
         const bool apply = InputText("##resultvalue", m_resultValueText, ImGuiInputTextFlags_EnterReturnsTrue);
-        ImGui::Spacing();
-        if (AccentButton("OK", Px(90.0f, 0.0f)) || apply)
+        if (DialogButtons("OK", true, false) == DialogChoice::Ok || apply)
         {
             const Lua::CustomType* custom = scanner.Kind() == Scan::ScanKind::Custom ? m_engine.Lua().FindCustomType(scanner.CustomName()) : nullptr;
             if (m_engine.HasProcess())
@@ -1235,9 +1213,6 @@ namespace Manifold::UI
             }
             ImGui::CloseCurrentPopup();
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", Px(90.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-            ImGui::CloseCurrentPopup();
         EndModal();
     }
 
@@ -1433,11 +1408,6 @@ namespace Manifold::UI
         m_scriptMenu = lua.MenuItems(Lua::ScriptMenu::MainMenu);
     }
 
-    bool MainWindow::ScriptMenuMerged(const Lua::ScriptMenuItem& item) const
-    {
-        return item.Merge == "file" || item.Merge == "edit" || item.Merge == "table" || item.Merge == "help";
-    }
-
     void MainWindow::ScriptMenuInto(const char* merge, int& opened, int& clicked)
     {
         for (const Lua::ScriptMenuItem& root : m_scriptMenu)
@@ -1465,24 +1435,8 @@ namespace Manifold::UI
             if (binding.Alternate)
                 own.push_back(binding.Alternate);
         }
-        std::vector<const Lua::ScriptMenuItem*> pending;
-        for (const Lua::ScriptMenuItem& root : m_scriptMenu)
-            pending.push_back(&root);
-        while (!pending.empty())
-        {
-            const Lua::ScriptMenuItem* item = pending.back();
-            pending.pop_back();
-            for (const Lua::ScriptMenuItem& child : item->Children)
-                pending.push_back(&child);
-            const ImGuiKeyChord chord = ScriptChord(item->Shortcut);
-            if (!chord || !item->Enabled || !item->Children.empty() || std::find(own.begin(), own.end(), chord) != own.end())
-                continue;
-            if (ChordPressed(chord, CommandScope::Main))
-            {
-                m_engine.Lua().ClickMenuItem(item->Id);
-                return;
-            }
-        }
+        if (const int clicked = ScriptShortcutPressed(m_scriptMenu, own, CommandScope::Main))
+            m_engine.Lua().ClickMenuItem(clicked);
     }
 
     void MainWindow::SaveResultsDialog()
@@ -1500,9 +1454,8 @@ namespace Manifold::UI
             ImGui::SetKeyboardFocusHere();
         ImGui::SetNextItemWidth(-1.0f);
         const bool apply = InputTextWithHint("##savedname", "name", m_saveResultsName, ImGuiInputTextFlags_EnterReturnsTrue);
-        ImGui::Spacing();
-        ImGui::BeginDisabled(TrimView(m_saveResultsName).empty());
-        if (AccentButton("Save", Px(90.0f, 0.0f)) || (apply && !TrimView(m_saveResultsName).empty()))
+        const bool named = !TrimView(m_saveResultsName).empty();
+        if (DialogButtons("Save", named, false) == DialogChoice::Ok || (apply && named))
         {
             if (scanner.SaveResults(m_saveResultsName))
             {
@@ -1511,10 +1464,6 @@ namespace Manifold::UI
             }
             ImGui::CloseCurrentPopup();
         }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", Px(90.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-            ImGui::CloseCurrentPopup();
         EndModal();
     }
 
@@ -1915,12 +1864,9 @@ namespace Manifold::UI
         const auto listMenu = [&](bool open) {
             if (!open)
                 return;
-            if (CommandItem(ICON_FA_PLUS "  Add address manually", Command::AddAddress))
-                OpenAddDialog();
-            if (CommandItem(ICON_FA_FOLDER_PLUS "  Add group", Command::AddGroup))
-                list.AddGroup("Group");
-            if (CommandItem(ICON_FA_CODE "  Add Auto Assembler script", Command::AddScript))
-                AddScriptRecord();
+            Item(ICON_FA_PLUS "  Add address manually", Command::AddAddress);
+            Item(ICON_FA_FOLDER_PLUS "  Add group", Command::AddGroup);
+            Item(ICON_FA_CODE "  Add Auto Assembler script", Command::AddScript);
             if (CommandItem(ICON_FA_PASTE "  Paste", Command::PasteRecords))
                 RunRecordCommand(Command::PasteRecords, nullptr);
             ImGui::Separator();
@@ -2234,8 +2180,7 @@ namespace Manifold::UI
             ItemTooltip("Ends the helper thread in the game and takes the Unity explorer's callback out. Managed method names and lookups stop until it is loaded again.");
         }
         ImGui::Separator();
-        if (CommandItem(ICON_FA_DICE_D6 "  Mono / .NET dissector", Command::OpenMono))
-            m_workspace.OpenMono();
+        Item(ICON_FA_DICE_D6 "  Mono / .NET dissector", Command::OpenMono);
         ImGui::EndMenu();
     }
 
@@ -3227,15 +3172,11 @@ namespace Manifold::UI
                 m_valueScroll = m_valueCursor >= 0 ? 2 : 0;
             }
         }
-        ImGui::Spacing();
-        if (AccentButton("OK", Px(90.0f, 0.0f)) || apply)
+        if (DialogButtons("OK", true, false) == DialogChoice::Ok || apply)
         {
             WriteValues(m_valueTargets, m_valueText);
             ImGui::CloseCurrentPopup();
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", Px(90.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-            ImGui::CloseCurrentPopup();
         EndModal();
     }
 
@@ -3397,16 +3338,12 @@ namespace Manifold::UI
             }
             ImGui::EndCombo();
         }
-        ImGui::Spacing();
-        if (AccentButton("Add", Px(90.0f, 0.0f)) || (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && !m_addAddress.empty()))
+        if (DialogButtons("Add", true, false) == DialogChoice::Ok || (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && !m_addAddress.empty()))
         {
             m_engine.Table().AddValue(m_addDescription, Trim(m_addAddress), Scan::kRecordTypes[m_addType]);
             m_engine.RefreshValues(true);
             ImGui::CloseCurrentPopup();
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", Px(90.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-            ImGui::CloseCurrentPopup();
         EndModal();
     }
 
@@ -3423,7 +3360,7 @@ namespace Manifold::UI
             ImGui::SetKeyboardFocusHere();
         ImGui::SetNextItemWidth(-1.0f);
         const bool enter = InputText("##text", m_descriptionText, ImGuiInputTextFlags_EnterReturnsTrue);
-        if (AccentButton("OK", Px(90.0f, 0.0f)) || enter)
+        if (DialogButtons("OK", true, false) == DialogChoice::Ok || enter)
         {
             if (Table::MemoryRecord* record = m_engine.Table().FindById(m_descriptionTarget))
             {
@@ -3432,9 +3369,6 @@ namespace Manifold::UI
             }
             ImGui::CloseCurrentPopup();
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", Px(90.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-            ImGui::CloseCurrentPopup();
         EndModal();
     }
 

@@ -4,6 +4,7 @@
 #include "App/Engine.h"
 #include "Core/RuntimeLog.h"
 #include "UI/Fonts.h"
+#include "UI/Shortcuts.h"
 #include "UI/Theme.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
@@ -188,6 +189,63 @@ namespace Manifold::UI
             }
             if (ImGui::MenuItem(label.c_str(), item.Shortcut.empty() ? nullptr : item.Shortcut.c_str(), item.Checked, item.Enabled))
                 clicked = item.Id;
+        }
+        return clicked;
+    }
+
+    ScriptMenuClicks DrawScriptMenuRoots(const std::vector<Lua::ScriptMenuItem>& roots, const char* idPrefix, bool (*skip)(const Lua::ScriptMenuItem&))
+    {
+        ScriptMenuClicks clicks;
+        for (const Lua::ScriptMenuItem& root : roots)
+        {
+            if (root.Caption == "-" || (skip && skip(root)))
+                continue;
+            const std::string label = root.Caption + idPrefix + std::to_string(root.Id);
+            if (root.Children.empty())
+            {
+                if (ImGui::MenuItem(label.c_str(), nullptr, root.Checked, root.Enabled))
+                    clicks.Clicked = root.Id;
+                continue;
+            }
+            if (ImGui::BeginMenu(label.c_str(), root.Enabled))
+            {
+                if (ImGui::IsWindowAppearing())
+                    clicks.Opened = root.Id;
+                if (const int inner = DrawScriptMenuItems(root.Children))
+                    clicks.Clicked = inner;
+                ImGui::EndMenu();
+            }
+        }
+        return clicks;
+    }
+
+    int ScriptShortcutPressed(const std::vector<Lua::ScriptMenuItem>& roots, const std::vector<ImGuiKeyChord>& reserved, CommandScope scope,
+        std::vector<ImGuiKeyChord>* taken, const char* owner)
+    {
+        static std::set<std::pair<int, ImGuiKeyChord>> reported;
+        std::vector<const Lua::ScriptMenuItem*> pending;
+        for (const Lua::ScriptMenuItem& root : roots)
+            pending.push_back(&root);
+        int clicked = 0;
+        while (!pending.empty())
+        {
+            const Lua::ScriptMenuItem* item = pending.back();
+            pending.pop_back();
+            for (const Lua::ScriptMenuItem& child : item->Children)
+                pending.push_back(&child);
+            const ImGuiKeyChord chord = ScriptChord(item->Shortcut);
+            if (!chord || !item->Enabled || !item->Children.empty())
+                continue;
+            if (std::find(reserved.begin(), reserved.end(), chord) != reserved.end())
+            {
+                if (owner && reported.insert({ item->Id, chord }).second)
+                    LOG_INFO("Lua", std::string("The ") + owner + " keeps " + ChordText(chord) + " for its own command, so the script entry \"" + item->Caption + "\" does not get it");
+                continue;
+            }
+            if (taken)
+                taken->push_back(chord);
+            if (!clicked && ChordPressed(chord, scope))
+                clicked = item->Id;
         }
         return clicked;
     }

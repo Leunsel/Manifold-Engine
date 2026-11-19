@@ -181,35 +181,52 @@ namespace Manifold::UI
         }
     }
 
+    bool Workspace::CanRun(Command command)
+    {
+        switch (command)
+        {
+        case Command::OpenMemoryViewer:
+        case Command::OpenStructureDissect:
+        case Command::OpenAutoAssembler:
+        case Command::OpenLuaEngine:
+        case Command::OpenMono:
+        case Command::OpenLog:
+            return !m_engine.Options().ReleaseMode;
+        default:
+            return Describe(command).Scope == CommandScope::Global;
+        }
+    }
+
+    void Workspace::Run(Command command)
+    {
+        if (!CanRun(command))
+            return;
+        switch (command)
+        {
+        case Command::OpenProcess: OpenProcessPicker(); break;
+        case Command::OpenTable: OpenTableDialog(false); break;
+        case Command::SaveTable: SaveTable(false); break;
+        case Command::SaveTableAs: SaveTable(true); break;
+        case Command::OpenSettings: OpenSettings(); break;
+        case Command::OpenShortcuts: OpenShortcuts(); break;
+        case Command::OpenMemoryViewer: OpenMemoryViewer(0); break;
+        case Command::OpenStructureDissect: OpenStructure(0); break;
+        case Command::OpenAutoAssembler: OpenScript(Asm::CheatTableTemplate()); break;
+        case Command::OpenLuaEngine: OpenLua(); break;
+        case Command::OpenMono: OpenMono(); break;
+        case Command::OpenLog: OpenLog(); break;
+        case Command::OpenProfiler: OpenProfiler(); break;
+        default: break;
+        }
+    }
+
     void Workspace::HandleShortcuts()
     {
-        const bool release = m_engine.Options().ReleaseMode;
-        if (Pressed(Command::OpenProcess))
-            OpenProcessPicker();
-        if (Pressed(Command::OpenTable))
-            OpenTableDialog(false);
-        if (Pressed(Command::SaveTable))
-            SaveTable(false);
-        if (Pressed(Command::SaveTableAs))
-            SaveTable(true);
-        if (Pressed(Command::OpenSettings))
-            OpenSettings();
-        if (Pressed(Command::OpenShortcuts))
-            OpenShortcuts();
-        if (Pressed(Command::OpenMemoryViewer) && !release)
-            OpenMemoryViewer(0);
-        if (Pressed(Command::OpenStructureDissect) && !release)
-            OpenStructure(0);
-        if (Pressed(Command::OpenAutoAssembler) && !release)
-            OpenScript(Asm::CheatTableTemplate());
-        if (Pressed(Command::OpenLuaEngine) && !release)
-            OpenLua();
-        if (Pressed(Command::OpenMono) && !release)
-            OpenMono();
-        if (Pressed(Command::OpenLog) && !release)
-            OpenLog();
-        if (Pressed(Command::OpenProfiler))
-            OpenProfiler();
+        for (const CommandInfo& info : AllCommands())
+        {
+            if (info.Scope == CommandScope::Global && Pressed(info.Id))
+                Run(info.Id);
+        }
         SecretKeys();
     }
 

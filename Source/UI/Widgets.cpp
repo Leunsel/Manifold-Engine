@@ -136,10 +136,6 @@ namespace Manifold::UI
             draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(left, y), color, begin, end, 0.0f, &clip);
         }
 
-        ImVec4 Mix(ImVec4 from, ImVec4 to, float amount)
-        {
-            return ImVec4(from.x + (to.x - from.x) * amount, from.y + (to.y - from.y) * amount, from.z + (to.z - from.z) * amount, from.w);
-        }
     }
 
     unsigned int SkeletonNoise(unsigned int value)
@@ -217,7 +213,7 @@ namespace Manifold::UI
                 const float spread = Px(3.0f) * static_cast<float>(layer);
                 draw->AddRectFilled(ImVec2(min.x - spread, min.y - spread + Px(4.0f)), ImVec2(max.x + spread, max.y + spread + Px(4.0f)), IM_COL32(0, 0, 0, 16), rounding + spread);
             }
-            draw->AddRectFilled(min, max, ImGui::GetColorU32(Mix(ManifoldTheme::Card, ManifoldTheme::Text, 0.025f)), rounding);
+            draw->AddRectFilled(min, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Mix(ManifoldTheme::Card, ManifoldTheme::Text, 0.025f), ManifoldTheme::Card.w)), rounding);
             draw->AddRect(min, max, ImGui::GetColorU32(ManifoldTheme::Border), rounding);
         }
         else
@@ -459,6 +455,19 @@ namespace Manifold::UI
         const bool clicked = ImGui::Button(label, size);
         ImGui::PopStyleColor(3);
         return clicked;
+    }
+
+    GhostButtons::GhostButtons(ImVec4 text)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.08f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.14f));
+        ImGui::PushStyleColor(ImGuiCol_Text, text);
+    }
+
+    GhostButtons::~GhostButtons()
+    {
+        ImGui::PopStyleColor(4);
     }
 
     bool DangerMenuItem(const char* label, const char* shortcut, bool enabled)
@@ -900,7 +909,7 @@ namespace Manifold::UI
         const ImVec2 knob(left + (right - left) * eased, min.y + height * 0.5f);
         const ImVec4 knobOff = ManifoldTheme::Label;
         const ImVec4 knobOn = ManifoldTheme::Page;
-        const ImVec4 knobColor(knobOff.x + (knobOn.x - knobOff.x) * eased, knobOff.y + (knobOn.y - knobOff.y) * eased, knobOff.z + (knobOn.z - knobOff.z) * eased, 1.0f);
+        const ImVec4 knobColor = ManifoldTheme::WithAlpha(ManifoldTheme::Mix(knobOff, knobOn, eased), 1.0f);
         draw->AddCircleFilled(knob, radius, ImGui::GetColorU32(knobColor), 24);
         return changed;
     }
@@ -1214,6 +1223,11 @@ namespace Manifold::UI
     }
 
     DialogChoice Dialog::Buttons(const char* ok, bool okEnabled, bool enterConfirms, const char* cancel)
+    {
+        return DialogButtons(ok, okEnabled, enterConfirms, cancel);
+    }
+
+    DialogChoice DialogButtons(const char* ok, bool okEnabled, bool enterConfirms, const char* cancel)
     {
         const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
         const bool enter = enterConfirms && focused && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));

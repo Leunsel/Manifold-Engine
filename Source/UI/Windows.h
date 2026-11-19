@@ -69,6 +69,7 @@ namespace Manifold::UI
         float TitleTools(float left, float right, float height);
         float ProcessChip(float left, float right, float y, float height);
         void ProcessChipMenu();
+        void ProcessItems();
         void ScanArea(float height);
         void ResultsCard(float width, float height);
         void ScanCard(float width, float height);
@@ -98,6 +99,9 @@ namespace Manifold::UI
         void SaveOptions();
         void OpenValueDialog(Table::MemoryRecord& record);
         void MainShortcuts();
+        bool CanRun(Command command);
+        void Run(Command command);
+        bool Item(const char* label, Command command, bool selected = false);
         void ToggleCompactMode();
         void ToggleReleaseMode();
         void OpenAddDialog();
@@ -107,7 +111,6 @@ namespace Manifold::UI
         void ResultValueDialog();
         void SaveResultsDialog();
         void RefreshScriptMenu();
-        bool ScriptMenuMerged(const Lua::ScriptMenuItem& item) const;
         void ScriptMenuInto(const char* merge, int& opened, int& clicked);
         void ScriptMenuShortcuts();
         std::string ResultText(const Scan::ScanRecord& record, std::span<const std::uint8_t> bytes);
@@ -131,6 +134,7 @@ namespace Manifold::UI
         Workspace& m_workspace;
         Engine& m_engine;
         bool m_release = false;
+        float m_menusWidth = 0.0f;
         IconCache m_processIcon;
         float m_chipHover = 0.0f;
         double m_chipConnectedAt = -1.0;

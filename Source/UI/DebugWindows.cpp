@@ -175,15 +175,11 @@ namespace Manifold::UI
             ImGui::Spacing();
             TextWithError(m_editError, ManifoldTheme::Error);
         }
-        ImGui::Spacing();
-        if (AccentButton(m_editExisting ? "Save" : "Set", Px(100.0f, 0.0f)))
+        const DialogChoice choice = DialogButtons(m_editExisting ? "Save" : "Set", true, false);
+        if (choice == DialogChoice::Ok)
             Apply();
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", Px(100.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-        {
+        else if (choice == DialogChoice::Cancel)
             m_editOpen = false;
-            ImGui::CloseCurrentPopup();
-        }
         EndModal();
     }
 
@@ -534,14 +530,12 @@ namespace Manifold::UI
             ImGui::Spacing();
             TextWithError(m_error, ManifoldTheme::Error);
         }
-        ImGui::Spacing();
-        if (AccentButton("Trace", Px(100.0f, 0.0f)))
+        const DialogChoice choice = DialogButtons("Trace", true, false);
+        if (choice == DialogChoice::Ok)
             Begin();
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", Px(100.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+        else if (choice == DialogChoice::Cancel)
         {
             m_startOpen = false;
-            ImGui::CloseCurrentPopup();
             if (m_steps.empty() && !m_running)
                 m_open = false;  // nothing traced yet: do not leave an empty window behind
         }

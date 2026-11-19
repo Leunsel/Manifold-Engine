@@ -1,5 +1,6 @@
 #pragma once
 
+#include "App/Commands.h"
 #include "Lua/LuaEngine.h"
 
 #include "imgui.h"
@@ -17,7 +18,16 @@ namespace Manifold
 
 namespace Manifold::UI
 {
+    struct ScriptMenuClicks
+    {
+        int Opened = 0;
+        int Clicked = 0;
+    };
+
     int DrawScriptMenuItems(const std::vector<Lua::ScriptMenuItem>& items);
+    ScriptMenuClicks DrawScriptMenuRoots(const std::vector<Lua::ScriptMenuItem>& roots, const char* idPrefix, bool (*skip)(const Lua::ScriptMenuItem&) = nullptr);
+    int ScriptShortcutPressed(const std::vector<Lua::ScriptMenuItem>& roots, const std::vector<ImGuiKeyChord>& reserved, CommandScope scope,
+        std::vector<ImGuiKeyChord>* taken = nullptr, const char* owner = nullptr);
     ImGuiKeyChord ScriptChord(const std::string& shortcut);
     void InstallTextMeasurer();
 

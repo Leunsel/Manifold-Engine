@@ -39,6 +39,17 @@ namespace Manifold::UI
     void CardTitle(const char* icon, const char* title, std::string_view note = {});
 
     bool IconButton(const char* icon, const char* tooltip, bool danger = false, float side = 0.0f);
+
+    class GhostButtons
+    {
+    public:
+        explicit GhostButtons(ImVec4 text = ManifoldTheme::Label);
+        ~GhostButtons();
+
+        GhostButtons(const GhostButtons&) = delete;
+        GhostButtons& operator=(const GhostButtons&) = delete;
+    };
+
     bool AccentButton(const char* label, ImVec2 size = ImVec2(0.0f, 0.0f));
     bool DangerButton(const char* label, ImVec2 size = ImVec2(0.0f, 0.0f));
     bool DangerMenuItem(const char* label, const char* shortcut = nullptr, bool enabled = true);
@@ -83,6 +94,8 @@ namespace Manifold::UI
         Ok,
         Cancel
     };
+
+    DialogChoice DialogButtons(const char* ok = "OK", bool okEnabled = true, bool enterConfirms = true, const char* cancel = "Cancel");
 
     class Dialog
     {
