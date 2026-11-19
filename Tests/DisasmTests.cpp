@@ -348,7 +348,7 @@ namespace Manifold::Tests
             std::printf("could not open %s: %s\n", name.c_str(), opened.Text.c_str());
             return 2;
         }
-        const Status mono = engine.EnsureMono();
+        const Status mono = engine.Managed().Ensure();
         if (!mono)
         {
             std::printf("no Mono: %s\n", mono.Text.c_str());

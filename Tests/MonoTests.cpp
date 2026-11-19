@@ -181,7 +181,7 @@ namespace Manifold::Tests
                 std::printf("could not open %u: %s\n", pid, opened.Text.c_str());
                 return 2;
             }
-            const Status mono = engine.EnsureMono();
+            const Status mono = engine.Managed().Ensure();
             if (!mono)
             {
                 std::printf("no Mono: %s\n", mono.Text.c_str());
@@ -299,7 +299,7 @@ namespace Manifold::Tests
     void SettleMono(Engine& engine, int milliseconds)
     {
         const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
-        while (engine.MonoLoading() && std::chrono::steady_clock::now() < until)
+        while (engine.Managed().Loading() && std::chrono::steady_clock::now() < until)
         {
             engine.Tick();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -310,11 +310,11 @@ namespace Manifold::Tests
     void CheckMonoInBackground(Engine& engine)
     {
         const std::uint64_t generation = engine.Mono().Generation();
-        engine.ReloadMono(true);
-        CHECK(engine.MonoLoading());
+        engine.Managed().Reload(true);
+        CHECK(engine.Managed().Loading());
         CHECK(engine.MonoPresent());
         SettleMono(engine, 5000);
-        CHECK(!engine.MonoLoading());
+        CHECK(!engine.Managed().Loading());
         CHECK(engine.Mono().Generation() != generation);
         CHECK_EQ(engine.Mono().ClassCount(), 2u);
 
@@ -334,28 +334,28 @@ namespace Manifold::Tests
         CHECK(!engine.MonoPresent());
         CHECK_EQ(engine.Mono().ClassCount(), 0u);
 
-        engine.LoadMono(true);
-        CHECK(engine.MonoLoading());
-        CHECK(engine.MonoWork() != 0);
+        engine.Managed().Load(true);
+        CHECK(engine.Managed().Loading());
+        CHECK(engine.Managed().WorkId() != 0);
         SettleMono(engine, 5000);
-        CHECK(!engine.MonoLoading());
+        CHECK(!engine.Managed().Loading());
         CHECK(engine.MonoPresent());
         CHECK_EQ(engine.Mono().ClassCount(), 2u);
         Status error;
         CHECK_MSG(engine.Evaluate("Player:TakeDamage", &error).has_value(), error.Text);
 
         engine.Mono().Stop();
-        engine.LoadMono(true);
-        engine.CancelWork(engine.MonoWork());
+        engine.Managed().Load(true);
+        engine.CancelWork(engine.Managed().WorkId());
         SettleMono(engine, 5000);
-        CHECK(!engine.MonoLoading());
+        CHECK(!engine.Managed().Loading());
         CHECK(engine.MonoPresent() == (engine.Mono().ClassCount() == 2u));
 
         engine.Mono().Stop();
-        engine.LoadMono(true);
-        const Status ensured = engine.EnsureMono();
+        engine.Managed().Load(true);
+        const Status ensured = engine.Managed().Ensure();
         CHECK_MSG(ensured.Ok(), ensured.Text);
-        CHECK(!engine.MonoLoading());
+        CHECK(!engine.Managed().Loading());
         CHECK(engine.MonoPresent());
 
         engine.Mono().Stop();
@@ -368,7 +368,7 @@ namespace Manifold::Tests
         while (std::chrono::steady_clock::now() < until)
         {
             engine.Tick();
-            sawLoading = sawLoading || engine.MonoLoading();
+            sawLoading = sawLoading || engine.Managed().Loading();
             const Status read = engine.Lua().RunWithResult("return __monoWait or ''", "mono wait result", waited);
             if (!read || !waited.empty())
                 break;
@@ -560,7 +560,7 @@ namespace Manifold::Tests
         }
         CheckOrphanedWorker(engine);
 
-        const Status mono = engine.EnsureMono();
+        const Status mono = engine.Managed().Ensure();
         CHECK_MSG(mono.Ok(), mono.Text);
         if (!mono)
             return;
@@ -700,7 +700,7 @@ namespace Manifold::Tests
             }
             engine.Mono().SetManagedDumper(false);
             const auto start = std::chrono::steady_clock::now();
-            const Status mono = engine.EnsureMono();
+            const Status mono = engine.Managed().Ensure();
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             if (!mono)
             {
@@ -856,7 +856,7 @@ namespace Manifold::Tests
             engine.Process()->Is64Bit() ? "64-bit" : "32-bit");
         engine.Mono().SetManagedDumper(!noDumper);
         const auto start = std::chrono::steady_clock::now();
-        const Status mono = engine.EnsureMono();
+        const Status mono = engine.Managed().Ensure();
         const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         if (!mono)
         {
@@ -967,7 +967,7 @@ namespace Manifold::Tests
             return 2;
         }
         std::printf("opened %s (pid %lu)\n", engine.Process()->Name().c_str(), static_cast<unsigned long>(engine.Process()->Id()));
-        const Status mono = engine.EnsureMono();
+        const Status mono = engine.Managed().Ensure();
         if (!mono)
         {
             std::printf("no Mono: %s\n", mono.Text.c_str());

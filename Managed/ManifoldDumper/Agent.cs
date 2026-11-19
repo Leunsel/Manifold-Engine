@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 
 namespace Manifold.Managed
 {
@@ -41,6 +42,7 @@ namespace Manifold.Managed
         internal const int SlotCount = 65536;
         const int HeartbeatLimitMs = 30000;
         const long FrameBudgetMs = 4;
+        const int StopWaitMs = 100;
 
         static readonly object s_lock = new object();
         static EventInfo s_event;
@@ -51,7 +53,7 @@ namespace Manifold.Managed
         static Batch s_pending;
         static IntPtr s_response;
         static int s_responseCapacity;
-        static bool s_retire;
+        static volatile bool s_retire;
         internal static Registry Objects;
         internal static readonly bool IsMono = Type.GetType("Mono.Runtime") != null;
 
@@ -87,10 +89,19 @@ namespace Manifold.Managed
 
         public static int StopNow()
         {
-            lock (s_lock)
+            if (!Monitor.TryEnter(s_lock, StopWaitMs))
+            {
+                s_retire = true;
+                return State;
+            }
+            try
             {
                 Retire();
                 return State;
+            }
+            finally
+            {
+                Monitor.Exit(s_lock);
             }
         }
 
@@ -215,6 +226,11 @@ namespace Manifold.Managed
                         s_heartbeatAt = now;
                     }
                     else if (now - s_heartbeatAt > HeartbeatLimitMs)
+                    {
+                        Retire();
+                        return;
+                    }
+                    if (s_retire && s_pending == null)
                     {
                         Retire();
                         return;

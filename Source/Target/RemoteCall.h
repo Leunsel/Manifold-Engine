@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/CheckedMutex.h"
 #include "Core/Errors.h"
 
 #include <chrono>
@@ -36,6 +37,7 @@ namespace Manifold::Target
         void Stop();
         bool Running() const { return m_running; }
         void SetTimeout(std::chrono::milliseconds timeout) { m_timeout = timeout; }
+        void SetGuard(const CheckedMutex* guard) { m_guard = guard; }
 
         // Call function(a0..a3) in the target and return its 64-bit result.
         Status Call(std::uint64_t function, std::uint64_t a0, std::uint64_t a1, std::uint64_t a2, std::uint64_t a3, std::uint64_t& result);
@@ -83,5 +85,6 @@ namespace Manifold::Target
         std::uint64_t m_drainBlock = 0;  // the drain's batch block
         bool m_running = false;
         std::chrono::milliseconds m_timeout{ 5000 };
+        const CheckedMutex* m_guard = nullptr;
     };
 }

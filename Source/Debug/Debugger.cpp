@@ -25,6 +25,7 @@ namespace Manifold::Debug
         constexpr std::uint64_t kTrapFlag = 0x100;
         constexpr std::uint64_t kResumeFlag = 0x10000;
         constexpr std::size_t kMaxWatchEntries = 4096;
+        constexpr std::uint64_t kMaxReturnSteps = 2000000;
         constexpr std::uint64_t kStaleHardwareMilliseconds = 5000;
         constexpr std::uint64_t kAttachSettleMilliseconds = 2000;
         constexpr std::uint64_t kHiddenCheckMilliseconds = 15;
@@ -1078,6 +1079,24 @@ namespace Manifold::Debug
         return m_disassembler->PreviousStart(buffer, sizeof(buffer), start, address);
     }
 
+    std::optional<Debugger::HitPlace> Debugger::ExecuteHitPlace(WatchKind kind, std::uint64_t at, const Disasm::RegisterValues& registers) const
+    {
+        if (kind == WatchKind::Calls)
+        {
+            const auto returnAddress = m_process->ReadPointer(registers.Rsp);
+            if (!returnAddress)
+                return std::nullopt;
+            return HitPlace{ PreviousInstruction(*returnAddress).value_or(*returnAddress), *returnAddress };
+        }
+        const Disasm::Instruction instruction = m_disassembler->Read(*m_process, at, nullptr);
+        return HitPlace{ at, m_disassembler->EffectiveAddress(instruction, registers).value_or(0) };
+    }
+
+    bool Debugger::AnyHardware() const
+    {
+        return std::any_of(m_breakpoints.begin(), m_breakpoints.end(), [](const auto& item) { return item.second.Hardware; });
+    }
+
     void Debugger::RecordHit(Watch& watch, std::uint64_t instruction, std::uint64_t accessed, std::uint32_t threadId, const Disasm::RegisterValues& registers)
     {
         ++watch.Hits;
@@ -1170,21 +1189,8 @@ namespace Manifold::Debug
                     if (watch != m_watches.end())
                     {
                         const Disasm::RegisterValues values = context.Values();
-                        if (watch->second.Kind == WatchKind::Calls)
-                        {
-                            const auto returnAddress = m_process->ReadPointer(values.Rsp);
-                            if (returnAddress)
-                            {
-                                const auto caller = PreviousInstruction(*returnAddress);
-                                RecordHit(watch->second, caller.value_or(*returnAddress), *returnAddress, event.dwThreadId, values);
-                            }
-                        }
-                        else
-                        {
-                            const Disasm::Instruction instruction = m_disassembler->Read(*m_process, at, nullptr);
-                            const auto accessed = m_disassembler->EffectiveAddress(instruction, values);
-                            RecordHit(watch->second, at, accessed.value_or(0), event.dwThreadId, values);
-                        }
+                        if (const auto place = ExecuteHitPlace(watch->second.Kind, at, values))
+                            RecordHit(watch->second, place->Instruction, place->Accessed, event.dwThreadId, values);
                     }
                     thread.Reinsert = at;
                     PlanStepAccess(thread, context.Values());
@@ -1259,7 +1265,7 @@ namespace Manifold::Debug
             ContextHolder context(m_is64Bit);
             if (!context.Read(thread.Handle))
             {
-                const bool hardwareActive = std::any_of(m_breakpoints.begin(), m_breakpoints.end(), [](const auto& item) { return item.second.Hardware; });
+                const bool hardwareActive = AnyHardware();
                 if (!hardwareActive && ::GetTickCount64() - m_lastHardwareTick >= kStaleHardwareMilliseconds && !thread.Stepping && !thread.Reinsert)
                     return DBG_EXCEPTION_NOT_HANDLED;
                 LOG_WARN("Debugger", Format("Could not read thread %u at a single step (%s); the step is kept from the process", static_cast<unsigned>(event.dwThreadId),
@@ -1289,20 +1295,8 @@ namespace Manifold::Debug
                         auto watch = m_watches.find(breakpoint.WatchId);
                         if (watch != m_watches.end())
                         {
-                            if (watch->second.Kind == WatchKind::Calls)
-                            {
-                                if (const auto returnAddress = m_process->ReadPointer(values.Rsp))
-                                {
-                                    const auto caller = PreviousInstruction(*returnAddress);
-                                    RecordHit(watch->second, caller.value_or(*returnAddress), *returnAddress, event.dwThreadId, values);
-                                }
-                            }
-                            else
-                            {
-                                const Disasm::Instruction instruction = m_disassembler->Read(*m_process, context.Ip(), nullptr);
-                                const auto accessed = m_disassembler->EffectiveAddress(instruction, values);
-                                RecordHit(watch->second, context.Ip(), accessed.value_or(0), event.dwThreadId, values);
-                            }
+                            if (const auto place = ExecuteHitPlace(watch->second.Kind, context.Ip(), values))
+                                RecordHit(watch->second, place->Instruction, place->Accessed, event.dwThreadId, values);
                         }
                     }
                     else
@@ -1369,7 +1363,7 @@ namespace Manifold::Debug
                 handled = true;
                 if (thread.UntilReturn)
                 {
-                    if (thread.ReturnPending || ++thread.Steps > 2000000)
+                    if (thread.ReturnPending || ++thread.Steps > kMaxReturnSteps)
                     {
                         thread.Stepping = false;
                         thread.UntilReturn = false;
@@ -1400,7 +1394,7 @@ namespace Manifold::Debug
             }
             if (!handled)
             {
-                const bool hardwareActive = std::any_of(m_breakpoints.begin(), m_breakpoints.end(), [](const auto& item) { return item.second.Hardware; });
+                const bool hardwareActive = AnyHardware();
                 if (hardwareActive || ::GetTickCount64() - m_lastHardwareTick < kStaleHardwareMilliseconds)
                 {
                     handled = true;
@@ -1450,7 +1444,7 @@ namespace Manifold::Debug
             {
                 std::unique_lock lock(m_lock);
                 RunTasks();
-                if (std::any_of(m_breakpoints.begin(), m_breakpoints.end(), [](const auto& item) { return item.second.Hardware; }))
+                if (AnyHardware())
                     CheckHiddenThreads(false);
             }
             if (!::WaitForDebugEventEx(&event, 10))
@@ -1472,7 +1466,7 @@ namespace Manifold::Debug
                 state->Id = event.dwThreadId;
                 m_mainThread = event.dwThreadId;
                 m_threads[event.dwThreadId] = std::move(state);
-                if (std::any_of(m_breakpoints.begin(), m_breakpoints.end(), [](const auto& item) { return item.second.Hardware; }))
+                if (AnyHardware())
                     ApplyHardware(event.dwThreadId);
                 break;
             }
@@ -1482,7 +1476,7 @@ namespace Manifold::Debug
                 state->Handle = event.u.CreateThread.hThread;
                 state->Id = event.dwThreadId;
                 m_threads[event.dwThreadId] = std::move(state);
-                if (std::any_of(m_breakpoints.begin(), m_breakpoints.end(), [](const auto& item) { return item.second.Hardware; }))
+                if (AnyHardware())
                     ApplyHardware(event.dwThreadId);
                 break;
             }
@@ -2232,19 +2226,11 @@ namespace Manifold::Debug
                         entry.Instruction = previous.value_or(raw.Instruction);
                         entry.Accessed = target.Address;
                     }
-                    else if (target.Kind == WatchKind::Calls)
-                    {
-                        const auto ret = m_process->ReadPointer(regs.Rsp);
-                        const auto caller = ret ? PreviousInstruction(*ret) : std::nullopt;
-                        entry.Instruction = caller.value_or(ret.value_or(raw.Instruction));
-                        entry.Accessed = ret.value_or(0);
-                    }
                     else
                     {
-                        entry.Instruction = raw.Instruction;
-                        const Disasm::Instruction decoded = m_disassembler->Read(*m_process, raw.Instruction, nullptr);
-                        const auto accessed = m_disassembler->EffectiveAddress(decoded, regs);
-                        entry.Accessed = accessed.value_or(0);
+                        const HitPlace place = ExecuteHitPlace(target.Kind, raw.Instruction, regs).value_or(HitPlace{ raw.Instruction, 0 });
+                        entry.Instruction = place.Instruction;
+                        entry.Accessed = place.Accessed;
                     }
                     hits += raw.Count;
                     entries.push_back(entry);

@@ -2,6 +2,7 @@
 
 #include "App/Engine.h"
 #include "Core/Text.h"
+#include "Core/CheckedMutex.h"
 #include "Core/RuntimeLog.h"
 #include "Lua/LuaEngine.h"
 #include "Target/PatchScan.h"
@@ -1005,6 +1006,7 @@ namespace Manifold::Tests
         DirectSystemCalls(target.Info.dwProcessId, health);
         CheckIl2CppTarget(targetPath);
         CheckManagedDumper(targetPath);
+        CHECK_MSG(UnheldLockNotes() == 0, std::to_string(UnheldLockNotes()) + " calls into the game ran without the Mono lock; the log names the places");
         return Totals().Failures - before;
     }
 }

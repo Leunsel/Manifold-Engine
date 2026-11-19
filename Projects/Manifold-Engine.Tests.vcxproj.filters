@@ -60,6 +60,9 @@
     <ClCompile Include="..\Source\App\Engine.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\ManagedSession.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Notifications.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -91,6 +94,9 @@
       <Filter>Source\Core</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Core\BuildInfo.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\CheckedMutex.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Core\Deflate.cpp">

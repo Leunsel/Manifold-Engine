@@ -109,6 +109,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\App\Commands.cpp" />
     <ClCompile Include="..\Source\App\Diagnostics.cpp" />
     <ClCompile Include="..\Source\App\Engine.cpp" />
+    <ClCompile Include="..\Source\App\ManagedSession.cpp" />
     <ClCompile Include="..\Source\App\Notifications.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
     <ClCompile Include="..\Source\App\SettingsStore.cpp" />
@@ -120,6 +121,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp" />
     <ClCompile Include="..\Source\Core\BackgroundWork.cpp" />
     <ClCompile Include="..\Source\Core\BuildInfo.cpp" />
+    <ClCompile Include="..\Source\Core\CheckedMutex.cpp" />
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
     <ClCompile Include="..\Source\Core\Handle.cpp" />

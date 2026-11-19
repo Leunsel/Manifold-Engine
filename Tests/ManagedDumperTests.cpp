@@ -418,7 +418,7 @@ namespace Manifold::Tests
             CHECK_MSG(opened.Ok(), opened.Text);
             if (!opened)
                 return;
-            const Status mono = engine.EnsureMono();
+            const Status mono = engine.Managed().Ensure();
             CHECK_MSG(mono.Ok(), label + ": " + mono.Text);
             if (!mono)
                 return;
@@ -481,7 +481,7 @@ namespace Manifold::Tests
             CHECK_MSG(opened.Ok(), opened.Text);
             if (!opened)
                 return;
-            const Status mono = engine.EnsureMono();
+            const Status mono = engine.Managed().Ensure();
             CHECK_MSG(mono.Ok(), label + ": " + mono.Text);
             if (!mono)
                 return;

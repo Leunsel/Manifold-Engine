@@ -419,6 +419,8 @@ namespace Manifold::Target
 
     Status RemoteCall::Call(std::uint64_t function, std::uint64_t a0, std::uint64_t a1, std::uint64_t a2, std::uint64_t a3, std::uint64_t& result)
     {
+        if (m_guard)
+            MANIFOLD_ASSERT_HELD(*m_guard);
         result = 0;
         if (!m_process || !m_running || !function)
             return Status::Fail(ErrorCode::NoProcess);
@@ -469,6 +471,8 @@ namespace Manifold::Target
 
     std::uint64_t RemoteCall::Scratch(std::size_t bytes)
     {
+        if (m_guard)
+            MANIFOLD_ASSERT_HELD(*m_guard);
         if (!m_process || !m_data)
             return 0;
         const std::uint64_t aligned = (bytes + 15) & ~std::uint64_t(15);
@@ -484,11 +488,15 @@ namespace Manifold::Target
 
     void RemoteCall::ResetScratch()
     {
+        if (m_guard)
+            MANIFOLD_ASSERT_HELD(*m_guard);
         m_dataUsed = 0;
     }
 
     Status RemoteCall::Drain(std::uint64_t function, std::uint64_t object, std::vector<DrainItem>& items, std::uint32_t peekOffset, std::uint64_t peekFunction, std::size_t limit)
     {
+        if (m_guard)
+            MANIFOLD_ASSERT_HELD(*m_guard);
         items.clear();
         if (!m_process || !m_running || !m_drain || !m_drainBlock || !function)
             return Status::Fail(ErrorCode::NoProcess);

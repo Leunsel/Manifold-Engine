@@ -162,7 +162,8 @@ namespace Manifold::Target
         {
             std::lock_guard lock(m_lock);
             m_process = process;
-            if (Status started = m_call.Start(process); !started)
+            m_call.SetGuard(&m_lock);
+        if (Status started = m_call.Start(process); !started)
             {
                 m_process.reset();
                 return started;

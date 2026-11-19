@@ -133,7 +133,7 @@ namespace Manifold::UI
                     "This reads the game's Mono or IL2CPP runtime by running a small helper inside it. For IL2CPP games the classes, "
                     "method addresses and field offsets are read; the scene explorer and inspector need a Mono game.",
                     actions, true) == 0)
-                m_engine.LoadMono();
+                m_engine.Managed().Load();
             EndToolWindow();
             return;
         }
@@ -260,18 +260,18 @@ namespace Manifold::UI
             if (!present)
             {
                 if (ImGui::MenuItem(ICON_FA_PLUG "  Load the runtime", nullptr, false, process && !working))
-                    m_engine.LoadMono();
+                    m_engine.Managed().Load();
                 ItemTooltip("Reads the game's Mono or IL2CPP runtime through a small helper inside the game");
             }
             else
             {
                 if (ImGui::MenuItem(ICON_FA_SYNC "  Reload the classes", nullptr, false, !working))
-                    m_engine.ReloadMono();
+                    m_engine.Managed().Reload();
                 ItemTooltip("Reads the class list again, for assemblies the game loaded later");
                 if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut down", nullptr, false, !working))
                 {
                     CloseAll();
-                    m_engine.StopMono();
+                    m_engine.Managed().Stop();
                     stopped = true;
                 }
                 ItemTooltip("Ends the helper in the game, takes the explorer's frame callback out again and sets runInBackground back");

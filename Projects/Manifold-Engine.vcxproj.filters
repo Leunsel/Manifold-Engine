@@ -72,6 +72,9 @@
     <ClCompile Include="..\Source\App\Engine.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\ManagedSession.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Notifications.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -106,6 +109,9 @@
       <Filter>Source\Core</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Core\BuildInfo.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\CheckedMutex.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Core\Deflate.cpp">
@@ -456,6 +462,9 @@
     <ClInclude Include="..\Source\App\Engine.h">
       <Filter>Source\App</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\App\ManagedSession.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\App\Notifications.h">
       <Filter>Source\App</Filter>
     </ClInclude>
@@ -487,6 +496,9 @@
       <Filter>Source\Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Core\BuildInfo.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Core\CheckedMutex.h">
       <Filter>Source\Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Core\Deflate.h">

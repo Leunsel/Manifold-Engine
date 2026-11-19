@@ -122,6 +122,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\App\CrashHandler.cpp" />
     <ClCompile Include="..\Source\App\Diagnostics.cpp" />
     <ClCompile Include="..\Source\App\Engine.cpp" />
+    <ClCompile Include="..\Source\App\ManagedSession.cpp" />
     <ClCompile Include="..\Source\App\Notifications.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
     <ClCompile Include="..\Source\App\SettingsStore.cpp" />
@@ -134,6 +135,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp" />
     <ClCompile Include="..\Source\Core\BackgroundWork.cpp" />
     <ClCompile Include="..\Source\Core\BuildInfo.cpp" />
+    <ClCompile Include="..\Source\Core\CheckedMutex.cpp" />
     <ClCompile Include="..\Source\Core\Deflate.cpp" />
     <ClCompile Include="..\Source\Core\Errors.cpp" />
     <ClCompile Include="..\Source\Core\Handle.cpp" />
@@ -254,6 +256,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\App\CrashHandler.h" />
     <ClInclude Include="..\Source\App\Diagnostics.h" />
     <ClInclude Include="..\Source\App\Engine.h" />
+    <ClInclude Include="..\Source\App\ManagedSession.h" />
     <ClInclude Include="..\Source\App\Notifications.h" />
     <ClInclude Include="..\Source\App\Settings.h" />
     <ClInclude Include="..\Source\App\SettingsStore.h" />
@@ -265,6 +268,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Asm\AutoAssembler.h" />
     <ClInclude Include="..\Source\Core\BackgroundWork.h" />
     <ClInclude Include="..\Source\Core\BuildInfo.h" />
+    <ClInclude Include="..\Source\Core\CheckedMutex.h" />
     <ClInclude Include="..\Source\Core\Deflate.h" />
     <ClInclude Include="..\Source\Core\Errors.h" />
     <ClInclude Include="..\Source\Core\Handle.h" />

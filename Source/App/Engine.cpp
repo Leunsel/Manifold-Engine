@@ -5,7 +5,6 @@
 #include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
-#include "Target/UnityExplorer.h"
 
 #include <algorithm>
 #include <chrono>
@@ -102,10 +101,9 @@ namespace Manifold
             return;
         CancelActivations();
         m_activation.WaitForActivation();
-        m_work.CancelGroup(kMonoWork);
-        m_work.CompleteGroup(kMonoWork);
+        m_managed.CancelWork();
         m_tracer.Stop();
-        NoteExplorer(false);
+        m_managed.NoteExplorer(false);
         m_target.Mono().Stop();
         m_debugger.Detach();
         m_scanner.Reset();
@@ -142,139 +140,6 @@ namespace Manifold
         m_debugger.SetPreferHardware(m_settings.UseHardwareExecuteBreakpoints);
         m_debugger.SetBackend(m_settings.UseInProcessDebugger ? Debug::Backend::Veh : Debug::Backend::Windows);
         return m_debugger.Attach(m_target.Process());
-    }
-
-    Status Engine::EnsureMono()
-    {
-        m_work.CompleteGroup(kMonoWork);
-        if (m_target.Mono().Present())
-            return Status::Success();
-        if (!m_target.Process())
-            return Status::Fail(ErrorCode::NoProcess);
-        const Status started = m_target.Mono().Start(m_target.Process());
-        if (started)
-            m_target.RefreshSymbolProvider();
-        return started;
-    }
-
-    Status Engine::ReloadMonoNow()
-    {
-        m_work.CompleteGroup(kMonoWork);
-        if (!m_target.Mono().Present())
-            return EnsureMono();
-        return m_target.Mono().Refresh();
-    }
-
-    void Engine::LoadMono(bool fromScript)
-    {
-        if (m_target.Mono().Present() || MonoLoading())
-            return;
-        if (!m_target.Process())
-        {
-            if (!fromScript)
-                Notify(Status::Fail(ErrorCode::NoProcess));
-            return;
-        }
-        const std::shared_ptr<Target::Process> process = m_target.Process();
-        const std::uint64_t generation = m_target.Generation();
-        const bool il2cpp = Target::MonoBridge::DetectRuntime(*process) == Target::ManagedRuntime::Il2Cpp;
-        m_work.Start({ .Title = il2cpp ? "Loading the IL2CPP runtime" : "Loading the Mono runtime", .Group = kMonoWork }, [this, process, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
-            {
-                const Status status = m_target.Mono().Start(process, &progress);
-                const bool cancelled = progress.Cancelled();
-                return [this, status, cancelled, generation, fromScript]() { FinishMono(status, cancelled, true, fromScript, generation); };
-            });
-    }
-
-    void Engine::ReloadMono(bool fromScript)
-    {
-        if (MonoLoading())
-            return;
-        if (!m_target.Mono().Present())
-        {
-            LoadMono(fromScript);
-            return;
-        }
-        const std::uint64_t generation = m_target.Generation();
-        m_work.Start({ .Title = m_target.Mono().IsIl2Cpp() ? "Reloading the IL2CPP classes" : "Reloading the Mono classes", .Group = kMonoWork }, [this, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
-            {
-                const Status status = m_target.Mono().Refresh(&progress);
-                const bool cancelled = progress.Cancelled();
-                return [this, status, cancelled, generation, fromScript]() { FinishMono(status, cancelled, false, fromScript, generation); };
-            });
-    }
-
-    void Engine::StopMono(bool fromScript)
-    {
-        m_work.CancelGroup(kMonoWork);
-        m_work.CompleteGroup(kMonoWork);
-        if (!m_target.Mono().Present())
-            return;
-        const std::string runtime = Target::MonoBridge::RuntimeName(m_target.Mono().Runtime());
-        NoteExplorer(false);
-        m_target.Mono().Stop();
-        m_target.RefreshSymbolProvider();
-        LOG_INFO("Mono", "Shut down the " + runtime + " helper in the game");
-        if (!fromScript)
-            Notify(LogLevel::Success, "Shut down " + runtime + ": the helper in the game has ended");
-    }
-
-    void Engine::FinishMono(const Status& status, bool cancelled, bool starting, bool fromScript, std::uint64_t generation)
-    {
-        if (generation != m_target.Generation())
-            return;
-        if (status)
-        {
-            if (starting)
-                m_target.RefreshSymbolProvider();
-            if (starting && m_settings.AutoExplorer && !m_target.Mono().IsIl2Cpp() && !m_target.Mono().Unity().Enabled())
-            {
-                m_target.Mono().Unity().SetEnabled(true);
-                LOG_INFO("Unity", "Turned the scene explorer on by itself (Settings > Debugger > Start the scene explorer by itself)");
-            }
-            if (!fromScript)
-                Notify(LogLevel::Success, Format("%s %zu %s classes", starting ? "Loaded" : "Reloaded", m_target.Mono().ClassCount(), Target::MonoBridge::RuntimeName(m_target.Mono().Runtime())));
-            return;
-        }
-        if (cancelled)
-        {
-            LOG_INFO("Mono", starting ? "Loading the managed runtime was cancelled" : "Reloading the classes was cancelled; the earlier list stays");
-            return;
-        }
-        if (fromScript)
-            LOG_WARN("Mono", status.Text);
-        else
-            Notify(status);
-    }
-
-    void Engine::NoteExplorer(bool exited)
-    {
-        const std::shared_ptr<Target::Process> process = m_target.Process();
-        if (!process || !m_target.Mono().Present() || m_target.Mono().IsIl2Cpp())
-            return;
-        const std::optional<Target::UnityStatus> unity = m_target.Mono().UnityState();
-        if (!unity || !unity->Hooked)
-            return;
-        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - unity->HookedSince).count();
-        if (!exited)
-        {
-            if (process->Alive())
-                LOG_INFO("Unity", Format("The scene explorer's agent ran %.0f s in %s (%llu frames) until it was taken out", seconds, process->Name().c_str(),
-                    static_cast<unsigned long long>(unity->CallbackRuns)));
-            return;
-        }
-        DWORD code = 0;
-        std::optional<std::uint32_t> exitCode;
-        if (::GetExitCodeProcess(process->Handle(), &code) && code != STILL_ACTIVE)
-            exitCode = static_cast<std::uint32_t>(code);
-        const Target::ExplorerExitNote note = Target::UnityExplorer::ExitNote(*unity, process->Name(), exitCode, seconds);
-        if (!note.Crashed)
-        {
-            LOG_INFO("Unity", note.Text);
-            return;
-        }
-        LOG_WARN("Unity", note.Text);
-        Notify(LogLevel::Warning, process->Name() + " crashed while the scene explorer was active. The log has the details.");
     }
 
     void Engine::LookUpProcessLater(std::string name, std::function<void(std::optional<ProcessId>)> found)
@@ -471,7 +336,7 @@ namespace Manifold
             m_lastAliveCheck = now;
             if (!m_target.Process()->Alive())
             {
-                NoteExplorer(true);
+                m_managed.NoteExplorer(true);
                 Notify(LogLevel::Warning, ErrorMessage(ErrorCode::ProcessExited));
                 CloseProcess();
             }

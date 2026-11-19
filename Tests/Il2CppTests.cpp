@@ -141,7 +141,7 @@ namespace Manifold::Tests
         }
 
         const std::int32_t detachedBefore = ReadInt(process, engine.Evaluate("TestTarget.g_il2cppDetached").value_or(0));
-        const Status loaded = engine.EnsureMono();
+        const Status loaded = engine.Managed().Ensure();
         CHECK_MSG(loaded.Ok(), loaded.Text);
         if (!loaded)
             return;
@@ -307,26 +307,26 @@ namespace Manifold::Tests
         // Loading in the background, a reload (which drops classes found only
         // by their shape) and Shutdown, which takes the worker off IL2CPP's
         // thread list.
-        engine.StopMono();
+        engine.Managed().Stop();
         CHECK(!engine.MonoPresent());
         CHECK(!bridge.IsIl2Cpp());
         CHECK_EQ(ReadInt(process, engine.Evaluate("TestTarget.g_il2cppDetached").value_or(0)), detachedBefore + 1);
         CHECK(!engine.Evaluate("Player:TakeDamage").has_value());
-        engine.LoadMono(true);
-        CHECK(engine.MonoLoading());
+        engine.Managed().Load(true);
+        CHECK(engine.Managed().Loading());
         SettleMono(engine, 5000);
-        CHECK(!engine.MonoLoading());
+        CHECK(!engine.Managed().Loading());
         CHECK(engine.MonoPresent() && bridge.IsIl2Cpp());
         CHECK_EQ(bridge.ClassCount(), 5u);
         CHECK(take != 0 && engine.Evaluate("Player:TakeDamage") == take);
         bridge.ClassNameAt(list);
         const std::uint64_t generation = bridge.Generation();
-        engine.ReloadMono(true);
+        engine.Managed().Reload(true);
         SettleMono(engine, 5000);
         CHECK(bridge.Generation() != generation);
         CHECK_EQ(bridge.ClassCount(), 5u);
         CHECK(take != 0 && bridge.MethodNameAt(take) == std::optional<std::string>("Game.Player:TakeDamage"));
-        engine.StopMono();
+        engine.Managed().Stop();
     }
 
     void CheckIl2CppTarget(const std::filesystem::path& targetPath)

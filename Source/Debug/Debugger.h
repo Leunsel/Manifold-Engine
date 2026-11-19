@@ -192,6 +192,13 @@ namespace Manifold::Debug
         void UnpatchLocked(std::uint64_t address, std::uint8_t* buffer, std::size_t size) const;
         std::optional<std::uint64_t> PreviousInstruction(std::uint64_t address) const;
         void RecordHit(Watch& watch, std::uint64_t instruction, std::uint64_t accessed, std::uint32_t threadId, const Disasm::RegisterValues& registers);
+        struct HitPlace
+        {
+            std::uint64_t Instruction = 0;
+            std::uint64_t Accessed = 0;
+        };
+        std::optional<HitPlace> ExecuteHitPlace(WatchKind kind, std::uint64_t at, const Disasm::RegisterValues& registers) const;
+        bool AnyHardware() const;
         void CleanUp();
 
         Status VehAttach();

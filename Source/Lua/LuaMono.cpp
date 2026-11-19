@@ -23,7 +23,7 @@ namespace Manifold::Lua
         template <lua_CFunction Body>
         int AfterMonoWork(lua_State* state, int, lua_KContext)
         {
-            if (Owner(state).MonoLoading())
+            if (Owner(state).Managed().Loading())
                 return lua_yieldk(state, 0, 0, &AfterMonoWork<Body>);
             return Body(state);
         }
@@ -32,16 +32,16 @@ namespace Manifold::Lua
         int WithMono(lua_State* state)
         {
             Engine& engine = Owner(state);
-            if (!engine.MonoPresent() || engine.MonoLoading())
+            if (!engine.MonoPresent() || engine.Managed().Loading())
             {
                 if (Cooperative(state))
                 {
-                    engine.LoadMono(true);
-                    if (engine.MonoLoading())
+                    engine.Managed().Load(true);
+                    if (engine.Managed().Loading())
                         return lua_yieldk(state, 0, 0, &AfterMonoWork<Body>);
                 }
                 else
-                    engine.EnsureMono();
+                    engine.Managed().Ensure();
             }
             return Body(state);
         }
@@ -87,14 +87,14 @@ namespace Manifold::Lua
             Engine& engine = Owner(state);
             if (Cooperative(state) && engine.MonoPresent())
             {
-                engine.ReloadMono(true);
-                if (engine.MonoLoading())
+                engine.Managed().Reload(true);
+                if (engine.Managed().Loading())
                     return lua_yieldk(state, 0, 0, &AfterMonoWork<MonoRefreshBody>);
                 return MonoRefreshBody(state);
             }
             if (!engine.MonoPresent())
                 return WithMono<MonoRefreshBody>(state);
-            lua_pushboolean(state, engine.ReloadMonoNow().Ok() ? 1 : 0);
+            lua_pushboolean(state, engine.Managed().ReloadNow().Ok() ? 1 : 0);
             return 1;
         }
 
@@ -166,7 +166,7 @@ namespace Manifold::Lua
 
         int MonoShutdown(lua_State* state)
         {
-            Owner(state).StopMono(true);
+            Owner(state).Managed().Stop(true);
             return 0;
         }
 

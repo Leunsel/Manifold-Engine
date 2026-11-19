@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App/ActivationRunner.h"
+#include "App/ManagedSession.h"
 #include "App/Notifications.h"
 #include "App/Settings.h"
 #include "App/TableRuntime.h"
@@ -109,16 +110,8 @@ namespace Manifold
         Debug::Tracer& Tracer() { return m_tracer; }
         bool Tracing() const { return m_tracer.Running(); }
         Status EnsureDebugger();
-        Status EnsureMono();
-        Status ReloadMonoNow();
-        void LoadMono(bool fromScript = false);
-        void ReloadMono(bool fromScript = false);
-        // Ends the Mono helper in the game (and the Unity explorer's callback)
-        // without closing the process; Mono names stop resolving until it is
-        // loaded again.
-        void StopMono(bool fromScript = false);
-        bool MonoLoading() const { return m_work.Busy(kMonoWork); }
-        int MonoWork() const { return m_work.Find(kMonoWork); }
+        ManagedSession& Managed() { return m_managed; }
+        const ManagedSession& Managed() const { return m_managed; }
         Target::MonoBridge& Mono() { return m_target.Mono(); }
         bool MonoPresent() const { return m_target.Mono().Present(); }
         void LookUpProcessLater(std::string name, std::function<void(std::optional<ProcessId>)> found);
@@ -190,9 +183,6 @@ namespace Manifold
         Settings& m_settings;
         SettingsStore m_settingsStore;
         TargetSession m_target;
-        void FinishMono(const Status& status, bool cancelled, bool starting, bool fromScript, std::uint64_t generation);
-        void NoteExplorer(bool exited);
-        static constexpr const char* kMonoWork = "mono";
         std::unique_ptr<Disasm::Disassembler> m_disassembler64;
         std::unique_ptr<Disasm::Disassembler> m_disassembler32;
         Scan::Scanner m_scanner;
@@ -212,5 +202,6 @@ namespace Manifold
         ActivationRunner m_activation{ *this };
         bool m_attachLookup = false;
         BackgroundWork m_work;
+        ManagedSession m_managed{ m_target, m_work, m_settings, [this](LogLevel level, std::string text) { Notify(level, std::move(text)); } };
     };
 }
