@@ -38,7 +38,7 @@
     Since 2.0.0 this runs on Manifold Engine only. Process, module, memory and
     scan calls go through its manifold API (version 2 or newer), and the log
     is the manifold.log channel "SigMaker". Stock Cheat Engine is no longer
-    supported; the 1.x version in the CheatEngineLua repository still is.
+    supported.
 
     Everything those entries do is also available as a method.
 

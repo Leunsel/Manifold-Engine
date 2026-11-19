@@ -29,7 +29,7 @@
         OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
         SOFTWARE.
 
-    This file is part of the Manifold CE system, ported to Manifold Engine.
+    This file is part of Manifold Engine.
 
     CHANGELOG:
         ∂ v2.0.0 (2026-11-17)

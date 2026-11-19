@@ -1,6 +1,6 @@
 # Autorun modules
 
-The `Autorun` folder holds Lua modules that Manifold Engine runs at start when they sit in the `autorun` folder next to the program. They are built on the program's own [manifold API](MANIFOLD-API.md) (version 2 or newer) and no longer run in stock Cheat Engine; the Cheat Engine versions they were ported from stay unchanged in the CheatEngineLua repository.
+The `Autorun` folder holds Lua modules that Manifold Engine runs at start when they sit in the `autorun` folder next to the program. They are built on the program's own [manifold API](MANIFOLD-API.md) (version 2 or newer) and do not run in stock Cheat Engine.
 
 | File | Global | What it does |
 | --- | --- | --- |
@@ -8,9 +8,9 @@ The `Autorun` folder holds Lua modules that Manifold Engine runs at start when t
 | `Manifold-Godot.lua` | `ManifoldGodot` | Godot 4 runtime: StringNames, ObjectDB, ClassDB, the scene tree and method symbols (`Class::method`); fills structures and adds a *Godot Engine* menu. Godot 3 is declined with a message. |
 | `Manifold-SigMaker.lua` + `Manifold-SigMaker-Modules` | `ManifoldSigMaker` | Makes byte signatures for the selected instruction in the memory viewer, checks that they are unique in their module, and finds them again (Ctrl+Shift+F). |
 
-Unreal Engine support was `Manifold-UE.lua` here and is built into the program now (Extensions → Unreal Engine, [`manifold.unreal`](MANIFOLD-API.md)). The program skips an old copy of that file in its `autorun` folder and logs it; the copy can be deleted.
+Unreal Engine support is built into the program (Extensions → Unreal Engine, [`manifold.unreal`](MANIFOLD-API.md)). The program skips an old `Manifold-UE.lua` in its `autorun` folder and logs it; that file can be deleted.
 
-Building the program copies the folder into `autorun` next to the executable. Only files that are newer in the repository than the copies there are copied, so a module changed in the program's `autorun` folder after a build stays until the repository's file changes again. Other files there, such as `Manifold-Json.lua`, are left alone.
+Building the program copies the folder into `autorun` next to the executable. Only files that are newer in the repository than the copies there are copied, so a module changed in the program's `autorun` folder after a build stays until the repository's file changes again. Other files there are left alone.
 
 ## How they use the API
 
