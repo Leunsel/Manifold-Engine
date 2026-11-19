@@ -399,6 +399,13 @@ namespace Manifold
         return AutoAssemble(script, Asm::HasSections(script) ? Asm::AaSection::Enable : Asm::AaSection::Whole, m_scratchMemory, checkOnly, "scratch");
     }
 
+    void Engine::RequestActive(Table::MemoryRecord& record, bool active, bool fromScript)
+    {
+        if (!fromScript)
+            m_tables.NoteActivationByHand(record);
+        m_activation.RequestActive(record, active, fromScript);
+    }
+
     void Engine::Notify(LogLevel level, std::string text)
     {
         switch (level)

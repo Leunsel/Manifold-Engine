@@ -9,6 +9,8 @@
 
 namespace Manifold::Xml
 {
+    inline constexpr int kMaxDepth = 128;
+
     struct Node
     {
         std::string Name;

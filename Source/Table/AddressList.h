@@ -70,6 +70,9 @@ namespace Manifold::Table
     };
 
     constexpr int kMaxRecordLength = 4096;
+    constexpr int kMaxRecordDepth = 32;
+    constexpr int kMaxRecordId = 0x3FFFFFFF;
+    constexpr int kMaxHotkeyKeys = 5;
 
     struct MemoryRecord
     {
@@ -211,6 +214,7 @@ namespace Manifold::Table
     };
 
     const char* HotkeyActionName(HotkeyAction action);
+    bool UsableHotkeyKeys(const std::vector<int>& keys);
     bool KeysPressed(const std::vector<int>& keys, bool& wasDown);
     std::string KeysText(const std::vector<int>& keys);
 

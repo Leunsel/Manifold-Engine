@@ -16,6 +16,8 @@
 
 namespace Manifold::Target
 {
+    inline constexpr std::uint32_t kMaxModuleExports = 0x10000;
+
     struct ModuleInfo
     {
         std::string Name;

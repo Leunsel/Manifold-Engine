@@ -410,6 +410,15 @@ namespace Manifold::Table
         return "?";
     }
 
+    bool UsableHotkeyKeys(const std::vector<int>& keys)
+    {
+        if (keys.empty() || keys.size() > static_cast<std::size_t>(kMaxHotkeyKeys))
+            return false;
+        if (!std::all_of(keys.begin(), keys.end(), [](int key) { return key >= 1 && key <= 254; }))
+            return false;
+        return std::any_of(keys.begin(), keys.end(), [](int key) { return key != VK_LBUTTON && key != VK_RBUTTON; });
+    }
+
     bool KeysPressed(const std::vector<int>& keys, bool& wasDown)
     {
         const bool down = !keys.empty() && std::all_of(keys.begin(), keys.end(), [](int key) { return (::GetAsyncKeyState(key) & 0x8000) != 0; });

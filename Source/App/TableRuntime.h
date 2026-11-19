@@ -47,6 +47,9 @@ namespace Manifold
         std::vector<Table::TableSymbol> TableSymbols() const;
         bool TableScriptWaiting() const { return m_tableScriptWaiting; }
         void AnswerTableScript(bool run);
+        bool HotkeyHeld(const Table::MemoryRecord& record, const Table::Hotkey& hotkey) const;
+        void NoteActivationByHand(const Table::MemoryRecord& record);
+        bool ScriptsTrusted() const { return m_scriptsTrusted; }
 
     private:
         void RefreshRecord(int id, double now);
@@ -56,6 +59,8 @@ namespace Manifold
         Table::StructureStore m_structures;
         std::vector<Table::TableSymbol> m_tableSymbols;
         bool m_tableScriptWaiting = false;
+        bool m_scriptsTrusted = true;
+        bool m_hotkeyHoldNoted = false;
         std::string m_pendingTableScript;
         double m_lastValues = -1.0;
         double m_lastFreeze = -1.0;

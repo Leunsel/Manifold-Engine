@@ -8,6 +8,7 @@
 #include "App/Notifications.h"
 #include "App/SettingsStore.h"
 #include "Core/BackgroundWork.h"
+#include "Core/Deflate.h"
 #include "Core/Handle.h"
 #include "Core/Ini.h"
 #include "Core/MainThread.h"
@@ -19,6 +20,7 @@
 #include "Debug/BreakAction.h"
 #include "Disasm/AssemblySearch.h"
 #include "Disasm/Disassembler.h"
+#include "Lua/LuaEngine.h"
 #include "Scan/Scanner.h"
 #include "Scan/ValueType.h"
 #include "Table/CheatTable.h"
@@ -1179,6 +1181,212 @@ data:
         std::filesystem::remove_all(root, ignored);
     }
 
+    std::string NestedElements(int depth)
+    {
+        std::string text;
+        for (int i = 0; i < depth; ++i)
+            text += "<a>";
+        for (int i = 0; i < depth; ++i)
+            text += "</a>";
+        return text;
+    }
+
+    void HostileXml()
+    {
+        CHECK(Xml::Parse(NestedElements(Xml::kMaxDepth)).Root != nullptr);
+        const Xml::ParseResult tooDeep = Xml::Parse(NestedElements(Xml::kMaxDepth + 1));
+        CHECK(!tooDeep.Root && tooDeep.Error.find("nested") != std::string::npos);
+        CHECK(!Xml::Parse(NestedElements(200000)).Root);
+
+        const int groups = Table::kMaxRecordDepth + 8;
+        std::string nested = "<CheatTable><CheatEntries>";
+        for (int i = 0; i < groups; ++i)
+            nested += "<CheatEntry><Description>\"g" + std::to_string(i) + "\"</Description><GroupHeader>1</GroupHeader><CheatEntries>";
+        for (int i = 0; i < groups; ++i)
+            nested += "</CheatEntries></CheatEntry>";
+        nested += "</CheatEntries></CheatTable>";
+        Table::LoadedTable table;
+        CHECK(Table::ParseTable(nested, table).Ok() && table.Records.size() == 1);
+        int depth = 0;
+        for (const Table::MemoryRecord* at = table.Records.empty() ? nullptr : table.Records[0].get(); at; at = at->Children.empty() ? nullptr : at->Children[0].get())
+            ++depth;
+        CHECK_EQ(depth, Table::kMaxRecordDepth);
+        CHECK_EQ(table.Warnings.size(), 1u);
+    }
+
+    void HostileHotkeys()
+    {
+        CHECK(Table::UsableHotkeyKeys({ VK_F1 }) && Table::UsableHotkeyKeys({ VK_CONTROL, VK_LBUTTON }) && Table::UsableHotkeyKeys({ VK_XBUTTON1 }));
+        CHECK(!Table::UsableHotkeyKeys({}) && !Table::UsableHotkeyKeys({ VK_LBUTTON }) && !Table::UsableHotkeyKeys({ VK_RBUTTON, VK_LBUTTON }));
+        CHECK(!Table::UsableHotkeyKeys({ 0 }) && !Table::UsableHotkeyKeys({ 255 }) && !Table::UsableHotkeyKeys({ VK_F1, 300 }) && !Table::UsableHotkeyKeys({ -1 }));
+        CHECK(!Table::UsableHotkeyKeys({ 16, 17, 18, 65, 66, 67 }));
+
+        const char* text = R"CT(<CheatTable><CheatEntries>
+<CheatEntry><ID>1</ID><Description>"Run"</Description><VariableType>Auto Assembler Script</VariableType><AssemblerScript>[ENABLE]
+{$lua}
+hostileRan = true
+{$asm}
+[DISABLE]
+</AssemblerScript><Hotkeys>
+<Hotkey><Action>Activate</Action><Keys><Key>1</Key></Keys><ID>0</ID></Hotkey>
+<Hotkey><Action>Activate</Action><Keys><Key>2</Key><Key>1</Key></Keys><ID>1</ID></Hotkey>
+<Hotkey><Action>Activate</Action><Keys><Key>0</Key></Keys><ID>2</ID></Hotkey>
+<Hotkey><Action>Activate</Action><Keys><Key>300</Key></Keys><ID>3</ID></Hotkey>
+<Hotkey><Action>Activate</Action><Keys><Key>16</Key><Key>17</Key><Key>18</Key><Key>65</Key><Key>66</Key><Key>67</Key></Keys><ID>4</ID></Hotkey>
+<Hotkey><Action>Activate</Action><Keys><Key>x</Key><Key>112</Key></Keys><ID>5</ID></Hotkey>
+<Hotkey><Action>Toggle Activation</Action><Keys><Key>17</Key><Key>1</Key></Keys><ID>6</ID></Hotkey>
+<Hotkey><Action>Toggle Activation</Action><Keys><Key>113</Key></Keys><ID>7</ID></Hotkey>
+</Hotkeys></CheatEntry>
+<CheatEntry><ID>4000000000</ID><Description>"Health"</Description><VariableType>4 Bytes</VariableType><Address>1000</Address>
+<Hotkeys><Hotkey><Action>Set Value</Action><Keys><Key>114</Key></Keys><Value>100</Value><ID>0</ID></Hotkey></Hotkeys></CheatEntry>
+<CheatEntry><ID>3</ID><Description>"Group"</Description><GroupHeader>1</GroupHeader><Options moActivateChildrenAsWell="1"/>
+<CheatEntries><CheatEntry><ID>5</ID><Description>"Inner"</Description><VariableType>Auto Assembler Script</VariableType><AssemblerScript>[ENABLE]
+[DISABLE]
+</AssemblerScript></CheatEntry></CheatEntries>
+<Hotkeys><Hotkey><Action>Activate</Action><Keys><Key>115</Key></Keys><ID>0</ID></Hotkey></Hotkeys></CheatEntry>
+</CheatEntries><LuaScript>hostileTableScript = (hostileTableScript or 0) + 1</LuaScript></CheatTable>
+)CT";
+        Table::LoadedTable parsed;
+        CHECK(Table::ParseTable(text, parsed).Ok() && parsed.Records.size() == 3);
+        if (parsed.Records.size() == 3)
+        {
+            const std::vector<Table::Hotkey>& kept = parsed.Records[0]->Hotkeys;
+            CHECK(kept.size() == 2 && kept[0].Id == 6 && kept[1].Id == 7);
+            CHECK_EQ(parsed.Warnings.size(), 6u);
+            CHECK_EQ(parsed.Records[1]->Id, 0);
+            CHECK_EQ(parsed.Records[1]->Hotkeys.size(), 1u);
+        }
+
+        const std::filesystem::path path = Paths::DataFolder() / L"hostile-hotkeys.CT";
+        std::error_code ignored;
+        std::filesystem::create_directories(path.parent_path(), ignored);
+        {
+            std::ofstream file(path, std::ios::binary | std::ios::trunc);
+            file << text;
+        }
+        Settings settings;
+        Engine engine(settings);
+        Table::Hotkey toggle;
+        toggle.Action = Table::HotkeyAction::Toggle;
+        Table::Hotkey activate;
+        activate.Action = Table::HotkeyAction::Activate;
+        Table::Hotkey setValue;
+        setValue.Action = Table::HotkeyAction::SetValue;
+        const auto ranTableScript = [&] {
+            std::string count;
+            engine.Lua().RunWithResult("return tostring(hostileTableScript)", "probe", count);
+            return count;
+        };
+        const auto held = [&](const char* description, const Table::Hotkey& hotkey) {
+            const Table::MemoryRecord* record = engine.Table().FindByDescription(description);
+            CHECK_MSG(record != nullptr, description);
+            return record && engine.Tables().HotkeyHeld(*record, hotkey);
+        };
+
+        CHECK(engine.Tables().ScriptsTrusted());
+        settings.TableScripts = TableScriptPolicy::Ask;
+        CHECK(engine.LoadTable(path, false).Ok());
+        CHECK(engine.TableScriptWaiting());
+        CHECK(held("Run", toggle) && held("Health", setValue) && held("Health", toggle));
+        engine.AnswerTableScript(false);
+        CHECK(!engine.TableScriptWaiting() && !engine.Tables().ScriptsTrusted());
+        CHECK_EQ(ranTableScript(), "nil");
+        CHECK(held("Run", toggle) && held("Run", activate) && held("Group", activate) && held("Inner", toggle));
+        CHECK(!held("Health", setValue) && !held("Health", toggle));
+        if (const Table::MemoryRecord* health = engine.Table().FindByDescription("Health"))
+            engine.Tables().NoteActivationByHand(*health);
+        CHECK(held("Run", toggle));
+        if (const Table::MemoryRecord* group = engine.Table().FindByDescription("Group"))
+            engine.Tables().NoteActivationByHand(*group);
+        CHECK(!held("Run", toggle) && !held("Group", activate));
+
+        CHECK(engine.LoadTable(path, false).Ok());
+        CHECK(engine.TableScriptWaiting() && held("Run", toggle));
+        engine.AnswerTableScript(true);
+        CHECK_EQ(ranTableScript(), "1");
+        CHECK(engine.Tables().ScriptsTrusted() && !held("Run", toggle));
+
+        settings.TableScripts = TableScriptPolicy::Never;
+        CHECK(engine.LoadTable(path, false).Ok());
+        CHECK(!engine.TableScriptWaiting() && held("Run", toggle) && !held("Health", setValue));
+        CHECK_EQ(ranTableScript(), "1");
+
+        settings.TableScripts = TableScriptPolicy::Always;
+        CHECK(engine.LoadTable(path, false).Ok());
+        CHECK(!engine.TableScriptWaiting() && !held("Run", toggle));
+        CHECK_EQ(ranTableScript(), "2");
+
+        settings.TableScripts = TableScriptPolicy::Never;
+        CHECK(engine.LoadTable(path, false).Ok());
+        engine.NewTable();
+        CHECK(engine.Tables().ScriptsTrusted());
+
+        std::string ran;
+        engine.Lua().RunWithResult("return tostring(hostileRan)", "probe", ran);
+        CHECK_EQ(ran, "nil");
+        std::filesystem::remove(path, ignored);
+    }
+
+    void HostileFiles()
+    {
+        std::vector<std::uint8_t> plain(3 * 1024 * 1024);
+        for (std::size_t i = 0; i < plain.size(); ++i)
+            plain[i] = static_cast<std::uint8_t>(i >> 12);
+        const std::string encoded = Table::EncodeTableFile(plain);
+        CHECK(!encoded.empty() && encoded.size() < plain.size() / 20);
+        const auto decoded = Table::DecodeTableFile(encoded);
+        CHECK(decoded && *decoded == plain);
+        const auto exact = Table::DecodeTableFile(encoded, plain.size());
+        CHECK(exact && exact->size() == plain.size());
+        CHECK(!Table::DecodeTableFile(encoded, plain.size() - 1));
+        CHECK(!Table::DecodeTableFile(encoded, 4096));
+        CHECK(!Table::DecodeTableFile(encoded, 0));
+
+        const auto packed = Deflate::Compress(plain);
+        CHECK(packed && packed->size() < plain.size() / 20);
+        if (packed)
+        {
+            const auto whole = Deflate::Decompress(*packed);
+            CHECK(whole && *whole == plain);
+            CHECK(!Deflate::Decompress(*packed, plain.size() - 1));
+        }
+        const std::uint8_t reservedBlockType[] = { 0x07 };
+        CHECK(!Deflate::Decompress(reservedBlockType));
+        CHECK(!Deflate::Decompress({}));
+        CHECK(!Table::DecodeTableFile(std::string_view(encoded).substr(0, encoded.size() / 2)));
+
+        const std::string small = Table::EncodeTableFile(std::vector<std::uint8_t>{ 1, 2, 3, 4, 5 });
+        const std::string twoFiles = "<CheatTable><Files><A Encoding=\"Ascii85\">" + small + "</A><B Encoding=\"Ascii85\">" + encoded + "</B></Files></CheatTable>";
+        Table::LoadedTable table;
+        CHECK(Table::ParseTable(twoFiles, table).Ok());
+        CHECK(table.Files.size() == 2 && table.Files[0].Data->size() == 5 && *table.Files[1].Data == plain);
+    }
+
+    void HostileExpressions()
+    {
+        Settings settings;
+        Engine engine(settings);
+        const auto wrapped = [](int depth) { return std::string(static_cast<std::size_t>(depth), '(') + "10" + std::string(static_cast<std::size_t>(depth), ')'); };
+        CHECK_EQ(engine.Evaluate(wrapped(32)).value_or(0), 0x10u);
+        Status error;
+        CHECK(!engine.Evaluate(wrapped(200), &error) && error.Code == ErrorCode::ExprSyntax);
+        CHECK(!engine.Evaluate(std::string(200000, '(') + "1"));
+        CHECK(!engine.Evaluate(std::string(200000, '-') + "1"));
+        CHECK(!engine.Evaluate(std::string(200000, '[') + "1"));
+        CHECK_EQ(engine.Evaluate("--10").value_or(0), 0x10u);
+
+        Lua::LuaEngine& lua = engine.Lua();
+        CHECK(lua.Compile("compileRan = true").Ok());
+        CHECK(lua.Compile("local a = 1\nreturn a + 1").Ok());
+        const Status escape = lua.Compile("end, (function() compileRan = true end)(), function()");
+        CHECK(!escape.Ok() && escape.Code == ErrorCode::LuaSyntax);
+        CHECK(!lua.Compile("if then").Ok());
+        CHECK(!lua.Compile(std::string_view("\x1bLua\x54\x00", 6)).Ok());
+        std::string ran;
+        lua.RunWithResult("return tostring(compileRan)", "probe", ran);
+        CHECK_EQ(ran, "nil");
+    }
+
     void DiagnosticsInfo()
     {
         CHECK_EQ(Diagnostics::Milliseconds(12.345), "12.3 ms");
@@ -1286,6 +1494,10 @@ data:
         FolderMigration();
         RecordIndex();
         ProfilerZones();
+        HostileXml();
+        HostileHotkeys();
+        HostileFiles();
+        HostileExpressions();
         DiagnosticsInfo();
         return Totals().Failures - before;
     }

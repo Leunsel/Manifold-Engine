@@ -165,9 +165,14 @@ namespace Manifold::Xml
                 return std::string(m_text.substr(start, m_at - start));
             }
 
-            std::unique_ptr<Node> Element()
+            std::unique_ptr<Node> Element(int depth = 1)
             {
                 auto node = std::make_unique<Node>();
+                if (depth > kMaxDepth)
+                {
+                    m_error = "elements are nested deeper than " + std::to_string(kMaxDepth) + " levels";
+                    return node;
+                }
                 ++m_at;
                 node->Name = Name();
                 if (node->Name.empty())
@@ -258,7 +263,7 @@ namespace Manifold::Xml
                     }
                     if (m_text[m_at] == '<')
                     {
-                        node->Children.push_back(Element());
+                        node->Children.push_back(Element(depth + 1));
                         if (!m_error.empty())
                             return node;
                         continue;

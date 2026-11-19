@@ -34,6 +34,8 @@ namespace Manifold::Table
     };
 
     inline constexpr int kTableVersion = 45;
+    inline constexpr std::size_t kMaxTableFileBytes = 256u * 1024u * 1024u;
+    inline constexpr std::size_t kMaxTableFilesBytes = 512u * 1024u * 1024u;
 
     Status LoadTable(const std::filesystem::path& path, LoadedTable& table);
     Status ParseTable(std::string_view text, LoadedTable& table);
@@ -41,7 +43,7 @@ namespace Manifold::Table
     std::string WriteTable(const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols);
 
     std::string RecordsToXml(const std::vector<const MemoryRecord*>& records);
-    std::optional<std::vector<std::uint8_t>> DecodeTableFile(std::string_view text);
+    std::optional<std::vector<std::uint8_t>> DecodeTableFile(std::string_view text, std::size_t limit = kMaxTableFileBytes);
     std::string EncodeTableFile(std::span<const std::uint8_t> data);
     std::vector<std::unique_ptr<MemoryRecord>> RecordsFromXml(std::string_view text);
 }

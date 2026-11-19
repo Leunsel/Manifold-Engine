@@ -64,10 +64,10 @@ namespace Manifold::Table
             return text == "1" || EqualsNoCase(text, "true");
         }
 
-        std::unique_ptr<MemoryRecord> ReadEntry(const Xml::Node& node, std::vector<std::string>& warnings)
+        std::unique_ptr<MemoryRecord> ReadEntry(const Xml::Node& node, std::vector<std::string>& warnings, int depth = 1)
         {
             auto record = std::make_unique<MemoryRecord>();
-            if (const auto id = ParseDecimal(node.ChildText("ID")))
+            if (const auto id = ParseDecimal(node.ChildText("ID")); id && *id >= 0 && *id <= kMaxRecordId)
                 record->Id = static_cast<int>(*id);
             record->Description = StripQuotes(node.ChildText("Description"));
             const std::string type = Trim(node.ChildText("VariableType"));
@@ -168,25 +168,35 @@ namespace Manifold::Table
                     {
                         for (const Xml::Node* value : keys->ChildrenNamed("Key"))
                         {
-                            if (const auto code = ParseDecimal(value->Text))
-                                key.Keys.push_back(static_cast<int>(*code));
+                            const auto code = ParseDecimal(value->Text);
+                            key.Keys.push_back(code && *code >= 0 && *code <= 0xFFFF ? static_cast<int>(*code) : 0);
                         }
                     }
                     key.Value = hotkey->ChildText("Value");
                     key.Description = hotkey->ChildText("Description");
-                    if (const auto id = ParseDecimal(hotkey->ChildText("ID")))
+                    if (const auto id = ParseDecimal(hotkey->ChildText("ID")); id && *id >= 0 && *id <= kMaxRecordId)
                         key.Id = static_cast<int>(*id);
-                    if (!key.Keys.empty())
+                    if (key.Keys.empty())
+                        continue;
+                    if (UsableHotkeyKeys(key.Keys))
                         record->Hotkeys.push_back(std::move(key));
+                    else
+                        warnings.push_back(ErrorMessage(ErrorCode::TableEntryDamaged, "hotkey of " + record->Description));
                 }
             }
             if (const Xml::Node* children = node.Child("CheatEntries"))
             {
-                for (const Xml::Node* child : children->ChildrenNamed("CheatEntry"))
+                const std::vector<const Xml::Node*> entries = children->ChildrenNamed("CheatEntry");
+                if (depth >= kMaxRecordDepth && !entries.empty())
+                    warnings.push_back(ErrorMessage(ErrorCode::TableEntryDamaged, "below " + record->Description + " (nested deeper than " + std::to_string(kMaxRecordDepth) + " groups)"));
+                else
                 {
-                    auto entry = ReadEntry(*child, warnings);
-                    entry->Parent = record.get();
-                    record->Children.push_back(std::move(entry));
+                    for (const Xml::Node* child : entries)
+                    {
+                        auto entry = ReadEntry(*child, warnings, depth + 1);
+                        entry->Parent = record.get();
+                        record->Children.push_back(std::move(entry));
+                    }
                 }
             }
             if (record->Kind == RecordKind::Value && record->Address.empty() && !record->Children.empty())
@@ -402,18 +412,20 @@ namespace Manifold::Table
         table.Comments = root.ChildText("Comments");
         if (const Xml::Node* files = root.Child("Files"))
         {
+            std::size_t room = kMaxTableFilesBytes;
             for (const auto& file : files->Children)
             {
                 TableFile entry;
                 entry.Name = file->Name;
                 if (file->Attribute("Encoding").value_or("") == "Ascii85")
                 {
-                    auto data = DecodeTableFile(file->Text);
+                    auto data = DecodeTableFile(file->Text, room);
                     if (!data)
                     {
                         table.Warnings.push_back(ErrorMessage(ErrorCode::TableEntryDamaged, "file " + file->Name));
                         continue;
                     }
+                    room -= data->size();
                     *entry.Data = std::move(*data);
                 }
                 else
@@ -577,8 +589,9 @@ namespace Manifold::Table
         return Xml::Write(root);
     }
 
-    std::optional<std::vector<std::uint8_t>> DecodeTableFile(std::string_view text)
+    std::optional<std::vector<std::uint8_t>> DecodeTableFile(std::string_view text, std::size_t limit)
     {
+        limit = std::min(limit, kMaxTableFileBytes);
         int index[256];
         std::fill(std::begin(index), std::end(index), -1);
         for (std::size_t i = 0; i < kBase85.size(); ++i)
@@ -612,14 +625,16 @@ namespace Manifold::Table
                 static_cast<std::uint8_t>(word) };
             packed.insert(packed.end(), bytes, bytes + (count == 5 ? 4 : count - 1));
         }
-        auto unpacked = Deflate::Decompress(packed);
+        auto unpacked = Deflate::Decompress(packed, limit + 4);
         if (!unpacked || unpacked->size() < 4)
             return std::nullopt;
         const std::uint32_t size = static_cast<std::uint32_t>((*unpacked)[0]) | (static_cast<std::uint32_t>((*unpacked)[1]) << 8) |
                                    (static_cast<std::uint32_t>((*unpacked)[2]) << 16) | (static_cast<std::uint32_t>((*unpacked)[3]) << 24);
         if (size > unpacked->size() - 4)
             return std::nullopt;
-        return std::vector<std::uint8_t>(unpacked->begin() + 4, unpacked->begin() + 4 + size);
+        unpacked->erase(unpacked->begin(), unpacked->begin() + 4);
+        unpacked->resize(size);
+        return unpacked;
     }
 
     std::string EncodeTableFile(std::span<const std::uint8_t> data)

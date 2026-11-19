@@ -268,6 +268,17 @@ namespace Manifold::Lua
         return Status::Success();
     }
 
+    Status LuaEngine::Compile(std::string_view code, std::string_view chunkName)
+    {
+        const int top = lua_gettop(m_state);
+        const std::string name = !chunkName.empty() && (chunkName.front() == '@' || chunkName.front() == '=') ? std::string(chunkName) : "=" + std::string(chunkName);
+        Status status = Status::Success();
+        if (luaL_loadbufferx(m_state, code.data(), code.size(), name.c_str(), "t") != LUA_OK)
+            status = Status::Fail(ErrorCode::LuaSyntax, lua_tostring(m_state, -1) ? lua_tostring(m_state, -1) : "unknown error");
+        lua_settop(m_state, top);
+        return status;
+    }
+
     Status LuaEngine::Run(std::string_view code, std::string_view chunkName)
     {
         std::string ignored;

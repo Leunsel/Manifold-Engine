@@ -373,6 +373,39 @@ namespace Manifold
             LOG_INFO("Hotkey", Table::KeysText(hotkey.Keys) + ": " + Table::HotkeyActionName(hotkey.Action) + " " + record.Description);
     }
 
+    namespace
+    {
+        bool RunsScripts(const Table::MemoryRecord& record)
+        {
+            if (record.Kind == Table::RecordKind::Script)
+                return true;
+            return std::any_of(record.Children.begin(), record.Children.end(), [](const auto& child) { return RunsScripts(*child); });
+        }
+    }
+
+    bool TableRuntime::HotkeyHeld(const Table::MemoryRecord& record, const Table::Hotkey& hotkey) const
+    {
+        if (m_tableScriptWaiting)
+            return true;
+        if (m_scriptsTrusted)
+            return false;
+        switch (hotkey.Action)
+        {
+        case Table::HotkeyAction::SetValue:
+        case Table::HotkeyAction::Increase:
+        case Table::HotkeyAction::Decrease:
+            return false;
+        default:
+            return RunsScripts(record);
+        }
+    }
+
+    void TableRuntime::NoteActivationByHand(const Table::MemoryRecord& record)
+    {
+        if (!m_scriptsTrusted && RunsScripts(record))
+            m_scriptsTrusted = true;
+    }
+
     void TableRuntime::UpdateHotkeys()
     {
         std::vector<std::pair<Table::MemoryRecord*, Table::Hotkey>> fired;
@@ -385,7 +418,17 @@ namespace Manifold
                 }
             });
         for (auto& [record, hotkey] : fired)
-            ApplyHotkey(*record, hotkey);
+        {
+            if (!HotkeyHeld(*record, hotkey))
+            {
+                ApplyHotkey(*record, hotkey);
+                continue;
+            }
+            if (m_tableScriptWaiting || m_hotkeyHoldNoted)
+                continue;
+            m_hotkeyHoldNoted = true;
+            m_engine.Notify(LogLevel::Warning, "Hotkeys of this table cannot turn scripts on yet. Turn a script on yourself first, or run the table's Lua script.");
+        }
     }
 
     std::vector<Table::TableSymbol> TableRuntime::TableSymbols() const
@@ -409,6 +452,9 @@ namespace Manifold
         m_structures.Clear();
         m_tableSymbols.clear();
         m_tableScriptWaiting = false;
+        m_pendingTableScript.clear();
+        m_scriptsTrusted = true;
+        m_hotkeyHoldNoted = false;
     }
 
     Status TableRuntime::LoadTable(const std::filesystem::path& path, bool merge)
@@ -431,6 +477,7 @@ namespace Manifold
             m_table.ExtraXml = std::move(loaded.ExtraXml);
             m_table.LoadedVersion = loaded.Version;
             m_tableSymbols = loaded.Symbols;
+            m_scriptsTrusted = m_engine.Options().TableScripts == TableScriptPolicy::Always;
         }
         else
         {
@@ -489,7 +536,10 @@ namespace Manifold
     {
         m_tableScriptWaiting = false;
         if (run)
+        {
+            m_scriptsTrusted = true;
             m_engine.Activation().RunTableScript(m_pendingTableScript);
+        }
         m_pendingTableScript.clear();
     }
 

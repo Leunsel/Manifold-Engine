@@ -11,6 +11,7 @@ namespace Manifold::Target
     namespace
     {
         constexpr std::uint64_t kExportReach = 0x2000;
+        constexpr int kMaxExpressionDepth = 64;
 
         class Parser
         {
@@ -47,6 +48,15 @@ namespace Manifold::Target
             }
 
         private:
+            struct Nesting
+            {
+                explicit Nesting(int& depth) : Depth(depth) { ++Depth; }
+                ~Nesting() { --Depth; }
+                Nesting(const Nesting&) = delete;
+                Nesting& operator=(const Nesting&) = delete;
+                int& Depth;
+            };
+
             void SkipSpace()
             {
                 while (m_at < m_text.size() && (m_text[m_at] == ' ' || m_text[m_at] == '\t'))
@@ -125,8 +135,9 @@ namespace Manifold::Target
 
             std::optional<std::uint64_t> Factor()
             {
+                const Nesting nesting(m_depth);
                 SkipSpace();
-                if (m_at >= m_text.size())
+                if (m_at >= m_text.size() || m_depth > kMaxExpressionDepth)
                     return Fail(Status::Fail(ErrorCode::ExprSyntax, m_text));
 
                 const char c = m_text[m_at];
@@ -318,6 +329,7 @@ namespace Manifold::Target
             const ExtraResolver& m_extra;
             const std::shared_ptr<Process>& m_process;
             std::size_t m_at = 0;
+            int m_depth = 0;
             Status m_error;
             bool m_usedPointer = false;
         };
@@ -540,9 +552,10 @@ namespace Manifold::Target
                 {
                     const auto* directory = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(block.data());
                     const auto inBlock = [&](DWORD rva, std::size_t bytes) { return rva >= exportRva && rva - exportRva + bytes <= block.size(); };
-                    std::vector<DWORD> functions(directory->NumberOfFunctions);
-                    std::vector<DWORD> names(directory->NumberOfNames);
-                    std::vector<WORD> ordinals(directory->NumberOfNames);
+                    const bool sane = directory->NumberOfFunctions <= kMaxModuleExports && directory->NumberOfNames <= kMaxModuleExports;
+                    std::vector<DWORD> functions(sane ? directory->NumberOfFunctions : 0);
+                    std::vector<DWORD> names(sane ? directory->NumberOfNames : 0);
+                    std::vector<WORD> ordinals(sane ? directory->NumberOfNames : 0);
                     const bool functionsRead = !functions.empty() && process.ReadExact(module.Base + directory->AddressOfFunctions, functions.data(), functions.size() * 4);
                     const bool namesRead = !names.empty() && process.ReadExact(module.Base + directory->AddressOfNames, names.data(), names.size() * 4) &&
                                            process.ReadExact(module.Base + directory->AddressOfNameOrdinals, ordinals.data(), ordinals.size() * 2);

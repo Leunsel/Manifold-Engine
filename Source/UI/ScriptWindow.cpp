@@ -50,8 +50,7 @@ namespace Manifold::UI
         m_editor.ErrorLine = 0;
         if (m_lua)
         {
-            std::string ignored;
-            const Status status = m_engine.Lua().RunWithResult("return function() " + m_text + "\nend", "check", ignored);
+            const Status status = m_engine.Lua().Compile(m_text);
             m_resultOk = status.Ok();
             m_result = status.Ok() ? "The Lua script compiles." : status.Text;
             return;

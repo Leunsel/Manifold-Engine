@@ -1197,6 +1197,8 @@ namespace Manifold::Target
         IMAGE_EXPORT_DIRECTORY directory{};
         if (!ReadExact(module->Base + exportRva, &directory, sizeof(directory)))
             return 0;
+        if (directory.NumberOfNames > kMaxModuleExports || directory.NumberOfFunctions > kMaxModuleExports)
+            return 0;
         std::vector<DWORD> names(directory.NumberOfNames);
         std::vector<WORD> ordinals(directory.NumberOfNames);
         std::vector<DWORD> functions(directory.NumberOfFunctions);

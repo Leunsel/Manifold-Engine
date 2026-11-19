@@ -4,9 +4,12 @@
 
 #include "Core/Deflate.h"
 
+#include <algorithm>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <new>
 
 #pragma warning(push, 0)
 #pragma warning(disable : 4505)
@@ -42,20 +45,25 @@ namespace Manifold::Deflate
         return raw;
     }
 
-    std::optional<std::vector<std::uint8_t>> Decompress(std::span<const std::uint8_t> packed)
+    std::optional<std::vector<std::uint8_t>> Decompress(std::span<const std::uint8_t> packed, std::size_t limit)
     {
         if (packed.size() > static_cast<std::size_t>(INT_MAX))
             return std::nullopt;
-        int length = 0;
-        char* data = stbi_zlib_decode_noheader_malloc(reinterpret_cast<const char*>(packed.data()), static_cast<int>(packed.size()), &length);
-        if (!data || length < 0)
+        const std::size_t ceiling = std::min({ limit, static_cast<std::size_t>(INT_MAX), packed.size() * kMaxRatio + 64 });
+        std::size_t room = std::min(ceiling, std::max<std::size_t>(packed.size() * 4, 0x10000));
+        for (;;)
         {
-            std::free(data);
-            return std::nullopt;
+            const std::unique_ptr<std::uint8_t[]> buffer(new (std::nothrow) std::uint8_t[room]);
+            if (!buffer)
+                return std::nullopt;
+            const int length = stbi_zlib_decode_noheader_buffer(reinterpret_cast<char*>(buffer.get()), static_cast<int>(room),
+                reinterpret_cast<const char*>(packed.data()), static_cast<int>(packed.size()));
+            if (length >= 0)
+                return std::vector<std::uint8_t>(buffer.get(), buffer.get() + length);
+            if (room >= ceiling)
+                return std::nullopt;
+            room = std::min(ceiling, room * 2);
         }
-        std::vector<std::uint8_t> result(reinterpret_cast<std::uint8_t*>(data), reinterpret_cast<std::uint8_t*>(data) + length);
-        std::free(data);
-        return result;
     }
 
     std::optional<std::vector<std::uint8_t>> DecodePng(std::span<const std::uint8_t> file, int& width, int& height)

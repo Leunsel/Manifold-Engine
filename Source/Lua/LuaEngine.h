@@ -289,6 +289,7 @@ namespace Manifold::Lua
 
         Status Run(std::string_view code, std::string_view chunkName = "script");
         Status RunWithResult(std::string_view code, std::string_view chunkName, std::string& result);
+        Status Compile(std::string_view code, std::string_view chunkName = "check");
         Status RunFile(const std::filesystem::path& path);
         Status RunAutorun(const std::filesystem::path& folder);
         bool CallReference(int reference, int arguments, int results, std::string& error);
