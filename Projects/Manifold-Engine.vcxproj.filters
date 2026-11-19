@@ -384,6 +384,9 @@
     <ClCompile Include="..\Source\UI\PatchScanWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\ProcessIcon.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\ProfilerWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -733,6 +736,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\NopSled.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\ProcessIcon.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\ProfilerWindow.h">

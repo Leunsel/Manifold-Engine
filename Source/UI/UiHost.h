@@ -27,7 +27,7 @@ namespace Manifold::UI
 
         void Draw();
         bool HasMenu();
-        void DrawMenu();
+        void DrawMenuItems();
         float ToolbarWidth();
         void DrawToolbar(float right, float y);
         float StatusWidth(float gap);

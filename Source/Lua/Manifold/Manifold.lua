@@ -2144,7 +2144,7 @@ native.docDefine(nil, ENTRY_DOC .. "remove", { returns = "boolean", doc = "Takes
 native.docDefine(nil, ENTRY_DOC .. "id", { kind = "field", type = "integer", doc = "The entry's number." })
 
 local MENU_KEYS = { icon = "string", enabled = "boolean", checked = "boolean", onClick = "function" }
-local menu = subarea(ui, "menu", "Entries in the main window's Scripts menu, which shows as soon as a script adds one.")
+local menu = subarea(ui, "menu", "Entries in the main window's Extensions menu, beside the menus of Cheat Engine scripts. The menu shows as soon as a script adds one.")
 
 define(menu, "add", {
   params = {
@@ -2159,7 +2159,7 @@ define(menu, "add", {
 end)
 
 local TOOLBAR_KEYS = { text = "string", tooltip = "string", enabled = "boolean", onClick = "function", icon = "string" }
-local toolbar = subarea(ui, "toolbar", "Buttons in the main window's process bar, left of the Memory view button.")
+local toolbar = subarea(ui, "toolbar", "Buttons in the main window's title bar, between the process and the Memory view button.")
 
 define(toolbar, "add", {
   params = {

@@ -279,7 +279,7 @@ Short notices in the lower right corner, the same ones Manifold shows. A notice 
 
 ## manifold.ui.menu
 
-Entries in the main window's Scripts menu, which shows as soon as a script adds one.
+Entries in the main window's Extensions menu, beside the menus of Cheat Engine scripts. The menu shows as soon as a script adds one.
 
 | Function | Returns | |
 | --- | --- | --- |
@@ -287,7 +287,7 @@ Entries in the main window's Scripts menu, which shows as soon as a script adds 
 
 ## manifold.ui.toolbar
 
-Buttons in the main window's process bar, left of the Memory view button.
+Buttons in the main window's title bar, between the process and the Memory view button.
 
 | Function | Returns | |
 | --- | --- | --- |

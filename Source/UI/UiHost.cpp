@@ -1024,16 +1024,11 @@ namespace Manifold::UI
         }
     }
 
-    void UiHost::DrawMenu()
+    void UiHost::DrawMenuItems()
     {
         const std::vector<Lua::UiSlot> slots = Model().Slots(Lua::UiSlotKind::Menu);
-        if (slots.empty())
-            return;
-        if (ImGui::BeginMenu("Scripts"))
-        {
+        if (!slots.empty())
             MenuItems(slots, "");
-            ImGui::EndMenu();
-        }
     }
 
     float UiHost::ToolbarWidth()

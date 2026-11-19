@@ -11,6 +11,7 @@
 #include "UI/AddressActions.h"
 #include "UI/BackgroundTask.h"
 #include "UI/CodeEditor.h"
+#include "UI/ProcessIcon.h"
 #include "UI/Templates.h"
 #include "UI/Widgets.h"
 #include "UI/Workspace.h"
@@ -65,7 +66,9 @@ namespace Manifold::UI
 
     private:
         void TitleBar();
-        void ProcessBar();
+        float TitleTools(float left, float right, float height);
+        float ProcessChip(float left, float right, float y, float height);
+        void ProcessChipMenu();
         void ScanArea(float height);
         void ResultsCard(float width, float height);
         void ScanCard(float width, float height);
@@ -129,6 +132,10 @@ namespace Manifold::UI
         Workspace& m_workspace;
         Engine& m_engine;
         bool m_release = false;
+        IconCache m_processIcon;
+        float m_chipHover = 0.0f;
+        double m_chipConnectedAt = -1.0;
+        std::uint32_t m_chipProcess = 0;
         std::vector<ValueUndo> m_valueUndo;
         struct ResultTarget
         {

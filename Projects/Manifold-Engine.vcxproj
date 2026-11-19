@@ -228,6 +228,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\MonoWindow.cpp" />
     <ClCompile Include="..\Source\UI\NopSled.cpp" />
     <ClCompile Include="..\Source\UI\PatchScanWindow.cpp" />
+    <ClCompile Include="..\Source\UI\ProcessIcon.cpp" />
     <ClCompile Include="..\Source\UI\ProfilerWindow.cpp" />
     <ClCompile Include="..\Source\UI\RecordEditor.cpp" />
     <ClCompile Include="..\Source\UI\ScriptUi.cpp" />
@@ -347,6 +348,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\LuaDialogs.h" />
     <ClInclude Include="..\Source\UI\LuaWindow.h" />
     <ClInclude Include="..\Source\UI\NopSled.h" />
+    <ClInclude Include="..\Source\UI\ProcessIcon.h" />
     <ClInclude Include="..\Source\UI\ProfilerWindow.h" />
     <ClInclude Include="..\Source\UI\ScriptUi.h" />
     <ClInclude Include="..\Source\UI\Shortcuts.h" />

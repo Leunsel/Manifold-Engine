@@ -39,7 +39,7 @@ local window = ui.window.create("UI demo", {
   key = "manifold ui demo",
   interval = 1 / 30,
   onClose = function()
-    ui.notice.show("The demo window is hidden. Scripts > UI demo > Show window brings it back.")
+    ui.notice.show("The demo window is hidden. Extensions > UI demo > Show window brings it back.")
   end,
   onUpdate = function()
     state.angle = state.angle + 0.04 * state.speed
@@ -498,4 +498,4 @@ end
 refreshSummary()
 refreshList()
 widgets.drawMap()
-log.success("ready: Scripts > UI demo, the toolbar button and the status entry open it")
+log.success("ready: Extensions > UI demo, the toolbar button and the status entry open it")

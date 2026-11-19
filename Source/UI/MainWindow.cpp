@@ -5,6 +5,7 @@
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
 #include "UI/Fonts.h"
+#include "UI/Loading.h"
 #include "UI/ProfilerWindow.h"
 #include "UI/ScriptUi.h"
 #include "UI/Shortcuts.h"
@@ -28,7 +29,6 @@ namespace Manifold::UI
     namespace
     {
         constexpr float kTitleHeight = 36.0f;
-        constexpr float kProcessBarHeight = 40.0f;
         constexpr float kStatusHeight = 24.0f;
         constexpr const char* kRecordDrag = "MANIFOLD_RECORD";
         constexpr std::size_t kUnclippedRows = 250;
@@ -179,6 +179,7 @@ namespace Manifold::UI
         drawList->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + Px(kTitleHeight)), ImGui::GetColorU32(ManifoldTheme::Sidebar), rounding, ImDrawFlags_RoundCornersTop);
         drawList->AddRect(pos, ImVec2(pos.x + size.x, pos.y + size.y), ImGui::GetColorU32(ManifoldTheme::Border), rounding);
 
+        m_release = m_engine.Options().ReleaseMode;
         {
             PROFILE_ZONE("Title bar and menus");
             TitleBar();
@@ -210,11 +211,6 @@ namespace Manifold::UI
         ImGui::BeginGroup();
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, PxWhole(8.0f, 8.0f));
         ImGui::BeginChild("##body", innerSize, ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
-        m_release = m_engine.Options().ReleaseMode;
-        {
-            PROFILE_ZONE("Process bar");
-            ProcessBar();
-        }
         if (m_engine.Options().CompactMode)
         {
             PROFILE_ZONE("Address list");
@@ -366,17 +362,22 @@ namespace Manifold::UI
         const float menusStart = ImGui::GetCursorPosX();
         RefreshScriptMenu();
         DetectMono();
-        float scriptMenusWidth = 0.0f;
-        for (const Lua::ScriptMenuItem& root : m_scriptMenu)
-        {
-            if (!ScriptMenuMerged(root) && root.Caption != "-")
-                scriptMenusWidth += ImGui::CalcTextSize(root.Caption.c_str()).x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
-        }
+        const bool scriptRoots = std::any_of(m_scriptMenu.begin(), m_scriptMenu.end(), [&](const Lua::ScriptMenuItem& root) { return !ScriptMenuMerged(root) && root.Caption != "-"; });
+        const bool extensions = scriptRoots || m_workspace.Ui().HasMenu();
+        std::vector<const char*> menuLabels = { "File", "Edit", "Process", "Table", "View" };
+        if (!m_release)
+            menuLabels.push_back("Tools");
         if (m_monoDetected && !m_release)
-            scriptMenusWidth += ImGui::CalcTextSize("Mono").x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+            menuLabels.push_back("Mono");
+        if (extensions)
+            menuLabels.push_back("Extensions");
+        menuLabels.push_back("Help");
+        float menusWidth = Px(16.0f);
+        for (const char* label : menuLabels)
+            menusWidth += ImGui::CalcTextSize(label).x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
         const float buttonWidth = Px(46.0f);
         const float buttonsStart = width - buttonWidth * 3.0f;
-        const float menuChildWidth = std::max(Px(120.0f), std::min(Px(540.0f) + scriptMenusWidth, buttonsStart - menusStart - Px(8.0f)));
+        const float menuChildWidth = std::max(Px(120.0f), std::min(menusWidth, buttonsStart - menusStart - Px(8.0f)));
         ImGui::BeginChild("##menus", ImVec2(menuChildWidth, menuHeight), ImGuiChildFlags_None, ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar);
         ImGui::PopStyleVar();
         float menusEnd = origin.x + menusStart;
@@ -519,27 +520,36 @@ namespace Manifold::UI
         }
         if (m_monoDetected && !m_release)
             MonoMenu();
-        for (const Lua::ScriptMenuItem& root : m_scriptMenu)
+        if (extensions && ImGui::BeginMenu("Extensions"))
         {
-            if (ScriptMenuMerged(root) || root.Caption == "-")
-                continue;
-            const std::string label = root.Caption + "##mainscript" + std::to_string(root.Id);
-            if (root.Children.empty())
+            for (const Lua::ScriptMenuItem& root : m_scriptMenu)
             {
-                if (ImGui::MenuItem(label.c_str(), nullptr, root.Checked, root.Enabled))
-                    scriptClicked = root.Id;
-                continue;
+                if (ScriptMenuMerged(root) || root.Caption == "-")
+                    continue;
+                const std::string label = root.Caption + "##mainscript" + std::to_string(root.Id);
+                if (root.Children.empty())
+                {
+                    if (ImGui::MenuItem(label.c_str(), nullptr, root.Checked, root.Enabled))
+                        scriptClicked = root.Id;
+                    continue;
+                }
+                if (ImGui::BeginMenu(label.c_str(), root.Enabled))
+                {
+                    if (ImGui::IsWindowAppearing())
+                        scriptOpened = root.Id;
+                    if (const int inner = DrawScriptMenuItems(root.Children))
+                        scriptClicked = inner;
+                    ImGui::EndMenu();
+                }
             }
-            if (ImGui::BeginMenu(label.c_str(), root.Enabled))
+            if (workspace.Ui().HasMenu())
             {
-                if (ImGui::IsWindowAppearing())
-                    scriptOpened = root.Id;
-                if (const int inner = DrawScriptMenuItems(root.Children))
-                    scriptClicked = inner;
-                ImGui::EndMenu();
+                if (scriptRoots)
+                    ImGui::Separator();
+                workspace.Ui().DrawMenuItems();
             }
+            ImGui::EndMenu();
         }
-        workspace.Ui().DrawMenu();
         if (ImGui::BeginMenu("Help"))
         {
             if (CommandItem(ICON_FA_KEYBOARD "  Keyboard shortcuts", Command::OpenShortcuts))
@@ -566,7 +576,9 @@ namespace Manifold::UI
         ImGui::PopStyleColor(2);
         ImGui::PopStyleVar(2);
 
-        workspace.Window().AddDragArea(menusEnd - origin.x + Px(8.0f), 0.0f, buttonsStart, height);
+        const float dragStart = menusEnd - origin.x + Px(8.0f);
+        const float toolsStart = TitleTools(dragStart + Px(10.0f), buttonsStart - Px(8.0f), height);
+        workspace.Window().AddDragArea(dragStart, 0.0f, std::max(dragStart, toolsStart - Px(6.0f)), height);
         ImGui::SetCursorPos(ImVec2(buttonsStart, 0.0f));
         if (WindowButton("##minimise", ICON_FA_WINDOW_MINIMIZE, buttonWidth, height, false))
             workspace.Window().Minimise();
@@ -578,80 +590,295 @@ namespace Manifold::UI
             workspace.RequestQuit();
     }
 
-    void MainWindow::ProcessBar()
+    float MainWindow::TitleTools(float left, float right, float height)
+    {
+        const float frame = ImGui::GetFrameHeight();
+        const float y = std::round((height - frame) * 0.5f);
+        float x = right;
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.08f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.14f));
+        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Label);
+        if (!m_release && x - frame > left)
+        {
+            x -= frame;
+            ImGui::SetCursorPos(ImVec2(x, y));
+            if (IconButton(ICON_FA_MEMORY "##titlememory", WithKeys("Memory view: the disassembler and hex view of the process", Command::OpenMemoryViewer).c_str()))
+                m_workspace.OpenMemoryViewer(0);
+            x -= Px(4.0f);
+        }
+        const float tools = m_workspace.Ui().ToolbarWidth();
+        if (tools > 0.0f && x - tools > left)
+        {
+            m_workspace.Ui().DrawToolbar(x, y);
+            x -= tools + Px(4.0f);
+        }
+        ImGui::PopStyleColor(4);
+        return ProcessChip(left, x - Px(6.0f), y, frame);
+    }
+
+    float MainWindow::ProcessChip(float left, float right, float y, float height)
     {
         Engine& engine = m_engine;
-        const float height = Px(kProcessBarHeight);
-        BeginCard("##process", nullptr, ImVec2(0.0f, height), ImGuiWindowFlags_NoScrollbar);
-        const float y = std::round((height - ImGui::GetFrameHeight()) * 0.5f) - Px(1.0f);
-        ImGui::SetCursorPosY(y);
         const bool hasProcess = engine.HasProcess();
-        if (hasProcess ? ImGui::Button(ICON_FA_DESKTOP "  Process") : AccentButton(ICON_FA_DESKTOP "  Open process"))
-            m_workspace.OpenProcessPicker();
-        ItemTooltip(WithKeys("Pick the process to work on", Command::OpenProcess).c_str());
-        ImGui::SameLine(0.0f, Px(12.0f));
+        const float pad = Px(10.0f);
+        const float gap = Px(7.0f);
+        const float line = ImGui::GetTextLineHeight();
+        const float icon = std::round(line);
+        if (right - left < height)
+            return right;
 
-        const float right = ImGui::GetWindowContentRegionMax().x;
+        std::string name;
+        std::string detail;
+        std::string badge;
+        ImVec4 badgeColor = ManifoldTheme::Accent;
         Debug::Debugger& debugger = engine.Debugger();
-        std::string debugText = !m_release && debugger.Attached() ? (debugger.Broken() ? ICON_FA_PAUSE_CIRCLE "  Broken" : ICON_FA_BUG "  Debugger attached") : "";
-        float x = right;
-        if (!m_release)
-            x -= ImGui::CalcTextSize(ICON_FA_MEMORY "  Memory view").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        const float scriptTools = m_workspace.Ui().ToolbarWidth();
-        const float scriptToolsEnd = m_release ? x : x - Px(8.0f);
-        if (scriptTools > 0.0f)
-            x = scriptToolsEnd - scriptTools - Px(8.0f);
-        const float debugWidth = debugText.empty() ? 0.0f : ImGui::CalcTextSize(debugText.c_str()).x + Px(16.0f);
-        const float textRoom = x - debugWidth - Px(12.0f) - ImGui::GetCursorPosX();
         if (hasProcess)
         {
-            const auto& process = *engine.Process();
-            ImGui::PushFont(Fonts::Bold(), 0.0f);
-            const float nameWidth = std::min(ImGui::CalcTextSize(process.Name().c_str()).x, std::max(Px(60.0f), textRoom));
-            TextFitted(process.Name(), nameWidth, ManifoldTheme::Text);
-            ImGui::PopFont();
-            const float detailRoom = textRoom - nameWidth - ImGui::GetStyle().ItemSpacing.x;
-            if (detailRoom > Px(40.0f))
+            const Target::Process& process = *engine.Process();
+            name = process.Name();
+            if (!m_release)
+                detail = Format("%s  ·  pid %u", process.Is64Bit() ? "64-bit" : "32-bit", process.Id());
+            if (!m_release && debugger.Attached())
             {
-                ImGui::SameLine();
-                if (m_release)
-                    TextFitted(process.Alive() ? "Opened" : "Closed", detailRoom, ManifoldTheme::Muted);
-                else
-                    TextFitted(Format("pid %u  ·  %s  ·  %zu modules", process.Id(), process.Is64Bit() ? "64-bit" : "32-bit", process.Modules()->size()), detailRoom, ManifoldTheme::Muted);
+                badge = debugger.Broken() ? ICON_FA_PAUSE_CIRCLE : ICON_FA_BUG;
+                badgeColor = debugger.Broken() ? ManifoldTheme::Warning : ManifoldTheme::Accent;
             }
         }
         else
         {
-            TextFitted(m_release ? "No game opened yet." : "No process opened. Pick one to scan, view memory or run scripts.", textRoom, ManifoldTheme::Muted);
+            name = m_release ? "Open a game" : "Open process";
         }
-        if (scriptTools > 0.0f)
+        ImGui::PushFont(Fonts::Bold(), 0.0f);
+        const float nameFull = ImGui::CalcTextSize(name.c_str()).x;
+        ImGui::PopFont();
+        const float detailWidth = detail.empty() ? 0.0f : ImGui::CalcTextSize(detail.c_str()).x;
+        const float chevronSize = std::round(ImGui::GetFontSize() * 0.72f);
+        const float chevronWidth = ImGui::GetFont()->CalcTextSizeA(chevronSize, FLT_MAX, 0.0f, ICON_FA_CHEVRON_DOWN).x;
+        const float badgeWidth = badge.empty() ? 0.0f : ImGui::CalcTextSize(badge.c_str()).x;
+        const auto measure = [&](bool withDetail, bool withChevron, float nameWidth)
+            {
+                float width = pad + icon + gap + nameWidth + pad;
+                if (withDetail && detailWidth > 0.0f)
+                    width += gap + Px(2.0f) + detailWidth;
+                if (badgeWidth > 0.0f)
+                    width += gap + badgeWidth;
+                if (withChevron)
+                    width += gap + chevronWidth;
+                return width;
+            };
+        const float room = right - left;
+        bool withDetail = measure(true, true, nameFull) <= room;
+        bool withChevron = measure(false, true, nameFull) <= room;
+        const float nameWidth = std::min(nameFull, std::max(0.0f, room - measure(withDetail, withChevron, 0.0f)));
+        const float width = std::min(room, measure(withDetail, withChevron, nameWidth));
+        const float x = right - width;
+
+        ImGui::SetCursorPos(ImVec2(x, y));
+        const bool clicked = ImGui::InvisibleButton("##processchip", ImVec2(width, height));
+        const bool hovered = ImGui::IsItemHovered();
+        const bool active = ImGui::IsItemActive();
+        const bool rightClicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImVec2 max = ImGui::GetItemRectMax();
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const bool callToAction = !hasProcess;
+        const double now = ImGui::GetTime();
+        const std::uint32_t pid = hasProcess ? Raw(engine.Process()->Id()) : 0u;
+        if (pid != m_chipProcess)
         {
-            ImGui::SameLine();
-            m_workspace.Ui().DrawToolbar(scriptToolsEnd, y);
+            m_chipProcess = pid;
+            m_chipConnectedAt = pid ? now : -1.0;
         }
-        if (m_release)
+        const float target = hovered || active ? 1.0f : 0.0f;
+        m_chipHover += (target - m_chipHover) * std::min(1.0f, ImGui::GetIO().DeltaTime * 10.0f);
+        if (std::fabs(target - m_chipHover) < 0.01f)
+            m_chipHover = target;
+        else
+            NoteAnimation();
+        const float hover = m_chipHover;
+        const float rounding = height * 0.5f;
+        const ImVec4 accent = ManifoldTheme::Accent;
+        const auto blend = [](ImVec4 from, ImVec4 to, float amount)
+            {
+                return ImVec4(from.x + (to.x - from.x) * amount, from.y + (to.y - from.y) * amount, from.z + (to.z - from.z) * amount, from.w + (to.w - from.w) * amount);
+            };
+        const float press = active ? 1.0f : 0.0f;
+        const ImVec4 fill = callToAction ? ManifoldTheme::WithAlpha(accent, 0.18f + 0.09f * hover + 0.07f * press)
+                                         : blend(ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.045f), ManifoldTheme::WithAlpha(accent, 0.11f + 0.06f * press), hover);
+        const ImVec4 edge = callToAction ? ManifoldTheme::WithAlpha(accent, 0.55f + 0.30f * hover) : blend(ManifoldTheme::Border, ManifoldTheme::WithAlpha(accent, 0.70f), hover);
+        if (hover > 0.01f)
         {
-            EndCard();
-            return;
+            for (int ring = 1; ring <= 3; ++ring)
+            {
+                const float grow = Px(1.0f) * static_cast<float>(ring);
+                draw->AddRect(ImVec2(min.x - grow, min.y - grow), ImVec2(max.x + grow, max.y + grow), ImGui::GetColorU32(ManifoldTheme::WithAlpha(accent, 0.14f * hover / static_cast<float>(ring))),
+                    rounding + grow, 0, Px(1.0f));
+            }
         }
-        ImGui::SameLine();
-        ImGui::SetCursorPos(ImVec2(scriptTools > 0.0f ? scriptToolsEnd + Px(8.0f) : x, y));
-        if (ImGui::Button(ICON_FA_MEMORY "  Memory view"))
-            m_workspace.OpenMemoryViewer(0);
-        ItemTooltip(WithKeys("Disassembler and hex view of the process", Command::OpenMemoryViewer).c_str());
-        if (!debugText.empty())
+        draw->AddRectFilled(min, max, ImGui::GetColorU32(fill), rounding);
+        if (callToAction)
         {
-            const float textWidth = ImGui::CalcTextSize(debugText.c_str()).x;
-            ImGui::SameLine();
-            ImGui::SetCursorPos(ImVec2(x - textWidth - Px(16.0f), y));
-            ImGui::PushStyleColor(ImGuiCol_Text, debugger.Broken() ? ManifoldTheme::Warning : ManifoldTheme::Accent);
-            ImGui::TextUnformatted(debugText.c_str());
+            constexpr double kPeriod = 6.5;
+            constexpr double kSweep = 1.1;
+            const double phase = std::fmod(now, kPeriod);
+            if (phase < kSweep)
+            {
+                NoteAnimation();
+                const float t = static_cast<float>(phase / kSweep);
+                const float eased = t * t * (3.0f - 2.0f * t);
+                const float band = Px(22.0f);
+                const float skew = Px(8.0f);
+                const float from = min.x + rounding + skew;
+                const float to = max.x - rounding - skew;
+                const float center = from - band + (to - from + band * 2.0f) * eased;
+                const float strength = std::sin(t * 3.14159265f);
+                for (int layer = 0; layer < 3; ++layer)
+                {
+                    const float half = band * 0.5f * (1.0f - 0.3f * static_cast<float>(layer));
+                    const float a = std::max(from, center - half);
+                    const float b = std::min(to, center + half);
+                    if (b <= a)
+                        continue;
+                    const ImVec2 quad[4] = { ImVec2(a + skew, min.y + Px(1.0f)), ImVec2(b + skew, min.y + Px(1.0f)), ImVec2(b - skew, max.y - Px(1.0f)), ImVec2(a - skew, max.y - Px(1.0f)) };
+                    draw->AddConvexPolyFilled(quad, 4, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.065f * strength)));
+                }
+            }
+        }
+        draw->AddRect(min, max, ImGui::GetColorU32(edge), rounding, 0, Px(1.0f));
+        float connect = 0.0f;
+        if (m_chipConnectedAt >= 0.0)
+        {
+            const float since = static_cast<float>(now - m_chipConnectedAt);
+            if (since < 1.0f)
+            {
+                NoteAnimation();
+                connect = 1.0f - since;
+                const float out = 1.0f - connect * connect * connect;
+                const float grow = Px(1.0f) + std::max(0.0f, y - Px(1.5f)) * out;
+                draw->AddRect(ImVec2(min.x - grow, min.y - grow), ImVec2(max.x + grow, max.y + grow), ImGui::GetColorU32(ManifoldTheme::WithAlpha(accent, 0.6f * connect)),
+                    rounding + grow, 0, Px(1.5f));
+            }
+            else
+                m_chipConnectedAt = -1.0;
+        }
+
+        const float textY = std::round(min.y + (height - line) * 0.5f);
+        float cx = min.x + pad;
+        void* texture = hasProcess ? m_processIcon.Texture(m_workspace.Window(), engine.Process()->Path(), static_cast<int>(icon)) : nullptr;
+        if (texture)
+            draw->AddImage(ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(texture))), ImVec2(cx, textY), ImVec2(cx + icon, textY + icon));
+        else
+            draw->AddText(ImVec2(cx, textY), ImGui::GetColorU32(callToAction ? accent : ManifoldTheme::Label), ICON_FA_DESKTOP);
+        if (hasProcess)
+        {
+            const ImVec2 dot(cx + icon - Px(1.0f), textY + icon - Px(1.0f));
+            const float radius = Px(2.6f) + Px(1.6f) * connect;
+            draw->AddCircleFilled(dot, radius + Px(1.3f), ImGui::GetColorU32(ManifoldTheme::Sidebar));
+            draw->AddCircleFilled(dot, radius, ImGui::GetColorU32(debugger.Broken() ? ManifoldTheme::Warning : ManifoldTheme::Success));
+        }
+        cx += icon + gap;
+        if (nameWidth > Px(4.0f))
+        {
+            ImGui::PushFont(Fonts::Bold(), 0.0f);
+            ImGui::PushStyleColor(ImGuiCol_Text, callToAction ? ManifoldTheme::Accent : ManifoldTheme::Text);
+            ImGui::RenderTextEllipsis(draw, ImVec2(cx, textY), ImVec2(cx + nameWidth, textY + line), cx + nameWidth, name.c_str(), nullptr, nullptr);
             ImGui::PopStyleColor();
-            if (debugger.Broken() && ImGui::IsItemClicked())
-                m_workspace.OpenMemoryViewer(debugger.Break().Address);
-            ItemTooltip(debugger.Broken() ? "The process is stopped at a breakpoint. Click to show it." : "The debugger is attached to the process.");
+            ImGui::PopFont();
+            cx += nameWidth;
         }
-        EndCard();
+        if (withDetail && detailWidth > 0.0f)
+        {
+            cx += gap + Px(2.0f);
+            draw->AddText(ImVec2(cx, textY), ImGui::GetColorU32(ManifoldTheme::Muted), detail.c_str());
+            cx += detailWidth;
+        }
+        ImRect badgeRect;
+        if (badgeWidth > 0.0f)
+        {
+            cx += gap;
+            draw->AddText(ImVec2(cx, textY), ImGui::GetColorU32(badgeColor), badge.c_str());
+            badgeRect = ImRect(ImVec2(cx - Px(3.0f), min.y), ImVec2(cx + badgeWidth + Px(3.0f), max.y));
+            cx += badgeWidth;
+        }
+        if (withChevron)
+        {
+            cx += gap;
+            draw->AddText(ImGui::GetFont(), chevronSize, ImVec2(cx, std::round(min.y + (height - chevronSize) * 0.5f + Px(1.5f) * hover)),
+                ImGui::GetColorU32(blend(ManifoldTheme::Muted, accent, hover)), ICON_FA_CHEVRON_DOWN);
+        }
+
+        const bool onBadge = badgeWidth > 0.0f && badgeRect.Contains(ImGui::GetIO().MousePos);
+        if (clicked)
+        {
+            if (onBadge && debugger.Broken())
+                m_workspace.OpenMemoryViewer(debugger.Break().Address);
+            else
+                m_workspace.OpenProcessPicker();
+        }
+        if (rightClicked)
+            ImGui::OpenPopup("##processchipmenu");
+        if (hovered)
+        {
+            std::string tip;
+            if (onBadge)
+                tip = debugger.Broken() ? "The process is stopped at a breakpoint. Click to show it." : "The debugger is attached to the process.";
+            else if (hasProcess)
+            {
+                const Target::Process& process = *engine.Process();
+                tip = process.Name() + "\n" + WideToUtf8(process.Path());
+                if (!m_release)
+                    tip += Format("\npid %u  ·  %s  ·  %zu modules", process.Id(), process.Is64Bit() ? "64-bit" : "32-bit", process.Modules()->size());
+                tip += "\n\n" + WithKeys("Click to pick another process, right-click for more", Command::OpenProcess);
+            }
+            else
+                tip = WithKeys("Pick the process to work on", Command::OpenProcess);
+            ItemTooltip(tip.c_str());
+        }
+        ProcessChipMenu();
+        return x;
+    }
+
+    void MainWindow::ProcessChipMenu()
+    {
+        if (!ImGui::BeginPopup("##processchipmenu"))
+            return;
+        Engine& engine = m_engine;
+        const bool hasProcess = engine.HasProcess();
+        if (CommandItem(ICON_FA_DESKTOP "  Open process...", Command::OpenProcess))
+            m_workspace.OpenProcessPicker();
+        const std::string& last = engine.Options().LastProcess;
+        const std::string lastLabel = ICON_FA_HISTORY "  Open " + (last.empty() ? std::string("the last process") : last);
+        if (CommandItem(lastLabel.c_str(), Command::OpenLastProcess, false, m_workspace.CanOpenLastProcess()))
+            m_workspace.OpenLastProcess();
+        if (ImGui::MenuItem(ICON_FA_TIMES "  Close process", nullptr, false, hasProcess))
+            engine.CloseProcess();
+        if (hasProcess && engine.HasProcess())
+        {
+            const Target::Process& process = *engine.Process();
+            const std::string name = process.Name();
+            const std::string id = ToText(process.Id());
+            const std::wstring path = process.Path();
+            if (!m_release)
+            {
+                ImGui::Separator();
+                if (CommandItem(ICON_FA_MEMORY "  Memory viewer", Command::OpenMemoryViewer))
+                    m_workspace.OpenMemoryViewer(0);
+                if (engine.Debugger().Broken() && ImGui::MenuItem(ICON_FA_PAUSE_CIRCLE "  Show the break"))
+                    m_workspace.OpenMemoryViewer(engine.Debugger().Break().Address);
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the name"))
+                ImGui::SetClipboardText(name.c_str());
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the process id"))
+                ImGui::SetClipboardText(id.c_str());
+            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Show the file in Explorer", nullptr, false, !path.empty()))
+            {
+                const std::wstring arguments = L"/select,\"" + path + L"\"";
+                ::ShellExecuteW(nullptr, L"open", L"explorer.exe", arguments.c_str(), nullptr, SW_SHOWNORMAL);
+            }
+        }
+        ImGui::EndPopup();
     }
 
     void MainWindow::ScanArea(float height)
