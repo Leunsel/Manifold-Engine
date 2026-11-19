@@ -207,6 +207,12 @@
     <ClCompile Include="..\Source\Lua\LuaCompat.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaCompatGaps.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaCompatSystem.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaConsole.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>

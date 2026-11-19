@@ -87,8 +87,10 @@ namespace Manifold::UI
         }
         ImDrawList* draw = ImGui::GetWindowDrawList();
         draw->AddText(at, ImGui::GetColorU32(DocKindColor(record->Kind)), DocKindIcon(record->Kind));
-        const std::string text = label + (record->IsDeprecated ? "  (deprecated)" : "");
-        draw->AddText(ImVec2(at.x + indent, at.y), ImGui::GetColorU32(record->IsDeprecated ? ManifoldTheme::Muted : ManifoldTheme::Text), text.c_str());
+        const char* marker = record->IsDeprecated ? "  (deprecated)" : record->Support == Lua::DocSupport::Missing ? "  (not available)" : record->Support == Lua::DocSupport::NoEffect ? "  (no effect)" : "";
+        const std::string text = label + marker;
+        const bool muted = record->IsDeprecated || record->Support != Lua::DocSupport::Full;
+        draw->AddText(ImVec2(at.x + indent, at.y), ImGui::GetColorU32(muted ? ManifoldTheme::Muted : ManifoldTheme::Text), text.c_str());
         if (!record->Summary.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
             ImGui::SetItemTooltip("%s", record->Summary.c_str());
         ImGui::PopID();

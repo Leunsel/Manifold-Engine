@@ -3,13 +3,20 @@
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/Text.h"
+#include "Lua/DocRegistry.h"
+#include "Lua/LuaCompatGaps.h"
+#include "Lua/LuaDocs.h"
 #include "Lua/LuaEngine.h"
+
+#include "lua.hpp"
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -808,6 +815,279 @@ namespace Manifold::Tests
             CHECK_EQ(lua.Console().Dropped(), static_cast<std::uint64_t>(0));
         }
 
+        bool IsMethodName(std::string_view name)
+        {
+            for (const char* method : Lua::CheatEngineMethodNames())
+            {
+                if (name == method)
+                    return true;
+            }
+            return false;
+        }
+
+        std::size_t Warnings(Engine& engine, const std::string& text)
+        {
+            std::size_t count = 0;
+            for (const Lua::ConsoleEntry& entry : engine.Lua().Console().Entries())
+            {
+                if (entry.Level == LogLevel::Warning && entry.Text.find(text) != std::string::npos)
+                    ++count;
+            }
+            return count;
+        }
+
+        void CheatEngineCoverage(Engine& engine)
+        {
+            lua_State* state = engine.Lua().State();
+            std::set<std::string> documented;
+            std::string missing;
+            for (const Lua::DocEntry& entry : Lua::DocEntries())
+            {
+                const std::string name = entry.Name;
+                if (entry.Kind != Lua::DocKind::Function || entry.Owner[0] != '\0' || name.find_first_of("[]. ") != std::string::npos || IsMethodName(name))
+                    continue;
+                if (!documented.insert(name).second)
+                    continue;
+                if (lua_getglobal(state, name.c_str()) != LUA_TFUNCTION)
+                    missing += (missing.empty() ? "" : ", ") + name;
+                lua_pop(state, 1);
+            }
+            CHECK_MSG(missing.empty(), "documented Cheat Engine functions that are nil: " + missing);
+            CHECK(documented.size() > 450);
+
+            std::set<std::string> seen;
+            for (const Lua::CompatGap& gap : Lua::CompatGaps())
+            {
+                const std::string name = gap.Name;
+                CHECK_MSG(seen.insert(name).second, "listed twice: " + name);
+                CHECK_MSG(documented.count(name) == 1, "not a documented Cheat Engine function: " + name);
+                CHECK_MSG(gap.Reason && gap.Reason->Title && gap.Reason->Text, "no reason for " + name);
+                lua_pushglobaltable(state);
+                lua_pushstring(state, gap.Name);
+                const int raw = lua_rawget(state, -2);
+                lua_pop(state, 2);
+                if (gap.Kind == Lua::GapKind::Unavailable)
+                    CHECK_MSG(raw == LUA_TNIL, name + " is listed as not available but is a real global now: remove it from the gap table");
+                else
+                    CHECK_MSG(raw == LUA_TFUNCTION, name + " is listed as having no effect but is not defined");
+                const Lua::DocPtr record = engine.Lua().Docs().Find(name);
+                CHECK_MSG(record && record->Support == (gap.Kind == Lua::GapKind::Unavailable ? Lua::DocSupport::Missing : Lua::DocSupport::NoEffect), "documentation does not mark " + name);
+            }
+            const Lua::DocPtr implemented = engine.Lua().Docs().Find("setMousePos");
+            CHECK(implemented && implemented->Support == Lua::DocSupport::Full);
+            for (const char* method : Lua::CheatEngineMethodNames())
+                CHECK_MSG(documented.count(method) == 0, std::string("method name filtered wrongly: ") + method);
+
+            const std::size_t before = Warnings(engine, "dbk_initialize is not available");
+            LuaCheck(engine, "unavailable functions", R"LUA(
+                if rawget(_G, "dbk_initialize") ~= nil then return "stub stored as a global" end
+                if dbk_initialize() ~= false or Dbk_initialize() ~= false then return "dbk_initialize result" end
+                if dbk_getCR3() ~= nil then return "nil result" end
+                if select("#", dbk_writeMSR(1, 2)) ~= 0 then return "no result" end
+                local id = registerAddressLookupCallback(function() end)
+                if math.type(id) ~= "integer" then return "register id" end
+                unregisterAddressLookupCallback(id)
+                if type(getHandleList()) ~= "table" then return "empty table result" end
+                if debug.getinfo(dbk_initialize).what ~= "C" then return "stub is not a C function" end
+                if not rawequal(dbk_initialize, dbk_initialize) then return "stub not cached" end
+                if noSuchCheatEngineFunction ~= nil then return "unknown names resolve" end
+                local kind, reason = __manifoldCompatGap("compile")
+                if kind ~= "unavailable" or not reason:find("compiler") then return "gap info" end
+                return "ok")LUA");
+            CHECK_EQ(Warnings(engine, "dbk_initialize is not available") - before, std::size_t(1));
+            CHECK_EQ(Warnings(engine, "unregisterAddressLookupCallback"), std::size_t(0));
+            CHECK_EQ(Warnings(engine, "registerAddressLookupCallback is not available"), std::size_t(1));
+
+            LuaCheck(engine, "functions without effect", R"LUA(
+                if waitForExports() ~= true or waitforsymbols(true) ~= true then return "wait functions" end
+                setProgressState(tbpsNormal)
+                hideAllCEWindows()
+                unhideMainCEwindow()
+                if debug_isStepping() ~= false then return "stepping" end
+                local form = getSettingsForm()
+                if form ~= getSettingsForm() or form.ClassName ~= "TForm" then return "settings form" end
+                local _ = form.SomeCheckBox.Checked
+                if getFreezeTimer().Interval <= 0 or getUpdateTimer().Interval <= 0 then return "timers" end
+                local owner = createForm(false)
+                if createCalendar(owner).ClassName ~= "TCalendar" or createDiagram(owner).Parent ~= owner then return "placeholders" end
+                createColorBox(owner)
+                createVirtualStringTree(owner)
+                createRegion()
+                owner.destroy()
+                return "ok")LUA");
+
+            LuaCheck(engine, "cheat engine system functions", R"LUA(
+                if signExtend(0xFF, 7) ~= -1 or signExtend(0x7F, 7) ~= 0x7F or signExtend(0x8000, 15) ~= -0x8000 then return "signExtend" end
+                local one = extendedToByteTable(1.0)
+                if #one ~= 10 or one[8] ~= 0x80 or one[9] ~= 0xFF or one[10] ~= 0x3F then return "extendedToByteTable 1.0" end
+                for _, value in ipairs({ 0.0, -1234.5, 3.25e-12, 1e300, 0.1 }) do
+                  if byteTableToExtended(extendedToByteTable(value)) ~= value then return "extended round trip " .. value end
+                end
+                if utf8ToAnsi("abc") ~= "abc" or ansiToUtf8("abc") ~= "abc" or ansiToUtf8(utf8ToAnsi("Gr\u{00FC}\u{00DF}e")) ~= "Gr\u{00FC}\u{00DF}e" then return "ansi" end
+                if invertColor(0) ~= 0xFFFFFF or invertColor(0x00FF00) ~= 0xFF00FF then return "invertColor" end
+                if getOperatingSystem() ~= 0 or not targetIsX86() or targetIsArm() or targetIsAndroid() then return "platform" end
+                if getPointerSize() ~= 8 or getOpenedProcessHandle() ~= 0 then return "no process" end
+                local raw, version = getCheatEngineFileVersion()
+                if version.major ~= 7 or version.minor ~= 5 or raw >> 48 ~= 7 then return "file version" end
+                if cpuid(0).EAX < 1 or cpuid(0).eax ~= cpuid(0).EAX then return "cpuid" end
+                if getCPUCount() < 1 then return "cpu count" end
+                if getSystemMetrics(0) ~= getScreenWidth() then return "system metrics" end
+                if getUserRegistryEnvironmentVariable("ManifoldEngineNoSuchVariable") ~= nil then return "environment" end
+                if isConnectedToCEServer() ~= false or speedhack_getSpeed() ~= 1 or debug_canBreak() ~= false or debug_getCurrentDebuggerInterface() ~= nil then return "fixed answers" end
+                if debug_getMaxLastBranchRecord() ~= -1 then return "branch records" end
+                if readShortInteger(0x10000) ~= nil or getRTTIClassName(0x10000) ~= nil then return "reads without process" end
+                if translateID("id", "text") ~= "text" or translateID("id") ~= "id" then return "translateID" end
+
+                local path = getTempFolder() .. "manifold-compat-" .. getCheatEngineProcessID() .. ".txt"
+                local file = io.open(path, "wb")
+                file:write("x")
+                file:close()
+                if not fileExists(path) then return "fileExists" end
+                if deleteFile(path) ~= true or fileExists(path) or deleteFile(path) ~= false then return "deleteFile" end
+
+                local ref = createRef("a", nil, 3)
+                local a, b, c = getRef(ref)
+                if a ~= "a" or b ~= nil or c ~= 3 then return "refs" end
+                destroyRef(ref)
+                if getRef(ref) ~= nil then return "destroyRef" end
+                setGlobalVariable("ManifoldCompatGlobal", 5)
+                if getGlobalVariable("ManifoldCompatGlobal") ~= 5 or ManifoldCompatGlobal ~= 5 then return "global variables" end
+                ManifoldCompatGlobal = nil
+
+                if getNextAllocNumber("alloc(newmem,2048)\nalloc(newmem2,$1000)") ~= 3 or getNextAllocNumber("") ~= 0 then return "alloc number" end
+                local script = createStringlist()
+                script.Text = "ALLOC(newmem5,8)"
+                if getNextAllocNumber(script) ~= 6 then return "alloc number from strings" end
+
+                if convertKeyComboToString(VK_CONTROL, VK_F1) ~= "Ctrl+F1" or convertKeyComboToString({ VK_SHIFT, VK_F2 }) ~= "Shift+F2" then return "key combo" end
+                if textToShortCut("Ctrl+Shift+F5") ~= (0x4000 | 0x2000 | 0x74) or textToShortCut("alt+a") ~= (0x8000 | 0x41) then return "textToShortCut" end
+                if shortCutToText(0x4000 | 0x41) ~= "Ctrl+A" or shortCutToText(textToShortCut("Shift+Del")) ~= "Shift+Del" then return "shortCutToText" end
+
+                local nop = assemble("nop")
+                if type(nop) ~= "table" or #nop ~= 1 or nop[1] ~= 0x90 then return "assemble nop" end
+                if #assemble("mov eax,1") ~= 5 or assemble("not an instruction") ~= nil then return "assemble" end
+                setAssemblerMode(0)
+                local push = assemble("push ebp")
+                setAssemblerMode(1)
+                if #push ~= 1 or push[1] ~= 0x55 then return "32-bit assembler mode" end
+
+                local source = allocateSharedMemoryLocal("ManifoldCompatShared" .. getCheatEngineProcessID(), 64)
+                if not source then return "shared memory" end
+                writeBytesLocal(source, 1, 2, 3, 4)
+                local copy = copyMemory(source, 4, nil, 3)
+                local bytes = readBytesLocal(copy, 4, true)
+                if bytes[4] ~= 4 or compareMemory(source, copy, 4, 2) ~= true then return "copyMemory" end
+                writeBytesLocal(copy + 2, 9)
+                local same, index = compareMemory(source, copy, 4, 2)
+                if same ~= false or index ~= 2 then return "compareMemory" end
+
+                setComment(0x1000, "comment")
+                setHeader(0x1000, "header")
+                if getComment(0x1000) ~= "comment" or getHeader(0x1000) ~= "header" then return "comments" end
+                setComment(0x1000, "")
+                setHeader(0x1000, "")
+                if getComment(0x1000) ~= "" then return "clear comment" end
+
+                if errorOnLookupFailure(false) ~= true or getAddress("no.such.symbol+1") ~= 0 then return "lookup without errors" end
+                if errorOnLookupFailure(true) ~= false or pcall(getAddress, "no.such.symbol+1") then return "lookup errors" end
+
+                registerSymbol("ManifoldCompatSymbol", 0x1234)
+                local found = false
+                for _, symbol in ipairs(enumRegisteredSymbols()) do
+                  found = found or (symbol.symbolname == "ManifoldCompatSymbol" and symbol.address == 0x1234)
+                end
+                local info = getSymbolInfo("ManifoldCompatSymbol")
+                unregisterSymbol("ManifoldCompatSymbol")
+                if not found or not info or info.address == nil or info.address ~= 0x1234 or info.searchkey ~= "ManifoldCompatSymbol" then return "symbols" end
+
+                if #getThreadlist() ~= 0 then return "thread list without process" end
+                if type(getWindowlist()) ~= "table" then return "window list" end
+                local processes = createStringlist()
+                getProcesslist(processes)
+                if processes.Count < 1 or not processes[0]:match("^%x%x%x%x%x%x%x%x%-") then return "process list strings" end
+                local output, code = runCommand("cmd.exe", { "/c", "echo", "manifold" })
+                if code ~= 0 or not tostring(output):find("manifold") then return "runCommand" end
+                return "ok")LUA");
+
+            LuaCheck(engine, "cheat engine objects", R"LUA(
+                local section = createCriticalSection()
+                section.enter()
+                if not section.tryEnter() then return "reentrant critical section" end
+                section.leave()
+                section:leave()
+                local event = createEvent(false, false)
+                if event.waitFor(0) ~= wrTimeout then return "unsignalled event" end
+                event.setEvent()
+                if event.waitFor(0) ~= wrSignaled or event.waitFor(0) ~= wrTimeout then return "auto reset event" end
+                local manual = createEvent(true, true)
+                if manual.waitFor(0) ~= wrSignaled or manual.waitFor(0) ~= wrSignaled then return "manual reset event" end
+                local semaphore = createSemaphore(1)
+                semaphore.acquire()
+                semaphore.release()
+                local sync = createMultiReadExclusiveWriteSynchronizer()
+                sync.beginRead()
+                sync.endRead()
+                if sync.beginWrite() ~= true then return "beginWrite" end
+                sync.endWrite()
+                local disassembler = createDisassembler()
+                if type(disassembler.disassemble) ~= "function" or getVisibleDisassembler() ~= getVisibleDisassembler() then return "disassembler" end
+                if type(disassembler.getLastDisassembleData()) ~= "table" then return "last disassemble data" end
+                local list = createClass("TStringList")
+                if list.ClassName ~= "TStringList" then return "createClass" end
+                local form = createForm(false)
+                local button = createComponentClass("TButton", form)
+                if button.ClassName ~= "TButton" or button.Owner ~= form or button.Parent ~= form then return "createComponentClass" end
+                form.destroy()
+                if createClass("TNoSuchClass") ~= nil then return "unknown class" end
+                local properties = getPropertyList("TLabel")
+                if properties.Count < 5 or properties.IndexOf("caption") < 0 then return "property list" end
+                local attach = getAutoAttachList()
+                if attach ~= getAutoAttachList() then return "auto attach list" end
+                attach.add("manifold-no-such-process.exe")
+                attach.clear()
+
+                local ran, args = false, nil
+                local thread = createThreadSuspended(function(self, a, b) ran = true args = (a or 0) + (b or 0) end, 2, 3)
+                local started = getTickCount()
+                repeat processMessages() until getTickCount() - started > 60
+                if ran then return "suspended thread ran before resume" end
+                thread.resume()
+                started = getTickCount()
+                repeat processMessages() until ran or getTickCount() - started > 3000
+                if not ran or args ~= 5 then return "suspended thread after resume" end
+                local fresh = false
+                ManifoldCompatFlag = nil
+                createThreadNewState("ManifoldCompatFlag = 7")
+                started = getTickCount()
+                repeat processMessages() until ManifoldCompatFlag or getTickCount() - started > 3000
+                if ManifoldCompatFlag ~= 7 then return "new state thread" end
+                ManifoldCompatFlag = nil
+                local event2 = createEvent(false, false)
+                local waited
+                createThread(function() waited = event2.waitFor(2000) end)
+                createTimer(30, function() event2.setEvent() end)
+                started = getTickCount()
+                repeat processMessages() until waited ~= nil or getTickCount() - started > 3000
+                if waited ~= wrSignaled then return "thread waits for an event: " .. tostring(waited) end
+                return "ok")LUA");
+
+            std::filesystem::path at = std::filesystem::current_path();
+            for (int i = 0; i < 8 && !std::filesystem::exists(at / "Source" / "Lua" / "LuaCompatGaps.cpp"); ++i)
+                at = at.parent_path();
+            const std::filesystem::path docs = at / "Docs" / "CE-COMPAT.md";
+            if (std::filesystem::exists(docs))
+            {
+                std::ifstream file(docs, std::ios::binary);
+                std::stringstream content;
+                content << file.rdbuf();
+                std::string written = content.str();
+                written.erase(std::remove(written.begin(), written.end(), '\r'), written.end());
+                CHECK_MSG(written == Lua::CompatGapsMarkdown(), "Docs/CE-COMPAT.md is out of date: run the tests with --ce-compat-markdown");
+            }
+            else
+                Skip("Docs/CE-COMPAT.md not found above " + std::filesystem::current_path().string());
+        }
+
         void WaitingLoops(Engine& engine)
         {
             Lua::LuaEngine& lua = engine.Lua();
@@ -949,6 +1229,7 @@ namespace Manifold::Tests
         ScriptLayout(engine);
         PaintBoxCanvas(engine);
         ScriptSettings(engine);
+        CheatEngineCoverage(engine);
         return Totals().Failures - before;
     }
 }
@@ -956,4 +1237,10 @@ namespace Manifold::Tests
 namespace Manifold::Tests
 {
     MANIFOLD_SUITE("compat", "Compatibility", 80, [](const SuiteContext&) { return RunCompatTests(); });
+
+    MANIFOLD_MODE("--ce-compat-markdown", [](const std::vector<std::string>&)
+        {
+            std::fputs(Lua::CompatGapsMarkdown().c_str(), stdout);
+            return 0;
+        });
 }

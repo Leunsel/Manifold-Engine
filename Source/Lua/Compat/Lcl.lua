@@ -1590,7 +1590,7 @@ Impl.thread = {
   waitfor = noop,
   waittilldone = noop,
   freeonterminate = function(self, value) D[self].props.freeonterminate = value end,
-  resume = noop,
+  resume = function(self) D[self].suspended = nil end,
   suspend = noop,
 }
 
@@ -3116,7 +3116,10 @@ setmetatable(_G, globalMeta)
 
 __manifoldLcl = {
   new = new,
+  construct = construct,
   data = D,
+  classes = classes,
+  impl = Impl,
   isObject = isObject,
   inherits = inherits,
   forms = forms,

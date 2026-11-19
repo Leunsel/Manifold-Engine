@@ -2,6 +2,7 @@
 
 #include "Core/Text.h"
 #include "Lua/DocText.h"
+#include "Lua/LuaCompatGaps.h"
 #include "Lua/LuaDocs.h"
 
 #include <algorithm>
@@ -544,7 +545,18 @@ namespace Manifold::Lua
             }
         }
         for (const std::string& key : order)
-            registry.Add(std::move(pending[key]));
+        {
+            DocRecord& record = pending[key];
+            if (record.Owner.empty() && record.Callable())
+            {
+                if (const CompatGap* gap = FindCompatGap(record.Name))
+                {
+                    record.Support = gap->Kind == GapKind::Unavailable ? DocSupport::Missing : DocSupport::NoEffect;
+                    record.SupportNote = CompatGapNote(*gap);
+                }
+            }
+            registry.Add(std::move(record));
+        }
         constexpr std::pair<const char*, const char*> kAliases[] = { { "TMainForm", "Form" }, { "TfrmLuaEngine", "Form" }, { "TMemoryBrowser", "Form" },
             { "TCustomForm", "Form" }, { "TPortableNetworkGraphic", "Graphic" }, { "TJpegImage", "Graphic" } };
         for (const auto& [alias, target] : kAliases)

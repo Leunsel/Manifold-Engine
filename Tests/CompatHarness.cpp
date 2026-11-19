@@ -67,6 +67,14 @@ shellExecute = ShellExecute
 os.exit = function(code)
   say("os.exit not run", code)
 end
+for _, name in ipairs({ "runCommand", "createProcess", "keyDown", "keyUp", "doKeyPress", "mouse_event", "setMousePos", "sendMessage",
+    "beep", "playSound", "speak", "speakEnglish", "setXBox360ControllerVibration", "setUserRegistryEnvironmentVariable",
+    "deleteFile", "saveTable", "createRemoteThread" }) do
+  _G[name] = function(first)
+    say(name .. " not run", first)
+    return nil, "blocked in the headless check"
+  end
+end
 inputQuery = function(caption, prompt, initial)
   say("inputQuery", tostring(caption) .. ": " .. tostring(prompt))
   return nil

@@ -32,6 +32,13 @@ namespace Manifold::Lua
         Manifold
     };
 
+    enum class DocSupport : std::uint8_t
+    {
+        Full,
+        NoEffect,
+        Missing
+    };
+
     struct DocParam
     {
         std::string Name;
@@ -69,6 +76,8 @@ namespace Manifold::Lua
         std::string Parent;
         std::string Deprecated;
         bool IsDeprecated = false;
+        DocSupport Support = DocSupport::Full;
+        std::string SupportNote;
         std::string Source;
         int Line = 0;
         std::vector<DocSignature> Signatures;

@@ -316,6 +316,11 @@ namespace Manifold::UI
             Gap(2.0f);
             RichText("Deprecated" + (record.Deprecated.empty() ? std::string(".") : ": " + record.Deprecated), width, ManifoldTheme::Warning);
         }
+        if (record.Support != Lua::DocSupport::Full && !record.SupportNote.empty())
+        {
+            Gap(2.0f);
+            RichText(record.SupportNote, width, record.Support == Lua::DocSupport::Missing ? ManifoldTheme::Warning : ManifoldTheme::Muted);
+        }
 
         if (options.SignatureHelp && signature && options.Parameter >= 0 && !signature->Params.empty())
         {

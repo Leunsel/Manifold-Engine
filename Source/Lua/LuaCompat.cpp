@@ -6,6 +6,7 @@
 #include "Core/Ini.h"
 #include "Core/Text.h"
 #include "Core/RuntimeLog.h"
+#include "Lua/LuaCompatGaps.h"
 #include "Lua/LuaCompatScripts.h"
 #include "Lua/LuaEngine.h"
 #include "Scan/Scanner.h"
@@ -43,6 +44,7 @@ namespace Manifold::Lua
         constexpr const char* kDetachedKey = "Manifold.DetachedStructures";
         constexpr const char* kCustomTypeType = "Manifold.CustomType";
         constexpr const char* kInternetType = "Manifold.Internet";
+        constexpr const char* kLookupErrorsKey = "Manifold.LookupErrors";
 
         bool ReadLocal(std::uint64_t address, void* buffer, std::size_t size)
         {
@@ -1075,8 +1077,27 @@ namespace Manifold::Lua
             Status error;
             const auto value = Owner(state).Evaluate(text, &error);
             if (!value)
+            {
+                if (!LookupErrors(state))
+                {
+                    lua_pushinteger(state, 0);
+                    return 1;
+                }
                 return luaL_error(state, "%s", error.Text.c_str());
+            }
             lua_pushinteger(state, static_cast<lua_Integer>(*value));
+            return 1;
+        }
+
+        int ErrorOnLookupFailure(lua_State* state)
+        {
+            const bool previous = LookupErrors(state);
+            if (!lua_isnoneornil(state, 1))
+            {
+                lua_pushboolean(state, lua_toboolean(state, 1));
+                lua_setfield(state, LUA_REGISTRYINDEX, kLookupErrorsKey);
+            }
+            lua_pushboolean(state, previous);
             return 1;
         }
 
@@ -3257,6 +3278,36 @@ namespace Manifold::Lua
         PushStructure(state, definition);
     }
 
+    std::optional<std::vector<std::uint8_t>> StreamData(lua_State* state, int index)
+    {
+        if (auto* holder = static_cast<std::shared_ptr<StreamState>*>(luaL_testudata(state, index, kStreamType)))
+            return *(*holder)->Data;
+        if (luaL_testudata(state, index, kTableFileType))
+        {
+            if (const Table::TableFile* file = CheckTableFile(state, index))
+                return *file->Data;
+        }
+        return std::nullopt;
+    }
+
+    bool SetStreamData(lua_State* state, int index, std::vector<std::uint8_t> data)
+    {
+        auto* holder = static_cast<std::shared_ptr<StreamState>*>(luaL_testudata(state, index, kStreamType));
+        if (!holder)
+            return false;
+        *(*holder)->Data = std::move(data);
+        (*holder)->Position = 0;
+        return true;
+    }
+
+    bool LookupErrors(lua_State* state)
+    {
+        const int type = lua_getfield(state, LUA_REGISTRYINDEX, kLookupErrorsKey);
+        const bool errors = type == LUA_TNIL || lua_toboolean(state, -1);
+        lua_pop(state, 1);
+        return errors;
+    }
+
     void RunCompatScripts(LuaEngine& engine)
     {
         for (const CompatScript& script : CompatScripts())
@@ -3299,6 +3350,7 @@ namespace Manifold::Lua
             { "getAddress", &GetAddressCompat },
             { "getAddressFromName", &GetAddressCompat },
             { "getAddressSafe", &GetAddressSafeCompat },
+            { "errorOnLookupFailure", &ErrorOnLookupFailure },
             { "enableWindowsSymbols", &EnableWindowsSymbols },
             { "waitForPDB", &WaitForPdb },
             { "searchPDBWhileLoading", &Nothing },
@@ -3432,5 +3484,7 @@ namespace Manifold::Lua
             if (function->name[0] != '_')
                 NoteFunction(function->name);
         }
+        RegisterCompatSystem(engine, state);
+        RegisterCompatGaps(engine, state);
     }
 }

@@ -172,6 +172,8 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Lua\LuaArgs.cpp" />
     <ClCompile Include="..\Source\Lua\LuaAssist.cpp" />
     <ClCompile Include="..\Source\Lua\LuaCompat.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaCompatGaps.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaCompatSystem.cpp" />
     <ClCompile Include="..\Source\Lua\LuaConsole.cpp" />
     <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp" />
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp" />
@@ -317,6 +319,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Lua\InputBox.h" />
     <ClInclude Include="..\Source\Lua\LuaApi.h" />
     <ClInclude Include="..\Source\Lua\LuaArgs.h" />
+    <ClInclude Include="..\Source\Lua\LuaCompatGaps.h" />
     <ClInclude Include="..\Source\Lua\LuaCompatScripts.h" />
     <ClInclude Include="..\Source\Lua\LuaConsole.h" />
     <ClInclude Include="..\Source\Lua\LuaDocBinding.h" />

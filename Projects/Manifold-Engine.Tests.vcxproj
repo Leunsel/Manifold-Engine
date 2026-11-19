@@ -158,6 +158,8 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaArgs.cpp" />
     <ClCompile Include="..\Source\Lua\LuaAssist.cpp" />
     <ClCompile Include="..\Source\Lua\LuaCompat.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaCompatGaps.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaCompatSystem.cpp" />
     <ClCompile Include="..\Source\Lua\LuaConsole.cpp" />
     <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp" />
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp" />
