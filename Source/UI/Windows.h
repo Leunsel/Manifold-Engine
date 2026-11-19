@@ -1071,7 +1071,9 @@ namespace Manifold::UI
         void SelectClass(int index);
         void SyncUnity(Target::UnityExplorer& unity);
         bool ExplorerGate(Target::UnityExplorer& unity, const char* icon, const char* what);
-        void StatusLine(Target::UnityExplorer& unity);
+        bool MenuBar();
+        void MenuStatus(Target::MonoBridge& mono);
+        void StatusLine();
         void ScenesTab(Target::UnityExplorer& unity);
         void SceneNode(Target::UnityExplorer& unity, int node);
         void ObjectsTab(Target::UnityExplorer& unity);
@@ -1134,6 +1136,7 @@ namespace Manifold::UI
         std::string m_searchName;
         bool m_searchHidden = false;
         bool m_suggest = false;
+        bool m_suggestHovered = false;
         std::string m_memberFilter;
         bool m_showFields = true;
         bool m_showProperties = true;

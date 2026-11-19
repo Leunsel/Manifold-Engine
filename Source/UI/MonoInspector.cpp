@@ -185,8 +185,8 @@ namespace Manifold::UI
         if (!unity.Enabled())
         {
             EmptyState(ICON_FA_EYE, "Inspector is off",
-                "The inspector reads properties and calls methods on the game's main thread. Turn the explorer on under Scenes or Objects "
-                "first - it is off because it can still crash Unity 6 games.",
+                "The inspector reads properties and calls methods on the game's main thread through the explorer's agent. "
+                "Turn the explorer on first, under Explorer in the menu or on the Scenes or Objects tab.",
                 {}, false);
             return;
         }

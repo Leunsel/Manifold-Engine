@@ -10,6 +10,8 @@
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
+#include "imgui_internal.h"
+
 #include <algorithm>
 #include <optional>
 
@@ -92,7 +94,12 @@ namespace Manifold::UI
             ImGui::SetNextWindowFocus();
             m_bringToFront = false;
         }
-        if (!BeginToolWindow(ICON_FA_DICE_D6 "  Mono / .NET###mono", &m_open, ImVec2(1040.0f, 620.0f), 0, ImVec2(620.0f, 360.0f)))
+        if (!BeginToolWindow(ICON_FA_DICE_D6 "  Mono / .NET###mono", &m_open, ImVec2(1040.0f, 620.0f), ImGuiWindowFlags_MenuBar, ImVec2(620.0f, 360.0f)))
+        {
+            EndToolWindow();
+            return;
+        }
+        if (MenuBar())
         {
             EndToolWindow();
             return;
@@ -170,34 +177,9 @@ namespace Manifold::UI
         Target::UnityExplorer& unity = mono.Unity();
         SyncUnity(unity);
 
-        // Toolbar: what is loaded, the explorer's state, reload and shut down.
-        // Items wrap onto a second line instead of running off a narrow window.
-        ImGui::AlignTextToFramePadding();
-        Muted(mono.Module() + "  ·  " + Target::MonoBridge::RuntimeName(mono.Runtime()) + "  ·  " + std::to_string(m_classes.size()) + " classes" +
-            (m_status.UnityVersion.empty() ? std::string() : "  ·  Unity " + m_status.UnityVersion));
-        if (work)
-        {
-            ImGui::SameLine();
-            if (LoadingLine(*work))
-                m_engine.CancelWork(work->Id);
-        }
-        else
-        {
-            FlowNext(SmallButtonWidth(ICON_FA_SYNC "  Reload"));
-            if (ImGui::SmallButton(ICON_FA_SYNC "  Reload"))
-                m_engine.ReloadMono();
-            ItemTooltip("Reads the class list again, for assemblies the game loaded later");
-            FlowNext(SmallButtonWidth(ICON_FA_POWER_OFF "  Shut down"));
-            if (ImGui::SmallButton(ICON_FA_POWER_OFF "  Shut down"))
-            {
-                CloseAll();
-                m_engine.StopMono();
-                EndToolWindow();
-                return;
-            }
-            ItemTooltip("Ends the helper in the game and takes the explorer's per-frame callback out again");
-        }
-        StatusLine(unity);
+        if (work && LoadingLine(*work))
+            m_engine.CancelWork(work->Id);
+        StatusLine();
 
         // The window's minimum (620 px, held even when docked) fits both panes
         // at their minimums, so neither can be squeezed below a usable width.
@@ -264,51 +246,129 @@ namespace Manifold::UI
         EndToolWindow();
     }
 
-    void MonoWindow::StatusLine(Target::UnityExplorer& unity)
+    bool MonoWindow::MenuBar()
     {
-        // The running request goes LAST on the line and only once it has run
-        // for a moment: with Auto, the inspector refreshes ten times a second,
-        // and a spinner, task text and Stop button popping in front of the
-        // other items made the whole line jump each time.
+        if (!ImGui::BeginMenuBar())
+            return false;
+        Target::MonoBridge& mono = m_engine.Mono();
+        const bool process = m_engine.HasProcess();
+        const bool present = process && mono.Present();
+        const bool working = m_engine.Work().Info("mono").has_value();
+        bool stopped = false;
+        if (ImGui::BeginMenu("Runtime"))
+        {
+            if (!present)
+            {
+                if (ImGui::MenuItem(ICON_FA_PLUG "  Load the runtime", nullptr, false, process && !working))
+                    m_engine.LoadMono();
+                ItemTooltip("Reads the game's Mono or IL2CPP runtime through a small helper inside the game");
+            }
+            else
+            {
+                if (ImGui::MenuItem(ICON_FA_SYNC "  Reload the classes", nullptr, false, !working))
+                    m_engine.ReloadMono();
+                ItemTooltip("Reads the class list again, for assemblies the game loaded later");
+                if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut down", nullptr, false, !working))
+                {
+                    CloseAll();
+                    m_engine.StopMono();
+                    stopped = true;
+                }
+                ItemTooltip("Ends the helper in the game, takes the explorer's frame callback out again and sets runInBackground back");
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_TIMES "  Close"))
+                m_open = false;
+            ImGui::EndMenu();
+        }
+        if (present && !stopped && !mono.IsIl2Cpp() && ImGui::BeginMenu("Explorer"))
+        {
+            Target::UnityExplorer& unity = mono.Unity();
+            if (!unity.Enabled())
+            {
+                if (ImGui::MenuItem(ICON_FA_PLAY "  Turn the explorer on"))
+                    unity.SetEnabled(true);
+                ItemTooltip("Starts Manifold's managed agent in the game for scenes, objects and the inspector");
+                ImGui::Separator();
+            }
+            const bool background = m_status.RunInBackground.value_or(false);
+            if (ImGui::MenuItem("Keep the game running in the background", nullptr, background, m_status.Hooked))
+                unity.SetRunInBackground(!background);
+            ItemTooltip("Sets Application.runInBackground, so the game keeps updating while Manifold is in front. Most requests need the game to run. "
+                        "Shut down sets it back.");
+            if (ImGui::MenuItem(ICON_FA_STOP "  Stop the running request", nullptr, false, m_status.Busy))
+                unity.Cancel();
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_TIMES "  Close all inspector tabs", nullptr, false, !m_tabs.empty()))
+            {
+                while (!m_tabs.empty())
+                    CloseTab(m_tabs.size() - 1);
+            }
+            ImGui::EndMenu();
+        }
+        if (present && !stopped && ImGui::BeginMenu("View"))
+        {
+            const auto view = [&](const char* label, int index)
+                {
+                    if (ImGui::MenuItem(label, nullptr, m_leftTab == index))
+                        m_requestLeftTab = index;
+                };
+            view(ICON_FA_SITEMAP "  Scenes", 0);
+            view(ICON_FA_SEARCH "  Objects", 1);
+            view(ICON_FA_CUBES "  Classes", 2);
+            ImGui::EndMenu();
+        }
+        if (present && !stopped)
+            MenuStatus(mono);
+        ImGui::EndMenuBar();
+        return stopped;
+    }
+
+    void MonoWindow::MenuStatus(Target::MonoBridge& mono)
+    {
         const double now = ImGui::GetTime();
         if (!m_status.Busy)
             m_busySince = -1.0;
         else if (m_busySince < 0.0)
             m_busySince = now;
         const bool showBusy = m_status.Busy && now - m_busySince > 0.4;
-        const char* const explorerOn = ICON_FA_INFO_CIRCLE " explorer on";
-        const char* const keepLabel = "Keep running in the background";
-        if (unity.Enabled())
+        const bool explorer = !mono.IsIl2Cpp() && mono.Unity().Enabled();
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float gap = Px(14.0f);
+        const std::string task = m_status.Task.empty() ? std::string("Working") : m_status.Task;
+        const char* const explorerOn = ICON_FA_INFO_CIRCLE "  explorer on";
+        const std::string info = mono.Module() + "  ·  " + Target::MonoBridge::RuntimeName(mono.Runtime()) + "  ·  " + std::to_string(m_classes.size()) + " classes" +
+            (m_status.UnityVersion.empty() ? std::string() : "  ·  Unity " + m_status.UnityVersion);
+        const float busyWidth = showBusy ? ImGui::GetTextLineHeight() + Px(6.0f) + ImGui::CalcTextSize(task.c_str()).x + Px(8.0f) + SmallButtonWidth(ICON_FA_STOP "  Stop") + gap : 0.0f;
+        const float explorerWidth = explorer ? ImGui::CalcTextSize(explorerOn).x + gap : 0.0f;
+        const float left = ImGui::GetCursorPosX() + gap;
+        const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - style.ItemSpacing.x;
+        const float infoWidth = std::max(0.0f, std::min(ImGui::CalcTextSize(info.c_str()).x, right - left - busyWidth - explorerWidth));
+        ImGui::SetCursorPosX(std::max(left, right - busyWidth - explorerWidth - infoWidth));
+        if (showBusy)
         {
-            FlowNext(ImGui::CalcTextSize(explorerOn).x);
+            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() - style.ItemSpacing.x + Px(6.0f));
+            Muted(task);
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() - style.ItemSpacing.x + Px(8.0f));
+            if (ImGui::SmallButton(ICON_FA_STOP "  Stop"))
+                mono.Unity().Cancel();
+            ItemTooltip("Stops the running request");
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() - style.ItemSpacing.x + gap);
+        }
+        if (explorer)
+        {
             ImGui::TextColored(ManifoldTheme::Label, "%s", explorerOn);
             ItemTooltip("Manifold's managed agent answers from the game's frame callback while this is on, a few milliseconds per frame at most. "
                         "Shut down takes it back out; the assembly itself stays loaded until the game ends.");
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() - style.ItemSpacing.x + gap);
         }
-        if (m_status.Hooked)
-        {
-            FlowNext(CheckboxWidth(keepLabel));
-            const bool background = m_status.RunInBackground.value_or(false);
-            bool keep = background;
-            if (ImGui::Checkbox(keepLabel, &keep))
-                unity.SetRunInBackground(keep);
-            ItemTooltip("Sets Application.runInBackground, so the game keeps updating while Manifold is in front. Most requests need the game to run. "
-                        "Shut down sets it back.");
-        }
-        if (showBusy)
-        {
-            // Spinner, task and Stop stay together when they wrap.
-            const std::string task = m_status.Task.empty() ? std::string("Working") : m_status.Task;
-            const float spacing = ImGui::GetStyle().ItemSpacing.x;
-            FlowNext(ImGui::GetTextLineHeight() + spacing + ImGui::CalcTextSize(task.c_str()).x + spacing + SmallButtonWidth(ICON_FA_STOP "  Stop"));
-            Spinner(ImGui::GetTextLineHeight(), ManifoldTheme::Accent);
-            ImGui::SameLine();
-            Muted(task);
-            ImGui::SameLine();
-            if (ImGui::SmallButton(ICON_FA_STOP "  Stop"))
-                unity.Cancel();
-            ItemTooltip("Stops the running request");
-        }
+        if (infoWidth > Px(24.0f))
+            TextFitted(info, infoWidth, ManifoldTheme::Muted);
+    }
+
+    void MonoWindow::StatusLine()
+    {
         if (!m_status.Error.empty())
             TextWithError(ICON_FA_EXCLAMATION_TRIANGLE "  " + m_status.Error, ManifoldTheme::Warning);
     }
@@ -329,14 +389,11 @@ namespace Manifold::UI
         }
         if (unity.Enabled())
             return true;
-        // Honest about the risk: this part runs code inside the game, and on
-        // Unity 6 with the current Mono build that is still known to crash
-        // games. The class list and Structure Dissect do not come through here.
-        std::vector<EmptyAction> actions = { { ICON_FA_PLAY "  Turn the explorer on anyway", nullptr, true } };
+        std::vector<EmptyAction> actions = { { ICON_FA_PLAY "  Turn the explorer on", nullptr, true } };
         const int chose = EmptyState(icon, what,
-            "This runs code inside the game to reach its main thread. On Unity 6 that is known to crash games after a few seconds - "
-            "the cause is not fixed yet, so only use it on a game you can afford to lose, and save first.\n\n"
-            "The class list, method addresses and Structure Dissect's Mono lookup do not use this and stay safe.",
+            "Scenes, objects and the inspector run through Manifold's managed agent inside the game. It answers from the game's frame callback, "
+            "a few milliseconds per frame at most, and Runtime > Shut down takes it out again. Setters and method calls change the game, so save first.\n\n"
+            "The class list, method addresses and Structure Dissect's Mono lookup do not need it.",
             actions, false);
         if (chose == 0)
             unity.SetEnabled(true);
@@ -501,11 +558,13 @@ namespace Manifold::UI
         ImGui::SameLine(label);
         ImGui::SetNextItemWidth(-1.0f);
         const bool entered = InputTextWithHint("##searchclass", "UnityEngine.Camera, a MonoBehaviour, any class", m_searchClass, ImGuiInputTextFlags_EnterReturnsTrue);
-        if (ImGui::IsItemActive())
+        const bool typing = ImGui::IsItemActive();
+        if (typing)
             m_suggest = true;
         const ImVec2 under(ImGui::GetItemRectMin().x, ImGui::GetItemRectMax().y);
         const float width = ImGui::GetItemRectSize().x;
         bool start = entered;
+        bool listed = false;
         if (m_suggest && m_searchClass.size() >= 2)
         {
             // Matching class names under the field, the closest first.
@@ -528,11 +587,24 @@ namespace Manifold::UI
                 });
             if (!matches.empty() && !(matches.size() == 1 && EqualsNoCase(m_classes[static_cast<std::size_t>(matches[0])].FullName(), m_searchClass)))
             {
+                const ImGuiViewport* host = ImGui::GetWindowViewport();
+                const float right = host->Pos.x + host->Size.x - Px(6.0f);
+                const float bottom = host->Pos.y + host->Size.y - Px(6.0f);
+                const float maxWidth = std::max(width, std::min(std::max(width, Px(360.0f)), right - under.x));
+                const float maxHeight = std::max(ImGui::GetTextLineHeightWithSpacing() * 3.0f, std::min(Px(260.0f), bottom - under.y));
                 ImGui::SetNextWindowPos(under);
-                ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(std::max(width, Px(360.0f)), Px(260.0f)));
-                if (ImGui::Begin("##classsuggest", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-                        ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_Tooltip))
+                ImGui::SetNextWindowViewport(host->ID);
+                ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(maxWidth, maxHeight));
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_PopupBg));
+                const bool shown = ImGui::Begin("##classsuggest", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                    ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+                    ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDocking);
+                ImGui::PopStyleColor();
+                listed = true;
+                if (shown)
                 {
+                    ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+                    m_suggestHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
                     for (std::size_t i = 0; i < std::min<std::size_t>(matches.size(), 30); ++i)
                     {
                         const Target::MonoClass& c = m_classes[static_cast<std::size_t>(matches[i])];
@@ -550,7 +622,9 @@ namespace Manifold::UI
                 ImGui::End();
             }
         }
-        if (!ImGui::IsAnyItemActive() && !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow | ImGuiHoveredFlags_AllowWhenBlockedByPopup))
+        if (!listed)
+            m_suggestHovered = false;
+        if (!typing && !m_suggestHovered)
             m_suggest = false;
         if (entered)
             m_suggest = false;

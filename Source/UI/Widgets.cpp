@@ -64,9 +64,8 @@ namespace Manifold::UI
 
         int g_toolWindowCount = 0;
 
-        std::vector<std::string> WrapWords(std::string_view text, float width)
+        void WrapParagraph(std::string_view text, float width, std::vector<std::string>& lines)
         {
-            std::vector<std::string> lines;
             std::string line;
             std::size_t at = 0;
             while (at < text.size())
@@ -89,8 +88,23 @@ namespace Manifold::UI
                 }
                 at = end;
             }
-            if (!line.empty())
-                lines.push_back(line);
+            lines.push_back(line);
+        }
+
+        std::vector<std::string> WrapWords(std::string_view text, float width)
+        {
+            std::vector<std::string> lines;
+            std::size_t start = 0;
+            for (;;)
+            {
+                const std::size_t end = std::min(text.find('\n', start), text.size());
+                WrapParagraph(text.substr(start, end - start), width, lines);
+                if (end >= text.size())
+                    break;
+                start = end + 1;
+            }
+            while (!lines.empty() && lines.back().empty())
+                lines.pop_back();
             return lines;
         }
 
