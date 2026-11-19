@@ -372,7 +372,7 @@ namespace Manifold::UI
         m_dropped = log.Dropped();
     }
 
-    void ConsoleView::DrawFilterBar(const Lua::ConsoleLog& log, ConsoleFilter& filter, bool& changed)
+    void ConsoleView::DrawFilterBar(const Lua::ConsoleLog& log, ConsoleFilter& filter, bool& changed, const std::function<void()>& clear)
     {
         const Lua::ConsoleCounts counts = log.Counts();
         constexpr LogLevel kLevels[] = { LogLevel::Debug, LogLevel::Info, LogLevel::Success, LogLevel::Warning, LogLevel::Error };
@@ -380,7 +380,8 @@ namespace Manifold::UI
         const ImGuiStyle& style = ImGui::GetStyle();
         const float spacing = style.ItemSpacing.x;
         const float side = ImGui::GetFrameHeight();
-        const float toggles = side * 4.0f + spacing * 3.0f;
+        const float buttons = clear ? 5.0f : 4.0f;
+        const float toggles = side * buttons + spacing * (buttons - 1.0f);
         const float start = ImGui::GetCursorPosX();
         const float avail = ImGui::GetContentRegionAvail().x;
         const std::vector<std::string> channels = log.Channels();
@@ -542,6 +543,8 @@ namespace Manifold::UI
                 option(ICON_FA_HASHTAG "  Integers in hex", filter.Hex);
                 option(ICON_FA_ARROW_DOWN "  Follow new entries", m_follow);
                 ImGui::PopItemFlag();
+                if (clear && ImGui::MenuItem(ICON_FA_ERASER "  Clear the console"))
+                    clear();
             }
             ImGui::EndPopup();
         }
@@ -597,6 +600,65 @@ namespace Manifold::UI
         toggle(ICON_FA_CLOCK, filter.Time, "Show the time of each entry");
         toggle(ICON_FA_HASHTAG, filter.Hex, "Show integers in hex");
         toggle(ICON_FA_ARROW_DOWN, m_follow, "Follow new entries");
+        if (clear)
+        {
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
+            if (IconButton(ICON_FA_ERASER, "Clear the console"))
+                clear();
+            ImGui::PopStyleColor();
+        }
+    }
+
+    void ConsoleView::Select(std::uint64_t id, bool toggle, bool range)
+    {
+        if (range && m_anchor != 0)
+        {
+            const std::vector<std::uint64_t> shown = ShownIds();
+            const auto from = std::find(shown.begin(), shown.end(), m_anchor);
+            const auto to = std::find(shown.begin(), shown.end(), id);
+            if (from != shown.end() && to != shown.end())
+            {
+                if (!toggle)
+                    m_selection.clear();
+                const auto first = std::min(from, to);
+                const auto last = std::max(from, to);
+                m_selection.insert(first, last + 1);
+                m_selected = id;
+                return;
+            }
+        }
+        if (toggle)
+        {
+            if (!m_selection.erase(id))
+                m_selection.insert(id);
+        }
+        else
+        {
+            m_selection.clear();
+            m_selection.insert(id);
+        }
+        m_anchor = id;
+        m_selected = id;
+    }
+
+    std::vector<std::uint64_t> ConsoleView::ShownIds() const
+    {
+        std::vector<std::uint64_t> ids;
+        for (const Row& row : m_rows)
+        {
+            if (ids.empty() || ids.back() != row.Id)
+                ids.push_back(row.Id);
+        }
+        return ids;
+    }
+
+    std::string ConsoleView::Copy(const Lua::ConsoleLog& log, const std::vector<std::uint64_t>& ids) const
+    {
+        std::string text;
+        for (const std::uint64_t id : ids)
+            log.VisitId(id, [&](const Lua::ConsoleEntry& entry) { text += entry.PlainText() + "\n"; });
+        return text;
     }
 
     void ConsoleView::Draw(const Lua::ConsoleLog& log, const ConsoleFilter& filter, ImVec2 size, const ConsoleActions& actions)
@@ -674,6 +736,8 @@ namespace Manifold::UI
         if (m_menuId != 0)
         {
             ImGui::OpenPopup("##entrymenu");
+            if (!m_selection.count(m_menuId))
+                Select(m_menuId, false, false);
             m_selected = m_menuId;
         }
         PopMono();
@@ -698,7 +762,20 @@ namespace Manifold::UI
                     }
                     if (!m_menuValue.empty() && ImGui::MenuItem(ICON_FA_COPY "  Copy the value"))
                         ImGui::SetClipboardText(m_menuValue.c_str());
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the entry"))
+                    if (m_selection.size() > 1)
+                    {
+                        if (ImGui::MenuItem((ICON_FA_COPY "  Copy the " + Grouped(m_selection.size()) + " selected entries").c_str(), "Ctrl+C"))
+                        {
+                            std::vector<std::uint64_t> ids;
+                            for (const std::uint64_t shown : ShownIds())
+                            {
+                                if (m_selection.count(shown))
+                                    ids.push_back(shown);
+                            }
+                            ImGui::SetClipboardText(Copy(log, ids).c_str());
+                        }
+                    }
+                    else if (ImGui::MenuItem(ICON_FA_COPY "  Copy the entry", "Ctrl+C"))
                         ImGui::SetClipboardText(entry.PlainText().c_str());
                     if (!entry.Traceback.empty() && ImGui::MenuItem(ICON_FA_LIST "  Copy the traceback"))
                         ImGui::SetClipboardText(entry.Traceback.c_str());
@@ -707,24 +784,53 @@ namespace Manifold::UI
                     if (!entry.Source.Chunk.empty() && entry.Source.Line > 0 && actions.GotoSource && ImGui::MenuItem(ICON_FA_CODE "  Go to the line"))
                         actions.GotoSource(entry.Source.Chunk, entry.Source.Line);
                 });
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy everything shown"))
+            const std::vector<std::uint64_t> shown = ShownIds();
+            const bool filtered = shown.size() != log.Count();
+            const std::string copyAll = ICON_FA_COPY "  Copy all " + Grouped(shown.size()) + (filtered ? " entries the filter shows" : " entries");
+            if (ImGui::MenuItem(copyAll.c_str()))
+                ImGui::SetClipboardText(Copy(log, shown).c_str());
+            ItemTooltip(filtered ? "Every entry that passes the filter, also the ones scrolled out of view" : "Every entry in the console, also the ones scrolled out of view");
+            if (ImGui::MenuItem(ICON_FA_CHECK_SQUARE "  Select all", "Ctrl+A"))
             {
-                std::string text;
-                std::uint64_t last = 0;
-                for (const Row& row : m_rows)
-                {
-                    if (row.Id == last)
-                        continue;
-                    last = row.Id;
-                    log.VisitId(row.Id, [&](const Lua::ConsoleEntry& entry) { text += entry.PlainText() + "\n"; });
-                }
-                ImGui::SetClipboardText(text.c_str());
+                m_selection.insert(shown.begin(), shown.end());
+                m_anchor = shown.empty() ? 0 : shown.front();
+            }
+            if (actions.Clear)
+            {
+                ImGui::Separator();
+                if (ImGui::MenuItem(ICON_FA_ERASER "  Clear the console"))
+                    actions.Clear();
             }
             ImGui::EndPopup();
         }
         m_menuId = 0;
-        if (ImGui::IsWindowFocused() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C) && m_selected != 0)
-            log.VisitId(m_selected, [](const Lua::ConsoleEntry& entry) { ImGui::SetClipboardText(entry.PlainText().c_str()); });
+        if (ImGui::IsWindowFocused() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C) && !m_selection.empty())
+        {
+            std::vector<std::uint64_t> ids;
+            for (const std::uint64_t shown : ShownIds())
+            {
+                if (m_selection.count(shown))
+                    ids.push_back(shown);
+            }
+            ImGui::SetClipboardText(Copy(log, ids).c_str());
+        }
+        if (ImGui::IsWindowFocused() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_A))
+        {
+            const std::vector<std::uint64_t> shown = ShownIds();
+            m_selection.insert(shown.begin(), shown.end());
+            m_anchor = shown.empty() ? 0 : shown.front();
+        }
+        if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !ImGui::IsAnyItemHovered() && actions.Clear)
+            ImGui::OpenPopup("##consolemenu");
+        if (ImGui::BeginPopup("##consolemenu"))
+        {
+            const std::vector<std::uint64_t> shown = ShownIds();
+            if (ImGui::MenuItem((ICON_FA_COPY "  Copy all " + Grouped(shown.size()) + " entries").c_str()))
+                ImGui::SetClipboardText(Copy(log, shown).c_str());
+            if (ImGui::MenuItem(ICON_FA_ERASER "  Clear the console"))
+                actions.Clear();
+            ImGui::EndPopup();
+        }
         ImGui::EndChild();
     }
 
@@ -751,12 +857,12 @@ namespace Manifold::UI
             draw->AddRectFilled(origin, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.05f)));
         else if (entry.Kind == Lua::EntryKind::Input)
             draw->AddRectFilled(origin, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.05f)));
-        if (m_selected == entry.Id)
+        if (m_selection.count(entry.Id))
             draw->AddRectFilled(origin, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.14f)));
         else if (hovered)
             draw->AddRectFilled(origin, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.04f)));
         if (clicked)
-            m_selected = entry.Id;
+            Select(entry.Id, ImGui::GetIO().KeyCtrl, ImGui::GetIO().KeyShift);
         if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
         {
             m_menuId = entry.Id;

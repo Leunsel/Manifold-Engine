@@ -242,6 +242,7 @@ namespace Manifold::UI
         ImGui::PopStyleVar(2);
 
         bool edited = false;
+        bool pasted = false;
         bool moved = false;
         bool forceComplete = false;
         ImGuiWindow* window = ImGui::GetCurrentWindow();
@@ -253,6 +254,7 @@ namespace Manifold::UI
 
         if (!state.Insert.empty() && editable)
         {
+            pasted = state.Insert.size() > 1;
             buffer.Paste(state.Insert);
             state.Insert.clear();
             edited = true;
@@ -516,6 +518,7 @@ namespace Manifold::UI
                     if (const char* clipboard = ImGui::GetClipboardText(); clipboard && clipboard[0])
                     {
                         buffer.Paste(clipboard);
+                        pasted = true;
                         edit();
                     }
                 }
@@ -626,6 +629,7 @@ namespace Manifold::UI
             if (ImGui::MenuItem(ICON_FA_PASTE "  Paste", "Ctrl+V", false, editable && clipboard && clipboard[0]))
             {
                 buffer.Paste(clipboard);
+                pasted = true;
                 edited = true;
             }
             if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Select all", "Ctrl+A"))
@@ -854,7 +858,9 @@ namespace Manifold::UI
             }
             else
             {
-                EditorShared::UpdateAssist(assist, *state.Assist, buffer.Text(), buffer.Caret(), edited, forceComplete);
+                if (pasted)
+                    assist.Open = false;
+                EditorShared::UpdateAssist(assist, *state.Assist, buffer.Text(), buffer.Caret(), edited && !pasted, forceComplete);
                 EditorShared::PopupAction action;
                 if (assist.Open && !assist.Items.empty())
                     action = EditorShared::DrawSuggestions(id, assist, caretScreen, metrics.Row, viewport);

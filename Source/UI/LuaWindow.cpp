@@ -195,6 +195,7 @@ namespace Manifold::UI
             m_editor.ErrorLine = line;
             SelectTab(Tab::Script);
         };
+        actions.Clear = [this]() { m_engine.Lua().ClearOutput(); };
         return actions;
     }
 
@@ -372,7 +373,7 @@ namespace Manifold::UI
     {
         Lua::LuaEngine& lua = m_engine.Lua();
         bool changed = false;
-        m_view.DrawFilterBar(lua.Console(), m_filter, changed);
+        m_view.DrawFilterBar(lua.Console(), m_filter, changed, [this]() { m_engine.Lua().ClearOutput(); });
         if (changed && (m_filter.Wrap != m_engine.Options().LuaWrapOutput || m_filter.Time != m_engine.Options().LuaConsoleTime || m_filter.Hex != m_engine.Options().LuaConsoleHex))
             SaveViewSettings();
         ImGui::Spacing();
@@ -418,9 +419,13 @@ namespace Manifold::UI
         float output = available - editor - Px(6.0f);
         const ImVec2 start = ImGui::GetCursorPos();
         CodeEditor("##lua", m_text, Language::Lua, ImVec2(0.0f, editor), m_editor);
-        ImGui::SetCursorPos(ImVec2(start.x, start.y + editor));
+        ImGui::SetCursorPos(start);
+        const ImVec2 screen = ImGui::GetCursorScreenPos();
+        const float width = ImGui::GetContentRegionAvail().x;
         if (Splitter("##scriptsplit", false, Px(6.0f), &editor, &output, Px(80.0f), Px(60.0f)))
             m_scriptShare = editor / std::max(1.0f, available);
+        const ImVec2 grip(std::floor(screen.x + width * 0.5f - Px(16.0f)), std::floor(screen.y + editor + Px(2.0f)));
+        ImGui::GetWindowDrawList()->AddRectFilled(grip, ImVec2(grip.x + Px(32.0f), grip.y + Px(2.0f)), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.45f)), Px(1.0f));
         ImGui::SetCursorPos(ImVec2(start.x, start.y + editor + Px(6.0f)));
         m_scriptView.Draw(lua.Console(), m_filter, ImVec2(0.0f, std::max(Px(40.0f), output)), Actions());
         DrawFooter(true);

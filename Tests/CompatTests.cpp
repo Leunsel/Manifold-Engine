@@ -1118,6 +1118,37 @@ namespace Manifold::Tests
             CHECK_EQ(result, std::string("true true true"));
         }
 
+        void ShellLaunch(Engine& engine)
+        {
+            LuaCheck(engine, "shellExecute outside a task", R"LUA(
+                if shellExecute("cmd.exe", "/c exit 0", "", 0) ~= true then return "not started" end
+                return "ok")LUA");
+            engine.SetAsync(true);
+            bool finished = false;
+            Status result;
+            std::string output;
+            const int task = engine.Lua().StartTask("local started = getTickCount() local ok = shellExecute('cmd.exe', '/c exit 0', '', 0) return tostring(ok)", "shell task",
+                [&](const Status& status, const std::string& value)
+                {
+                    result = status;
+                    output = value;
+                    finished = true;
+                });
+            CHECK(task > 0);
+            double longest = 0.0;
+            const double started = engine.Now();
+            while (!finished && engine.Now() - started < 10.0)
+            {
+                const double before = engine.Now();
+                engine.Tick();
+                longest = std::max(longest, engine.Now() - before);
+            }
+            engine.SetAsync(false);
+            CHECK_MSG(finished && result.Ok(), result.Text);
+            CHECK_EQ(output, std::string("true"));
+            CHECK_MSG(longest < 0.1, "one frame took " + std::to_string(longest) + " s while shellExecute ran");
+        }
+
         bool HasCompletion(const std::vector<Lua::LuaCompletion>& list, const std::string& name, const std::string& signature = {})
         {
             return std::any_of(list.begin(), list.end(), [&](const Lua::LuaCompletion& item) { return item.Name == name && (signature.empty() || item.Signature == signature); });
@@ -1211,6 +1242,7 @@ namespace Manifold::Tests
         engine.Lua().Run("__manifoldHeadless = true", "headless");
         OutputBuffer(engine);
         WaitingLoops(engine);
+        ShellLaunch(engine);
         CeHabits(engine);
         Assist(engine);
         Extensions(engine);

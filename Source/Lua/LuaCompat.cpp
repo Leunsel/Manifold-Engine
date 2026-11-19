@@ -5,6 +5,7 @@
 #include "App/Settings.h"
 #include "Core/Ini.h"
 #include "Core/Text.h"
+#include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
 #include "Lua/LuaCompatGaps.h"
 #include "Lua/LuaCompatScripts.h"
@@ -14,6 +15,7 @@
 #include "lua.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -849,15 +851,76 @@ namespace Manifold::Lua
             return 1;
         }
 
+        struct ShellJob
+        {
+            std::wstring Command;
+            std::wstring Parameters;
+            std::wstring Folder;
+            int Show = SW_SHOWNORMAL;
+            std::atomic<bool> Done = false;
+            bool Started = false;
+        };
+
+        constexpr const char* kShellJobType = "Manifold.ShellJob";
+
+        void RunShellJob(ShellJob& job)
+        {
+            const HRESULT com = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+            const HINSTANCE result = ::ShellExecuteW(nullptr, L"open", job.Command.c_str(), job.Parameters.empty() ? nullptr : job.Parameters.c_str(),
+                job.Folder.empty() ? nullptr : job.Folder.c_str(), job.Show);
+            job.Started = reinterpret_cast<std::intptr_t>(result) > 32;
+            if (SUCCEEDED(com))
+                ::CoUninitialize();
+            if (!job.Started)
+                LOG_WARN("Lua", "shellExecute could not start " + WideToUtf8(job.Command));
+            job.Done.store(true, std::memory_order_release);
+        }
+
+        int CollectShellJob(lua_State* state)
+        {
+            using Holder = std::shared_ptr<ShellJob>;
+            static_cast<Holder*>(luaL_checkudata(state, 1, kShellJobType))->~Holder();
+            return 0;
+        }
+
+        int AfterShellJob(lua_State* state, int, lua_KContext)
+        {
+            const auto& job = *static_cast<std::shared_ptr<ShellJob>*>(luaL_checkudata(state, 5, kShellJobType));
+            if (!job->Done.load(std::memory_order_acquire))
+                return lua_yieldk(state, 0, 0, &AfterShellJob);
+            lua_pushboolean(state, job->Started ? 1 : 0);
+            return 1;
+        }
+
         int ShellExecuteCompat(lua_State* state)
         {
-            const std::wstring command = Utf8ToWide(luaL_checkstring(state, 1));
-            const std::wstring parameters = Utf8ToWide(luaL_optstring(state, 2, ""));
-            const std::wstring folder = Utf8ToWide(luaL_optstring(state, 3, ""));
-            const int show = static_cast<int>(luaL_optinteger(state, 4, SW_SHOWNORMAL));
-            const HINSTANCE result = ::ShellExecuteW(nullptr, L"open", command.c_str(), parameters.empty() ? nullptr : parameters.c_str(), folder.empty() ? nullptr : folder.c_str(), show);
-            lua_pushboolean(state, reinterpret_cast<std::intptr_t>(result) > 32);
-            return 1;
+            auto job = std::make_shared<ShellJob>();
+            job->Command = Utf8ToWide(luaL_checkstring(state, 1));
+            job->Parameters = Utf8ToWide(luaL_optstring(state, 2, ""));
+            job->Folder = Utf8ToWide(luaL_optstring(state, 3, ""));
+            job->Show = static_cast<int>(luaL_optinteger(state, 4, SW_SHOWNORMAL));
+            if (!OnMainThread())
+            {
+                RunShellJob(*job);
+                lua_pushboolean(state, job->Started ? 1 : 0);
+                return 1;
+            }
+            std::thread([job]() { RunShellJob(*job); }).detach();
+            LuaEngine& lua = EngineOf(state);
+            if (!Owner(state).Async() || !lua_isyieldable(state) || !lua.IsCooperative(state))
+            {
+                lua_pushboolean(state, 1);
+                return 1;
+            }
+            lua_settop(state, 4);
+            new (lua_newuserdatauv(state, sizeof(std::shared_ptr<ShellJob>), 0)) std::shared_ptr<ShellJob>(std::move(job));
+            if (luaL_newmetatable(state, kShellJobType))
+            {
+                lua_pushcfunction(state, &CollectShellJob);
+                lua_setfield(state, -2, "__gc");
+            }
+            lua_setmetatable(state, -2);
+            return lua_yieldk(state, 0, 0, &AfterShellJob);
         }
 
         int TableFileNames(lua_State* state)

@@ -21,6 +21,7 @@ namespace Manifold::UI
         std::function<void(std::uint64_t)> AddAddress;
         std::function<void(const std::string&)> Recall;
         std::function<void(const std::string&, int)> GotoSource;
+        std::function<void()> Clear;
     };
 
     struct ConsoleFilter
@@ -36,7 +37,7 @@ namespace Manifold::UI
     class ConsoleView
     {
     public:
-        void DrawFilterBar(const Lua::ConsoleLog& log, ConsoleFilter& filter, bool& changed);
+        void DrawFilterBar(const Lua::ConsoleLog& log, ConsoleFilter& filter, bool& changed, const std::function<void()>& clear = {});
         void Draw(const Lua::ConsoleLog& log, const ConsoleFilter& filter, ImVec2 size, const ConsoleActions& actions);
         void FocusSearch() { m_focusSearch = true; }
         void Follow() { m_follow = true; }
@@ -87,7 +88,13 @@ namespace Manifold::UI
         float m_glyph = 7.0f;
         float m_iconColumn = 16.0f;
         ConsoleFilter m_builtFilter;
+        void Select(std::uint64_t id, bool toggle, bool range);
+        std::vector<std::uint64_t> ShownIds() const;
+        std::string Copy(const Lua::ConsoleLog& log, const std::vector<std::uint64_t>& ids) const;
+
         std::uint64_t m_selected = 0;
+        std::uint64_t m_anchor = 0;
+        std::set<std::uint64_t> m_selection;
         bool m_follow = true;
         bool m_focusSearch = false;
         std::uint64_t m_menuId = 0;
