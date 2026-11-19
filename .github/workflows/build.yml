@@ -4,14 +4,12 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - '**.md'
-      - 'Docs/**'
+      - 'README.md'
       - 'Licenses/**'
       - 'LICENSE'
   pull_request:
     paths-ignore:
-      - '**.md'
-      - 'Docs/**'
+      - 'README.md'
       - 'Licenses/**'
       - 'LICENSE'
   workflow_dispatch:
@@ -23,7 +21,7 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-2022
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
@@ -32,8 +30,18 @@ jobs:
       - name: Build Release x64
         run: msbuild Manifold-Engine.sln /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
 
+      - name: Generated files are committed
+        shell: pwsh
+        run: |
+          python Tools/gen_projects.py
+          git diff --exit-code -- Source/Generated Projects Manifold-Engine.sln
+          if ($LASTEXITCODE -ne 0) { Write-Error "Run the build or Tools/gen_projects.py and commit the regenerated files."; exit 1 }
+
       - name: Test
         run: Build\x64\Release\Manifold-Engine.Tests.exe
+
+      - name: Build Debug x64
+        run: msbuild Manifold-Engine.sln /m /nologo /v:minimal /p:Configuration=Debug /p:Platform=x64
 
       - name: Keep logs and crash reports
         if: failure()

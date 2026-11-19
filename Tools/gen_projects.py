@@ -225,7 +225,7 @@ def write(name, text):
 
 
 PREBUILD = """    <PreBuildEvent>
-      <Command>where python &gt;nul 2&gt;nul || exit /b 0
+      <Command>where python &gt;nul 2&gt;nul || (echo Manifold : warning ME0001 : Python was not found, so the generated sources in Source\\Generated were not refreshed &amp; exit /b 0)
 python "$(ProjectDir)..\\Tools\\embed_lua.py"
 python "$(ProjectDir)..\\Tools\\embed_templates.py"
 python "$(ProjectDir)..\\Tools\\gen_buildinfo.py" "$(IntDir)Info\\ManifoldBuild.h"</Command>
