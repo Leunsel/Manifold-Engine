@@ -11,7 +11,7 @@
 #include "UI/LuaDialogs.h"
 #include "UI/ProfilerWindow.h"
 #include "UI/Theme.h"
-#include "UI/Windows.h"
+#include "UI/SettingsWindow.h"
 
 #include "imgui.h"
 

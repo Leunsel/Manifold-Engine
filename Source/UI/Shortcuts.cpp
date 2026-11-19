@@ -5,7 +5,7 @@
 #include "UI/Fonts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
-#include "UI/Windows.h"
+#include "UI/SettingsWindow.h"
 
 #include "imgui_internal.h"
 
@@ -126,16 +126,8 @@ namespace Manifold::UI
 
     void ShortcutsWindow::Draw()
     {
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_KEYBOARD "  Keyboard shortcuts###shortcuts", &m_open, ImVec2(640.0f, 680.0f), 0, ImVec2(440.0f, 300.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_KEYBOARD "  Keyboard shortcuts###shortcuts", ImVec2(640.0f, 680.0f), 0, ImVec2(440.0f, 300.0f)))
             return;
-        }
         if (m_focusSearch)
         {
             ImGui::SetKeyboardFocusHere();

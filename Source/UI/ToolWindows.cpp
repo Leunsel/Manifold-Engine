@@ -1,4 +1,4 @@
-#include "UI/Windows.h"
+#include "UI/ToolWindows.h"
 
 #include "App/Sounds.h"
 #include "Core/Text.h"
@@ -482,16 +482,8 @@ namespace Manifold::UI
 
     void LogWindow::Draw()
     {
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_STREAM "  Log###log", &m_open, ImVec2(860.0f, 480.0f), 0, ImVec2(640.0f, 260.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_STREAM "  Log###log", ImVec2(860.0f, 480.0f), 0, ImVec2(640.0f, 260.0f)))
             return;
-        }
         if (ImGui::BeginTabBar("##logtabs"))
         {
             if (ImGui::BeginTabItem("Log"))
@@ -623,16 +615,8 @@ namespace Manifold::UI
 
     void SymbolsWindow::Draw()
     {
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_TAGS "  Symbols and modules###symbols", &m_open, ImVec2(640.0f, 520.0f), 0, ImVec2(480.0f, 320.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_TAGS "  Symbols and modules###symbols", ImVec2(640.0f, 520.0f), 0, ImVec2(480.0f, 320.0f)))
             return;
-        }
         Engine& engine = m_workspace.Core();
         {
             const bool hasProcess = engine.HasProcess();
@@ -816,16 +800,8 @@ namespace Manifold::UI
 
     void RegionsWindow::Draw()
     {
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_TH_LIST "  Memory regions###regions", &m_open, ImVec2(760.0f, 540.0f), 0, ImVec2(560.0f, 300.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_TH_LIST "  Memory regions###regions", ImVec2(760.0f, 540.0f), 0, ImVec2(560.0f, 300.0f)))
             return;
-        }
         Engine& engine = m_workspace.Core();
         if (!engine.HasProcess())
         {

@@ -1,4 +1,4 @@
-#include "UI/Windows.h"
+#include "UI/RecordEditor.h"
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
@@ -615,16 +615,8 @@ namespace Manifold::UI
             m_open = false;
             return;
         }
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(m_title.c_str(), &m_open, ImVec2(560.0f, 720.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse, ImVec2(480.0f, 420.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(m_title.c_str(), ImVec2(560.0f, 720.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse, ImVec2(480.0f, 420.0f)))
             return;
-        }
 
         const float footer = ImGui::GetFrameHeight() + Px(18.0f);
         ImGui::BeginChild("##editorbody", ImVec2(0.0f, -footer), ImGuiChildFlags_None);

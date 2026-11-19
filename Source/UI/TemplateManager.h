@@ -5,6 +5,7 @@
 #include "Templates/TemplateLibrary.h"
 #include "UI/CodeEditor.h"
 #include "UI/Widgets.h"
+#include "UI/ToolWindowBase.h"
 #include "UI/Workspace.h"
 
 #include <map>
@@ -14,12 +15,11 @@
 
 namespace Manifold::UI
 {
-    class TemplateManager : public ToolWindow
+    class TemplateManager : public ToolWindowBase
     {
     public:
         explicit TemplateManager(Workspace& workspace);
         void Draw() override;
-        bool Closed() const override { return !m_open; }
         void Show() { m_open = true; m_bringToFront = true; }
         void Select(const std::string& id);
         void NewTemplate(const std::string& script);
@@ -62,8 +62,6 @@ namespace Manifold::UI
 
         Workspace& m_workspace;
         Engine& m_engine;
-        bool m_open = true;
-        bool m_bringToFront = true;
         bool m_closing = false;
         std::optional<Draft> m_draft;
         std::string m_filter;

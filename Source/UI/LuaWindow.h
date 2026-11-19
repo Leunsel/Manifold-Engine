@@ -5,6 +5,7 @@
 #include "UI/CodeEditor.h"
 #include "UI/ConsoleView.h"
 #include "UI/DocBrowser.h"
+#include "UI/ToolWindowBase.h"
 #include "UI/Workspace.h"
 
 #include <filesystem>
@@ -19,12 +20,11 @@ namespace Manifold
 
 namespace Manifold::UI
 {
-    class LuaWindow : public ToolWindow
+    class LuaWindow : public ToolWindowBase
     {
     public:
         explicit LuaWindow(Workspace& workspace);
         void Draw() override;
-        bool Closed() const override { return !m_open; }
         void Show()
         {
             m_open = true;
@@ -55,8 +55,6 @@ namespace Manifold::UI
 
         Workspace& m_workspace;
         Engine& m_engine;
-        bool m_open = true;
-        bool m_bringToFront = true;
         Tab m_tab = Tab::Console;
         bool m_selectTab = false;
         int m_task = 0;

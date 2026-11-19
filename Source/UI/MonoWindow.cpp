@@ -1,4 +1,4 @@
-#include "UI/Windows.h"
+#include "UI/MonoWindow.h"
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
@@ -89,16 +89,8 @@ namespace Manifold::UI
             return;
         }
         m_closedAll = false;
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_DICE_D6 "  Mono / .NET###mono", &m_open, ImVec2(1040.0f, 620.0f), ImGuiWindowFlags_MenuBar, ImVec2(620.0f, 360.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_DICE_D6 "  Mono / .NET###mono", ImVec2(1040.0f, 620.0f), ImGuiWindowFlags_MenuBar, ImVec2(620.0f, 360.0f)))
             return;
-        }
         if (MenuBar())
         {
             EndToolWindow();

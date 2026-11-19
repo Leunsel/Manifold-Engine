@@ -1,4 +1,4 @@
-#include "UI/Windows.h"
+#include "UI/ScriptWindow.h"
 
 #include "App/Sounds.h"
 #include "Core/Text.h"
@@ -298,11 +298,6 @@ namespace Manifold::UI
     {
         if (!m_open)
             return;
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
         const bool dirty = m_recordId != kNoRecord && m_text != m_saved;
         std::string title = m_title;
         if (dirty)
@@ -310,11 +305,8 @@ namespace Manifold::UI
             const std::size_t hidden = title.find("###");
             title.insert(hidden, " *");
         }
-        if (!BeginToolWindow(title.c_str(), &m_open, ImVec2(760.0f, 640.0f), ImGuiWindowFlags_MenuBar, ImVec2(560.0f, 300.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(title.c_str(), ImVec2(760.0f, 640.0f), ImGuiWindowFlags_MenuBar, ImVec2(560.0f, 300.0f)))
             return;
-        }
         Menu();
         m_templates.Draw();
         if (const auto generated = m_templates.TakeText())

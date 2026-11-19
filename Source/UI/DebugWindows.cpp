@@ -1,4 +1,4 @@
-#include "UI/Windows.h"
+#include "UI/DebugWindows.h"
 
 #include "Core/Text.h"
 #include "Debug/BreakAction.h"
@@ -196,16 +196,8 @@ namespace Manifold::UI
 
     void BreakpointWindow::DrawWindow()
     {
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_CIRCLE "  Breakpoints###breakpoints", &m_open, ImVec2(640.0f, 360.0f), 0, ImVec2(460.0f, 240.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_CIRCLE "  Breakpoints###breakpoints", ImVec2(640.0f, 360.0f), 0, ImVec2(460.0f, 240.0f)))
             return;
-        }
         m_selfViewport = ImGui::GetWindowViewport()->ID;
         Debug::Debugger& debugger = m_engine.Debugger();
         if (debugger.Generation() != m_generation)
@@ -337,16 +329,8 @@ namespace Manifold::UI
     {
         if (!m_open)
             return;
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_STREAM "  Threads###threads", &m_open, ImVec2(620.0f, 380.0f), 0, ImVec2(440.0f, 240.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_STREAM "  Threads###threads", ImVec2(620.0f, 380.0f), 0, ImVec2(440.0f, 240.0f)))
             return;
-        }
         const double now = ImGui::GetTime();
         if (m_engine.HasProcess() && Raw(m_engine.Process()->Id()) != m_process)
             m_refreshAt = 0.0;
@@ -589,16 +573,8 @@ namespace Manifold::UI
 
     void TraceWindow::DrawWindow()
     {
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(m_title.c_str(), &m_open, ImVec2(680.0f, 460.0f), 0, ImVec2(480.0f, 300.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(m_title.c_str(), ImVec2(680.0f, 460.0f), 0, ImVec2(480.0f, 300.0f)))
             return;
-        }
         m_selfViewport = ImGui::GetWindowViewport()->ID;
         Debug::Tracer& tracer = m_engine.Tracer();
         const bool mine = tracer.TriggerAddress() == m_address;

@@ -1,4 +1,4 @@
-#include "UI/Windows.h"
+#include "UI/StructureWindow.h"
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"

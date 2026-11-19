@@ -1,4 +1,4 @@
-#include "UI/Windows.h"
+#include "UI/PatchScanWindow.h"
 
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"

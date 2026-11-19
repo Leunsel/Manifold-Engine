@@ -2,6 +2,7 @@
 
 #include "App/Diagnostics.h"
 #include "Core/Profiler.h"
+#include "UI/ToolWindowBase.h"
 #include "UI/Workspace.h"
 
 #include "imgui.h"
@@ -17,7 +18,7 @@ namespace Manifold::UI
     // Work per frame ("0.63 ms") and frame rate ("144 fps") for the status bar, refreshed twice a second.
     bool FrameReadout(std::string& work, std::string& rate);
 
-    class ProfilerWindow : public ToolWindow
+    class ProfilerWindow : public ToolWindowBase
     {
     public:
         enum Tab
@@ -32,7 +33,6 @@ namespace Manifold::UI
 
         explicit ProfilerWindow(Workspace& workspace);
         void Draw() override;
-        bool Closed() const override { return !m_open; }
         void Show(int tab = -1);
 
     private:
@@ -67,8 +67,6 @@ namespace Manifold::UI
         ImVec4 ZoneColor(int node) const;
 
         Workspace& m_workspace;
-        bool m_open = true;
-        bool m_bringToFront = true;
         int m_tab = OverviewTab;
         int m_requestedTab = -1;
         bool m_pinned = false;

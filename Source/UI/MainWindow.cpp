@@ -1,9 +1,10 @@
-#include "UI/Windows.h"
+#include "UI/MainWindow.h"
 
 #include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
+#include "UI/CodeEditor.h"
 #include "UI/Fonts.h"
 #include "UI/Loading.h"
 #include "UI/ProfilerWindow.h"

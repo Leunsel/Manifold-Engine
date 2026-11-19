@@ -1,4 +1,4 @@
-#include "UI/Windows.h"
+#include "UI/TableFilesWindow.h"
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
@@ -208,16 +208,8 @@ namespace Manifold::UI
 
     void TableFilesWindow::Draw()
     {
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_FILE_ARCHIVE "  Table files###tablefiles", &m_open, ImVec2(820.0f, 560.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse, ImVec2(560.0f, 320.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_FILE_ARCHIVE "  Table files###tablefiles", ImVec2(820.0f, 560.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse, ImVec2(560.0f, 320.0f)))
             return;
-        }
         Engine& engine = m_workspace.Core();
         Table::AddressList& list = engine.Table();
 

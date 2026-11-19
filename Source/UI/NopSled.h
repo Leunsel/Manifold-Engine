@@ -1,5 +1,6 @@
 #pragma once
 
+#include "UI/ToolWindowBase.h"
 #include "UI/Workspace.h"
 
 #include "imgui.h"
@@ -11,7 +12,7 @@
 
 namespace Manifold::UI
 {
-    class NopSledWindow : public ToolWindow
+    class NopSledWindow : public ToolWindowBase
     {
     public:
         static constexpr int kColumns = 16;
@@ -19,7 +20,6 @@ namespace Manifold::UI
 
         explicit NopSledWindow(Workspace& workspace);
         void Draw() override;
-        bool Closed() const override { return !m_open; }
         void Show();
         bool Animating() const;
 
@@ -116,8 +116,6 @@ namespace Manifold::UI
         ImVec4 BrickColor(int row, const Brick& brick) const;
 
         Workspace& m_workspace;
-        bool m_open = true;
-        bool m_bringToFront = true;
         bool m_focused = false;
         Phase m_phase = Phase::Title;
         float m_phaseTime = 0.0f;

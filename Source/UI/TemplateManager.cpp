@@ -1154,16 +1154,8 @@ namespace Manifold::UI
     {
         if (!m_open)
             return;
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_SHAPES "  Templates###templatemanager", &m_open, ImVec2(1220.0f, 740.0f), 0, ImVec2(820.0f, 420.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_SHAPES "  Templates###templatemanager", ImVec2(1220.0f, 740.0f), 0, ImVec2(820.0f, 420.0f)))
             return;
-        }
         if (!m_open && Dirty())
         {
             m_open = true;

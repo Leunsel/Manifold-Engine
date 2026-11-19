@@ -1,5 +1,6 @@
-#include "UI/Windows.h"
+#include "UI/MemoryViewer.h"
 
+#include "UI/CodeTools.h"
 #include "Asm/Assembler.h"
 #include "Core/Text.h"
 #include "Core/RuntimeLog.h"

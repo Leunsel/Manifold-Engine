@@ -714,10 +714,19 @@
     <ClInclude Include="..\Source\UI\BackgroundTask.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\UI\ByteSearch.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\UI\CodeEditor.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\UI\CodeTools.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\UI\ConsoleView.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\DebugWindows.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\DialogHost.h">
@@ -747,7 +756,19 @@
     <ClInclude Include="..\Source\UI\LuaWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\UI\MainWindow.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\MemoryViewer.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\MonoWindow.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\UI\NopSled.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\PatchScanWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\ProcessIcon.h">
@@ -756,13 +777,28 @@
     <ClInclude Include="..\Source\UI\ProfilerWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\UI\RecordEditor.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\UI\ScriptUi.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\ScriptWindow.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\SettingsWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Shortcuts.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\SplashScreen.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\StructureWindow.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\TableFilesWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\TemplateManager.h">
@@ -774,16 +810,22 @@
     <ClInclude Include="..\Source\UI\Theme.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\UI\ToolWindowBase.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\ToolWindows.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\UI\UiHost.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\UiScale.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
-    <ClInclude Include="..\Source\UI\Widgets.h">
+    <ClInclude Include="..\Source\UI\WatchWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
-    <ClInclude Include="..\Source\UI\Windows.h">
+    <ClInclude Include="..\Source\UI\Widgets.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Workspace.h">

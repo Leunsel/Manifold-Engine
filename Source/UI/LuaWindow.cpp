@@ -428,16 +428,8 @@ namespace Manifold::UI
 
     void LuaWindow::Draw()
     {
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_MOON "  Lua Engine###lua", &m_open, ImVec2(860.0f, 640.0f), ImGuiWindowFlags_MenuBar, ImVec2(420.0f, 320.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_MOON "  Lua Engine###lua", ImVec2(860.0f, 640.0f), ImGuiWindowFlags_MenuBar, ImVec2(420.0f, 320.0f)))
             return;
-        }
         DrawMenu();
         for (const CommandInfo& info : AllCommands())
         {

@@ -360,16 +360,8 @@ namespace Manifold::UI
 
     void ProfilerWindow::Draw()
     {
-        if (m_bringToFront)
-        {
-            ImGui::SetNextWindowFocus();
-            m_bringToFront = false;
-        }
-        if (!BeginToolWindow(ICON_FA_TACHOMETER_ALT "  Profiler and diagnostics###profiler", &m_open, ImVec2(940.0f, 660.0f), 0, ImVec2(640.0f, 440.0f)))
-        {
-            EndToolWindow();
+        if (!BeginWindow(ICON_FA_TACHOMETER_ALT "  Profiler and diagnostics###profiler", ImVec2(940.0f, 660.0f), 0, ImVec2(640.0f, 440.0f)))
             return;
-        }
         const double now = ImGui::GetTime();
         if (now - m_sampledAt > 1.0)
         {

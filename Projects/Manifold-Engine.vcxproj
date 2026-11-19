@@ -340,8 +340,11 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Text\TextBuffer.h" />
     <ClInclude Include="..\Source\UI\AddressActions.h" />
     <ClInclude Include="..\Source\UI\BackgroundTask.h" />
+    <ClInclude Include="..\Source\UI\ByteSearch.h" />
     <ClInclude Include="..\Source\UI\CodeEditor.h" />
+    <ClInclude Include="..\Source\UI\CodeTools.h" />
     <ClInclude Include="..\Source\UI\ConsoleView.h" />
+    <ClInclude Include="..\Source\UI\DebugWindows.h" />
     <ClInclude Include="..\Source\UI\DialogHost.h" />
     <ClInclude Include="..\Source\UI\DocBrowser.h" />
     <ClInclude Include="..\Source\UI\DocView.h" />
@@ -351,19 +354,30 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\Loading.h" />
     <ClInclude Include="..\Source\UI\LuaDialogs.h" />
     <ClInclude Include="..\Source\UI\LuaWindow.h" />
+    <ClInclude Include="..\Source\UI\MainWindow.h" />
+    <ClInclude Include="..\Source\UI\MemoryViewer.h" />
+    <ClInclude Include="..\Source\UI\MonoWindow.h" />
     <ClInclude Include="..\Source\UI\NopSled.h" />
+    <ClInclude Include="..\Source\UI\PatchScanWindow.h" />
     <ClInclude Include="..\Source\UI\ProcessIcon.h" />
     <ClInclude Include="..\Source\UI\ProfilerWindow.h" />
+    <ClInclude Include="..\Source\UI\RecordEditor.h" />
     <ClInclude Include="..\Source\UI\ScriptUi.h" />
+    <ClInclude Include="..\Source\UI\ScriptWindow.h" />
+    <ClInclude Include="..\Source\UI\SettingsWindow.h" />
     <ClInclude Include="..\Source\UI\Shortcuts.h" />
     <ClInclude Include="..\Source\UI\SplashScreen.h" />
+    <ClInclude Include="..\Source\UI\StructureWindow.h" />
+    <ClInclude Include="..\Source\UI\TableFilesWindow.h" />
     <ClInclude Include="..\Source\UI\TemplateManager.h" />
     <ClInclude Include="..\Source\UI\Templates.h" />
     <ClInclude Include="..\Source\UI\Theme.h" />
+    <ClInclude Include="..\Source\UI\ToolWindowBase.h" />
+    <ClInclude Include="..\Source\UI\ToolWindows.h" />
     <ClInclude Include="..\Source\UI\UiHost.h" />
     <ClInclude Include="..\Source\UI\UiScale.h" />
+    <ClInclude Include="..\Source\UI\WatchWindow.h" />
     <ClInclude Include="..\Source\UI\Widgets.h" />
-    <ClInclude Include="..\Source\UI\Windows.h" />
     <ClInclude Include="..\Source\UI\Workspace.h" />
   </ItemGroup>
   <ItemGroup>
