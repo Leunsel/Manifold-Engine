@@ -932,7 +932,7 @@ namespace Manifold::UI
             ImGui::SetNextWindowFocus();
             m_bringToFront = false;
         }
-        if (!BeginToolWindow(ICON_FA_GAMEPAD "  NOP Sled###nopsled", &m_open, ImVec2(780.0f, 620.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse, ImVec2(440.0f, 360.0f)))
+        if (!BeginToolWindow(ICON_FA_GAMEPAD "  NOP Sled###nopsled", &m_open, ImVec2(780.0f, 620.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse, ImVec2(440.0f, 360.0f), false))
         {
             m_focused = false;
             EndToolWindow();

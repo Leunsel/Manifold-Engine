@@ -25,6 +25,7 @@ namespace Manifold::UI
         void NewTemplate(const std::string& script);
 
     private:
+        bool EscapeCloses() const override { return false; }
         struct Draft
         {
             std::string Id;

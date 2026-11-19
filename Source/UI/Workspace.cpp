@@ -608,18 +608,18 @@ namespace Manifold::UI
         m_aboutOpen = true;
     }
 
-    void Workspace::OpenRecordEditor(int recordId)
+    void Workspace::OpenRecordEditor(int recordId, RecordField field)
     {
         for (auto& editor : m_editors)
         {
             if (editor->RecordId() == recordId)
             {
-                editor->Focus();
+                editor->Focus(field);
                 return;
             }
         }
         if (m_engine.Table().FindById(recordId))
-            m_editors.push_back(std::make_unique<RecordEditor>(*this, recordId));
+            m_editors.push_back(std::make_unique<RecordEditor>(*this, recordId, field));
     }
 
     void Workspace::StartWatch(Debug::WatchKind kind, std::uint64_t address, int size)

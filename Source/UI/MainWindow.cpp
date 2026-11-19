@@ -252,6 +252,7 @@ namespace Manifold::UI
         SaveResultsDialog();
         AddAddressDialog();
         DescriptionDialog();
+        HoldEscape();
         ImGui::End();
     }
 
@@ -2528,6 +2529,20 @@ namespace Manifold::UI
                     if (!TableHandlesScriptEdit(lua, record))
                         m_workspace.OpenScript(record.Script, record.Id);
                 }
+                else if (column == 2)
+                {
+                    if (!lua.AddressListEvent("onaddresschange", &record))
+                        m_workspace.OpenRecordEditor(record.Id, RecordField::Address);
+                }
+                else if (column == 3 && record.Kind == Table::RecordKind::Value)
+                {
+                    if (!lua.AddressListEvent("ontypechange", &record))
+                        m_workspace.OpenRecordEditor(record.Id, RecordField::Type);
+                }
+                else if (column == 4 && record.Kind == Table::RecordKind::Value)
+                {
+                    StartInlineEdit(record);
+                }
                 else if (column == 1 || record.Kind == Table::RecordKind::Group)
                 {
                     if (!lua.AddressListEvent("ondescriptionchange", &record))
@@ -2536,13 +2551,6 @@ namespace Manifold::UI
                         m_descriptionTarget = record.Id;
                         m_descriptionText = record.Description;
                     }
-                }
-                else if ((column == 2 && lua.AddressListEvent("onaddresschange", &record)) || (column == 3 && lua.AddressListEvent("ontypechange", &record)))
-                {
-                }
-                else if (column == 4 && record.Kind == Table::RecordKind::Value)
-                {
-                    StartInlineEdit(record);
                 }
                 else
                     m_workspace.OpenRecordEditor(record.Id);
@@ -2601,7 +2609,10 @@ namespace Manifold::UI
         PushMono();
         if (!m_release)
             ImGui::TableNextColumn();
-        if (!m_release && record.Kind == Table::RecordKind::Value)
+        const bool addressHeader = record.Kind == Table::RecordKind::Group && record.AddressGroupHeader;
+        if (!m_release && addressHeader)
+            engine.ResolveRecord(record);
+        if (!m_release && (record.Kind == Table::RecordKind::Value || addressHeader))
         {
             if (record.IsPointer())
             {
@@ -2785,32 +2796,47 @@ namespace Manifold::UI
         if (!list.Selected(record.Id))
             list.Select(record.Id, false);
         m_inlineEdit = record.Id;
+        m_inlineTargets = list.Selection();
         m_inlineText = record.ValueText == "??" ? "" : record.ValueText;
+        m_inlineOriginal = m_inlineText;
         m_inlineFocus = true;
+        m_inlineFrames = 0;
     }
 
     void MainWindow::InlineValue(Table::MemoryRecord& record)
     {
+        const bool escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(Px(4.0f), 0.0f));
         ImGui::SetNextItemWidth(-FLT_MIN);
-        if (m_inlineFocus)
-        {
-            ImGui::SetKeyboardFocusHere();
-            m_inlineFocus = false;
-        }
+        if (m_inlineFocus && (m_inlineFrames == 0 || m_inlineFrames == 4))
+            ImGui::ActivateItemByID(ImGui::GetID("##inlinevalue"));
+        ImGui::PushItemFlag(ImGuiItemFlags_NoNav, false);
         const bool enter = InputText("##inlinevalue", m_inlineText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+        ImGui::PopItemFlag();
+        const ImGuiID id = ImGui::GetItemID();
+        const bool active = ImGui::IsItemActive();
         const bool deactivated = ImGui::IsItemDeactivated();
         ImGui::PopStyleVar();
-        if (enter)
-        {
-            Table::AddressList& list = m_engine.Table();
-            WriteValues(list.Selected(record.Id) ? list.Selection() : std::vector<int>{ record.Id }, m_inlineText);
-            m_inlineEdit = -1;
-        }
-        else if (deactivated)
+        if (m_inlineFocus && (active || ++m_inlineFrames > 8))
+            m_inlineFocus = false;
+        if (escape)
         {
             m_inlineEdit = -1;
+            return;
         }
+        if (enter || (deactivated && m_inlineText != m_inlineOriginal))
+        {
+            const std::vector<int> targets = m_inlineTargets.empty() ? std::vector<int>{ record.Id } : m_inlineTargets;
+            m_inlineEdit = -1;
+            WriteValues(targets, m_inlineText);
+            return;
+        }
+        if (deactivated || (!active && !m_inlineFocus))
+        {
+            m_inlineEdit = -1;
+            return;
+        }
+        ImGui::SetKeyOwner(ImGuiKey_Escape, id);
     }
 
     void MainWindow::ProgressLine(float right)
@@ -3226,7 +3252,7 @@ namespace Manifold::UI
             else if (ImGui::IsWindowAppearing())
                 ImGui::SetKeyboardFocusHere();
             ImGui::SetNextItemWidth(-1.0f);
-            apply = InputText("##newvalue", m_valueText, ImGuiInputTextFlags_EnterReturnsTrue) || apply;
+            apply = InputText("##newvalue", m_valueText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll) || apply;
             if (ImGui::IsItemEdited() && !entries.empty())
             {
                 m_valueCursor = FindEntry(entries, m_valueText);
@@ -3420,7 +3446,7 @@ namespace Manifold::UI
         if (ImGui::IsWindowAppearing())
             ImGui::SetKeyboardFocusHere();
         ImGui::SetNextItemWidth(-1.0f);
-        const bool enter = InputText("##text", m_descriptionText, ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool enter = InputText("##text", m_descriptionText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
         if (DialogButtons("OK", true, false) == DialogChoice::Ok || enter)
         {
             if (Table::MemoryRecord* record = m_engine.Table().FindById(m_descriptionTarget))

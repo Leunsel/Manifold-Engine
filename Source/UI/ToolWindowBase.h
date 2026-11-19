@@ -13,6 +13,7 @@ namespace Manifold::UI
 
     protected:
         virtual bool Busy() const { return false; }
+        virtual bool EscapeCloses() const { return true; }
 
         bool BeginWindow(const char* title, ImVec2 size, ImGuiWindowFlags flags = 0, ImVec2 minimum = ImVec2(260.0f, 160.0f))
         {
@@ -21,7 +22,7 @@ namespace Manifold::UI
                 ImGui::SetNextWindowFocus();
                 m_bringToFront = false;
             }
-            if (BeginToolWindow(title, &m_open, size, flags, minimum))
+            if (BeginToolWindow(title, &m_open, size, flags, minimum, EscapeCloses()))
                 return true;
             EndToolWindow();
             return false;

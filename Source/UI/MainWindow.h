@@ -189,7 +189,10 @@ namespace Manifold::UI
         int m_scrollToRecord = -1;
         int m_inlineEdit = -1;
         std::string m_inlineText;
+        std::string m_inlineOriginal;
+        std::vector<int> m_inlineTargets;
         bool m_inlineFocus = false;
+        int m_inlineFrames = 0;
         bool m_filterActiveOnly = false;
         int m_filterKind = 0;
         std::string m_recentChecked;

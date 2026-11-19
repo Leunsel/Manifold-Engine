@@ -6,6 +6,8 @@
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
+#include "imgui_internal.h"
+
 #include <algorithm>
 #include <optional>
 
@@ -188,11 +190,39 @@ namespace Manifold::UI
         }
     }
 
-    RecordEditor::RecordEditor(Workspace& workspace, int recordId) : m_workspace(workspace), m_engine(workspace.Core()), m_recordId(recordId)
+    RecordEditor::RecordEditor(Workspace& workspace, int recordId, RecordField field) : m_workspace(workspace), m_engine(workspace.Core()), m_recordId(recordId)
     {
         if (const Table::MemoryRecord* record = m_engine.Table().FindById(recordId))
             Load(*record);
         m_title = ICON_FA_SLIDERS_H "  " + m_description + "###record" + std::to_string(recordId);
+        Focus(field);
+    }
+
+    void RecordEditor::Focus(RecordField field)
+    {
+        m_bringToFront = true;
+        m_focusField = field == RecordField::None ? RecordField::Description : field;
+        m_focusFrames = 0;
+    }
+
+    ImGuiInputTextFlags RecordEditor::TakeFocus(RecordField field)
+    {
+        if (m_focusField != field)
+            return 0;
+        if (m_focusFrames == 0 || m_focusFrames == 4)
+            ImGui::SetKeyboardFocusHere();
+        return ImGuiInputTextFlags_AutoSelectAll;
+    }
+
+    void RecordEditor::FocusDone(RecordField field)
+    {
+        if (m_focusField != field)
+            return;
+        if (ImGui::IsItemActive() || ImGui::IsItemFocused() || ++m_focusFrames > 8)
+        {
+            ImGui::SetScrollHereY(0.3f);
+            m_focusField = RecordField::None;
+        }
     }
 
     void RecordEditor::Load(const Table::MemoryRecord& record)
@@ -316,7 +346,9 @@ namespace Manifold::UI
             ImGui::Spacing();
         }
         FieldLabel("Address");
-        InputTextWithHint("##address", "game.exe+1234, or +10 from the parent", m_address);
+        if (InputTextWithHint("##address", "game.exe+1234, or +10 from the parent", m_address, TakeFocus(RecordField::Address) | ImGuiInputTextFlags_EnterReturnsTrue))
+            m_enterOk = true;
+        FocusDone(RecordField::Address);
         const ResolvedPath path = ResolvePath(m_engine, record, m_address, m_offsets);
         ImGui::SetCursorPosX(Px(kLabelWidth));
         if (!path.Base)
@@ -362,7 +394,8 @@ namespace Manifold::UI
                     Muted(std::to_string(i + 1));
                     ImGui::TableNextColumn();
                     ImGui::SetNextItemWidth(-FLT_MIN);
-                    InputTextWithHint("##offset", "0", m_offsets[i]);
+                    if (InputTextWithHint("##offset", "0", m_offsets[i], ImGuiInputTextFlags_EnterReturnsTrue))
+                        m_enterOk = true;
                     ImGui::TableNextColumn();
                     if (step.Pointer && step.Offset)
                     {
@@ -401,7 +434,14 @@ namespace Manifold::UI
     {
         BeginSection("##value", ICON_FA_HASHTAG, "Value");
         FieldLabel("Type");
-        if (ImGui::BeginCombo("##type", Scan::TypeName(Scan::kRecordTypes[m_type])))
+        if (TakeFocus(RecordField::Type))
+            ImGui::OpenPopupEx(ImHashStr("##ComboPopup", 0, ImGui::GetID("##type")));
+        const bool typeOpen = ImGui::BeginCombo("##type", Scan::TypeName(Scan::kRecordTypes[m_type]));
+        if (!typeOpen)
+            FocusDone(RecordField::Type);
+        else if (m_focusField == RecordField::Type)
+            m_focusField = RecordField::None;
+        if (typeOpen)
         {
             for (int i = 0; i < static_cast<int>(std::size(Scan::kRecordTypes)); ++i)
             {
@@ -516,6 +556,7 @@ namespace Manifold::UI
         BeginSection("##hotkeys", ICON_FA_KEYBOARD, "Hotkeys");
         if (m_capturing)
         {
+            KeepEscape();
             std::vector<int> down;
             for (int key = 0x08; key <= 0xFE; ++key)
             {
@@ -625,7 +666,9 @@ namespace Manifold::UI
         ImGui::PopStyleColor();
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::PushFont(Fonts::Bold(), 0.0f);
-        InputTextWithHint("##description", "Description", m_description);
+        if (InputTextWithHint("##description", "Description", m_description, TakeFocus(RecordField::Description) | ImGuiInputTextFlags_EnterReturnsTrue))
+            m_enterOk = true;
+        FocusDone(RecordField::Description);
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(0.0f, Px(6.0f)));
 
@@ -652,16 +695,19 @@ namespace Manifold::UI
 
         ImGui::Separator();
         ImGui::SetCursorPosY(ImGui::GetCursorPosY() + Px(4.0f));
-        if (AccentButton("OK", Px(96.0f, 0.0f)))
+        if (AccentButton("OK", Px(96.0f, 0.0f)) || m_enterOk)
         {
             Apply(*record);
             m_open = false;
         }
+        m_enterOk = false;
+        if (m_focusField != RecordField::None && ++m_focusFrames > 12)
+            m_focusField = RecordField::None;
         ImGui::SameLine();
         if (ImGui::Button("Apply", Px(96.0f, 0.0f)))
             Apply(*record);
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", Px(96.0f, 0.0f)))
+        if (ImGui::Button("Cancel", Px(96.0f, 0.0f)) || (!m_capturing && EscapeLeavesWindow()))
             m_open = false;
         EndToolWindow();
     }

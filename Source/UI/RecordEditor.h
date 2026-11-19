@@ -11,12 +11,14 @@ namespace Manifold::UI
     class RecordEditor : public ToolWindowBase
     {
     public:
-        RecordEditor(Workspace& workspace, int recordId);
+        RecordEditor(Workspace& workspace, int recordId, RecordField field = RecordField::None);
         void Draw() override;
         int RecordId() const { return m_recordId; }
-        void Focus() { m_bringToFront = true; }
+        void Focus(RecordField field = RecordField::None);
 
     private:
+        ImGuiInputTextFlags TakeFocus(RecordField field);
+        void FocusDone(RecordField field);
         void Load(const Table::MemoryRecord& record);
         void Apply(Table::MemoryRecord& record);
         void AddressSection(Table::MemoryRecord& record);
@@ -61,5 +63,8 @@ namespace Manifold::UI
         bool m_hasColor = false;
         std::string m_comment;
         std::string m_error;
+        RecordField m_focusField = RecordField::None;
+        int m_focusFrames = 0;
+        bool m_enterOk = false;
     };
 }

@@ -32,6 +32,7 @@ namespace Manifold::UI
         }
 
     private:
+        bool EscapeCloses() const override { return false; }
         enum class Tab
         {
             Console,

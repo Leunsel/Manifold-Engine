@@ -56,6 +56,14 @@ namespace Manifold::UI
     class SettingsWindow;
     class ProcessPicker;
     class RecordEditor;
+
+    enum class RecordField
+    {
+        None,
+        Description,
+        Address,
+        Type,
+    };
     class SymbolsWindow;
     class RegionsWindow;
     class TableFilesWindow;
@@ -118,7 +126,7 @@ namespace Manifold::UI
         void RevealInMemoryViewer(std::uint64_t address, std::uint64_t length, bool code, bool raise);
         void OpenShortcuts();
         void OpenTemplateManager(const std::string& id = {}, std::optional<std::string> script = std::nullopt);
-        void OpenRecordEditor(int recordId);
+        void OpenRecordEditor(int recordId, RecordField field = RecordField::None);
         void OpenTableDialog(bool merge);
         void OpenLastProcess();
         bool CanOpenLastProcess();

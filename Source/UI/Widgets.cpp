@@ -64,6 +64,23 @@ namespace Manifold::UI
 
         int g_toolWindowCount = 0;
 
+        struct ToolEscape
+        {
+            ImGuiID Window = 0;
+            bool* Open = nullptr;
+            bool Allowed = false;
+            bool Kept = false;
+        };
+
+        std::vector<ToolEscape> g_toolEscape;
+        int g_popupFrame = -10;
+
+        void NotePopups()
+        {
+            if (ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+                g_popupFrame = ImGui::GetFrameCount();
+        }
+
         void WrapParagraph(std::string_view text, float width, std::vector<std::string>& lines)
         {
             std::string line;
@@ -1107,7 +1124,7 @@ namespace Manifold::UI
         return true;
     }
 
-    bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags, ImVec2 minimum)
+    bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags, ImVec2 minimum, bool escapeCloses)
     {
         const bool raise = FocusRequested();
         ImGuiWindowClass windowClass;
@@ -1148,13 +1165,50 @@ namespace Manifold::UI
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ManifoldTheme::Page);
         const bool visible = ImGui::Begin(title, open, flags);
         ImGui::PopStyleColor();
+        g_toolEscape.push_back({ ImGui::GetCurrentWindow()->ID, open, escapeCloses && open != nullptr, false });
         RaisePlatformWindow(raise);
         return visible;
     }
 
     void EndToolWindow()
     {
+        const ImGuiWindow* window = ImGui::GetCurrentWindow();
+        if (!g_toolEscape.empty() && g_toolEscape.back().Window == window->ID)
+        {
+            const ToolEscape entry = g_toolEscape.back();
+            g_toolEscape.pop_back();
+            if (entry.Allowed && !entry.Kept && *entry.Open && !window->Collapsed && EscapeFree() &&
+                ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows | ImGuiFocusedFlags_NoPopupHierarchy) && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+                *entry.Open = false;
+        }
+        NotePopups();
         ImGui::End();
+    }
+
+    void KeepEscape()
+    {
+        if (!g_toolEscape.empty())
+            g_toolEscape.back().Kept = true;
+    }
+
+    bool EscapeFree()
+    {
+        const ImGuiContext& g = *ImGui::GetCurrentContext();
+        return g.ActiveId == 0 && g.ActiveIdPreviousFrame == 0 && g_popupFrame < ImGui::GetFrameCount() - 1 &&
+               !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+    }
+
+    bool EscapeLeavesWindow()
+    {
+        return g_popupFrame < ImGui::GetFrameCount() - 1 && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
+               ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows | ImGuiFocusedFlags_NoPopupHierarchy) && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+    }
+
+    void HoldEscape()
+    {
+        NotePopups();
+        if (EscapeFree() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows | ImGuiFocusedFlags_NoPopupHierarchy))
+            ImGui::SetKeyOwner(ImGuiKey_Escape, ImGui::GetID("##holdescape"));
     }
 
     ImGuiID CallerViewport()

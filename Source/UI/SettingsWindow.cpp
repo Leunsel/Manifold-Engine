@@ -733,6 +733,7 @@ namespace Manifold::UI
         const bool wasCapturing = m_captureCommand >= 0;
         if (m_captureCommand >= 0)
         {
+            KeepEscape();
             SetShortcutCapture(true);
             const Command capturing = static_cast<Command>(m_captureCommand);
             const CommandInfo& info = Describe(capturing);

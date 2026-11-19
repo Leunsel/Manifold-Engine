@@ -174,7 +174,7 @@ namespace Manifold::UI
         }
         bool open = true;
         const ImVec2 size(window.Width > 0.0f ? window.Width : 420.0f, window.Height > 0.0f ? window.Height : 320.0f);
-        const bool visible = BeginToolWindow(title.c_str(), &open, size, window.Dock ? 0 : ImGuiWindowFlags_NoDocking, ImVec2(160.0f, 100.0f));
+        const bool visible = BeginToolWindow(title.c_str(), &open, size, window.Dock ? 0 : ImGuiWindowFlags_NoDocking, ImVec2(160.0f, 100.0f), false);
         if (visible)
         {
             ImGui::PushID(id);

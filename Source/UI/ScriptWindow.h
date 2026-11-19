@@ -18,6 +18,7 @@ namespace Manifold::UI
         void Focus() { m_bringToFront = true; }
 
     private:
+        bool EscapeCloses() const override { return false; }
         void Menu();
         void Run(bool disable);
         void Check();

@@ -18,6 +18,7 @@ namespace Manifold::UI
         void Show() { m_open = true; m_bringToFront = true; }
 
     private:
+        bool EscapeCloses() const override { return false; }
         void Select(const std::string& name);
         void Import();
         void ImportFolder();
