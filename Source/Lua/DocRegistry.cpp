@@ -540,7 +540,7 @@ namespace Manifold::Lua
                 const bool known = std::any_of(record.Signatures.begin(), record.Signatures.end(), [&](const DocSignature& other) { return FormatParams(other) == params; });
                 if (!known)
                     record.Signatures.push_back(std::move(signature));
-                if (record.Text.empty() && entry.Text[0] != '\0' && std::string_view(entry.Text) != "^ but adds a custom title")
+                if (record.Text.empty() && entry.Text[0] != '\0')
                     record.Text = entry.Text;
             }
         }
