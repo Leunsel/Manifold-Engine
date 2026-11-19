@@ -1249,6 +1249,37 @@ namespace Manifold::Tests
         }
     }
 
+    void OutsideTraces(Engine& engine)
+    {
+        const std::optional<LogEntry> last = RuntimeLog::Last();
+        const std::uint64_t mark = last ? last->Serial : 0;
+        LuaCheck(engine, "outside traces", R"LUA(
+            runCommand("cmd.exe", { "/c", "exit", "0" })
+            os.execute("exit 0")
+            local pipe = io.popen("echo traced")
+            if not pipe then return "io.popen" end
+            local text = pipe:read("a")
+            pipe:close()
+            if not tostring(text):find("traced") then return "io.popen output" end
+            if os.execute() == nil then return "os.execute without a command" end
+            if shellExecute("cmd.exe", "/c exit 0", "", 0) ~= true then return "shellExecute" end
+            return "ok")LUA");
+        const std::vector<LogEntry> entries = RuntimeLog::Entries();
+        const auto traced = [&](std::string_view start)
+            {
+                return std::count_if(entries.begin(), entries.end(), [&](const LogEntry& entry)
+                    {
+                        return entry.Serial > mark && entry.Level == LogLevel::Warning && entry.Area == "Script" && entry.Message.rfind(start, 0) == 0 &&
+                               entry.Message.find("(outside traces:") != std::string::npos;
+                    });
+            };
+        CHECK_EQ(traced("runCommand: cmd.exe /c exit 0"), 1);
+        CHECK_EQ(traced("os.execute: exit 0"), 1);
+        CHECK_EQ(traced("os.execute"), 1);
+        CHECK_EQ(traced("io.popen: echo traced"), 1);
+        CHECK_EQ(traced("shellExecute: cmd.exe /c exit 0"), 1);
+    }
+
     void StreamTables(Engine& engine)
     {
         const std::vector<std::string> recent = engine.Options().RecentTables;
@@ -1301,6 +1332,7 @@ namespace Manifold::Tests
         PaintBoxCanvas(engine);
         ScriptSettings(engine);
         CheatEngineCoverage(engine);
+        OutsideTraces(engine);
         StreamTables(engine);
         return Totals().Failures - before;
     }

@@ -538,6 +538,7 @@ namespace Manifold::Lua
         int InjectLibrary(lua_State* state)
         {
             const auto process = NeedProcess(state);
+            NoteOutsideAction(state, "injectDLL", luaL_checkstring(state, 1));
             const Status status = process->InjectLibrary(Utf8ToWide(luaL_checkstring(state, 1)));
             if (!status)
                 EngineOf(state).PrintError(status.Text);

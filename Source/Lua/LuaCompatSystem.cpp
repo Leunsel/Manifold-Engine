@@ -276,6 +276,7 @@ namespace Manifold::Lua
         {
             const std::wstring name = Utf8ToWide(LuaText(state, 1));
             const std::wstring value = Utf8ToWide(LuaText(state, 2));
+            NoteOutsideAction(state, "setUserRegistryEnvironmentVariable", WideToUtf8(name) + " = " + WideToUtf8(value));
             const LSTATUS result = ::RegSetKeyValueW(HKEY_CURRENT_USER, L"Environment", name.c_str(), REG_SZ, value.c_str(), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
             lua_pushboolean(state, result == ERROR_SUCCESS);
             return 1;
@@ -1096,6 +1097,7 @@ namespace Manifold::Lua
             if (!parameters.empty())
                 command += L" " + parameters;
             const std::wstring folder = std::filesystem::path(path).parent_path().wstring();
+            NoteOutsideAction(state, "createProcess", WideToUtf8(command));
             STARTUPINFOW startup{};
             startup.cb = sizeof(startup);
             PROCESS_INFORMATION created{};
@@ -1151,6 +1153,7 @@ namespace Manifold::Lua
             else if (!lua_isnoneornil(state, 2))
                 command += L" " + Utf8ToWide(LuaText(state, 2));
             const std::wstring folder = lua_isnoneornil(state, 3) ? std::wstring() : Utf8ToWide(LuaText(state, 3));
+            NoteOutsideAction(state, "runCommand", WideToUtf8(command));
 
             SECURITY_ATTRIBUTES security{ sizeof(security), nullptr, TRUE };
             HANDLE readEnd = nullptr;

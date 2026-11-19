@@ -4,6 +4,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Lua/LuaApi.h"
+#include "Lua/LuaArgs.h"
 #include "Lua/LuaDocBinding.h"
 #include "Table/AddressList.h"
 #include "Table/Structures.h"
@@ -95,6 +96,37 @@ namespace Manifold::Lua
             }
             lua_pop(state, 1);
         }
+
+        int TracedCall(lua_State* state)
+        {
+            if (lua_type(state, 1) == LUA_TSTRING)
+                NoteOutsideAction(state, lua_tostring(state, lua_upvalueindex(2)), lua_tostring(state, 1));
+            const int arguments = lua_gettop(state);
+            lua_pushvalue(state, lua_upvalueindex(1));
+            lua_insert(state, 1);
+            lua_call(state, arguments, LUA_MULTRET);
+            return lua_gettop(state);
+        }
+
+        void TraceLibraryFunction(lua_State* state, const char* library, const char* function)
+        {
+            lua_getglobal(state, library);
+            if (lua_istable(state, -1))
+            {
+                lua_getfield(state, -1, function);
+                if (lua_isfunction(state, -1))
+                {
+                    lua_pushfstring(state, "%s.%s", library, function);
+                    lua_pushcclosure(state, &TracedCall, 2);
+                    lua_setfield(state, -2, function);
+                }
+                else
+                {
+                    lua_pop(state, 1);
+                }
+            }
+            lua_pop(state, 1);
+        }
     }
 
     int CustomType::ByteCount() const
@@ -139,6 +171,8 @@ namespace Manifold::Lua
         m_docs = std::make_shared<DocRegistry>(BuiltinDocs());
         m_state = luaL_newstate();
         luaL_openlibs(m_state);
+        TraceLibraryFunction(m_state, "os", "execute");
+        TraceLibraryFunction(m_state, "io", "popen");
         const std::vector<std::string> standard = GlobalFunctionNames(m_state);
         lua_pushlightuserdata(m_state, this);
         lua_setfield(m_state, LUA_REGISTRYINDEX, kEngineKey);

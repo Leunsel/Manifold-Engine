@@ -899,6 +899,7 @@ namespace Manifold::Lua
             job->Parameters = Utf8ToWide(luaL_optstring(state, 2, ""));
             job->Folder = Utf8ToWide(luaL_optstring(state, 3, ""));
             job->Show = static_cast<int>(luaL_optinteger(state, 4, SW_SHOWNORMAL));
+            NoteOutsideAction(state, "shellExecute", std::string(lua_tostring(state, 1)) + (job->Parameters.empty() ? std::string() : " " + WideToUtf8(job->Parameters)));
             if (!OnMainThread())
             {
                 RunShellJob(*job);

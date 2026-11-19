@@ -26,6 +26,15 @@ namespace Manifold::UI
                 return 0;
             return static_cast<int>(ParseDecimal(message.substr(at + 5, message.find(':', at) - at - 5)).value_or(0));
         }
+
+        std::string HeldBackNote(bool luaHeldBack, bool passed)
+        {
+            if (!luaHeldBack)
+                return {};
+            const char* reason = "this table's scripts have not been allowed yet (run the table's Lua script or turn a script on yourself)";
+            return passed ? std::string(" Its Lua parts were only compiled, not run, because ") + reason + "."
+                          : std::string(" Its Lua parts were not run, because ") + reason + ", so this can be a false alarm.";
+        }
     }
 
     ScriptWindow::ScriptWindow(Workspace& workspace, int number, std::string script, int recordId, bool lua)
@@ -58,24 +67,27 @@ namespace Manifold::UI
         Asm::AaMemory memory;
         if (Asm::HasSections(m_text))
         {
+            bool luaHeldBack = false;
             for (const Asm::AaSection section : { Asm::AaSection::Enable, Asm::AaSection::Disable })
             {
-                const Asm::AaResult result = m_engine.AutoAssemble(m_text, section, memory, true, "check");
-                if (!result.Ok())
+                const ScriptCheck check = m_engine.CheckScript(m_text, section, memory);
+                luaHeldBack = luaHeldBack || check.LuaHeldBack > 0;
+                if (!check.Result.Ok())
                 {
                     m_resultOk = false;
-                    m_result = std::string(section == Asm::AaSection::Enable ? "[ENABLE] " : "[DISABLE] ") + result.Error.Text;
-                    m_editor.ErrorLine = result.Line;
+                    m_result = std::string(section == Asm::AaSection::Enable ? "[ENABLE] " : "[DISABLE] ") + check.Result.Error.Text + HeldBackNote(luaHeldBack, false);
+                    m_editor.ErrorLine = check.Result.Line;
                     return;
                 }
             }
             m_resultOk = true;
-            m_result = "Both sections assemble.";
+            m_result = "Both sections assemble." + HeldBackNote(luaHeldBack, true);
             return;
         }
-        const Asm::AaResult result = m_engine.AutoAssemble(m_text, Asm::AaSection::Whole, memory, true, "check");
+        const ScriptCheck check = m_engine.CheckScript(m_text, Asm::AaSection::Whole, memory);
+        const Asm::AaResult& result = check.Result;
         m_resultOk = result.Ok();
-        m_result = result.Ok() ? "The script assembles." : result.Error.Text;
+        m_result = (result.Ok() ? "The script assembles." : result.Error.Text) + HeldBackNote(check.LuaHeldBack > 0, result.Ok());
         m_editor.ErrorLine = result.Ok() ? 0 : (result.Line ? result.Line : LineOf(result.Error.Text));
     }
 
@@ -156,11 +168,12 @@ namespace Manifold::UI
         if (!m_lua)
         {
             Asm::AaMemory memory;
-            const Asm::AaResult result = m_engine.AutoAssemble(m_text, Asm::HasSections(m_text) ? Asm::AaSection::Enable : Asm::AaSection::Whole, memory, true, "check");
+            const ScriptCheck check = m_engine.CheckScript(m_text, Asm::HasSections(m_text) ? Asm::AaSection::Enable : Asm::AaSection::Whole, memory);
+            const Asm::AaResult& result = check.Result;
             if (!result.Ok())
             {
                 m_resultOk = false;
-                m_result = "Saved, but it does not assemble: " + result.Error.Text;
+                m_result = "Saved, but it does not assemble: " + result.Error.Text + HeldBackNote(check.LuaHeldBack > 0, false);
                 m_editor.ErrorLine = result.Line;
             }
             else

@@ -836,6 +836,7 @@ namespace Manifold::Asm
                     std::filesystem::path file = Utf8ToWide(path);
                     if (file.is_relative() && !m_options.IncludeFolder.empty() && std::filesystem::exists(m_options.IncludeFolder / file))
                         file = m_options.IncludeFolder / file;
+                    LOG_WARN("Script", "loadlibrary: " + WideToUtf8(file.wstring()));
                     const Status status = m_host.Process->InjectLibrary(file.wstring());
                     if (!status)
                     {

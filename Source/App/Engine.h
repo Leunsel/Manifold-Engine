@@ -70,6 +70,12 @@ namespace Manifold
         std::uint64_t Stop = 0;
     };
 
+    struct ScriptCheck
+    {
+        Asm::AaResult Result;
+        int LuaHeldBack = 0;
+    };
+
     class Engine
     {
     public:
@@ -164,6 +170,7 @@ namespace Manifold
 
         Asm::AaResult AutoAssemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record = nullptr);
         Asm::AaResult AutoAssemble(std::string_view script, bool checkOnly);
+        ScriptCheck CheckScript(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory);
 
         Status LoadTable(const std::filesystem::path& path, bool merge) { return m_tables.LoadTable(path, merge); }
         Status SaveTable(const std::filesystem::path& path) { return m_tables.SaveTable(path); }
@@ -189,6 +196,8 @@ namespace Manifold
 
     private:
         void UpdateAutoAttach();
+        Asm::AaResult Assemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record,
+            int* luaHeldBack);
         Settings& m_settings;
         SettingsStore m_settingsStore;
         TargetSession m_target;

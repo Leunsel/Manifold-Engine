@@ -1318,8 +1318,28 @@ hostileRan = true
 
         settings.TableScripts = TableScriptPolicy::Never;
         CHECK(engine.LoadTable(path, false).Ok());
+        const char* checked = "[ENABLE]\n{$lua}\ncheckRan = (checkRan or 0) + 1\n{$asm}\n[DISABLE]\n";
+        const auto checkRan = [&] {
+            std::string count;
+            engine.Lua().RunWithResult("return tostring(checkRan)", "probe", count);
+            return count;
+        };
+        {
+            Asm::AaMemory memory;
+            const ScriptCheck held = engine.CheckScript(checked, Asm::AaSection::Enable, memory);
+            CHECK_MSG(held.Result.Ok() && held.LuaHeldBack >= 1, held.Result.Error.Text);
+            CHECK_EQ(checkRan(), "nil");
+            const ScriptCheck broken = engine.CheckScript("[ENABLE]\n{$lua}\nif then\n{$asm}\n[DISABLE]\n", Asm::AaSection::Enable, memory);
+            CHECK(!broken.Result.Ok() && broken.LuaHeldBack >= 1);
+        }
         engine.NewTable();
         CHECK(engine.Tables().ScriptsTrusted());
+        {
+            Asm::AaMemory memory;
+            const ScriptCheck ran = engine.CheckScript(checked, Asm::AaSection::Enable, memory);
+            CHECK_MSG(ran.Result.Ok() && ran.LuaHeldBack == 0, ran.Result.Error.Text);
+            CHECK(checkRan() != "nil");
+        }
 
         std::string ran;
         engine.Lua().RunWithResult("return tostring(hostileRan)", "probe", ran);

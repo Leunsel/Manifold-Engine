@@ -363,11 +363,30 @@ namespace Manifold
 
     Asm::AaResult Engine::AutoAssemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record)
     {
+        return Assemble(script, section, memory, checkOnly, owner, record, nullptr);
+    }
+
+    ScriptCheck Engine::CheckScript(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory)
+    {
+        ScriptCheck check;
+        check.Result = Assemble(script, section, memory, true, "check", nullptr, m_tables.ScriptsTrusted() ? nullptr : &check.LuaHeldBack);
+        return check;
+    }
+
+    Asm::AaResult Engine::Assemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record,
+        int* luaHeldBack)
+    {
         Asm::AaHost host;
         host.Process = m_target.Process().get();
         host.Symbols = &m_target.Symbols();
-        host.RunLua = [this, record](std::string_view code, bool syntaxCheck, std::string& output) -> Status
+        host.RunLua = [this, record, luaHeldBack](std::string_view code, bool syntaxCheck, std::string& output) -> Status
             {
+                if (luaHeldBack)
+                {
+                    ++*luaHeldBack;
+                    output.clear();
+                    return m_lua->Compile(code, "{$lua}");
+                }
                 const Lua::ScriptGlobals saved = m_lua->SaveScriptGlobals();
                 m_lua->SetScriptGlobals(record, syntaxCheck);
                 const Status status = m_lua->RunWithResult(code, "{$lua}", output);
@@ -375,8 +394,14 @@ namespace Manifold
                 return status;
             };
         host.IsCustomCommand = [this](std::string_view name) { return m_lua->IsAutoAssemblerCommand(name); };
-        host.RunCustomCommand = [this, record](std::string_view name, std::string_view parameters, bool syntaxCheck, std::string& output) -> Status
+        host.RunCustomCommand = [this, record, luaHeldBack](std::string_view name, std::string_view parameters, bool syntaxCheck, std::string& output) -> Status
             {
+                if (luaHeldBack)
+                {
+                    ++*luaHeldBack;
+                    output.clear();
+                    return Status::Success();
+                }
                 const Lua::ScriptGlobals saved = m_lua->SaveScriptGlobals();
                 m_lua->SetScriptGlobals(record, syntaxCheck);
                 const Status status = m_lua->RunAutoAssemblerCommand(name, parameters, syntaxCheck, output);

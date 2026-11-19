@@ -109,6 +109,24 @@ namespace Manifold::Lua
         return bytes;
     }
 
+    void NoteOutsideAction(lua_State* state, std::string_view function, std::string_view what)
+    {
+        constexpr std::size_t kShown = 400;
+        std::string text(function);
+        text += ": ";
+        text += what.substr(0, kShown);
+        if (what.size() > kShown)
+            text += "...";
+        luaL_where(state, 1);
+        std::string where = lua_tostring(state, -1) ? lua_tostring(state, -1) : "";
+        lua_pop(state, 1);
+        while (!where.empty() && (where.back() == ' ' || where.back() == ':'))
+            where.pop_back();
+        if (!where.empty())
+            text += "  (" + where + ")";
+        LOG_WARN("Script", text);
+    }
+
     std::string FailureMessage(const Status& status)
     {
         const std::string suffix = " (" + ErrorName(status.Code) + ")";
