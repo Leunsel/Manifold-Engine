@@ -868,27 +868,35 @@ namespace Manifold::UI
         std::vector<std::string> addressTexts;
         std::vector<bool> addressInModule;
         std::vector<std::optional<std::string>> headers;
+        std::vector<bool> blockStarts;
         addressTexts.reserve(m_lines.size());
         addressInModule.reserve(m_lines.size());
         headers.reserve(m_lines.size());
+        blockStarts.reserve(m_lines.size());
         float widestAddress = 0.0f;
         PushMono();
         for (const Disasm::Instruction& line : m_lines)
         {
             std::optional<std::string> header;
+            bool blockStart = false;
             if (showSymbols)
             {
                 header = m_engine.Symbols().ExactName(line.Address);
                 if (header)
                 {
-                    functionStart = line.Address;
-                    functionEnd = std::max(SymbolEnd(line.Address), line.Next());
+                    blockStart = !m_engine.Symbols().LabelOnly(line.Address);
+                    if (blockStart)
+                    {
+                        functionStart = line.Address;
+                        functionEnd = std::max(SymbolEnd(line.Address), line.Next());
+                    }
                 }
                 else if (m_engine.MonoPresent())
                 {
                     header = m_engine.Mono().MethodStartNameAt(line.Address);
                     if (header)
                     {
+                        blockStart = true;
                         const auto range = m_engine.Mono().MethodRange(line.Address);
                         functionStart = line.Address;
                         functionEnd = range ? WithoutPadding(process, line.Address, range->second) : line.Address + kSymbolReach;
@@ -913,6 +921,7 @@ namespace Manifold::UI
                 text = symbolic ? ReplaceAll(address, "\"", "") : Hex(line.Address, process.Is64Bit() ? 12 : 8);
             }
             headers.push_back(std::move(header));
+            blockStarts.push_back(blockStart);
             addressTexts.push_back(std::move(text));
             addressInModule.push_back(symbolic);
             widestAddress = std::max(widestAddress, ImGui::CalcTextSize(addressTexts.back().c_str()).x);
@@ -1097,7 +1106,7 @@ namespace Manifold::UI
             }
 
             const std::optional<std::string>& methodHeader = headers[i];
-            if (methodHeader && i != 0)
+            if (methodHeader && blockStarts[i] && i != 0)
                 drawList->AddLine(ImVec2(origin.x, y), ImVec2(origin.x + width, y), ImGui::GetColorU32(ManifoldTheme::RowSeparator));
 
             std::string comment;

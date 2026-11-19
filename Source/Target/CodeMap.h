@@ -19,8 +19,8 @@ namespace Manifold::Target
 
     // Where code is known to start, for the disassembler: the functions in a
     // 64-bit module's unwind table (.pdata), the JIT code ranges of Mono methods,
-    // the first byte of every allocation and, outside those functions, registered
-    // symbols and exports. These give a listing fixed points,
+    // the first byte of every allocation and, outside those functions, exports and
+    // the symbols registered in memory outside modules. These give a listing fixed points,
     // so scrolling through padding, trampolines or data between functions does
     // not shift the instruction grid into the next function's prolog.
     class CodeMap final : public Disasm::CodeHints
@@ -86,8 +86,8 @@ namespace Manifold::Target
         std::optional<std::pair<std::uint64_t, std::uint64_t>> MonoRange(std::uint64_t address) const;
         bool AllocationStart(std::uint64_t address) const;
         std::optional<std::uint64_t> RunStart(std::uint64_t address, std::uint64_t floor) const;
-        std::optional<std::uint64_t> NamedIn(std::uint64_t from, std::uint64_t to) const;
-        std::optional<std::uint64_t> NamedBelow(std::uint64_t address, std::uint64_t floor) const;
+        std::optional<std::uint64_t> NamedIn(std::uint64_t from, std::uint64_t to, bool module) const;
+        std::optional<std::uint64_t> NamedBelow(std::uint64_t address, std::uint64_t floor, bool module) const;
 
         std::shared_ptr<Process> m_process;
         MonoBridge* m_mono = nullptr;

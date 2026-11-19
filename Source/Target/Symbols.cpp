@@ -651,15 +651,18 @@ namespace Manifold::Target
                 if (start <= address && address - start < reach && (!best || start > best->first))
                     best = std::make_pair(start, name);
             };
+        std::optional<std::pair<std::uint64_t, std::string>> registered;
         {
             std::lock_guard lock(m_registeredLock);
             if (auto below = m_registeredByAddress.upper_bound(address); below != m_registeredByAddress.begin())
             {
                 --below;
                 if (const UserSymbol* symbol = RegisteredAt(below->first))
-                    consider(symbol->Address, symbol->Name);
+                    registered = std::make_pair(symbol->Address, symbol->Name);
             }
         }
+        if (registered && !(m_process && m_process->ModuleAt(registered->first)))
+            consider(registered->first, registered->second);
         if (!m_process)
             return best;
         const auto module = m_process->ModuleAt(address);
@@ -680,60 +683,84 @@ namespace Manifold::Target
         return best;
     }
 
-    std::optional<std::uint64_t> Symbols::NamedIn(std::uint64_t from, std::uint64_t to) const
+    std::optional<std::uint64_t> Symbols::RegisteredIn(std::uint64_t from, std::uint64_t to) const
     {
-        std::optional<std::uint64_t> best;
+        std::lock_guard lock(m_registeredLock);
+        if (const auto above = m_registeredByAddress.upper_bound(from); above != m_registeredByAddress.end() && above->first < to)
+            return above->first;
+        return std::nullopt;
+    }
+
+    std::optional<std::uint64_t> Symbols::RegisteredBelow(std::uint64_t address, std::uint64_t floor) const
+    {
+        std::lock_guard lock(m_registeredLock);
+        if (auto below = m_registeredByAddress.lower_bound(address); below != m_registeredByAddress.begin())
         {
-            std::lock_guard lock(m_registeredLock);
-            if (const auto above = m_registeredByAddress.upper_bound(from); above != m_registeredByAddress.end() && above->first < to)
-                best = above->first;
+            --below;
+            if (below->first >= floor)
+                return below->first;
         }
+        return std::nullopt;
+    }
+
+    std::optional<std::uint64_t> Symbols::ExportIn(std::uint64_t from, std::uint64_t to) const
+    {
         if (!m_process)
-            return best;
+            return std::nullopt;
         const auto module = m_process->ModuleAt(from);
         if (!module)
-            return best;
+            return std::nullopt;
         const auto table = Exports(*module);
         const auto found = std::upper_bound(table->ByAddress.begin(), table->ByAddress.end(), from,
             [](std::uint64_t value, const ExportSymbol& symbol)
             {
                 return value < symbol.Address;
             });
-        if (found != table->ByAddress.end() && found->Address < to && (!best || found->Address < *best))
-            best = found->Address;
-        return best;
+        if (found != table->ByAddress.end() && found->Address < to)
+            return found->Address;
+        return std::nullopt;
     }
 
-    std::optional<std::uint64_t> Symbols::NamedBelow(std::uint64_t address, std::uint64_t floor) const
+    std::optional<std::uint64_t> Symbols::ExportBelow(std::uint64_t address, std::uint64_t floor) const
     {
-        std::optional<std::uint64_t> best;
-        {
-            std::lock_guard lock(m_registeredLock);
-            if (auto below = m_registeredByAddress.lower_bound(address); below != m_registeredByAddress.begin())
-            {
-                --below;
-                if (below->first >= floor)
-                    best = below->first;
-            }
-        }
         if (!m_process || address == 0)
-            return best;
+            return std::nullopt;
         const auto module = m_process->ModuleAt(address - 1);
         if (!module)
-            return best;
+            return std::nullopt;
         const auto table = Exports(*module);
         auto found = std::lower_bound(table->ByAddress.begin(), table->ByAddress.end(), address,
             [](const ExportSymbol& symbol, std::uint64_t value)
             {
                 return symbol.Address < value;
             });
-        if (found != table->ByAddress.begin())
+        if (found == table->ByAddress.begin())
+            return std::nullopt;
+        --found;
+        if (found->Address < floor)
+            return std::nullopt;
+        return found->Address;
+    }
+
+    bool Symbols::LabelOnly(std::uint64_t address) const
+    {
         {
-            --found;
-            if (found->Address >= floor && (!best || found->Address > *best))
-                best = found->Address;
+            std::lock_guard lock(m_registeredLock);
+            if (!RegisteredAt(address))
+                return false;
         }
-        return best;
+        if (!m_process)
+            return false;
+        const auto module = m_process->ModuleAt(address);
+        if (!module)
+            return false;
+        const auto table = Exports(*module);
+        const auto found = std::lower_bound(table->ByAddress.begin(), table->ByAddress.end(), address,
+            [](const ExportSymbol& symbol, std::uint64_t value)
+            {
+                return symbol.Address < value;
+            });
+        return found == table->ByAddress.end() || found->Address != address;
     }
 
     std::string Symbols::ModuleOffset(std::uint64_t address) const

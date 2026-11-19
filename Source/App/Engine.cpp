@@ -82,14 +82,17 @@ namespace Manifold
                 return std::nullopt;
             };
         clues.KnownStart = [&](std::uint64_t at)
-            {
-                if (Symbols().ExactName(at))
-                    return true;
-                if (!dissect)
-                    return false;
-                const std::span<const Disasm::CodeRef> references = dissect->To(at);
-                return std::any_of(references.begin(), references.end(), [](const Disasm::CodeRef& reference) { return reference.Kind() == Disasm::RefKind::Call; });
-            };
+        {
+            if (Symbols().ExactName(at) && !Symbols().LabelOnly(at))
+                return true;
+            if (!dissect)
+                return false;
+            const std::span<const Disasm::CodeRef> references = dissect->To(at);
+            return std::any_of(references.begin(), references.end(), [](const Disasm::CodeRef& reference)
+                {
+                    return reference.Kind() == Disasm::RefKind::Call;
+                });
+        };
         clues.Floor = address > kReach ? address - kReach : 0;
         clues.Ceiling = address + kReach;
         if (const auto module = Process()->ModuleAt(address))
@@ -136,15 +139,19 @@ namespace Manifold
         const Target::CodeMap* map = CodeMap();
         if (Disassembler().InlineHolder(process, start))
             return start;
+        const auto ownRow = [&]
+        {
+            const std::vector<Disasm::Instruction> row = Disassembler().ReadMany(process, start, 1, nullptr, map);
+            return row.empty() ? start : row.front().Next();
+        };
+        if (Symbols().LabelOnly(start))
+            return ownRow();
         if (map)
         {
             if (const auto function = map->FunctionAt(start))
                 return function->second;
             if (const auto section = map->SectionAt(start); section && !section->Code)
-            {
-                const std::vector<Disasm::Instruction> row = Disassembler().ReadMany(process, start, 1, nullptr, map);
-                return row.empty() ? start : row.front().Next();
-            }
+                return ownRow();
         }
         if (MonoPresent())
         {
@@ -152,6 +159,23 @@ namespace Manifold
                 return method->second;
         }
         return Disasm::CodeExtent(Disassembler(), process, start, start + kReach, map);
+    }
+
+    bool Engine::FunctionStartAt(std::uint64_t address)
+    {
+        if (!HasProcess())
+            return false;
+        if (const Target::CodeMap* map = CodeMap())
+        {
+            if (const auto function = map->FunctionAt(address); function && function->first == address)
+                return true;
+        }
+        if (MonoPresent())
+        {
+            if (const auto method = Mono().MethodRange(address); method && method->first == address)
+                return true;
+        }
+        return Symbols().ExactName(address) && !Symbols().LabelOnly(address);
     }
 
     Status Engine::OpenProcess(ProcessId id)

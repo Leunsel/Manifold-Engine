@@ -33,6 +33,8 @@ namespace Manifold::Tests
         constexpr std::uint32_t kFrameAt = 0x00;
         constexpr std::uint32_t kLeafAt = 0x10;
         constexpr std::uint32_t kSecondAt = 0x40;
+        constexpr std::uint32_t kHookFunctionAt = 0x60;
+        constexpr std::uint32_t kHookAt = 0x67;
         constexpr std::uint64_t kSlots = 0x500;
         constexpr std::uint64_t kFarCall = 0x540;
         constexpr std::uint64_t kNearCall = 0x560;
@@ -43,6 +45,7 @@ namespace Manifold::Tests
 
         const std::uint8_t kFrame[] = { 0x48, 0x83, 0xEC, 0x28, 0x31, 0xC0, 0x48, 0x83, 0xC4, 0x28, 0xC3 };
         const std::uint8_t kLeaf[] = { 0xB8, 0x07, 0x00, 0x00, 0x00, 0xC3 };
+        const std::uint8_t kHooked[] = { 0x85, 0xC9, 0x74, 0x03, 0x31, 0xC0, 0xC3, 0xB8, 0x05, 0x00, 0x00, 0x00, 0xC3 };
         const char* const kSlotNames[] = { "PlayerController", "World", "HealthDec" };
 
         struct UnwindEntry
@@ -120,6 +123,7 @@ namespace Manifold::Tests
             std::memcpy(text + kFrameAt, kFrame, sizeof(kFrame));
             std::memcpy(text + kLeafAt, kLeaf, sizeof(kLeaf));
             std::memcpy(text + kSecondAt, kFrame, sizeof(kFrame));
+            std::memcpy(text + kHookFunctionAt, kHooked, sizeof(kHooked));
             const std::uint8_t unwindInfo[] = { 0x01, 0x04, 0x01, 0x00, 0x04, 0x42, 0x00, 0x00 };
             std::memcpy(file.data() + kFileAlignment * 2, unwindInfo, sizeof(unwindInfo));
             std::memcpy(file.data() + kFileAlignment * 2 + 0x100, kFrame, sizeof(kFrame));
@@ -286,15 +290,12 @@ namespace Manifold::Tests
             const Disasm::Instruction narrow = legacy.Decode(base + kSlots, reinterpret_cast<const std::uint8_t*>(base + kSlots), 16, nullptr);
             CHECK_MSG(narrow.Mnemonic == "jmp" && narrow.Length == 6 && narrow.InlineBytes == 0, narrow.Text());
 
-            const std::vector<Disasm::Instruction> synced = disassembler.ReadMany(process, base + 0x590, 12, nullptr, map);
-            const Disasm::Instruction* first = RowAt(synced, base + kJunk);
-            const Disasm::Instruction* second = RowAt(synced, base + kJunk + 1);
-            const Disasm::Instruction* code = RowAt(synced, base + kJunk + 2);
-            CHECK_MSG(first && first->Length == 1 && second && second->Length == 1, "the bytes in front of a registered symbol are cut");
-            CHECK_MSG(code && code->Valid && code->Length == sizeof(kLeaf) - 1 && code->Mnemonic == "mov", "the registered symbol starts a row");
-            const std::vector<Disasm::Instruction> unsynced = disassembler.ReadMany(process, base + 0x590, 12, nullptr, nullptr);
-            const Disasm::Instruction* swallowed = RowAt(unsynced, base + kJunk);
-            CHECK_MSG(swallowed && swallowed->Length == 10 && !RowAt(unsynced, base + kJunk + 2), "without hints the junk swallows the symbol");
+            for (const Disasm::CodeHints* hints : { static_cast<const Disasm::CodeHints*>(map), static_cast<const Disasm::CodeHints*>(nullptr) })
+            {
+                const std::vector<Disasm::Instruction> rows = disassembler.ReadMany(process, base + 0x590, 12, nullptr, hints);
+                const Disasm::Instruction* swallowed = RowAt(rows, base + kJunk);
+                CHECK_MSG(swallowed && swallowed->Length == 10 && !RowAt(rows, base + kJunk + 2), std::string("a symbol registered in a module is no sync point ") + (hints ? "with hints" : "without hints"));
+            }
 
             const std::vector<Disasm::Instruction> function = disassembler.ReadMany(process, base + kText, 3, nullptr, map);
             CHECK_MSG(!function.empty() && function[0].Length == 4 && function[0].Mnemonic == "sub", "a symbol inside an unwind function does not cut its instructions");
@@ -317,7 +318,7 @@ namespace Manifold::Tests
             CHECK(up(0x530, 6) == 0x500);
             CHECK(up(0x520, 2) == 0x510);
             CHECK(up(0x50E, 1) == 0x500);
-            CHECK(up(0x5A0, 1) == kJunk + 1);
+            CHECK(up(0x5A0, 1) == kJunk);
             CHECK(disassembler.BackUp(process, base + 0x510, 1, nullptr) == base + 0x50E);
 
             const std::vector<Disasm::Instruction> rows = disassembler.ReadMany(process, base, 1200, nullptr, map);
@@ -368,6 +369,33 @@ namespace Manifold::Tests
                 CHECK(leaf->Start == base + kText + kLeafAt);
                 CHECK(leaf->End == base + kText + kLeafAt + sizeof(kLeaf));
             }
+
+            const std::uint64_t hookFunction = base + kText + kHookFunctionAt;
+            const auto hooked = engine.FunctionAround(base + kText + kHookAt + 5);
+            CHECK_MSG(hooked && hooked->Start == hookFunction, "the function around an injection point starts at +" + (hooked ? Hex(hooked->Start - base) : std::string("?")));
+            const auto onHook = engine.FunctionAround(base + kText + kHookAt);
+            CHECK(onHook && onHook->Start == hookFunction && onHook->End == hookFunction + sizeof(kHooked));
+            Target::Symbols& symbols = engine.Symbols();
+            CHECK(symbols.LabelOnly(base + kText + kHookAt));
+            CHECK(symbols.LabelOnly(base + kText + kFrameAt + 1));
+            CHECK(symbols.LabelOnly(base + kData + 0x100));
+            CHECK(symbols.LabelOnly(base + kSlots) && symbols.LabelOnly(base + kSlots + 6));
+            CHECK(!symbols.LabelOnly(base + kText + kSecondAt));
+            CHECK(!engine.FunctionStartAt(base + kText + kHookAt));
+            CHECK(!engine.FunctionStartAt(base + kText + kLeafAt));
+            CHECK(!engine.FunctionStartAt(base + kSlots));
+            CHECK(!engine.FunctionStartAt(base + kData + 0x100));
+            CHECK(engine.FunctionStartAt(base + kText + kFrameAt));
+            CHECK(engine.FunctionStartAt(base + kText + kSecondAt));
+            const Disasm::FlowGraph graph = Disasm::BuildFlowGraph(engine.Disassembler(), *engine.Process(), hookFunction, &symbols, map, [&](std::uint64_t target, Disasm::EdgeKind)
+                {
+                    return engine.FunctionStartAt(target);
+                });
+            CHECK_MSG(graph.Blocks.size() == 3 && graph.BlockStarting(base + kText + kHookAt) >= 0, "the jump to the injection point stays inside the graph");
+            CHECK(std::all_of(graph.Blocks.begin(), graph.Blocks.end(), [](const Disasm::FlowBlock& block)
+                {
+                    return block.Exits.empty();
+                }));
         }
 
         bool HasJump(const Disasm::FlowGraph& graph, int from, int to)
@@ -437,6 +465,8 @@ namespace Manifold::Tests
             symbols.Register("Junk_Code", image.Base + kJunk + 2, kOwner);
             symbols.Register("Inside_Frame", image.Base + kText + kFrameAt + 1, kOwner);
             symbols.Register("Leaf_Start", image.Base + kText + kLeafAt, kOwner);
+            symbols.Register("Hook_Point", image.Base + kText + kHookAt, kOwner);
+            symbols.Register("Data_Ptr", image.Base + kData + 0x100, kOwner);
             symbols.Register("Zero_Data", image.Base + kZeroData, kOwner);
             return true;
         }
@@ -448,7 +478,7 @@ namespace Manifold::Tests
             std::uint64_t end = 0;
             for (const Disasm::Instruction& row : rows)
             {
-                if (engine.Symbols().ExactName(row.Address))
+                if (engine.Symbols().ExactName(row.Address) && !engine.Symbols().LabelOnly(row.Address))
                 {
                     start = row.Address;
                     end = std::max(engine.SymbolEnd(row.Address), row.Next());
@@ -477,25 +507,27 @@ namespace Manifold::Tests
             CHECK_MSG(end(0) > 0 && end(0) < 0x40, "the module base ends at +" + Hex(end(0)));
             CHECK_MSG(end(kZeroData) == kZeroData + 2, "zero data ends at +" + Hex(end(kZeroData)));
             CHECK_MSG(end(kJunk + 2) == kJunk + 2 + 5, "the header code ends at +" + Hex(end(kJunk + 2)));
-            CHECK(end(kText + kFrameAt + 1) == kText + kFrameAt + sizeof(kFrame));
-            CHECK(end(kText + kLeafAt) == kText + kLeafAt + sizeof(kLeaf));
+            CHECK_MSG(end(kText + kFrameAt + 1) == kText + kFrameAt + 4, "a symbol inside a function ends at +" + Hex(end(kText + kFrameAt + 1)));
+            CHECK_MSG(end(kText + kLeafAt) == kText + kLeafAt + 5, "a symbol at a leaf start ends at +" + Hex(end(kText + kLeafAt)));
+            CHECK_MSG(end(kText + kHookAt) == kText + kHookAt + 5, "an injection point ends at +" + Hex(end(kText + kHookAt)));
+            CHECK_MSG(end(kData + 0x100) == kData + 0x104, "a data symbol ends at +" + Hex(end(kData + 0x100)));
             CHECK(end(kText + kSecondAt) == kText + kSecondAt + sizeof(kFrame));
 
             const Target::Process& process = *engine.Process();
             const std::vector<Disasm::Instruction> rows = engine.Disassembler().ReadMany(process, base + 0x4F0, 40, nullptr, engine.CodeMap());
             const std::vector<std::string> labels = LabelColumn(engine, rows);
             const std::string module = process.ModuleAt(base)->Name + "+";
-            int symbolic = 0;
             for (std::size_t i = 0; i < rows.size(); ++i)
             {
                 const std::uint64_t offset = rows[i].Address - base;
-                const bool slot = offset >= kSlots && offset < kSlots + 0x30 && (offset - kSlots) % 0x10 == 0;
-                const std::string expected = slot ? "+0" : module + Hex(offset);
+                const std::string expected = module + Hex(offset);
                 if (labels[i] != expected)
                     CHECK_MSG(false, "the row at +" + Hex(offset) + " is labelled " + labels[i] + ", expected " + expected);
-                symbolic += slot ? 1 : 0;
             }
-            CHECK(symbolic == 3);
+            const std::vector<Disasm::Instruction> hookRows = engine.Disassembler().ReadMany(process, base + kText + kHookFunctionAt, 6, nullptr, engine.CodeMap());
+            const std::vector<std::string> hookLabels = LabelColumn(engine, hookRows);
+            for (std::size_t i = 0; i < hookRows.size(); ++i)
+                CHECK_MSG(hookLabels[i] == module + Hex(hookRows[i].Address - base), "the row at +" + Hex(hookRows[i].Address - base) + " is labelled " + hookLabels[i]);
             for (const std::uint64_t top : { kSlots + 0xE, kSlots + 0x2E, 0x530ull, 0x5B0ull, kZeroData + 2 })
             {
                 const auto symbol = engine.Symbols().Containing(base + top, 0x1000);
@@ -512,12 +544,33 @@ namespace Manifold::Tests
             const char text[] = "Hello";
             std::memcpy(cave + 0x1E, text, sizeof(text));
             const auto at = reinterpret_cast<std::uint64_t>(cave);
+            const std::uint8_t junk[] = { 0x48, 0xB8 };
+            std::memcpy(cave + 0x5E, junk, sizeof(junk));
+            std::memcpy(cave + 0x60, kLeaf, sizeof(kLeaf));
             engine.Symbols().Register("Cave_Code", at, kOwner);
             engine.Symbols().Register("Cave_Zero", at + 0x40, kOwner);
+            engine.Symbols().Register("Cave_Sync", at + 0x60, kOwner);
             CHECK_MSG(engine.SymbolEnd(at) == at + 0x1E, "the cave code ends at +" + Hex(engine.SymbolEnd(at) - at));
             CHECK_MSG(engine.SymbolEnd(at + 0x40) == at + 0x42, "the cave zero data ends at +" + Hex(engine.SymbolEnd(at + 0x40) - at));
+            CHECK(engine.SymbolEnd(at + 0x60) == at + 0x60 + sizeof(kLeaf));
+            CHECK(!engine.Symbols().LabelOnly(at) && !engine.Symbols().LabelOnly(at + 0x60));
+            CHECK(engine.FunctionStartAt(at) && engine.FunctionStartAt(at + 0x60));
+            const auto around = engine.Symbols().Containing(at + 0x62, 0x100);
+            CHECK(around && around->first == at + 0x60 && around->second == "Cave_Sync");
+            const auto inModule = engine.Symbols().Containing(base + kText + kHookAt + 2, 0x1000);
+            CHECK(!inModule || inModule->first != base + kText + kHookAt);
+            const std::vector<Disasm::Instruction> synced = engine.Disassembler().ReadMany(process, at + 0x50, 12, nullptr, engine.CodeMap());
+            const Disasm::Instruction* first = RowAt(synced, at + 0x5E);
+            const Disasm::Instruction* second = RowAt(synced, at + 0x5F);
+            const Disasm::Instruction* entry = RowAt(synced, at + 0x60);
+            CHECK_MSG(first && first->Length == 1 && second && second->Length == 1, "the bytes in front of a symbol in allocated memory are cut");
+            CHECK_MSG(entry && entry->Valid && entry->Length == sizeof(kLeaf) - 1 && entry->Mnemonic == "mov", "a symbol in allocated memory starts a row");
+            const std::vector<std::string> caveLabels = LabelColumn(engine, synced);
+            CHECK_MSG(entry && caveLabels[static_cast<std::size_t>(entry - synced.data())] == "+0", "a symbol in allocated memory starts a block");
+            CHECK_MSG(entry && caveLabels[static_cast<std::size_t>(entry - synced.data()) + 1] == "+5", "the rows after it count from it");
             engine.Symbols().Unregister("Cave_Code");
             engine.Symbols().Unregister("Cave_Zero");
+            engine.Symbols().Unregister("Cave_Sync");
             ::VirtualFree(cave, 0, MEM_RELEASE);
         }
 

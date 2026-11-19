@@ -100,21 +100,10 @@ namespace Manifold::UI
         m_writes = engine.Writes().Revision();
         const Target::CodeMap* map = engine.CodeMap();
         const Target::Symbols& symbols = engine.Symbols();
-        const bool mono = engine.MonoPresent();
         const auto other = [&](std::uint64_t target, Disasm::EdgeKind)
-            {
-                if (map)
-                {
-                    if (const auto function = map->FunctionAt(target); function && function->first == target)
-                        return true;
-                }
-                if (mono)
-                {
-                    if (const auto range = engine.Mono().MethodRange(target); range && range->first == target)
-                        return true;
-                }
-                return symbols.ExactName(target).has_value();
-            };
+        {
+            return engine.FunctionStartAt(target);
+        };
         m_graph = Disasm::BuildFlowGraph(engine.Disassembler(), *engine.Process(), entry, &symbols, map, other);
         m_loops = static_cast<int>(std::count_if(m_graph.Blocks.begin(), m_graph.Blocks.end(), [](const Disasm::FlowBlock& block) { return block.LoopHead; }));
         m_built = true;

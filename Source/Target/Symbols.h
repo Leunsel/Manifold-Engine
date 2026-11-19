@@ -75,8 +75,11 @@ namespace Manifold::Target
         // a registered symbol, a module base or an export (what ExactName
         // names). Gives the function a disassembly line is in.
         std::optional<std::pair<std::uint64_t, std::string>> Containing(std::uint64_t address, std::uint64_t reach) const;
-        std::optional<std::uint64_t> NamedIn(std::uint64_t from, std::uint64_t to) const;
-        std::optional<std::uint64_t> NamedBelow(std::uint64_t address, std::uint64_t floor) const;
+        std::optional<std::uint64_t> RegisteredIn(std::uint64_t from, std::uint64_t to) const;
+        std::optional<std::uint64_t> RegisteredBelow(std::uint64_t address, std::uint64_t floor) const;
+        std::optional<std::uint64_t> ExportIn(std::uint64_t from, std::uint64_t to) const;
+        std::optional<std::uint64_t> ExportBelow(std::uint64_t address, std::uint64_t floor) const;
+        bool LabelOnly(std::uint64_t address) const;
         std::vector<ExportSymbol> ExportsOf(const ModuleInfo& module) const;
 
         Evaluation Evaluate(std::string_view expression, const ExtraResolver& extra = {}) const;

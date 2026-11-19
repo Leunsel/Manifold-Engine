@@ -296,24 +296,28 @@ namespace Manifold::Target
         return std::nullopt;
     }
 
-    std::optional<std::uint64_t> CodeMap::NamedIn(std::uint64_t from, std::uint64_t to) const
+    std::optional<std::uint64_t> CodeMap::NamedIn(std::uint64_t from, std::uint64_t to, bool module) const
     {
         const Symbols* symbols = nullptr;
         {
             std::lock_guard lock(m_lock);
             symbols = m_symbols;
         }
-        return symbols ? symbols->NamedIn(from, to) : std::nullopt;
+        if (!symbols)
+            return std::nullopt;
+        return module ? symbols->ExportIn(from, to) : symbols->RegisteredIn(from, to);
     }
 
-    std::optional<std::uint64_t> CodeMap::NamedBelow(std::uint64_t address, std::uint64_t floor) const
+    std::optional<std::uint64_t> CodeMap::NamedBelow(std::uint64_t address, std::uint64_t floor, bool module) const
     {
         const Symbols* symbols = nullptr;
         {
             std::lock_guard lock(m_lock);
             symbols = m_symbols;
         }
-        return symbols ? symbols->NamedBelow(address, floor) : std::nullopt;
+        if (!symbols)
+            return std::nullopt;
+        return module ? symbols->ExportBelow(address, floor) : symbols->RegisteredBelow(address, floor);
     }
 
     std::optional<std::pair<std::uint64_t, std::uint64_t>> CodeMap::MonoRange(std::uint64_t address) const
@@ -362,8 +366,10 @@ namespace Manifold::Target
                     best = value;
             };
         bool inside = false;
+        bool module = false;
         if (const auto table = TableFor(from))
         {
+            module = true;
             // Inside a module: the next function start, or the end of the
             // function the window begins in. JIT code is never inside a module,
             // so the Mono runtime is not asked here.
@@ -396,7 +402,7 @@ namespace Manifold::Target
         }
         if (anchors == Anchors::CodeAndNames && !inside)
         {
-            if (const auto named = NamedIn(from, to))
+            if (const auto named = NamedIn(from, to, module))
                 consider(*named);
         }
         const std::uint64_t page = (to - 1) & ~(kPage - 1);
@@ -441,7 +447,7 @@ namespace Manifold::Target
             }
             if (anchors == Anchors::CodeAndNames)
             {
-                if (const auto named = NamedBelow(address, floor))
+                if (const auto named = NamedBelow(address, floor, true))
                     consider(*named);
             }
             return best;
@@ -467,7 +473,7 @@ namespace Manifold::Target
             consider(*run);
         if (anchors == Anchors::CodeAndNames && !inside)
         {
-            if (const auto named = NamedBelow(address, floor))
+            if (const auto named = NamedBelow(address, floor, false))
                 consider(*named);
         }
         return best;
