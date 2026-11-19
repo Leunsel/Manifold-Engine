@@ -1,5 +1,6 @@
 #include "Core/Paths.h"
 
+#include "Core/Errors.h"
 #include "Core/Text.h"
 
 #include <optional>
@@ -22,17 +23,10 @@ namespace Manifold
         constexpr const wchar_t* kConfigNames[] = { kSettingsName, kLayoutName, kScriptSettingsName };
         constexpr const wchar_t* kLogNames[] = { kLogName, L"Manifold-Engine.previous.log", L"Manifold-CheatEngine.log", L"Manifold-CheatEngine.previous.log" };
 
-        std::string SystemMessage(DWORD error)
+        std::filesystem::path& DataFolderOverride()
         {
-            wchar_t* buffer = nullptr;
-            const DWORD length = ::FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, error,
-                MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), reinterpret_cast<wchar_t*>(&buffer), 0, nullptr);
-            std::string text = length && buffer ? Trim(WideToUtf8(std::wstring_view(buffer, length))) : "error " + std::to_string(error);
-            if (buffer)
-                ::LocalFree(buffer);
-            while (!text.empty() && text.back() == '.')
-                text.pop_back();
-            return text;
+            static std::filesystem::path folder;
+            return folder;
         }
 
         bool Present(const std::filesystem::path& path)
@@ -89,14 +83,14 @@ namespace Manifold
             const std::filesystem::path to = programFolder / wanted;
             if (between.empty() || !::MoveFileExW(from.c_str(), between.c_str(), 0))
             {
-                migration.Problems.push_back("The folder " + sourceText + " could not be renamed to " + wantedText + ": " + SystemMessage(::GetLastError()));
+                migration.Problems.push_back("The folder " + sourceText + " could not be renamed to " + wantedText + ": " + SystemErrorText(::GetLastError()));
                 return;
             }
             if (!::MoveFileExW(between.c_str(), to.c_str(), 0))
             {
                 const DWORD error = ::GetLastError();
                 const bool restored = ::MoveFileExW(between.c_str(), from.c_str(), 0) != FALSE;
-                migration.Problems.push_back("The folder " + sourceText + " could not be renamed to " + wantedText + ": " + SystemMessage(error) +
+                migration.Problems.push_back("The folder " + sourceText + " could not be renamed to " + wantedText + ": " + SystemErrorText(error) +
                     (restored ? std::string() : "; it is now called " + WideToUtf8(between.filename().wstring())));
                 return;
             }
@@ -124,9 +118,20 @@ namespace Manifold
             return std::filesystem::path(program).parent_path();
         }
 
+        std::filesystem::path DataFolder()
+        {
+            const std::filesystem::path& data = DataFolderOverride();
+            return data.empty() ? ProgramFolder() : data;
+        }
+
+        void SetDataFolder(std::filesystem::path folder)
+        {
+            DataFolderOverride() = std::move(folder);
+        }
+
         std::filesystem::path ConfigFolder()
         {
-            return ProgramFolder() / kConfigFolder;
+            return DataFolder() / kConfigFolder;
         }
 
         std::filesystem::path SettingsFile()
@@ -141,7 +146,7 @@ namespace Manifold
 
         std::filesystem::path LogFolder()
         {
-            return ProgramFolder() / kLogFolder;
+            return DataFolder() / kLogFolder;
         }
 
         std::filesystem::path LogFile()
@@ -171,7 +176,7 @@ namespace Manifold
 
         std::filesystem::path CrashFolder()
         {
-            return ProgramFolder() / L"crashes";
+            return DataFolder() / L"crashes";
         }
 
         std::filesystem::path ScanFolder()
@@ -194,7 +199,7 @@ namespace Manifold
                     const std::filesystem::path folder = programFolder / folderName;
                     std::error_code error;
                     if (!std::filesystem::is_directory(folder, error) && !std::filesystem::create_directories(folder, error))
-                        migration.Problems.push_back("The " + folderText + " folder could not be created in " + WideToUtf8(programFolder.wstring()) + ": " + SystemMessage(static_cast<DWORD>(error.value())));
+                        migration.Problems.push_back("The " + folderText + " folder could not be created in " + WideToUtf8(programFolder.wstring()) + ": " + SystemErrorText(static_cast<DWORD>(error.value())));
                     for (const wchar_t* name : names)
                     {
                         const std::filesystem::path source = programFolder / name;
@@ -204,7 +209,7 @@ namespace Manifold
                         if (::MoveFileExW(source.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH))
                             migration.Moved.push_back(WideToUtf8(name) + " moved into the " + folderText + " folder");
                         else
-                            migration.Problems.push_back(WideToUtf8(name) + " could not be moved into the " + folderText + " folder: " + SystemMessage(::GetLastError()));
+                            migration.Problems.push_back(WideToUtf8(name) + " could not be moved into the " + folderText + " folder: " + SystemErrorText(::GetLastError()));
                     }
                 };
             moveInto(kConfigFolder, kConfigNames);
@@ -224,7 +229,7 @@ namespace Manifold
                 if (::CopyFileW(source.c_str(), target.c_str(), TRUE))
                     migration.Moved.push_back(WideToUtf8(earlier) + " copied to " + WideToUtf8((std::filesystem::path(kConfigFolder) / current).wstring()));
                 else
-                    migration.Problems.push_back(WideToUtf8(earlier) + " could not be copied into the configs folder: " + SystemMessage(::GetLastError()));
+                    migration.Problems.push_back(WideToUtf8(earlier) + " could not be copied into the configs folder: " + SystemErrorText(::GetLastError()));
             }
 
             RenameFolder(programFolder, L"Tables", kTablesFolder, migration);

@@ -4,9 +4,13 @@
 #include "Core/Paths.h"
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <map>
+#include <span>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace Manifold
@@ -113,4 +117,25 @@ namespace Manifold
         Status Save(const std::filesystem::path& path) const;
         void AddRecentTable(const std::string& path);
     };
+
+    struct SettingChoice
+    {
+        std::vector<const char*> Names;
+        int (*Get)(const Settings&);
+        void (*Set)(Settings&, int);
+    };
+
+    using SettingMember = std::variant<bool Settings::*, int Settings::*, std::uint32_t Settings::*, std::string Settings::*, std::vector<std::string> Settings::*, const SettingChoice*>;
+
+    struct SettingField
+    {
+        const char* Section;
+        const char* Key;
+        SettingMember Member;
+        int Min = std::numeric_limits<int>::min();
+        int Max = std::numeric_limits<int>::max();
+        bool OnlyWhenChanged = false;
+    };
+
+    std::span<const SettingField> SettingFields();
 }

@@ -15,6 +15,8 @@ namespace Manifold
         };
 
         std::filesystem::path ProgramFolder();
+        std::filesystem::path DataFolder();
+        void SetDataFolder(std::filesystem::path folder);
         std::filesystem::path ConfigFolder();
         std::filesystem::path SettingsFile();
         std::filesystem::path ScriptSettingsFile();

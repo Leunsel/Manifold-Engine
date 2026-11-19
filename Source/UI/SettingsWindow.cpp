@@ -533,19 +533,19 @@ namespace Manifold::UI
         {
             ManifoldTheme::Configure(settings.Theme);
             m_workspace.RequestRestyle();
-            m_themeSaveAt = ImGui::GetTime() + 0.6;
-        }
-        if (m_themeSaveAt > 0.0 && ImGui::GetTime() >= m_themeSaveAt && !ImGui::IsAnyItemActive())
-        {
-            m_themeSaveAt = 0.0;
             changed = true;
         }
         m_workspace.Core().Debugger().SetLogDebugStrings(settings.LogDebugStrings);
         m_workspace.Core().Debugger().SetPreferHardware(settings.UseHardwareExecuteBreakpoints);
         if (changed)
+            m_workspace.Core().SaveOptionsSoon();
+        const SettingsStore& store = m_workspace.Core().OptionsStore();
+        if (!m_seenSaves)
+            m_seenSaves = store.Saves();
+        if (store.Saves() != *m_seenSaves)
         {
-            const Status status = m_workspace.Core().SaveOptionsNow();
-            m_saveError = status.Ok() ? "" : status.Text;
+            m_seenSaves = store.Saves();
+            m_saveError = store.LastResult().Ok() ? "" : store.LastResult().Text;
             m_savedAt = ImGui::GetTime();
         }
         EndToolWindow();

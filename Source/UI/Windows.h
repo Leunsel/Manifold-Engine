@@ -654,7 +654,7 @@ namespace Manifold::UI
         std::string m_search;
         std::string m_autoAttach;
         std::string m_saveError;
-        double m_themeSaveAt = 0.0;
+        std::optional<std::uint64_t> m_seenSaves;
         double m_savedAt = -100.0;
     };
 

@@ -2,6 +2,7 @@
 
 #include "App/Engine.h"
 #include "App/Settings.h"
+#include "Core/Text.h"
 #include "Lua/LuaEngine.h"
 
 #include <algorithm>
@@ -752,14 +753,8 @@ namespace Manifold::Tests
         void ScriptSettings(Engine& engine)
         {
             const std::filesystem::path path = Paths::ScriptSettingsFile();
-            std::error_code error;
-            const bool existed = std::filesystem::exists(path, error);
-            std::string original;
-            if (existed)
-            {
-                std::ifstream file(path, std::ios::binary);
-                original.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
-            }
+            CHECK_MSG(Paths::DataFolder() != Paths::ProgramFolder() && path.parent_path().parent_path() == Paths::DataFolder(),
+                "the tests would write the real " + WideToUtf8(path.wstring()));
             LuaCheck(engine, "getSettings", R"LUA(
                 local settings = getSettings("Manifold Tests\\Compat")
                 if settings.Value["missing"] ~= "" then return "missing" end
@@ -769,15 +764,6 @@ namespace Manifold::Tests
                 if again.Value["scope"] ~= "process" then return "read " .. tostring(again.Value["scope"]) end
                 if again.Value.Lines ~= "a\nb" then return "lines" end
                 return "ok")LUA");
-            if (existed)
-            {
-                std::ofstream file(path, std::ios::binary | std::ios::trunc);
-                file.write(original.data(), static_cast<std::streamsize>(original.size()));
-            }
-            else
-            {
-                std::filesystem::remove(path, error);
-            }
         }
 
         void Commands(Engine& engine)

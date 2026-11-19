@@ -3,8 +3,10 @@
 #include "App/Commands.h"
 #include "Core/Errors.h"
 #include "Core/MainThread.h"
+#include "Core/Paths.h"
 #include "Core/RuntimeLog.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -46,11 +48,55 @@ namespace Manifold::Tests
         static Counter counter;
         return counter;
     }
+
+    class DataFolder
+    {
+    public:
+        DataFolder()
+        {
+            wchar_t temp[MAX_PATH + 1] = L"";
+            const DWORD length = ::GetTempPathW(MAX_PATH + 1, temp);
+            m_folder = (length ? std::filesystem::path(temp) : std::filesystem::current_path()) / L"Manifold-Engine-Tests" / std::to_wstring(::GetCurrentProcessId());
+            std::error_code ignored;
+            std::vector<std::filesystem::path> stale;
+            for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(m_folder.parent_path(), ignored))
+            {
+                const std::wstring name = entry.path().filename().wstring();
+                if (name.empty() || name.size() > 10 || !std::all_of(name.begin(), name.end(), [](wchar_t c) { return c >= L'0' && c <= L'9'; }))
+                    continue;
+                const HANDLE process = ::OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(std::stoull(name)));
+                const bool running = process && ::WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+                if (process)
+                    ::CloseHandle(process);
+                if (!running)
+                    stale.push_back(entry.path());
+            }
+            for (const std::filesystem::path& folder : stale)
+                std::filesystem::remove_all(folder, ignored);
+            std::filesystem::remove_all(m_folder, ignored);
+            std::filesystem::create_directories(m_folder, ignored);
+            Paths::SetDataFolder(m_folder);
+        }
+
+        ~DataFolder()
+        {
+            Paths::SetDataFolder({});
+            std::error_code ignored;
+            std::filesystem::remove_all(m_folder, ignored);
+        }
+
+        DataFolder(const DataFolder&) = delete;
+        DataFolder& operator=(const DataFolder&) = delete;
+
+    private:
+        std::filesystem::path m_folder;
+    };
 }
 
 int main(int argc, char** argv)
 {
     Manifold::BindMainThread();
+    const Manifold::Tests::DataFolder data;
     std::filesystem::path target;
     bool assemblerOnly = false;
     bool allowSkips = false;

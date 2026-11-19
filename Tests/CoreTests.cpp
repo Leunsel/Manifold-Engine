@@ -22,15 +22,19 @@
 #include "Scan/ValueType.h"
 #include "Table/CheatTable.h"
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <chrono>
+#include <type_traits>
+#include <variant>
 
 #include <windows.h>
 
@@ -769,6 +773,83 @@ data:
         CHECK_EQ(finished, 100);
     }
 
+    std::map<std::string, std::string> SettingLines(const std::string& text)
+    {
+        std::map<std::string, std::string> lines;
+        for (const Ini::Section& section : Ini::Parse(text))
+        {
+            for (const Ini::Entry& entry : section.Entries)
+                lines[Lower(Trim(entry.Key))] = Trim(entry.Value);
+        }
+        return lines;
+    }
+
+    void SettingsTable()
+    {
+        std::set<std::string> keys;
+        for (const SettingField& field : SettingFields())
+        {
+            const std::string key = Lower(field.Key);
+            CHECK_MSG(keys.insert(key).second, std::string("the settings key ") + field.Key + " is used twice");
+            CHECK_MSG(key.rfind("color.", 0) != 0 && key.rfind("size.", 0) != 0 && key.rfind("key.", 0) != 0 && key.rfind("recent", 0) == std::string::npos,
+                std::string("the settings key ") + field.Key + " collides with a key family");
+        }
+
+        const Settings defaults;
+        Settings written;
+        for (const SettingField& field : SettingFields())
+        {
+            std::visit([&](auto member)
+                {
+                    using Member = decltype(member);
+                    if constexpr (std::is_same_v<Member, bool Settings::*>)
+                        written.*member = !(defaults.*member);
+                    else if constexpr (std::is_same_v<Member, int Settings::*> || std::is_same_v<Member, std::uint32_t Settings::*>)
+                    {
+                        const long long base = static_cast<long long>(defaults.*member);
+                        long long next = std::clamp<long long>(base + 7, field.Min, field.Max);
+                        if (next == base)
+                            next = std::clamp<long long>(base - 7, field.Min, field.Max);
+                        written.*member = static_cast<std::remove_reference_t<decltype(written.*member)>>(next);
+                    }
+                    else if constexpr (std::is_same_v<Member, std::string Settings::*>)
+                        written.*member = std::string("probe-") + field.Key;
+                    else if constexpr (std::is_same_v<Member, std::vector<std::string> Settings::*>)
+                        written.*member = { "first.exe", "second.exe" };
+                    else
+                        member->Set(written, (member->Get(defaults) + 1) % static_cast<int>(member->Names.size()));
+                }, field.Member);
+        }
+        written.RecentTables = { "C:\\one.CT", "C:\\two.CT" };
+        written.Theme.Colors["Accent"] = { 0.25f, 0.5f, 0.75f, 1.0f };
+        written.Theme.Sizes["Rounding"] = 3.5f;
+        written.Shortcuts["OpenProcess"] = "Ctrl+Shift+P";
+
+        wchar_t temp[MAX_PATH] = L"";
+        ::GetTempPathW(MAX_PATH, temp);
+        const std::filesystem::path folder = std::filesystem::path(temp) / ("manifold-settings-" + std::to_string(::GetCurrentProcessId()));
+        CHECK(written.Save(folder / "written.ini").Ok());
+        CHECK(defaults.Save(folder / "defaults.ini").Ok());
+        Settings read;
+        CHECK(read.Load(folder / "written.ini"));
+        CHECK(read.Save(folder / "read.ini").Ok());
+        const std::string writtenText = Ini::ReadText(folder / "written.ini").value_or("");
+        const std::string readText = Ini::ReadText(folder / "read.ini").value_or("-");
+        CHECK_MSG(writtenText == readText, readText);
+        const std::map<std::string, std::string> changed = SettingLines(writtenText);
+        const std::map<std::string, std::string> plain = SettingLines(Ini::ReadText(folder / "defaults.ini").value_or(""));
+        for (const SettingField& field : SettingFields())
+        {
+            const auto now = changed.find(Lower(field.Key));
+            const auto before = plain.find(Lower(field.Key));
+            CHECK_MSG(now != changed.end() && (before == plain.end() || before->second != now->second), std::string("the settings key ") + field.Key + " did not change in the file");
+        }
+        CHECK(read.RecentTables == written.RecentTables && read.Theme.Colors == written.Theme.Colors && read.Theme.Sizes == written.Theme.Sizes && read.Shortcuts == written.Shortcuts);
+        CHECK(plain.count("legacyeditor") == 0 && plain.count("nopsledbest") == 0);
+        std::error_code ignored;
+        std::filesystem::remove_all(folder, ignored);
+    }
+
     void Foundations()
     {
         const Result<Address> good(Address(0x1234));
@@ -1177,6 +1258,7 @@ data:
         BreakExpressions();
         SerialWork();
         Foundations();
+        SettingsTable();
         SoundDecoding();
         FolderMigration();
         RecordIndex();

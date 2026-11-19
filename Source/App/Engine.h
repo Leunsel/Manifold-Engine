@@ -78,6 +78,7 @@ namespace Manifold
         Settings& Options() { return m_settings; }
         void SaveOptionsSoon();
         Status SaveOptionsNow();
+        const SettingsStore& OptionsStore() const { return m_settingsStore; }
         BackgroundWork& Work() { return m_work; }
         std::vector<WorkInfo> BusyWork() const;
         void CancelWork(int id);
