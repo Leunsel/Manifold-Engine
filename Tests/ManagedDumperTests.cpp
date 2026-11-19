@@ -717,6 +717,11 @@ namespace Manifold::Tests
         }
     }
 
+    void CheckManagedDumperTarget(const std::filesystem::path& targetPath)
+    {
+        CheckAgentTarget(targetPath);
+    }
+
     void CheckManagedDumper(const std::filesystem::path& targetPath)
     {
         CheckParser();

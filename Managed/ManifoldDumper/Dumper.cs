@@ -185,7 +185,7 @@ namespace Manifold.Managed
                     parent = FullName(type.BaseType);
                 token = (uint)type.MetadataToken;
                 if (m_mono)
-                    klass = (ulong)Marshal.ReadIntPtr(type.TypeHandle.Value).ToInt64();
+                    klass = NativeAddress.From(Marshal.ReadIntPtr(type.TypeHandle.Value));
             }
             catch (Exception)
             {
@@ -243,7 +243,7 @@ namespace Manifold.Managed
                     methodName = method.Name;
                     methodFlags = (method.IsStatic ? 1u : 0u) | (method.IsVirtual ? 2u : 0u) | (method.IsAbstract ? 4u : 0u) | (method.IsConstructor ? 8u : 0u);
                     if (m_mono)
-                        handle = (ulong)method.MethodHandle.Value.ToInt64();
+                        handle = NativeAddress.From(method.MethodHandle.Value);
                 }
                 catch (Exception)
                 {

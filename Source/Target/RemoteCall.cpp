@@ -1,12 +1,15 @@
 #include "Target/RemoteCall.h"
 
+#include "Asm/Assembler.h"
 #include "Core/Text.h"
 #include "Target/Process.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -32,6 +35,7 @@ namespace Manifold::Target
         constexpr std::uint32_t kWakeOffset = 0x50;        // handles[0]: wake event
         constexpr std::uint32_t kHostOffset = 0x58;        // handles[1]: host process
         constexpr std::uint32_t kCloseOffset = 0x60;       // CloseHandle
+        constexpr std::uint32_t kReasonOffset = 0x68;
         constexpr std::uint32_t kControlSize = 0x70;       // 0x68: exit reason while leaving
         constexpr std::uint32_t kSpinBeforeSleep = 100000;
         constexpr std::uint32_t kWaitMilliseconds = 200;
@@ -184,6 +188,8 @@ namespace Manifold::Target
         // export) sits at the same base in the target.
         std::uint64_t SystemExport(const Process& process, const char* name)
         {
+            if (!process.Is64Bit())
+                return process.FindExport("kernel32.dll", name);
             const HMODULE kernel = ::GetModuleHandleW(L"kernel32.dll");
             const FARPROC local = kernel ? ::GetProcAddress(kernel, name) : nullptr;
             HMODULE owner = nullptr;
@@ -273,6 +279,216 @@ namespace Manifold::Target
                 0xC3                                   // ret
             };
         }
+
+        Result<std::vector<std::uint8_t>> Assemble32(std::uint64_t address, const std::vector<std::string>& lines)
+        {
+            std::map<std::string, std::uint64_t, std::less<>> labels;
+            std::set<std::string, std::less<>> declared;
+            for (const std::string& line : lines)
+            {
+                if (line.ends_with(':'))
+                    declared.insert(line.substr(0, line.size() - 1));
+            }
+            for (int pass = 0; pass < 8; ++pass)
+            {
+                std::vector<std::uint8_t> code;
+                bool settled = true;
+                for (const std::string& line : lines)
+                {
+                    if (line.ends_with(':'))
+                    {
+                        const std::uint64_t at = address + code.size();
+                        const auto [label, added] = labels.try_emplace(line.substr(0, line.size() - 1), at);
+                        settled = settled && !added && label->second == at;
+                        label->second = at;
+                        continue;
+                    }
+                    Asm::AssembleOptions options;
+                    options.Is64Bit = false;
+                    options.Address = address + code.size();
+                    options.AllowPending = true;
+                    options.Resolve = [&labels, &declared](std::string_view name)
+                        {
+                            if (const auto found = labels.find(name); found != labels.end())
+                                return Asm::SymbolValue{ Asm::SymbolState::Known, found->second };
+                            return Asm::SymbolValue{ declared.count(name) ? Asm::SymbolState::Pending : Asm::SymbolState::Unknown, 0 };
+                        };
+                    const Asm::AssembleResult result = Asm::Assemble(line, options);
+                    if (!result.Ok)
+                        return Status::Fail(ErrorCode::ThreadCreateFailed, "the 32-bit remote worker does not assemble at \"" + line + "\": " + result.Message);
+                    settled = settled && !result.UsedPending;
+                    code.insert(code.end(), result.Bytes.begin(), result.Bytes.end());
+                }
+                if (settled)
+                    return code;
+            }
+            return Status::Fail(ErrorCode::ThreadCreateFailed, "the 32-bit remote worker's jumps do not settle");
+        }
+
+        Result<std::vector<std::uint8_t>> WorkerCode32(std::uint64_t address)
+        {
+            return Assemble32(address, {
+                "push ebp", "push ebx", "push esi", "push edi",
+                "mov esi,[esp+0x14]",
+                "mov edi,esp",
+                "and esp,0xFFFFFFF0",
+                "mov ebp,esp",
+                "awake:",
+                Format("mov ebx,0x%X", kSpinBeforeSleep),
+                "poll:",
+                "mov eax,[esi]",
+                "cmp eax,2",
+                "je stop",
+                "cmp eax,1",
+                "je invoke",
+                "test ebx,ebx",
+                "jz doze",
+                "dec ebx",
+                "pause",
+                "jmp poll",
+                "doze:",
+                Format("mov eax,[esi+0x%X]", kWaitOffset),
+                "test eax,eax",
+                "jz nap",
+                Format("push 0x%X", kWaitMilliseconds),
+                "push 0",
+                Format("lea ecx,[esi+0x%X]", kWakeOffset),
+                "push ecx",
+                "push 2",
+                "call eax",
+                "mov esp,ebp",
+                "cmp eax,1",
+                "je gone",
+                "test eax,eax",
+                "jz dozed",
+                "cmp eax,0x102",
+                "je dozed",
+                Format("mov dword ptr [esi+0x%X],0", kWaitOffset),
+                "dozed:",
+                "xor ebx,ebx",
+                "jmp poll",
+                "nap:",
+                Format("mov eax,[esi+0x%X]", kSleepOffset),
+                "test eax,eax",
+                "jz awake",
+                "push 1",
+                "call eax",
+                "mov esp,ebp",
+                "xor ebx,ebx",
+                "jmp poll",
+                "invoke:",
+                Format("push dword ptr [esi+0x%X]", kFuncOffset + 0x20),
+                Format("push dword ptr [esi+0x%X]", kFuncOffset + 0x18),
+                Format("push dword ptr [esi+0x%X]", kFuncOffset + 0x10),
+                Format("push dword ptr [esi+0x%X]", kFuncOffset + 0x08),
+                Format("mov eax,[esi+0x%X]", kFuncOffset),
+                "call eax",
+                "mov esp,ebp",
+                Format("mov [esi+0x%X],eax", kResultOffset),
+                Format("mov dword ptr [esi+0x%X],0", kResultOffset + 4),
+                "mov eax,1",
+                "xor ecx,ecx",
+                "lock cmpxchg [esi],ecx",
+                "jmp awake",
+                "gone:",
+                "mov eax,2",
+                "jmp quit",
+                "stop:",
+                "mov eax,1",
+                "quit:",
+                Format("mov [esi+0x%X],eax", kReasonOffset),
+                Format("mov eax,[esi+0x%X]", kCloseOffset),
+                "test eax,eax",
+                "jz finish",
+                Format("mov ecx,[esi+0x%X]", kWakeOffset),
+                "test ecx,ecx",
+                "jz host",
+                "push ecx",
+                Format("call dword ptr [esi+0x%X]", kCloseOffset),
+                "mov esp,ebp",
+                "host:",
+                Format("mov ecx,[esi+0x%X]", kWakeOffset + 4),
+                "test ecx,ecx",
+                "jz finish",
+                "push ecx",
+                Format("call dword ptr [esi+0x%X]", kCloseOffset),
+                "mov esp,ebp",
+                "finish:",
+                Format("mov eax,[esi+0x%X]", kReasonOffset),
+                Format("mov [esi+0x%X],eax", kStoppedOffset),
+                "mov esp,edi",
+                "pop edi", "pop esi", "pop ebx", "pop ebp",
+                "ret 4",
+            });
+        }
+
+        Result<std::vector<std::uint8_t>> CollectorCode32(std::uint64_t address)
+        {
+            return Assemble32(address, {
+                "mov edx,[esp+8]",
+                "mov eax,[edx]",
+                "cmp eax,[edx+8]",
+                "jae full",
+                "mov ecx,[esp+4]",
+                "mov [edx+eax*8+0x10],ecx",
+                "mov dword ptr [edx+eax*8+0x14],0",
+                "inc eax",
+                "mov [edx],eax",
+                "full:",
+                "ret",
+            });
+        }
+
+        Result<std::vector<std::uint8_t>> DrainCode32(std::uint64_t address)
+        {
+            return Assemble32(address, {
+                "push ebp", "push ebx", "push esi", "push edi",
+                "mov ebp,esp",
+                "mov ebx,[ebp+0x1C]",
+                "next:",
+                "mov eax,[ebx]",
+                "cmp eax,[ebx+8]",
+                "jae full",
+                "lea ecx,[ebx+0x10]",
+                "push ecx",
+                "push dword ptr [ebp+0x18]",
+                "call dword ptr [ebp+0x14]",
+                "mov esp,ebp",
+                "test eax,eax",
+                "jz end",
+                "mov edi,[ebx]",
+                "shl edi,4",
+                Format("lea edi,[ebx+edi+0x%X]", kDrainHeader),
+                "mov [edi],eax",
+                "xor ecx,ecx",
+                "mov [edi+4],ecx",
+                "mov [edi+8],ecx",
+                "mov [edi+0xC],ecx",
+                "mov esi,[ebx+0x28]",
+                "test esi,esi",
+                "jz read",
+                "push eax",
+                "call esi",
+                "mov esp,ebp",
+                "mov [edi+8],eax",
+                "jmp stored",
+                "read:",
+                "mov esi,[ebx+0x18]",
+                "cmp esi,0xFFFFFFFF",
+                "je stored",
+                "mov esi,[eax+esi]",
+                "mov [edi+8],esi",
+                "stored:",
+                "inc dword ptr [ebx]",
+                "jmp next",
+                "end:",
+                "mov dword ptr [ebx+0x20],1",
+                "full:",
+                "mov eax,[ebx]",
+                "pop edi", "pop esi", "pop ebx", "pop ebp",
+                "ret",
+            });
+        }
     }
 
     RemoteCall::~RemoteCall()
@@ -285,9 +501,8 @@ namespace Manifold::Target
         Stop();
         if (!process || !process->Alive())
             return Status::Fail(ErrorCode::NoProcess);
-        if (!process->Is64Bit())
-            return Status::Fail(ErrorCode::ThreadCreateFailed, "the remote-call worker supports 64-bit targets only");
         m_process = std::move(process);
+        const bool is64 = m_process->Is64Bit();
 
         const Result<Address> codeBlock = m_process->Allocate(0x1000, PAGE_EXECUTE_READWRITE);
         if (!codeBlock)
@@ -304,10 +519,37 @@ namespace Manifold::Target
             Stop();
             return drainBlock.Error();
         }
+        if (!is64 && std::max({ m_code + 0x1000, m_control + kControlSize, m_data + kScratchSize, m_drainBlock + kDrainHeader + kDrainBatch * sizeof(DrainItem) }) > 0x100000000ull)
+        {
+            Stop();
+            return Status::Fail(ErrorCode::ThreadCreateFailed, "the remote worker's pages lie above 4 GB in a 32-bit target");
+        }
 
-        std::vector<std::uint8_t> worker = WorkerCode();
-        std::vector<std::uint8_t> collector = CollectorCode();
         m_collector = m_code + kCollectorOffset;
+        m_drain = m_code + kDrainOffset;
+        std::vector<std::uint8_t> worker;
+        std::vector<std::uint8_t> collector;
+        std::vector<std::uint8_t> drain;
+        if (is64)
+        {
+            worker = WorkerCode();
+            collector = CollectorCode();
+            drain = DrainCode();
+        }
+        else
+        {
+            Result<std::vector<std::uint8_t>> worker32 = WorkerCode32(m_code);
+            Result<std::vector<std::uint8_t>> collector32 = worker32 ? CollectorCode32(m_collector) : Result<std::vector<std::uint8_t>>(worker32.Error());
+            Result<std::vector<std::uint8_t>> drain32 = collector32 ? DrainCode32(m_drain) : Result<std::vector<std::uint8_t>>(collector32.Error());
+            if (!drain32)
+            {
+                Stop();
+                return drain32.Error();
+            }
+            worker = std::move(*worker32);
+            collector = std::move(*collector32);
+            drain = std::move(*drain32);
+        }
         std::vector<std::uint8_t> control(kControlSize, 0);
         const auto put = [&](std::uint32_t offset, std::uint64_t value) { std::memcpy(control.data() + offset, &value, sizeof(value)); };
         put(kSleepOffset, SystemExport(*m_process, "Sleep"));
@@ -333,8 +575,13 @@ namespace Manifold::Target
             if (remoteWake && remoteHost)
             {
                 put(kWaitOffset, wait);
-                put(kWakeOffset, remoteWake);
-                put(kHostOffset, remoteHost);
+                if (is64)
+                {
+                    put(kWakeOffset, remoteWake);
+                    put(kHostOffset, remoteHost);
+                }
+                else
+                    put(kWakeOffset, (remoteHost << 32) | (remoteWake & 0xFFFFFFFFull));
                 put(kCloseOffset, close);
             }
             else
@@ -356,10 +603,8 @@ namespace Manifold::Target
                 return failure;
             };
 
-        std::vector<std::uint8_t> drain = DrainCode();
         if (worker.size() > kCollectorOffset || collector.size() > kDrainOffset - kCollectorOffset || kDrainOffset + drain.size() > 0x1000)
             return fail(Status::Fail(ErrorCode::WriteFailed, "the remote worker code does not fit its page"));
-        m_drain = m_code + kDrainOffset;
         if (!m_process->Write(m_code, worker.data(), worker.size()) ||
             !m_process->Write(m_collector, collector.data(), collector.size()) ||
             !m_process->Write(m_drain, drain.data(), drain.size()) ||

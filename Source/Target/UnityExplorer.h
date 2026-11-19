@@ -441,6 +441,7 @@ namespace Manifold::Target
         std::uint64_t m_jobAbort = 0;
 
         std::shared_ptr<Process> Proc() const;
+        std::size_t PointerBytes() const;
 
         mutable std::mutex m_stateLock;
         std::shared_ptr<Process> m_process;

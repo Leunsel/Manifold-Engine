@@ -13,7 +13,7 @@ namespace Manifold::Target
 {
     class Process;
 
-    // Calls functions inside a 64-bit target without injecting a DLL: a small
+    // Calls functions inside a target without injecting a DLL: a small
     // position-independent worker is written into an executable page and run on
     // one persistent remote thread, so every call shares the same thread (it
     // can be attached to a runtime once, e.g. mono_thread_attach). Manifold
@@ -39,7 +39,7 @@ namespace Manifold::Target
         void SetTimeout(std::chrono::milliseconds timeout) { m_timeout = timeout; }
         void SetGuard(const CheckedMutex* guard) { m_guard = guard; }
 
-        // Call function(a0..a3) in the target and return its 64-bit result.
+        // Call function(a0..a3) in the target and return its result.
         Status Call(std::uint64_t function, std::uint64_t a0, std::uint64_t a1, std::uint64_t a2, std::uint64_t a3, std::uint64_t& result);
         Status Call(std::uint64_t function, std::uint64_t a0, std::uint64_t& result) { return Call(function, a0, 0, 0, 0, result); }
         Status Call(std::uint64_t function, std::uint64_t a0, std::uint64_t a1, std::uint64_t& result) { return Call(function, a0, a1, 0, 0, result); }
@@ -51,8 +51,8 @@ namespace Manifold::Target
         // Walks an iterator API of the form item = function(object, &iter)
         // (mono_class_get_methods, il2cpp_class_get_fields, ...) inside the
         // target until it returns null, gathering a whole batch of items per
-        // round trip instead of one call each. With a peek offset the 8 bytes
-        // at item + offset are read next to each item, in the target; with a
+        // round trip instead of one call each. With a peek offset the pointer
+        // at item + offset is read next to each item, in the target; with a
         // peek function, peek(item) is called instead (it wins over the offset).
         struct DrainItem
         {

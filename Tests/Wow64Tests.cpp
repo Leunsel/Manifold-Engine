@@ -10,6 +10,7 @@
 #include "Target/PatchScan.h"
 
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <optional>
@@ -219,6 +220,14 @@ namespace Manifold::Tests
             }
             const auto sleep = engine.Evaluate("kernel32.Sleep");
             CHECK(sleep && *sleep < 0x100000000ull);
+            const std::uint64_t forwarded = process.FindExport("kernel32.dll", "AcquireSRWLockExclusive");
+            const std::uint64_t ntdllTarget = process.FindExport("ntdll.dll", "RtlAcquireSRWLockExclusive");
+            CHECK_MSG(forwarded != 0 && forwarded == ntdllTarget, Hex(forwarded) + " vs " + Hex(ntdllTarget));
+            for (const char* name : { "Sleep", "WaitForMultipleObjects", "CloseHandle" })
+            {
+                const std::uint64_t address = process.FindExport("kernel32.dll", name);
+                CHECK_MSG(kernel && address >= kernel->Base && address < kernel->Base + kernel->Size, std::string(name) + " at " + Hex(address));
+            }
             for (const char* name : { "kernel32.dll", "TestTarget32.exe" })
             {
                 const auto module = process.FindModule(name);
@@ -709,6 +718,40 @@ namespace Manifold::Tests
         }
     }
 
+    void CheckMono(Engine& engine);
+    void CheckIl2CppTarget(const std::filesystem::path& targetPath);
+    void CheckManagedDumperTarget(const std::filesystem::path& targetPath);
+
+    namespace
+    {
+        void CheckManaged32(const std::filesystem::path& targetPath)
+        {
+            {
+                Target32 target;
+                const bool started = Launch32(targetPath, target);
+                CHECK_MSG(started, "could not start the 32-bit test target for Mono");
+                if (started)
+                {
+                    Settings settings;
+                    Engine engine(settings);
+                    const Status opened = engine.OpenProcess(MakeProcessId(target.Info.dwProcessId));
+                    CHECK_MSG(opened.Ok(), opened.Text);
+                    if (opened)
+                    {
+                        CHECK(!engine.Process()->Is64Bit());
+                        CheckMono(engine);
+                    }
+                    engine.CloseProcess();
+                    DWORD code = 0;
+                    ::GetExitCodeProcess(target.Info.hProcess, &code);
+                    CHECK_MSG(code == STILL_ACTIVE, "the 32-bit Mono target ended with " + Hex(code, 8));
+                }
+            }
+            CheckIl2CppTarget(targetPath);
+            CheckManagedDumperTarget(targetPath);
+        }
+    }
+
     int RunWow64Tests(const std::filesystem::path& targetPath)
     {
         const int before = Totals().Failures;
@@ -750,8 +793,24 @@ namespace Manifold::Tests
         DWORD code = 0;
         ::GetExitCodeProcess(target.Info.hProcess, &code);
         CHECK_MSG(code == STILL_ACTIVE, "the 32-bit target ended with " + Hex(code, 8));
+        CheckManaged32(targetPath);
         return Totals().Failures - before;
     }
+
+    int RunWow64ManagedCheck(const std::vector<std::string>&)
+    {
+        std::setvbuf(stdout, nullptr, _IONBF, 0);
+        wchar_t self[MAX_PATH] = L"";
+        ::GetModuleFileNameW(nullptr, self, MAX_PATH);
+        InitSysCalls();
+        const int before = Totals().Failures;
+        CheckManaged32(std::filesystem::path(self).parent_path() / L"TestTarget32.exe");
+        const int failures = Totals().Failures - before;
+        std::printf("wow64 managed check: %d checks, %d failed\n", Totals().Checks, failures);
+        return failures == 0 ? 0 : 1;
+    }
+
+    MANIFOLD_MODE("--wow64-managed-check", &RunWow64ManagedCheck);
 
     MANIFOLD_SUITE("wow64", "32-bit target", 125, [](const SuiteContext& context)
         {

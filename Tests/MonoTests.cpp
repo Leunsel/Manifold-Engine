@@ -30,6 +30,7 @@ namespace Manifold::Tests
         // A RemoteCall worker thread starts with push rsi; push rdi; mov rsi, rcx;
         // mov rdi, rsp; and rsp, -16. Finding workers this way only reads.
         constexpr std::uint8_t kWorkerStart[] = { 0x56, 0x57, 0x48, 0x89, 0xCE, 0x48, 0x89, 0xE7, 0x48, 0x83, 0xE4, 0xF0 };
+        constexpr std::uint8_t kWorkerStart32[] = { 0x55, 0x53, 0x56, 0x57, 0x8B, 0x74, 0x24, 0x14, 0x89, 0xE7, 0x83, 0xE4, 0xF0 };
 
         struct WorkerThread
         {
@@ -66,11 +67,11 @@ namespace Manifold::Tests
                     if (!thread)
                         continue;
                     std::uint64_t start = 0;
-                    std::uint8_t bytes[sizeof(kWorkerStart)] = {};
+                    std::uint8_t bytes[std::max(sizeof(kWorkerStart), sizeof(kWorkerStart32))] = {};
                     SIZE_T got = 0;
                     if (query(thread, 9, &start, sizeof(start), nullptr) >= 0 && start &&
                         ::ReadProcessMemory(process, reinterpret_cast<LPCVOID>(start), bytes, sizeof(bytes), &got) && got == sizeof(bytes) &&
-                        std::memcmp(bytes, kWorkerStart, sizeof(bytes)) == 0)
+                        (std::memcmp(bytes, kWorkerStart, sizeof(kWorkerStart)) == 0 || std::memcmp(bytes, kWorkerStart32, sizeof(kWorkerStart32)) == 0))
                         workers.push_back({ entry.th32ThreadID, start, ThreadCpuSeconds(thread) });
                     ::CloseHandle(thread);
                 }
@@ -409,9 +410,8 @@ namespace Manifold::Tests
         unity.SetEnabled(false);
 
         CHECK(unity.ClassOf(player) != 0);
-        std::uint64_t listClass = 0;
-        process.ReadExact(list, &listClass, sizeof(listClass));       // the vtable
-        process.ReadExact(listClass, &listClass, sizeof(listClass));  // its class
+        const std::uint64_t listVTable = process.ReadPointer(list).value_or(0);
+        const std::uint64_t listClass = process.ReadPointer(listVTable).value_or(0);
         CHECK(listClass != 0);
         CHECK_EQ(unity.ClassOf(list), listClass);
         CHECK(unity.IsClass(listClass));
@@ -514,7 +514,8 @@ namespace Manifold::Tests
                 CHECK(call.Call(attach, 0x1111u, result).Ok());
                 CHECK_EQ(result, 0x1111ull);
 
-                const std::uint64_t sleep = reinterpret_cast<std::uint64_t>(::GetProcAddress(::GetModuleHandleW(L"kernel32.dll"), "Sleep"));
+                const std::uint64_t sleep = process.FindExport("kernel32.dll", "Sleep");
+                CHECK(sleep != 0);
                 call.SetTimeout(std::chrono::milliseconds(100));
                 const Status late = call.Call(sleep, 700, result);
                 CHECK_MSG(!late.Ok() && late.Code == ErrorCode::MonoCallFailed, late.Text);
@@ -583,7 +584,7 @@ namespace Manifold::Tests
             CHECK(playerFields[1].Name == "ammo" && playerFields[1].Offset == 0x1C && playerFields[1].TypeCode == 0x08);
         }
         // Class-from-address, the Structure Dissect lookup.
-        const auto object = engine.Evaluate("TestTarget.g_fakePlayer");
+        const auto object = engine.Evaluate(std::filesystem::path(module).stem().string() + ".g_fakePlayer");
         CHECK(object.has_value());
         if (object)
         {
@@ -1125,7 +1126,8 @@ namespace Manifold::Tests
             return RunOrphanChild(childPid);
         wchar_t self[MAX_PATH] = L"";
         ::GetModuleFileNameW(nullptr, self, MAX_PATH);
-        const std::filesystem::path targetPath = std::filesystem::path(self).parent_path() / L"TestTarget.exe";
+        const bool target32 = std::find(arguments.begin(), arguments.end(), "--target32") != arguments.end();
+        const std::filesystem::path targetPath = std::filesystem::path(self).parent_path() / (target32 ? L"TestTarget32.exe" : L"TestTarget.exe");
         std::wstring command = L"\"" + targetPath.wstring() + L"\"";
         STARTUPINFOW startup{ sizeof(startup) };
         PROCESS_INFORMATION info{};

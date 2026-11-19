@@ -25,6 +25,22 @@ namespace Manifold::Target
         Il2Cpp
     };
 
+    struct MonoObjectLayout
+    {
+        std::uint64_t Pointer = 8;
+        std::uint64_t ObjectHeader = 0x10;
+        std::uint64_t StringLength = 0x10;
+        std::uint64_t StringChars = 0x14;
+        std::uint64_t ArrayLength = 0x18;
+        std::uint64_t ArrayData = 0x20;
+    };
+
+    constexpr MonoObjectLayout MonoLayoutFor(int pointerSize)
+    {
+        const std::uint64_t pointer = pointerSize == 4 ? 4 : 8;
+        return { pointer, 2 * pointer, 2 * pointer, 2 * pointer + 4, 3 * pointer, 4 * pointer };
+    }
+
     class RuntimeBackend
     {
     public:

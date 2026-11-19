@@ -35,11 +35,6 @@ namespace Manifold::Target
         constexpr std::uint32_t kFieldStatic = 0x10;
         constexpr std::uint32_t kFieldLiteral = 0x40;
         constexpr std::uint32_t kMethodStatic = 0x10;
-        constexpr std::uint64_t kObjectHeader = 0x10;
-        constexpr std::uint64_t kStringLength = 0x10;
-        constexpr std::uint64_t kStringChars = 0x14;
-        constexpr std::uint64_t kArrayLength = 0x18;
-        constexpr std::uint64_t kArrayData = 0x20;
 
         // Set on the explorer's job thread, the only thread that may make
         // remote calls for names and layouts; drawing code only reads caches.
@@ -50,7 +45,7 @@ namespace Manifold::Target
             return 1000 + id;
         }
 
-        int PrimitiveSize(int code)
+        int PrimitiveSize(int code, int pointer)
         {
             switch (code)
             {
@@ -58,14 +53,21 @@ namespace Manifold::Target
             case MonoTypeCode::Char: case MonoTypeCode::I2: case MonoTypeCode::U2: return 2;
             case MonoTypeCode::I4: case MonoTypeCode::U4: case MonoTypeCode::R4: return 4;
             case MonoTypeCode::I8: case MonoTypeCode::U8: case MonoTypeCode::R8: return 8;
-            case MonoTypeCode::I: case MonoTypeCode::U: case MonoTypeCode::Ptr: case MonoTypeCode::FnPtr: return 8;
+            case MonoTypeCode::I: case MonoTypeCode::U: case MonoTypeCode::Ptr: case MonoTypeCode::FnPtr: return pointer;
             default: return 0;
             }
         }
 
         bool IsPrimitive(int code)
         {
-            return PrimitiveSize(code) > 0;
+            return PrimitiveSize(code, 8) > 0;
+        }
+
+        std::uint64_t LoadPointer(const std::uint8_t* bytes, std::size_t pointer)
+        {
+            std::uint64_t value = 0;
+            std::memcpy(&value, bytes, std::min<std::size_t>(pointer, sizeof(value)));
+            return value;
         }
 
         template <typename T>
@@ -114,7 +116,7 @@ namespace Manifold::Target
                 std::memcpy(out.data() + at, value, size);
         }
 
-        bool ParsePrimitive(int code, const std::string& text, std::uint8_t* out, std::string* error)
+        bool ParsePrimitive(int code, int pointer, const std::string& text, std::uint8_t* out, std::string* error)
         {
             const auto fail = [&](const char* why) { if (error) *error = why; return false; };
             const std::string value = Trim(text);
@@ -158,7 +160,7 @@ namespace Manifold::Target
             default:
                 break;
             }
-            const int size = PrimitiveSize(code);
+            const int size = PrimitiveSize(code, pointer);
             if (!size)
                 return fail("not a simple value");
             const auto number = ParseInteger(value);
@@ -207,6 +209,12 @@ namespace Manifold::Target
     {
         std::lock_guard lock(m_stateLock);
         return m_process;
+    }
+
+    std::size_t UnityExplorer::PointerBytes() const
+    {
+        const auto process = Proc();
+        return process ? static_cast<std::size_t>(process->PointerSize()) : 8;
     }
 
     // ---------------------------------------------------------------------
@@ -491,12 +499,13 @@ namespace Manifold::Target
         const auto process = Proc();
         if (!process || !monoString)
             return {};
+        const MonoObjectLayout layout = MonoLayoutFor(process->PointerSize());
         std::int32_t length = 0;
-        if (!process->ReadExact(monoString + kStringLength, &length, sizeof(length)) || length <= 0)
+        if (!process->ReadExact(monoString + layout.StringLength, &length, sizeof(length)) || length <= 0)
             return {};
         const std::size_t count = std::min<std::size_t>(static_cast<std::size_t>(length), limit);
         std::wstring wide(count, L'\0');
-        const std::size_t got = process->Read(monoString + kStringChars, wide.data(), count * 2);
+        const std::size_t got = process->Read(monoString + layout.StringChars, wide.data(), count * 2);
         wide.resize(got / 2);
         std::string text = WideToUtf8(wide);
         if (static_cast<std::size_t>(length) > limit)
@@ -512,14 +521,20 @@ namespace Manifold::Target
             *total = 0;
         if (!process || !monoArray)
             return items;
-        std::uint64_t length = 0;
-        if (!process->ReadExact(monoArray + kArrayLength, &length, sizeof(length)) || length > 0x10000000ull)
+        const MonoObjectLayout layout = MonoLayoutFor(process->PointerSize());
+        const std::uint64_t length = process->ReadPointer(monoArray + layout.ArrayLength).value_or(~std::uint64_t(0));
+        if (length > 0x10000000ull)
             return items;
         if (total)
             *total = static_cast<std::size_t>(length);
-        items.resize(static_cast<std::size_t>(std::min<std::uint64_t>(length, limit)));
-        if (!items.empty() && !process->ReadExact(monoArray + kArrayData, items.data(), items.size() * 8))
-            items.clear();
+        const std::size_t count = static_cast<std::size_t>(std::min<std::uint64_t>(length, limit));
+        std::vector<std::uint8_t> bytes(count * layout.Pointer);
+        if (count && process->ReadExact(monoArray + layout.ArrayData, bytes.data(), bytes.size()))
+        {
+            items.resize(count);
+            for (std::size_t i = 0; i < count; ++i)
+                items[i] = LoadPointer(bytes.data() + i * layout.Pointer, layout.Pointer);
+        }
         return items;
     }
 
@@ -530,7 +545,7 @@ namespace Manifold::Target
         if (!process || !boxed)
             return std::nullopt;
         T value{};
-        if (!process->ReadExact(boxed + kObjectHeader, &value, sizeof(T)))
+        if (!process->ReadExact(boxed + MonoLayoutFor(process->PointerSize()).ObjectHeader, &value, sizeof(T)))
             return std::nullopt;
         return value;
     }
@@ -569,6 +584,8 @@ namespace Manifold::Target
             return {};
         if (const auto found = m_types.find(type); found != m_types.end())
             return found->second;
+        const auto process = Proc();
+        const int pointer = process ? process->PointerSize() : 8;
         MonoTypeInfo info;
         info.Code = static_cast<int>(Worker("mono_type_get_type", type).value_or(0) & 0xFF);
         info.ValueCode = info.Code;
@@ -577,7 +594,7 @@ namespace Manifold::Target
         if (IsPrimitive(info.Code))
         {
             info.ValueType = true;
-            info.Size = PrimitiveSize(info.Code);
+            info.Size = PrimitiveSize(info.Code, pointer);
         }
         else if ((info.Code == MonoTypeCode::ValueType || info.Code == MonoTypeCode::GenericInst) && info.Class &&
                  (Worker("mono_class_is_valuetype", info.Class).value_or(0) & 0xFF))
@@ -590,7 +607,7 @@ namespace Manifold::Target
                     info.ValueCode = static_cast<int>(Worker("mono_type_get_type", *base).value_or(MonoTypeCode::I4) & 0xFF);
                 else
                     info.ValueCode = MonoTypeCode::I4;
-                info.Size = std::max(1, PrimitiveSize(info.ValueCode));
+                info.Size = std::max(1, PrimitiveSize(info.ValueCode, pointer));
             }
             else
             {
@@ -666,7 +683,9 @@ namespace Manifold::Target
 
     bool UnityExplorer::IsClass(std::uint64_t klass) const
     {
-        if (klass < 0x10000 || klass > 0x7FFFFFFFFFFFull || (klass & 7) != 0)
+        const auto process = Proc();
+        const std::uint64_t pointer = process ? static_cast<std::uint64_t>(process->PointerSize()) : 8;
+        if (klass < 0x10000 || klass > (pointer == 4 ? 0xFFFFFFFFull : 0x7FFFFFFFFFFFull) || (klass & (pointer - 1)) != 0)
             return false;
         ClassShape shape;
         {
@@ -688,7 +707,6 @@ namespace Manifold::Target
         }
         // Not enumerated (a generic instance, an array): its image field must
         // name a loaded image, and its name field a readable name.
-        const auto process = Proc();
         if (!shape.Ready || !process)
             return false;
         const auto image = process->ReadPointer(klass + shape.Image);
@@ -747,17 +765,19 @@ namespace Manifold::Target
                 break;
             const std::uint64_t image = Worker("mono_class_get_image", klass).value_or(0);
             const std::uint64_t name = Worker("mono_class_get_name", klass).value_or(0);
-            std::uint64_t words[64] = {};
-            if (!image || !name || !process->ReadExact(klass, words, sizeof(words)))
+            const std::uint32_t pointer = static_cast<std::uint32_t>(process->PointerSize());
+            std::uint8_t words[64 * 8] = {};
+            if (!image || !name || !process->ReadExact(klass, words, 64 * pointer))
                 continue;
             std::optional<std::uint32_t> foundImage;
             std::optional<std::uint32_t> foundName;
             for (std::uint32_t i = 0; i < 64; ++i)
             {
-                if (!foundImage && words[i] == image)
-                    foundImage = i * 8;
-                if (!foundName && words[i] == name)
-                    foundName = i * 8;
+                const std::uint64_t word = LoadPointer(words + i * pointer, pointer);
+                if (!foundImage && word == image)
+                    foundImage = i * pointer;
+                if (!foundName && word == name)
+                    foundName = i * pointer;
             }
             if (!foundImage || !foundName || (imageAt && *imageAt != *foundImage) || (nameAt && *nameAt != *foundName))
                 consistent = false;
@@ -848,7 +868,7 @@ namespace Manifold::Target
             if (const auto element = Worker("mono_class_get_element_class", klass); element && *element)
                 if (const auto type = Worker("mono_class_get_type", *element); type && *type)
                     layout->Element = TypeInfo(*type);
-            layout->ElementSize = static_cast<int>(Worker("mono_array_element_size", klass).value_or(8) & 0xFFFF);
+            layout->ElementSize = static_cast<int>(Worker("mono_array_element_size", klass).value_or(static_cast<std::uint64_t>(process->PointerSize())) & 0xFFFF);
         }
 
         std::uint64_t domain = 0;
@@ -859,6 +879,7 @@ namespace Manifold::Target
         const std::size_t mark = m_argsUsed;
         const std::uint64_t iter = ArgSpace(8);
         const std::uint64_t paramIter = ArgSpace(8);
+        const std::size_t pointer = static_cast<std::size_t>(process->PointerSize());
         const std::uint64_t names = ArgSpace(8 * 64);
         const std::uint64_t literal = ArgSpace(64);
         const std::uint64_t zero = 0;
@@ -919,7 +940,7 @@ namespace Manifold::Target
                         std::uint8_t clear[64] = {};
                         process->Write(literal, clear, sizeof(clear));
                         Exec("mono_field_static_get_value", vtable, *field, literal);
-                        member.LiteralBytes.resize(static_cast<std::size_t>(member.Type.ValueType ? member.Type.Size : 8));
+                        member.LiteralBytes.resize(member.Type.ValueType ? static_cast<std::size_t>(member.Type.Size) : pointer);
                         process->ReadExact(literal, member.LiteralBytes.data(), member.LiteralBytes.size());
                     }
                 }
@@ -1022,13 +1043,15 @@ namespace Manifold::Target
                     }
                     if (names && count > 0 && count <= 64)
                     {
-                        std::vector<std::uint64_t> clear(static_cast<std::size_t>(count), 0);
-                        process->Write(names, clear.data(), clear.size() * 8);
+                        std::vector<std::uint8_t> raw(static_cast<std::size_t>(count) * pointer, 0);
+                        process->Write(names, raw.data(), raw.size());
                         Worker("mono_method_get_param_names", *method, names);
-                        std::vector<std::uint64_t> pointers(static_cast<std::size_t>(count), 0);
-                        process->ReadExact(names, pointers.data(), pointers.size() * 8);
-                        for (const std::uint64_t pointer : pointers)
-                            member.ParamNames.push_back(pointer ? m_mono.m_call.ReadCString(pointer, 128) : std::string());
+                        process->ReadExact(names, raw.data(), raw.size());
+                        for (std::size_t p = 0; p < static_cast<std::size_t>(count); ++p)
+                        {
+                            const std::uint64_t text = LoadPointer(raw.data() + p * pointer, pointer);
+                            member.ParamNames.push_back(text ? m_mono.m_call.ReadCString(text, 128) : std::string());
+                        }
                     }
                 }
                 layout->Members.push_back(std::move(member));
@@ -1104,11 +1127,13 @@ namespace Manifold::Target
     MonoShown UnityExplorer::Format(const MonoTypeInfo& type, const std::uint8_t* bytes, std::size_t size, int depth)
     {
         MonoShown shown;
+        const auto process = Proc();
+        const MonoObjectLayout objects = MonoLayoutFor(process ? process->PointerSize() : 8);
         const int code = type.ValueCode ? type.ValueCode : type.Code;
         const auto need = [&](std::size_t n) { return size >= n; };
         if (type.Enum)
         {
-            const int width = std::max(1, PrimitiveSize(code));
+            const int width = std::max(1, PrimitiveSize(code, static_cast<int>(objects.Pointer)));
             if (!need(static_cast<std::size_t>(width)))
                 return { "??" };
             std::int64_t value = 0;
@@ -1172,8 +1197,8 @@ namespace Manifold::Target
         case MonoTypeCode::R4: if (!need(4)) break; shown.Text = FormatFloat(Load<float>(bytes), 7); shown.Editable = true; return shown;
         case MonoTypeCode::R8: if (!need(8)) break; shown.Text = FormatFloat(Load<double>(bytes), 15); shown.Editable = true; return shown;
         case MonoTypeCode::I: case MonoTypeCode::U: case MonoTypeCode::Ptr: case MonoTypeCode::FnPtr:
-            if (!need(8)) break;
-            shown.Text = "0x" + Hex(Load<std::uint64_t>(bytes));
+            if (!need(objects.Pointer)) break;
+            shown.Text = "0x" + Hex(LoadPointer(bytes, objects.Pointer));
             shown.Editable = true;
             return shown;
         default:
@@ -1194,7 +1219,7 @@ namespace Manifold::Target
             {
                 if (field.Kind != MonoMemberKind::Field || field.Static)
                     continue;
-                const std::int64_t at = static_cast<std::int64_t>(field.Offset) - static_cast<std::int64_t>(kObjectHeader);
+                const std::int64_t at = static_cast<std::int64_t>(field.Offset) - static_cast<std::int64_t>(objects.ObjectHeader);
                 if (at < 0 || static_cast<std::size_t>(at) >= size || parts.size() >= 8)
                     break;
                 if (!field.Type.ValueType)
@@ -1216,9 +1241,9 @@ namespace Manifold::Target
             shown.Editable = editable && !parts.empty();
             return shown;
         }
-        if (!need(8))
+        if (!need(objects.Pointer))
             return { "??" };
-        const std::uint64_t pointer = Load<std::uint64_t>(bytes);
+        const std::uint64_t pointer = LoadPointer(bytes, objects.Pointer);
         if (!pointer)
         {
             shown.Text = "null";
@@ -1238,10 +1263,9 @@ namespace Manifold::Target
         }
         if (className.empty())
             className = ShortTypeName(type);
-        const auto process = Proc();
-        std::uint64_t length = 0;
-        if (process && !className.empty() && className.back() == ']' && process->ReadExact(pointer + kArrayLength, &length, sizeof(length)))
-            shown.Text = ShortName(className) + "  (" + std::to_string(length) + ")";
+        const std::optional<std::uint64_t> length = process && !className.empty() && className.back() == ']' ? process->ReadPointer(pointer + objects.ArrayLength) : std::nullopt;
+        if (length)
+            shown.Text = ShortName(className) + "  (" + std::to_string(*length) + ")";
         else
             shown.Text = ShortName(className);
         return shown;
@@ -1271,7 +1295,7 @@ namespace Manifold::Target
                 return { "" };
             address = object + static_cast<std::uint64_t>(field.Offset);
         }
-        const std::size_t size = static_cast<std::size_t>(field.Type.ValueType ? std::max(1, field.Type.Size) : 8);
+        const std::size_t size = static_cast<std::size_t>(field.Type.ValueType ? std::max(1, field.Type.Size) : process->PointerSize());
         std::vector<std::uint8_t> bytes(size, 0);
         if (!process->ReadExact(address, bytes.data(), bytes.size()))
             return { "??" };
@@ -1287,7 +1311,7 @@ namespace Manifold::Target
         if (!value.Text.empty() || member.Type.Code == MonoTypeCode::String)
         {
             MonoShown shown;
-            const std::uint64_t pointer = value.Raw.size() >= 8 ? Load<std::uint64_t>(value.Raw.data()) : 0;
+            const std::uint64_t pointer = value.Raw.empty() ? 0 : LoadPointer(value.Raw.data(), value.Raw.size());
             shown.Text = pointer ? "\"" + value.Text + "\"" : "null";
             shown.Null = !pointer;
             shown.Editable = true;
@@ -1325,9 +1349,11 @@ namespace Manifold::Target
             std::memcpy(out.data(), &value, std::min<std::size_t>(out.size(), 8));
             return out;
         }
+        const auto process = Proc();
+        const MonoObjectLayout objects = MonoLayoutFor(process ? process->PointerSize() : 8);
         if (IsPrimitive(code))
         {
-            if (!ParsePrimitive(code, text, out.data(), error))
+            if (!ParsePrimitive(code, static_cast<int>(objects.Pointer), text, out.data(), error))
                 return std::nullopt;
             return out;
         }
@@ -1349,7 +1375,7 @@ namespace Manifold::Target
         for (std::size_t i = 0; i < fields.size(); ++i)
         {
             const MonoMember& field = *fields[i];
-            const std::int64_t at = static_cast<std::int64_t>(field.Offset) - static_cast<std::int64_t>(kObjectHeader);
+            const std::int64_t at = static_cast<std::int64_t>(field.Offset) - static_cast<std::int64_t>(objects.ObjectHeader);
             if (!field.Type.ValueType || at < 0 || static_cast<std::size_t>(at + std::max(1, field.Type.Size)) > out.size())
                 return fail("this struct holds references and cannot be typed in");
             const auto inner = Parse(field.Type, parts[i], error);
@@ -1592,7 +1618,7 @@ namespace Manifold::Target
             break;
         default:
             if (type.Code != MonoTypeCode::Void)
-                pending.Value.Raw.assign(type.ValueType ? static_cast<std::size_t>(std::max(1, type.Size)) : 8u, 0);
+                pending.Value.Raw.assign(type.ValueType ? static_cast<std::size_t>(std::max(1, type.Size)) : PointerBytes(), 0);
             break;
         }
         if (!in.Ok())
@@ -1608,8 +1634,8 @@ namespace Manifold::Target
         if (!pending.Reference)
             return;
         const std::uint64_t address = AddressOf(pending.Slot);
-        pending.Value.Raw.resize(8);
-        std::memcpy(pending.Value.Raw.data(), &address, 8);
+        pending.Value.Raw.resize(PointerBytes());
+        std::memcpy(pending.Value.Raw.data(), &address, pending.Value.Raw.size());
     }
 
     // ---------------------------------------------------------------------
@@ -2032,8 +2058,9 @@ namespace Manifold::Target
         }
         constexpr std::uint64_t kChunk = 0x100000;
         constexpr std::size_t kMaxVTables = 64;
-        std::vector<std::uint64_t> chunk;
-        // Sweep once over a set of 8-byte values and hand every hit's ADDRESS
+        const std::size_t pointer = static_cast<std::size_t>(process->PointerSize());
+        std::vector<std::uint8_t> chunk;
+        // Sweep once over a set of pointer-sized values and hand every hit's ADDRESS
         // to the visitor; an object header holds its vtable, a vtable holds its
         // class, both at offset 0, so one sweep shape serves both passes.
         const auto sweep = [&](const std::vector<std::uint64_t>& wanted, bool writableOnly, const std::function<bool(std::uint64_t)>& hit)
@@ -2051,13 +2078,13 @@ namespace Manifold::Target
                         if (Aborted())
                             return;
                         const std::uint64_t size = std::min(kChunk, region.End() - at);
-                        chunk.assign(static_cast<std::size_t>(size / 8), 0);
-                        const std::size_t got = process->Read(at, chunk.data(), chunk.size() * 8) / 8;
+                        chunk.assign(static_cast<std::size_t>(size) / pointer * pointer, 0);
+                        const std::size_t got = process->Read(at, chunk.data(), chunk.size()) / pointer;
                         for (std::size_t i = 0; i < got; ++i)
                         {
-                            if (std::find(wanted.begin(), wanted.end(), chunk[i]) == wanted.end())
+                            if (std::find(wanted.begin(), wanted.end(), LoadPointer(chunk.data() + i * pointer, pointer)) == wanted.end())
                                 continue;
-                            if (!hit(at + i * 8))
+                            if (!hit(at + i * pointer))
                                 return;
                         }
                     }
@@ -2249,7 +2276,7 @@ namespace Manifold::Target
                         .Text(member.Image)
                         .U32(member.GetterToken)
                         .I32(member.Static ? 0 : self)
-                        .I32(member.Type.ValueType ? std::max(1, member.Type.Size) : 8)
+                        .I32(member.Type.ValueType ? std::max(1, member.Type.Size) : static_cast<int>(PointerBytes()))
                         .I32(0);
                     getters.push_back(i);
                     ++next;
@@ -2265,7 +2292,7 @@ namespace Manifold::Target
             {
                 request.Op(AgentProtocol::Fields).I32(group).I32(self).I32(static_cast<std::int32_t>(referenceFields.size()));
                 for (const std::size_t i : referenceFields)
-                    request.Text(layout.Members[i].Image).U32(layout.Members[i].Token).I32(8);
+                    request.Text(layout.Members[i].Image).U32(layout.Members[i].Token).I32(static_cast<int>(PointerBytes()));
                 fieldsReply = next++;
             }
             if (layout.Rank > 0 && inspection.Object && !layout.Element.ValueType)
@@ -2755,7 +2782,7 @@ namespace Manifold::Target
                 .Text(member.Image)
                 .U32(member.Token)
                 .I32(self)
-                .I32(member.Type.ValueType ? std::max(1, member.Type.Size) : 8)
+                .I32(member.Type.ValueType ? std::max(1, member.Type.Size) : static_cast<int>(PointerBytes()))
                 .I32(static_cast<std::int32_t>(args.size()));
             for (const AgentArg& arg : args)
                 WriteArg(request, arg);

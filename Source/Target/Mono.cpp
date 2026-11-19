@@ -144,8 +144,6 @@ namespace Manifold::Target
         Stop();
         if (!process || !process->Alive())
             return Status::Fail(ErrorCode::NoProcess);
-        if (!process->Is64Bit())
-            return Status::Fail(ErrorCode::MonoNotFound, "only 64-bit Mono and IL2CPP targets are supported");
         if (progress)
             progress->SetText("Looking for the runtime");
 
@@ -429,13 +427,14 @@ namespace Manifold::Target
         if (!m_present || !m_process || !address)
             return std::nullopt;
         // The address is often a field inside an object, not its header. Try the
-        // address itself first, then step back a little (8-byte aligned) for the
+        // address itself first, then step back a little (pointer aligned) for the
         // enclosing object's header. The runtime fallback is allowed only for the
         // exact address; the back scan keeps to the enumerated classes so a stray
         // field value cannot be mistaken for an object.
         constexpr std::uint64_t kMaxBack = 0x1000;
-        const std::uint64_t aligned = address & ~std::uint64_t(7);
-        for (std::uint64_t back = 0; back <= kMaxBack; back += 8)
+        const std::uint64_t step = static_cast<std::uint64_t>(m_process->PointerSize());
+        const std::uint64_t aligned = address & ~(step - 1);
+        for (std::uint64_t back = 0; back <= kMaxBack; back += step)
         {
             if (aligned < back + 0x10000)
                 break;

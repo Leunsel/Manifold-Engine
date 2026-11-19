@@ -137,6 +137,7 @@ namespace Manifold::Target
 
     private:
         Process() = default;
+        std::uint64_t ExportAddress(std::string_view module, std::string_view name, int depth) const;
 
         bool DryReserve(std::uint64_t base, std::size_t size) const;
         void DryOverlay(std::uint64_t address, std::uint8_t* out, std::size_t size) const;

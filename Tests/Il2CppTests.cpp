@@ -73,9 +73,7 @@ namespace Manifold::Tests
 
         std::uint64_t ReadValue(const Target::Process& process, std::uint64_t address)
         {
-            std::uint64_t value = 0;
-            process.ReadExact(address, &value, sizeof(value));
-            return value;
+            return process.ReadPointer(address).value_or(0);
         }
 
         std::int32_t ReadInt(const Target::Process& process, std::uint64_t address)
@@ -100,12 +98,13 @@ namespace Manifold::Tests
     {
         const Target::Process& process = *engine.Process();
         const std::string module = process.Name();
+        const std::string stem = std::filesystem::path(module).stem().string();
         const auto main = process.MainModule();
         CHECK(main.has_value());
         if (!main)
             return;
         const auto inModule = [&](std::uint64_t address) { return address >= main->Base && address < main->Base + main->Size; };
-        const std::uint64_t player = engine.Evaluate("TestTarget.g_il2cppPlayer").value_or(0);
+        const std::uint64_t player = engine.Evaluate(stem + ".g_il2cppPlayer").value_or(0);
         CHECK(player != 0);
 
         // The drain stub on its own: one call walks a whole iterator, with the
@@ -140,7 +139,7 @@ namespace Manifold::Tests
             call.Stop();
         }
 
-        const std::int32_t detachedBefore = ReadInt(process, engine.Evaluate("TestTarget.g_il2cppDetached").value_or(0));
+        const std::int32_t detachedBefore = ReadInt(process, engine.Evaluate(stem + ".g_il2cppDetached").value_or(0));
         const Status loaded = engine.Managed().Ensure();
         CHECK_MSG(loaded.Ok(), loaded.Text);
         if (!loaded)
@@ -149,7 +148,7 @@ namespace Manifold::Tests
         CHECK(bridge.IsIl2Cpp());
         CHECK(bridge.Runtime() == Target::ManagedRuntime::Il2Cpp);
         CHECK_EQ(bridge.Module(), module);
-        CHECK(ReadInt(process, engine.Evaluate("TestTarget.g_il2cppAttached").value_or(0)) >= 1);
+        CHECK(ReadInt(process, engine.Evaluate(stem + ".g_il2cppAttached").value_or(0)) >= 1);
 
         // Classes: "<Module>" is left out, image names lose their ".dll".
         const std::vector<Target::MonoClass> classes = bridge.Classes();
@@ -232,7 +231,7 @@ namespace Manifold::Tests
         CHECK_MSG(engine.Evaluate("Assembly-CSharp:Player:TakeDamage", &error) == take, error.Text);
         CHECK_MSG(engine.Evaluate("Assembly-CSharp:Game.Player:TakeDamage+4", &error) == take + 4, error.Text);
         CHECK_MSG(engine.Evaluate("\"Assembly-CSharp:Player:TakeDamage\"+4", &error) == take + 4, error.Text);
-        CHECK(engine.Evaluate("TestTarget.exe+10-4") == main->Base + 0xC);
+        CHECK(engine.Evaluate(stem + ".exe+10-4") == main->Base + 0xC);
 
         // Address -> name, from the sorted table of method code, both in the
         // bridge and through the symbol provider (it beats a nearby export).
@@ -260,7 +259,7 @@ namespace Manifold::Tests
         CHECK(!bridge.MethodNameAt(main->Base).has_value());
         CHECK(!bridge.MethodNameAt(main->Base + main->Size + 0x1000).has_value());
         const std::uint64_t domainGet = process.FindExport(module, "il2cpp_domain_get");
-        CHECK_EQ(engine.Describe(domainGet), std::string("TestTarget.il2cpp_domain_get"));
+        CHECK_EQ(engine.Describe(domainGet), stem + ".il2cpp_domain_get");
 
         // Structure Dissect's lookups: the object points straight at its
         // class; a generic instance no image lists is named by its shape;
@@ -274,14 +273,14 @@ namespace Manifold::Tests
             CHECK(!bridge.ClassNameAt(player + 8).has_value());
         }
         const std::size_t before = bridge.ClassCount();
-        const std::uint64_t list = engine.Evaluate("TestTarget.g_il2cppList").value_or(0);
+        const std::uint64_t list = engine.Evaluate(stem + ".g_il2cppList").value_or(0);
         const auto listName = bridge.ClassNameAt(list);
         CHECK_MSG(listName && *listName == "System.Collections.Generic.List`1", listName ? *listName : "nil");
         CHECK_EQ(bridge.ClassCount(), before + 1);
         CHECK(bridge.FieldsOf("System.Collections.Generic.List`1").empty());
-        CHECK(!bridge.ClassNameAt(engine.Evaluate("TestTarget.g_il2cppWild").value_or(0)).has_value());
-        CHECK(!bridge.ClassNameAt(engine.Evaluate("TestTarget.g_il2cppNotClass").value_or(0)).has_value());
-        CHECK(!bridge.ClassNameAt(engine.Evaluate("TestTarget.g_il2cppStray").value_or(0)).has_value());
+        CHECK(!bridge.ClassNameAt(engine.Evaluate(stem + ".g_il2cppWild").value_or(0)).has_value());
+        CHECK(!bridge.ClassNameAt(engine.Evaluate(stem + ".g_il2cppNotClass").value_or(0)).has_value());
+        CHECK(!bridge.ClassNameAt(engine.Evaluate(stem + ".g_il2cppStray").value_or(0)).has_value());
 
         // The Unity explorer is Mono only and refuses, even switched on.
         Target::UnityExplorer& unity = bridge.Unity();
@@ -310,7 +309,7 @@ namespace Manifold::Tests
         engine.Managed().Stop();
         CHECK(!engine.MonoPresent());
         CHECK(!bridge.IsIl2Cpp());
-        CHECK_EQ(ReadInt(process, engine.Evaluate("TestTarget.g_il2cppDetached").value_or(0)), detachedBefore + 1);
+        CHECK_EQ(ReadInt(process, engine.Evaluate(stem + ".g_il2cppDetached").value_or(0)), detachedBefore + 1);
         CHECK(!engine.Evaluate("Player:TakeDamage").has_value());
         engine.Managed().Load(true);
         CHECK(engine.Managed().Loading());
@@ -345,13 +344,14 @@ namespace Manifold::Tests
         engine.CloseProcess();
     }
 
-    int RunIl2CppCheck(const std::vector<std::string>&)
+    int RunIl2CppCheck(const std::vector<std::string>& arguments)
     {
         std::setvbuf(stdout, nullptr, _IONBF, 0);
         wchar_t self[MAX_PATH] = L"";
         ::GetModuleFileNameW(nullptr, self, MAX_PATH);
         const int before = Totals().Failures;
-        CheckIl2CppTarget(std::filesystem::path(self).parent_path() / L"TestTarget.exe");
+        const bool target32 = std::find(arguments.begin(), arguments.end(), "--target32") != arguments.end();
+        CheckIl2CppTarget(std::filesystem::path(self).parent_path() / (target32 ? L"TestTarget32.exe" : L"TestTarget.exe"));
         const int failures = Totals().Failures - before;
         std::printf("il2cpp check: %d checks, %d failed\n", Totals().Checks, failures);
         return failures == 0 ? 0 : 1;

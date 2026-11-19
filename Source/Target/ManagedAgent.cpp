@@ -17,9 +17,6 @@ namespace Manifold::Target
 
         constexpr std::uint32_t kMaxResponse = 64u << 20;
         constexpr std::uint32_t kMaxReplies = 1u << 20;
-        constexpr std::uint64_t kStringLength = 0x10;
-        constexpr std::uint64_t kStringChars = 0x14;
-        constexpr std::uint64_t kBoxed = 0x10;
         constexpr auto kStalled = std::chrono::seconds(3);
         constexpr auto kPoll = std::chrono::milliseconds(1);
     }
@@ -232,11 +229,12 @@ namespace Manifold::Target
         const auto text = StaticValue(m_errorField, 8);
         if (!text || !*text)
             return {};
+        const MonoObjectLayout layout = MonoLayoutFor(m_mono.m_process->PointerSize());
         std::int32_t length = 0;
-        if (!m_mono.m_process->ReadExact(*text + kStringLength, &length, sizeof(length)) || length <= 0)
+        if (!m_mono.m_process->ReadExact(*text + layout.StringLength, &length, sizeof(length)) || length <= 0)
             return {};
         std::wstring wide(static_cast<std::size_t>(std::min(length, 1024)), L'\0');
-        const std::size_t got = m_mono.m_process->Read(*text + kStringChars, wide.data(), wide.size() * 2);
+        const std::size_t got = m_mono.m_process->Read(*text + layout.StringChars, wide.data(), wide.size() * 2);
         wide.resize(got / 2);
         return WideToUtf8(wide);
     }
@@ -272,10 +270,11 @@ namespace Manifold::Target
             return Status::Fail(ErrorCode::MonoCallFailed, "the agent in the game does not match this build");
         m_class = klass;
         m_process = m_mono.m_process;
+        const MonoObjectLayout layout = MonoLayoutFor(process.PointerSize());
         const auto begun = InvokeStatic(m_begin);
         std::int32_t state = -1;
         if (begun && *begun)
-            process.ReadExact(*begun + kBoxed, &state, sizeof(state));
+            process.ReadExact(*begun + layout.ObjectHeader, &state, sizeof(state));
         const std::uint64_t mailbox = StaticValue(m_mailboxField, 8).value_or(0);
         const std::uint64_t slots = StaticValue(m_slotsField, 8).value_or(0);
         const std::string remote = RemoteError();
@@ -291,7 +290,7 @@ namespace Manifold::Target
             Forget();
             return Status::Fail(ErrorCode::MonoCallFailed, "the agent's mailbox in the game has another format");
         }
-        process.ReadExact(m_mailbox + P::kOffRequest, &m_request, sizeof(m_request));
+        m_request = process.ReadPointer(m_mailbox + P::kOffRequest).value_or(0);
         m_capacity = Read32(P::kOffRequestCapacity);
         m_slots = slots;
         m_seq = std::max(Read32(P::kOffRequestSeq), Read32(P::kOffDoneSeq));
@@ -347,7 +346,7 @@ namespace Manifold::Target
             const auto begun = InvokeStatic(m_begin);
             std::int32_t state = -1;
             if (begun && *begun)
-                m_process->ReadExact(*begun + kBoxed, &state, sizeof(state));
+                m_process->ReadExact(*begun + MonoLayoutFor(m_process->PointerSize()).ObjectHeader, &state, sizeof(state));
             const std::string remote = state == P::kStateHooked ? std::string() : RemoteError();
             m_mono.m_call.ResetScratch();
             if (state != P::kStateHooked)
@@ -380,8 +379,7 @@ namespace Manifold::Target
                 return Status::Fail(ErrorCode::NoProcess);
             std::this_thread::sleep_for(kPoll);
         }
-        std::uint64_t response = 0;
-        m_process->ReadExact(m_mailbox + P::kOffResponse, &response, sizeof(response));
+        const std::uint64_t response = m_process->ReadPointer(m_mailbox + P::kOffResponse).value_or(0);
         const std::uint32_t size = Read32(P::kOffResponseSize);
         if (!response || size < 4 || size > kMaxResponse)
             return Status::Fail(ErrorCode::MonoCallFailed, "the agent's answer could not be read");
@@ -402,14 +400,16 @@ namespace Manifold::Target
         std::map<int, std::uint64_t> found;
         if (!m_process || !m_slots)
             return found;
+        const MonoObjectLayout layout = MonoLayoutFor(m_process->PointerSize());
         for (const int slot : slots)
         {
             if (slot <= 0 || found.count(slot))
                 continue;
             const std::uint64_t index = static_cast<std::uint32_t>(slot) & P::kSlotIndexMask;
-            std::uint64_t address = 0;
-            if (index && m_process->ReadExact(m_slots + P::kArrayData + 8ull * index, &address, sizeof(address)))
-                found[slot] = address;
+            if (!index)
+                continue;
+            if (const auto address = m_process->ReadPointer(m_slots + layout.ArrayData + layout.Pointer * index))
+                found[slot] = *address;
         }
         return found;
     }

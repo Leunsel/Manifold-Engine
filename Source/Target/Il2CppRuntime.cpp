@@ -66,25 +66,28 @@ namespace Manifold::Target
             return std::all_of(name.begin(), name.end(), [](char c) { return static_cast<unsigned char>(c) >= 0x20 && c != 0x7F; });
         }
 
-        // The offset (8-byte aligned, in the first kShapeWords words) at which
+        // The offset (pointer aligned, in the first kShapeWords words) at which
         // every sampled struct holds the value the runtime returned for it,
         // e.g. klass->name for il2cpp_class_get_name. -1 when fewer than two
         // samples agree on one offset.
         int CommonOffset(const Process& process, const std::vector<std::pair<std::uint64_t, std::uint64_t>>& samples)
         {
+            const int pointer = process.PointerSize();
             unsigned candidates = (1u << kShapeWords) - 1;
             std::size_t used = 0;
             for (const auto& [base, value] : samples)
             {
                 if (!base || !value)
                     continue;
-                std::uint64_t words[kShapeWords] = {};
-                if (!process.ReadExact(base, words, sizeof(words)))
+                std::uint8_t bytes[kShapeWords * 8] = {};
+                if (!process.ReadExact(base, bytes, static_cast<std::size_t>(kShapeWords * pointer)))
                     return -1;
                 unsigned here = 0;
                 for (int i = 0; i < kShapeWords; ++i)
                 {
-                    if (words[i] == value)
+                    std::uint64_t word = 0;
+                    std::memcpy(&word, bytes + i * pointer, static_cast<std::size_t>(pointer));
+                    if (word == value)
                         here |= 1u << i;
                 }
                 candidates &= here;
@@ -92,7 +95,7 @@ namespace Manifold::Target
             }
             if (used < 2 || candidates == 0)
                 return -1;
-            return std::countr_zero(candidates) * 8;
+            return std::countr_zero(candidates) * pointer;
         }
     }
 
@@ -152,11 +155,13 @@ namespace Manifold::Target
             m_bridge.m_process->ReadExact(size, &count, sizeof(count));
             m_bridge.m_call.ResetScratch();
             count = std::min(count, kMaxAssemblies);
-            if (array && count)
+            const std::size_t pointer = static_cast<std::size_t>(m_bridge.m_process->PointerSize());
+            std::vector<std::uint8_t> bytes(static_cast<std::size_t>(count) * pointer);
+            if (array && count && m_bridge.m_process->ReadExact(array, bytes.data(), bytes.size()))
             {
                 assemblies.resize(static_cast<std::size_t>(count));
-                if (!m_bridge.m_process->ReadExact(array, assemblies.data(), assemblies.size() * sizeof(std::uint64_t)))
-                    assemblies.clear();
+                for (std::size_t i = 0; i < assemblies.size(); ++i)
+                    std::memcpy(&assemblies[i], bytes.data() + i * pointer, pointer);
             }
         }
         if (assemblies.empty())

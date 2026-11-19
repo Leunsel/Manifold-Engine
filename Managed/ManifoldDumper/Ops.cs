@@ -38,6 +38,7 @@ namespace Manifold.Managed
         const int ValueText = 2;
         const int ValueObject = 3;
 
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         delegate IntPtr Native4(IntPtr a0, IntPtr a1, IntPtr a2, IntPtr a3);
 
         static readonly Dictionary<long, Native4> s_natives = new Dictionary<long, Native4>();
@@ -501,19 +502,19 @@ namespace Manifold.Managed
         static void CallNative(Reader input, Writer output)
         {
             long function = input.I64();
-            IntPtr a0 = new IntPtr(input.I64());
-            IntPtr a1 = new IntPtr(input.I64());
-            IntPtr a2 = new IntPtr(input.I64());
-            IntPtr a3 = new IntPtr(input.I64());
+            IntPtr a0 = NativeAddress.ToPointer(input.I64());
+            IntPtr a1 = NativeAddress.ToPointer(input.I64());
+            IntPtr a2 = NativeAddress.ToPointer(input.I64());
+            IntPtr a3 = NativeAddress.ToPointer(input.I64());
             if (function == 0)
                 throw new ArgumentException("no function");
             Native4 call;
             if (!s_natives.TryGetValue(function, out call))
             {
-                call = (Native4)Marshal.GetDelegateForFunctionPointer(new IntPtr(function), typeof(Native4));
+                call = (Native4)Marshal.GetDelegateForFunctionPointer(NativeAddress.ToPointer(function), typeof(Native4));
                 s_natives.Add(function, call);
             }
-            output.I64(call(a0, a1, a2, a3).ToInt64());
+            output.I64((long)NativeAddress.From(call(a0, a1, a2, a3)));
         }
 
         static int ToInt(object value, int fallback)
@@ -714,6 +715,19 @@ namespace Manifold.Managed
         }
     }
 
+    static class NativeAddress
+    {
+        public static ulong From(IntPtr pointer)
+        {
+            return IntPtr.Size == 4 ? unchecked((uint)pointer.ToInt32()) : unchecked((ulong)pointer.ToInt64());
+        }
+
+        public static IntPtr ToPointer(long value)
+        {
+            return IntPtr.Size == 4 ? new IntPtr(unchecked((int)value)) : new IntPtr(value);
+        }
+    }
+
     static class Values
     {
         const BindingFlags InstanceFields = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
@@ -834,6 +848,8 @@ namespace Manifold.Managed
                 case TypeCode.Single: return BitConverter.ToSingle(from, at);
                 case TypeCode.Double: return BitConverter.ToDouble(from, at);
                 }
+                if (IntPtr.Size == 4)
+                    return type == typeof(IntPtr) ? (object)new IntPtr(BitConverter.ToInt32(from, at)) : new UIntPtr(BitConverter.ToUInt32(from, at));
                 return type == typeof(IntPtr) ? (object)new IntPtr(BitConverter.ToInt64(from, at)) : new UIntPtr(BitConverter.ToUInt64(from, at));
             }
             if (!type.IsValueType || depth > 8)

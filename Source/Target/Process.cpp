@@ -1163,6 +1163,11 @@ namespace Manifold::Target
 
     std::uint64_t Process::FindExport(std::string_view moduleName, std::string_view name) const
     {
+        return ExportAddress(moduleName, name, 0);
+    }
+
+    std::uint64_t Process::ExportAddress(std::string_view moduleName, std::string_view name, int depth) const
+    {
         const auto module = FindModule(moduleName);
         if (!module)
             return 0;
@@ -1206,8 +1211,19 @@ namespace Manifold::Target
             if (got == 0)
                 continue;
             buffer[sizeof(buffer) - 1] = 0;
-            if (name == buffer && ordinals[i] < functions.size())
-                return module->Base + functions[ordinals[i]];
+            if (name != buffer || ordinals[i] >= functions.size())
+                continue;
+            const DWORD rva = functions[ordinals[i]];
+            if (rva < exportRva || rva >= exportRva + exportSize)
+                return module->Base + rva;
+            char forward[256] = {};
+            if (depth >= 4 || Read(module->Base + rva, forward, sizeof(forward) - 1) == 0)
+                return 0;
+            const std::string_view target(forward);
+            const std::size_t dot = target.rfind('.');
+            if (dot == std::string_view::npos || dot == 0 || dot + 1 >= target.size() || target[dot + 1] == '#')
+                return 0;
+            return ExportAddress(std::string(target.substr(0, dot)) + ".dll", target.substr(dot + 1), depth + 1);
         }
         return 0;
     }
