@@ -51,6 +51,9 @@ namespace Manifold::UI
         bool RegisterLine(const std::string& id, std::string_view name, const std::string& editText, float rowHeight, float nameWidth, std::string& edited, ImVec2& valueMin, ImVec2& valueMax);
         void CodeMenu(const Disasm::Instruction& instruction);
         void HexMenu(std::uint64_t address);
+        std::vector<Disasm::Instruction> SelectedInstructions(bool names) const;
+        void CopyInstructions(Target::AddressStyle style);
+        void AddressCopyItems(std::uint64_t address);
         void BookmarkItems();
         void GotoDialog();
         void CommentDialog();

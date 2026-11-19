@@ -1343,17 +1343,6 @@ namespace Manifold::UI
                 if (debugger.Broken())
                     debugger.Resume(mode);
             };
-        const auto selectedRange = [&]()
-            {
-                std::vector<Disasm::Instruction> lines;
-                for (const Disasm::Instruction& instruction : disassembler.ReadMany(process, std::min(m_selected, m_selectionEnd), 512, &m_engine.Symbols()))
-                {
-                    if (instruction.Address > std::max(m_selected, m_selectionEnd))
-                        break;
-                    lines.push_back(instruction);
-                }
-                return lines;
-            };
         switch (command)
         {
         case Command::SaveMemoryRegion: OpenRegionDialog(RegionSave); break;
@@ -1464,12 +1453,13 @@ namespace Manifold::UI
         }
         case Command::NopInstruction: Nop(disassembler.Read(process, m_selected, nullptr)); break;
         case Command::CopyInstructions:
+            CopyInstructions(m_engine.Options().ShowSymbols ? Target::AddressStyle::Name : Target::AddressStyle::ModuleOffset);
+            break;
         case Command::CopyInstructionBytes:
         {
             std::string text;
-            for (const Disasm::Instruction& instruction : selectedRange())
-                text += command == Command::CopyInstructionBytes ? instruction.BytesText() + "\n"
-                                                                 : m_engine.Symbols().ModuleOffset(instruction.Address) + " - " + instruction.BytesText() + " - " + instruction.Text() + "\n";
+            for (const Disasm::Instruction& instruction : SelectedInstructions(false))
+                text += instruction.BytesText() + "\n";
             ImGui::SetClipboardText(text.c_str());
             break;
         }
@@ -1816,13 +1806,14 @@ namespace Manifold::UI
         item(ICON_FA_PLUS "  Add this address to the address list", Command::AddInstructionToList);
         if (ImGui::BeginMenu(ICON_FA_COPY "  Copy"))
         {
-            item("Selected instructions", Command::CopyInstructions);
+            item(m_engine.Options().ShowSymbols ? "Selected instructions with names" : "Selected instructions with module offsets", Command::CopyInstructions);
+            if (ImGui::MenuItem(m_engine.Options().ShowSymbols ? "Selected instructions with module offsets" : "Selected instructions with names"))
+                CopyInstructions(m_engine.Options().ShowSymbols ? Target::AddressStyle::ModuleOffset : Target::AddressStyle::Name);
+            if (ImGui::MenuItem("Selected instructions with plain addresses"))
+                CopyInstructions(Target::AddressStyle::Plain);
             item("Bytes only", Command::CopyInstructionBytes);
             ImGui::Separator();
-            if (ImGui::MenuItem("Address"))
-                ImGui::SetClipboardText(Hex(instruction.Address).c_str());
-            if (ImGui::MenuItem("Symbolic address"))
-                ImGui::SetClipboardText(m_engine.Symbols().ModuleOffset(instruction.Address).c_str());
+            AddressCopyItems(instruction.Address);
             if (ImGui::MenuItem("Bytes"))
                 ImGui::SetClipboardText(instruction.BytesText().c_str());
             if (ImGui::MenuItem("Instruction"))
@@ -2577,6 +2568,42 @@ namespace Manifold::UI
         }
     }
 
+    std::vector<Disasm::Instruction> MemoryViewer::SelectedInstructions(bool names) const
+    {
+        std::vector<Disasm::Instruction> lines;
+        if (!m_engine.HasProcess())
+            return lines;
+        const std::uint64_t first = std::min(m_selected, m_selectionEnd);
+        const std::uint64_t last = std::max(m_selected, m_selectionEnd);
+        for (const Disasm::Instruction& instruction : m_engine.Disassembler().ReadMany(*m_engine.Process(), first, 512, names ? &m_engine.Symbols() : nullptr))
+        {
+            if (instruction.Address > last)
+                break;
+            lines.push_back(instruction);
+        }
+        return lines;
+    }
+
+    void MemoryViewer::CopyInstructions(Target::AddressStyle style)
+    {
+        const std::vector<Disasm::Instruction> lines = SelectedInstructions(style != Target::AddressStyle::Plain);
+        ImGui::SetClipboardText(Disasm::CopyText(lines, m_engine.Symbols(), style).c_str());
+    }
+
+    void MemoryViewer::AddressCopyItems(std::uint64_t address)
+    {
+        const auto copy = [](const char* label, const std::string& value)
+            {
+                const std::string preview = value.size() > 40 ? value.substr(0, 37) + "..." : value;
+                if (ImGui::MenuItem(label, preview.c_str()))
+                    ImGui::SetClipboardText(value.c_str());
+            };
+        const Target::Symbols& symbols = m_engine.Symbols();
+        copy("Address", symbols.AddressText(address, Target::AddressStyle::Plain));
+        copy("Name", symbols.AddressText(address, Target::AddressStyle::Name));
+        copy("Module + offset", symbols.AddressText(address, Target::AddressStyle::ModuleOffset));
+    }
+
     void MemoryViewer::HexMenu(std::uint64_t address)
     {
         const auto item = [&](const char* label, Command command, bool enabled = true)
@@ -2601,9 +2628,24 @@ namespace Manifold::UI
         item(ICON_FA_CIRCLE "  Break when read or written", Command::HexBreakOnAccess);
         ImGui::Separator();
         item(ICON_FA_PLUS "  Add this address to the address list", Command::HexAddToList);
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
-            ImGui::SetClipboardText(Hex(address).c_str());
-        item(ICON_FA_COPY "  Copy 16 bytes", Command::HexCopy);
+        if (ImGui::BeginMenu(ICON_FA_COPY "  Copy"))
+        {
+            AddressCopyItems(address);
+            ImGui::Separator();
+            item("16 bytes", Command::HexCopy);
+            if (ImGui::MenuItem("16 bytes as a C array"))
+            {
+                std::uint8_t bytes[16]{};
+                if (m_engine.Process()->ReadExact(address, bytes, sizeof(bytes)))
+                {
+                    std::string array = "{ ";
+                    for (std::size_t i = 0; i < sizeof(bytes); ++i)
+                        array += (i ? ", 0x" : "0x") + Hex(bytes[i], 2);
+                    ImGui::SetClipboardText((array + " }").c_str());
+                }
+            }
+            ImGui::EndMenu();
+        }
         item(ICON_FA_PASTE "  Paste bytes", Command::HexPaste);
         item(ICON_FA_UNDO_ALT "  Undo the last memory edit", Command::UndoMemoryEdit, !m_undo.empty());
         if (ImGui::BeginMenu(ICON_FA_TH "  Show"))

@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,6 +12,7 @@ namespace Manifold::Target
 {
     class Process;
     class Symbols;
+    enum class AddressStyle;
 }
 
 namespace Manifold::Disasm
@@ -84,6 +86,7 @@ namespace Manifold::Disasm
     };
 
     ConditionInfo EvaluateCondition(std::string_view mnemonic, const RegisterValues& registers, bool is64Bit);
+    std::string CopyText(std::span<const Instruction> lines, const Target::Symbols& symbols, Target::AddressStyle style);
 
     // Instruction starts known from outside the bytes: where functions begin and
     // end (a runtime's method table, a module's unwind data) and where an

@@ -44,6 +44,13 @@ namespace Manifold::Target
     using SymbolForward = std::function<std::optional<std::uint64_t>(std::string_view name)>;
     using SymbolReverse = std::function<std::optional<std::string>(std::uint64_t address)>;
 
+    enum class AddressStyle
+    {
+        Name,
+        ModuleOffset,
+        Plain
+    };
+
     class Symbols
     {
     public:
@@ -62,6 +69,7 @@ namespace Manifold::Target
         std::uint64_t ResolveExport(std::string_view module, std::string_view name) const;
         std::string Describe(std::uint64_t address) const;
         std::string ModuleOffset(std::uint64_t address) const;
+        std::string AddressText(std::uint64_t address, AddressStyle style) const;
         std::optional<std::string> ExactName(std::uint64_t address) const;
         // The closest name at or below an address, at most reach bytes away:
         // a registered symbol, a module base or an export (what ExactName

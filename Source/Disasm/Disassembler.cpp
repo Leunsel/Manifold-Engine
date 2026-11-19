@@ -114,6 +114,14 @@ namespace Manifold::Disasm
         return HexBytes(std::span<const std::uint8_t>(Bytes.data(), std::min<std::size_t>(Length, Bytes.size())));
     }
 
+    std::string CopyText(std::span<const Instruction> lines, const Target::Symbols& symbols, Target::AddressStyle style)
+    {
+        std::string text;
+        for (const Instruction& line : lines)
+            text += symbols.AddressText(line.Address, style) + " - " + line.BytesText() + " - " + line.Text() + "\n";
+        return text;
+    }
+
     ConditionInfo EvaluateCondition(std::string_view mnemonic, const RegisterValues& registers, bool is64Bit)
     {
         constexpr int kCarry = 0;

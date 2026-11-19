@@ -690,6 +690,16 @@ namespace Manifold::Target
         return Hex(address);
     }
 
+    std::string Symbols::AddressText(std::uint64_t address, AddressStyle style) const
+    {
+        switch (style)
+        {
+        case AddressStyle::Name: return Describe(address);
+        case AddressStyle::ModuleOffset: return ModuleOffset(address);
+        default: return Hex(address);
+        }
+    }
+
     std::string Symbols::Describe(std::uint64_t address) const
     {
         {

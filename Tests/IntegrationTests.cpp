@@ -8,6 +8,7 @@
 #include "Target/PatchScan.h"
 #include "Disasm/AssemblySearch.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <functional>
@@ -559,6 +560,22 @@ namespace Manifold::Tests
             deAlloc(memory)
             return string.format('%s|%d|%d', description, plain, hex))LUA", "record numbers", luaResult);
         CHECK_MSG(lua.Ok() && luaResult == "100|100|256", lua.Ok() ? luaResult : lua.Text);
+
+        if (const std::uint64_t touch = process.FindExport(process.Name(), "Touch"))
+        {
+            const Target::Symbols& symbols = engine.Symbols();
+            CHECK_EQ(symbols.AddressText(touch + 1, Target::AddressStyle::Plain), Hex(touch + 1));
+            CHECK(symbols.AddressText(touch + 1, Target::AddressStyle::ModuleOffset).rfind("\"" + process.Name() + "\"+", 0) == 0);
+            const std::string named = symbols.AddressText(touch, Target::AddressStyle::Name);
+            CHECK_MSG(named.find("Touch") != std::string::npos, named);
+            const std::vector<Disasm::Instruction> lines = engine.Disassembler().ReadMany(process, touch, 2, &symbols);
+            const std::string copied = Disasm::CopyText(lines, symbols, Target::AddressStyle::Name);
+            CHECK_MSG(copied.rfind(named + " - ", 0) == 0 && std::count(copied.begin(), copied.end(), '\n') == 2, copied);
+        }
+        else
+        {
+            CHECK_MSG(false, "TestTarget exports no Touch");
+        }
 
         lua = engine.Lua().RunWithResult(R"LUA(
             local base = getAddress('TestTarget.exe') + 0x1000
