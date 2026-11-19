@@ -1,0 +1,8 @@
+Zydis 5.0.0 with Zycore (ZYDIS_VERSION 0x0005000000000000 in Zydis.h)
+Upstream : https://github.com/zyantific/zydis
+Built as the single-file amalgamation (Zydis.c, Zydis.h) by Zydis' amalgamate.py.
+MIT, see LICENSE.txt (Zydis) and LICENSE-Zycore.txt (Zycore).
+
+To update: run amalgamate.py in a fresh checkout of a newer release, replace
+Zydis.c and Zydis.h, and update this file. The "// Source file:" lines in
+Zydis.c are relative to the Zydis checkout (src/..., dependencies/...).
