@@ -410,6 +410,14 @@ namespace Manifold::Table
         return "?";
     }
 
+    bool KeysPressed(const std::vector<int>& keys, bool& wasDown)
+    {
+        const bool down = !keys.empty() && std::all_of(keys.begin(), keys.end(), [](int key) { return (::GetAsyncKeyState(key) & 0x8000) != 0; });
+        const bool pressed = down && !wasDown;
+        wasDown = down;
+        return pressed;
+    }
+
     std::string KeysText(const std::vector<int>& keys)
     {
         std::string text;

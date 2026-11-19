@@ -178,7 +178,7 @@ namespace Manifold
         const std::shared_ptr<Target::Process> process = m_target.Process();
         const std::uint64_t generation = m_target.Generation();
         const bool il2cpp = Target::MonoBridge::DetectRuntime(*process) == Target::ManagedRuntime::Il2Cpp;
-        m_work.Start({ il2cpp ? "Loading the IL2CPP runtime" : "Loading the Mono runtime", kMonoWork, true, false }, [this, process, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
+        m_work.Start({ .Title = il2cpp ? "Loading the IL2CPP runtime" : "Loading the Mono runtime", .Group = kMonoWork }, [this, process, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
             {
                 const Status status = m_target.Mono().Start(process, &progress);
                 const bool cancelled = progress.Cancelled();
@@ -196,7 +196,7 @@ namespace Manifold
             return;
         }
         const std::uint64_t generation = m_target.Generation();
-        m_work.Start({ m_target.Mono().IsIl2Cpp() ? "Reloading the IL2CPP classes" : "Reloading the Mono classes", kMonoWork, true, false }, [this, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
+        m_work.Start({ .Title = m_target.Mono().IsIl2Cpp() ? "Reloading the IL2CPP classes" : "Reloading the Mono classes", .Group = kMonoWork }, [this, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
             {
                 const Status status = m_target.Mono().Refresh(&progress);
                 const bool cancelled = progress.Cancelled();
@@ -279,7 +279,7 @@ namespace Manifold
 
     void Engine::LookUpProcessLater(std::string name, std::function<void(std::optional<ProcessId>)> found)
     {
-        m_work.Start({ "Looking for " + name, "lookup", false, true }, [name, found = std::move(found)](WorkProgress&) mutable -> BackgroundWork::Finish
+        m_work.Start({ .Title = "Looking for " + name, .Group = "lookup", .Cancellable = false, .Quiet = true }, [name, found = std::move(found)](WorkProgress&) mutable -> BackgroundWork::Finish
             {
                 const std::optional<ProcessId> id = Target::FindProcessId(name);
                 return [found = std::move(found), id]() { found(id); };
@@ -340,7 +340,7 @@ namespace Manifold
             return;
         m_attachLookup = true;
         const std::vector<std::string> names = m_settings.AutoAttach;
-        m_work.Start({ "Looking for processes to open", "attach", false, true }, [this, names](WorkProgress&) -> BackgroundWork::Finish
+        m_work.Start({ .Title = "Looking for processes to open", .Group = "attach", .Cancellable = false, .Quiet = true }, [this, names](WorkProgress&) -> BackgroundWork::Finish
             {
                 std::optional<ProcessId> id;
                 std::string matched;

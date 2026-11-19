@@ -375,18 +375,13 @@ namespace Manifold
 
     void TableRuntime::UpdateHotkeys()
     {
-        const auto down = [](int key) { return (::GetAsyncKeyState(key) & 0x8000) != 0; };
         std::vector<std::pair<Table::MemoryRecord*, Table::Hotkey>> fired;
         m_table.ForEach([&](Table::MemoryRecord& record)
             {
                 for (Table::Hotkey& hotkey : record.Hotkeys)
                 {
-                    if (hotkey.Keys.empty())
-                        continue;
-                    const bool all = std::all_of(hotkey.Keys.begin(), hotkey.Keys.end(), down);
-                    if (all && !hotkey.WasDown)
+                    if (Table::KeysPressed(hotkey.Keys, hotkey.WasDown))
                         fired.emplace_back(&record, hotkey);
-                    hotkey.WasDown = all;
                 }
             });
         for (auto& [record, hotkey] : fired)

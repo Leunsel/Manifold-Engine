@@ -472,7 +472,6 @@ namespace Manifold::Lua
         std::map<int, SymbolCallback> m_symbolLookups;
         int m_nextSymbolCallback = 1;
         bool m_inSymbolLookup = false;
-        std::thread::id m_thread = std::this_thread::get_id();
         int m_onOpenProcess = 0;
         bool m_inTick = false;
         UiModel m_ui;

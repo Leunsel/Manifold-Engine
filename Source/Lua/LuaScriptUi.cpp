@@ -277,7 +277,7 @@ namespace Manifold::Lua
     std::vector<ScriptMenuItem> LuaEngine::ReadMenu(bool byId, int id, const char* which)
     {
         std::vector<ScriptMenuItem> items;
-        if (std::this_thread::get_id() != m_thread)
+        if (!Manifold::OnMainThread())
             return items;
         const int top = lua_gettop(m_state);
         lua_getglobal(m_state, "__manifoldMenuSnapshot");
@@ -315,7 +315,7 @@ namespace Manifold::Lua
 
     void LuaEngine::OpenMenu(bool byId, int id, const char* which)
     {
-        if (std::this_thread::get_id() != m_thread)
+        if (!Manifold::OnMainThread())
             return;
         const int top = lua_gettop(m_state);
         lua_getglobal(m_state, "__manifoldMenuPopup");
@@ -373,7 +373,7 @@ namespace Manifold::Lua
     std::vector<ScriptForm> LuaEngine::ShownForms()
     {
         std::vector<ScriptForm> forms;
-        if (!m_formsShown || std::this_thread::get_id() != m_thread)
+        if (!m_formsShown || !Manifold::OnMainThread())
             return forms;
         const int top = lua_gettop(m_state);
         lua_getglobal(m_state, "__manifoldFormSnapshot");
@@ -411,7 +411,7 @@ namespace Manifold::Lua
 
     void LuaEngine::SetFormValue(int control, std::string_view field, std::string_view value)
     {
-        if (std::this_thread::get_id() != m_thread)
+        if (!Manifold::OnMainThread())
             return;
         const int top = lua_gettop(m_state);
         lua_getglobal(m_state, "__manifoldFormSet");
@@ -467,7 +467,7 @@ namespace Manifold::Lua
 
     void LuaEngine::SetFormBounds(int form, int left, int top, int width, int height, int clientWidth, int clientHeight)
     {
-        if (std::this_thread::get_id() != m_thread)
+        if (!Manifold::OnMainThread())
             return;
         const int stackTop = lua_gettop(m_state);
         lua_getglobal(m_state, "__manifoldFormBounds");

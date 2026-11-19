@@ -300,11 +300,6 @@ namespace Manifold::Debug
             }
         }
 
-        std::string ErrorText(DWORD error)
-        {
-            return "Windows error " + std::to_string(error);
-        }
-
         bool Touches(const Breakpoint& breakpoint, std::uint64_t first, std::uint64_t last, bool written)
         {
             if (!breakpoint.Hardware || breakpoint.Type == BreakpointType::Execute || (breakpoint.Type == BreakpointType::Write && !written))
@@ -1268,7 +1263,7 @@ namespace Manifold::Debug
                 if (!hardwareActive && ::GetTickCount64() - m_lastHardwareTick >= kStaleHardwareMilliseconds && !thread.Stepping && !thread.Reinsert)
                     return DBG_EXCEPTION_NOT_HANDLED;
                 LOG_WARN("Debugger", Format("Could not read thread %u at a single step (%s); the step is kept from the process", static_cast<unsigned>(event.dwThreadId),
-                    ErrorText(::GetLastError()).c_str()));
+                    SystemErrorText(::GetLastError()).c_str()));
                 return DBG_CONTINUE;
             }
             const std::uint64_t dr6 = thread.Reinsert && m_simulateMissingStepBits ? context.Dr6() & ~0xFull : context.Dr6();
@@ -1435,7 +1430,7 @@ namespace Manifold::Debug
         const std::uint32_t id = Raw(m_process->Id());
         if (!::DebugActiveProcess(id))
         {
-            attached->set_value(Status::Fail(ErrorCode::DebugAttachFailed, ErrorText(::GetLastError())));
+            attached->set_value(Status::Fail(ErrorCode::DebugAttachFailed, SystemErrorText(::GetLastError())));
             return;
         }
         ::DebugSetProcessKillOnExit(FALSE);
@@ -1619,7 +1614,7 @@ namespace Manifold::Debug
         ++m_generation;
         lock.unlock();
         if (!exited && !::DebugActiveProcessStop(id))
-            LOG_ERROR("Debugger", ErrorMessage(ErrorCode::DebugDetachFailed, ErrorText(::GetLastError())));
+            LOG_ERROR("Debugger", ErrorMessage(ErrorCode::DebugDetachFailed, SystemErrorText(::GetLastError())));
         else
             LOG_INFO("Debugger", "Detached");
         if (attached)
@@ -2005,7 +2000,7 @@ namespace Manifold::Debug
             m_process->Free(block);
             if (loadedBefore && !lastError)
                 return Status::Fail(ErrorCode::DebugAgentVersion);
-            return Status::Fail(ErrorCode::InjectFailed, "the agent did not start" + (lastError ? " (" + ErrorText(lastError) + ")" : std::string()));
+            return Status::Fail(ErrorCode::InjectFailed, "the agent did not start" + (lastError ? " (" + SystemErrorText(lastError) + ")" : std::string()));
         }
         {
             std::lock_guard lock(m_lock);

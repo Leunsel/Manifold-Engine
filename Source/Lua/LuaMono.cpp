@@ -1,5 +1,6 @@
 #include "App/Engine.h"
 #include "Lua/LuaApi.h"
+#include "Lua/LuaArgs.h"
 #include "Lua/LuaEngine.h"
 #include "Target/Mono.h"
 
@@ -12,12 +13,11 @@ namespace Manifold::Lua
 {
     namespace
     {
-        Engine& Owner(lua_State* state) { return EngineOf(state).Owner(); }
 
         bool Cooperative(lua_State* state)
         {
             const Engine& engine = Owner(state);
-            return engine.Async() && engine.OnMainThread() && lua_isyieldable(state) && EngineOf(state).IsCooperative(state);
+            return engine.Async() && Manifold::OnMainThread() && lua_isyieldable(state) && EngineOf(state).IsCooperative(state);
         }
 
         template <lua_CFunction Body>

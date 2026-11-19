@@ -1,8 +1,12 @@
 #include "Core/Errors.h"
 
+#include "Core/Text.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
+
+#include <windows.h>
 
 namespace Manifold
 {
@@ -483,6 +487,19 @@ namespace Manifold
                 message.replace(at, 1, "\\|");
             text += "| " + ErrorName(info.Code) + " | " + message + " | " + std::string(info.Cause) + " | " + std::string(info.Help) + " |\n";
         }
+        return text;
+    }
+
+    std::string SystemErrorText(std::uint32_t error)
+    {
+        wchar_t* buffer = nullptr;
+        const DWORD length = ::FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, error,
+            MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), reinterpret_cast<wchar_t*>(&buffer), 0, nullptr);
+        std::string text = length && buffer ? Trim(WideToUtf8(std::wstring_view(buffer, length))) : "error " + std::to_string(error);
+        if (buffer)
+            ::LocalFree(buffer);
+        while (!text.empty() && text.back() == '.')
+            text.pop_back();
         return text;
     }
 }

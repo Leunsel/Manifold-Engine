@@ -6,6 +6,7 @@
 #include "Core/Paths.h"
 #include "Core/Text.h"
 #include "Lua/LuaApi.h"
+#include "Lua/LuaArgs.h"
 #include "Lua/LuaEngine.h"
 #include "Lua/UiModel.h"
 
@@ -33,10 +34,7 @@ namespace Manifold::Lua
 
         int Gone(lua_State* state, const char* what)
         {
-            lua_pushnil(state);
-            lua_pushstring(state, ErrorName(ErrorCode::LuaUiGone).c_str());
-            lua_pushstring(state, (std::string("The ") + what + " is gone").c_str());
-            return 3;
+            return PushFailure(state, ErrorCode::LuaUiGone, what);
         }
 
         bool ReadString(lua_State* state, int index, const char* name, std::string& out)
@@ -664,10 +662,7 @@ namespace Manifold::Lua
             std::optional<DecodedImage> decoded = DecodeImage(bytes);
             if (!decoded || decoded->Width <= 0 || decoded->Height <= 0 || decoded->Width > kMaxImageSide || decoded->Height > kMaxImageSide)
             {
-                lua_pushnil(state);
-                lua_pushstring(state, ErrorName(ErrorCode::LuaImageUnreadable).c_str());
-                lua_pushstring(state, ("The image " + path + " could not be read").c_str());
-                return 3;
+                return PushFailure(state, ErrorCode::LuaImageUnreadable, path);
             }
             UiImage image;
             image.Width = decoded->Width;

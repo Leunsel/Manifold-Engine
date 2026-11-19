@@ -148,7 +148,6 @@ namespace Manifold
         bool Working() const { return m_activation.Working(); }
         void SetAsync(bool async) { m_activation.SetAsync(async); }
         bool Async() const { return m_activation.Async(); }
-        bool OnMainThread() const { return std::this_thread::get_id() == m_mainThread; }
         static bool OnActivationWorker() { return ActivationRunner::OnActivationWorker(); }
         void RunOnMainAndWait(const std::function<void()>& work) { m_activation.RunOnMainAndWait(work); }
         void StopTableScript() { m_activation.StopTableScript(); }
@@ -209,7 +208,6 @@ namespace Manifold
         double m_lastAliveCheck = -1.0;
         std::uint64_t m_lastBreakSerial = 0;
 
-        std::thread::id m_mainThread = std::this_thread::get_id();
         ActivationRunner m_activation{ *this };
         bool m_attachLookup = false;
         BackgroundWork m_work;

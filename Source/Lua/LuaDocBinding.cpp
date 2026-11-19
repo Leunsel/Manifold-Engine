@@ -5,6 +5,7 @@
 #include "Lua/DocAnnotations.h"
 #include "Lua/DocText.h"
 #include "Lua/LuaApi.h"
+#include "Lua/LuaArgs.h"
 #include "Lua/LuaCompatScripts.h"
 #include "Lua/LuaEngine.h"
 
@@ -164,23 +165,12 @@ namespace Manifold::Lua
 
         int MisuseResult(lua_State* state, std::string_view detail)
         {
-            lua_pushnil(state);
-            lua_pushstring(state, ErrorName(ErrorCode::LuaApiMisuse).c_str());
-            lua_pushlstring(state, detail.data(), detail.size());
-            return 3;
+            return PushFailure(state, ErrorCode::LuaApiMisuse, detail);
         }
 
         int MissingResult(lua_State* state, std::string_view what)
         {
-            const Status status = Status::Fail(ErrorCode::LuaDocMissing, what);
-            std::string message = status.Text;
-            const std::string suffix = " (" + ErrorName(status.Code) + ")";
-            if (message.size() >= suffix.size() && message.compare(message.size() - suffix.size(), suffix.size(), suffix) == 0)
-                message.resize(message.size() - suffix.size());
-            lua_pushnil(state);
-            lua_pushstring(state, ErrorName(ErrorCode::LuaDocMissing).c_str());
-            lua_pushstring(state, message.c_str());
-            return 3;
+            return PushFailure(state, ErrorCode::LuaDocMissing, what);
         }
 
         std::optional<DocItemKind> KindNamed(std::string_view name)

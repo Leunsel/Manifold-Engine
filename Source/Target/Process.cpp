@@ -48,19 +48,6 @@ namespace Manifold::Target
             return false;
         }
 
-        std::string LastErrorText(DWORD error)
-        {
-            wchar_t* buffer = nullptr;
-            const DWORD length = ::FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, error,
-                MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), reinterpret_cast<wchar_t*>(&buffer), 0, nullptr);
-            std::string text = length && buffer ? Trim(WideToUtf8(std::wstring_view(buffer, length))) : "error " + std::to_string(error);
-            if (buffer)
-                ::LocalFree(buffer);
-            while (!text.empty() && text.back() == '.')
-                text.pop_back();
-            return text;
-        }
-
         bool WritableProtect(DWORD protect)
         {
             const DWORD base = protect & 0xFF;
@@ -606,7 +593,7 @@ namespace Manifold::Target
 
         if (!handle)
         {
-            const std::string detail = std::to_string(id) + ", " + LastErrorText(error);
+            const std::string detail = std::to_string(id) + ", " + SystemErrorText(error);
             if (error == ERROR_ACCESS_DENIED)
                 return Status::Fail(ErrorCode::ProcessAccessDenied, detail);
             if (error == ERROR_INVALID_PARAMETER)
@@ -836,7 +823,7 @@ namespace Manifold::Target
         }
         ::FlushInstructionCache(m_handle.Get(), reinterpret_cast<LPCVOID>(address), size);
         if (!written)
-            return Status::Fail(ErrorCode::WriteFailed, Hex(address) + " (" + LastErrorText(error) + ")");
+            return Status::Fail(ErrorCode::WriteFailed, Hex(address) + " (" + SystemErrorText(error) + ")");
         return Status::Success();
     }
 
@@ -916,7 +903,7 @@ namespace Manifold::Target
         void* memory = AllocVm(m_handle.Get(), 0, size, MEM_RESERVE | MEM_COMMIT, protect);
         if (!memory)
         {
-            return Status::Fail(ErrorCode::AllocFailed, Hex(size) + " bytes, " + LastErrorText(::GetLastError()));
+            return Status::Fail(ErrorCode::AllocFailed, Hex(size) + " bytes, " + SystemErrorText(::GetLastError()));
         }
         return reinterpret_cast<std::uint64_t>(memory);
     }
@@ -1147,7 +1134,7 @@ namespace Manifold::Target
         }
         const UniqueHandle thread(::CreateRemoteThread(m_handle.Get(), nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(start), reinterpret_cast<LPVOID>(parameter), 0, nullptr));
         if (!thread)
-            return Status::Fail(ErrorCode::ThreadCreateFailed, Hex(start) + ", " + LastErrorText(::GetLastError()));
+            return Status::Fail(ErrorCode::ThreadCreateFailed, Hex(start) + ", " + SystemErrorText(::GetLastError()));
         const DWORD waited = wait ? ::WaitForSingleObject(thread.Get(), timeoutMilliseconds) : WAIT_OBJECT_0;
         if (waited != WAIT_OBJECT_0)
             return Status::Fail(ErrorCode::ThreadTimedOut, Hex(start) + ", " + std::to_string(timeoutMilliseconds) + " ms");
@@ -1233,7 +1220,7 @@ namespace Manifold::Target
         {
             const DWORD error = ::GetLastError();
             Free(memory);
-            return Status::Fail(ErrorCode::ThreadCreateFailed, LastErrorText(error));
+            return Status::Fail(ErrorCode::ThreadCreateFailed, SystemErrorText(error));
         }
         constexpr DWORD kLoadTimeout = 15000;
         const DWORD waited = ::WaitForSingleObject(thread.Get(), kLoadTimeout);

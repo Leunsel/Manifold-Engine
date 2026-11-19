@@ -1,4 +1,5 @@
 #include "Lua/LuaApi.h"
+#include "Lua/LuaArgs.h"
 
 #include "App/Engine.h"
 #include "Core/Text.h"
@@ -52,11 +53,6 @@ namespace Manifold::Lua
             int Sub = 0;
         };
 
-        Engine& Owner(lua_State* state)
-        {
-            return EngineOf(state).Owner();
-        }
-
         Handle& CheckHandle(lua_State* state, int index, const char* type)
         {
             return *static_cast<Handle*>(luaL_checkudata(state, index, type));
@@ -73,11 +69,6 @@ namespace Manifold::Lua
             handle->Id = id;
             handle->Sub = sub;
             luaL_setmetatable(state, type);
-        }
-
-        std::string Key(lua_State* state, int index)
-        {
-            return lua_type(state, index) == LUA_TSTRING ? Lower(lua_tostring(state, index)) : std::string();
         }
 
         Table::MemoryRecord* FindRecord(lua_State* state, int id)
@@ -101,16 +92,7 @@ namespace Manifold::Lua
             return nullptr;
         }
 
-        std::string TextArgument(lua_State* state, int index)
-        {
-            std::size_t length = 0;
-            const char* text = luaL_tolstring(state, index, &length);
-            std::string result(text, length);
-            lua_pop(state, 1);
-            return result;
-        }
-
-        std::string AddressArgument(lua_State* state, int index)
+        std::string AddressText(lua_State* state, int index)
         {
             if (lua_isinteger(state, index))
                 return Hex(static_cast<std::uint64_t>(lua_tointeger(state, index)));
@@ -504,7 +486,7 @@ namespace Manifold::Lua
                 { "setaddress", [](lua_State* s) -> int
                     {
                         Table::MemoryRecord& target = CheckRecord(s, 1);
-                        target.Address = AddressArgument(s, 2);
+                        target.Address = AddressText(s, 2);
                         if (lua_istable(s, 3))
                         {
                             target.Offsets.clear();
@@ -512,7 +494,7 @@ namespace Manifold::Lua
                             for (lua_Integer i = count; i >= 1; --i)
                             {
                                 lua_rawgeti(s, 3, i);
-                                target.Offsets.push_back(AddressArgument(s, -1));
+                                target.Offsets.push_back(AddressText(s, -1));
                                 lua_pop(s, 1);
                             }
                         }
@@ -536,7 +518,7 @@ namespace Manifold::Lua
                             return luaL_error(s, "offset index out of range");
                         if (index >= static_cast<lua_Integer>(target.Offsets.size()))
                             target.Offsets.insert(target.Offsets.begin(), static_cast<std::size_t>(index) + 1 - target.Offsets.size(), "0");
-                        target.Offsets[target.Offsets.size() - 1 - static_cast<std::size_t>(index)] = AddressArgument(s, 3);
+                        target.Offsets[target.Offsets.size() - 1 - static_cast<std::size_t>(index)] = AddressText(s, 3);
                         Owner(s).Table().Touch();
                         return 0;
                     } },
@@ -629,7 +611,7 @@ namespace Manifold::Lua
                 record.Description = TextArgument(state, 3);
             else if (key == "address")
             {
-                record.Address = AddressArgument(state, 3);
+                record.Address = AddressText(state, 3);
                 record.AddressOk = false;
             }
             else if (key == "type" || key == "vartype")
@@ -648,7 +630,7 @@ namespace Manifold::Lua
             else if (key == "active")
             {
                 const bool wanted = lua_toboolean(state, 3) != 0;
-                if (engine.Async() && engine.OnMainThread() && lua_isyieldable(state) && EngineOf(state).IsCooperative(state))
+                if (engine.Async() && Manifold::OnMainThread() && lua_isyieldable(state) && EngineOf(state).IsCooperative(state))
                 {
                     if (!engine.InsideActivation())
                     {
@@ -890,7 +872,7 @@ namespace Manifold::Lua
             {
                 if (index >= static_cast<lua_Integer>(record->Offsets.size()))
                     record->Offsets.insert(record->Offsets.begin(), static_cast<std::size_t>(index) + 1 - record->Offsets.size(), "0");
-                record->Offsets[record->Offsets.size() - 1 - static_cast<std::size_t>(index)] = AddressArgument(state, 3);
+                record->Offsets[record->Offsets.size() - 1 - static_cast<std::size_t>(index)] = AddressText(state, 3);
                 record->AddressOk = false;
                 Owner(state).Table().Touch();
             }
@@ -1475,22 +1457,7 @@ namespace Manifold::Lua
         int DebugSetBreakpoint(lua_State* state)
         {
             Engine& engine = Owner(state);
-            std::uint64_t address = 0;
-            if (lua_type(state, 1) == LUA_TNUMBER)
-            {
-                const auto value = ExactInteger(state, 1);
-                if (!value)
-                    return luaL_argerror(state, 1, "the address is not a whole number");
-                address = static_cast<std::uint64_t>(*value);
-            }
-            else
-            {
-                Status error;
-                const auto value = engine.Evaluate(luaL_checkstring(state, 1), &error);
-                if (!value)
-                    return luaL_error(state, "%s", error.Text.c_str());
-                address = *value;
-            }
+            const std::uint64_t address = AddressArgument(state, 1);
             int size = 1;
             int trigger = 0;
             int callbackIndex = 0;
@@ -1532,7 +1499,7 @@ namespace Manifold::Lua
         int DebugRemoveBreakpoint(lua_State* state)
         {
             Engine& engine = Owner(state);
-            const std::uint64_t address = lua_type(state, 1) == LUA_TNUMBER ? static_cast<std::uint64_t>(ExactInteger(state, 1).value_or(0)) : engine.Evaluate(luaL_checkstring(state, 1)).value_or(0);
+            const std::uint64_t address = ResolveAddress(state, 1).value_or(0);
             EngineOf(state).ClearBreakpointCallback(address);
             const Status status = engine.Debugger().RemoveBreakpoint(address);
             lua_pushboolean(state, status.Ok());

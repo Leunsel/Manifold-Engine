@@ -1,4 +1,5 @@
 #include "Lua/LuaApi.h"
+#include "Lua/LuaArgs.h"
 
 #include "App/Engine.h"
 #include "App/Settings.h"
@@ -43,16 +44,6 @@ namespace Manifold::Lua
         constexpr const char* kCustomTypeType = "Manifold.CustomType";
         constexpr const char* kInternetType = "Manifold.Internet";
 
-        Engine& Owner(lua_State* state)
-        {
-            return EngineOf(state).Owner();
-        }
-
-        std::string Key(lua_State* state, int index)
-        {
-            return lua_type(state, index) == LUA_TSTRING ? Lower(lua_tostring(state, index)) : std::string();
-        }
-
         bool ReadLocal(std::uint64_t address, void* buffer, std::size_t size)
         {
             SIZE_T done = 0;
@@ -65,7 +56,7 @@ namespace Manifold::Lua
             return ::WriteProcessMemory(::GetCurrentProcess(), reinterpret_cast<LPVOID>(address), data, size, &done) && done == size;
         }
 
-        std::uint64_t Number(lua_State* state, int index)
+        std::uint64_t NumberOrHex(lua_State* state, int index)
         {
             if (lua_type(state, index) == LUA_TNUMBER)
                 return static_cast<std::uint64_t>(ExactInteger(state, index).value_or(0));
@@ -151,7 +142,7 @@ namespace Manifold::Lua
         int StreamWrite(lua_State* state)
         {
             StreamState& stream = CheckStream(state, 1);
-            const T value = static_cast<T>(Number(state, 2));
+            const T value = static_cast<T>(NumberOrHex(state, 2));
             StreamPut(stream, &value, sizeof(T));
             return 0;
         }
@@ -616,7 +607,7 @@ namespace Manifold::Lua
                 { "getvalue", [](lua_State* s) -> int
                     {
                         const CustomType& target = CheckCustomType(s, 1);
-                        const std::uint64_t address = Number(s, 2);
+                        const std::uint64_t address = NumberOrHex(s, 2);
                         const auto& process = Owner(s).Process();
                         std::vector<std::uint8_t> bytes(static_cast<std::size_t>(target.ByteCount()));
                         if (!process || !process->ReadExact(address, bytes.data(), bytes.size()))
@@ -629,7 +620,7 @@ namespace Manifold::Lua
                 { "setvalue", [](lua_State* s) -> int
                     {
                         const CustomType& target = CheckCustomType(s, 1);
-                        const std::uint64_t address = Number(s, 2);
+                        const std::uint64_t address = NumberOrHex(s, 2);
                         std::vector<std::uint8_t> bytes;
                         const auto& process = Owner(s).Process();
                         const bool ok = process && EngineOf(s).CustomFromText(target, luaL_tolstring(s, 3, nullptr), address, bytes) && process->Write(address, bytes).Ok();
@@ -648,13 +639,13 @@ namespace Manifold::Lua
                             lua_pop(s, 1);
                         }
                         bytes.resize(static_cast<std::size_t>(target.ByteCount()), 0);
-                        return PushCustomValue(s, target, bytes, Number(s, 3));
+                        return PushCustomValue(s, target, bytes, NumberOrHex(s, 3));
                     } },
                 { "valuetobytetable", [](lua_State* s) -> int
                     {
                         const CustomType& target = CheckCustomType(s, 1);
                         std::vector<std::uint8_t> bytes;
-                        if (!EngineOf(s).CustomFromText(target, luaL_tolstring(s, 2, nullptr), Number(s, 3), bytes))
+                        if (!EngineOf(s).CustomFromText(target, luaL_tolstring(s, 2, nullptr), NumberOrHex(s, 3), bytes))
                         {
                             lua_pushnil(s);
                             return 1;
@@ -914,7 +905,7 @@ namespace Manifold::Lua
         int ReadLocalValue(lua_State* state)
         {
             T value{};
-            if (!ReadLocal(Number(state, 1), &value, sizeof(T)))
+            if (!ReadLocal(NumberOrHex(state, 1), &value, sizeof(T)))
             {
                 lua_pushnil(state);
                 return 1;
@@ -935,14 +926,14 @@ namespace Manifold::Lua
             if constexpr (std::is_floating_point_v<T>)
                 value = static_cast<T>(luaL_checknumber(state, 2));
             else
-                value = static_cast<T>(Number(state, 2));
-            lua_pushboolean(state, WriteLocal(Number(state, 1), &value, sizeof(T)));
+                value = static_cast<T>(NumberOrHex(state, 2));
+            lua_pushboolean(state, WriteLocal(NumberOrHex(state, 1), &value, sizeof(T)));
             return 1;
         }
 
         int ReadStringLocal(lua_State* state)
         {
-            const std::uint64_t address = Number(state, 1);
+            const std::uint64_t address = NumberOrHex(state, 1);
             const lua_Integer maximum = std::clamp<lua_Integer>(luaL_optinteger(state, 2, 1000), 1, 64 * 1024 * 1024);
             const bool wide = lua_toboolean(state, 3) != 0;
             std::vector<std::uint8_t> bytes(static_cast<std::size_t>(maximum) * (wide ? 2 : 1));
@@ -988,16 +979,16 @@ namespace Manifold::Lua
             if (lua_toboolean(state, 3))
             {
                 const std::wstring wide = Utf8ToWide(std::string_view(text, length));
-                lua_pushboolean(state, WriteLocal(Number(state, 1), wide.c_str(), (wide.size() + 1) * 2));
+                lua_pushboolean(state, WriteLocal(NumberOrHex(state, 1), wide.c_str(), (wide.size() + 1) * 2));
             }
             else
-                lua_pushboolean(state, WriteLocal(Number(state, 1), text, length + 1));
+                lua_pushboolean(state, WriteLocal(NumberOrHex(state, 1), text, length + 1));
             return 1;
         }
 
         int ReadBytesLocal(lua_State* state)
         {
-            const std::uint64_t address = Number(state, 1);
+            const std::uint64_t address = NumberOrHex(state, 1);
             const lua_Integer count = std::clamp<lua_Integer>(luaL_optinteger(state, 2, 1), 1, 16 * 1024 * 1024);
             std::vector<std::uint8_t> bytes(static_cast<std::size_t>(count));
             if (!ReadLocal(address, bytes.data(), bytes.size()))
@@ -1023,23 +1014,8 @@ namespace Manifold::Lua
 
         int WriteBytesLocal(lua_State* state)
         {
-            const std::uint64_t address = Number(state, 1);
-            std::vector<std::uint8_t> bytes;
-            for (int i = 2; i <= lua_gettop(state); ++i)
-            {
-                if (lua_istable(state, i))
-                {
-                    const lua_Integer length = luaL_len(state, i);
-                    for (lua_Integer n = 1; n <= length; ++n)
-                    {
-                        lua_rawgeti(state, i, n);
-                        bytes.push_back(static_cast<std::uint8_t>(lua_tointeger(state, -1)));
-                        lua_pop(state, 1);
-                    }
-                }
-                else
-                    bytes.push_back(static_cast<std::uint8_t>(luaL_checkinteger(state, i)));
-            }
+            const std::uint64_t address = NumberOrHex(state, 1);
+            const std::vector<std::uint8_t> bytes = BytesFrom(state, 2);
             lua_pushboolean(state, WriteLocal(address, bytes.data(), bytes.size()));
             return 1;
         }
@@ -1155,7 +1131,7 @@ namespace Manifold::Lua
 
         int ExecuteCodeLocalEx(lua_State* state)
         {
-            const std::uint64_t address = lua_type(state, 1) == LUA_TSTRING ? LocalAddress(lua_tostring(state, 1)) : Number(state, 1);
+            const std::uint64_t address = lua_type(state, 1) == LUA_TSTRING ? LocalAddress(lua_tostring(state, 1)) : NumberOrHex(state, 1);
             if (address < 0x10000)
                 return luaL_error(state, "executeCodeLocalEx: invalid address");
             std::vector<LocalArgument> arguments;
@@ -1191,7 +1167,7 @@ namespace Manifold::Lua
                         std::memcpy(&argument.Value, &value, 8);
                     }
                     else
-                        argument.Value = Number(state, -1);
+                        argument.Value = NumberOrHex(state, -1);
                     lua_pop(state, 1);
                 }
                 else if (lua_type(state, i) == LUA_TSTRING)
@@ -1201,7 +1177,7 @@ namespace Manifold::Lua
                 }
                 else
                 {
-                    argument.Value = Number(state, i);
+                    argument.Value = NumberOrHex(state, i);
                 }
                 arguments.push_back(std::move(argument));
             }
@@ -1352,7 +1328,7 @@ namespace Manifold::Lua
             if (!process)
                 return luaL_error(state, "%s", ErrorMessage(ErrorCode::NoProcess).c_str());
             std::vector<std::uint8_t> bytes(static_cast<std::size_t>(std::clamp<lua_Integer>(luaL_checkinteger(state, 2), 0, 256 * 1024 * 1024)));
-            if (!process->ReadExact(Number(state, 1), bytes.data(), bytes.size()))
+            if (!process->ReadExact(NumberOrHex(state, 1), bytes.data(), bytes.size()))
             {
                 lua_pushnil(state);
                 return 1;
@@ -1377,7 +1353,7 @@ namespace Manifold::Lua
 
         int IntegerToUserData(lua_State* state)
         {
-            lua_pushlightuserdata(state, reinterpret_cast<void*>(static_cast<std::uintptr_t>(Number(state, 1))));
+            lua_pushlightuserdata(state, reinterpret_cast<void*>(static_cast<std::uintptr_t>(NumberOrHex(state, 1))));
             return 1;
         }
 
@@ -1519,14 +1495,16 @@ namespace Manifold::Lua
         int InModule(lua_State* state)
         {
             const auto process = Owner(state).Process();
-            lua_pushboolean(state, process && process->ModuleAt(Number(state, 1)).has_value());
+            const auto address = ResolveAddress(state, 1);
+            lua_pushboolean(state, process && address && process->ModuleAt(*address).has_value());
             return 1;
         }
 
         int InSystemModule(lua_State* state)
         {
             const auto process = Owner(state).Process();
-            const auto module = process ? process->ModuleAt(Number(state, 1)) : std::nullopt;
+            const auto address = ResolveAddress(state, 1);
+            const auto module = process && address ? process->ModuleAt(*address) : std::nullopt;
             lua_pushboolean(state, module && module->System);
             return 1;
         }
@@ -1534,7 +1512,8 @@ namespace Manifold::Lua
         int GetModuleNameFromAddress(lua_State* state)
         {
             const auto process = Owner(state).Process();
-            const auto module = process ? process->ModuleAt(Number(state, 1)) : std::nullopt;
+            const auto address = ResolveAddress(state, 1);
+            const auto module = process && address ? process->ModuleAt(*address) : std::nullopt;
             if (module)
                 lua_pushstring(state, module->Name.c_str());
             else
@@ -1544,7 +1523,7 @@ namespace Manifold::Lua
 
         HWND WindowArgument(lua_State* state, int index)
         {
-            return reinterpret_cast<HWND>(static_cast<std::uintptr_t>(Number(state, index)));
+            return reinterpret_cast<HWND>(static_cast<std::uintptr_t>(NumberOrHex(state, index)));
         }
 
         void PushWindow(lua_State* state, HWND window)
@@ -1573,7 +1552,7 @@ namespace Manifold::Lua
 
         int GetWindowCompat(lua_State* state)
         {
-            PushWindow(state, ::GetWindow(WindowArgument(state, 1), static_cast<UINT>(Number(state, 2))));
+            PushWindow(state, ::GetWindow(WindowArgument(state, 1), static_cast<UINT>(NumberOrHex(state, 2))));
             return 1;
         }
 
@@ -1775,7 +1754,7 @@ namespace Manifold::Lua
 
         int SetSelectedCodeAddress(lua_State* state)
         {
-            const std::uint64_t address = Number(state, 1);
+            const std::uint64_t address = NumberOrHex(state, 1);
             Owner(state).SelectedCodeAddress = address;
             UiRequest request;
             request.Kind = UiRequestKind::MemoryViewerSelect;
@@ -2306,8 +2285,8 @@ namespace Manifold::Lua
                         options.Floats = RoundingFromCe(luaL_optinteger(s, 4, 0));
                         options.Value = luaL_optstring(s, 5, "");
                         options.Value2 = luaL_optstring(s, 6, "");
-                        options.Start = Number(s, 7);
-                        const std::uint64_t stop = Number(s, 8);
+                        options.Start = NumberOrHex(s, 7);
+                        const std::uint64_t stop = NumberOrHex(s, 8);
                         options.Stop = stop ? stop : process->HighestAddress();
                         ApplyProtection(options, luaL_optstring(s, 9, "+W*X-C"));
                         const lua_Integer alignment = luaL_optinteger(s, 10, 1);
@@ -2816,7 +2795,7 @@ namespace Manifold::Lua
                     {
                         Table::StructDefinition& target = CheckStructure(s, 1);
                         const auto& process = Owner(s).Process();
-                        const std::uint64_t base = Number(s, 2);
+                        const std::uint64_t base = NumberOrHex(s, 2);
                         const lua_Integer offset = luaL_optinteger(s, 3, 0);
                         const lua_Integer size = luaL_optinteger(s, 4, 4096);
                         if (!process || !base || offset < 0 || offset > 0x1000000 || size <= 0 || size > 0x100000)
@@ -3053,7 +3032,7 @@ namespace Manifold::Lua
             if (lua_type(state, 1) == LUA_TSTRING)
                 address = Owner(state).Evaluate(lua_tostring(state, 1)).value_or(0);
             else
-                address = Number(state, 1);
+                address = NumberOrHex(state, 1);
             UiRequest request{ UiRequestKind::StructureDissect, address, {} };
             if (lua_type(state, 3) == LUA_TSTRING)
                 request.Text = lua_tostring(state, 3);

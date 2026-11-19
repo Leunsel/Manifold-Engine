@@ -177,6 +177,9 @@
     <ClCompile Include="..\Source\Lua\LuaApi.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaArgs.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaAssist.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>

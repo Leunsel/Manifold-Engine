@@ -5,6 +5,7 @@
 #include "Core/Text.h"
 #include "Lua/LuaApi.h"
 #include "Lua/LuaDocBinding.h"
+#include "Table/AddressList.h"
 #include "Table/Structures.h"
 
 #include "lua.hpp"
@@ -105,7 +106,7 @@ namespace Manifold::Lua
         Open();
         m_engine.Symbols().SetLookupCallback([this](std::string_view name, bool first) -> std::optional<std::uint64_t>
             {
-                if (std::this_thread::get_id() != m_thread && Engine::OnActivationWorker())
+                if (!Manifold::OnMainThread() && Engine::OnActivationWorker())
                 {
                     std::optional<std::uint64_t> result;
                     const std::string copy(name);
@@ -747,7 +748,7 @@ namespace Manifold::Lua
 
     std::optional<std::uint64_t> LuaEngine::LookupSymbol(std::string_view name, bool first)
     {
-        if (m_symbolLookups.empty() || m_inSymbolLookup || !m_state || std::this_thread::get_id() != m_thread)
+        if (m_symbolLookups.empty() || m_inSymbolLookup || !m_state || !Manifold::OnMainThread())
             return std::nullopt;
         m_inSymbolLookup = true;
         std::optional<std::uint64_t> result;
@@ -1013,7 +1014,7 @@ namespace Manifold::Lua
 
     void LuaEngine::ProcessMessages()
     {
-        if (std::this_thread::get_id() != m_thread)
+        if (!Manifold::OnMainThread())
             return;
         MSG message{};
         ::PeekMessageW(&message, nullptr, 0, 0, PM_NOREMOVE);
@@ -1022,7 +1023,7 @@ namespace Manifold::Lua
 
     void LuaEngine::BlockingSleep(std::uint32_t milliseconds)
     {
-        if (std::this_thread::get_id() != m_thread)
+        if (!Manifold::OnMainThread())
         {
             ::Sleep(milliseconds);
             return;
@@ -1091,14 +1092,11 @@ namespace Manifold::Lua
             }
         }
 
-        const auto down = [](int key) { return (::GetAsyncKeyState(key) & 0x8000) != 0; };
         std::vector<int> pressed;
         for (auto& [id, hotkey] : m_hotkeys)
         {
-            const bool all = !hotkey.Keys.empty() && std::all_of(hotkey.Keys.begin(), hotkey.Keys.end(), down);
-            if (all && !hotkey.WasDown)
+            if (Table::KeysPressed(hotkey.Keys, hotkey.WasDown))
                 pressed.push_back(id);
-            hotkey.WasDown = all;
         }
         for (int id : pressed)
         {
@@ -1249,7 +1247,7 @@ namespace Manifold::Lua
 
     void LuaEngine::DispatchEvent(const char* name)
     {
-        if (std::this_thread::get_id() != m_thread)
+        if (!Manifold::OnMainThread())
             return;
         if (lua_getfield(m_state, LUA_REGISTRYINDEX, "Manifold.Dispatch") != LUA_TFUNCTION)
         {

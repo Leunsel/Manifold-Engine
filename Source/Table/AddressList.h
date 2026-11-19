@@ -211,6 +211,7 @@ namespace Manifold::Table
     };
 
     const char* HotkeyActionName(HotkeyAction action);
+    bool KeysPressed(const std::vector<int>& keys, bool& wasDown);
     std::string KeysText(const std::vector<int>& keys);
 
     std::string DropDownText(const std::vector<DropDownEntry>& entries);

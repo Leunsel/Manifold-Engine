@@ -147,6 +147,7 @@ namespace Manifold
     std::string_view ErrorArea(ErrorCode code);
     std::string ErrorMessage(ErrorCode code, std::string_view detail = {});
     std::string ErrorsMarkdown();
+    std::string SystemErrorText(std::uint32_t error);
 
     struct Status
     {

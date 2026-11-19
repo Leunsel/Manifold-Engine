@@ -4,6 +4,7 @@
 #include "Core/Text.h"
 #include "Core/Version.h"
 #include "Lua/LuaApi.h"
+#include "Lua/LuaArgs.h"
 #include "Lua/LuaCompatScripts.h"
 #include "Lua/LuaDocBinding.h"
 #include "Lua/LuaEngine.h"
@@ -71,33 +72,6 @@ namespace Manifold::Lua
             { "bytes", MemoryType::Bytes }, { "raw", MemoryType::Raw }, { "string", MemoryType::String },
         };
 
-        Engine& Owner(lua_State* state)
-        {
-            return EngineOf(state).Owner();
-        }
-
-        std::string MessageOf(const Status& status)
-        {
-            const std::string suffix = " (" + ErrorName(status.Code) + ")";
-            std::string text = status.Text;
-            if (text.size() >= suffix.size() && text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0)
-                text.resize(text.size() - suffix.size());
-            return text;
-        }
-
-        int Failed(lua_State* state, const Status& status)
-        {
-            lua_pushnil(state);
-            lua_pushstring(state, ErrorName(status.Code).c_str());
-            lua_pushstring(state, MessageOf(status).c_str());
-            return 3;
-        }
-
-        int Failed(lua_State* state, ErrorCode code, std::string_view detail = {})
-        {
-            return Failed(state, Status::Fail(code, detail));
-        }
-
         int Fail(lua_State* state)
         {
             const std::string_view name = luaL_checkstring(state, 1);
@@ -114,33 +88,16 @@ namespace Manifold::Lua
             }
             const Status status = Status::Fail(code, std::string_view(detail, length));
             lua_pushstring(state, ErrorName(code).c_str());
-            lua_pushstring(state, MessageOf(status).c_str());
+            lua_pushstring(state, FailureMessage(status).c_str());
             return 2;
         }
 
         bool Resolve(lua_State* state, int index, std::uint64_t& address, Status& error)
         {
-            if (lua_type(state, index) == LUA_TNUMBER)
-            {
-                const auto value = ExactInteger(state, index);
-                if (!value)
-                {
-                    error = Status::Fail(ErrorCode::LuaBadArgument, "the address is not a whole number");
-                    return false;
-                }
-                address = static_cast<std::uint64_t>(*value);
-                return true;
-            }
-            const char* text = luaL_checkstring(state, index);
-            const auto value = Owner(state).Evaluate(text, &error);
-            if (!value)
-            {
-                if (error.Ok())
-                    error = Status::Fail(ErrorCode::ExprSyntax, text);
-                return false;
-            }
-            address = *value;
-            return true;
+            const auto value = ResolveAddress(state, index, error);
+            if (value)
+                address = *value;
+            return value.has_value();
         }
 
         std::shared_ptr<Target::Process> Opened(lua_State* state, Status& error)
@@ -170,8 +127,8 @@ namespace Manifold::Lua
         int AccessFailed(lua_State* state, const Target::Process& process, const Status& status)
         {
             if (!process.Alive())
-                return Failed(state, ErrorCode::ProcessExited);
-            return Failed(state, status);
+                return PushFailure(state, ErrorCode::ProcessExited);
+            return PushFailure(state, status);
         }
 
         int ReadFailure(lua_State* state, const Target::Process& process, std::uint64_t address)
@@ -310,7 +267,7 @@ namespace Manifold::Lua
             Status error;
             const auto process = Opened(state, error);
             if (!process)
-                return Failed(state, error);
+                return PushFailure(state, error);
             PushProcess(state, *process);
             return 1;
         }
@@ -319,7 +276,7 @@ namespace Manifold::Lua
         {
             const Status status = OpenProcessArgument(Owner(state), state, 1);
             if (!status)
-                return Failed(state, status);
+                return PushFailure(state, status);
             return ProcessInfo(state);
         }
 
@@ -348,10 +305,10 @@ namespace Manifold::Lua
             Status error;
             const auto process = Opened(state, error);
             if (!process)
-                return Failed(state, error);
+                return PushFailure(state, error);
             const auto module = process->MainModule();
             if (!module)
-                return Failed(state, ErrorCode::ModulesUnreadable);
+                return PushFailure(state, ErrorCode::ModulesUnreadable);
             PushModule(state, *module);
             return 1;
         }
@@ -361,11 +318,11 @@ namespace Manifold::Lua
             Status error;
             const auto process = Opened(state, error);
             if (!process)
-                return Failed(state, error);
+                return PushFailure(state, error);
             const std::string name = luaL_checkstring(state, 1);
             const auto module = process->FindModule(name);
             if (!module)
-                return Failed(state, ErrorCode::ModuleNotFound, name);
+                return PushFailure(state, ErrorCode::ModuleNotFound, name);
             PushModule(state, *module);
             return 1;
         }
@@ -375,10 +332,10 @@ namespace Manifold::Lua
             Status error;
             const auto process = Opened(state, error);
             if (!process)
-                return Failed(state, error);
+                return PushFailure(state, error);
             const Target::ModuleList modules = process->Modules();
             if (!modules)
-                return Failed(state, ErrorCode::ModulesUnreadable);
+                return PushFailure(state, ErrorCode::ModulesUnreadable);
             lua_createtable(state, static_cast<int>(modules->size()), 0);
             lua_Integer index = 1;
             for (const Target::ModuleInfo& module : *modules)
@@ -394,7 +351,7 @@ namespace Manifold::Lua
             std::uint64_t address = 0;
             Status error;
             if (!Resolve(state, 1, address, error))
-                return Failed(state, error);
+                return PushFailure(state, error);
             lua_pushinteger(state, static_cast<lua_Integer>(address));
             return 1;
         }
@@ -404,7 +361,7 @@ namespace Manifold::Lua
             std::uint64_t address = 0;
             Status error;
             if (!Resolve(state, 1, address, error))
-                return Failed(state, error);
+                return PushFailure(state, error);
             const std::string text = Owner(state).Describe(address);
             lua_pushstring(state, text.c_str());
             return 1;
@@ -463,10 +420,10 @@ namespace Manifold::Lua
             Status error;
             const auto process = OpenedForAccess(state, error);
             if (!process)
-                return Failed(state, error);
+                return PushFailure(state, error);
             std::uint64_t address = 0;
             if (!Resolve(state, 1, address, error))
-                return Failed(state, error);
+                return PushFailure(state, error);
             const auto type = TypeNamed(luaL_checkstring(state, 2));
             if (!type)
                 return luaL_argerror(state, 2, "unknown memory type");
@@ -536,10 +493,10 @@ namespace Manifold::Lua
             Status error;
             const auto process = OpenedForAccess(state, error);
             if (!process)
-                return Failed(state, error);
+                return PushFailure(state, error);
             std::uint64_t address = 0;
             if (!Resolve(state, 1, address, error))
-                return Failed(state, error);
+                return PushFailure(state, error);
             const auto type = TypeNamed(luaL_checkstring(state, 2));
             if (!type)
                 return luaL_argerror(state, 2, "unknown memory type");
@@ -574,14 +531,7 @@ namespace Manifold::Lua
                 else
                 {
                     luaL_checktype(state, 3, LUA_TTABLE);
-                    const lua_Integer count = static_cast<lua_Integer>(lua_rawlen(state, 3));
-                    bytes.reserve(static_cast<std::size_t>(count));
-                    for (lua_Integer i = 1; i <= count; ++i)
-                    {
-                        lua_rawgeti(state, 3, i);
-                        bytes.push_back(static_cast<std::uint8_t>(lua_tointeger(state, -1)));
-                        lua_pop(state, 1);
-                    }
+                    bytes = ByteTable(state, 3);
                 }
                 break;
             case MemoryType::String:
@@ -637,11 +587,11 @@ namespace Manifold::Lua
             Status error;
             const auto process = Opened(state, error);
             if (!process)
-                return Failed(state, error);
+                return PushFailure(state, error);
             const std::string text = luaL_checkstring(state, 1);
             const auto pattern = Scan::ParsePattern(text);
             if (!pattern)
-                return Failed(state, ErrorCode::ScanBadPattern, text);
+                return PushFailure(state, ErrorCode::ScanBadPattern, text);
             std::uint64_t start = 0;
             std::uint64_t stop = ~0ull;
             if (!lua_isnoneornil(state, 2))
@@ -649,7 +599,7 @@ namespace Manifold::Lua
                 const std::string name = luaL_checkstring(state, 2);
                 const auto module = process->FindModule(name);
                 if (!module)
-                    return Failed(state, ErrorCode::ModuleNotFound, name);
+                    return PushFailure(state, ErrorCode::ModuleNotFound, name);
                 start = module->Base;
                 stop = module->Base + module->Size;
             }
@@ -673,13 +623,13 @@ namespace Manifold::Lua
             Status error;
             const auto process = Opened(state, error);
             if (!process)
-                return Failed(state, error);
+                return PushFailure(state, error);
             std::uint64_t address = 0;
             if (!Resolve(state, 1, address, error))
-                return Failed(state, error);
+                return PushFailure(state, error);
             const auto module = process->ModuleAt(address);
             if (!module)
-                return Failed(state, ErrorCode::NoModuleAt, Hex(address));
+                return PushFailure(state, ErrorCode::NoModuleAt, Hex(address));
             PushModule(state, *module);
             return 1;
         }
@@ -689,14 +639,14 @@ namespace Manifold::Lua
             Status error;
             const auto process = Opened(state, error);
             if (!process)
-                return Failed(state, error);
+                return PushFailure(state, error);
             const std::string name = luaL_checkstring(state, 1);
             std::uint64_t address = 0;
             if (!Resolve(state, 2, address, error))
-                return Failed(state, error);
+                return PushFailure(state, error);
             const Status status = Owner(state).Symbols().Register(name, address, "lua");
             if (!status)
-                return Failed(state, status);
+                return PushFailure(state, status);
             lua_pushboolean(state, 1);
             return 1;
         }
@@ -705,7 +655,7 @@ namespace Manifold::Lua
         {
             const std::string name = luaL_checkstring(state, 1);
             if (!Owner(state).Symbols().Unregister(name))
-                return Failed(state, ErrorCode::ExprUnknownSymbol, name);
+                return PushFailure(state, ErrorCode::ExprUnknownSymbol, name);
             lua_pushboolean(state, 1);
             return 1;
         }

@@ -461,7 +461,7 @@ namespace Manifold
 
     void ActivationRunner::WaitForActivation()
     {
-        if (!m_running || m_workerLuaActive || !m_engine.OnMainThread())
+        if (!m_running || m_workerLuaActive || !Manifold::OnMainThread())
             return;
         const bool previous = m_waitingForWorker;
         m_waitingForWorker = true;
@@ -476,7 +476,7 @@ namespace Manifold
 
     void ActivationRunner::RunOnMainAndWait(const std::function<void()>& work)
     {
-        if (m_engine.OnMainThread())
+        if (Manifold::OnMainThread())
         {
             work();
             return;
@@ -543,7 +543,7 @@ namespace Manifold
 
     Status ActivationRunner::SetActive(Table::MemoryRecord& record, bool active)
     {
-        if (m_running && m_engine.OnMainThread())
+        if (m_running && Manifold::OnMainThread())
             WaitForActivation();
         const Status status = ActivateTree(record, active);
         m_engine.Table().Refresh();

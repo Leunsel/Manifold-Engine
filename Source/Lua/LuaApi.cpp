@@ -6,6 +6,7 @@
 #include "Core/Text.h"
 #include "Core/Version.h"
 #include "Lua/InputBox.h"
+#include "Lua/LuaArgs.h"
 #include "Lua/LuaEngine.h"
 #include "Scan/Scanner.h"
 
@@ -32,34 +33,12 @@ namespace Manifold::Lua
             return names;
         }
 
-        Engine& Owner(lua_State* state)
-        {
-            return EngineOf(state).Owner();
-        }
-
         std::shared_ptr<Target::Process> NeedProcess(lua_State* state)
         {
             const auto& process = Owner(state).Process();
             if (!process)
                 luaL_error(state, "%s", ErrorMessage(ErrorCode::NoProcess).c_str());
             return process;
-        }
-
-        std::uint64_t AddressArgument(lua_State* state, int index)
-        {
-            if (lua_type(state, index) == LUA_TNUMBER)
-            {
-                const auto value = ExactInteger(state, index);
-                if (!value)
-                    luaL_argerror(state, index, "the address is not a whole number");
-                return static_cast<std::uint64_t>(value.value_or(0));
-            }
-            const char* text = luaL_checkstring(state, index);
-            Status error;
-            const auto value = Owner(state).Evaluate(text, &error);
-            if (!value)
-                luaL_error(state, "%s", error.Text.c_str());
-            return *value;
         }
 
         void PushAddress(lua_State* state, std::uint64_t address)
@@ -141,15 +120,6 @@ namespace Manifold::Lua
             }
             engine.AddEntry(std::move(entry));
             return 0;
-        }
-
-        std::string TextArgument(lua_State* state, int index)
-        {
-            std::size_t length = 0;
-            const char* text = luaL_tolstring(state, index, &length);
-            std::string result(text, length);
-            lua_pop(state, 1);
-            return result;
         }
 
         int ShowMessage(lua_State* state)
@@ -417,30 +387,6 @@ namespace Manifold::Lua
             for (std::uint8_t byte : bytes)
                 lua_pushinteger(state, byte);
             return static_cast<int>(count);
-        }
-
-        std::vector<std::uint8_t> BytesFrom(lua_State* state, int first)
-        {
-            std::vector<std::uint8_t> bytes;
-            const int top = lua_gettop(state);
-            for (int i = first; i <= top; ++i)
-            {
-                if (lua_istable(state, i))
-                {
-                    const lua_Integer length = luaL_len(state, i);
-                    for (lua_Integer n = 1; n <= length; ++n)
-                    {
-                        lua_rawgeti(state, i, n);
-                        bytes.push_back(static_cast<std::uint8_t>(lua_tointeger(state, -1)));
-                        lua_pop(state, 1);
-                    }
-                }
-                else
-                {
-                    bytes.push_back(static_cast<std::uint8_t>(luaL_checkinteger(state, i)));
-                }
-            }
-            return bytes;
         }
 
         int WriteBytes(lua_State* state)
@@ -812,18 +758,9 @@ namespace Manifold::Lua
 
         std::vector<std::uint8_t> ByteArgument(lua_State* state, int index)
         {
-            std::vector<std::uint8_t> bytes;
             if (lua_istable(state, index))
-            {
-                const lua_Integer count = static_cast<lua_Integer>(lua_rawlen(state, index));
-                for (lua_Integer i = 1; i <= count; ++i)
-                {
-                    lua_rawgeti(state, index, i);
-                    bytes.push_back(static_cast<std::uint8_t>(lua_tointeger(state, -1)));
-                    lua_pop(state, 1);
-                }
-                return bytes;
-            }
+                return ByteTable(state, index);
+            std::vector<std::uint8_t> bytes;
             const std::string text = luaL_checkstring(state, index);
             int high = -1;
             for (const char c : text)
