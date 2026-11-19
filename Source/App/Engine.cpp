@@ -127,6 +127,33 @@ namespace Manifold
         return span;
     }
 
+    std::uint64_t Engine::SymbolEnd(std::uint64_t start)
+    {
+        constexpr std::uint64_t kReach = 0x1000;
+        if (!HasProcess() || start == 0)
+            return start;
+        const Target::Process& process = *Process();
+        const Target::CodeMap* map = CodeMap();
+        if (Disassembler().InlineHolder(process, start))
+            return start;
+        if (map)
+        {
+            if (const auto function = map->FunctionAt(start))
+                return function->second;
+            if (const auto section = map->SectionAt(start); section && !section->Code)
+            {
+                const std::vector<Disasm::Instruction> row = Disassembler().ReadMany(process, start, 1, nullptr, map);
+                return row.empty() ? start : row.front().Next();
+            }
+        }
+        if (MonoPresent())
+        {
+            if (const auto method = Mono().MethodRange(start))
+                return method->second;
+        }
+        return Disasm::CodeExtent(Disassembler(), process, start, start + kReach, map);
+    }
+
     Status Engine::OpenProcess(ProcessId id)
     {
         m_activation.WaitForActivation();

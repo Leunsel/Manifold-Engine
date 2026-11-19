@@ -35,5 +35,6 @@ namespace Manifold::Disasm
 
     std::optional<FunctionSpan> FindFunction(const Disassembler& disassembler, const Target::Process& process, std::uint64_t address, const CodeHints* hints,
         const FunctionClues& clues);
+    std::uint64_t CodeExtent(const Disassembler& disassembler, const Target::Process& process, std::uint64_t start, std::uint64_t limit, const CodeHints* hints);
     const char* FunctionSourceText(FunctionSource source);
 }

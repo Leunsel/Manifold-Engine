@@ -796,10 +796,10 @@ namespace Manifold::UI
         std::string functionName;
         if (showSymbols && m_top)
         {
-            if (const auto symbol = m_engine.Symbols().Containing(m_top, kSymbolReach))
+            if (const auto symbol = m_engine.Symbols().Containing(m_top, kSymbolReach); symbol && m_top < SymbolEnd(symbol->first))
             {
                 functionStart = symbol->first;
-                functionEnd = symbol->first + kSymbolReach;
+                functionEnd = SymbolEnd(symbol->first);
                 functionName = symbol->second;
             }
             if (m_engine.MonoPresent())
@@ -882,7 +882,7 @@ namespace Manifold::UI
                 if (header)
                 {
                     functionStart = line.Address;
-                    functionEnd = line.Address + kSymbolReach;
+                    functionEnd = std::max(SymbolEnd(line.Address), line.Next());
                 }
                 else if (m_engine.MonoPresent())
                 {
@@ -2630,6 +2630,27 @@ namespace Manifold::UI
                 return "It lies outside the module's code sections, in its headers or data.";
         }
         return "There is no unwind data or managed method here, and nothing above it within 64 KB both looks like a start and leads here.";
+    }
+
+    std::uint64_t MemoryViewer::SymbolEnd(std::uint64_t start)
+    {
+        const std::uint64_t generation = m_engine.ProcessGeneration();
+        const std::uint64_t symbols = m_engine.Symbols().Generation();
+        const std::uint64_t writes = m_engine.Writes().Revision();
+        const double now = m_engine.Now();
+        SymbolEndCache& cache = m_symbolEnds;
+        if (cache.Generation != generation || cache.Symbols != symbols || cache.Writes != writes || now - cache.Stamp > 1.0)
+        {
+            cache.Ends.clear();
+            cache.Generation = generation;
+            cache.Symbols = symbols;
+            cache.Writes = writes;
+            cache.Stamp = now;
+        }
+        const auto [entry, added] = cache.Ends.try_emplace(start, start);
+        if (added)
+            entry->second = m_engine.SymbolEnd(start);
+        return entry->second;
     }
 
     void MemoryViewer::JumpToFunction(Command command)

@@ -37,6 +37,7 @@ namespace Manifold::Tests
         constexpr std::uint64_t kFarCall = 0x540;
         constexpr std::uint64_t kNearCall = 0x560;
         constexpr std::uint64_t kJunk = 0x59E;
+        constexpr std::uint64_t kZeroData = 0x5C0;
         constexpr std::uint64_t kFarTarget = 0x1CB8D400000ull;
         constexpr const char* kOwner = "relaytest";
 
@@ -435,7 +436,89 @@ namespace Manifold::Tests
             }
             symbols.Register("Junk_Code", image.Base + kJunk + 2, kOwner);
             symbols.Register("Inside_Frame", image.Base + kText + kFrameAt + 1, kOwner);
+            symbols.Register("Leaf_Start", image.Base + kText + kLeafAt, kOwner);
+            symbols.Register("Zero_Data", image.Base + kZeroData, kOwner);
             return true;
+        }
+
+        std::vector<std::string> LabelColumn(Engine& engine, const std::vector<Disasm::Instruction>& rows)
+        {
+            std::vector<std::string> labels;
+            std::uint64_t start = 0;
+            std::uint64_t end = 0;
+            for (const Disasm::Instruction& row : rows)
+            {
+                if (engine.Symbols().ExactName(row.Address))
+                {
+                    start = row.Address;
+                    end = std::max(engine.SymbolEnd(row.Address), row.Next());
+                }
+                if (start && row.Address >= start && row.Address < end)
+                    labels.push_back("+" + Hex(row.Address - start));
+                else
+                    labels.push_back(ReplaceAll(engine.Symbols().ModuleOffset(row.Address), "\"", ""));
+            }
+            return labels;
+        }
+
+        void Labels(Engine& engine, const RelayImage& image)
+        {
+            const std::uint64_t base = image.Base;
+            const auto end = [&](std::uint64_t offset)
+            {
+                return engine.SymbolEnd(base + offset) - base;
+            };
+            for (std::size_t slot = 0; slot < 3; ++slot)
+            {
+                const std::uint64_t at = kSlots + slot * 0x10;
+                CHECK_MSG(end(at) == at + 14, "the relay at +" + Hex(at) + " ends at +" + Hex(end(at)));
+                CHECK_MSG(end(at + 6) == at + 6, "the destination at +" + Hex(at + 6) + " ends at +" + Hex(end(at + 6)));
+            }
+            CHECK_MSG(end(0) > 0 && end(0) < 0x40, "the module base ends at +" + Hex(end(0)));
+            CHECK_MSG(end(kZeroData) == kZeroData + 2, "zero data ends at +" + Hex(end(kZeroData)));
+            CHECK_MSG(end(kJunk + 2) == kJunk + 2 + 5, "the header code ends at +" + Hex(end(kJunk + 2)));
+            CHECK(end(kText + kFrameAt + 1) == kText + kFrameAt + sizeof(kFrame));
+            CHECK(end(kText + kLeafAt) == kText + kLeafAt + sizeof(kLeaf));
+            CHECK(end(kText + kSecondAt) == kText + kSecondAt + sizeof(kFrame));
+
+            const Target::Process& process = *engine.Process();
+            const std::vector<Disasm::Instruction> rows = engine.Disassembler().ReadMany(process, base + 0x4F0, 40, nullptr, engine.CodeMap());
+            const std::vector<std::string> labels = LabelColumn(engine, rows);
+            const std::string module = process.ModuleAt(base)->Name + "+";
+            int symbolic = 0;
+            for (std::size_t i = 0; i < rows.size(); ++i)
+            {
+                const std::uint64_t offset = rows[i].Address - base;
+                const bool slot = offset >= kSlots && offset < kSlots + 0x30 && (offset - kSlots) % 0x10 == 0;
+                const std::string expected = slot ? "+0" : module + Hex(offset);
+                if (labels[i] != expected)
+                    CHECK_MSG(false, "the row at +" + Hex(offset) + " is labelled " + labels[i] + ", expected " + expected);
+                symbolic += slot ? 1 : 0;
+            }
+            CHECK(symbolic == 3);
+            for (const std::uint64_t top : { kSlots + 0xE, kSlots + 0x2E, 0x530ull, 0x5B0ull, kZeroData + 2 })
+            {
+                const auto symbol = engine.Symbols().Containing(base + top, 0x1000);
+                CHECK_MSG(!symbol || engine.SymbolEnd(symbol->first) <= base + top, "the top row +" + Hex(top) + " stays labelled by " + (symbol ? symbol->second : std::string()));
+            }
+
+            auto* cave = static_cast<std::uint8_t*>(::VirtualAlloc(nullptr, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE));
+            CHECK(cave != nullptr);
+            if (!cave)
+                return;
+            const std::uint8_t code[] = { 0x85, 0xC9, 0x75, 0x07, 0xB8, 0x01, 0x00, 0x00, 0x00, 0xEB, 0x05, 0xB8, 0x02, 0x00, 0x00, 0x00, 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00 };
+            std::memcpy(cave, code, sizeof(code));
+            std::memcpy(cave + sizeof(code), &kFarTarget, sizeof(kFarTarget));
+            const char text[] = "Hello";
+            std::memcpy(cave + 0x1E, text, sizeof(text));
+            const auto at = reinterpret_cast<std::uint64_t>(cave);
+            engine.Symbols().Register("Cave_Code", at, kOwner);
+            engine.Symbols().Register("Cave_Zero", at + 0x40, kOwner);
+            CHECK_MSG(engine.SymbolEnd(at) == at + 0x1E, "the cave code ends at +" + Hex(engine.SymbolEnd(at) - at));
+            CHECK_MSG(engine.SymbolEnd(at + 0x40) == at + 0x42, "the cave zero data ends at +" + Hex(engine.SymbolEnd(at + 0x40) - at));
+            engine.Symbols().Unregister("Cave_Code");
+            engine.Symbols().Unregister("Cave_Zero");
+            ::VirtualFree(cave, 0, MEM_RELEASE);
         }
 
         int RunRelayListing()
@@ -447,13 +530,18 @@ namespace Manifold::Tests
                 return 1;
             const Target::Symbols& symbols = engine.Symbols();
             const std::uint64_t top = engine.Disassembler().BackUp(*engine.Process(), image.Base + kSlots, 4, engine.CodeMap());
-            for (const Disasm::Instruction& row : engine.Disassembler().ReadMany(*engine.Process(), top, 40, &symbols, engine.CodeMap()))
+            std::vector<Disasm::Instruction> rows = engine.Disassembler().ReadMany(*engine.Process(), top, 40, &symbols, engine.CodeMap());
+            rows.erase(std::find_if(rows.begin(), rows.end(), [&](const Disasm::Instruction& row)
+                           {
+                               return row.Address >= image.Base + 0x5B0;
+                           }),
+                rows.end());
+            const std::vector<std::string> labels = LabelColumn(engine, rows);
+            for (std::size_t i = 0; i < rows.size(); ++i)
             {
-                if (row.Address >= image.Base + 0x5B0)
-                    break;
-                if (const auto name = symbols.ExactName(row.Address))
+                if (const auto name = symbols.ExactName(rows[i].Address))
                     std::printf("%s\n", name->c_str());
-                std::printf("  +%-5s %-48s %s\n", Hex(row.Address - image.Base).c_str(), row.BytesText().c_str(), row.Text().c_str());
+                std::printf("  %-36s %-48s %s\n", labels[i].c_str(), rows[i].BytesText().c_str(), rows[i].Text().c_str());
             }
             for (const std::uint64_t offset : { kSlots, kSlots + 0xE, kSlots + 0x10, kJunk + 2 })
                 std::printf("function at +%s: %s\n", Hex(offset).c_str(), engine.FunctionAround(image.Base + offset) ? "found" : "none");
@@ -475,6 +563,7 @@ namespace Manifold::Tests
         Scrolling(engine, image);
         Functions(engine, image);
         Graphs(engine, image);
+        Labels(engine, image);
         engine.Symbols().UnregisterOwner(kOwner);
         engine.CloseProcess();
         return Totals().Failures - before;

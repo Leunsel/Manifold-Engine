@@ -11,6 +11,7 @@
 #include <map>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace Manifold::UI
@@ -49,6 +50,7 @@ namespace Manifold::UI
         std::vector<Disasm::Instruction> InstructionsBetween(std::uint64_t first, std::uint64_t last, bool names) const;
         std::optional<Disasm::FunctionSpan> FunctionOf(std::uint64_t address);
         std::string NoFunctionReason(std::uint64_t address) const;
+        std::uint64_t SymbolEnd(std::uint64_t start);
         void FunctionMenu(const Disasm::Instruction& instruction);
         void JumpToFunction(Command command);
         void CopyInstructions(Target::AddressStyle style);
@@ -113,6 +115,15 @@ namespace Manifold::UI
             std::optional<Disasm::FunctionSpan> Span;
         };
         FunctionCache m_function;
+        struct SymbolEndCache
+        {
+            std::uint64_t Generation = 0;
+            std::uint64_t Symbols = 0;
+            std::uint64_t Writes = 0;
+            double Stamp = 0.0;
+            std::unordered_map<std::uint64_t, std::uint64_t> Ends;
+        };
+        SymbolEndCache m_symbolEnds;
         std::vector<std::uint64_t> m_history;
         std::vector<Disasm::Instruction> m_lines;
         int m_visibleLines = 30;
