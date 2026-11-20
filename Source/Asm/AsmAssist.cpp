@@ -1,6 +1,7 @@
 #include "Asm/AsmAssist.h"
 
 #include "Asm/Assembler.h"
+#include "Asm/MnemonicDocs.h"
 #include "Core/Text.h"
 
 #include <algorithm>
@@ -294,7 +295,7 @@ namespace Manifold::Asm
                 for (const std::string& mnemonic : KnownMnemonics())
                 {
                     if (StartsWithNoCase(mnemonic, word.Prefix))
-                        add(mnemonic, "keyword", "", "");
+                        add(mnemonic, "keyword", "", MnemonicSummary(mnemonic));
                 }
             }
             break;

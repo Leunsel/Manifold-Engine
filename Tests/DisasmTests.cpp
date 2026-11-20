@@ -2,6 +2,8 @@
 
 #include "App/Engine.h"
 #include "App/Settings.h"
+#include "Asm/Assembler.h"
+#include "Asm/MnemonicDocs.h"
 #include "Core/Text.h"
 #include "Disasm/Disassembler.h"
 #include "Lua/LuaEngine.h"
@@ -426,6 +428,69 @@ namespace Manifold::Tests
             CHECK(chainedByPointer == (std::vector<std::pair<std::uint32_t, std::uint32_t>>{ { 0x2F00, 0x3040 } }));
         }
 
+        void InstructionHelp()
+        {
+            CHECK(Asm::MnemonicSummary("MOV").rfind("Copies the source", 0) == 0);
+            CHECK(Asm::MnemonicSummary("jne") == "Jumps if not equal (ZF = 0), else goes on.");
+            CHECK(Asm::MnemonicSummary("jg").find("greater, signed") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("setb").rfind("Sets the byte to 1 if below", 0) == 0);
+            CHECK(Asm::MnemonicSummary("cmovz").find("zero (ZF = 1)") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("addss") == "Adds one float (32-bit) in the low lane.");
+            CHECK(Asm::MnemonicSummary("mulpd") == "Multiplies every double lane.");
+            CHECK(Asm::MnemonicSummary("xorps").find("sets the register to zero") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("cvttss2si") == "Converts a float to an integer, cutting off the fraction (rounding toward zero).");
+            CHECK(Asm::MnemonicSummary("cvtsi2sd").rfind("Converts an integer to a double", 0) == 0);
+            CHECK(Asm::MnemonicSummary("vaddss").rfind("AVX form", 0) == 0);
+            CHECK(Asm::MnemonicSummary("vmovss").find("Copies one float") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("jmp") == "Jumps to the target.");
+            CHECK(Asm::MnemonicSummary("jx").empty() && Asm::MnemonicSummary("setx").empty() && Asm::MnemonicSummary("").empty());
+            CHECK(Asm::MnemonicSummary("sets").rfind("Sets the byte to 1 if negative", 0) == 0);
+            CHECK(Asm::MnemonicSummary("addsx").empty() && Asm::MnemonicSummary("cvtxx2si").empty());
+
+            int described = 0;
+            const std::vector<std::string> mnemonics = Asm::KnownMnemonics();
+            for (const char* common : { "mov", "lea", "add", "sub", "cmp", "test", "jmp", "call", "ret", "push", "pop", "xor", "and", "or", "imul", "movss", "movsd",
+                     "movaps", "movups", "addss", "subss", "mulss", "divss", "comiss", "cvtsi2ss", "cvttss2si", "movzx", "movsx", "movsxd", "inc", "dec", "nop", "int3",
+                     "je", "jne", "jz", "jnz", "jl", "jg", "jle", "jge", "ja", "jb", "jbe", "jae", "sete", "setne", "cmove", "cmovne", "shl", "shr", "sar", "neg", "not",
+                     "cdq", "cqo", "idiv", "div", "mul", "xchg", "cmpxchg", "lock", "vmovss", "vaddss", "pxor", "movd", "movq", "sqrtss", "minss", "maxss", "andps" })
+            {
+                if (std::find(mnemonics.begin(), mnemonics.end(), std::string(common)) == mnemonics.end())
+                    continue;
+                CHECK_MSG(!Asm::MnemonicSummary(common).empty(), std::string("no text for ") + common);
+                ++described;
+            }
+            CHECK(described > 60);
+
+            Disasm::Disassembler disassembler(true);
+            const std::uint8_t load[] = { 0x8B, 0x43, 0x10 };
+            const Disasm::Instruction mov = disassembler.Decode(0x1000, load, sizeof(load));
+            const auto facts = disassembler.Facts(mov);
+            CHECK(facts && facts->Operands.size() == 2);
+            if (facts && facts->Operands.size() == 2)
+            {
+                CHECK(facts->Operands[0].Written && !facts->Operands[0].Read && !facts->Operands[0].Memory && facts->Operands[0].Text == "eax");
+                CHECK(facts->Operands[1].Read && facts->Operands[1].Memory && facts->Operands[1].Size == 4);
+                CHECK(facts->FlagsModified == 0 && facts->FlagsTested == 0);
+                const std::vector<std::string> lines = Disasm::ExplainFacts(*facts);
+                CHECK(lines.size() == 2 && lines[0] == "Writes eax" && lines[1].rfind("Reads 4 bytes at ", 0) == 0 && lines[1].find("rbx+10") != std::string::npos);
+                CHECK(!facts->Category.empty());
+            }
+            const std::uint8_t compare[] = { 0x83, 0xF8, 0x05 };
+            const auto cmp = disassembler.Facts(disassembler.Decode(0x1000, compare, sizeof(compare)));
+            CHECK(cmp && (cmp->FlagsModified & 0x40) && !cmp->Operands.empty() && !cmp->Operands[0].Written);
+            if (cmp)
+            {
+                const std::vector<std::string> lines = Disasm::ExplainFacts(*cmp);
+                CHECK(std::any_of(lines.begin(), lines.end(), [](const std::string& line) { return line.rfind("Changes the flags", 0) == 0 && line.find("ZF") != std::string::npos; }));
+                CHECK(std::any_of(lines.begin(), lines.end(), [](const std::string& line) { return line == "Uses the constant 5"; }));
+            }
+            const std::uint8_t branch[] = { 0x75, 0x02 };
+            const auto jne = disassembler.Facts(disassembler.Decode(0x1000, branch, sizeof(branch)));
+            CHECK(jne && (jne->FlagsTested & 0x40) && jne->FlagsModified == 0);
+            CHECK(Disasm::FlagNames(0x1 | 0x40 | 0x800) == "CF ZF OF");
+            Disasm::Instruction invalid;
+            CHECK(!disassembler.Facts(invalid));
+        }
     }
 
     int RunDisasmTests()
@@ -450,6 +515,7 @@ namespace Manifold::Tests
         }
         UnreadableFloor(engine);
         ChainedUnwind();
+        InstructionHelp();
         engine.CloseProcess();
         return Totals().Failures - before;
     }

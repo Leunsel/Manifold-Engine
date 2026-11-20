@@ -597,6 +597,92 @@ namespace Manifold::Disasm
         return std::nullopt;
     }
 
+    std::string FlagNames(std::uint32_t mask)
+    {
+        static constexpr std::pair<std::uint32_t, const char*> kFlags[] = { { ZYDIS_CPUFLAG_CF, "CF" }, { ZYDIS_CPUFLAG_PF, "PF" }, { ZYDIS_CPUFLAG_AF, "AF" },
+            { ZYDIS_CPUFLAG_ZF, "ZF" }, { ZYDIS_CPUFLAG_SF, "SF" }, { ZYDIS_CPUFLAG_TF, "TF" }, { ZYDIS_CPUFLAG_IF, "IF" }, { ZYDIS_CPUFLAG_DF, "DF" },
+            { ZYDIS_CPUFLAG_OF, "OF" } };
+        std::string text;
+        for (const auto& [bit, name] : kFlags)
+        {
+            if (mask & bit)
+                text += (text.empty() ? "" : " ") + std::string(name);
+        }
+        return text;
+    }
+
+    std::vector<std::string> ExplainFacts(const InstructionFacts& facts)
+    {
+        std::vector<std::string> lines;
+        for (const OperandFact& operand : facts.Operands)
+        {
+            if (operand.Text.empty())
+                continue;
+            if (operand.Immediate)
+            {
+                lines.push_back("Uses the constant " + operand.Text);
+                continue;
+            }
+            const char* verb = operand.Read && operand.Written ? "Reads and writes" : operand.Written ? "Writes" : operand.Read ? "Reads" : "Uses";
+            if (operand.Memory && operand.Size > 0)
+                lines.push_back(std::string(verb) + " " + std::to_string(operand.Size) + (operand.Size == 1 ? " byte at " : " bytes at ") + operand.Text);
+            else
+                lines.push_back(std::string(verb) + " " + operand.Text);
+        }
+        if (facts.FlagsTested)
+            lines.push_back("Reads the flags " + FlagNames(facts.FlagsTested));
+        if (const std::uint32_t changed = facts.FlagsModified | facts.FlagsCleared | facts.FlagsSet)
+        {
+            std::string text = "Changes the flags " + FlagNames(changed);
+            if (facts.FlagsCleared)
+                text += " (clears " + FlagNames(facts.FlagsCleared) + ")";
+            if (facts.FlagsSet)
+                text += " (sets " + FlagNames(facts.FlagsSet) + ")";
+            lines.push_back(text);
+        }
+        if (facts.FlagsUndefined)
+            lines.push_back("Leaves undefined: " + FlagNames(facts.FlagsUndefined));
+        return lines;
+    }
+
+    std::optional<InstructionFacts> Disassembler::Facts(const Instruction& line) const
+    {
+        if (!line.Valid || line.Length == 0)
+            return std::nullopt;
+        ZydisDecodedInstruction instruction{};
+        ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT]{};
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&m_state->Decoder, line.Bytes.data(), std::min<std::size_t>(line.Length, line.Bytes.size()), &instruction, operands)))
+            return std::nullopt;
+        InstructionFacts facts;
+        if (const char* category = ZydisCategoryGetString(instruction.meta.category))
+            facts.Category = category;
+        if (const char* isa = ZydisISASetGetString(instruction.meta.isa_set))
+            facts.IsaSet = isa;
+        for (ZyanU8 i = 0; i < instruction.operand_count_visible; ++i)
+        {
+            const ZydisDecodedOperand& operand = operands[i];
+            OperandFact fact;
+            char text[128] = "";
+            if (ZYAN_SUCCESS(ZydisFormatterFormatOperand(&m_state->Formatter, &instruction, &operand, text, sizeof(text), line.Address, nullptr)))
+                fact.Text = text;
+            fact.Read = (operand.actions & ZYDIS_OPERAND_ACTION_MASK_READ) != 0;
+            fact.Written = (operand.actions & ZYDIS_OPERAND_ACTION_MASK_WRITE) != 0;
+            fact.Memory = operand.type == ZYDIS_OPERAND_TYPE_MEMORY && operand.mem.type != ZYDIS_MEMOP_TYPE_AGEN;
+            fact.Immediate = operand.type == ZYDIS_OPERAND_TYPE_IMMEDIATE;
+            fact.Size = operand.size / 8;
+            facts.Operands.push_back(std::move(fact));
+        }
+        if (instruction.cpu_flags)
+        {
+            facts.FlagsTested = instruction.cpu_flags->tested;
+            facts.FlagsModified = instruction.cpu_flags->modified;
+            facts.FlagsCleared = instruction.cpu_flags->set_0;
+            facts.FlagsSet = instruction.cpu_flags->set_1;
+            facts.FlagsUndefined = instruction.cpu_flags->undefined;
+        }
+        return facts;
+    }
+
     std::optional<std::uint64_t> Disassembler::EffectiveAddress(const Instruction& instruction, const RegisterValues& registers) const
     {
         if (!instruction.Memory.Present)

@@ -3,6 +3,7 @@
 #include "App/Engine.h"
 #include "App/Sounds.h"
 #include "Asm/AsmAssist.h"
+#include "Asm/MnemonicDocs.h"
 #include "Core/Errors.h"
 #include "Lua/DocRecord.h"
 #include "UI/LuaWindow.h"
@@ -39,7 +40,19 @@ namespace Manifold::UI
         {
             const Asm::AsmCommandDoc* command = Asm::FindAsmCommand(name);
             if (!command)
-                return nullptr;
+            {
+                const std::string summary = Asm::MnemonicSummary(name);
+                if (summary.empty())
+                    return nullptr;
+                auto record = std::make_shared<Lua::DocRecord>();
+                record->Name = Lower(name);
+                record->Path = record->Name;
+                record->Kind = Lua::DocItemKind::Keyword;
+                record->Origin = Lua::DocOrigin::Manifold;
+                record->Text = summary;
+                record->Summary = summary;
+                return record;
+            }
             auto record = std::make_shared<Lua::DocRecord>();
             record->Name = command->Name;
             record->Path = command->Name;
@@ -107,7 +120,7 @@ namespace Manifold::UI
                 std::vector<CodeSuggestion> result;
                 for (Asm::AsmCompletion& item : Asm::CompleteAsm(text, cursor, input))
                 {
-                    std::shared_ptr<const Lua::DocRecord> doc = item.Kind == "function" ? AsmCommandRecord(item.Name) : nullptr;
+                    std::shared_ptr<const Lua::DocRecord> doc = item.Kind == "function" || (item.Kind == "keyword" && !item.Text.empty()) ? AsmCommandRecord(item.Name) : nullptr;
                     result.push_back({ std::move(item.Name), std::move(item.Kind), std::move(item.Signature), std::move(item.Text), std::move(doc) });
                 }
                 return result;

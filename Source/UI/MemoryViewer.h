@@ -81,6 +81,7 @@ namespace Manifold::UI
         Debug::BreakInfo ShownBreak() const;
         bool RegisterLine(const std::string& id, std::string_view name, const std::string& editText, float rowHeight, float nameWidth, std::string& edited, ImVec2& valueMin, ImVec2& valueMax);
         void CodeMenu(const Disasm::Instruction& instruction);
+        void ExplainInstruction(const Disasm::Instruction& line, const Disasm::RegisterValues* registers);
         void HexMenu(std::uint64_t address);
         std::vector<Disasm::Instruction> SelectedInstructions(bool names) const;
         std::vector<Disasm::Instruction> InstructionsBetween(std::uint64_t first, std::uint64_t last, bool names) const;
@@ -142,6 +143,8 @@ namespace Manifold::UI
         std::uint64_t m_top = 0;
         std::uint64_t m_selected = 0;
         std::uint64_t m_selectionEnd = 0;
+        std::uint64_t m_explainAddress = 0;
+        double m_explainSince = 0.0;
         struct FunctionCache
         {
             std::uint64_t Address = 0;

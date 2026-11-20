@@ -2,6 +2,7 @@
 
 #include "UI/CodeTools.h"
 #include "Asm/Assembler.h"
+#include "Asm/MnemonicDocs.h"
 #include "Core/Text.h"
 #include "Core/RuntimeLog.h"
 #include "Generated/IconsFontAwesome5.h"
@@ -1050,6 +1051,23 @@ namespace Manifold::UI
         if (hovered && hoveredRow >= 0 && hoveredRow < static_cast<int>(m_lines.size()))
         {
             const Disasm::Instruction& line = m_lines[static_cast<std::size_t>(hoveredRow)];
+            const float mouseAt = ImGui::GetIO().MousePos.x;
+            if (line.Valid && mouseAt >= textX && mouseAt < commentX && !ImGui::IsAnyMouseDown())
+            {
+                if (m_explainAddress != line.Address)
+                {
+                    m_explainAddress = line.Address;
+                    m_explainSince = ImGui::GetTime();
+                }
+                else if (ImGui::GetTime() - m_explainSince > 0.6)
+                {
+                    ExplainInstruction(line, info.Broken && line.Address == info.Address ? &info.Registers : nullptr);
+                }
+            }
+            else
+            {
+                m_explainAddress = 0;
+            }
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
             {
                 PushMono();
@@ -1233,6 +1251,47 @@ namespace Manifold::UI
         }
         if (m_focusCode && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
             HandleCodeKeys();
+    }
+
+    void MemoryViewer::ExplainInstruction(const Disasm::Instruction& line, const Disasm::RegisterValues* registers)
+    {
+        const Disasm::Disassembler& disassembler = m_engine.Disassembler();
+        const std::optional<Disasm::InstructionFacts> facts = disassembler.Facts(line);
+        const std::string summary = Asm::MnemonicSummary(line.Mnemonic);
+        if (!facts && summary.empty())
+            return;
+        std::optional<std::uint64_t> effective;
+        if (registers && line.Memory.Present)
+            effective = disassembler.EffectiveAddress(line, *registers);
+        ShowTooltip([&]()
+            {
+                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+                PushMono();
+                ImGui::TextColored(ManifoldTheme::CodeRegister, "%s", line.Mnemonic.c_str());
+                ImGui::SameLine();
+                ImGui::TextUnformatted(line.Operands.c_str());
+                PopMono();
+                if (!summary.empty())
+                    ImGui::TextUnformatted(summary.c_str());
+                if (facts)
+                {
+                    const std::vector<std::string> lines = Disasm::ExplainFacts(*facts);
+                    if (!lines.empty())
+                    {
+                        ImGui::Spacing();
+                        for (const std::string& text : lines)
+                            ImGui::TextColored(ManifoldTheme::Label, "%s", text.c_str());
+                    }
+                }
+                if (effective)
+                    ImGui::TextColored(ManifoldTheme::Accent, "At this break the memory operand is %s", m_engine.Describe(*effective).c_str());
+                if (facts && (!facts->Category.empty() || !facts->IsaSet.empty()))
+                {
+                    ImGui::Spacing();
+                    Muted(Lower(facts->Category) + (facts->IsaSet.empty() ? std::string() : "  \xC2\xB7  " + facts->IsaSet));
+                }
+                ImGui::PopTextWrapPos();
+            });
     }
 
     void MemoryViewer::HandleCodeKeys()

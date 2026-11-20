@@ -99,6 +99,9 @@
     <ClCompile Include="..\Source\Asm\AutoAssembler.cpp">
       <Filter>Source\Asm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Asm\MnemonicDocs.cpp">
+      <Filter>Source\Asm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp">
       <Filter>Source\Asm</Filter>
     </ClCompile>

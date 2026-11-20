@@ -86,6 +86,31 @@ namespace Manifold::Disasm
         bool UsesCounter = false;
     };
 
+    struct OperandFact
+    {
+        std::string Text;
+        bool Read = false;
+        bool Written = false;
+        bool Memory = false;
+        bool Immediate = false;
+        int Size = 0;
+    };
+
+    struct InstructionFacts
+    {
+        std::string Category;
+        std::string IsaSet;
+        std::vector<OperandFact> Operands;
+        std::uint32_t FlagsTested = 0;
+        std::uint32_t FlagsModified = 0;
+        std::uint32_t FlagsCleared = 0;
+        std::uint32_t FlagsSet = 0;
+        std::uint32_t FlagsUndefined = 0;
+    };
+
+    std::string FlagNames(std::uint32_t mask);
+    std::vector<std::string> ExplainFacts(const InstructionFacts& facts);
+
     ConditionInfo EvaluateCondition(std::string_view mnemonic, const RegisterValues& registers, bool is64Bit);
     std::string CopyText(std::span<const Instruction> lines, const Target::Symbols& symbols, Target::AddressStyle style);
 
@@ -123,6 +148,7 @@ namespace Manifold::Disasm
             const Target::Symbols* symbols = nullptr, const CodeHints* hints = nullptr) const;
 
         std::optional<std::uint64_t> EffectiveAddress(const Instruction& instruction, const RegisterValues& registers) const;
+        std::optional<InstructionFacts> Facts(const Instruction& instruction) const;
         std::optional<std::uint64_t> PreviousStart(const Target::Process& process, std::uint64_t address) const;
         std::optional<std::uint64_t> PreviousStart(const std::uint8_t* buffer, std::size_t size, std::uint64_t base, std::uint64_t address) const;
         // The address the given number of lines above an address. Stops only
