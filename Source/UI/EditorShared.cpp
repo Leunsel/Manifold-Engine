@@ -86,9 +86,62 @@ namespace Manifold::UI::EditorShared
             }
         }
 
+        std::pair<std::string, std::string> SplitLast(std::string_view chain)
+        {
+            const std::size_t at = chain.find_last_of(".:");
+            if (at == std::string_view::npos)
+                return { std::string(), std::string(chain) };
+            return { std::string(chain.substr(0, at)), std::string(chain.substr(at + 1)) };
+        }
+
+        std::string InferClass(const CodeAssist& provider, const std::string& text, std::size_t before, std::string_view chain, int depth)
+        {
+            if (depth > 4 || chain.empty() || !provider.ResolveType || !provider.ClassMember)
+                return {};
+            const std::size_t split = chain.find_first_of(".:");
+            const std::string head(chain.substr(0, split));
+            const std::string call = Text::AssignedCall(text, before, head);
+            if (call.empty())
+                return {};
+            const auto [callObject, callName] = SplitLast(call);
+            std::shared_ptr<const Lua::DocRecord> doc;
+            if (!callObject.empty())
+            {
+                if (const std::string owner = InferClass(provider, text, before, callObject, depth + 1); !owner.empty())
+                    doc = provider.ClassMember(owner, callName);
+            }
+            if (!doc && provider.Describe)
+                doc = provider.Describe(call, false);
+            if (!doc || !doc->Callable() || doc->Signatures.empty())
+                return {};
+            std::string docClass = provider.ResolveType(doc->Signatures.front().Returns, doc->Owner.empty() ? doc->Path : doc->Owner);
+            for (std::size_t at = split; !docClass.empty() && at != std::string_view::npos;)
+            {
+                const std::size_t next = chain.find_first_of(".:", at + 1);
+                const std::string field(chain.substr(at + 1, next == std::string_view::npos ? std::string_view::npos : next - at - 1));
+                const std::shared_ptr<const Lua::DocRecord> member = provider.ClassMember(docClass, field);
+                docClass = member && !member->Type.empty() ? provider.ResolveType(member->Type, docClass) : std::string();
+                at = next;
+            }
+            return docClass;
+        }
+
         void Refresh(CodeAssistState& assist, const CodeAssist& provider, const std::string& text, const Text::WordContext& word)
         {
             std::vector<CodeSuggestion> items = provider.Complete ? provider.Complete(word.Chain, word.Prefix, word.Method) : std::vector<CodeSuggestion>{};
+            if (word.Member && provider.CompleteClass)
+            {
+                if (const std::string docClass = InferClass(provider, text, word.Start, word.Chain, 0); !docClass.empty())
+                {
+                    std::vector<CodeSuggestion> members = provider.CompleteClass(docClass, word.Prefix, word.Method);
+                    for (CodeSuggestion& item : items)
+                    {
+                        if (std::none_of(members.begin(), members.end(), [&](const CodeSuggestion& member) { return member.Name == item.Name; }))
+                            members.push_back(std::move(item));
+                    }
+                    items = std::move(members);
+                }
+            }
             AddBufferWords(text, word, items);
             std::stable_sort(items.begin(), items.end(), [&](const CodeSuggestion& a, const CodeSuggestion& b)
                 {
@@ -107,6 +160,7 @@ namespace Manifold::UI::EditorShared
             const std::string previous = assist.Open && assist.Selected < static_cast<int>(assist.Items.size()) ? assist.Items[static_cast<std::size_t>(assist.Selected)].Name : std::string();
             assist.Items = std::move(items);
             assist.Selected = 0;
+            assist.ShownSelected = -1;
             for (std::size_t i = 0; i < assist.Items.size(); ++i)
             {
                 if (!previous.empty() && assist.Items[i].Name == previous)
@@ -228,6 +282,15 @@ namespace Manifold::UI::EditorShared
     std::shared_ptr<const Lua::DocRecord> DescribeAt(CodeAssistState& assist, const CodeAssist& provider, const std::string& text, std::string_view chain, bool method)
     {
         std::shared_ptr<const Lua::DocRecord> found = provider.Describe ? provider.Describe(std::string(chain), method) : nullptr;
+        if (!found && provider.ClassMember)
+        {
+            const auto [object, name] = SplitLast(chain);
+            if (!object.empty())
+            {
+                if (const std::string docClass = InferClass(provider, text, text.size(), object, 0); !docClass.empty())
+                    found = provider.ClassMember(docClass, name);
+            }
+        }
         if (!found || found->Origin == Lua::DocOrigin::Reflection)
         {
             std::shared_ptr<const Lua::DocRecord> local = BufferDoc(assist, text, chain);
@@ -350,23 +413,62 @@ namespace Manifold::UI::EditorShared
             ImGui::PopStyleVar(2);
         }
 
-        void PlaceNear(const std::string& name, ImVec2 caret, float lineHeight, ImGuiID viewport, bool preferAbove)
+        struct Room
+        {
+            float Left = -FLT_MAX;
+            float Top = -FLT_MAX;
+            float Right = FLT_MAX;
+            float Bottom = FLT_MAX;
+
+            float Width() const { return Right - Left; }
+        };
+
+        Room RoomOf(ImGuiID viewport)
+        {
+            Room room;
+            if (const ImGuiViewport* host = ImGui::FindViewportByID(viewport))
+            {
+                const float margin = Px(4.0f);
+                room.Left = host->WorkPos.x + margin;
+                room.Top = host->WorkPos.y + margin;
+                room.Right = host->WorkPos.x + host->WorkSize.x - margin;
+                room.Bottom = host->WorkPos.y + host->WorkSize.y - margin;
+            }
+            return room;
+        }
+
+        float PlaceNear(const std::string& name, ImVec2 anchor, float lineHeight, ImGuiID viewport, bool preferAbove)
         {
             const ImGuiWindow* previous = ImGui::FindWindowByName(name.c_str());
-            const float height = previous ? previous->Size.y : Px(160.0f);
-            const ImGuiViewport* host = ImGui::FindViewportByID(viewport);
-            const float top = host ? host->WorkPos.y : -FLT_MAX;
-            const float bottom = host ? host->WorkPos.y + host->WorkSize.y : FLT_MAX;
-            const ImVec2 above(caret.x - Px(6.0f), caret.y - Px(3.0f));
-            const ImVec2 below(caret.x - Px(6.0f), caret.y + lineHeight + Px(3.0f));
-            const bool roomAbove = above.y - height >= top;
-            const bool roomBelow = below.y + height <= bottom;
-            const bool useAbove = preferAbove ? (roomAbove || !roomBelow) : (!roomBelow && roomAbove);
+            const bool known = previous && previous->WasActive;
+            const float height = known ? previous->Size.y : Px(160.0f);
+            const float width = known ? previous->Size.x : Px(300.0f);
+            const Room room = RoomOf(viewport);
+            const float x = std::max(room.Left, std::min(anchor.x - Px(6.0f), room.Right - width));
+            const float aboveY = anchor.y - Px(3.0f);
+            const float belowY = anchor.y + lineHeight + Px(3.0f);
+            const float spaceAbove = aboveY - room.Top;
+            const float spaceBelow = room.Bottom - belowY;
+            const bool roomAbove = spaceAbove >= height;
+            const bool roomBelow = spaceBelow >= height;
+            bool useAbove = preferAbove ? (roomAbove || !roomBelow) : (!roomBelow && roomAbove);
+            if (!roomAbove && !roomBelow)
+                useAbove = spaceAbove > spaceBelow;
             if (useAbove)
-                ImGui::SetNextWindowPos(above, ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+                ImGui::SetNextWindowPos(ImVec2(x, aboveY), ImGuiCond_Always, ImVec2(0.0f, 1.0f));
             else
-                ImGui::SetNextWindowPos(below, ImGuiCond_Always, ImVec2(0.0f, 0.0f));
+                ImGui::SetNextWindowPos(ImVec2(x, belowY), ImGuiCond_Always, ImVec2(0.0f, 0.0f));
             ImGui::SetNextWindowViewport(viewport);
+            return std::max(useAbove ? spaceAbove : spaceBelow, Px(80.0f));
+        }
+
+        bool BeginScrollingDoc(const char* id, float width, float maxHeight, bool toTop)
+        {
+            const float bar = ImGui::GetStyle().ScrollbarSize;
+            ImGui::SetNextWindowSizeConstraints(ImVec2(width + bar, 0.0f), ImVec2(width + bar, std::max(maxHeight, Px(60.0f))));
+            if (toTop)
+                ImGui::SetNextWindowScroll(ImVec2(0.0f, 0.0f));
+            return ImGui::BeginChild(id, ImVec2(width + bar, 0.0f), ImGuiChildFlags_AutoResizeY, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoNav);
         }
 
         void TextHints(const CodeAssistState& assist)
@@ -410,27 +512,45 @@ namespace Manifold::UI::EditorShared
     PopupAction DrawSuggestions(const char* id, CodeAssistState& assist, ImVec2 caret, float lineHeight, ImGuiID viewport)
     {
         PopupAction action;
-        constexpr int kVisible = 10;
         const int count = static_cast<int>(assist.Items.size());
         if (count == 0)
             return action;
-        assist.Selected = std::clamp(assist.Selected, 0, count - 1);
-        if (assist.Selected < assist.First)
-            assist.First = assist.Selected;
-        if (assist.Selected >= assist.First + kVisible)
-            assist.First = assist.Selected - kVisible + 1;
-        assist.First = std::clamp(assist.First, 0, std::max(0, count - kVisible));
 
         const std::string name = std::string("##suggestions") + id;
-        PlaceNear(name, caret, lineHeight, viewport, false);
+        const float available = PlaceNear(name, caret, lineHeight, viewport, false);
+        const Room room = RoomOf(viewport);
+        const float padding = Px(6.0f);
+        const float gap = Px(12.0f);
+        const float bar = ImGui::GetStyle().ScrollbarSize;
+        const float roomWidth = room.Width() - padding * 2.0f;
+        float width = std::round(Px(300.0f));
+        const bool beside = roomWidth >= width + gap + bar + Px(220.0f);
+        float detail = beside ? std::min(Px(340.0f), roomWidth - width - gap - bar) : std::max(Px(160.0f), std::min(Px(340.0f), roomWidth - bar));
+        detail = std::round(detail);
+        if (!beside)
+            width = std::round(std::max(Px(160.0f), std::min(width, roomWidth)));
+
+        const float rowGuess = std::round(ImGui::GetTextLineHeight() + Px(5.0f));
+        const float listRoom = available - padding * 2.0f - ImGui::GetTextLineHeight() - (beside ? 0.0f : Px(72.0f));
+        const int visible = std::clamp(static_cast<int>(listRoom / rowGuess), 3, 10);
+        assist.Selected = std::clamp(assist.Selected, 0, count - 1);
+        const bool moved = assist.Selected != assist.ShownSelected;
+        if (moved)
+        {
+            if (assist.Selected < assist.First)
+                assist.First = assist.Selected;
+            if (assist.Selected >= assist.First + visible)
+                assist.First = assist.Selected - visible + 1;
+        }
+        assist.First = std::clamp(assist.First, 0, std::max(0, count - visible));
+        assist.ShownSelected = assist.Selected;
         PushPopupStyle(ImVec2(6.0f, 6.0f));
         if (ImGui::Begin(name.c_str(), nullptr, kPopupFlags))
         {
             ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
             const bool hoveredWindow = ImGui::IsWindowHovered();
             if (hoveredWindow && ImGui::GetIO().MouseWheel != 0.0f)
-                assist.First = std::clamp(assist.First - static_cast<int>(ImGui::GetIO().MouseWheel * 3.0f), 0, std::max(0, count - kVisible));
-            const float width = std::round(Px(300.0f));
+                assist.First = std::clamp(assist.First - static_cast<int>(ImGui::GetIO().MouseWheel * 3.0f), 0, std::max(0, count - visible));
             ImDrawList* draw = ImGui::GetWindowDrawList();
             ImGui::BeginGroup();
             PushMono();
@@ -438,7 +558,7 @@ namespace Manifold::UI::EditorShared
             const float fontSize = ImGui::GetFontSize();
             const float rowHeight = std::round(ImGui::GetTextLineHeight() + Px(5.0f));
             const float iconWidth = std::round(Px(22.0f));
-            for (int i = assist.First; i < std::min(count, assist.First + kVisible); ++i)
+            for (int i = assist.First; i < std::min(count, assist.First + visible); ++i)
             {
                 const CodeSuggestion& item = assist.Items[static_cast<std::size_t>(i)];
                 const ImVec2 row = ImGui::GetCursorScreenPos();
@@ -468,35 +588,42 @@ namespace Manifold::UI::EditorShared
                 ImGui::Dummy(ImVec2(width, rowHeight));
             }
             PopMono();
-            if (count > kVisible)
+            if (count > visible)
                 ImGui::TextColored(ManifoldTheme::Muted, "%d of %d", assist.Selected + 1, count);
             ImGui::EndGroup();
+            const float listHeight = ImGui::GetItemRectSize().y;
 
             const CodeSuggestion& current = assist.Items[static_cast<std::size_t>(assist.Selected)];
             if (current.Doc || !current.Text.empty())
             {
-                ImGui::SameLine(0.0f, Px(8.0f));
-                const ImVec2 top = ImGui::GetCursorScreenPos();
-                ImGui::BeginGroup();
-                ImGui::Dummy(ImVec2(Px(4.0f), 0.0f));
-                ImGui::SameLine(0.0f, 0.0f);
-                ImGui::BeginGroup();
-                const float detail = std::round(Px(340.0f));
-                if (current.Doc)
-                {
-                    DocViewOptions options;
-                    options.Width = detail;
-                    DocView(*current.Doc, options);
-                }
+                if (beside)
+                    ImGui::SameLine(0.0f, gap);
                 else
+                    ImGui::Dummy(ImVec2(0.0f, Px(4.0f)));
+                const ImVec2 top = ImGui::GetCursorScreenPos();
+                const float spacing = ImGui::GetStyle().ItemSpacing.y * 2.0f + Px(6.0f);
+                const float maxHeight = beside ? available - padding * 2.0f - Px(2.0f) : available - padding * 2.0f - listHeight - spacing;
+                if (BeginScrollingDoc("##detail", detail, maxHeight, moved))
                 {
-                    RichText(current.Text, detail, ManifoldTheme::Label);
+                    if (current.Doc)
+                    {
+                        DocViewOptions options;
+                        options.Width = detail;
+                        DocView(*current.Doc, options);
+                    }
+                    else
+                    {
+                        RichText(current.Text, detail, ManifoldTheme::Label);
+                    }
                 }
-                ImGui::EndGroup();
-                ImGui::EndGroup();
-                draw->AddLine(ImVec2(top.x - Px(4.0f), top.y), ImVec2(top.x - Px(4.0f), ImGui::GetItemRectMax().y), ImGui::GetColorU32(ManifoldTheme::Border), Px(1.0f));
+                ImGui::EndChild();
+                const ImU32 line = ImGui::GetColorU32(ManifoldTheme::Border);
+                if (beside)
+                    draw->AddLine(ImVec2(top.x - gap * 0.5f, top.y), ImVec2(top.x - gap * 0.5f, ImGui::GetItemRectMax().y), line, Px(1.0f));
+                else
+                    draw->AddLine(ImVec2(top.x, top.y - Px(3.0f)), ImVec2(top.x + width, top.y - Px(3.0f)), line, Px(1.0f));
             }
-            if (hoveredWindow && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
                 action.Clicked = true;
         }
         ImGui::End();
@@ -510,15 +637,17 @@ namespace Manifold::UI::EditorShared
         if (!assist.HintDoc && assist.Hints.empty())
             return action;
         const std::string name = std::string("##hints") + id;
-        PlaceNear(name, caret, lineHeight, viewport, true);
+        const float available = PlaceNear(name, caret, lineHeight, viewport, true);
+        const float width = std::round(std::max(Px(160.0f), std::min(Px(420.0f), RoomOf(viewport).Width() - Px(16.0f) - ImGui::GetStyle().ScrollbarSize)));
         PushPopupStyle(ImVec2(8.0f, 6.0f));
         if (ImGui::Begin(name.c_str(), nullptr, kPopupFlags))
         {
             ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
-            if (assist.HintDoc)
+            const bool open = BeginScrollingDoc("##hint", width, available - Px(12.0f), false);
+            if (open && assist.HintDoc)
             {
                 DocViewOptions options;
-                options.Width = std::round(Px(420.0f));
+                options.Width = width;
                 options.Signature = assist.HintSignature;
                 options.Parameter = assist.HintArgument;
                 options.SignatureHelp = true;
@@ -532,13 +661,14 @@ namespace Manifold::UI::EditorShared
                 }
                 action.Choice = result.Choice;
             }
-            else
+            else if (open)
             {
                 TextHints(assist);
                 if (!assist.HintChoices.empty())
-                    action.Choice = ChoiceChips(assist.HintChoices, std::round(Px(380.0f)), true);
+                    action.Choice = ChoiceChips(assist.HintChoices, width, true);
             }
-            if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            ImGui::EndChild();
+            if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
                 action.Clicked = true;
         }
         ImGui::End();
@@ -546,16 +676,30 @@ namespace Manifold::UI::EditorShared
         return action;
     }
 
-    void DrawHover(const Lua::DocRecord& record)
+    void DrawHover(const char* id, CodeAssistState& assist, const Lua::DocRecord& record, ImGuiID viewport)
     {
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, PxWhole(8.0f, 6.0f));
-        if (ImGui::BeginTooltip())
+        const std::string name = std::string("##hover") + id;
+        const bool appearing = !assist.HoverShown;
+        const float available = PlaceNear(name, assist.HoverAnchor, assist.HoverRow, viewport, false);
+        const float width = std::round(std::max(Px(160.0f), std::min(Px(440.0f), RoomOf(viewport).Width() - Px(16.0f) - ImGui::GetStyle().ScrollbarSize)));
+        PushPopupStyle(ImVec2(8.0f, 6.0f));
+        if (ImGui::Begin(name.c_str(), nullptr, kPopupFlags))
         {
-            DocViewOptions options;
-            options.Width = std::round(Px(440.0f));
-            DocView(record, options);
-            ImGui::EndTooltip();
+            ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+            if (BeginScrollingDoc("##doc", width, available - Px(12.0f), appearing))
+            {
+                DocViewOptions options;
+                options.Width = width;
+                DocView(record, options);
+            }
+            ImGui::EndChild();
+            const ImGuiWindow* window = ImGui::GetCurrentWindow();
+            const float reach = Px(6.0f);
+            assist.HoverMin = ImVec2(window->Pos.x - reach, window->Pos.y - reach);
+            assist.HoverMax = ImVec2(window->Pos.x + window->Size.x + reach, window->Pos.y + window->Size.y + reach);
+            assist.HoverShown = true;
         }
-        ImGui::PopStyleVar();
+        ImGui::End();
+        PopPopupStyle();
     }
 }

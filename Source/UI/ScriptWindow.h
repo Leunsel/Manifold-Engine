@@ -46,8 +46,12 @@ namespace Manifold::UI
         CodeEditorState m_editor;
         std::string m_result;
         bool m_resultOk = true;
+        std::string m_shownError;
+        int m_errorLine = 0;
+        bool m_errorOpen = false;
         int m_task = 0;
         bool m_stopped = false;
+        void ErrorPopup();
         std::shared_ptr<int> m_alive = std::make_shared<int>(0);
         TemplateRunner m_templates;
     };

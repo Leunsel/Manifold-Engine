@@ -4,11 +4,13 @@
 #include "Lua/DocRegistry.h"
 #include "Lua/LuaApi.h"
 #include "Lua/LuaDocBinding.h"
+#include "Text/Highlight.h"
 #include "Text/LuaContext.h"
 
 #include "lua.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <map>
 
 namespace Manifold::Lua
@@ -228,6 +230,43 @@ namespace Manifold::Lua
         }
         lua_settop(state, top);
         return collector.Take();
+    }
+
+    std::string LuaEngine::ResolveDocType(std::string_view type, std::string_view scope) const
+    {
+        std::string name(TrimView(type.substr(0, type.find('|'))));
+        while (!name.empty() && (name.back() == '?' || name.back() == ' '))
+            name.pop_back();
+        if (name.empty() || Text::IsLuaKeyword(name))
+            return {};
+        static constexpr const char* kPlain[] = { "string", "number", "integer", "boolean", "table", "function", "any", "userdata", "thread", "value", "nil" };
+        if (std::any_of(std::begin(kPlain), std::end(kPlain), [&](const char* plain) { return EqualsNoCase(name, plain); }))
+            return {};
+        for (std::string owner(TrimView(scope)); !owner.empty();)
+        {
+            if (std::string found = m_docs->ResolveClass(owner + "." + name); !found.empty())
+                return found;
+            const std::size_t dot = owner.rfind('.');
+            owner = dot == std::string::npos ? std::string() : owner.substr(0, dot);
+        }
+        return m_docs->ResolveClass(name);
+    }
+
+    std::vector<LuaCompletion> LuaEngine::CompleteClass(std::string_view className, std::string_view prefix, bool method)
+    {
+        Collector collector(*this, m_state, prefix, method);
+        collector.Class(std::string(className));
+        return collector.Take();
+    }
+
+    std::shared_ptr<const DocRecord> LuaEngine::ClassMember(std::string_view className, std::string_view member) const
+    {
+        for (std::string docClass = m_docs->ResolveClass(className); !docClass.empty(); docClass = m_docs->ParentOf(docClass))
+        {
+            if (DocPtr found = m_docs->Find(docClass + "." + std::string(member)); found && found->OwnerIsClass)
+                return found;
+        }
+        return nullptr;
     }
 
     std::shared_ptr<const DocRecord> LuaEngine::Describe(std::string_view chain, bool method)

@@ -414,6 +414,9 @@ namespace Manifold::Lua
         std::string ChunkText(std::string_view name) const;
         std::shared_ptr<const DocRecord> Describe(std::string_view chain, bool method);
         std::vector<LuaCompletion> Complete(std::string_view chain, std::string_view prefix, bool method);
+        std::string ResolveDocType(std::string_view type, std::string_view scope) const;
+        std::vector<LuaCompletion> CompleteClass(std::string_view className, std::string_view prefix, bool method);
+        std::shared_ptr<const DocRecord> ClassMember(std::string_view className, std::string_view member) const;
         std::vector<std::string> CallSignatures(std::string_view chain, bool method);
         std::vector<std::string> CallArgumentChoices(std::string_view chain, bool method, int argument);
         static std::vector<std::string> DocumentedSignatures(std::string_view name);

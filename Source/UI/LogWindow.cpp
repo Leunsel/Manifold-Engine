@@ -591,9 +591,7 @@ namespace Manifold::UI
             facts += Format("  ·  %d times in a row, the last at %s", row->Repeat, Clock(m_entries[row->Last]).c_str());
         Muted(facts);
         ImGui::AlignTextToFramePadding();
-        PushMono();
         TextFitted(entry.Trace, ImGui::GetContentRegionAvail().x - Px(250.0f), ManifoldTheme::Label);
-        PopMono();
         {
             const GhostButtons ghost;
             ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - Px(246.0f)));
@@ -617,9 +615,7 @@ namespace Manifold::UI
             ImGui::PopStyleColor();
             ImGui::PopTextWrapPos();
         }
-        PushMono();
         InputMultiline("##logtext", m_detailText, ImVec2(-FLT_MIN, -FLT_MIN), ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
-        PopMono();
     }
 
     void LogWindow::ErrorsTab()

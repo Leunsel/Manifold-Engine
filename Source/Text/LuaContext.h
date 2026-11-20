@@ -50,6 +50,7 @@ namespace Manifold::Text
     CallContext CallAt(std::string_view text, std::size_t cursor);
     ChainContext ChainAt(std::string_view text, std::size_t position);
     std::vector<BufferFunction> BufferFunctions(std::string_view text);
+    std::string AssignedCall(std::string_view text, std::size_t before, std::string_view name);
     std::vector<std::string> SplitParameters(std::string_view params);
     int FuzzyScore(std::string_view name, std::string_view query);
 }

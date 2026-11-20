@@ -1195,6 +1195,23 @@ namespace Manifold::Tests
             CHECK(format.size() == 1 && format.front() == "format(format, ...)");
             CHECK(lua.CallSignatures("NoSuchThing.Run", false).empty());
             CHECK(!Lua::LuaEngine::DocumentedSignatures("readInteger").empty());
+
+            const auto create = lua.Describe("manifold.ui.window.create", false);
+            CHECK(create && !create->Signatures.empty() && create->Signatures.front().Returns == "window");
+            if (create && !create->Signatures.empty())
+            {
+                const std::string window = lua.ResolveDocType(create->Signatures.front().Returns, create->Owner.empty() ? create->Path : create->Owner);
+                CHECK_EQ(window, "manifold.ui.window.Window");
+                CHECK(HasCompletion(lua.CompleteClass(window, "", false), "add") && HasCompletion(lua.CompleteClass(window, "sh", false), "show"));
+                const auto add = lua.ClassMember(window, "add");
+                CHECK(add && add->Callable() && !add->Signatures.empty());
+                if (add && !add->Signatures.empty())
+                    CHECK_EQ(lua.ResolveDocType(add->Signatures.front().Returns, add->Owner), "manifold.ui.window.Widget");
+                CHECK(!lua.ClassMember(window, "noSuchMember"));
+            }
+            CHECK(lua.ResolveDocType("string", "manifold.ui.window").empty());
+            CHECK(lua.ResolveDocType("boolean?", "manifold.ui.window").empty());
+            CHECK(lua.ResolveDocType("", "").empty());
         }
 
         void CeHabits(Engine& engine)

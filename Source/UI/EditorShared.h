@@ -27,5 +27,5 @@ namespace Manifold::UI::EditorShared
     std::shared_ptr<const Lua::DocRecord> DescribeAt(CodeAssistState& assist, const CodeAssist& provider, const std::string& text, std::string_view chain, bool method);
     PopupAction DrawSuggestions(const char* id, CodeAssistState& assist, ImVec2 caret, float lineHeight, ImGuiID viewport);
     PopupAction DrawSignatureHelp(const char* id, CodeAssistState& assist, ImVec2 caret, float lineHeight, ImGuiID viewport);
-    void DrawHover(const Lua::DocRecord& record);
+    void DrawHover(const char* id, CodeAssistState& assist, const Lua::DocRecord& record, ImGuiID viewport);
 }

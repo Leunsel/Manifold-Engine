@@ -45,6 +45,15 @@ namespace Manifold::UI
         m_assist.Signatures = [this](const std::string& chain, bool method) { return m_engine.Lua().CallSignatures(chain, method); };
         m_assist.Choices = [this](const std::string& chain, bool method, int argument) { return m_engine.Lua().CallArgumentChoices(chain, method, argument); };
         m_assist.Describe = [this](const std::string& chain, bool method) { return m_engine.Lua().Describe(chain, method); };
+        m_assist.ResolveType = [this](const std::string& type, const std::string& scope) { return m_engine.Lua().ResolveDocType(type, scope); };
+        m_assist.CompleteClass = [this](const std::string& className, const std::string& prefix, bool method)
+            {
+                std::vector<CodeSuggestion> result;
+                for (Lua::LuaCompletion& item : m_engine.Lua().CompleteClass(className, prefix, method))
+                    result.push_back({ std::move(item.Name), std::move(item.Kind), std::move(item.Signature), std::move(item.Text), std::move(item.Doc) });
+                return result;
+            };
+        m_assist.ClassMember = [this](const std::string& className, const std::string& member) { return m_engine.Lua().ClassMember(className, member); };
         m_editor.Assist = &m_assist;
         m_inputEditor.Assist = &m_assist;
         m_inputEditor.Console = true;

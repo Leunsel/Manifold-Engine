@@ -1,6 +1,7 @@
 #include "UI/ScriptWindow.h"
 
 #include "App/Sounds.h"
+#include "Core/Errors.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
@@ -11,6 +12,7 @@
 
 #include "imgui_internal.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -59,6 +61,7 @@ namespace Manifold::UI
 
     void ScriptWindow::Check()
     {
+        m_shownError.clear();
         m_editor.ErrorLine = 0;
         if (m_lua)
         {
@@ -96,6 +99,7 @@ namespace Manifold::UI
 
     void ScriptWindow::Run(bool disable)
     {
+        m_shownError.clear();
         m_editor.ErrorLine = 0;
         if (m_lua)
         {
@@ -123,8 +127,11 @@ namespace Manifold::UI
                     m_task = 0;
                     m_resultOk = status.Ok();
                     m_result = status.Ok() ? "The script ran." : status.Text;
-                    if (!status && !std::exchange(m_stopped, false))
+                    const bool stopped = std::exchange(m_stopped, false);
+                    if (!status && !stopped)
                         Sounds::Play(Sounds::Cue::Error);
+                    if (stopped)
+                        m_shownError = m_result;
                 });
             return;
         }
@@ -154,6 +161,7 @@ namespace Manifold::UI
 
     void ScriptWindow::SaveToRecord()
     {
+        m_shownError.clear();
         if (m_recordId == kTableLuaScript)
         {
             m_engine.Table().TableLuaScript = m_text;
@@ -206,6 +214,7 @@ namespace Manifold::UI
 
     void ScriptWindow::SaveFile(bool askName)
     {
+        m_shownError.clear();
         std::optional<std::filesystem::path> path;
         if (!askName && !m_path.empty())
             path = m_path;
@@ -362,10 +371,21 @@ namespace Manifold::UI
                 m_engine.Lua().StopTask(m_task);
             }
         }
+        else if (!m_result.empty() && !m_resultOk)
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Error);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(ICON_FA_TIMES_CIRCLE "  The last run failed");
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            const GhostButtons ghost;
+            if (ImGui::SmallButton(ICON_FA_EXPAND "  Show the message"))
+                m_shownError.clear();
+        }
         else if (!m_result.empty())
         {
             ImGui::PushTextWrapPos(ImGui::GetContentRegionAvail().x);
-            TextWithError(m_result, m_resultOk ? ManifoldTheme::Accent : ManifoldTheme::Error);
+            TextWithError(m_result, ManifoldTheme::Accent);
             ImGui::PopTextWrapPos();
         }
         else
@@ -424,6 +444,62 @@ namespace Manifold::UI
                     AssignToTable();
             }
         }
+        ErrorPopup();
         EndToolWindow();
+    }
+
+    void ScriptWindow::ErrorPopup()
+    {
+        const std::string id = "scripterror" + m_windowId.substr(3);
+        if (!m_resultOk && !m_result.empty() && m_result != m_shownError && !(m_task && m_engine.Lua().TaskAlive(m_task)))
+        {
+            m_shownError = m_result;
+            m_errorLine = m_editor.ErrorLine;
+            m_errorOpen = true;
+        }
+        if (m_errorOpen && !ImGui::IsPopupOpen(("###" + id).c_str()))
+            ImGui::OpenPopup(("###" + id).c_str());
+        const char* title = m_lua ? "The Lua script failed" : "The Auto Assembler script failed";
+        if (!BeginModal(id.c_str(), ICON_FA_TIMES_CIRCLE, title, ImVec2(520.0f, 0.0f), nullptr, CallerViewport()))
+            return;
+        const ErrorInfo* info = ErrorOf(m_shownError);
+        ImGui::PushTextWrapPos(ImGui::GetContentRegionAvail().x);
+        if (info)
+        {
+            ImGui::TextColored(ManifoldTheme::Accent, "%s  %s", ErrorName(info->Code).c_str(), std::string(ErrorArea(info->Code)).c_str());
+            ImGui::TextUnformatted(info->Cause.data(), info->Cause.data() + info->Cause.size());
+            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Label);
+            ImGui::TextUnformatted(info->Help.data(), info->Help.data() + info->Help.size());
+            ImGui::PopStyleColor();
+            ImGui::Spacing();
+        }
+        ImGui::PopTextWrapPos();
+        std::string message = m_shownError;
+        const float textHeight = ImGui::CalcTextSize(message.c_str(), nullptr, false, ImGui::GetContentRegionAvail().x - Px(16.0f)).y + Px(14.0f);
+        const float height = std::clamp(textHeight, ImGui::GetFrameHeight() * 2.0f, ImGui::GetTextLineHeight() * 10.0f);
+        InputMultiline("##scripterrortext", message, ImVec2(-FLT_MIN, height), ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
+        ImGui::Spacing();
+        bool close = false;
+        if (AccentButton("OK", Px(100.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            close = true;
+        ImGui::SameLine();
+        if (ImGui::Button(ICON_FA_COPY "  Copy", Px(100.0f, 0.0f)))
+            ImGui::SetClipboardText(m_shownError.c_str());
+        if (m_errorLine > 0)
+        {
+            ImGui::SameLine();
+            if (ImGui::Button((ICON_FA_LONG_ARROW_ALT_RIGHT "  Go to line " + std::to_string(m_errorLine)).c_str()))
+            {
+                m_editor.GotoLine = m_errorLine;
+                m_editor.Focus = true;
+                close = true;
+            }
+        }
+        if (close)
+        {
+            m_errorOpen = false;
+            ImGui::CloseCurrentPopup();
+        }
+        EndModal();
     }
 }

@@ -37,6 +37,9 @@ namespace Manifold::UI
         std::function<std::vector<std::string>(const std::string& chain, bool method)> Signatures;
         std::function<std::vector<std::string>(const std::string& chain, bool method, int argument)> Choices;
         std::function<std::shared_ptr<const Lua::DocRecord>(const std::string& chain, bool method)> Describe;
+        std::function<std::string(const std::string& type, const std::string& scope)> ResolveType;
+        std::function<std::vector<CodeSuggestion>(const std::string& className, const std::string& prefix, bool method)> CompleteClass;
+        std::function<std::shared_ptr<const Lua::DocRecord>(const std::string& className, const std::string& member)> ClassMember;
     };
 
     struct CodeAssistState
@@ -45,6 +48,7 @@ namespace Manifold::UI
         std::vector<CodeSuggestion> Items;
         int Selected = 0;
         int First = 0;
+        int ShownSelected = -1;
         std::size_t WordStart = 0;
         std::string Chain;
         bool Method = false;
@@ -71,6 +75,11 @@ namespace Manifold::UI
         double HoverSince = 0.0;
         bool HoverResolved = false;
         std::shared_ptr<const Lua::DocRecord> HoverDoc;
+        ImVec2 HoverAnchor;
+        float HoverRow = 0.0f;
+        bool HoverShown = false;
+        ImVec2 HoverMin;
+        ImVec2 HoverMax;
         std::shared_ptr<const Lua::AnnotatedFile> BufferDocs;
         std::size_t BufferDocsHash = 0;
         bool PopupClicked = false;

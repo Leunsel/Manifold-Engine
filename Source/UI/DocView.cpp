@@ -105,7 +105,10 @@ namespace Manifold::UI
             for (int i = 0; i < count; ++i)
             {
                 const bool current = i == highlighted;
-                Token(flow, FormatParam(signature->Params[static_cast<std::size_t>(i)]), current ? accent : text, i == 0 ? 0.0f : ImGui::CalcTextSize(" ").x, current);
+                const Lua::DocParam& param = signature->Params[static_cast<std::size_t>(i)];
+                Token(flow, FormatParam(param), current ? accent : text, i == 0 ? 0.0f : ImGui::CalcTextSize(" ").x, current);
+                if (!param.Type.empty())
+                    Token(flow, ": " + param.Type, muted);
                 if (i + 1 < count)
                     Token(flow, ",", muted);
             }
@@ -121,12 +124,43 @@ namespace Manifold::UI
             ImGui::Dummy(ImVec2(0.0f, Px(pixels)));
         }
 
-        std::string KeysText(const Lua::DocParam& param)
+        void KeyGrid(const Lua::DocParam& param, float width)
         {
-            std::string text;
+            if (param.Keys.empty())
+                return;
+            PushMono();
+            float keyWidth = 0.0f;
+            float typeWidth = 0.0f;
             for (const auto& [key, type] : param.Keys)
-                text += (text.empty() ? "`" : ", `") + key + "` " + type;
-            return text;
+            {
+                keyWidth = std::max(keyWidth, ImGui::CalcTextSize(key.c_str()).x);
+                typeWidth = std::max(typeWidth, ImGui::CalcTextSize(type.c_str()).x);
+            }
+            const float space = ImGui::CalcTextSize(" ").x;
+            const float cell = keyWidth + space * 2.0f + typeWidth;
+            const float gap = space * 3.0f;
+            const int columns = std::max(1, static_cast<int>((width + gap) / (cell + gap)));
+            const int rows = (static_cast<int>(param.Keys.size()) + columns - 1) / columns;
+            const ImVec2 origin = ImGui::GetCursorScreenPos();
+            const float line = ImGui::GetTextLineHeight() + Px(1.0f);
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            const ImU32 keyColor = ImGui::GetColorU32(ManifoldTheme::Text);
+            const ImU32 typeColor = ImGui::GetColorU32(ManifoldTheme::Muted);
+            for (std::size_t i = 0; i < param.Keys.size(); ++i)
+            {
+                const int column = static_cast<int>(i) / rows;
+                const int row = static_cast<int>(i) % rows;
+                const ImVec2 at(origin.x + static_cast<float>(column) * (cell + gap), origin.y + static_cast<float>(row) * line);
+                draw->AddText(at, keyColor, param.Keys[i].first.c_str());
+                draw->AddText(ImVec2(at.x + keyWidth + space * 2.0f, at.y), typeColor, param.Keys[i].second.c_str());
+            }
+            ImGui::Dummy(ImVec2(std::min(width, static_cast<float>(columns) * (cell + gap) - gap), static_cast<float>(rows) * line));
+            PopMono();
+        }
+
+        bool Explained(const Lua::DocParam& param)
+        {
+            return !param.Text.empty() || !param.Keys.empty() || !param.Choices.empty() || !param.Default.empty();
         }
     }
 
@@ -330,21 +364,17 @@ namespace Manifold::UI
             if (index < static_cast<int>(signature->Params.size()))
             {
                 const Lua::DocParam& param = signature->Params[static_cast<std::size_t>(index)];
-                if (!param.Type.empty() || !param.Text.empty() || !param.Choices.empty() || !param.Keys.empty())
+                if (Explained(param))
                 {
                     Gap(3.0f);
-                    PushMono();
-                    ImGui::TextColored(ManifoldTheme::Accent, "%s", param.Name.c_str());
-                    if (!param.Type.empty())
-                    {
-                        ImGui::SameLine(0.0f, ImGui::CalcTextSize(" ").x);
-                        ImGui::TextColored(ManifoldTheme::Muted, "%s", param.Type.c_str());
-                    }
-                    PopMono();
                     if (!param.Text.empty())
-                        RichText(param.Text, width, ManifoldTheme::Label);
+                        RichText("`" + param.Name + "` " + param.Text, width, ManifoldTheme::Label);
                     if (!param.Keys.empty())
-                        RichText("Options: " + KeysText(param), width, ManifoldTheme::Label);
+                    {
+                        if (param.Text.empty())
+                            RichText("`" + param.Name + "` takes:", width, ManifoldTheme::Label);
+                        KeyGrid(param, width);
+                    }
                     if (!param.Default.empty())
                         RichText("Default: `" + param.Default + "`", width, ManifoldTheme::Label);
                     if (!param.Choices.empty())
@@ -370,36 +400,26 @@ namespace Manifold::UI
 
         if (options.Detail && signature)
         {
-            bool any = false;
             for (const Lua::DocParam& param : signature->Params)
-                any = any || !param.Text.empty() || !param.Type.empty() || !param.Choices.empty();
-            if (any)
             {
+                if (!Explained(param))
+                    continue;
                 Gap(4.0f);
-                for (const Lua::DocParam& param : signature->Params)
-                {
-                    PushMono();
-                    ImGui::TextColored(ManifoldTheme::Text, "%s", FormatParam(param).c_str());
-                    if (!param.Type.empty())
-                    {
-                        ImGui::SameLine(0.0f, ImGui::CalcTextSize(" ").x);
-                        ImGui::TextColored(ManifoldTheme::Muted, "%s", param.Type.c_str());
-                    }
-                    PopMono();
-                    ImGui::Indent(Px(12.0f));
-                    if (!param.Text.empty())
-                        RichText(param.Text, width - Px(12.0f), ManifoldTheme::Label);
-                    if (!param.Keys.empty())
-                        RichText("Options: " + KeysText(param), width - Px(12.0f), ManifoldTheme::Label);
-                    if (!param.Choices.empty())
-                        ChoiceChips(param.Choices, width - Px(12.0f), false);
-                    ImGui::Unindent(Px(12.0f));
-                }
+                if (!param.Text.empty())
+                    RichText("`" + param.Name + "` " + param.Text, width, ManifoldTheme::Label);
+                else
+                    RichText("`" + param.Name + "`" + (param.Keys.empty() ? std::string() : " takes:"), width, ManifoldTheme::Label);
+                if (!param.Keys.empty())
+                    KeyGrid(param, width);
+                if (!param.Default.empty())
+                    RichText("Default: `" + param.Default + "`", width, ManifoldTheme::Label);
+                if (!param.Choices.empty())
+                    ChoiceChips(param.Choices, width, false);
             }
-            if (!signature->Returns.empty() || !signature->ReturnsText.empty())
+            if (!signature->ReturnsText.empty())
             {
                 Gap(3.0f);
-                RichText("Returns `" + signature->Returns + "`" + (signature->ReturnsText.empty() ? std::string() : ": " + signature->ReturnsText), width, ManifoldTheme::Label);
+                RichText("Returns `" + (signature->Returns.empty() ? std::string("a value") : signature->Returns) + "`: " + signature->ReturnsText, width, ManifoldTheme::Label);
             }
         }
 

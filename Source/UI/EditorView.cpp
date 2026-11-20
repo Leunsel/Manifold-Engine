@@ -718,7 +718,11 @@ namespace Manifold::UI
 
         ImVec2 caretScreen(textOrigin.x + static_cast<float>(caretColumn) * metrics.Char, textOrigin.y + static_cast<float>(caretLine) * metrics.Row);
         std::shared_ptr<const Lua::DocRecord> hoverDoc;
-        if (language == Language::Lua && state.Assist && overText && !view.Dragging && !ImGui::IsAnyMouseDown())
+        if (assist.HoverShown && assist.HoverDoc && ImGui::IsMouseHoveringRect(assist.HoverMin, assist.HoverMax, false))
+        {
+            hoverDoc = assist.HoverDoc;
+        }
+        else if (language == Language::Lua && state.Assist && overText && !view.Dragging && !ImGui::IsAnyMouseDown())
         {
             const int line = std::clamp(static_cast<int>(std::floor((io.MousePos.y - textOrigin.y) / metrics.Row)), 0, buffer.LineCount() - 1);
             const int column = static_cast<int>(std::floor((io.MousePos.x - textOrigin.x) / metrics.Char));
@@ -741,6 +745,9 @@ namespace Manifold::UI
                 {
                     assist.HoverDoc = EditorShared::DescribeAt(assist, *state.Assist, buffer.Text(), chain.Chain, chain.Method);
                     assist.HoverResolved = true;
+                    assist.HoverShown = false;
+                    assist.HoverAnchor = ImVec2(io.MousePos.x, textOrigin.y + static_cast<float>(line) * metrics.Row);
+                    assist.HoverRow = metrics.Row;
                 }
                 hoverDoc = assist.HoverDoc;
             }
@@ -849,7 +856,9 @@ namespace Manifold::UI
         state.LineCount = buffer.LineCount();
 
         if (hoverDoc)
-            EditorShared::DrawHover(*hoverDoc);
+            EditorShared::DrawHover(id, assist, *hoverDoc, viewport);
+        else
+            assist.HoverShown = false;
         if (assistEnabled)
         {
             if (!focused)

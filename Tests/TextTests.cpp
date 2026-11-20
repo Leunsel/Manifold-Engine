@@ -223,6 +223,18 @@ namespace Manifold::Tests
             CHECK(!Text::WordAt("x = 1 -- comm", 13).Valid);
             CHECK(!Text::WordAt("x = 12", 6).Valid);
             CHECK(!Text::WordAt("a = 'x'..ab", 11).Member);
+
+            const std::string script = "local window = manifold.ui.window.create(\"Test\")\nlocal button = window.add(\"button\", {})\n-- window = other.thing()\nwindow.";
+            CHECK_EQ(Text::AssignedCall(script, script.size(), "window"), std::string("manifold.ui.window.create"));
+            CHECK_EQ(Text::AssignedCall(script, script.size(), "button"), std::string("window.add"));
+            CHECK_EQ(Text::AssignedCall(script, 10, "window"), std::string());
+            CHECK_EQ(Text::AssignedCall(script, script.size(), "win"), std::string());
+            CHECK_EQ(Text::AssignedCall("x = a.b(1)\nx = c:d{}\n", 20, "x"), std::string("c:d"));
+            CHECK_EQ(Text::AssignedCall("if x == f() then end", 20, "x"), std::string());
+            CHECK_EQ(Text::AssignedCall("y.x = f()", 9, "x"), std::string());
+            CHECK_EQ(Text::AssignedCall("x = 5", 5, "x"), std::string());
+            CHECK_EQ(Text::AssignedCall("s = \"x = f()\"", 13, "x"), std::string());
+            CHECK_EQ(Text::AssignedCall("", 0, "x"), std::string());
         }
 
         void Calls()

@@ -203,6 +203,41 @@ namespace Manifold::Text
         return context;
     }
 
+    std::string AssignedCall(std::string_view text, std::size_t before, std::string_view name)
+    {
+        if (name.empty())
+            return {};
+        before = std::min(before, text.size());
+        const auto blank = [](char c) { return c == ' ' || c == '\t'; };
+        std::string found;
+        for (std::size_t at = text.find(name); at != std::string_view::npos && at < before; at = text.find(name, at + 1))
+        {
+            const std::size_t end = at + name.size();
+            if ((at > 0 && (IsIdentifierChar(text[at - 1]) || text[at - 1] == '.' || text[at - 1] == ':')) || (end < text.size() && IsIdentifierChar(text[end])))
+                continue;
+            if (!InCode(text, at))
+                continue;
+            std::size_t i = end;
+            while (i < text.size() && blank(text[i]))
+                ++i;
+            if (i >= text.size() || text[i] != '=' || (i + 1 < text.size() && text[i + 1] == '='))
+                continue;
+            ++i;
+            while (i < text.size() && blank(text[i]))
+                ++i;
+            const std::size_t chainStart = i;
+            while (i < text.size() && (IsIdentifierChar(text[i]) || text[i] == '.' || text[i] == ':'))
+                ++i;
+            const std::size_t chainEnd = i;
+            while (i < text.size() && blank(text[i]))
+                ++i;
+            if (chainEnd == chainStart || i >= text.size() || (text[i] != '(' && text[i] != '"' && text[i] != '\'' && text[i] != '{') || i >= before)
+                continue;
+            found = std::string(text.substr(chainStart, chainEnd - chainStart));
+        }
+        return found;
+    }
+
     std::vector<BufferFunction> BufferFunctions(std::string_view text)
     {
         std::vector<BufferFunction> result;
