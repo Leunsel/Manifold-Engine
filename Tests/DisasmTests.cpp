@@ -435,13 +435,41 @@ namespace Manifold::Tests
             CHECK(Asm::MnemonicSummary("jg").find("greater, signed") != std::string::npos);
             CHECK(Asm::MnemonicSummary("setb").rfind("Sets the byte to 1 if below", 0) == 0);
             CHECK(Asm::MnemonicSummary("cmovz").find("zero (ZF = 1)") != std::string::npos);
-            CHECK(Asm::MnemonicSummary("addss") == "Adds one float (32-bit) in the low lane.");
-            CHECK(Asm::MnemonicSummary("mulpd") == "Multiplies every double lane.");
+            CHECK(Asm::MnemonicSummary("addss") == "Adds the low float (32-bit).");
+            CHECK(Asm::MnemonicSummary("mulpd") == "Multiplies all doubles (64-bit).");
+            CHECK(Asm::MnemonicSummary("vpaddd") == "AVX form of `paddd`: Adds dwords.");
+            CHECK(Asm::MnemonicSummary("paddusw") == "Adds words with unsigned saturation.");
+            CHECK(Asm::MnemonicSummary("pcmpgtq") == "Compares signed qwords; greater lanes become all ones.");
+            CHECK(Asm::MnemonicSummary("pmovzxbd") == "Zero-extends packed bytes to dwords.");
+            CHECK(Asm::MnemonicSummary("vpmovqd").find("Narrows qwords to dwords") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("vpermt2w").find("Picks words from two tables") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("vpshldvq").find("filling from a second source") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("vpcompressd").find("Packs the dwords selected by a mask") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("vpcomuw").find("AMD XOP") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("vpshlb").find("AMD XOP") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("vfmadd231ps").find("dst = src2*src3 + dst") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("vfnmsub132sd").find("dst = -(dst*src3) - src2") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("kortestw") == "ORs two mask registers and sets ZF and CF (AVX-512, 16 bits).");
+            CHECK(Asm::MnemonicSummary("fisubr") == "Subtracts st0 from an integer in memory, into st0.");
+            CHECK(Asm::MnemonicSummary("faddp") == "Adds two x87 values and pops.");
+            CHECK(Asm::MnemonicSummary("fcmovnbe").find("above") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("ccmpnle").find("greater, signed") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("cmpbexadd").find("below or equal") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("lodsq") == "Loads the qword at [rsi] into rax and advances rsi.");
+            CHECK(Asm::MnemonicSummary("pushfq") == "Pushes the 64-bit flags register.");
+            CHECK(Asm::MnemonicSummary("vmovdqa32").find("AVX-512 form of `movdqa` for 32-bit elements") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("sha256rnds2").find("SHA") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("vmlaunch").find("virtualization") != std::string::npos);
+            CHECK(Asm::MnemonicSummary("vmovss").find("AVX form of `movss`") == 0);
             CHECK(Asm::MnemonicSummary("xorps").find("sets the register to zero") != std::string::npos);
             CHECK(Asm::MnemonicSummary("cvttss2si") == "Converts a float to an integer, cutting off the fraction (rounding toward zero).");
             CHECK(Asm::MnemonicSummary("cvtsi2sd").rfind("Converts an integer to a double", 0) == 0);
             CHECK(Asm::MnemonicSummary("vaddss").rfind("AVX form", 0) == 0);
             CHECK(Asm::MnemonicSummary("vmovss").find("Copies one float") != std::string::npos);
+            int texts = 0;
+            for (const std::string& mnemonic : Asm::KnownMnemonics())
+                texts += Asm::MnemonicSummary(mnemonic).empty() ? 0 : 1;
+            CHECK_MSG(texts * 100 >= static_cast<int>(Asm::KnownMnemonics().size()) * 98, std::to_string(texts) + " mnemonics have a text");
             CHECK(Asm::MnemonicSummary("jmp") == "Jumps to the target.");
             CHECK(Asm::MnemonicSummary("jx").empty() && Asm::MnemonicSummary("setx").empty() && Asm::MnemonicSummary("").empty());
             CHECK(Asm::MnemonicSummary("sets").rfind("Sets the byte to 1 if negative", 0) == 0);
@@ -534,5 +562,26 @@ namespace Manifold::Tests
             const int failed = RunDisasmTests();
             std::printf("%d checks, %d failed\n", Totals().Checks, failed);
             return failed;
+        });
+    MANIFOLD_MODE("--mnemonic-coverage", [](const std::vector<std::string>& arguments)
+        {
+            const bool list = std::find(arguments.begin(), arguments.end(), "--list") != arguments.end();
+            if (std::find(arguments.begin(), arguments.end(), "--show") != arguments.end())
+            {
+                for (const std::string& mnemonic : Asm::KnownMnemonics())
+                    std::printf("%s\t%s\n", mnemonic.c_str(), Asm::MnemonicSummary(mnemonic).c_str());
+                return 0;
+            }
+            const std::vector<std::string> mnemonics = Asm::KnownMnemonics();
+            int described = 0;
+            for (const std::string& mnemonic : mnemonics)
+            {
+                if (!Asm::MnemonicSummary(mnemonic).empty())
+                    ++described;
+                else if (list)
+                    std::printf("%s\n", mnemonic.c_str());
+            }
+            std::printf("%d of %zu mnemonics have a text\n", described, mnemonics.size());
+            return 0;
         });
 }

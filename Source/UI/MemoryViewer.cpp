@@ -1257,7 +1257,8 @@ namespace Manifold::UI
     {
         const Disasm::Disassembler& disassembler = m_engine.Disassembler();
         const std::optional<Disasm::InstructionFacts> facts = disassembler.Facts(line);
-        const std::string summary = Asm::MnemonicSummary(line.Mnemonic);
+        std::string summary = Asm::MnemonicSummary(line.Mnemonic);
+        std::erase(summary, '`');
         if (!facts && summary.empty())
             return;
         std::optional<std::uint64_t> effective;
