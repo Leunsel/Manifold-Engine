@@ -496,6 +496,33 @@ namespace Manifold::Tests
                 engine.ResolveRecord(record);
                 CHECK_MSG(record.AddressOk && record.ResolvedAddress == health, written + ": " + record.AddressError);
             }
+            Settings& options = engine.Options();
+            Table::MemoryRecord& named = engine.Table().AddValue("Main module", "mainmodule+10", Scan::ValueType::FourBytes);
+            engine.ResolveRecord(named);
+            options.AddressColumn = 2;
+            options.AddressDigits = 0;
+            RecordAddressText text = engine.Tables().AddressTextOf(named);
+            CHECK_MSG(text.Text == "mainmodule+10" && text.Resolved == Hex(module->Base + 0x10) && text.Tooltip == Hex(module->Base + 0x10), text.Text + " | " + text.Resolved);
+            options.AddressColumn = 1;
+            text = engine.Tables().AddressTextOf(named);
+            CHECK_MSG(text.Text == Hex(module->Base + 0x10) && text.Resolved.empty() && text.Tooltip == "mainmodule+10", text.Text);
+            options.AddressColumn = 0;
+            text = engine.Tables().AddressTextOf(named);
+            CHECK(text.Text == "mainmodule+10" && text.Resolved.empty() && text.Tooltip == Hex(module->Base + 0x10));
+            options.AddressColumn = 2;
+            Table::MemoryRecord& numeric = engine.Table().AddValue("Numeric", Hex(hero + 0x20), Scan::ValueType::FourBytes);
+            engine.ResolveRecord(numeric);
+            text = engine.Tables().AddressTextOf(numeric);
+            CHECK(text.Text == Hex(hero + 0x20) && text.Resolved.empty());
+            text = engine.Tables().AddressTextOf(pointer);
+            CHECK_MSG(text.Text == "P->" + Hex(health), text.Text);
+            options.AddressDigits = 1;
+            CHECK_EQ(engine.Tables().AddressTextOf(pointer).Text, "P->" + Hex(health, 8));
+            CHECK_EQ(engine.Tables().AddressHex(0), std::string("00000000"));
+            options.AddressDigits = 2;
+            CHECK_EQ(engine.Tables().AddressTextOf(pointer).Text, "P->" + Hex(health, 16));
+            options.AddressDigits = 0;
+            CHECK_EQ(engine.Tables().AddressHex(0), std::string("0"));
         }
         Table::MemoryRecord& ammo = engine.Table().AddValue("Ammo", Hex(hero + 0x20), Scan::ValueType::FourBytes);
         CHECK(engine.WriteRecord(ammo, "25").Ok());

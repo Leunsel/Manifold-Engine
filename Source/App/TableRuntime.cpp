@@ -69,6 +69,53 @@ namespace Manifold
         record.AddressError.clear();
     }
 
+    std::string TableRuntime::AddressHex(std::uint64_t address) const
+    {
+        const int mode = m_engine.Options().AddressDigits;
+        if (mode == 1)
+            return Hex(address, 8);
+        if (mode == 2)
+        {
+            const auto& process = m_engine.Session().Process();
+            return Hex(address, process && !process->Is64Bit() ? 8 : 16);
+        }
+        return Hex(address);
+    }
+
+    RecordAddressText TableRuntime::AddressTextOf(const Table::MemoryRecord& record) const
+    {
+        RecordAddressText text;
+        if (record.IsPointer())
+        {
+            text.Text = record.AddressOk ? "P->" + AddressHex(record.ResolvedAddress) : "P->????????";
+            text.Tooltip = "[" + record.Address + "] + " + Join(record.Offsets, " + ");
+            return text;
+        }
+        const std::string_view written = TrimView(record.Address);
+        if (!written.empty() && (written.front() == '+' || written.front() == '-') && record.Parent)
+        {
+            text.Text = record.AddressOk ? AddressHex(record.ResolvedAddress) : record.Address;
+            text.Tooltip = (record.Parent->Description.empty() ? std::string("Parent") : record.Parent->Description) + " " + std::string(written);
+            return text;
+        }
+        const int mode = m_engine.Options().AddressColumn;
+        const bool plain = ParseHex(written) == std::optional<std::uint64_t>(record.ResolvedAddress);
+        if (mode == 1 && record.AddressOk)
+        {
+            text.Text = AddressHex(record.ResolvedAddress);
+            text.Tooltip = plain ? std::string() : record.Address;
+            return text;
+        }
+        text.Text = record.Address;
+        if (record.AddressOk)
+        {
+            if (mode == 2 && !plain)
+                text.Resolved = AddressHex(record.ResolvedAddress);
+            text.Tooltip = AddressHex(record.ResolvedAddress);
+        }
+        return text;
+    }
+
     std::vector<std::uint8_t> TableRuntime::ReadRecord(Table::MemoryRecord& record)
     {
         ResolveRecord(record);

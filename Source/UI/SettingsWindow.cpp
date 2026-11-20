@@ -855,6 +855,21 @@ namespace Manifold::UI
             list.EndRow();
         }
 
+        list.Section("Address list");
+        const float addressChoice = std::round(Px(330.0f));
+        if (list.Row("Address column", "What the Address column shows for a record that is not a pointer: the address as written (mainmodule+10, \"game.exe\"+1A2B30), "
+                "the address it resolves to, or both with the resolved address dimmed behind the written one. The tooltip shows the other one.", addressChoice))
+        {
+            changed |= Segmented("##addresscolumn", &settings.AddressColumn, { "As written", "Resolved", "Both" }, addressChoice);
+            list.EndRow();
+        }
+        if (list.Row("Address digits", "How resolved addresses and pointer targets (P->...) are written: as short as the value, with at least 8 digits like Cheat Engine (P->00F40000), "
+                "or at the pointer width of the process, 8 digits for 32-bit and 16 for 64-bit.", addressChoice))
+        {
+            changed |= Segmented("##addressdigits", &settings.AddressDigits, { "Short", "At least 8", "Pointer width" }, addressChoice);
+            list.EndRow();
+        }
+
         list.Section("Refresh rates");
         if (list.Row("Address list", "How often the values in the address list are read.", slider))
         {

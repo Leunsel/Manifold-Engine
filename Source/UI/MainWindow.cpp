@@ -518,6 +518,36 @@ namespace Manifold::UI
             ItemTooltip("Only the address list, without the scanner");
             Item(ICON_FA_GAMEPAD "  Release mode", Command::ReleaseMode, options.ReleaseMode);
             ItemTooltip("Hides addresses, types and the developer tools, so a table is simple to use. Turn it off here again.");
+            if (!m_release)
+            {
+                ImGui::Separator();
+                if (ImGui::BeginMenu("Address column"))
+                {
+                    const char* const columns[] = { "As written", "Resolved address", "Written and resolved" };
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        if (ImGui::MenuItem(columns[i], nullptr, options.AddressColumn == i))
+                        {
+                            options.AddressColumn = i;
+                            engine.SaveOptionsSoon();
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
+                if (ImGui::BeginMenu("Address digits"))
+                {
+                    const char* const digits[] = { "Short (P->F40000)", "At least 8 (P->00F40000)", "Pointer width (8 or 16)" };
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        if (ImGui::MenuItem(digits[i], nullptr, options.AddressDigits == i))
+                        {
+                            options.AddressDigits = i;
+                            engine.SaveOptionsSoon();
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
+            }
             ImGui::EndMenu();
         }
         if (!m_release && ImGui::BeginMenu("Tools"))
@@ -2641,22 +2671,19 @@ namespace Manifold::UI
             engine.ResolveRecord(record);
         if (!m_release && (record.Kind == Table::RecordKind::Value || addressHeader))
         {
-            if (record.IsPointer())
+            const RecordAddressText address = engine.Tables().AddressTextOf(record);
+            ImGui::TextUnformatted(address.Text.c_str());
+            const bool failed = !record.IsPointer() && !record.AddressOk && !record.AddressError.empty();
+            if (failed)
+                ErrorTooltip(record.AddressError);
+            else if (!address.Tooltip.empty())
+                ItemTooltip(address.Tooltip.c_str());
+            if (!address.Resolved.empty())
             {
-                ImGui::TextUnformatted(record.AddressOk ? ("P->" + Hex(record.ResolvedAddress)).c_str() : "P->????????");
-                ItemTooltip(("[" + record.Address + "] + " + Join(record.Offsets, " + ")).c_str());
-            }
-            else
-            {
-                // ∑ A "+10" written relative to the parent tells nothing on its own, so the
-                // column shows where it landed and the tooltip keeps the written offset.
-                const std::string_view written = TrimView(record.Address);
-                const bool relative = !written.empty() && (written.front() == '+' || written.front() == '-') && record.Parent;
-                ImGui::TextUnformatted(relative && record.AddressOk ? Hex(record.ResolvedAddress).c_str() : record.Address.c_str());
-                if (!record.AddressOk && !record.AddressError.empty())
-                    ErrorTooltip(record.AddressError);
-                else if (record.AddressOk)
-                    ItemTooltip(relative ? ((record.Parent->Description.empty() ? std::string("Parent") : record.Parent->Description) + " " + std::string(written)).c_str() : Hex(record.ResolvedAddress).c_str());
+                ImGui::SameLine();
+                ImGui::TextColored(ManifoldTheme::Muted, "%s", address.Resolved.c_str());
+                if (!address.Tooltip.empty())
+                    ItemTooltip(address.Tooltip.c_str());
             }
         }
         if (!m_release)

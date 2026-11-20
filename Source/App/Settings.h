@@ -77,6 +77,8 @@ namespace Manifold
         bool ScanMapped = false;
         std::uint32_t AllTypes = 0x3F;
         int ResultValueRefreshMs = 500;
+        int AddressColumn = 2;
+        int AddressDigits = 0;
 
         bool AutorunEnabled = true;
         bool ScriptWindowsAppLook = true;

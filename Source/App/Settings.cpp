@@ -40,6 +40,12 @@ namespace Manifold
         const SettingChoice kStackOffsets{ { "rsp", "rbp", "address" },
             [](const Settings& s) { return s.StackOffsets; },
             [](Settings& s, int value) { s.StackOffsets = value; } };
+        const SettingChoice kAddressColumn{ { "written", "resolved", "both" },
+            [](const Settings& s) { return s.AddressColumn; },
+            [](Settings& s, int value) { s.AddressColumn = value; } };
+        const SettingChoice kAddressDigits{ { "short", "cheatengine", "pointer" },
+            [](const Settings& s) { return s.AddressDigits; },
+            [](Settings& s, int value) { s.AddressDigits = value; } };
         const SettingChoice kMode{ { "developer", "release" },
             [](const Settings& s) { return s.ReleaseMode ? 1 : 0; },
             [](Settings& s, int value) { s.ReleaseMode = value == 1; } };
@@ -67,6 +73,8 @@ namespace Manifold
             { "Scanner", "ScanMapped", &Settings::ScanMapped },
             { "Scanner", "AllTypes", &Settings::AllTypes, 0, 0x3F },
             { "Scanner", "ResultRefresh", &Settings::ResultValueRefreshMs, 50, 10000 },
+            { "Table", "AddressColumn", &kAddressColumn },
+            { "Table", "AddressDigits", &kAddressDigits },
             { "Scripts", "Autorun", &Settings::AutorunEnabled },
             { "Scripts", "AutoAttach", &Settings::AutoAttach },
             { "Scripts", "AutoAttachEnabled", &Settings::AutoAttachEnabled },

@@ -16,6 +16,13 @@ namespace Manifold
 {
     class Engine;
 
+    struct RecordAddressText
+    {
+        std::string Text;
+        std::string Resolved;
+        std::string Tooltip;
+    };
+
     class TableRuntime
     {
     public:
@@ -29,6 +36,8 @@ namespace Manifold
 
         void ResolveRecord(Table::MemoryRecord& record);
         std::vector<std::uint8_t> ReadRecord(Table::MemoryRecord& record);
+        std::string AddressHex(std::uint64_t address) const;
+        RecordAddressText AddressTextOf(const Table::MemoryRecord& record) const;
         std::string FormatRecord(const Table::MemoryRecord& record, std::span<const std::uint8_t> bytes) const;
         const std::vector<Table::DropDownEntry>& DropDownOf(const Table::MemoryRecord& record) const;
         void ApplyHotkey(Table::MemoryRecord& record, const Table::Hotkey& hotkey);
