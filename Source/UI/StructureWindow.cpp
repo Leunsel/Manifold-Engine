@@ -10,6 +10,9 @@
 #include "UI/Shortcuts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
+#include "UI/Workspace.h"
+
+#include "imgui_internal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -257,6 +260,7 @@ namespace Manifold::UI
     StructureWindow::StructureWindow(Workspace& workspace, int number) : m_workspace(workspace), m_engine(workspace.Core()), m_number(number)
     {
         m_title = NextWindowTitle(ICON_FA_SITEMAP "  Structure Dissect", number);
+        m_windowId = m_title.substr(m_title.find("###"));
         m_columns.push_back({});
     }
 
@@ -595,7 +599,21 @@ namespace Manifold::UI
     {
         if (!m_open)
             return;
-        if (!BeginToolWindow(m_title.c_str(), &m_open, ImVec2(820.0f, 640.0f), ImGuiWindowFlags_MenuBar, ImVec2(680.0f, 320.0f)))
+        if (!m_placed)
+        {
+            const std::uint32_t dock = m_engine.Options().StructureTabs ? m_workspace.StructureDock(*this) : 0;
+            if (dock)
+                ImGui::SetNextWindowDockID(dock, ImGuiCond_Always);
+            else
+                m_placed = true;
+        }
+        const bool visible = BeginToolWindow(m_title.c_str(), &m_open, ImVec2(820.0f, 640.0f), ImGuiWindowFlags_MenuBar, ImVec2(680.0f, 320.0f));
+        if (!m_placed)
+        {
+            const ImGuiWindow* self = ImGui::FindWindowByName(m_windowId.c_str());
+            m_placed = (self && self->DockId != 0) || ++m_dockTries >= 30;
+        }
+        if (!visible)
         {
             EndToolWindow();
             return;
@@ -637,6 +655,8 @@ namespace Manifold::UI
             m_engine.Table().Touch();
         }
         Toolbar();
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        InputTextWithHint("##fieldfilter", ICON_FA_FILTER "  Filter the fields: name, offset (+1A0), type or value", m_filter);
         Table::StructDefinition* definition = Current();
         if (m_structure != m_selectionStructure)
         {
@@ -665,6 +685,35 @@ namespace Manifold::UI
         {
             BuildRows(*definition, std::move(bases), "", 0);
             const int pointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8;
+            const std::size_t total = m_rows.size();
+            if (const std::string needle = Lower(Trim(m_filter)); !needle.empty())
+            {
+                std::string offsetNeedle = needle;
+                if (!offsetNeedle.empty() && offsetNeedle.front() == '+')
+                    offsetNeedle.erase(0, 1);
+                if (offsetNeedle.rfind("0x", 0) == 0)
+                    offsetNeedle.erase(0, 2);
+                const bool hexNeedle = !offsetNeedle.empty() && std::all_of(offsetNeedle.begin(), offsetNeedle.end(), [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; });
+                std::erase_if(m_rows, [&](const Row& row)
+                    {
+                        const Table::StructField& field = row.Definition->Fields[static_cast<std::size_t>(row.Field)];
+                        if (Lower(field.Name).find(needle) != std::string::npos || Lower(TypeLabel(field)).find(needle) != std::string::npos)
+                            return false;
+                        if (hexNeedle && Lower(Hex(static_cast<std::uint64_t>(field.Offset))).find(offsetNeedle) != std::string::npos)
+                            return false;
+                        const Block& block = m_blocks[static_cast<std::size_t>(row.Block)];
+                        const std::uint64_t base = block.Bases.empty() ? 0 : block.Bases.front();
+                        if (!base || !m_engine.HasProcess() || Embedded(field))
+                            return true;
+                        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(std::clamp(field.Size, 1, 256)));
+                        const std::uint64_t address = FieldAddress(base, field.Offset);
+                        if (!m_engine.Process()->ReadExact(address, bytes.data(), bytes.size()))
+                            return true;
+                        return Lower(FieldText(field, bytes, address, pointerSize)).find(needle) == std::string::npos;
+                    });
+            }
+            if (!m_filter.empty())
+                Muted(std::to_string(m_rows.size()) + " of " + std::to_string(total) + " fields match");
             const int columns = 3 + static_cast<int>(m_columns.size());
             const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp;
             if (ImGui::BeginTable("##fields", columns, flags))
@@ -804,6 +853,11 @@ namespace Manifold::UI
         Table::StructDefinition* current = Current();
         if (ImGui::BeginMenu("File"))
         {
+            if (ImGui::MenuItem(ICON_FA_CLONE "  New window"))
+                m_workspace.OpenStructure(!m_columns.empty() && m_columns.front().Valid ? m_columns.front().Value : 0, m_structure, true);
+            if (ImGui::MenuItem(ICON_FA_SEARCH_LOCATION "  Find static pointers to the address", nullptr, false, !m_columns.empty() && m_columns.front().Valid && m_engine.HasProcess()))
+                m_workspace.FindStaticPointers(m_columns.front().Value);
+            ImGui::Separator();
             item(ICON_FA_PLUS "  Add an address to compare", Command::AddStructureColumn);
             ImGui::BeginDisabled(m_columns.size() < 2);
             if (ImGui::MenuItem(ICON_FA_TIMES "  Remove the last address"))
@@ -1525,9 +1579,44 @@ namespace Manifold::UI
         ImGui::Separator();
         if (ImGui::BeginMenu(ICON_FA_EXCHANGE_ALT "  Type"))
         {
+            std::vector<std::uint8_t> sample(64);
+            const bool sampled = first != 0 && m_engine.HasProcess() && m_engine.Process()->Read(first, sample.data(), sample.size()) >= 8;
+            const auto preview = [&](const Table::StructField& probe) -> std::string
+                {
+                    if (!sampled)
+                        return {};
+                    const std::size_t size = static_cast<std::size_t>(std::clamp(probe.Size, 1, static_cast<int>(sample.size())));
+                    std::string text;
+                    if (probe.Type == Scan::ValueType::Pointer)
+                    {
+                        std::uint64_t value = 0;
+                        std::memcpy(&value, sample.data(), static_cast<std::size_t>(pointerSize));
+                        const std::string described = m_engine.Describe(value);
+                        text = "-> " + (described != Hex(value) ? described : Hex(value));
+                        if (!(value >= 0x10000 && m_engine.Process()->RegionAt(value).value_or(Target::RegionInfo{}).Committed()))
+                            text = Hex(value) + " (not mapped)";
+                    }
+                    else
+                    {
+                        text = FieldText(probe, std::span<const std::uint8_t>(sample.data(), size), first, pointerSize);
+                    }
+                    if (text.size() > 28)
+                        text = text.substr(0, 27) + "\xE2\x80\xA6";
+                    return text;
+                };
             for (Scan::ValueType type : kFieldTypes)
             {
-                if (ImGui::MenuItem(Scan::TypeName(type), nullptr, field.CustomType.empty() && !Embedded(field) && field.Type == type))
+                Table::StructField probe = field;
+                probe.CustomType.clear();
+                probe.ChildStructure.clear();
+                probe.Type = type;
+                probe.Size = SizeOf(type, pointerSize, type == Scan::ValueType::String || type == Scan::ValueType::ByteArray ? std::max(field.Size, 16) : field.Size);
+                if (type == Scan::ValueType::Pointer)
+                    probe.Display = Table::FieldDisplay::Hex;
+                else if ((probe.Display == Table::FieldDisplay::Binary && type != Scan::ValueType::Binary) || field.Type == Scan::ValueType::Pointer)
+                    probe.Display = Table::FieldDisplay::Signed;
+                const std::string shown = type == Scan::ValueType::Binary ? std::string() : preview(probe);
+                if (ImGui::MenuItem(Scan::TypeName(type), shown.empty() ? nullptr : shown.c_str(), field.CustomType.empty() && !Embedded(field) && field.Type == type))
                 {
                     if (Embedded(field))
                         field.ChildStructure.clear();

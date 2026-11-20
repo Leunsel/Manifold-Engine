@@ -81,6 +81,7 @@ namespace Manifold
         bool AutorunEnabled = true;
         bool ScriptWindowsAppLook = true;
         bool ScriptEditorTabs = true;
+        bool StructureTabs = true;
         int ScriptCallbackLimitMs = 2000;
         bool LuaShowOnPrint = true;
         bool LuaWrapOutput = true;

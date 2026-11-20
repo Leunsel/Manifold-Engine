@@ -177,6 +177,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaUnreal.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
+    <ClCompile Include="..\Source\Scan\StaticPointers.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
     <ClCompile Include="..\Source\Syscalls\Syscall.cpp">
       <SupportJustMyCode>false</SupportJustMyCode>
@@ -227,6 +228,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\ManifoldApiTests.cpp" />
     <ClCompile Include="..\Tests\MonoTests.cpp" />
     <ClCompile Include="..\Tests\RelayTests.cpp" />
+    <ClCompile Include="..\Tests\StructureTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
     <ClCompile Include="..\Tests\TextTests.cpp" />
     <ClCompile Include="..\Tests\UnrealTests.cpp" />

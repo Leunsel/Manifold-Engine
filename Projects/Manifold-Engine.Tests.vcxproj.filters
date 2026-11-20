@@ -264,6 +264,9 @@
     <ClCompile Include="..\Source\Scan\Scanner.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Scan\StaticPointers.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Scan\ValueType.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
@@ -406,6 +409,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\RelayTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\StructureTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\TemplateTests.cpp">

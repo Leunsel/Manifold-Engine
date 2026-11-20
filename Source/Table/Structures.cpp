@@ -35,20 +35,28 @@ namespace Manifold::Table
         process.Read(address + static_cast<std::uint64_t>(offset), bytes.data(), bytes.size());
 
         std::map<std::uint64_t, Target::RegionInfo> regions;
-        const auto readable = [&](std::uint64_t value)
+        const auto mapped = [&](std::uint64_t value)
         {
             auto found = regions.upper_bound(value);
             if (found != regions.begin())
             {
                 --found;
                 if (value < found->second.End())
-                    return found->second.Readable();
+                    return found->second.Committed();
             }
             const auto region = process.RegionAt(value);
             if (!region || region->Size == 0)
                 return false;
             regions[region->Base] = *region;
-            return region->Readable();
+            return region->Committed();
+        };
+        const auto pointerAt = [&](int at)
+        {
+            if (at < 0 || at + pointerSize > size || (address + static_cast<std::uint64_t>(offset + at)) % static_cast<std::uint64_t>(pointerSize) != 0)
+                return false;
+            std::uint64_t value = 0;
+            std::memcpy(&value, bytes.data() + at, static_cast<std::size_t>(pointerSize));
+            return value >= 0x10000 && value < process.HighestAddress() && mapped(value);
         };
 
         std::vector<StructField> added;
@@ -57,11 +65,9 @@ namespace Manifold::Table
         {
             StructField field;
             field.Offset = offset + at;
-            if (field.Offset % pointerSize == 0 && at + pointerSize <= size)
+            if (at + pointerSize <= size)
             {
-                std::uint64_t value = 0;
-                std::memcpy(&value, bytes.data() + at, static_cast<std::size_t>(pointerSize));
-                if (value >= 0x10000 && value < process.HighestAddress() && readable(value))
+                if (pointerAt(at))
                 {
                     field.Type = Scan::ValueType::Pointer;
                     field.Size = pointerSize;
@@ -80,10 +86,19 @@ namespace Manifold::Table
                     break;
                 ++printable;
             }
-            if (printable >= 4)
+            int length = std::min(size - at, (printable + 4) & ~3);
+            for (int slot = at + 1; slot < at + length; ++slot)
+            {
+                if (pointerAt(slot))
+                {
+                    length = slot - at;
+                    break;
+                }
+            }
+            if (printable >= 4 && length >= 4)
             {
                 field.Type = Scan::ValueType::String;
-                field.Size = std::min(size - at, (printable + 4) & ~3);
+                field.Size = length;
                 field.Name = "String";
                 added.push_back(field);
                 at += field.Size;

@@ -279,6 +279,9 @@
     <ClCompile Include="..\Source\Scan\Scanner.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Scan\StaticPointers.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Scan\ValueType.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
@@ -463,6 +466,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\SplashScreen.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\StaticPointersWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\StructureWindow.cpp">
@@ -708,6 +714,9 @@
     <ClInclude Include="..\Source\Scan\Scanner.h">
       <Filter>Source\Scan</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Scan\StaticPointers.h">
+      <Filter>Source\Scan</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Scan\ValueType.h">
       <Filter>Source\Scan</Filter>
     </ClInclude>
@@ -892,6 +901,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\SplashScreen.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\StaticPointersWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\StructureWindow.h">

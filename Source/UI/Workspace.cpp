@@ -30,6 +30,7 @@
 #include "UI/RecordEditor.h"
 #include "UI/ScriptWindow.h"
 #include "UI/SettingsWindow.h"
+#include "UI/StaticPointersWindow.h"
 #include "UI/StructureWindow.h"
 #include "UI/TableFilesWindow.h"
 #include "UI/ToolWindows.h"
@@ -150,6 +151,7 @@ namespace Manifold::UI
         drawOne("Code dissect", m_codeDissect);
         drawOne("Assembly search", m_asmSearch);
         drawOne("Byte search", m_byteSearch);
+        drawOne("Static pointers", m_staticPointers);
         drawOne("Breakpoints", m_breakpoints);
         drawOne("Thread list", m_threadList);
         drawOne("Mono / .NET", m_mono);
@@ -381,11 +383,65 @@ namespace Manifold::UI
         viewer.Show(address, hexView);
     }
 
-    void Workspace::OpenStructure(std::uint64_t address, const std::string& structure)
+    void Workspace::OpenStructure(std::uint64_t address, const std::string& structure, bool newWindow)
     {
-        if (m_structures.empty())
+        StructureWindow* target = nullptr;
+        for (auto it = m_structures.rbegin(); it != m_structures.rend() && !newWindow; ++it)
+        {
+            if (!(*it)->Closed())
+            {
+                target = it->get();
+                break;
+            }
+        }
+        if (!target && !newWindow && !m_structures.empty())
+            target = m_structures.back().get();
+        if (!target)
+        {
             m_structures.push_back(std::make_unique<StructureWindow>(*this, m_nextWindow++));
-        m_structures.back()->Show(address, structure);
+            target = m_structures.back().get();
+        }
+        target->Show(address, structure);
+    }
+
+    std::uint32_t Workspace::DockGroup(const std::vector<std::string>& others, std::uint32_t& dock, int& frame)
+    {
+        if (frame == ImGui::GetFrameCount() && ImGui::DockBuilderGetNode(dock))
+            return dock;
+        for (const std::string& name : others)
+        {
+            ImGuiWindow* window = ImGui::FindWindowByName(name.c_str());
+            if (!window || !(window->Active || window->WasActive))
+                continue;
+            if (window->DockId != 0)
+            {
+                const ImGuiDockNode* node = ImGui::DockBuilderGetNode(window->DockId);
+                if (node && !node->IsCentralNode())
+                    return window->DockId;
+                continue;
+            }
+            const ImGuiID node = ImGui::DockBuilderAddNode(0, ImGuiDockNodeFlags_None);
+            ImGui::DockBuilderSetNodePos(node, window->Pos);
+            ImGui::DockBuilderSetNodeSize(node, window->Size);
+            ImGui::DockBuilderDockWindow(window->Name, node);
+            ImGui::DockBuilderFinish(node);
+            dock = node;
+            frame = ImGui::GetFrameCount();
+            return node;
+        }
+        return 0;
+    }
+
+    std::uint32_t Workspace::StructureDock(const StructureWindow& opening)
+    {
+        std::vector<std::string> others;
+        for (auto it = m_structures.rbegin(); it != m_structures.rend(); ++it)
+        {
+            const StructureWindow& other = **it;
+            if (&other != &opening && !other.Closed() && other.Placed())
+                others.push_back(other.WindowId());
+        }
+        return DockGroup(others, m_structureDock, m_structureDockFrame);
     }
 
     void Workspace::OpenScript(std::string script, int recordId, bool lua)
@@ -406,33 +462,14 @@ namespace Manifold::UI
 
     std::uint32_t Workspace::ScriptEditorDock(const ScriptWindow& opening)
     {
-        if (m_scriptDockFrame == ImGui::GetFrameCount() && ImGui::DockBuilderGetNode(m_scriptDock))
-            return m_scriptDock;
+        std::vector<std::string> others;
         for (auto it = m_scripts.rbegin(); it != m_scripts.rend(); ++it)
         {
             const ScriptWindow& other = **it;
-            if (&other == &opening || other.Closed() || !other.Placed())
-                continue;
-            ImGuiWindow* window = ImGui::FindWindowByName(other.WindowId().c_str());
-            if (!window || !(window->Active || window->WasActive))
-                continue;
-            if (window->DockId != 0)
-            {
-                const ImGuiDockNode* node = ImGui::DockBuilderGetNode(window->DockId);
-                if (node && !node->IsCentralNode())
-                    return window->DockId;
-                continue;
-            }
-            const ImGuiID node = ImGui::DockBuilderAddNode(0, ImGuiDockNodeFlags_None);
-            ImGui::DockBuilderSetNodePos(node, window->Pos);
-            ImGui::DockBuilderSetNodeSize(node, window->Size);
-            ImGui::DockBuilderDockWindow(window->Name, node);
-            ImGui::DockBuilderFinish(node);
-            m_scriptDock = node;
-            m_scriptDockFrame = ImGui::GetFrameCount();
-            return node;
+            if (&other != &opening && !other.Closed() && other.Placed())
+                others.push_back(other.WindowId());
         }
-        return 0;
+        return DockGroup(others, m_scriptDock, m_scriptDockFrame);
     }
 
     void Workspace::OpenLua()
@@ -522,6 +559,13 @@ namespace Manifold::UI
             m_byteSearch->Show();
         else
             m_byteSearch->Search(pattern);
+    }
+
+    void Workspace::FindStaticPointers(std::uint64_t address)
+    {
+        if (!m_staticPointers)
+            m_staticPointers = std::make_unique<StaticPointersWindow>(*this);
+        m_staticPointers->Search(address);
     }
 
     void Workspace::RevealInMemoryViewer(std::uint64_t address, std::uint64_t length, bool code, bool raise)

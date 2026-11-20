@@ -191,6 +191,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Lua\LuaUnreal.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
+    <ClCompile Include="..\Source\Scan\StaticPointers.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
     <ClCompile Include="..\Source\Syscalls\Syscall.cpp">
       <SupportJustMyCode>false</SupportJustMyCode>
@@ -255,6 +256,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\SettingsWindow.cpp" />
     <ClCompile Include="..\Source\UI\Shortcuts.cpp" />
     <ClCompile Include="..\Source\UI\SplashScreen.cpp" />
+    <ClCompile Include="..\Source\UI\StaticPointersWindow.cpp" />
     <ClCompile Include="..\Source\UI\StructureWindow.cpp" />
     <ClCompile Include="..\Source\UI\TableFilesWindow.cpp" />
     <ClCompile Include="..\Source\UI\TemplateManager.cpp" />
@@ -338,6 +340,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Lua\LuaUnreal.h" />
     <ClInclude Include="..\Source\Lua\UiModel.h" />
     <ClInclude Include="..\Source\Scan\Scanner.h" />
+    <ClInclude Include="..\Source\Scan\StaticPointers.h" />
     <ClInclude Include="..\Source\Scan\ValueType.h" />
     <ClInclude Include="..\Source\Syscalls\Syscall.h" />
     <ClInclude Include="..\Source\Table\AddressList.h" />
@@ -400,6 +403,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\SettingsWindow.h" />
     <ClInclude Include="..\Source\UI\Shortcuts.h" />
     <ClInclude Include="..\Source\UI\SplashScreen.h" />
+    <ClInclude Include="..\Source\UI\StaticPointersWindow.h" />
     <ClInclude Include="..\Source\UI\StructureWindow.h" />
     <ClInclude Include="..\Source\UI\TableFilesWindow.h" />
     <ClInclude Include="..\Source\UI\TemplateManager.h" />

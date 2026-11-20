@@ -4,7 +4,7 @@ The `Autorun` folder holds Lua modules that Manifold Engine runs at start when t
 
 | File | Global | What it does |
 | --- | --- | --- |
-| `Manifold-RTTI.lua` | `ManifoldRTTI` | Names C++ objects from MSVC RTTI in Structure Dissect and registers `<Class>::vftable` symbols; finds the owner of an address and instances of a class. |
+| `Manifold-RTTI.lua` | `ManifoldRTTI` | Names C++ objects from MSVC RTTI in Structure Dissect, turns member objects that have their own RTTI into embedded structures named after their class (three levels deep), and registers `<Class>::vftable` symbols; finds the owner of an address and instances of a class. |
 | `Manifold-Godot.lua` | `ManifoldGodot` | Godot 4 runtime: StringNames, ObjectDB, ClassDB, the scene tree and method symbols (`Class::method`); fills structures and adds a *Godot Engine* menu. Godot 3 is declined with a message. |
 | `Manifold-SigMaker.lua` + `Manifold-SigMaker-Modules` | `ManifoldSigMaker` | Makes byte signatures for the selected instruction in the memory viewer, checks that they are unique in their module, and finds them again (Ctrl+Shift+F). |
 

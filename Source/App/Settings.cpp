@@ -108,6 +108,7 @@ namespace Manifold
             { "Debugger", "StackOffsets", &kStackOffsets },
             { "Debugger", "ShowSymbols", &Settings::ShowSymbols },
             { "Debugger", "HexView", &Settings::MemoryHexView },
+            { "Debugger", "DissectTabs", &Settings::StructureTabs },
             { "Debugger", "CodeShare", &Settings::MemoryCodeShare, 100, 950 },
             { "Mono", "AutoExplorer", &Settings::AutoExplorer },
             { "Recent", "LastProcess", &Settings::LastProcess },

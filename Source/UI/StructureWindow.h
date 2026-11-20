@@ -22,6 +22,8 @@ namespace Manifold::UI
         void Draw() override;
         bool Closed() const override { return !m_open; }
         void Show(std::uint64_t address, const std::string& structure = {});
+        const std::string& WindowId() const { return m_windowId; }
+        bool Placed() const { return m_placed; }
 
     private:
         struct Column
@@ -90,6 +92,10 @@ namespace Manifold::UI
         Engine& m_engine;
         [[maybe_unused]] int m_number = 1;
         std::string m_title;
+        std::string m_windowId;
+        bool m_placed = false;
+        int m_dockTries = 0;
+        std::string m_filter;
         bool m_open = true;
         std::vector<Column> m_columns;
         std::string m_structure;

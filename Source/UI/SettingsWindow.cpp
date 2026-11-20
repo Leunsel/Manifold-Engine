@@ -1394,6 +1394,15 @@ namespace Manifold::UI
         bool changed = false;
         const float toggle = ToggleSwitchWidth();
 
+        list.Section("Structure Dissect");
+        if (list.Row("Open as tabs",
+                "A new Structure Dissect window opens as a tab beside the ones already open, in one window. Off: each opens as a window of its own. "
+                "A tab can be dragged out with Shift held.", toggle))
+        {
+            changed |= ToggleSwitch("##dissecttabs", &settings.StructureTabs);
+            list.EndRow();
+        }
+
         list.Section("Breakpoints");
         if (list.Row("Hardware breakpoints for code", "Use a free debug register instead of changing the code, so integrity checks do not see it. There are only four.", toggle))
         {

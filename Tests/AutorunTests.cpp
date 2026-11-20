@@ -7,6 +7,7 @@
 #include "Lua/LuaEngine.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -17,6 +18,24 @@ namespace Manifold::Tests
 {
     namespace
     {
+        struct EmbedMember
+        {
+            virtual ~EmbedMember() = default;
+            virtual int Value() const { return 7; }
+            std::uint64_t Payload = 0x1111;
+        };
+
+        struct EmbedOwner
+        {
+            virtual ~EmbedOwner() = default;
+            virtual int Kind() const { return 1; }
+            std::uint64_t Before = 0x2222;
+            EmbedMember Member;
+            std::uint64_t After = 0x3333;
+        };
+
+        EmbedOwner g_embedOwner;
+
         std::filesystem::path AutorunSource()
         {
             std::filesystem::path at = std::filesystem::current_path();
@@ -103,6 +122,30 @@ namespace Manifold::Tests
             return "ok")LUA", "autorun probe", result);
         CHECK_MSG(probed.Ok() && result == "ok", probed.Ok() ? result : probed.Text);
         CheckQuiet(lua, mark, "claims");
+
+        mark = Mark(lua);
+        const std::uint64_t owner = reinterpret_cast<std::uint64_t>(&g_embedOwner);
+        const Status embedded = lua.RunWithResult("local address, member, size = 0x" + Hex(owner) + ", " + std::to_string(reinterpret_cast<std::uint64_t>(&g_embedOwner.Member) - owner) + ", " + std::to_string(sizeof(EmbedOwner)) + R"LUA(
+            local s = createStructure("EmbedProbe")
+            s.autoGuess(address, 0, size)
+            ManifoldRTTI.label(s, address)
+            local found
+            for i = 0, s.Count - 1 do
+              local e = s.getElement(i)
+              if e.Offset == member then found = e end
+              if e.Offset > member and e.Offset < size then return "a field inside the member stayed: " .. string.format("%X", e.Offset) end
+            end
+            if not found then return "no field at the member" end
+            if found.Vartype == vtPointer then return "the member is still a pointer" end
+            local child = found.ChildStruct
+            if not child then return "no child structure" end
+            if not child.Name:find("EmbedMember", 1, true) then return "child is " .. child.Name end
+            if found.Bytesize ~= size - member then return "member size " .. found.Bytesize end
+            local first = child.getElement(0)
+            if not first or first.Name ~= "vftable" then return "child field 0 is " .. tostring(first and first.Name) end
+            return "ok")LUA", "embedded member", result);
+        CHECK_MSG(embedded.Ok() && result == "ok", embedded.Ok() ? result : embedded.Text);
+        CheckQuiet(lua, mark, "embedded member");
 
         mark = Mark(lua);
         engine.CloseProcess();

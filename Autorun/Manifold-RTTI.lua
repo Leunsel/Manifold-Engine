@@ -95,7 +95,7 @@ end
 -- CONFIG
 ----------------------------------------
 local RUNTIME_STATE_KEY = "__MANIFOLD_RTTI_RUNTIME__"
-local VERSION           = "2.0.1"
+local VERSION           = "2.1.0"
 local MENU_CAPTION      = "RTTI"
 
 -- ∑ One key for every manifold registration of this script: running the
@@ -128,6 +128,11 @@ local SCAN_LIMIT_MAX  = 1000000
 local REGISTER_SYMBOLS = true
 
 local VT_POINTER = vtPointer
+local VT_BYTES   = rawget(_G, "vtByteArray") or 8
+
+local EMBED_MEMBERS = true
+local MEMBER_LIMIT  = 0x200
+local MEMBER_DEPTH  = 3
 
 -- ∑ Running the file again replaces every keyed registration by itself.
 -- What still lives outside this chunk is what has no key: the menu, which
@@ -1121,7 +1126,105 @@ local function Elements(structure)
     return list
 end
 
-local function AnnotateObject(structure, hit)
+-- ∑ The guess runs inside the override; the flag keeps a dissect that the
+-- guess itself starts from coming back into this override.
+local InOverride = false
+
+local function Guess(structure, base, size)
+    local outer = InOverride
+    InOverride = true
+    local ok, problem = try(function() structure.autoGuess(base, 0, size or GUESS_SIZE) end)
+    InOverride = outer
+    return ok, problem
+end
+
+local function FindGlobalStructure(name)
+    for i = 0, (getStructureCount() or 0) - 1 do
+        local structure = getStructure(i)
+        if structure and structure.Name == name then return structure end
+    end
+    return nil
+end
+
+local AnnotateObject
+
+local function MemberStructure(info, address, size, depth, building)
+    local existing = FindGlobalStructure(info.name)
+    if existing then return existing end
+    if building[info.name] then return nil end
+    building[info.name] = true
+    local child = createStructure(info.name)
+    Guess(child, address, size)
+    if #Elements(child) == 0 then
+        child.destroy()
+        building[info.name] = nil
+        return nil
+    end
+    AnnotateObject(child, { address = address, start = address, class = info }, depth + 1, building)
+    child.addToGlobalStructureList()
+    building[info.name] = nil
+    return child
+end
+
+local function EmbedMembers(structure, hit, depth, building)
+    if not EMBED_MEMBERS or depth >= MEMBER_DEPTH or hit.via then return 0 end
+    local elements = Elements(structure)
+    if #elements == 0 then return 0 end
+    local last = elements[#elements]
+    local finish = last.Offset + math.max(last.Bytesize or 0, 1)
+    local byOffset, own, members, seen = {}, {}, {}, {}
+    for index, element in ipairs(elements) do
+        byOffset[element.Offset] = index
+    end
+    for _, element in ipairs(elements) do
+        if element.Vartype == VT_POINTER then
+            local info = VTableClass(RP(hit.start + element.Offset), true)
+            if info then
+                if info.td == hit.class.td then
+                    own[#own + 1] = element.Offset
+                elseif info.offset <= element.Offset then
+                    local start = element.Offset - info.offset
+                    if start > 0 and byOffset[start] and not seen[start] then
+                        seen[start] = true
+                        members[#members + 1] = { start = start, info = info }
+                    end
+                end
+            end
+        end
+    end
+    if #members == 0 then return 0 end
+    table.sort(members, function(a, b) return a.start < b.start end)
+    for i, member in ipairs(members) do
+        local stop = members[i + 1] and members[i + 1].start or math.min(finish, member.start + MEMBER_LIMIT)
+        for _, offset in ipairs(own) do
+            if offset > member.start and offset < stop then stop = offset end
+        end
+        member.size = stop - member.start
+    end
+    local embedded = 0
+    for i = #members, 1, -1 do
+        local member = members[i]
+        local child = member.size > 0 and MemberStructure(member.info, hit.start + member.start, member.size, depth, building)
+        if child then
+            local first = byOffset[member.start]
+            for index = #elements, first + 1, -1 do
+                local element = elements[index]
+                if element.Offset < member.start + member.size then element.destroy() end
+            end
+            local element = elements[first]
+            element.Vartype = VT_BYTES
+            element.Bytesize = member.size
+            element.ChildStruct = child
+            if Generic(element.Name) or element.Name == "vftable" then element.Name = member.info.name end
+            embedded = embedded + 1
+            elements = Elements(structure)
+        end
+    end
+    return embedded
+end
+
+AnnotateObject = function(structure, hit, depth, building)
+    EmbedMembers(structure, hit, depth or 0, building or {})
     local labelled = 0
     for _, element in ipairs(Elements(structure)) do
         if element.Vartype == VT_POINTER and Generic(element.Name) then
@@ -1152,17 +1255,6 @@ end
 
 local function TableName(info)
     return SymbolFor(info)
-end
-
--- ∑ The guess runs inside the override; the flag keeps a dissect that the
--- guess itself starts from coming back into this override.
-local InOverride = false
-
-local function Guess(structure, base)
-    InOverride = true
-    local ok, problem = try(function() structure.autoGuess(base, 0, GUESS_SIZE) end)
-    InOverride = false
-    return ok, problem
 end
 
 -- ∑ The structure name resolver: the class names the structure, and an
@@ -1201,14 +1293,6 @@ local function DissectOverride(structure, base)
     if #Elements(structure) == 0 then return nil end
     if hit then AnnotateObject(structure, hit) else AnnotateTable(structure, base) end
     return true
-end
-
-local function FindGlobalStructure(name)
-    for i = 0, (getStructureCount() or 0) - 1 do
-        local structure = getStructure(i)
-        if structure and structure.Name == name then return structure end
-    end
-    return nil
 end
 
 local function Dissect(address)

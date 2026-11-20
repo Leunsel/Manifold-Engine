@@ -72,6 +72,7 @@ namespace Manifold::UI
     class CodeDissectWindow;
     class AsmSearchWindow;
     class ByteSearchWindow;
+    class StaticPointersWindow;
     class ShortcutsWindow;
     class TemplateManager;
     class ScriptForms;
@@ -110,7 +111,9 @@ namespace Manifold::UI
         void RequestRestyle() { m_restyle = true; }
 
         void OpenMemoryViewer(std::uint64_t address, bool hexView = false, bool newWindow = false);
-        void OpenStructure(std::uint64_t address, const std::string& structure = {});
+        void OpenStructure(std::uint64_t address, const std::string& structure = {}, bool newWindow = false);
+        std::uint32_t StructureDock(const StructureWindow& opening);
+        void FindStaticPointers(std::uint64_t address);
         void OpenScript(std::string script, int recordId = kNoRecord, bool lua = false);
         std::uint32_t ScriptEditorDock(const ScriptWindow& opening);
         void OpenLua();
@@ -213,6 +216,7 @@ namespace Manifold::UI
         std::unique_ptr<CodeDissectWindow> m_codeDissect;
         std::unique_ptr<AsmSearchWindow> m_asmSearch;
         std::unique_ptr<ByteSearchWindow> m_byteSearch;
+        std::unique_ptr<StaticPointersWindow> m_staticPointers;
         std::unique_ptr<ShortcutsWindow> m_shortcuts;
         std::unique_ptr<TemplateManager> m_templateManager;
         std::unique_ptr<ScriptForms> m_scriptForms;
@@ -231,6 +235,9 @@ namespace Manifold::UI
         int m_nextWindow = 1;
         std::uint32_t m_scriptDock = 0;
         int m_scriptDockFrame = -1;
+        std::uint32_t m_structureDock = 0;
+        int m_structureDockFrame = -1;
+        std::uint32_t DockGroup(const std::vector<std::string>& others, std::uint32_t& dock, int& frame);
 
         struct ConfirmRequest
         {
