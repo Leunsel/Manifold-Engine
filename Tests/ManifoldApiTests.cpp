@@ -59,7 +59,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 7 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 8 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -329,6 +329,8 @@ namespace Manifold::Tests
                 if registered ~= nil or noSymbol.code ~= "ME-1005" then return "symbol" end
                 local fast, noFast = manifold.memory.read(0x1000, "u64")
                 if fast ~= nil or noFast.code ~= "ME-1005" or noFast.where ~= "no process:14" then return "fast read " .. tostring(noFast) end
+                local name, noName = manifold.process.name()
+                if name ~= nil or noName.code ~= "ME-1005" or process ~= nil then return "name" end
                 if #manifold.process.find() < 10 or #manifold.process.find("CSRSS") < 1 then return "find" end
                 if #manifold.process.find("no-such-process-name") ~= 0 then return "find filter" end
                 local opened, badId = manifold.process.open(0x100000004)
@@ -361,6 +363,16 @@ namespace Manifold::Tests
                 local missing, why = manifold.process.module("nothing-here.dll")
                 if missing ~= nil or why.code ~= "ME-1016" then return "missing module " .. tostring(why) end
                 if not manifold.process.mainModule().name:find("Tests") then return "main module" end
+                local main = manifold.process.mainModule()
+                if manifold.process.name() ~= main.name or manifold.process.name() ~= process then return "name " .. tostring(manifold.process.name()) .. " / " .. tostring(process) end
+                local address = manifold.process.address
+                if address("$process") ~= main.base or address("$PROCESS+10") ~= main.base + 0x10 or address('"$process"+10') ~= main.base + 0x10 then return "$process" end
+                if address("mainmodule") ~= main.base or address("MainModule+1A") ~= main.base + 0x1A or address("[mainmodule+3C]") ~= manifold.memory.read(main.base + 0x3C, "pointer") then return "mainmodule" end
+                if address("$10") ~= 0x10 or address("$DEAD+1") ~= 0xDEAE then return "dollar hex" end
+                if getAddress("$process") ~= main.base or getAddress("mainmodule+8") ~= main.base + 8 then return "getAddress" end
+                if manifold.process.module("$process").base ~= main.base or manifold.process.module("mainmodule").name ~= main.name then return "module alias" end
+                local unknown, why = address("$nothing")
+                if unknown ~= nil or why.code ~= "ME-8002" then return "unknown dollar " .. tostring(why) end
                 if #manifold.process.modules() < 3 then return "modules" end
                 local tick = manifold.process.address("kernel32.GetTickCount")
                 if not tick or tick == 0 then return "address" end

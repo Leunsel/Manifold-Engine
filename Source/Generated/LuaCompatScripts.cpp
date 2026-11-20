@@ -5024,7 +5024,7 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 7
+local API_VERSION = 8
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -5662,6 +5662,13 @@ define(process, "open", {
   return result(native.processOpen(target))
 end)
 
+define(process, "name", {
+  returns = "string, or nil, error",
+  doc = "The file name of the process's executable module, such as `\"game.exe\"`: the same name the Cheat Engine global `process` holds, read when it is asked for. Addresses name that module's base as `mainmodule` or, as in Cheat Engine, `$process`, so `\"mainmodule+1A2B30\"` works in memory records, pointers, Auto Assembler scripts and here.",
+}, function()
+  return result(native.processName())
+end)
+
 define(process, "find", {
   params = { { name = "name", type = "string", optional = true } },
   returns = "list of `{ id, name, path, windowTitle, is64Bit }`",
@@ -5672,7 +5679,7 @@ end)
 
 define(process, "mainModule", {
   returns = "`{ name, base, size, path }`, or nil, error",
-  doc = "The process's executable module.",
+  doc = "The process's executable module. Its base is what `mainmodule` and `$process` stand for in addresses.",
 }, function()
   return result(native.mainModule())
 end)
@@ -5754,7 +5761,8 @@ define(memory, "read", {
 end)
 
 do
-  local slow = rawget(memory.members, "read")
+)MLUA"),
+            std::string_view(R"MLUA(  local slow = rawget(memory.members, "read")
   local nativeRead = native.read
   local function fast(address, kind, options, extra)
     if extra == nil and math.type(address) == "integer" then
@@ -5766,8 +5774,7 @@ do
         return value
       end
       if kind == "raw" and type(options) == "table" and next(options, next(options)) == nil then
-)MLUA"),
-            std::string_view(R"MLUA(        local count = rawget(options, "count")
+        local count = rawget(options, "count")
         if math.type(count) == "integer" and count >= 1 and count <= MAX_BYTES then
           local value, code, message = nativeRead(address, "raw", count, 0, false)
           if value == nil and code ~= nil then
@@ -6056,7 +6063,8 @@ define(symbol, "unregister", {
 end)
 
 local addSymbolResolver, removeSymbolResolver = keyedRegistry(function(resolver)
-  local guarded = protect("symbol", resolver)
+)MLUA"),
+            std::string_view(R"MLUA(  local guarded = protect("symbol", resolver)
   return ceSymbolLookup(function(name)
     local value = guarded(name)
     if math.type(value) == "integer" then
@@ -6069,8 +6077,7 @@ end, ceSymbolUnlookup)
 define(symbol, "addResolver", {
   params = { { name = "resolver", type = "function" }, KEY_OPTION },
   returns = "id",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Calls `resolver(name)` for a name that is neither a module, an export nor a registered symbol; it returns an address or nil. Resolvers are asked in the order they were added, and the first address wins. An error in a resolver is logged once." .. KEY_TEXT,
+  doc = "Calls `resolver(name)` for a name that is neither a module, an export nor a registered symbol; it returns an address or nil. Resolvers are asked in the order they were added, and the first address wins. An error in a resolver is logged once." .. KEY_TEXT,
 }, function(resolver, options)
   return addSymbolResolver(resolver, options)
 end)

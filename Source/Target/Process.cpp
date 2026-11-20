@@ -1095,7 +1095,14 @@ namespace Manifold::Target
             if (dot != std::string::npos && EqualsNoCase(std::string_view(module.Name).substr(0, dot), name))
                 return module;
         }
+        if (IsMainModuleName(name))
+            return MainModule();
         return std::nullopt;
+    }
+
+    bool Process::IsMainModuleName(std::string_view name)
+    {
+        return EqualsNoCase(name, "$process") || EqualsNoCase(name, "mainmodule");
     }
 
     std::optional<ModuleInfo> Process::MainModule() const

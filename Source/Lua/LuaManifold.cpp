@@ -339,6 +339,17 @@ namespace Manifold::Lua
             return 1;
         }
 
+        int ProcessName(lua_State* state)
+        {
+            Status error;
+            const auto process = Opened(state, error);
+            if (!process)
+                return PushFailure(state, error);
+            const auto main = process->MainModule();
+            lua_pushstring(state, main ? main->Name.c_str() : process->Name().c_str());
+            return 1;
+        }
+
         int MainModule(lua_State* state)
         {
             Status error;
@@ -733,6 +744,7 @@ namespace Manifold::Lua
             { "processInfo", &ProcessInfo },
             { "processOpen", &ProcessOpen },
             { "processFind", &ProcessFind },
+            { "processName", &ProcessName },
             { "mainModule", &MainModule },
             { "module", &Module },
             { "modules", &Modules },

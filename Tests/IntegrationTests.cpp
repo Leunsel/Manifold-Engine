@@ -355,6 +355,14 @@ namespace Manifold::Tests
         {
             CHECK_EQ(engine.Evaluate("TestTarget.exe").value_or(0), module->Base);
             CHECK_EQ(engine.Evaluate("\"TestTarget.exe\"+10").value_or(0), module->Base + 0x10);
+            CHECK_EQ(engine.Evaluate("$process").value_or(0), module->Base);
+            CHECK_EQ(engine.Evaluate("$process+1234").value_or(0), module->Base + 0x1234);
+            CHECK_EQ(engine.Evaluate("\"$process\"+10").value_or(0), module->Base + 0x10);
+            CHECK_EQ(engine.Evaluate("[$process+3C]-[mainmodule+3C]").value_or(1), 0u);
+            CHECK_EQ(engine.Evaluate("mainmodule+10").value_or(0), module->Base + 0x10);
+            CHECK_EQ(engine.Evaluate("$10+$process").value_or(0), module->Base + 0x10);
+            Status unknownDollar;
+            CHECK(!engine.Evaluate("$nosuchname", &unknownDollar) && unknownDollar.Code == ErrorCode::ExprUnknownSymbol);
             CHECK_EQ(engine.Symbols().ModuleOffset(damage), "\"TestTarget.exe\"+" + Hex(damage - module->Base));
         }
         const auto sleep = engine.Evaluate("kernel32.Sleep");
@@ -477,6 +485,18 @@ namespace Manifold::Tests
         pointer.Offsets = { "8", "0" };
         engine.ResolveRecord(pointer);
         CHECK(pointer.AddressOk && pointer.ResolvedAddress == health);
+        CHECK(module && world >= module->Base && world < module->Base + module->Size);
+        if (module && world >= module->Base && world < module->Base + module->Size)
+        {
+            const std::string offset = Hex(world - module->Base);
+            for (const std::string& written : { "$process+" + offset, "\"$process\"+" + offset, "mainmodule+" + offset })
+            {
+                Table::MemoryRecord& record = engine.Table().AddValue("Health by " + written, written, Scan::ValueType::FourBytes);
+                record.Offsets = { "8", "0" };
+                engine.ResolveRecord(record);
+                CHECK_MSG(record.AddressOk && record.ResolvedAddress == health, written + ": " + record.AddressError);
+            }
+        }
         Table::MemoryRecord& ammo = engine.Table().AddValue("Ammo", Hex(hero + 0x20), Scan::ValueType::FourBytes);
         CHECK(engine.WriteRecord(ammo, "25").Ok());
         CHECK(engine.SetActive(ammo, true).Ok());

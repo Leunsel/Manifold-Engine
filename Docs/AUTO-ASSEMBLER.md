@@ -8,9 +8,9 @@ Failures name the line and end in an `ME-3xxx` code; see [ERRORS.md](ERRORS.md).
 
 - Numbers are **hexadecimal** unless written with `#` (decimal): `10` is sixteen, `#10` is ten. `0x` and `$` also mark hex.
 - Comments: `// to the end of the line`, `{ a block }` and `/* a block */`.
-- An address line ends in a colon and sets where the following lines go: `newmem:`, `game.exe+1234:`, `"game.exe"+1234:`, `INJECT+5:`. A declared label written this way is placed at the current address instead.
+- An address line ends in a colon and sets where the following lines go: `newmem:`, `game.exe+1234:`, `"game.exe"+1234:`, `$process+1234:`, `INJECT+5:`. A declared label written this way is placed at the current address instead.
 - Every other line is an instruction or data, Intel syntax: `mov eax,[rcx+10]`, `jmp return`, `db 90 90`, `dd (float)100.5`, `dq (double)1`, `db 'text',0`, `nop 5`.
-- Names that work everywhere: labels and allocations of the script, `aobscan` results, registered symbols, module names (`game.exe`), exports (`kernel32.Sleep`, `kernel32!Sleep`).
+- Names that work everywhere: labels and allocations of the script, `aobscan` results, registered symbols, module names (`game.exe`), the executable of the opened process as `mainmodule` or `$process` (as in Cheat Engine), exports (`kernel32.Sleep`, `kernel32!Sleep`).
 - Jumps and calls pick the shortest form. In 64-bit code a target beyond 2 GB becomes a 14-byte absolute jump (16 for `call` and conditional jumps). Allocate near the code to keep the 5-byte form: `alloc(newmem,$1000,INJECT)`.
 
 ## Commands
@@ -25,7 +25,7 @@ Failures name the line and end in an `ME-3xxx` code; see [ERRORS.md](ERRORS.md).
 | `registersymbol(name, ...)` | Makes a label, allocation or `aobscan` result usable by other scripts, by addresses in the table and by Lua. |
 | `unregistersymbol(name, ...)` | Removes registered symbols. |
 | `aobscan(name, bytes)` | Finds the first match of a byte pattern in the whole process. `??` or `*` matches any byte, `4?` matches any low nibble. |
-| `aobscanmodule(name, module, bytes)` | Finds the pattern inside one module. |
+| `aobscanmodule(name, module, bytes)` | Finds the pattern inside one module. `$process` or `mainmodule` as the module is the executable of the opened process. |
 | `aobscanregion(name, start, stop, bytes)` | Finds the pattern between two addresses. |
 | `assert(address, bytes)` | Stops the script when the memory does not hold these bytes, before anything is written. |
 | `readmem(address, size)` | Writes a copy of the bytes found at `address` into the current position. The bytes are read after the `aobscan` commands and `alloc`, so `address` may be a symbol from a scan of the same script. |

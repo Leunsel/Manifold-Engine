@@ -29,6 +29,8 @@ namespace Manifold::Tests
     {
         using namespace Manifold::Templates;
 
+        volatile std::uint64_t g_mainModuleProbe[5] = {};
+
         void WriteText(const std::filesystem::path& path, const std::string& text)
         {
             std::filesystem::create_directories(path.parent_path());
@@ -421,6 +423,18 @@ namespace Manifold::Tests
             const std::string scanned = "aobscanmodule(SITE,Manifold-Engine.Tests.exe," + HexBytes(site) + ")\nalloc(cave,$100)\ncave:\nreadmem(SITE,6)\nreadmem(cave,4)\n";
             const Asm::AaResult readAfterScan = engine.AutoAssemble(scanned, true);
             CHECK_MSG(readAfterScan.Ok(), readAfterScan.Error.Text);
+            const std::uint64_t mainBase = engine.Process()->MainModule().value().Base;
+            const std::string viaProcess = "aobscanmodule(SITE,$process," + HexBytes(site) + ")\nalloc(cave,$100)\ncave:\nreadmem(SITE,6)\n";
+            const Asm::AaResult scanViaProcess = engine.AutoAssemble(viaProcess, true);
+            CHECK_MSG(scanViaProcess.Ok(), scanViaProcess.Error.Text);
+            const std::string probe = Hex(reinterpret_cast<std::uint64_t>(&g_mainModuleProbe));
+            const std::string written = "assert($process,4D 5A)\nassert(\"$process\",4D 5A)\nassert(mainmodule,4D 5A)\n" + probe + ":\ndq $process\ndq \"$process\"+10\ndq mainmodule+20\nmov rax,$process\n";
+            const Asm::AaResult wroteMain = engine.AutoAssemble(written, false);
+            CHECK_MSG(wroteMain.Ok(), wroteMain.Error.Text);
+            CHECK_EQ(g_mainModuleProbe[0], mainBase);
+            CHECK_EQ(g_mainModuleProbe[1], mainBase + 0x10);
+            CHECK_EQ(g_mainModuleProbe[2], mainBase + 0x20);
+            CHECK_EQ(g_mainModuleProbe[3] & 0xFFFF, std::uint64_t(0xB848));
             const Asm::AaResult unreadable = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreadmem(10,4)\n", true);
             CHECK(!unreadable.Ok() && unreadable.Error.Code == ErrorCode::AaReadMemFailed && unreadable.Line == 3);
             const Asm::AaResult unknown = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreadmem(NoSuchSymbol,4)\n", true);

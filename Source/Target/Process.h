@@ -124,6 +124,7 @@ namespace Manifold::Target
         std::optional<ModuleInfo> ModuleAt(std::uint64_t address) const;
         std::optional<ModuleInfo> FindModule(std::string_view name) const;
         std::optional<ModuleInfo> MainModule() const;
+        static bool IsMainModuleName(std::string_view name);
 
         std::vector<std::uint32_t> Threads() const;
         bool Suspend() const;

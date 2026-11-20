@@ -1978,6 +1978,12 @@ namespace Manifold::Asm
                 {
                     Next();
                     const std::optional<std::uint64_t> number = ParseNumber(token.Text);
+                    if (!number && token.Text.size() > 1 && token.Text.front() == '$' && Options.Resolve)
+                    {
+                        const SymbolValue symbol = Options.Resolve(token.Text);
+                        if (symbol.State == SymbolState::Known)
+                            return Value{ symbol.Value, false };
+                    }
                     if (!number)
                     {
                         Fail(AsmError::BadNumber, "Bad number " + Quoted(token.Text) + ".");

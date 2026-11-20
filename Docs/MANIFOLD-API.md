@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 7 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 8 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -90,8 +90,9 @@ The opened process. Without one, every function that needs it returns `nil` and 
 | `manifold.process.isOpen()` | boolean | Whether a process is open and still running. |
 | `manifold.process.info()` | `{ id, name, path, is64Bit }`, or nil, error | The opened process. |
 | `manifold.process.open(target)` | `{ id, name, path, is64Bit }`, or nil, error | Opens a process by id or by executable name (`"game.exe"`, or the start of the name). |
+| `manifold.process.name()` | string, or nil, error | The file name of the process's executable module, such as `"game.exe"`: the same name the Cheat Engine global `process` holds, read when it is asked for. Addresses name that module's base as `mainmodule` or, as in Cheat Engine, `$process`, so `"mainmodule+1A2B30"` works in memory records, pointers, Auto Assembler scripts and here. |
 | `manifold.process.find(name?)` | list of `{ id, name, path, windowTitle, is64Bit }` | Running processes whose executable name contains `name` (any case); all of them without `name`. |
-| `manifold.process.mainModule()` | `{ name, base, size, path }`, or nil, error | The process's executable module. |
+| `manifold.process.mainModule()` | `{ name, base, size, path }`, or nil, error | The process's executable module. Its base is what `mainmodule` and `$process` stand for in addresses. |
 | `manifold.process.module(name)` | `{ name, base, size, path }`, or nil, error | A loaded module by file name, any case. `ME-1016` when it is not loaded. |
 | `manifold.process.moduleAt(address)` | `{ name, base, size, path }`, or nil, error | The module that contains the address. `ME-1017` for addresses outside every module: the heap, stacks and code the game allocated itself. |
 | `manifold.process.modules()` | list of `{ name, base, size, path }`, or nil, error | All loaded modules. |

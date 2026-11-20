@@ -196,10 +196,20 @@ namespace Manifold::Target
                     m_at = close + 1;
                     return Name(name, false);
                 }
-                if (c == '$' && m_at + 1 < m_text.size() && IsHexDigit(m_text[m_at + 1]))
+                if (c == '$' && m_at + 1 < m_text.size() && Symbols::IsNameChar(m_text[m_at + 1]))
                 {
-                    ++m_at;
-                    return Number();
+                    std::size_t end = m_at + 1;
+                    while (end < m_text.size() && Symbols::IsNameChar(m_text[end]))
+                        ++end;
+                    const std::string_view word = m_text.substr(m_at + 1, end - m_at - 1);
+                    if (std::all_of(word.begin(), word.end(), [](char ch) { return IsHexDigit(ch); }))
+                    {
+                        ++m_at;
+                        return Number();
+                    }
+                    const std::string_view name = m_text.substr(m_at, end - m_at);
+                    m_at = end;
+                    return Name(name, false);
                 }
                 if (Symbols::IsNameChar(c))
                 {

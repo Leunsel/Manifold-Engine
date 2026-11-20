@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 7
+local API_VERSION = 8
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -638,6 +638,13 @@ define(process, "open", {
   return result(native.processOpen(target))
 end)
 
+define(process, "name", {
+  returns = "string, or nil, error",
+  doc = "The file name of the process's executable module, such as `\"game.exe\"`: the same name the Cheat Engine global `process` holds, read when it is asked for. Addresses name that module's base as `mainmodule` or, as in Cheat Engine, `$process`, so `\"mainmodule+1A2B30\"` works in memory records, pointers, Auto Assembler scripts and here.",
+}, function()
+  return result(native.processName())
+end)
+
 define(process, "find", {
   params = { { name = "name", type = "string", optional = true } },
   returns = "list of `{ id, name, path, windowTitle, is64Bit }`",
@@ -648,7 +655,7 @@ end)
 
 define(process, "mainModule", {
   returns = "`{ name, base, size, path }`, or nil, error",
-  doc = "The process's executable module.",
+  doc = "The process's executable module. Its base is what `mainmodule` and `$process` stand for in addresses.",
 }, function()
   return result(native.mainModule())
 end)

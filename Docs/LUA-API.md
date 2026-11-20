@@ -124,7 +124,7 @@ Tables and autorun scripts written for Cheat Engine 7.5 run here. Beyond the fun
 
 - All constants of Cheat Engine's `defines.lua` (`vt*`, `so*`, `rt*`, `fsm*`, `mrh*`, `mr*`, `cl*`, `al*`, `bs*`, `ss*` and the rest).
 - Member names in any case (`memrec.description` is `memrec.Description`), and methods called with a dot or a colon (`stream.readByte()` and `stream:readByte()`). Old `class_method` globals such as `memoryrecord_getDescription(mr)` or `component_getComponent(c, i)` call the method.
-- The globals `process` (the module name of the opened process), `memrec` and `syntaxcheck` inside `{$lua}` blocks and Auto Assembler commands, `MainForm` and `AddressList`.
+- The globals `process` (the module name of the opened process; `manifold.process.name()` reads the same name when it is called), `memrec` and `syntaxcheck` inside `{$lua}` blocks and Auto Assembler commands, `MainForm` and `AddressList`.
 - Reads, writes and `enumModules()` without an opened process give nil, false or an empty table instead of an error.
 - Module names with dashes in addresses: `Game-Win64-Shipping.exe+10` and `Game-Win64-Shipping+10`.
 - Table files: `findTableFile(name)`, `createTableFile(name, path)`, with `Name`, `Stream`, `getData()`, `saveToFile(path)`, `delete()`. Files attached to a table are kept when it is saved.
