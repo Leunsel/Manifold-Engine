@@ -2,6 +2,7 @@
 
 #include "App/Commands.h"
 #include "App/Engine.h"
+#include "UI/CodeEditor.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -182,6 +183,9 @@ namespace Manifold::UI
         void DrawNotices();
         void DrawConfirm();
         void DrawTableScriptPrompt();
+        std::string m_tableScriptShown;
+        CodeEditorState m_tableScriptView;
+        int m_tableScriptNext = 0;
         void DrawAbout();
         void DrawWindows();
 

@@ -31,6 +31,15 @@ namespace Manifold
         const SettingChoice kQuitPolicy{ { "ask", "disable", "leave" },
             [](const Settings& s) { return static_cast<int>(s.ActiveScriptsOnQuit); },
             [](Settings& s, int value) { s.ActiveScriptsOnQuit = static_cast<QuitPolicy>(value); } };
+        const SettingChoice kCorners{ { "round", "small", "square" },
+            [](const Settings& s) { return s.Theme.Corners; },
+            [](Settings& s, int value) { s.Theme.Corners = value; } };
+        const SettingChoice kExceptionBreak{ { "never", "always", "region" },
+            [](const Settings& s) { return s.BreakOnException; },
+            [](Settings& s, int value) { s.BreakOnException = value; } };
+        const SettingChoice kStackOffsets{ { "rsp", "rbp", "address" },
+            [](const Settings& s) { return s.StackOffsets; },
+            [](Settings& s, int value) { s.StackOffsets = value; } };
         const SettingChoice kMode{ { "developer", "release" },
             [](const Settings& s) { return s.ReleaseMode ? 1 : 0; },
             [](Settings& s, int value) { s.ReleaseMode = value == 1; } };
@@ -87,6 +96,16 @@ namespace Manifold
             { "Debugger", "HardwareExecute", &Settings::UseHardwareExecuteBreakpoints },
             { "Debugger", "RegistersOnBreak", &Settings::ShowRegistersOnBreak },
             { "Debugger", "InProcess", &Settings::UseInProcessDebugger },
+            { "Debugger", "BreakOnException", &kExceptionBreak },
+            { "Debugger", "ExceptionRegionStart", &Settings::ExceptionRegionStart },
+            { "Debugger", "ExceptionRegionStop", &Settings::ExceptionRegionStop },
+            { "Debugger", "StackFollowPointers", &Settings::StackFollowPointers },
+            { "Debugger", "StackPointerTargets", &Settings::StackPointerTargets },
+            { "Debugger", "StackCollapseZeros", &Settings::StackCollapseZeros },
+            { "Debugger", "RegisterSections", &Settings::RegisterSections, 0, 15 },
+            { "Debugger", "VectorFormat", &Settings::VectorFormat, 0, 3 },
+            { "Debugger", "RegisterEditing", &Settings::RegisterEditing },
+            { "Debugger", "StackOffsets", &kStackOffsets },
             { "Debugger", "ShowSymbols", &Settings::ShowSymbols },
             { "Debugger", "HexView", &Settings::MemoryHexView },
             { "Debugger", "CodeShare", &Settings::MemoryCodeShare, 100, 950 },
@@ -94,6 +113,7 @@ namespace Manifold
             { "Recent", "LastProcess", &Settings::LastProcess },
             { "Theme", "Palette", &kPalette },
             { "Theme", "Appearance", &kAppearance },
+            { "Theme", "Corners", &kCorners },
             { "Extras", "NopSledBest", &Settings::NopSledBest, 0, std::numeric_limits<int>::max(), true },
         };
 

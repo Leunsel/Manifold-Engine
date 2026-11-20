@@ -71,6 +71,120 @@ namespace Manifold::UI
             });
     }
 
+    std::vector<std::size_t> PatchScanWindow::VisibleRows() const
+    {
+        std::vector<std::size_t> visible;
+        if (!m_result)
+            return visible;
+        visible.reserve(m_result->Patches.size());
+        for (std::size_t i = 0; i < m_result->Patches.size(); ++i)
+        {
+            const Target::CodePatch& patch = m_result->Patches[i];
+            if (m_filter.empty() || ContainsNoCase(patch.Module, m_filter) || ContainsNoCase(Hex(patch.Address), m_filter))
+                visible.push_back(i);
+        }
+        return visible;
+    }
+
+    Status PatchScanWindow::Restore(const Target::CodePatch& patch)
+    {
+        Engine& engine = m_workspace.Core();
+        return engine.Writes().Write(*m_scanned, engine.ProcessGeneration(), patch.Address, patch.Original, "Restored patch at " + engine.Symbols().ModuleOffset(patch.Address));
+    }
+
+    // Restores from the last address down, so a failure leaves the rows that
+    // were not written in place, and the erase never moves a row still to do.
+    void PatchScanWindow::RestoreAll(const std::vector<std::size_t>& rows)
+    {
+        Engine& engine = m_workspace.Core();
+        if (!m_result || !StillOpen(engine, m_scanned))
+            return;
+        std::vector<std::size_t> order = rows;
+        std::sort(order.rbegin(), order.rend());
+        int restored = 0;
+        int skipped = 0;
+        std::uint64_t bytes = 0;
+        std::string firstError;
+        for (const std::size_t index : order)
+        {
+            if (index >= m_result->Patches.size())
+                continue;
+            const Target::CodePatch patch = m_result->Patches[index];
+            if (!patch.Complete())
+            {
+                ++skipped;
+                continue;
+            }
+            const Status written = Restore(patch);
+            if (!written)
+            {
+                ++skipped;
+                if (firstError.empty())
+                    firstError = engine.Symbols().ModuleOffset(patch.Address) + ": " + written.Text;
+                continue;
+            }
+            ++restored;
+            bytes += patch.Size;
+            m_result->Patches.erase(m_result->Patches.begin() + static_cast<std::ptrdiff_t>(index));
+        }
+        std::string text = "Restored " + std::to_string(restored) + (restored == 1 ? " patch" : " patches") + " (" + Grouped(bytes) + " bytes).";
+        if (skipped)
+            text += " " + std::to_string(skipped) + " could not be restored" + (firstError.empty() ? " (too large)." : ", first: " + firstError);
+        LOG_INFO("Patches", text);
+        engine.Notify(skipped ? LogLevel::Warning : LogLevel::Success, text + (restored ? " Tools > Write history can undo them." : ""));
+    }
+
+    void PatchScanWindow::MenuBar()
+    {
+        if (!ImGui::BeginMenuBar())
+            return;
+        Engine& engine = m_workspace.Core();
+        const bool running = m_task.Running();
+        const bool live = m_result && StillOpen(engine, m_scanned);
+        if (ImGui::BeginMenu("Scan"))
+        {
+            if (ImGui::MenuItem(ICON_FA_SEARCH "  Scan again", nullptr, false, !running && engine.HasProcess()))
+                Start();
+            ImGui::Separator();
+            ImGui::MenuItem("Include Windows modules", nullptr, &m_windowsModules);
+            ItemTooltip("Also compare the libraries of Windows itself. Overlays and anti-cheat hook these, so expect results there. Takes effect on the next scan.");
+            ImGui::EndMenu();
+        }
+        const std::vector<std::size_t> rows = VisibleRows();
+        const std::size_t restorable = static_cast<std::size_t>(std::count_if(rows.begin(), rows.end(), [&](std::size_t i) { return m_result->Patches[i].Complete(); }));
+        if (ImGui::BeginMenu("Restore", live && !rows.empty()))
+        {
+            const bool filtered = m_result && rows.size() != m_result->Patches.size();
+            const std::string label = std::string(ICON_FA_UNDO "  Restore ") + (filtered ? "the " + std::to_string(restorable) + " shown" : "all " + std::to_string(restorable)) + "...";
+            if (DangerMenuItem(label.c_str(), nullptr, restorable > 0))
+            {
+                const std::string text = "Writes the original bytes from the files on disk back over " + std::to_string(restorable) + (restorable == 1 ? " patch" : " patches") +
+                                         (filtered ? " that match the filter" : "") + ".\n\nChanges made by active scripts should be undone by turning the scripts off instead: "
+                                         "a script that later turns itself off writes over the restored bytes. Each restore can be undone in Tools > Write history.";
+                m_workspace.Confirm("Restore patches", text, [this, rows]() { RestoreAll(rows); }, "Restore");
+            }
+            if (restorable < rows.size())
+                ImGui::TextDisabled("%d too large to restore here", static_cast<int>(rows.size() - restorable));
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Copy", m_result && !rows.empty()))
+        {
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the list"))
+            {
+                std::string text;
+                for (const std::size_t i : rows)
+                {
+                    const Target::CodePatch& patch = m_result->Patches[i];
+                    text += patch.Module + "+" + Hex(patch.Offset) + "\t" + std::to_string(patch.Size) + "\t" + HexBytes(patch.Current) + "\t" + HexBytes(patch.Original) + "\n";
+                }
+                ImGui::SetClipboardText(text.c_str());
+            }
+            ItemTooltip("Module+offset, size, current and original bytes, one patch per line, tab-separated.");
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
+
     void PatchScanWindow::Collect()
     {
         std::optional<Target::PatchScanResult> collected = m_task.Collect();
@@ -215,14 +329,7 @@ namespace Manifold::UI
 
     void PatchScanWindow::Results()
     {
-        std::vector<std::size_t> visible;
-        visible.reserve(m_result->Patches.size());
-        for (std::size_t i = 0; i < m_result->Patches.size(); ++i)
-        {
-            const Target::CodePatch& patch = m_result->Patches[i];
-            if (m_filter.empty() || ContainsNoCase(patch.Module, m_filter) || ContainsNoCase(Hex(patch.Address), m_filter))
-                visible.push_back(i);
-        }
+        const std::vector<std::size_t> visible = VisibleRows();
         if (m_result->Patches.empty())
         {
             std::uint64_t code = 0;
@@ -257,9 +364,10 @@ namespace Manifold::UI
     void PatchScanWindow::Draw()
     {
         Collect();
-        if (!BeginWindow(ICON_FA_BAND_AID "  Scan for patches###patchscan", ImVec2(920.0f, 560.0f), 0, ImVec2(620.0f, 320.0f)))
+        if (!BeginWindow(ICON_FA_BAND_AID "  Scan for patches###patchscan", ImVec2(920.0f, 560.0f), ImGuiWindowFlags_MenuBar, ImVec2(620.0f, 320.0f)))
             return;
         Engine& engine = m_workspace.Core();
+        MenuBar();
         if (!engine.HasProcess() && !m_result && !m_task.Running())
         {
             m_workspace.NoProcessState(ICON_FA_BAND_AID, "Open a process to compare its code with the files on disk.");
@@ -271,10 +379,6 @@ namespace Manifold::UI
         if (AccentButton(ICON_FA_SEARCH "  Scan"))
             Start();
         ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::AlignTextToFramePadding();
-        ImGui::Checkbox("Windows modules", &m_windowsModules);
-        ItemTooltip("Also compare the libraries of Windows itself. Overlays and anti-cheat hook these, so expect results there.");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(Px(200.0f));
         InputTextWithHint("##filter", ICON_FA_SEARCH " Module or address", m_filter);
@@ -317,11 +421,11 @@ namespace Manifold::UI
         if (m_restore >= 0 && m_result && static_cast<std::size_t>(m_restore) < m_result->Patches.size() && StillOpen(engine, m_scanned))
         {
             const Target::CodePatch patch = m_result->Patches[static_cast<std::size_t>(m_restore)];
-            const Status written = m_scanned->Write(patch.Address, patch.Original);
+            const Status written = Restore(patch);
             m_workspace.Report(written);
             if (written)
             {
-                engine.Notify(LogLevel::Success, "Restored " + std::to_string(patch.Size) + " bytes at " + engine.Symbols().ModuleOffset(patch.Address));
+                engine.Notify(LogLevel::Success, "Restored " + std::to_string(patch.Size) + " bytes at " + engine.Symbols().ModuleOffset(patch.Address) + ". Tools > Write history can undo it.");
                 m_result->Patches.erase(m_result->Patches.begin() + m_restore);
             }
         }

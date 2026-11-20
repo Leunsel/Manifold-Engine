@@ -17,6 +17,7 @@
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 #include "UI/ByteSearch.h"
+#include "UI/CodeEditor.h"
 #include "UI/CodeTools.h"
 #include "UI/DebugWindows.h"
 #include "UI/LogWindow.h"
@@ -960,8 +961,13 @@ namespace Manifold::UI
         m_engine.RequestDeactivateAll();
     }
 
+    // A process stopped at a breakpoint holds its locks (the loader lock, the
+    // heap's, its own): a script that turns off with a remote call or a new
+    // thread would wait on it forever and the quit would hang with the game
+    // frozen. The debugger goes away on quit anyway, so it goes first.
     void Workspace::TurnOffAndQuit()
     {
+        m_engine.Debugger().Detach();
         const std::vector<std::string> failures = m_engine.DeactivateAll();
         if (failures.empty())
         {
@@ -979,6 +985,7 @@ namespace Manifold::UI
 
     void Workspace::FinishQuit()
     {
+        m_engine.Debugger().Detach();
         m_quitConfirmed = true;
         m_shell.Close();
     }
@@ -1193,38 +1200,67 @@ namespace Manifold::UI
         }
     }
 
+    // The script is shown read-only inside the prompt, as Cheat Engine does:
+    // the prompt is modal, so a script window opened beside it could not be
+    // reached until the question was answered.
     void Workspace::DrawTableScriptPrompt()
     {
         if (!m_engine.TableScriptWaiting())
+        {
+            m_tableScriptShown.clear();
             return;
+        }
         const char* id = "Table script##workspace";
         if (!ImGui::IsPopupOpen(id))
-            ImGui::OpenPopup(id);
-        ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
-        if (BeginModal(id, ICON_FA_SCROLL, "This table has a Lua script", ImVec2(460.0f, 0.0f)))
         {
-            ImGui::PushTextWrapPos(ImGui::GetContentRegionAvail().x);
-            ImGui::TextUnformatted("Lua scripts can do anything this program can, including reading and writing files. Run it only if you trust the table.");
-            ImGui::PopTextWrapPos();
-            ImGui::Spacing();
-            if (AccentButton("Run the script", Px(130.0f, 0.0f)))
-            {
-                ImGui::CloseCurrentPopup();
-                m_engine.AnswerTableScript(true);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Do not run it", Px(130.0f, 0.0f)))
-            {
-                ImGui::CloseCurrentPopup();
-                m_engine.AnswerTableScript(false);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Show it"))
-            {
-                OpenScript(m_engine.Table().TableLuaScript, kTableLuaScript, true);
-            }
-            EndModal();
+            ImGui::OpenPopup(id);
+            m_tableScriptShown = m_engine.Table().TableLuaScript;
+            m_tableScriptView = {};
+            m_tableScriptView.ReadOnly = true;
+            m_tableScriptNext = static_cast<int>(m_engine.Options().TableScripts);
         }
+        ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
+        if (!BeginModal(id, ICON_FA_SCROLL, "Run this table's Lua script?", ImVec2(720.0f, 0.0f)))
+            return;
+        ImGui::PushTextWrapPos(ImGui::GetContentRegionAvail().x);
+        Muted("Lua scripts can do anything this program can, including reading and writing files. Run it only if you trust the table.");
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        const int lines = static_cast<int>(std::count(m_tableScriptShown.begin(), m_tableScriptShown.end(), '\n')) + 1;
+        const float lineHeight = ImGui::GetTextLineHeightWithSpacing();
+        const float height = std::clamp(static_cast<float>(lines) * lineHeight + Px(16.0f), Px(120.0f), Px(340.0f));
+        CodeEditor("##tablescriptview", m_tableScriptShown, Text::Language::Lua, ImVec2(-1.0f, height), m_tableScriptView);
+        Muted(std::to_string(lines) + (lines == 1 ? " line" : " lines") + "  ·  read only");
+        ImGui::Spacing();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Next time a table has a Lua script:");
+        ImGui::SameLine();
+        const char* const policies[] = { "Ask", "Run it", "Do not run it" };
+        ImGui::SetNextItemWidth(Px(150.0f));
+        ImGui::Combo("##tablescriptnext", &m_tableScriptNext, policies, 3);
+        ItemTooltip("Also in Settings > Scripts.");
+        ImGui::Spacing();
+        const auto answer = [&](bool run)
+            {
+                Settings& options = m_engine.Options();
+                if (static_cast<int>(options.TableScripts) != m_tableScriptNext)
+                {
+                    options.TableScripts = static_cast<TableScriptPolicy>(std::clamp(m_tableScriptNext, 0, 2));
+                    m_engine.SaveOptionsSoon();
+                }
+                ImGui::CloseCurrentPopup();
+                m_tableScriptShown.clear();
+                m_engine.AnswerTableScript(run);
+            };
+        if (AccentButton("Run the script", Px(130.0f, 0.0f)))
+            answer(true);
+        ImGui::SameLine();
+        if (ImGui::Button("Do not run it", Px(130.0f, 0.0f)))
+            answer(false);
+        ImGui::SameLine();
+        if (ImGui::Button(ICON_FA_COPY "  Copy"))
+            ImGui::SetClipboardText(m_tableScriptShown.c_str());
+        EndModal();
     }
 
     void Workspace::DrawAbout()

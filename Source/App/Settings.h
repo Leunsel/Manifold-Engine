@@ -53,6 +53,7 @@ namespace Manifold
     {
         ThemeFamily Family = ThemeFamily::Standard;
         ThemeMode Mode = ThemeMode::Dark;
+        int Corners = 0;
         std::map<std::string, std::array<float, 4>> Colors;
         std::map<std::string, float> Sizes;
     };
@@ -110,6 +111,16 @@ namespace Manifold
         bool UseHardwareExecuteBreakpoints = false;
         bool UseInProcessDebugger = false;
         bool ShowRegistersOnBreak = true;
+        int BreakOnException = 0;
+        std::string ExceptionRegionStart;
+        std::string ExceptionRegionStop;
+        bool StackFollowPointers = true;
+        bool StackPointerTargets = false;
+        bool StackCollapseZeros = true;
+        int RegisterSections = 7;
+        int VectorFormat = 0;
+        bool RegisterEditing = true;
+        int StackOffsets = 0;
         bool ShowSymbols = true;
         bool MemoryHexView = true;
         int MemoryCodeShare = 620;

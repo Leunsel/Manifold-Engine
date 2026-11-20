@@ -50,9 +50,24 @@ namespace
         block->Stop = 1;
     }
 
+    HANDLE EventOf(std::uint64_t value)
+    {
+        return reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(value));
+    }
+
+    void SignalBreak(Block* block)
+    {
+        if (block->BreakEvent)
+            ::SetEvent(EventOf(block->BreakEvent));
+    }
+
+    // The host sets the resume event right after the command, so the thread
+    // goes on at once instead of after the next 15 ms scheduler tick that a
+    // Sleep(2) would wait for.
     void WaitForResume(Block* block)
     {
         HostWatch host;
+        const HANDLE resume = EventOf(block->ResumeEvent);
         while (block->ResumeCmd == ResumeNone && !block->Stop)
         {
             if (HostGone(block, host))
@@ -60,12 +75,25 @@ namespace
                 LetGo(block);
                 break;
             }
-            ::Sleep(2);
+            if (resume)
+                ::WaitForSingleObject(resume, 20);
+            else
+                ::Sleep(2);
         }
     }
 
-    Block* g_block = nullptr;
+    constexpr int kMaxArmed = 32;
+    constexpr DWORD kPrintException = 0x40010006;
+    constexpr DWORD kPrintExceptionWide = 0x4001000A;
+    constexpr DWORD kThreadNameException = 0x406D1388;
+    constexpr DWORD kControlC = 0x40010005;
+    constexpr DWORD kControlBreak = 0x40010008;
+
+    Block* volatile g_block = nullptr;
     PVOID g_handler = nullptr;
+    volatile LONG g_inside = 0;
+    std::uint64_t g_armed[kMaxArmed] = {};
+    volatile LONG g_armedCount = 0;
     DWORD g_applyThreadId = 0;
     HINSTANCE g_module = nullptr;
     volatile LONG g_started = 0;
@@ -73,6 +101,9 @@ namespace
     volatile DWORD g_breakOwner = 0;
     DWORD g_suspended[kMaxThreads];
     int g_suspendedCount = 0;
+    volatile LONG g_kept = 0;
+    volatile ULONGLONG g_keptSince = 0;
+    constexpr ULONGLONG kKeepMs = 300;
     Recent g_recent[kRecentSlots] = {};
 
     long volatile* LockOf(Block* block)
@@ -182,6 +213,22 @@ namespace
         return c.MxCsr;
     }
 
+    unsigned char* FpuArea(CONTEXT& c)
+    {
+        return reinterpret_cast<unsigned char*>(&c.FltSave);
+    }
+
+    const unsigned char* FpuArea(const CONTEXT& c)
+    {
+        return reinterpret_cast<const unsigned char*>(&c.FltSave);
+    }
+
+    std::uint64_t DebugAddress(const CONTEXT& c, int slot)
+    {
+        const DWORD64 slots[4] = { c.Dr0, c.Dr1, c.Dr2, c.Dr3 };
+        return slots[slot];
+    }
+
     void SetMxcsr(CONTEXT& c, std::uint32_t value)
     {
         c.MxCsr = value;
@@ -257,6 +304,22 @@ namespace
     void SetMxcsr(CONTEXT& c, std::uint32_t value)
     {
         __movsb(c.ExtendedRegisters + kFxsaveMxcsr, reinterpret_cast<const unsigned char*>(&value), sizeof(value));
+    }
+
+    unsigned char* FpuArea(CONTEXT& c)
+    {
+        return c.ExtendedRegisters;
+    }
+
+    const unsigned char* FpuArea(const CONTEXT& c)
+    {
+        return c.ExtendedRegisters;
+    }
+
+    std::uint64_t DebugAddress(const CONTEXT& c, int slot)
+    {
+        const DWORD slots[4] = { c.Dr0, c.Dr1, c.Dr2, c.Dr3 };
+        return slots[slot];
     }
 
 #pragma comment(linker, "/EXPORT:ManifoldAgentStart=_ManifoldAgentStart@4")
@@ -397,6 +460,93 @@ namespace
         SetMxcsr(c, v.Mxcsr);
     }
 
+    void CaptureFpu(Block* block, const CONTEXT& c)
+    {
+        if (!HasVectors(c))
+        {
+            block->FpuValid = 0;
+            return;
+        }
+        __movsb(block->BreakFpu, FpuArea(c), kFpuBytes);
+        block->FpuValid = 1;
+    }
+
+    // Only the x87 part goes back: control, status and tag words, the opcode
+    // and pointers, and the eight stack registers. MXCSR and the XMM registers
+    // between them belong to ApplyVectors.
+    void ApplyFpu(CONTEXT& c, const std::uint8_t (&fpu)[kFpuBytes])
+    {
+        if (!HasVectors(c))
+            return;
+        unsigned char* area = FpuArea(c);
+        __movsb(area, fpu, 24);
+        __movsb(area + 32, fpu + 32, kFpuBytes - 32);
+    }
+
+    void RememberArmed(std::uint64_t address)
+    {
+        if (!address)
+            return;
+        const LONG count = g_armedCount;
+        for (LONG i = 0; i < count; ++i)
+        {
+            if (g_armed[i] == address)
+                return;
+        }
+        if (count < kMaxArmed)
+        {
+            g_armed[count] = address;
+            g_armedCount = count + 1;
+        }
+    }
+
+    bool WasArmed(std::uint64_t address)
+    {
+        const LONG count = g_armedCount;
+        for (LONG i = 0; i < count; ++i)
+        {
+            if (g_armed[i] == address)
+                return true;
+        }
+        return false;
+    }
+
+    bool Unexpected(DWORD code)
+    {
+        switch (code)
+        {
+        case kPrintException:
+        case kPrintExceptionWide:
+        case kThreadNameException:
+        case kControlC:
+        case kControlBreak:
+        case static_cast<DWORD>(EXCEPTION_SINGLE_STEP):
+        case kWx86SingleStep:
+            return false;
+        default:
+            return true;
+        }
+    }
+
+    bool BreaksOnException(Block* block, const EXCEPTION_RECORD& record)
+    {
+        const std::uint32_t mode = block->ExceptionMode;
+        if (mode == ExceptionNever || !Unexpected(record.ExceptionCode))
+            return false;
+        if (mode == ExceptionAlways)
+            return true;
+        const std::uint64_t at = reinterpret_cast<std::uintptr_t>(record.ExceptionAddress);
+        return mode == ExceptionInRegion && at >= block->ExceptionStart && at < block->ExceptionStop;
+    }
+
+    struct Inside
+    {
+        Inside() { _InterlockedIncrement(&g_inside); }
+        ~Inside() { _InterlockedDecrement(&g_inside); }
+        Inside(const Inside&) = delete;
+        Inside& operator=(const Inside&) = delete;
+    };
+
     void SuspendOthers()
     {
         const DWORD self = ::GetCurrentProcessId();
@@ -438,53 +588,145 @@ namespace
         g_suspendedCount = 0;
     }
 
-    void EnterBreak(Block* block, CONTEXT& context, std::uint64_t address, std::uint32_t slot)
+    struct BreakCause
     {
-        if (_InterlockedCompareExchange(&g_breaking, 1, 0) != 0)
+        std::uint32_t Code = 0;
+        std::uint32_t ParamCount = 0;
+        std::uint64_t Params[2] = {};
+    };
+
+    // Returns whether the host changed registers while the thread stood here.
+    bool EnterBreak(Block* block, CONTEXT& context, std::uint64_t address, std::uint32_t slot, const BreakCause& cause = {})
+    {
+        for (int attempt = 0; _InterlockedCompareExchange(&g_breaking, 1, 0) != 0; ++attempt)
         {
             for (int wait = 0; wait < 50 && g_breaking && !block->Broken && !block->Stop; ++wait)
                 ::Sleep(1);
+            const bool stopped = block->Broken != 0;
             while (block->Broken && !block->Stop)
                 ::Sleep(1);
-            return;
+            // Only a real stop of another thread swallows this hit; the apply
+            // thread also holds the flag for a moment to let kept threads go.
+            if (stopped || block->Stop || attempt >= 3)
+                return false;
+            if (slot < static_cast<std::uint32_t>(kMaxWatches) && !block->Watches[slot].Active)
+                return false;
+            if (slot == kSlotException && block->ExceptionMode == ExceptionNever)
+                return false;
         }
         g_breakOwner = ::GetCurrentThreadId();
         CaptureRegs(block->BreakRegs, context);
         CaptureVectors(block->BreakXmm, context);
+        CaptureFpu(block, context);
         block->XmmDirty = 0;
+        block->FpuDirty = 0;
+        block->RegsDirty = 0;
+        block->BreakCode = cause.Code;
+        block->BreakParamCount = cause.ParamCount;
+        block->BreakParams[0] = cause.Params[0];
+        block->BreakParams[1] = cause.Params[1];
         block->BreakAddress = address;
         block->BreakSlot = slot;
         block->BrokenThread = ::GetCurrentThreadId();
         block->ResumeCmd = ResumeNone;
-        SuspendOthers();
+        if (!_InterlockedExchange(&g_kept, 0))
+            SuspendOthers();
         block->BreakSerial = block->BreakSerial + 1;
         block->Broken = 1;
+        SignalBreak(block);
         WaitForResume(block);
+        bool changed = false;
         if (block->RegsDirty)
         {
             ApplyRegs(context, block->NewRegs);
             block->RegsDirty = 0;
+            changed = true;
         }
         if (block->XmmDirty)
         {
             ApplyVectors(context, block->NewXmm);
             block->XmmDirty = 0;
+            changed = true;
         }
+        if (block->FpuDirty)
+        {
+            ApplyFpu(context, block->NewFpu);
+            block->FpuDirty = 0;
+            changed = true;
+        }
+        const bool handled = block->ExceptionHandled != 0;
+        block->ExceptionHandled = 0;
+        // A single step may leave the other threads stopped: one instruction
+        // cannot wait on them, and skipping the thread snapshot makes a step
+        // take well under a millisecond. The apply loop lets them go if the
+        // step does not come back within kKeepMs (a syscall that waits).
+        const bool keep = block->KeepSuspended != 0 && !block->Stop;
+        block->KeepSuspended = 0;
         block->ResumeCmd = ResumeNone;
         block->Broken = 0;
-        ResumeOthers();
+        if (keep)
+        {
+            g_keptSince = ::GetTickCount64();
+            _InterlockedExchange(&g_kept, 1);
+        }
+        else
+            ResumeOthers();
         g_breakOwner = 0;
         _InterlockedExchange(&g_breaking, 0);
+        return changed || handled;
+    }
+
+    // After the agent stopped, a thread whose debug registers could not be
+    // cleared may still trap on an address the agent armed. Such a trap is
+    // taken here and the thread disarmed; anything else goes on to the process.
+    LONG Passive(EXCEPTION_POINTERS* info)
+    {
+        const DWORD code = info->ExceptionRecord->ExceptionCode;
+        if (code != static_cast<DWORD>(EXCEPTION_SINGLE_STEP) && code != static_cast<DWORD>(kDataSingleStep) && code != kWx86SingleStep)
+            return EXCEPTION_CONTINUE_SEARCH;
+        CONTEXT& context = *info->ContextRecord;
+        const std::uint64_t dr6 = context.Dr6;
+        bool ours = false;
+        for (int slot = 0; slot < 4 && !ours; ++slot)
+            ours = (dr6 & (1ull << slot)) != 0 && WasArmed(DebugAddress(context, slot));
+        if (!ours)
+            return EXCEPTION_CONTINUE_SEARCH;
+        const std::uint64_t none[4] = {};
+        SetDebugRegisters(context, none, 0);
+        context.EFlags |= kResumeFlag;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    LONG ExceptionBreak(Block* block, EXCEPTION_POINTERS* info)
+    {
+        const EXCEPTION_RECORD& record = *info->ExceptionRecord;
+        BreakCause cause;
+        cause.Code = record.ExceptionCode;
+        cause.ParamCount = record.NumberParameters < 2 ? record.NumberParameters : 2;
+        for (std::uint32_t i = 0; i < cause.ParamCount; ++i)
+            cause.Params[i] = record.ExceptionInformation[i];
+        const std::uint64_t at = reinterpret_cast<std::uintptr_t>(record.ExceptionAddress);
+        if (!EnterBreak(block, *info->ContextRecord, at, kSlotException, cause))
+            return EXCEPTION_CONTINUE_SEARCH;
+        return EXCEPTION_CONTINUE_EXECUTION;
     }
 
     LONG CALLBACK Handler(EXCEPTION_POINTERS* info)
     {
+        const Inside inside;
         Block* block = g_block;
-        if (!block || block->Magic != kMagic)
+        if (!block)
+            return Passive(info);
+        if (block->Magic != kMagic)
             return EXCEPTION_CONTINUE_SEARCH;
         const DWORD code = info->ExceptionRecord->ExceptionCode;
         if (code != static_cast<DWORD>(EXCEPTION_SINGLE_STEP) && code != static_cast<DWORD>(kDataSingleStep) && code != kWx86SingleStep)
-            return EXCEPTION_CONTINUE_SEARCH;
+        {
+            const DWORD self = ::GetCurrentThreadId();
+            if (block->Stop || self == g_applyThreadId || self == g_breakOwner || !BreaksOnException(block, *info->ExceptionRecord))
+                return EXCEPTION_CONTINUE_SEARCH;
+            return ExceptionBreak(block, info);
+        }
         CONTEXT& context = *info->ContextRecord;
         const std::uint64_t dr6 = context.Dr6;
         const DWORD tid = ::GetCurrentThreadId();
@@ -508,7 +750,7 @@ namespace
                 if (Breaks(watch.Mode))
                 {
                     const std::uint64_t at = InstructionPointer(context);
-                    if (RunAction(block->Actions[slot], context, tid) && !breakHit)
+                    if (RunAction(block->Actions[slot], context, tid) && !breakHit && !block->Stop)
                     {
                         breakHit = true;
                         breakAddr = at;
@@ -532,11 +774,14 @@ namespace
         return EXCEPTION_CONTINUE_EXECUTION;
     }
 
-    void ArmThread(DWORD threadId, const std::uint64_t (&addresses)[4], std::uint64_t dr7)
+    // Returns false only when the thread is still there and its debug
+    // registers did not read back as written.
+    bool ArmThread(Block* block, DWORD threadId, const std::uint64_t (&addresses)[4], std::uint64_t dr7, bool verify)
     {
         HANDLE thread = ::OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE, threadId);
         if (!thread)
-            return;
+            return true;
+        bool armed = true;
         if (::SuspendThread(thread) != static_cast<DWORD>(-1))
         {
             alignas(16) CONTEXT context{};
@@ -544,25 +789,33 @@ namespace
             SetDebugRegisters(context, addresses, dr7);
             if (::SetThreadContext(thread, &context))
             {
-                g_block->AppliedThreads = g_block->AppliedThreads + 1;
+                block->AppliedThreads = block->AppliedThreads + 1;
                 if (dr7 != 0)
                     MarkActive(threadId);
+            }
+            if (verify)
+            {
+                alignas(16) CONTEXT check{};
+                check.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+                armed = ::GetThreadContext(thread, &check) && (check.Dr7 & 0xFF) == (dr7 & 0xFF);
             }
             ::ResumeThread(thread);
         }
         ::CloseHandle(thread);
+        return armed;
     }
 
-    void Sweep(const std::uint64_t (&addresses)[4], std::uint64_t dr7, bool all)
+    int Sweep(Block* block, const std::uint64_t (&addresses)[4], std::uint64_t dr7, bool all, bool verify = false)
     {
         const DWORD self = ::GetCurrentProcessId();
         const ULONGLONG now = ::GetTickCount64();
         HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
         if (snapshot == INVALID_HANDLE_VALUE)
-            return;
+            return -1;
         THREADENTRY32 entry{};
         entry.dwSize = sizeof(entry);
-        g_block->AppliedThreads = 0;
+        block->AppliedThreads = 0;
+        int failed = 0;
         if (::Thread32First(snapshot, &entry))
         {
             do
@@ -571,10 +824,71 @@ namespace
                     continue;
                 if (!all && RecentlyActive(entry.th32ThreadID, now))
                     continue;
-                ArmThread(entry.th32ThreadID, addresses, dr7);
+                if (!ArmThread(block, entry.th32ThreadID, addresses, dr7, verify))
+                    ++failed;
             } while (::Thread32Next(snapshot, &entry));
         }
         ::CloseHandle(snapshot);
+        return failed;
+    }
+
+    bool WaitUntilOutside(ULONGLONG milliseconds)
+    {
+        const ULONGLONG until = ::GetTickCount64() + milliseconds;
+        while (g_inside != 0)
+        {
+            if (::GetTickCount64() > until)
+                return false;
+            ::Sleep(1);
+        }
+        return true;
+    }
+
+    // Every thread must read back with its debug registers off before the
+    // handler goes: a thread that still traps after that has nobody to take
+    // its single step and the process dies (STATUS_SINGLE_STEP, no WER).
+    // When that cannot be proven, the handler stays as a passive one and the
+    // module stays loaded; when a thread is still inside the handler, the
+    // module stays loaded too, so no thread runs code that is gone.
+    bool Release(Block* block)
+    {
+        for (int slot = 0; slot < kMaxWatches; ++slot)
+        {
+            RememberArmed(block->Watches[slot].Address);
+            block->Watches[slot].Active = 0;
+        }
+        const ULONGLONG until = ::GetTickCount64() + 3000;
+        while (g_breaking && ::GetTickCount64() < until)
+            ::Sleep(1);
+        if (_InterlockedExchange(&g_kept, 0))
+            ResumeOthers();
+        const std::uint64_t none[4] = {};
+        bool disarmed = false;
+        for (int pass = 0; pass < 40 && !disarmed; ++pass)
+        {
+            disarmed = Sweep(block, none, 0, true, true) == 0;
+            ::Sleep(15);
+        }
+        if (disarmed)
+            disarmed = Sweep(block, none, 0, true, true) == 0;
+        g_block = nullptr;
+        const bool outside = WaitUntilOutside(3000);
+        bool unload = false;
+        if (disarmed && outside && g_handler)
+        {
+            ::RemoveVectoredExceptionHandler(g_handler);
+            g_handler = nullptr;
+            unload = WaitUntilOutside(2000);
+        }
+        if (block->BreakEvent)
+            ::CloseHandle(EventOf(block->BreakEvent));
+        if (block->ResumeEvent)
+            ::CloseHandle(EventOf(block->ResumeEvent));
+        block->BreakEvent = 0;
+        block->ResumeEvent = 0;
+        block->AppliedThreads = 0;
+        block->Running = 0;
+        return unload;
     }
 
     DWORD WINAPI ApplyLoop(LPVOID)
@@ -602,10 +916,18 @@ namespace
                     lastClear[slot] = block->Watches[slot].Clear;
                 }
             }
+            if (g_kept && !block->Broken && ::GetTickCount64() - g_keptSince > kKeepMs && _InterlockedCompareExchange(&g_breaking, 1, 0) == 0)
+            {
+                if (_InterlockedExchange(&g_kept, 0))
+                    ResumeOthers();
+                _InterlockedExchange(&g_breaking, 0);
+            }
             if (block->BreakNow && !block->Broken && _InterlockedCompareExchange(&g_breaking, 1, 0) == 0)
             {
                 g_breakOwner = ::GetCurrentThreadId();
                 block->BreakNow = 0;
+                if (_InterlockedExchange(&g_kept, 0))
+                    ResumeOthers();
                 SuspendOthers();
                 const DWORD target = g_suspendedCount > 0 ? g_suspended[0] : 0;
                 HANDLE thread = target ? ::OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, target) : nullptr;
@@ -615,25 +937,37 @@ namespace
                 {
                     CaptureRegs(block->BreakRegs, ctx);
                     CaptureVectors(block->BreakXmm, ctx);
+                    CaptureFpu(block, ctx);
                     block->XmmDirty = 0;
+                    block->FpuDirty = 0;
+                    block->RegsDirty = 0;
+                    block->BreakCode = 0;
+                    block->BreakParamCount = 0;
                     block->BreakRegs.GsBase = 0;
                     block->BreakAddress = InstructionPointer(ctx);
-                    block->BreakSlot = 0xFFFFFFFFu;
+                    block->BreakSlot = kSlotBreakNow;
                     block->BrokenThread = target;
                     block->ResumeCmd = ResumeNone;
                     block->BreakSerial = block->BreakSerial + 1;
                     block->Broken = 1;
+                    SignalBreak(block);
                     WaitForResume(block);
+                    block->KeepSuspended = 0;
                     const bool registers = block->RegsDirty != 0;
                     const bool vectors = block->XmmDirty != 0;
+                    const bool fpu = block->FpuDirty != 0;
                     if (registers)
                         ApplyRegs(ctx, block->NewRegs);
                     if (vectors)
                         ApplyVectors(ctx, block->NewXmm);
-                    if (registers || vectors)
+                    if (fpu)
+                        ApplyFpu(ctx, block->NewFpu);
+                    if (registers || vectors || fpu)
                         ::SetThreadContext(thread, &ctx);
                     block->RegsDirty = 0;
                     block->XmmDirty = 0;
+                    block->FpuDirty = 0;
+                    block->ExceptionHandled = 0;
                     block->ResumeCmd = ResumeNone;
                     block->Broken = 0;
                 }
@@ -648,33 +982,18 @@ namespace
                 std::uint64_t addresses[4] = {};
                 std::uint64_t dr7 = 0;
                 BuildRegisters(block, addresses, dr7);
+                for (int slot = 0; slot < 4; ++slot)
+                    RememberArmed(addresses[slot]);
                 const std::uint32_t command = block->Command;
                 if (dr7 != 0 || block->Applied != command)
-                    Sweep(addresses, dr7, false);
+                    Sweep(block, addresses, dr7, false);
                 block->Applied = command;
             }
             ::Sleep(kSweepMs);
         }
-        if (block)
-        {
-            for (int slot = 0; slot < kMaxWatches; ++slot)
-                block->Watches[slot].Active = 0;
-            std::uint64_t none[4] = {};
-            for (int pass = 0; pass < 6; ++pass)
-            {
-                Sweep(none, 0, true);
-                ::Sleep(15);
-            }
-            if (g_handler)
-            {
-                ::RemoveVectoredExceptionHandler(g_handler);
-                g_handler = nullptr;
-            }
-            block->AppliedThreads = 0;
-            block->Running = 0;
-        }
+        const bool unload = block && Release(block);
         _InterlockedExchange(&g_started, 0);
-        if (g_module)
+        if (unload && g_module)
             ::FreeLibraryAndExitThread(g_module, 0);
         return 0;
     }
@@ -687,7 +1006,6 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldAgentStart(LPVOID paramete
         return 1;
     if (_InterlockedCompareExchange(&g_started, 1, 0) != 0)
         return 2;
-    g_block = block;
     block->Stop = 0;
     block->AppliedThreads = 0;
     for (int i = 0; i < kRecentSlots; ++i)
@@ -695,9 +1013,12 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldAgentStart(LPVOID paramete
         g_recent[i].Thread = 0;
         g_recent[i].Tick = 0;
     }
-    g_handler = ::AddVectoredExceptionHandler(1, &Handler);
+    g_block = block;
+    if (!g_handler)
+        g_handler = ::AddVectoredExceptionHandler(1, &Handler);
     if (!g_handler)
     {
+        g_block = nullptr;
         block->LastError = ::GetLastError();
         block->Running = 0;
         _InterlockedExchange(&g_started, 0);
@@ -708,8 +1029,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldAgentStart(LPVOID paramete
     if (!applyThread)
     {
         block->LastError = ::GetLastError();
-        ::RemoveVectoredExceptionHandler(g_handler);
-        g_handler = nullptr;
+        g_block = nullptr;
         block->Running = 0;
         _InterlockedExchange(&g_started, 0);
         return 4;

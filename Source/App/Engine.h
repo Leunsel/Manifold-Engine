@@ -123,6 +123,7 @@ namespace Manifold
         Debug::Tracer& Tracer() { return m_tracer; }
         bool Tracing() const { return m_tracer.Running(); }
         Status EnsureDebugger();
+        Status ApplyExceptionBreak();
         ManagedSession& Managed() { return m_managed; }
         const ManagedSession& Managed() const { return m_managed; }
         UnrealSession& Unreal() { return m_unreal; }

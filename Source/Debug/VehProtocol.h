@@ -7,10 +7,13 @@
 namespace Manifold::Debug::Veh
 {
     constexpr std::uint32_t kMagic = 0x56454830u;
-    constexpr std::uint32_t kVersion = 2;
+    constexpr std::uint32_t kVersion = 3;
     constexpr int kMaxWatches = 4;
     constexpr int kMaxEntries = 256;
     constexpr std::uint64_t kHostSilenceMs = 4000;
+    constexpr int kFpuBytes = 160;
+    constexpr std::uint32_t kSlotBreakNow = 0xFFFFFFFFu;
+    constexpr std::uint32_t kSlotException = 0xFFFFFFFEu;
 
     struct Registers
     {
@@ -73,6 +76,13 @@ namespace Manifold::Debug::Veh
         Program::Change Changes[Program::kMaxChanges];
     };
 
+    enum ExceptionBreak : std::uint32_t
+    {
+        ExceptionNever = 0,
+        ExceptionAlways = 1,
+        ExceptionInRegion = 2
+    };
+
     enum Resume : std::uint32_t
     {
         ResumeNone = 0,
@@ -112,6 +122,21 @@ namespace Manifold::Debug::Veh
         volatile std::uint64_t HostBeat;
         volatile std::uint32_t HostLost;
         std::uint32_t Pad5;
+        volatile std::uint32_t ExceptionMode;
+        volatile std::uint32_t ExceptionHandled;
+        volatile std::uint64_t ExceptionStart;
+        volatile std::uint64_t ExceptionStop;
+        volatile std::uint32_t BreakCode;
+        volatile std::uint32_t BreakParamCount;
+        volatile std::uint64_t BreakParams[2];
+        std::uint8_t BreakFpu[kFpuBytes];
+        std::uint8_t NewFpu[kFpuBytes];
+        volatile std::uint32_t FpuDirty;
+        volatile std::uint32_t FpuValid;
+        volatile std::uint64_t BreakEvent;
+        volatile std::uint64_t ResumeEvent;
+        volatile std::uint32_t KeepSuspended;
+        std::uint32_t Pad7;
     };
 
     static_assert(alignof(std::uint64_t) == 8, "the 32-bit and the 64-bit agent share this layout");
@@ -120,5 +145,6 @@ namespace Manifold::Debug::Veh
     static_assert(sizeof(Entry) == 32 + sizeof(Registers));
     static_assert(sizeof(Watch) == 48 + kMaxEntries * sizeof(Entry));
     static_assert(sizeof(Program::Change) == 4 + Program::kMaxCode);
+    static_assert(kFpuBytes % 8 == 0);
     static_assert(sizeof(Action) == 32 + Program::kMaxCode + Program::kMaxChanges * sizeof(Program::Change));
 }

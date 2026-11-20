@@ -124,7 +124,7 @@ While a memory viewer window has the focus.
 | `F9` | Run | `DebugRun` | CE |
 | `F7` | Step into | `DebugStepInto` | CE |
 | `F8` | Step over | `DebugStepOver` | CE |
-| `Shift+F8` | Run until the function returns | `DebugRunToReturn` | CE |
+| `Shift+F8` | Step out: run until the function returns | `DebugRunToReturn` | CE |
 | `F12` | Break into the process | `DebugBreak` | Manifold |
 | `F5` | Toggle a breakpoint on the selected instruction | `ToggleBreakpoint` | CE |
 | `Ctrl+F4` | Set the instruction pointer to the selected instruction | `SetInstructionPointer` | CE |

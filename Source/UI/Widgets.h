@@ -68,7 +68,13 @@ namespace Manifold::UI
 
     bool Splitter(const char* id, bool vertical, float thickness, float* first, float* second, float minFirst, float minSecond, float length = 0.0f);
     void Spinner(float size, ImVec4 color);
-    void AsmOperands(ImDrawList* draw, ImFont* font, float size, ImVec2 pos, const ImVec4& clip, std::string_view operands);
+    void AsmOperands(ImDrawList* draw, ImFont* font, float size, ImVec2 pos, const ImVec4& clip, std::string_view operands, std::string_view highlight = {});
+    std::string RegisterFamily(std::string_view word);
+    std::string HighlightToken(std::string_view word);
+    bool HighlightMatches(std::string_view word, std::string_view highlight);
+    std::string AsmTokenAt(ImFont* font, float size, float startX, std::string_view operands, float x);
+    std::vector<std::string> AsmRegisters(std::string_view operands);
+    int HighlightUse(std::string_view mnemonic, std::string_view operands, std::string_view highlight);
     bool ToggleSwitch(const char* id, bool* value);
     float ToggleSwitchWidth();
     bool Segmented(const char* id, int* value, const std::vector<const char*>& options, float width);

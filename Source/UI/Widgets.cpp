@@ -13,6 +13,9 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <map>
 #include <set>
 #include <string_view>
 #include <utility>
@@ -835,7 +838,156 @@ namespace Manifold::UI
         }
     }
 
-    void AsmOperands(ImDrawList* draw, ImFont* font, float size, ImVec2 pos, const ImVec4& clip, std::string_view operands)
+    std::string RegisterFamily(std::string_view word)
+    {
+        std::string lower(word);
+        for (char& c : lower)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        static const char* const kFamilies[][6] = {
+            { "rax", "eax", "ax", "al", "ah", nullptr }, { "rbx", "ebx", "bx", "bl", "bh", nullptr }, { "rcx", "ecx", "cx", "cl", "ch", nullptr },
+            { "rdx", "edx", "dx", "dl", "dh", nullptr }, { "rsi", "esi", "si", "sil", nullptr, nullptr }, { "rdi", "edi", "di", "dil", nullptr, nullptr },
+            { "rbp", "ebp", "bp", "bpl", nullptr, nullptr }, { "rsp", "esp", "sp", "spl", nullptr, nullptr }, { "rip", "eip", "ip", nullptr, nullptr, nullptr } };
+        for (const auto& family : kFamilies)
+        {
+            for (const char* name : family)
+            {
+                if (name && lower == name)
+                    return family[0];
+            }
+        }
+        if (lower.size() >= 2 && lower[0] == 'r' && std::isdigit(static_cast<unsigned char>(lower[1])))
+        {
+            std::size_t digits = 1;
+            while (digits < lower.size() && std::isdigit(static_cast<unsigned char>(lower[digits])))
+                ++digits;
+            const std::string number = lower.substr(1, digits - 1);
+            const std::string rest = lower.substr(digits);
+            const int value = std::atoi(number.c_str());
+            if (value >= 8 && value <= 15 && (rest.empty() || rest == "d" || rest == "w" || rest == "b" || rest == "l"))
+                return "r" + number;
+            return {};
+        }
+        for (const char* prefix : { "xmm", "ymm", "zmm" })
+        {
+            const std::size_t length = std::strlen(prefix);
+            if (lower.size() > length && lower.compare(0, length, prefix) == 0 &&
+                std::all_of(lower.begin() + static_cast<std::ptrdiff_t>(length), lower.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }))
+                return "xmm" + lower.substr(length);
+        }
+        return {};
+    }
+
+    std::string HighlightToken(std::string_view word)
+    {
+        std::string family = RegisterFamily(word);
+        if (!family.empty())
+            return family;
+        std::string lower(word);
+        for (char& c : lower)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return lower;
+    }
+
+    bool HighlightMatches(std::string_view word, std::string_view highlight)
+    {
+        return !highlight.empty() && HighlightToken(word) == highlight;
+    }
+
+    std::string AsmTokenAt(ImFont* font, float size, float startX, std::string_view operands, float x)
+    {
+        float left = startX;
+        std::size_t at = 0;
+        while (at < operands.size())
+        {
+            std::size_t end = at + 1;
+            if (AsmWordChar(operands[at]))
+            {
+                while (end < operands.size() && AsmWordChar(operands[end]))
+                    ++end;
+            }
+            const float right = left + font->CalcTextSizeA(size, FLT_MAX, 0.0f, operands.data() + at, operands.data() + end).x;
+            if (x >= left && x < right)
+                return AsmWordChar(operands[at]) ? std::string(operands.substr(at, end - at)) : std::string();
+            left = right;
+            at = end;
+        }
+        return {};
+    }
+
+    std::vector<std::string> AsmRegisters(std::string_view operands)
+    {
+        std::vector<std::string> found;
+        std::size_t at = 0;
+        while (at < operands.size())
+        {
+            if (!AsmWordChar(operands[at]))
+            {
+                ++at;
+                continue;
+            }
+            std::size_t end = at;
+            while (end < operands.size() && AsmWordChar(operands[end]))
+                ++end;
+            const std::string family = RegisterFamily(operands.substr(at, end - at));
+            if (!family.empty() && std::find(found.begin(), found.end(), family) == found.end())
+                found.push_back(family);
+            at = end;
+        }
+        return found;
+    }
+
+    int HighlightUse(std::string_view mnemonic, std::string_view operands, std::string_view highlight)
+    {
+        if (highlight.empty())
+            return 0;
+        int use = 0;
+        int depth = 0;
+        int operand = 0;
+        std::size_t at = 0;
+        bool writtenFirst = false;
+        while (at < operands.size())
+        {
+            const char c = operands[at];
+            if (c == '[')
+                ++depth;
+            else if (c == ']')
+                depth = std::max(0, depth - 1);
+            else if (c == ',' && depth == 0)
+                ++operand;
+            if (!AsmWordChar(c))
+            {
+                ++at;
+                continue;
+            }
+            std::size_t end = at;
+            while (end < operands.size() && AsmWordChar(operands[end]))
+                ++end;
+            if (HighlightMatches(operands.substr(at, end - at), highlight))
+            {
+                use = std::max(use, 1);
+                if (operand == 0 && depth == 0)
+                    writtenFirst = true;
+            }
+            at = end;
+        }
+        if (!writtenFirst)
+            return use;
+        std::string lower(mnemonic);
+        for (char& c : lower)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        static const char* const kReadOnly[] = { "cmp", "test", "bt", "push", "jmp", "call", "ucomiss", "ucomisd", "comiss", "comisd", "ptest", "vptest", "vucomiss",
+            "vucomisd", "vcomiss", "vcomisd", "loop", "jrcxz", "jecxz", "out", "lock cmp" };
+        for (const char* name : kReadOnly)
+        {
+            if (lower == name)
+                return 1;
+        }
+        if (!lower.empty() && lower[0] == 'j')
+            return 1;
+        return 2;
+    }
+
+    void AsmOperands(ImDrawList* draw, ImFont* font, float size, ImVec2 pos, const ImVec4& clip, std::string_view operands, std::string_view highlight)
     {
         float x = pos.x;
         std::size_t at = 0;
@@ -863,8 +1015,17 @@ namespace Manifold::UI
             }
             const char* begin = operands.data() + at;
             const char* stop = operands.data() + end;
+            const float advance = font->CalcTextSizeA(size, FLT_MAX, 0.0f, begin, stop).x;
+            if (!highlight.empty() && AsmWordChar(operands[at]) && HighlightMatches(operands.substr(at, end - at), highlight))
+            {
+                const ImVec2 min(x - 2.0f, pos.y - 1.0f);
+                const ImVec2 max(x + advance + 2.0f, pos.y + size + 1.0f);
+                draw->AddRectFilled(min, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.30f)), 3.0f);
+                draw->AddRect(min, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.85f)), 3.0f);
+                color = ImGui::GetColorU32(ManifoldTheme::Text);
+            }
             draw->AddText(font, size, ImVec2(x, pos.y), color, begin, stop, 0.0f, &clip);
-            x += font->CalcTextSizeA(size, FLT_MAX, 0.0f, begin, stop).x;
+            x += advance;
             at = end;
         }
     }
@@ -1124,6 +1285,42 @@ namespace Manifold::UI
         return true;
     }
 
+    namespace
+    {
+        std::map<ImGuiID, ImRect> g_restoreRects;
+
+        // ∑ A tool window is its own OS window, so a double click on its title
+        // does what it does on any Windows window: fill the monitor's work
+        // area, and again to go back. ImGui's own double click collapsed the
+        // window to its title, and the minimum size pulled it straight back,
+        // which only showed as a jump. Same test ImGui uses for the collapse:
+        // nothing under the mouse this frame or the last (no close button).
+        void MaximiseOnTitleDoubleClick(ImGuiWindowFlags flags)
+        {
+            ImGuiContext& g = *GImGui;
+            ImGuiWindow* window = ImGui::GetCurrentWindow();
+            if ((flags & ImGuiWindowFlags_NoTitleBar) || window->DockIsActive || g.HoveredWindow != window || g.HoveredId != 0 || g.HoveredIdPreviousFrame != 0 ||
+                g.IO.MouseClickedCount[0] != 2 || !ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                return;
+            const ImRect bar = window->TitleBarRect();
+            if (!ImGui::IsMouseHoveringRect(bar.Min, bar.Max, false))
+                return;
+            if (const auto found = g_restoreRects.find(window->ID); found != g_restoreRects.end())
+            {
+                ImGui::SetWindowPos(window, found->second.Min);
+                ImGui::SetWindowSize(window, found->second.GetSize());
+                g_restoreRects.erase(found);
+                return;
+            }
+            const ImGuiPlatformMonitor* monitor = ImGui::GetViewportPlatformMonitor(window->Viewport);
+            if (!monitor)
+                return;
+            g_restoreRects[window->ID] = window->Rect();
+            ImGui::SetWindowPos(window, monitor->WorkPos);
+            ImGui::SetWindowSize(window, monitor->WorkSize);
+        }
+    }
+
     bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags, ImVec2 minimum, bool escapeCloses)
     {
         const bool raise = FocusRequested();
@@ -1163,8 +1360,9 @@ namespace Manifold::UI
             }
         }
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ManifoldTheme::Page);
-        const bool visible = ImGui::Begin(title, open, flags);
+        const bool visible = ImGui::Begin(title, open, flags | ImGuiWindowFlags_NoCollapse);
         ImGui::PopStyleColor();
+        MaximiseOnTitleDoubleClick(flags);
         g_toolEscape.push_back({ ImGui::GetCurrentWindow()->ID, open, escapeCloses && open != nullptr, false });
         RaisePlatformWindow(raise);
         return visible;

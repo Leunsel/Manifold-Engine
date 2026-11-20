@@ -75,6 +75,7 @@ namespace Manifold::Debug
         std::uint8_t Original = 0;
         bool Inserted = false;
         std::uint32_t OwnerThread = 0;
+        std::uint64_t AboveStack = 0;
         BreakAction Action;
         std::uint64_t Hits = 0;
     };
@@ -96,6 +97,54 @@ namespace Manifold::Debug
         bool operator==(const VectorRegisters&) const = default;
     };
 
+    // The first 160 bytes of the FXSAVE area: control, status and tag words,
+    // the last opcode and pointers, MXCSR, and the eight x87 stack registers
+    // (ST0 first, 16 bytes each, 10 used).
+    struct FpuRegisters
+    {
+        static constexpr int kBytes = 160;
+        std::array<std::uint8_t, kBytes> Area{};
+        bool Valid = false;
+
+        std::uint16_t Control() const;
+        std::uint16_t Status() const;
+        std::uint8_t Tags() const;
+        std::uint16_t Opcode() const;
+        int Top() const { return (Status() >> 11) & 7; }
+        bool Used(int st) const { return (Tags() >> ((Top() + st) & 7)) & 1; }
+        const std::uint8_t* Stack(int st) const { return Area.data() + 32 + st * 16; }
+        std::uint8_t* Stack(int st) { return Area.data() + 32 + st * 16; }
+        void SetControl(std::uint16_t value);
+        void SetStatus(std::uint16_t value);
+        void SetTags(std::uint8_t value);
+
+        bool operator==(const FpuRegisters&) const = default;
+    };
+
+    double ExtendedToDouble(const std::uint8_t* tenBytes);
+    void DoubleToExtended(double value, std::uint8_t* tenBytes);
+    std::string ExtendedText(const std::uint8_t* tenBytes);
+
+    enum class ExceptionBreak
+    {
+        Never,
+        Always,
+        InRegion
+    };
+
+    struct BreakException
+    {
+        bool Raised = false;
+        std::uint32_t Code = 0;
+        bool FirstChance = true;
+        int ParamCount = 0;
+        std::uint64_t Params[2] = {};
+    };
+
+    std::string ExceptionName(std::uint32_t code);
+    std::string DescribeException(const BreakException& exception);
+    bool UnexpectedException(std::uint32_t code);
+
     struct BreakInfo
     {
         bool Broken = false;
@@ -104,6 +153,8 @@ namespace Manifold::Debug
         std::uint64_t BreakpointAddress = 0;
         Disasm::RegisterValues Registers;
         VectorRegisters Vectors;
+        FpuRegisters Fpu;
+        BreakException Exception;
         std::string Reason;
         std::uint64_t Serial = 0;
         bool Is64Bit = true;
@@ -160,8 +211,12 @@ namespace Manifold::Debug
         bool Stepping() const { return m_stepping.load(); }
         BreakInfo Break() const;
         void Resume(ResumeMode mode);
+        void ResumeHandled();
         void SetRegisters(const Disasm::RegisterValues& registers);
         void SetVectors(const VectorRegisters& vectors);
+        void SetFpu(const FpuRegisters& fpu);
+        void SetExceptionBreak(ExceptionBreak mode, std::uint64_t start, std::uint64_t stop);
+        ExceptionBreak ExceptionBreakMode() const { return m_exceptionMode.load(); }
         Status BreakNow();
         void Unpatch(std::uint64_t address, std::uint8_t* buffer, std::size_t size) const;
 
@@ -179,6 +234,8 @@ namespace Manifold::Debug
         unsigned long HandleException(void* event, bool& enterBreak, std::string& reason, std::uint64_t& breakpointAddress, std::uint32_t& breakThread);
         std::uint32_t Wow64BreakThread(std::uint32_t breakIn) const;
         void EnterBreak(std::uint32_t threadId, const std::string& reason, std::uint64_t breakpointAddress);
+        bool BreaksOnException(std::uint32_t code, std::uint64_t address) const;
+        void VehWriteExceptionBreak();
         Status ApplyHardware(std::uint32_t onlyThread = 0);
         void LeaveOut(ThreadState& thread);
         void CheckHiddenThreads(bool force);
@@ -227,6 +284,8 @@ namespace Manifold::Debug
         void VehCheckBreak();
         std::vector<std::uint64_t> VehStepTargets(const Disasm::Instruction& instruction, const Disasm::RegisterValues& registers, ResumeMode mode) const;
         void VehClearTempSlots();
+        std::optional<std::uint64_t> ReturnSlot(const Disasm::RegisterValues& registers) const;
+        void VehWakeAgent();
         std::wstring AgentPath() const;
         std::wstring AgentName() const;
 
@@ -258,6 +317,13 @@ namespace Manifold::Debug
         Disasm::RegisterValues m_newRegisters;
         bool m_vectorsChanged = false;
         VectorRegisters m_newVectors;
+        bool m_fpuChanged = false;
+        FpuRegisters m_newFpu;
+        bool m_exceptionHandled = false;
+        BreakException m_cause;
+        std::atomic<ExceptionBreak> m_exceptionMode{ ExceptionBreak::Never };
+        std::atomic<std::uint64_t> m_exceptionStart{ 0 };
+        std::atomic<std::uint64_t> m_exceptionStop{ 0 };
         std::atomic<bool> m_stepping{ false };
         std::uint64_t m_breakSerial = 0;
         bool m_breakRequested = false;
@@ -273,5 +339,8 @@ namespace Manifold::Debug
         std::atomic<bool> m_vehStop{ false };
         std::uint64_t m_vehBreakSerial = 0;
         std::vector<int> m_vehTempSlots;
+        bool m_vehStepOut = false;
+        void* m_vehBreakEvent = nullptr;
+        void* m_vehResumeEvent = nullptr;
     };
 }

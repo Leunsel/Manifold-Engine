@@ -466,7 +466,7 @@ namespace Manifold::Tests
                     const bool returned = stepped && WaitForBreak(engine, step.Serial, 3000);
                     CHECK_MSG(returned, "windows: run to return did not stop");
                     const Debug::BreakInfo back = debugger.Break();
-                    CHECK_MSG(returned && back.Reason == "Returned" && back.Address == returnAddress, back.Reason + " at " + Hex(back.Address) + ", expected " + Hex(returnAddress));
+                    CHECK_MSG(returned && back.Reason.find("Returned") == 0 && back.Address == returnAddress, back.Reason + " at " + Hex(back.Address) + ", expected " + Hex(returnAddress));
 
                     debugger.Resume(Debug::ResumeMode::StepOver);
                     const bool over = returned && WaitForBreak(engine, back.Serial, 3000);

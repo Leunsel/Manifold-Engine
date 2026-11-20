@@ -240,6 +240,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\LuaWindow.cpp" />
     <ClCompile Include="..\Source\UI\MainWindow.cpp" />
     <ClCompile Include="..\Source\UI\MemoryViewer.cpp" />
+    <ClCompile Include="..\Source\UI\MemoryViewerRegisters.cpp" />
     <ClCompile Include="..\Source\UI\MonoInspector.cpp" />
     <ClCompile Include="..\Source\UI\MonoWindow.cpp" />
     <ClCompile Include="..\Source\UI\NopSled.cpp" />

@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 6 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 7 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -216,6 +216,10 @@ The documentation behind completion, signature help, hover tooltips and the docs
 
 Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.
 
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.ui.getMode()` | table | How the main window looks: `{ release = boolean, compact = boolean }`. *Release* shows three columns, hides the Edit, Tools and Debug menus and toggles records with a double click; *compact* hides the scanner and shows only the address list. View > Compact mode and View > Release mode (Ctrl+Shift+C, Ctrl+Shift+R) switch the same. |
+| `manifold.ui.setMode(mode)` | nothing | Switches release and/or compact mode, like View > Release mode and View > Compact mode, and saves it with the settings. A key left out keeps its state, so `setMode{ compact = true }` changes only compact mode. |
 
 ### Menu, toolbar and status entries
 

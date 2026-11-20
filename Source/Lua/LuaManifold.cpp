@@ -247,6 +247,37 @@ namespace Manifold::Lua
             return 0;
         }
 
+        int UiMode(lua_State* state)
+        {
+            const Settings& options = Owner(state).Options();
+            lua_createtable(state, 0, 2);
+            lua_pushboolean(state, options.ReleaseMode ? 1 : 0);
+            lua_setfield(state, -2, "release");
+            lua_pushboolean(state, options.CompactMode ? 1 : 0);
+            lua_setfield(state, -2, "compact");
+            return 1;
+        }
+
+        int SetUiMode(lua_State* state)
+        {
+            Engine& engine = Owner(state);
+            Settings& options = engine.Options();
+            bool changed = false;
+            if (!lua_isnoneornil(state, 1) && options.ReleaseMode != (lua_toboolean(state, 1) != 0))
+            {
+                options.ReleaseMode = lua_toboolean(state, 1) != 0;
+                changed = true;
+            }
+            if (!lua_isnoneornil(state, 2) && options.CompactMode != (lua_toboolean(state, 2) != 0))
+            {
+                options.CompactMode = lua_toboolean(state, 2) != 0;
+                changed = true;
+            }
+            if (changed)
+                engine.SaveOptionsSoon();
+            return 0;
+        }
+
         int Version(lua_State* state)
         {
             lua_pushstring(state, MANIFOLD_VERSION_TEXT);
@@ -694,6 +725,8 @@ namespace Manifold::Lua
             { "clearOutput", &ClearOutput },
             { "showOnPrint", &ShowOnPrint },
             { "setShowOnPrint", &SetShowOnPrint },
+            { "uiMode", &UiMode },
+            { "setUiMode", &SetUiMode },
             { "version", &Version },
             { "processIsOpen", &ProcessIsOpen },
             { "is64Bit", &Is64Bit },

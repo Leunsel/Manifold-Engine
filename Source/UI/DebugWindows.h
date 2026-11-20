@@ -21,11 +21,14 @@ namespace Manifold::UI
     private:
         void EditDialog();
         void Apply();
+        void MenuBar();
+        const Debug::Breakpoint* Selected() const;
 
         Workspace& m_workspace;
         Engine& m_engine;
         std::uint64_t m_generation = 0;
         std::vector<Debug::Breakpoint> m_list;
+        std::uint64_t m_selected = 0;
 
         bool m_editOpen = false;
         bool m_editExisting = false;
