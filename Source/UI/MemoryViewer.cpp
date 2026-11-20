@@ -338,6 +338,7 @@ namespace Manifold::UI
             return;
         if (hexView)
         {
+            m_engine.Options().MemoryHexView = true;
             m_hexTop = address & ~0xFull;
             m_hexSelected = address;
             m_hexFocus = true;
@@ -360,6 +361,7 @@ namespace Manifold::UI
     void MemoryViewer::ShowHex(std::uint64_t address, std::uint64_t start, std::uint64_t stop)
     {
         m_open = true;
+        m_engine.Options().MemoryHexView = true;
         if (address)
         {
             m_hexTop = address & ~0xFull;
@@ -483,9 +485,13 @@ namespace Manifold::UI
         }
 
         Toolbar();
+        Settings& options = m_engine.Options();
+        const bool hexShown = options.MemoryHexView;
         const float available = ImGui::GetContentRegionAvail().y;
-        float code = std::floor(available * m_codeShare);
-        float hex = available - code - Px(6.0f);
+        const float splitBar = Px(6.0f);
+        const float share = std::clamp(static_cast<float>(options.MemoryCodeShare) / 1000.0f, 0.1f, 0.95f);
+        float code = std::floor(available * share);
+        float hex = available - code - splitBar;
         const ImVec2 start = ImGui::GetCursorPos();
         if (info.Broken)
             m_heldBreak = info;
@@ -514,30 +520,52 @@ namespace Manifold::UI
                     m_registersWidth = second;
                 ImGui::PopStyleColor();
             };
-        ImGui::BeginChild("##codearea", ImVec2(leftWidth, code), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-        Disassembly(code);
+        const auto rememberShare = [&]()
+            {
+                options.MemoryCodeShare = static_cast<int>(std::lround(code / available * 1000.0f));
+                m_engine.SaveOptionsSoon();
+            };
+        const float leftCode = hexShown ? code : available;
+        ImGui::BeginChild("##codearea", ImVec2(leftWidth, leftCode), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        Disassembly(leftCode);
         ImGui::EndChild();
+        const float rightX = ImGui::GetWindowContentRegionMax().x - registersWidth;
         if (showRegisters)
         {
-            columnSplitter("##registersplit", codeScreen, code);
-            ImGui::SetCursorPos(ImVec2(ImGui::GetWindowContentRegionMax().x - registersWidth, codeStart.y));
+            columnSplitter("##registersplit", codeScreen, hexShown ? code : available);
+            ImGui::SetCursorPos(ImVec2(rightX, codeStart.y));
             Registers(registersWidth, code, shown, running);
         }
-        ImGui::SetCursorPos(ImVec2(start.x, start.y + code));
-        if (Splitter("##viewsplit", false, Px(6.0f), &code, &hex, Px(120.0f), Px(90.0f)))
-            m_codeShare = code / available;
-        ImGui::SetCursorPos(ImVec2(start.x, start.y + code + Px(6.0f)));
-        const ImVec2 hexStart = ImGui::GetCursorPos();
-        const ImVec2 hexScreen = ImGui::GetCursorScreenPos();
-        const float hexHeight = ImGui::GetContentRegionAvail().y;
-        ImGui::BeginChild("##hexarea", ImVec2(leftWidth, hexHeight), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-        HexView(ImGui::GetContentRegionAvail().y);
-        ImGui::EndChild();
-        if (showRegisters)
+        if (hexShown)
         {
-            columnSplitter("##stacksplit", hexScreen, hexHeight);
-            ImGui::SetCursorPos(ImVec2(ImGui::GetWindowContentRegionMax().x - registersWidth, hexStart.y));
-            Stack(registersWidth, hexHeight, shown, running);
+            ImGui::SetCursorPos(start);
+            if (Splitter("##viewsplit", false, splitBar, &code, &hex, Px(120.0f), Px(90.0f)))
+                rememberShare();
+            ImGui::SetCursorPos(ImVec2(start.x, start.y + code + splitBar));
+            const ImVec2 hexStart = ImGui::GetCursorPos();
+            const ImVec2 hexScreen = ImGui::GetCursorScreenPos();
+            const float hexHeight = ImGui::GetContentRegionAvail().y;
+            ImGui::BeginChild("##hexarea", ImVec2(leftWidth, hexHeight), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+            HexView(ImGui::GetContentRegionAvail().y);
+            ImGui::EndChild();
+            if (showRegisters)
+            {
+                columnSplitter("##stacksplit", hexScreen, hexHeight);
+                ImGui::SetCursorPos(ImVec2(rightX, hexStart.y));
+                Stack(registersWidth, hexHeight, shown, running);
+            }
+        }
+        else
+        {
+            m_hexFocus = false;
+            if (showRegisters)
+            {
+                ImGui::SetCursorPos(ImVec2(rightX, start.y));
+                if (Splitter("##stacksplit", false, splitBar, &code, &hex, Px(120.0f), Px(90.0f), registersWidth))
+                    rememberShare();
+                ImGui::SetCursorPos(ImVec2(rightX, start.y + code + splitBar));
+                Stack(registersWidth, ImGui::GetContentRegionAvail().y, shown, running);
+            }
         }
         Shortcuts();
 
@@ -605,7 +633,14 @@ namespace Manifold::UI
             item(ICON_FA_QUOTE_LEFT "  Referenced strings", Command::ReferencedStrings);
             item(ICON_FA_CODE_BRANCH "  Flow graph of the selected function", Command::FlowGraph);
             ImGui::Separator();
-            if (ImGui::BeginMenu(ICON_FA_TH "  Hex view shows"))
+            if (ImGui::MenuItem(ICON_FA_TH "  Hex view", nullptr, &m_engine.Options().MemoryHexView))
+            {
+                if (!m_engine.Options().MemoryHexView)
+                    m_hexFocus = false;
+                m_engine.SaveOptionsSoon();
+            }
+            ItemTooltip("Off gives the disassembler the whole height. The stack stays beside the registers while the process is stopped.");
+            if (ImGui::BeginMenu(ICON_FA_TH "  Hex view shows", m_engine.Options().MemoryHexView))
             {
                 const Command modes[] = { Command::HexBytes, Command::HexTwoBytes, Command::HexFourBytes, Command::HexEightBytes, Command::HexFourBytesDecimal, Command::HexFloat, Command::HexDouble };
                 for (int i = 0; i < static_cast<int>(std::size(modes)); ++i)

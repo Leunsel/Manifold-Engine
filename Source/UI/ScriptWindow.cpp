@@ -9,6 +9,8 @@
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
+#include "imgui_internal.h"
+
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -51,7 +53,8 @@ namespace Manifold::UI
         }
         else
             name = lua ? "Lua script" : "Auto Assembler";
-        m_title = std::string(lua ? ICON_FA_MOON "  " : ICON_FA_CODE "  ") + name + "###script" + std::to_string(number);
+        m_windowId = "###script" + std::to_string(number);
+        m_title = std::string(lua ? ICON_FA_MOON "  " : ICON_FA_CODE "  ") + name + m_windowId;
     }
 
     void ScriptWindow::Check()
@@ -317,7 +320,21 @@ namespace Manifold::UI
             const std::size_t hidden = title.find("###");
             title.insert(hidden, " *");
         }
-        if (!BeginWindow(title.c_str(), ImVec2(760.0f, 640.0f), ImGuiWindowFlags_MenuBar, ImVec2(560.0f, 300.0f)))
+        if (!m_placed)
+        {
+            const std::uint32_t dock = m_engine.Options().ScriptEditorTabs ? m_workspace.ScriptEditorDock(*this) : 0;
+            if (dock)
+                ImGui::SetNextWindowDockID(dock, ImGuiCond_Always);
+            else
+                m_placed = true;
+        }
+        const bool visible = BeginWindow(title.c_str(), ImVec2(760.0f, 640.0f), ImGuiWindowFlags_MenuBar, ImVec2(560.0f, 300.0f));
+        if (!m_placed)
+        {
+            const ImGuiWindow* self = ImGui::FindWindowByName(m_windowId.c_str());
+            m_placed = (self && self->DockId != 0) || ++m_dockTries >= kDockTries;
+        }
+        if (!visible)
             return;
         Menu();
         m_templates.Draw();

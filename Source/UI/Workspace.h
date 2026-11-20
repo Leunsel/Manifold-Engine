@@ -111,6 +111,7 @@ namespace Manifold::UI
         void OpenMemoryViewer(std::uint64_t address, bool hexView = false, bool newWindow = false);
         void OpenStructure(std::uint64_t address, const std::string& structure = {});
         void OpenScript(std::string script, int recordId = kNoRecord, bool lua = false);
+        std::uint32_t ScriptEditorDock(const ScriptWindow& opening);
         void OpenLua();
         void OpenLog();
         void OpenSettings(int page = -1);
@@ -219,6 +220,8 @@ namespace Manifold::UI
         int m_nextTrace = 1;
         MemoryViewer& ActiveMemoryViewer();
         int m_nextWindow = 1;
+        std::uint32_t m_scriptDock = 0;
+        int m_scriptDockFrame = -1;
 
         struct ConfirmRequest
         {

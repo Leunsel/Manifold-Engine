@@ -16,6 +16,8 @@ namespace Manifold::UI
         void Draw() override;
         int RecordId() const { return m_recordId; }
         void Focus() { m_bringToFront = true; }
+        const std::string& WindowId() const { return m_windowId; }
+        bool Placed() const { return m_placed; }
 
     private:
         bool EscapeCloses() const override { return false; }
@@ -32,6 +34,10 @@ namespace Manifold::UI
         Workspace& m_workspace;
         Engine& m_engine;
         std::string m_title;
+        std::string m_windowId;
+        static constexpr int kDockTries = 30;
+        bool m_placed = false;
+        int m_dockTries = 0;
         std::string m_text;
         std::string m_saved;
         std::filesystem::path m_path;

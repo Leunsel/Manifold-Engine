@@ -402,6 +402,37 @@ namespace Manifold::UI
         m_scripts.push_back(std::make_unique<ScriptWindow>(*this, m_nextWindow++, std::move(script), recordId, lua));
     }
 
+    std::uint32_t Workspace::ScriptEditorDock(const ScriptWindow& opening)
+    {
+        if (m_scriptDockFrame == ImGui::GetFrameCount() && ImGui::DockBuilderGetNode(m_scriptDock))
+            return m_scriptDock;
+        for (auto it = m_scripts.rbegin(); it != m_scripts.rend(); ++it)
+        {
+            const ScriptWindow& other = **it;
+            if (&other == &opening || other.Closed() || !other.Placed())
+                continue;
+            ImGuiWindow* window = ImGui::FindWindowByName(other.WindowId().c_str());
+            if (!window || !(window->Active || window->WasActive))
+                continue;
+            if (window->DockId != 0)
+            {
+                const ImGuiDockNode* node = ImGui::DockBuilderGetNode(window->DockId);
+                if (node && !node->IsCentralNode())
+                    return window->DockId;
+                continue;
+            }
+            const ImGuiID node = ImGui::DockBuilderAddNode(0, ImGuiDockNodeFlags_None);
+            ImGui::DockBuilderSetNodePos(node, window->Pos);
+            ImGui::DockBuilderSetNodeSize(node, window->Size);
+            ImGui::DockBuilderDockWindow(window->Name, node);
+            ImGui::DockBuilderFinish(node);
+            m_scriptDock = node;
+            m_scriptDockFrame = ImGui::GetFrameCount();
+            return node;
+        }
+        return 0;
+    }
+
     void Workspace::OpenLua()
     {
         if (!m_lua)

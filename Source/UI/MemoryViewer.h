@@ -145,7 +145,6 @@ namespace Manifold::UI
         Debug::VectorRegisters m_previousVectors;
         Debug::VectorRegisters m_lastVectors;
         std::uint64_t m_lastBreak = 0;
-        float m_codeShare = 0.62f;
         bool m_focusCode = false;
         float m_addressWidth = 0.0f;
         float m_bytesWidth = 0.0f;

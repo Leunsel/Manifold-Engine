@@ -79,6 +79,7 @@ namespace Manifold
 
         bool AutorunEnabled = true;
         bool ScriptWindowsAppLook = true;
+        bool ScriptEditorTabs = true;
         int ScriptCallbackLimitMs = 2000;
         bool LuaShowOnPrint = true;
         bool LuaWrapOutput = true;
@@ -105,6 +106,8 @@ namespace Manifold
         bool UseInProcessDebugger = false;
         bool ShowRegistersOnBreak = true;
         bool ShowSymbols = true;
+        bool MemoryHexView = true;
+        int MemoryCodeShare = 620;
         int DisassemblerRows = 0;
         bool AutoExplorer = true;
 

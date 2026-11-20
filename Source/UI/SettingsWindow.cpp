@@ -1230,6 +1230,15 @@ namespace Manifold::UI
             list.EndRow();
         }
 
+        list.Section("Script editors");
+        if (list.Row("Open as tabs",
+                "A new Auto Assembler or Lua script editor opens as a tab beside the ones already open, in one window. Off: each opens as a window of its own. "
+                "A tab can be dragged out with Shift held, and windows can be docked together the same way.", toggle))
+        {
+            changed |= ToggleSwitch("##editortabs", &settings.ScriptEditorTabs);
+            list.EndRow();
+        }
+
         list.Section("Tables");
         if (list.Row("Lua script in a table", "What happens when a loaded table carries a Lua script.", choice))
         {
