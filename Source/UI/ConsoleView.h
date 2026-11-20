@@ -37,10 +37,11 @@ namespace Manifold::UI
     class ConsoleView
     {
     public:
-        void DrawFilterBar(const Lua::ConsoleLog& log, ConsoleFilter& filter, bool& changed, const std::function<void()>& clear = {});
+        void DrawFilterBar(const Lua::ConsoleLog& log, ConsoleFilter& filter, bool& changed);
         void Draw(const Lua::ConsoleLog& log, const ConsoleFilter& filter, ImVec2 size, const ConsoleActions& actions);
         void FocusSearch() { m_focusSearch = true; }
         void Follow() { m_follow = true; }
+        bool& Following() { return m_follow; }
         void Invalidate() { m_built = false; }
 
     private:

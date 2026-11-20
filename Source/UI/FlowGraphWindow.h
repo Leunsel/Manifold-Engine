@@ -27,6 +27,7 @@ namespace Manifold::UI
         std::uint64_t FunctionStart(std::uint64_t address) const;
         void Build(std::uint64_t entry);
         void Measure();
+        void MenuBar();
         void Toolbar();
         void Canvas();
         void Minimap(ImVec2 canvasMin, ImVec2 canvasMax);

@@ -372,7 +372,7 @@ namespace Manifold::UI
         m_dropped = log.Dropped();
     }
 
-    void ConsoleView::DrawFilterBar(const Lua::ConsoleLog& log, ConsoleFilter& filter, bool& changed, const std::function<void()>& clear)
+    void ConsoleView::DrawFilterBar(const Lua::ConsoleLog& log, ConsoleFilter& filter, bool& changed)
     {
         const Lua::ConsoleCounts counts = log.Counts();
         constexpr LogLevel kLevels[] = { LogLevel::Debug, LogLevel::Info, LogLevel::Success, LogLevel::Warning, LogLevel::Error };
@@ -380,9 +380,6 @@ namespace Manifold::UI
         const ImGuiStyle& style = ImGui::GetStyle();
         const float spacing = style.ItemSpacing.x;
         const float side = ImGui::GetFrameHeight();
-        const float buttons = clear ? 5.0f : 4.0f;
-        const float toggles = side * buttons + spacing * (buttons - 1.0f);
-        const float start = ImGui::GetCursorPosX();
         const float avail = ImGui::GetContentRegionAvail().x;
         const std::vector<std::string> channels = log.Channels();
 
@@ -406,13 +403,10 @@ namespace Manifold::UI
 
         const float channelMin = Px(90.0f);
         const float searchMin = Px(80.0f);
-        const float rest = avail - levelsWidth - toggles - spacing * 3.0f;
+        const float rest = avail - levelsWidth - spacing * 2.0f;
         const bool channelInline = rest >= channelMin + searchMin;
-        const bool togglesInline = channelInline || avail - levelsWidth - toggles - spacing * 2.0f >= searchMin;
         const float channelWidth = channelInline ? std::clamp(rest * 0.4f, channelMin, Px(150.0f)) : 0.0f;
-        const float searchWidth = channelInline ? std::min(rest - channelWidth, Px(360.0f))
-                                : togglesInline ? std::min(avail - levelsWidth - toggles - spacing * 2.0f, Px(360.0f))
-                                                : std::max(Px(40.0f), avail - levelsWidth - spacing);
+        const float searchWidth = channelInline ? std::min(rest - channelWidth, Px(360.0f)) : std::max(Px(40.0f), std::min(avail - levelsWidth - spacing, Px(360.0f)));
         if (!channelInline && !filter.Channel.empty())
             segments.front().Color = ManifoldTheme::Accent;
         if (levelsFiltered)
@@ -460,7 +454,7 @@ namespace Manifold::UI
         {
             std::string tip = "Filter by level";
             if (!channelInline)
-                tip += togglesInline ? " and channel" : ", channel and view";
+                tip += " and channel";
             tip += ".";
             for (std::size_t i = 0; i < std::size(kLevels); ++i)
                 tip += std::string("\n") + (filter.Levels[i] ? "" : "(hidden) ") + kNames[i] + ": " + Grouped(counts.Levels[i]);
@@ -525,27 +519,6 @@ namespace Manifold::UI
                 SectionLabel("Channel");
                 channelItems();
             }
-            if (!togglesInline)
-            {
-                ImGui::Separator();
-                SectionLabel("View");
-                ImGui::PushItemFlag(ImGuiItemFlags_AutoClosePopups, false);
-                const auto option = [&](const char* label, bool& value)
-                {
-                    if (ImGui::MenuItem(label, nullptr, value))
-                    {
-                        value = !value;
-                        changed = true;
-                    }
-                };
-                option(ICON_FA_ALIGN_LEFT "  Wrap lines", filter.Wrap);
-                option(ICON_FA_CLOCK "  Show the time", filter.Time);
-                option(ICON_FA_HASHTAG "  Integers in hex", filter.Hex);
-                option(ICON_FA_ARROW_DOWN "  Follow new entries", m_follow);
-                ImGui::PopItemFlag();
-                if (clear && ImGui::MenuItem(ICON_FA_ERASER "  Clear the console"))
-                    clear();
-            }
             ImGui::EndPopup();
         }
 
@@ -570,44 +543,6 @@ namespace Manifold::UI
         }
         if (InputTextWithHint("##consolesearch", ICON_FA_SEARCH " Search", filter.Search))
             changed = true;
-
-        if (!togglesInline)
-            return;
-        bool first = true;
-        const auto toggle = [&](const char* icon, bool& value, const char* tip)
-        {
-            ImGui::SameLine();
-            if (first)
-                ImGui::SetCursorPosX(start + avail - toggles);
-            first = false;
-            int colors = 1;
-            ImGui::PushStyleColor(ImGuiCol_Text, value ? ManifoldTheme::Accent : ManifoldTheme::Muted);
-            if (value)
-            {
-                ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.22f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.32f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.42f));
-                colors += 3;
-            }
-            if (IconButton(icon, tip))
-            {
-                value = !value;
-                changed = true;
-            }
-            ImGui::PopStyleColor(colors);
-        };
-        toggle(ICON_FA_ALIGN_LEFT, filter.Wrap, "Wrap long lines at the window's edge");
-        toggle(ICON_FA_CLOCK, filter.Time, "Show the time of each entry");
-        toggle(ICON_FA_HASHTAG, filter.Hex, "Show integers in hex");
-        toggle(ICON_FA_ARROW_DOWN, m_follow, "Follow new entries");
-        if (clear)
-        {
-            ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
-            if (IconButton(ICON_FA_ERASER, "Clear the console"))
-                clear();
-            ImGui::PopStyleColor();
-        }
     }
 
     void ConsoleView::Select(std::uint64_t id, bool toggle, bool range)

@@ -55,6 +55,7 @@ namespace Manifold::UI
         void Whois(const Target::UnrealRuntime& runtime);
         void TypeList(const Target::UnrealRuntime& runtime, float height);
         void Details(const Target::UnrealRuntime& runtime);
+        void MenuBar();
         void Properties(const Target::UnrealRuntime& runtime, std::uint64_t type);
         void Functions(const Target::UnrealRuntime& runtime, std::uint64_t type);
         void Instances(const Target::UnrealRuntime& runtime, std::uint64_t type);

@@ -24,6 +24,7 @@ namespace Manifold::UI
     {
         constexpr int kWarningLevel = static_cast<int>(LogLevel::Warning);
         constexpr int kErrorLevel = static_cast<int>(LogLevel::Error);
+        constexpr const char* kLevels[] = { "Debug", "Info", "Success", "Warnings", "Errors" };
 
         bool SameText(const LogEntry& a, const LogEntry& b)
         {
@@ -60,31 +61,20 @@ namespace Manifold::UI
                 line.remove_suffix(1);
             return line;
         }
-
-        bool Toggle(const char* icon, const char* tooltip, bool& value)
-        {
-            if (value)
-            {
-                ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.22f));
-                ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Accent);
-            }
-            const bool clicked = IconButton(icon, tooltip);
-            if (value)
-                ImGui::PopStyleColor(2);
-            if (clicked)
-                value = !value;
-            return clicked;
-        }
     }
 
     void LogWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_STREAM "  Log###log", ImVec2(980.0f, 560.0f), 0, ImVec2(720.0f, 300.0f)))
+        if (!BeginWindow(ICON_FA_STREAM "  Log###log", ImVec2(980.0f, 560.0f), ImGuiWindowFlags_MenuBar, ImVec2(720.0f, 300.0f)))
             return;
+        Refresh();
+        MenuBar();
+        bool logTab = false;
         if (ImGui::BeginTabBar("##logtabs"))
         {
             if (ImGui::BeginTabItem("Log"))
             {
+                logTab = true;
                 const bool find = Pressed(Command::LogFind);
                 const bool copy = Pressed(Command::LogCopy);
                 const bool all = Pressed(Command::LogSelectAll);
@@ -133,6 +123,8 @@ namespace Manifold::UI
                     line += Format("  ·  %zu selected (%s copies them)", selected, ShortcutText(Command::LogCopy) ? ShortcutText(Command::LogCopy) : "Copy");
                 if (!m_hiddenAreas.empty())
                     line += Format("  ·  %zu %s hidden", m_hiddenAreas.size(), m_hiddenAreas.size() == 1 ? "area" : "areas");
+                if (m_level != 1)
+                    line += m_level == kErrorLevel ? std::string("  ·  errors only") : Format("  ·  %s and up", kLevels[m_level]);
                 Muted(line);
                 ImGui::EndTabItem();
             }
@@ -143,6 +135,7 @@ namespace Manifold::UI
             }
             ImGui::EndTabBar();
         }
+        m_logTab = logTab;
         EndToolWindow();
     }
 
@@ -216,127 +209,151 @@ namespace Manifold::UI
         m_total = top;
     }
 
+    void LogWindow::MenuBar()
+    {
+        if (!ImGui::BeginMenuBar())
+            return;
+        if (ImGui::BeginMenu("Log"))
+        {
+            const std::vector<std::size_t> selected = SelectedRows();
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the selected entries", ShortcutText(Command::LogCopy), false, m_logTab && !selected.empty()))
+                Copy(selected);
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the shown entries", nullptr, false, !m_rows.empty()))
+            {
+                std::vector<std::size_t> rows(m_rows.size());
+                for (std::size_t i = 0; i < rows.size(); ++i)
+                    rows[i] = i;
+                Copy(rows);
+            }
+            ItemTooltip("Every entry the list shows with the current filters, as text.");
+            if (CommandItem(ICON_FA_CHECK_DOUBLE "  Select all", Command::LogSelectAll, false, m_logTab && !m_rows.empty()))
+                SelectAll();
+            if (CommandItem(ICON_FA_SEARCH "  Find", Command::LogFind, false, m_logTab))
+                m_focusSearch = true;
+            ImGui::Separator();
+            bool verbose = RuntimeLog::Verbose();
+            if (ImGui::MenuItem(ICON_FA_BUG "  Record debug messages", nullptr, &verbose))
+            {
+                RuntimeLog::SetVerbose(verbose);
+                m_workspace.Core().Options().VerboseLog = verbose;
+            }
+            ItemTooltip("Also record the debug level. Saved with the settings.");
+            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open the log folder"))
+            {
+                const std::wstring folder = RuntimeLog::FilePath().parent_path().wstring();
+                ::ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            }
+            ImGui::Separator();
+            if (DangerMenuItem(ICON_FA_ERASER "  Clear the log", nullptr, !m_entries.empty()))
+            {
+                RuntimeLog::Clear();
+                m_selected.clear();
+                m_current = 0;
+            }
+            ItemTooltip("Empties the list. The log file keeps everything.");
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("View", m_logTab))
+        {
+            if (ImGui::BeginMenu(ICON_FA_SIGNAL "  Lowest level"))
+            {
+                for (int i = 0; i < static_cast<int>(std::size(kLevels)); ++i)
+                {
+                    if (ImGui::MenuItem(kLevels[i], nullptr, m_level == i))
+                        m_level = i;
+                }
+                if (!RuntimeLog::Verbose())
+                {
+                    ImGui::Separator();
+                    ImGui::TextDisabled("Debug messages are only recorded\nwith Log > Record debug messages.");
+                }
+                ImGui::EndMenu();
+            }
+            const std::string areas = m_hiddenAreas.empty() ? std::string(ICON_FA_FILTER "  Areas") : Format(ICON_FA_FILTER "  Areas (%zu hidden)", m_hiddenAreas.size());
+            if (ImGui::BeginMenu((areas + "###areas").c_str()))
+            {
+                AreaMenu();
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
+            ImGui::MenuItem(ICON_FA_ARROW_DOWN "  Follow new entries", nullptr, &m_follow);
+            ItemTooltip("Scroll along with new entries while the list is at its end.");
+            if (ImGui::MenuItem(ICON_FA_ALIGN_LEFT "  Wrap long messages", nullptr, &m_wrap))
+                m_layoutWidth = -1.0f;
+            ItemTooltip("Wrap long and multi-line messages in the list. Off shows their first line only.");
+            if (ImGui::MenuItem(ICON_FA_LAYER_GROUP "  Group repeats", nullptr, &m_group))
+                m_dirty = true;
+            ItemTooltip("Show repeats of the same message in a row as one entry with a count.");
+            ImGui::MenuItem(ICON_FA_COLUMNS "  Details pane", nullptr, &m_details);
+            ItemTooltip("Details below the list: the whole message, time to the millisecond, thread and source.");
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
+
     void LogWindow::Toolbar()
     {
-        const char* levels[] = { "Debug", "Info", "Success", "Warnings", "Errors" };
-        ImGui::SetNextItemWidth(Px(104.0f));
-        ImGui::Combo("##level", &m_level, levels, static_cast<int>(std::size(levels)));
-        ItemTooltip("The lowest level that is shown. Debug lines are only recorded while the bug button is on.");
-        ImGui::SameLine();
-        AreaFilter();
-        ImGui::SameLine();
         const ImGuiStyle& style = ImGui::GetStyle();
-        const float iconButton = ImGui::GetFrameHeight();
         const float counters = (m_warnings ? ImGui::CalcTextSize(Format(ICON_FA_EXCLAMATION_TRIANGLE " %d", m_warnings).c_str()).x + style.FramePadding.x * 2.0f + style.ItemSpacing.x : 0.0f) +
                                (m_errors ? ImGui::CalcTextSize(Format(ICON_FA_TIMES_CIRCLE " %d", m_errors).c_str()).x + style.FramePadding.x * 2.0f + style.ItemSpacing.x : 0.0f);
-        const float right = iconButton * 8.0f + style.ItemSpacing.x * 9.0f + counters;
         if (m_focusSearch)
         {
             ImGui::SetKeyboardFocusHere();
             m_focusSearch = false;
         }
-        ImGui::SetNextItemWidth(std::max(Px(110.0f), ImGui::GetContentRegionAvail().x - right));
+        ImGui::SetNextItemWidth(std::max(Px(110.0f), ImGui::GetContentRegionAvail().x - counters));
         InputTextWithHint("##search", ICON_FA_SEARCH "  Search messages, areas and sources", m_search);
         const GhostButtons ghost;
+        const auto counter = [&](const std::string& label, const ImVec4& color, int level, const char* tooltip)
+        {
+            ImGui::SameLine();
+            const bool active = m_level == level;
+            if (active)
+                ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(color, 0.18f));
+            ImGui::PushStyleColor(ImGuiCol_Text, color);
+            if (ImGui::Button(label.c_str()))
+                m_level = active ? 1 : level;
+            ImGui::PopStyleColor(active ? 2 : 1);
+            ItemTooltip(tooltip);
+        };
         if (m_warnings)
-        {
-            ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Warning);
-            if (ImGui::Button(Format(ICON_FA_EXCLAMATION_TRIANGLE " %d##warnings", m_warnings).c_str()))
-                m_level = m_level == kWarningLevel ? 1 : kWarningLevel;
-            ImGui::PopStyleColor();
-            ItemTooltip("Warnings in the log. Click to show warnings and errors only, click again for everything.");
-        }
+            counter(Format(ICON_FA_EXCLAMATION_TRIANGLE " %d##warnings", m_warnings), ManifoldTheme::Warning, kWarningLevel,
+                    "Warnings in the log. Click to show warnings and errors only, click again for everything.");
         if (m_errors)
-        {
-            ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Error);
-            if (ImGui::Button(Format(ICON_FA_TIMES_CIRCLE " %d##errors", m_errors).c_str()))
-                m_level = m_level == kErrorLevel ? 1 : kErrorLevel;
-            ImGui::PopStyleColor();
-            ItemTooltip("Errors in the log. Click to show errors only, click again for everything.");
-        }
-        ImGui::SameLine();
-        Toggle(ICON_FA_ARROW_DOWN "##follow", "Follow: scroll along with new entries while the list is at its end", m_follow);
-        ImGui::SameLine();
-        if (Toggle(ICON_FA_ALIGN_LEFT "##wrap", "Wrap long and multi-line messages in the list", m_wrap))
-            m_layoutWidth = -1.0f;
-        ImGui::SameLine();
-        if (Toggle(ICON_FA_LAYER_GROUP "##group", "Show repeats of the same message in a row as one entry with a count", m_group))
-            m_dirty = true;
-        ImGui::SameLine();
-        Toggle(ICON_FA_COLUMNS "##details", "Details below the list: the whole message, time to the millisecond, thread and source", m_details);
-        ImGui::SameLine();
-        bool verbose = RuntimeLog::Verbose();
-        if (Toggle(ICON_FA_BUG "##debug", "Record debug messages too (saved with the settings)", verbose))
-        {
-            RuntimeLog::SetVerbose(verbose);
-            m_workspace.Core().Options().VerboseLog = verbose;
-        }
-        ImGui::SameLine();
-        if (IconButton(ICON_FA_COPY "##copyshown", "Copy the shown entries as text"))
-        {
-            std::vector<std::size_t> rows(m_rows.size());
-            for (std::size_t i = 0; i < rows.size(); ++i)
-                rows[i] = i;
-            Copy(rows);
-        }
-        ImGui::SameLine();
-        if (IconButton(ICON_FA_ERASER "##clear", "Clear the log (the log file keeps everything)"))
-        {
-            RuntimeLog::Clear();
-            m_selected.clear();
-            m_current = 0;
-        }
-        ImGui::SameLine();
-        if (IconButton(ICON_FA_FOLDER_OPEN "##file", "Open the folder with the log file"))
-        {
-            const std::wstring folder = RuntimeLog::FilePath().parent_path().wstring();
-            ::ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-        }
+            counter(Format(ICON_FA_TIMES_CIRCLE " %d##errors", m_errors), ManifoldTheme::Error, kErrorLevel, "Errors in the log. Click to show errors only, click again for everything.");
     }
 
-    void LogWindow::AreaFilter()
+    void LogWindow::AreaMenu()
     {
-        const std::string label = m_hiddenAreas.empty() ? std::string(ICON_FA_FILTER "  Areas") : Format(ICON_FA_FILTER "  Areas (%zu hidden)", m_hiddenAreas.size());
-        if (ImGui::Button((label + "##areas").c_str()))
-            ImGui::OpenPopup("##areafilter");
-        ItemTooltip("Which areas the list shows");
-        if (!ImGui::BeginPopup("##areafilter"))
-            return;
+        if (ImGui::MenuItem(ICON_FA_EYE "  Show all", nullptr, false, !m_hiddenAreas.empty()))
         {
-            const GhostButtons ghost;
-            if (ImGui::SmallButton("Show all"))
-            {
-                m_hiddenAreas.clear();
-                m_dirty = true;
-            }
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Hide all"))
-            {
-                for (const auto& [area, count] : m_areas)
-                    m_hiddenAreas.insert(area);
-                m_dirty = true;
-            }
+            m_hiddenAreas.clear();
+            m_dirty = true;
+        }
+        if (ImGui::MenuItem(ICON_FA_EYE_SLASH "  Hide all", nullptr, false, !m_areas.empty()))
+        {
+            for (const auto& [area, count] : m_areas)
+                m_hiddenAreas.insert(area);
+            m_dirty = true;
         }
         ImGui::Separator();
+        // Picking several areas in a row is the common case, so the menu stays open.
+        ImGui::PushItemFlag(ImGuiItemFlags_AutoClosePopups, false);
         for (const auto& [area, count] : m_areas)
         {
-            bool shown = !m_hiddenAreas.count(area);
-            if (ImGui::Checkbox((area + "##area").c_str(), &shown))
+            const bool shown = !m_hiddenAreas.count(area);
+            if (ImGui::MenuItem((area + "##area").c_str(), std::to_string(count).c_str(), shown))
             {
                 if (shown)
-                    m_hiddenAreas.erase(area);
-                else
                     m_hiddenAreas.insert(area);
+                else
+                    m_hiddenAreas.erase(area);
                 m_dirty = true;
             }
-            ImGui::SameLine();
-            Muted(std::to_string(count));
         }
+        ImGui::PopItemFlag();
         if (m_areas.empty())
-            Muted("Nothing logged yet");
-        ImGui::EndPopup();
+            ImGui::TextDisabled("Nothing logged yet");
     }
 
     void LogWindow::Table(float height)

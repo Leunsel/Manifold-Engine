@@ -26,7 +26,7 @@ namespace Manifold::UI
     {
         if (!m_open)
             return;
-        if (!BeginToolWindow(m_title.c_str(), &m_open, ImVec2(720.0f, 460.0f), 0, ImVec2(520.0f, 340.0f)))
+        if (!BeginToolWindow(m_title.c_str(), &m_open, ImVec2(720.0f, 460.0f), ImGuiWindowFlags_MenuBar, ImVec2(520.0f, 340.0f)))
         {
             EndToolWindow();
             return;
@@ -34,6 +34,35 @@ namespace Manifold::UI
         Debug::Debugger& debugger = m_engine.Debugger();
         const bool known = debugger.CopyWatch(m_watchId, m_copy);
         const bool running = known && m_copy.Running && debugger.Attached();
+        const bool byAddress = m_kind == Debug::WatchKind::InstructionAccesses;
+        if (m_selected >= static_cast<int>(m_copy.Entries.size()))
+            m_selected = -1;
+        if (ImGui::BeginMenuBar())
+        {
+            if (ImGui::BeginMenu("Watch"))
+            {
+                if (ImGui::MenuItem(ICON_FA_STOP "  Stop", nullptr, false, running))
+                    debugger.StopWatch(m_watchId);
+                ImGui::Separator();
+                if (ImGui::MenuItem(ICON_FA_COPY "  Copy the list", nullptr, false, !m_copy.Entries.empty()))
+                    CopyList();
+                ItemTooltip(byAddress ? "Count and address of every row, one per line, tab-separated." : "Count, address and instruction of every row, one per line, tab-separated.");
+                if (ImGui::MenuItem(ICON_FA_ERASER "  Clear the list", nullptr, false, !m_copy.Entries.empty()))
+                {
+                    debugger.ClearWatch(m_watchId);
+                    m_selected = -1;
+                }
+                ItemTooltip("Forget the rows and counts so far. The watch keeps running.");
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu(byAddress ? "Address" : "Instruction", m_selected >= 0))
+            {
+                if (m_selected >= 0)
+                    EntryMenu(m_copy.Entries[static_cast<std::size_t>(m_selected)]);
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenuBar();
+        }
         if (running)
         {
             if (DangerButton(ICON_FA_STOP "  Stop", Px(90.0f, 0.0f)))
@@ -44,12 +73,6 @@ namespace Manifold::UI
             ImGui::BeginDisabled();
             ImGui::Button(ICON_FA_STOP "  Stopped", Px(90.0f, 0.0f));
             ImGui::EndDisabled();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_ERASER "  Clear"))
-        {
-            debugger.ClearWatch(m_watchId);
-            m_selected = -1;
         }
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();
@@ -66,7 +89,6 @@ namespace Manifold::UI
 
         const float detailHeight = m_selected >= 0 ? Px(150.0f) : 0.0f;
         const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp;
-        const bool byAddress = m_kind == Debug::WatchKind::InstructionAccesses;
         PushMono();
         if (ImGui::BeginTable("##entries", 3, flags, ImVec2(0.0f, ImGui::GetContentRegionAvail().y - detailHeight)))
         {
@@ -91,6 +113,14 @@ namespace Manifold::UI
                         else
                             m_workspace.OpenMemoryViewer(entry.Instruction);
                     }
+                }
+                if (ImGui::BeginPopupContextItem("##entrymenu"))
+                {
+                    m_selected = i;
+                    PopMono();
+                    EntryMenu(entry);
+                    PushMono();
+                    ImGui::EndPopup();
                 }
                 ImGui::PopID();
                 ImGui::TableNextColumn();
@@ -141,29 +171,6 @@ namespace Manifold::UI
         {
             const Debug::WatchEntry& entry = m_copy.Entries[static_cast<std::size_t>(m_selected)];
             BeginCard("##details", nullptr, ImVec2(0.0f, 0.0f));
-            if (ImGui::SmallButton(ICON_FA_CODE "  Show in disassembler"))
-                m_workspace.OpenMemoryViewer(entry.Instruction);
-            ImGui::SameLine();
-            if (byAddress)
-            {
-                if (ImGui::SmallButton(ICON_FA_PLUS "  Add address to the list"))
-                    m_workspace.AddAddress(entry.Accessed, Scan::ValueType::FourBytes);
-                ImGui::SameLine();
-                if (ImGui::SmallButton(ICON_FA_SITEMAP "  Dissect"))
-                    m_workspace.OpenStructure(entry.Accessed);
-            }
-            else
-            {
-                if (m_kind != Debug::WatchKind::Calls && ImGui::SmallButton(ICON_FA_LIST_UL "  What addresses does it access?"))
-                    m_workspace.StartWatch(Debug::WatchKind::InstructionAccesses, entry.Instruction, 1);
-                ImGui::SameLine();
-                if (ImGui::SmallButton(ICON_FA_MAGIC "  AOB injection script"))
-                {
-                    m_workspace.LastCodeAddress = entry.Instruction;
-                    m_workspace.OpenMemoryViewer(entry.Instruction);
-                }
-                ItemTooltip("Opens the instruction in the memory viewer; right click it there and pick Create script.");
-            }
             PushMono();
             const Disasm::RegisterValues& r = entry.Registers;
             const bool is64 = !m_engine.HasProcess() || m_engine.Process()->Is64Bit();
@@ -180,5 +187,55 @@ namespace Manifold::UI
             EndCard();
         }
         EndToolWindow();
+    }
+
+    void WatchWindow::EntryMenu(const Debug::WatchEntry& entry)
+    {
+        if (ImGui::MenuItem(ICON_FA_CODE "  Show in the disassembler"))
+            m_workspace.OpenMemoryViewer(entry.Instruction);
+        if (m_kind == Debug::WatchKind::InstructionAccesses)
+        {
+            if (ImGui::MenuItem(ICON_FA_TH "  Show the address in the hex view"))
+                m_workspace.OpenMemoryViewer(entry.Accessed, true);
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_PLUS "  Add the address to the list"))
+                m_workspace.AddAddress(entry.Accessed, Scan::ValueType::FourBytes);
+            if (ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect"))
+                m_workspace.OpenStructure(entry.Accessed);
+        }
+        else
+        {
+            ImGui::Separator();
+            if (m_kind != Debug::WatchKind::Calls && ImGui::MenuItem(ICON_FA_LIST_UL "  Find out what addresses this instruction accesses"))
+                m_workspace.StartWatch(Debug::WatchKind::InstructionAccesses, entry.Instruction, 1);
+            if (ImGui::MenuItem(ICON_FA_MAGIC "  AOB injection script"))
+            {
+                m_workspace.LastCodeAddress = entry.Instruction;
+                m_workspace.OpenMemoryViewer(entry.Instruction);
+            }
+            ItemTooltip("Opens the instruction in the memory viewer; right click it there and pick Create script.");
+        }
+        ImGui::Separator();
+        const std::string address = m_engine.Describe(m_kind == Debug::WatchKind::InstructionAccesses ? entry.Accessed : entry.Instruction);
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the address", address.c_str()))
+            ImGui::SetClipboardText(address.c_str());
+    }
+
+    void WatchWindow::CopyList() const
+    {
+        const bool byAddress = m_kind == Debug::WatchKind::InstructionAccesses;
+        std::string text;
+        for (const Debug::WatchEntry& entry : m_copy.Entries)
+        {
+            text += std::to_string(entry.Count) + "\t" + m_engine.Describe(byAddress ? entry.Accessed : entry.Instruction);
+            if (!byAddress)
+            {
+                const auto found = m_text.find(entry.Instruction);
+                if (found != m_text.end())
+                    text += "\t" + found->second;
+            }
+            text += "\n";
+        }
+        ImGui::SetClipboardText(text.c_str());
     }
 }

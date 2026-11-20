@@ -52,9 +52,10 @@ namespace Manifold::UI
 
     void UnrealWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_CUBES "  Unreal Engine###unreal", ImVec2(1040.0f, 660.0f), 0, ImVec2(660.0f, 360.0f)))
+        if (!BeginWindow(ICON_FA_CUBES "  Unreal Engine###unreal", ImVec2(1040.0f, 660.0f), ImGuiWindowFlags_MenuBar, ImVec2(660.0f, 360.0f)))
             return;
         Engine& engine = m_workspace.Core();
+        MenuBar();
         if (!engine.HasProcess())
         {
             m_runtime.reset();
@@ -100,25 +101,7 @@ namespace Manifold::UI
         ImGui::AlignTextToFramePadding();
         ImGui::TextColored(runtime ? ManifoldTheme::Success : session.State() == UnrealState::Failed ? ManifoldTheme::Warning : ManifoldTheme::Muted, ICON_FA_CIRCLE);
         ImGui::SameLine();
-        TextFitted(session.StatusText(), ImGui::GetContentRegionAvail().x - Px(250.0f), ManifoldTheme::Label);
-        {
-            const float right = ImGui::GetWindowContentRegionMax().x;
-            const float start = ImGui::CalcTextSize(ICON_FA_SYNC "  Resolve again").x + ImGui::CalcTextSize(ICON_FA_POWER_OFF "  Shut down").x + ImGui::GetStyle().FramePadding.x * 4.0f +
-                                ImGui::GetStyle().ItemSpacing.x;
-            ImGui::SameLine(std::max(ImGui::GetCursorPosX(), right - start));
-            const GhostButtons ghost;
-            ImGui::BeginDisabled(session.Resolving());
-            if (ImGui::Button(session.Stopped() ? ICON_FA_PLAY "  Start" : ICON_FA_SYNC "  Resolve again"))
-                session.Start(false);
-            ImGui::EndDisabled();
-            ItemTooltip("Reads the name table, the object array and the reflection layout of the game again, also in a game that does not look like Unreal.");
-            ImGui::SameLine();
-            ImGui::BeginDisabled(session.Stopped());
-            if (ImGui::Button(ICON_FA_POWER_OFF "  Shut down"))
-                session.Stop();
-            ImGui::EndDisabled();
-            ItemTooltip("Drops what was resolved; dissects, symbols and types stop until Start, also in the next game.");
-        }
+        TextFitted(session.StatusText(), ImGui::GetContentRegionAvail().x, ManifoldTheme::Label);
 
         if (!runtime)
         {
@@ -363,15 +346,6 @@ namespace Manifold::UI
             Muted(m_searching ? std::string("Searching...") : Format("%zu properties%s", m_hits.size(), m_hits.size() >= kHitLimit ? " (first ones)" : ""));
         else
             Muted(m_refreshing ? std::string("Reading the types again...") : Format("%zu of %zu types", m_visible.size(), m_index->List.size()));
-        {
-            const GhostButtons ghost;
-            ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - ImGui::GetStyle().FramePadding.x * 2.0f));
-            ImGui::BeginDisabled(m_refreshing);
-            if (ImGui::Button(ICON_FA_SYNC "##unrealtypesagain"))
-                ReadTypesAgain(true);
-            ImGui::EndDisabled();
-            ItemTooltip("Reads the types again. Classes a game loads later, such as the Blueprints of a level, are listed after this.");
-        }
         ImGui::BeginChild("##unrealtypes", ImVec2(0.0f, 0.0f));
         const auto& types = m_index->List;
         const auto row = [&](std::size_t type, const std::string& label, int index)
@@ -546,9 +520,41 @@ namespace Manifold::UI
         }
     }
 
+    void UnrealWindow::MenuBar()
+    {
+        if (!ImGui::BeginMenuBar())
+            return;
+        Engine& engine = m_workspace.Core();
+        UnrealSession& session = engine.Unreal();
+        if (ImGui::BeginMenu("Unreal"))
+        {
+            if (session.Resolving())
+                ImGui::MenuItem(ICON_FA_SPINNER "  Reading the reflection...", nullptr, false, false);
+            else if (ImGui::MenuItem(session.Runtime() ? ICON_FA_SYNC "  Resolve again" : ICON_FA_PLAY "  Start", nullptr, false, engine.HasProcess()))
+                session.Start(false);
+            ItemTooltip("Reads the game's name table, object array and reflection layout, also in a game that does not look like Unreal.");
+            if (ImGui::MenuItem(ICON_FA_LIST "  Read the types again", nullptr, false, m_runtime && m_index && !m_refreshing))
+                ReadTypesAgain(true);
+            ItemTooltip("Classes a game loads later, such as the Blueprints of a level, are listed after this.");
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut down", nullptr, false, !session.Stopped()))
+                session.Stop();
+            ItemTooltip("Drops what was resolved; dissects, symbols and types stop until Start, also in the next game.");
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("View"))
+        {
+            ImGui::MenuItem(ICON_FA_FILTER "  Properties declared here only", nullptr, &m_ownOnly);
+            ItemTooltip("Properties: leave out the ones the type inherits from its parents.");
+            ImGui::MenuItem(ICON_FA_LAYER_GROUP "  Functions of the parents too", nullptr, &m_inherited);
+            ItemTooltip("Functions: also list the ones the parent types declare.");
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
+
     void UnrealWindow::Properties(const Target::UnrealRuntime& runtime, std::uint64_t type)
     {
-        ImGui::Checkbox("Declared here only", &m_ownOnly);
         if (m_view.Runtime != &runtime || m_view.Type != type || !m_view.HasFields || m_view.OwnOnly != m_ownOnly)
         {
             m_view.Fields = runtime.Fields(type, m_ownOnly);
@@ -596,7 +602,6 @@ namespace Manifold::UI
 
     void UnrealWindow::Functions(const Target::UnrealRuntime& runtime, std::uint64_t type)
     {
-        ImGui::Checkbox("With the parents' functions", &m_inherited);
         if (m_view.Runtime != &runtime || m_view.Type != type || !m_view.HasFunctions || m_view.Inherited != m_inherited)
         {
             m_view.Functions = runtime.Functions(type, m_inherited);

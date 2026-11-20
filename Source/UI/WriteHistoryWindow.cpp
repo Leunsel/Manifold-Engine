@@ -75,22 +75,44 @@ namespace Manifold::UI
 
     void WriteHistoryWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_HISTORY "  Write history###writehistory", ImVec2(820.0f, 420.0f), 0, ImVec2(520.0f, 240.0f)))
+        if (!BeginWindow(ICON_FA_HISTORY "  Write history###writehistory", ImVec2(820.0f, 420.0f), ImGuiWindowFlags_MenuBar, ImVec2(520.0f, 240.0f)))
             return;
         Engine& engine = m_workspace.Core();
+        const WriteHistory& history = engine.Writes();
+        const std::uint64_t generation = engine.ProcessGeneration();
+        std::vector<const MemoryWrite*> rows;
+        if (engine.HasProcess())
+        {
+            for (auto it = history.Entries().rbegin(); it != history.Entries().rend(); ++it)
+            {
+                if (it->Generation == generation)
+                    rows.push_back(&*it);
+            }
+        }
+        const std::size_t undoable = engine.HasProcess() ? history.Undoable(generation) : 0;
+        if (ImGui::BeginMenuBar())
+        {
+            if (ImGui::BeginMenu("Edits"))
+            {
+                if (ImGui::MenuItem(ICON_FA_UNDO_ALT "  Undo all", nullptr, false, undoable > 0))
+                    UndoAll();
+                ItemTooltip("Writes back the bytes from before each edit, newest first.");
+                ImGui::Separator();
+                if (ImGui::MenuItem(ICON_FA_TRASH "  Clear the list", nullptr, false, !rows.empty()))
+                {
+                    engine.Writes().Clear(generation);
+                    rows.clear();
+                }
+                ItemTooltip("Forgets the edits; the memory stays as it is.");
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenuBar();
+        }
         if (!engine.HasProcess())
         {
             m_workspace.NoProcessState(ICON_FA_HISTORY, "Open a process to see the memory edits made in it.");
             EndToolWindow();
             return;
-        }
-        const WriteHistory& history = engine.Writes();
-        const std::uint64_t generation = engine.ProcessGeneration();
-        std::vector<const MemoryWrite*> rows;
-        for (auto it = history.Entries().rbegin(); it != history.Entries().rend(); ++it)
-        {
-            if (it->Generation == generation)
-                rows.push_back(&*it);
         }
 
         if (history.Revision() != m_statesRevision)
@@ -98,36 +120,12 @@ namespace Manifold::UI
             m_states.clear();
             m_statesRevision = history.Revision();
         }
-        const std::size_t undoable = history.Undoable(generation);
         const std::size_t dropped = history.Dropped(generation);
-        const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-        ImGui::AlignTextToFramePadding();
         std::string summary = rows.empty() ? std::string("No edits in this process yet")
                                            : Format("%zu %s in this process, %zu not undone", rows.size(), rows.size() == 1 ? "edit" : "edits", undoable);
         if (dropped > 0)
             summary += Format(", %zu older %s left the list and cannot be undone here", dropped, dropped == 1 ? "one" : "ones");
         Muted(summary);
-        const float undoWidth = ImGui::CalcTextSize(ICON_FA_UNDO_ALT "  Undo all").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        const float clearWidth = ImGui::CalcTextSize(ICON_FA_TRASH "  Clear the list").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), right - undoWidth - clearWidth - ImGui::GetStyle().ItemSpacing.x));
-        ImGui::BeginDisabled(undoable == 0);
-        if (ImGui::Button(ICON_FA_UNDO_ALT "  Undo all"))
-            UndoAll();
-        ImGui::EndDisabled();
-        ItemTooltip("Writes back the bytes from before each edit, newest first.");
-        ImGui::SameLine();
-        ImGui::BeginDisabled(rows.empty());
-        {
-            const GhostButtons ghost;
-            if (ImGui::Button(ICON_FA_TRASH "  Clear the list"))
-            {
-                engine.Writes().Clear(generation);
-                rows.clear();
-            }
-        }
-        ImGui::EndDisabled();
-        ItemTooltip("Forgets the edits; the memory stays as it is.");
 
         if (rows.empty())
         {

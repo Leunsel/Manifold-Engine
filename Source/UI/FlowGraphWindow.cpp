@@ -155,9 +155,11 @@ namespace Manifold::UI
 
     void FlowGraphWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_CODE_BRANCH "  Flow graph###flowgraph", ImVec2(900.0f, 640.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse, ImVec2(420.0f, 300.0f)))
+        if (!BeginWindow(ICON_FA_CODE_BRANCH "  Flow graph###flowgraph", ImVec2(900.0f, 640.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_MenuBar,
+                ImVec2(420.0f, 300.0f)))
             return;
         Engine& engine = m_workspace.Core();
+        MenuBar();
         if (!engine.HasProcess())
         {
             m_built = false;
@@ -231,31 +233,41 @@ namespace Manifold::UI
             ImGui::TextColored(ManifoldTheme::Warning, ICON_FA_EXCLAMATION_TRIANGLE);
             ItemTooltip("The function is larger than the graph follows (6000 instructions or 800 blocks), so some paths end early.");
         }
+    }
 
-        const float buttons = ImGui::GetFrameHeight() * 4.0f + ImGui::GetStyle().ItemSpacing.x * 4.0f;
-        const float follow = ImGui::CalcTextSize("Follow the disassembler").x + ToggleSwitchWidth() + ImGui::GetStyle().ItemSpacing.x * 2.0f;
-        ImGui::SameLine(std::max(ImGui::GetCursorPosX() + ImGui::GetStyle().ItemSpacing.x, ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - buttons - follow));
-        ToggleSwitch("##flowfollow", &m_follow);
-        ItemTooltip("Shows the function of the instruction selected in the memory viewer, and moves to it as the selection changes.");
-        ImGui::SameLine();
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Follow the disassembler");
-        ImGui::SameLine();
-        const GhostButtons ghost;
-        if (IconButton(ICON_FA_EXPAND "##flowfit", WithKeys("Fit the graph into the window", Command::FlowGraphFit).c_str()))
-            m_fit = true;
-        ImGui::SameLine();
-        if (IconButton(ICON_FA_SEARCH "##flowreset", WithKeys("Actual size", Command::FlowGraphActualSize).c_str()))
-            m_actualSize = true;
-        ImGui::SameLine();
-        if (IconButton(ICON_FA_SYNC "##flowrefresh", "Read the function again"))
-            Build(m_entry);
-        ImGui::SameLine();
-        if (IconButton(ICON_FA_COPY "##flowcopy", "Copy the graph as a Mermaid flowchart, for notes, issues and wikis"))
+    void FlowGraphWindow::MenuBar()
+    {
+        if (!ImGui::BeginMenuBar())
+            return;
+        Engine& engine = m_workspace.Core();
+        const bool shown = engine.HasProcess() && m_built;
+        if (ImGui::BeginMenu("Graph"))
         {
-            ImGui::SetClipboardText(Mermaid().c_str());
-            engine.Notify(LogLevel::Info, "Copied the flow graph as Mermaid text");
+            if (CommandItem(ICON_FA_ARROW_LEFT "  Back to the function before", Command::FlowGraphBack, false, !m_history.empty()))
+                GoBack();
+            if (ImGui::MenuItem(ICON_FA_SYNC "  Read the function again", nullptr, false, shown))
+                Build(m_entry);
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy as Mermaid", nullptr, false, shown))
+            {
+                ImGui::SetClipboardText(Mermaid().c_str());
+                engine.Notify(LogLevel::Info, "Copied the flow graph as Mermaid text");
+            }
+            ItemTooltip("A Mermaid flowchart of the graph, for notes, issues and wikis.");
+            ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("View"))
+        {
+            if (CommandItem(ICON_FA_EXPAND "  Fit the graph into the window", Command::FlowGraphFit, false, shown))
+                m_fit = true;
+            if (CommandItem(ICON_FA_SEARCH "  Actual size", Command::FlowGraphActualSize, false, shown))
+                m_actualSize = true;
+            ImGui::Separator();
+            ImGui::MenuItem(ICON_FA_CROSSHAIRS "  Follow the disassembler", nullptr, &m_follow);
+            ItemTooltip("Shows the function of the instruction selected in the memory viewer, and moves to it as the selection changes.");
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
     }
 
     void FlowGraphWindow::Canvas()

@@ -92,34 +92,39 @@ namespace Manifold::UI
 
     void ProcessPicker::Draw()
     {
-        if (!BeginToolWindow(ICON_FA_DESKTOP "  Processes###processes", &m_open, ImVec2(620.0f, 580.0f), 0, ImVec2(460.0f, 340.0f)))
+        if (!BeginToolWindow(ICON_FA_DESKTOP "  Processes###processes", &m_open, ImVec2(620.0f, 580.0f), ImGuiWindowFlags_MenuBar, ImVec2(460.0f, 340.0f)))
         {
             EndToolWindow();
             return;
         }
         Engine& engine = m_workspace.Core();
         const ImGuiStyle& style = ImGui::GetStyle();
+        if (ImGui::BeginMenuBar())
+        {
+            if (ImGui::BeginMenu("View"))
+            {
+                if (ImGui::MenuItem(ICON_FA_WINDOW_MAXIMIZE "  Apps only", nullptr, m_windowsOnly))
+                    m_windowsOnly = true;
+                ItemTooltip("Only programs with a window. Other processes of the same name stay folded under them.");
+                if (ImGui::MenuItem(ICON_FA_LIST "  All processes", nullptr, !m_windowsOnly))
+                    m_windowsOnly = false;
+                ItemTooltip("Also list the background processes on their own.");
+                ImGui::Separator();
+                if (ImGui::MenuItem(ICON_FA_SYNC "  Refresh"))
+                    Refresh();
+                ItemTooltip("Read the process list again.");
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenuBar();
+        }
 
-        const float refreshSide = ImGui::GetFrameHeight();
-        const float segmentWidth = std::round(Px(124.0f));
         if (m_focusFilter)
         {
             ImGui::SetKeyboardFocusHere();
             m_focusFilter = false;
         }
-        ImGui::SetNextItemWidth(std::max(Px(120.0f), ImGui::GetContentRegionAvail().x - segmentWidth - refreshSide - style.ItemSpacing.x * 2.0f));
+        ImGui::SetNextItemWidth(-FLT_MIN);
         InputTextWithHint("##filter", ICON_FA_SEARCH "  Name, window title or pid", m_filter);
-        ImGui::SameLine();
-        int mode = m_windowsOnly ? 0 : 1;
-        if (Segmented("##mode", &mode, { "Apps", "All" }, segmentWidth))
-            m_windowsOnly = mode == 0;
-        ItemTooltip("Apps are programs with a window. All adds the background processes.");
-        ImGui::SameLine();
-        {
-            const GhostButtons ghost;
-            if (IconButton(ICON_FA_SYNC "##refresh", "Read the process list again"))
-                Refresh();
-        }
 
         if (!Target::IsElevated())
         {
@@ -470,7 +475,7 @@ namespace Manifold::UI
         std::size_t appCount = 0;
         for (const ProcessGroup& group : groups)
             appCount += group.App ? 1 : 0;
-        Muted(Format("%zu processes  ·  %zu apps", m_list.size(), appCount));
+        Muted(Format("%zu processes  ·  %zu apps", m_list.size(), appCount) + (m_windowsOnly ? "  ·  background processes hidden" : ""));
         if (openNow)
             open(*openNow);
         EndToolWindow();
@@ -482,25 +487,36 @@ namespace Manifold::UI
 
     void SymbolsWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_TAGS "  Symbols and modules###symbols", ImVec2(640.0f, 520.0f), 0, ImVec2(480.0f, 320.0f)))
+        if (!BeginWindow(ICON_FA_TAGS "  Symbols and modules###symbols", ImVec2(640.0f, 520.0f), ImGuiWindowFlags_MenuBar, ImVec2(480.0f, 320.0f)))
             return;
         Engine& engine = m_workspace.Core();
+        const bool loading = engine.SymbolsActive() && !engine.SymbolsLoaded();
+        if (ImGui::BeginMenuBar())
         {
             const bool hasProcess = engine.HasProcess();
-            ImGui::BeginDisabled(!hasProcess);
-            if (ImGui::Button(ICON_FA_DOWNLOAD "  Load symbols"))
-                engine.LoadSymbols(false);
-            ImGui::SameLine();
-            if (ImGui::Button(ICON_FA_GLOBE "  Load Windows symbols"))
-                engine.LoadSymbols(true);
-            ImGui::EndDisabled();
-            ImGui::SameLine();
-            if (engine.SymbolsActive() && !engine.SymbolsLoaded())
-                Muted("Loading " + std::to_string(engine.SymbolsModulesDone()) + "/" + std::to_string(engine.SymbolsModulesTotal()) + " modules...");
-            else if (engine.SymbolsLoaded())
-                Muted("Symbols loaded");
-            else
-                Muted("PDB symbols not loaded");
+            if (ImGui::BeginMenu("Symbols"))
+            {
+                if (ImGui::MenuItem(ICON_FA_DOWNLOAD "  Load symbols", nullptr, false, hasProcess))
+                    engine.LoadSymbols(false);
+                ItemTooltip("Read the PDB files of the process and its own modules.");
+                if (ImGui::MenuItem(ICON_FA_GLOBE "  Load Windows symbols", nullptr, false, hasProcess))
+                    engine.LoadSymbols(true);
+                ItemTooltip("Also the modules of Windows itself, downloaded from the Microsoft symbol server the first time.");
+                ImGui::Separator();
+                ImGui::TextDisabled("%s", loading ? "Loading..." : engine.SymbolsLoaded() ? "Symbols loaded" : "PDB symbols not loaded");
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Modules", hasProcess))
+            {
+                if (ImGui::MenuItem(ICON_FA_SYNC "  Refresh the module list"))
+                    engine.Process()->RefreshModules();
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenuBar();
+        }
+        if (loading)
+        {
+            Muted("Loading symbols, " + std::to_string(engine.SymbolsModulesDone()) + " of " + std::to_string(engine.SymbolsModulesTotal()) + " modules...");
             ImGui::Separator();
         }
         if (ImGui::BeginTabBar("##symboltabs"))
@@ -566,9 +582,6 @@ namespace Manifold::UI
                     m_workspace.NoProcessState(ICON_FA_CUBES, "Open a process to list the modules it has loaded.");
                 else
                 {
-                    if (ImGui::Button(ICON_FA_SYNC "  Refresh"))
-                        engine.Process()->RefreshModules();
-                    ImGui::SameLine();
                     ImGui::SetNextItemWidth(Px(220.0f));
                     InputTextWithHint("##filter", ICON_FA_SEARCH " Filter", m_filter);
                     const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable;
@@ -669,23 +682,34 @@ namespace Manifold::UI
 
     void RegionsWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_TH_LIST "  Memory regions###regions", ImVec2(760.0f, 540.0f), 0, ImVec2(560.0f, 300.0f)))
+        if (!BeginWindow(ICON_FA_TH_LIST "  Memory regions###regions", ImVec2(760.0f, 540.0f), ImGuiWindowFlags_MenuBar, ImVec2(560.0f, 300.0f)))
             return;
         Engine& engine = m_workspace.Core();
+        if (ImGui::BeginMenuBar())
+        {
+            if (ImGui::BeginMenu("View"))
+            {
+                ImGui::MenuItem(ICON_FA_FILTER "  Committed only", nullptr, &m_committedOnly);
+                ItemTooltip("Hide reserved and free address ranges, which hold no memory.");
+                ImGui::Separator();
+                if (ImGui::MenuItem(ICON_FA_SYNC "  Refresh", nullptr, false, engine.HasProcess()))
+                    m_dirty = true;
+                ItemTooltip("Read the regions of the process again.");
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenuBar();
+        }
         if (!engine.HasProcess())
         {
             m_workspace.NoProcessState(ICON_FA_TH_LIST, "Open a process to list its memory regions and their protection.");
             EndToolWindow();
             return;
         }
-        if (ImGui::Button(ICON_FA_SYNC "  Refresh") || m_dirty)
+        if (m_dirty)
         {
             m_regions = engine.Process()->Regions(0, engine.Process()->HighestAddress());
             m_dirty = false;
         }
-        ImGui::SameLine();
-        ImGui::Checkbox("Committed only", &m_committedOnly);
-        ImGui::SameLine();
         ImGui::SetNextItemWidth(Px(220.0f));
         InputTextWithHint("##filter", ICON_FA_SEARCH " Module or protection", m_filter);
         const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable;

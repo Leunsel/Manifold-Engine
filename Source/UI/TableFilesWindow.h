@@ -25,6 +25,10 @@ namespace Manifold::UI
         void AddFiles(const std::vector<std::filesystem::path>& paths);
         void NewTextFile();
         void Export(const Table::TableFile& file);
+        void StartRename(const Table::TableFile& file);
+        void Delete(const std::string& name);
+        void FileMenu(const Table::TableFile* file);
+        void MenuBar();
         void ReformatJson(int indent);
         void ShowJsonProblem(const Text::JsonProblem& problem);
         void JsonStatus();

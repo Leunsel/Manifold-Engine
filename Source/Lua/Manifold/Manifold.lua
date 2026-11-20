@@ -583,7 +583,7 @@ native.docDefine(nil, "manifold.log.Channel.channel", {
 })
 native.docDefine(nil, "manifold.log.Channel.name", { kind = "field", type = "string", doc = "The channel's name." })
 
-local output = area("output", "The Lua engine window and its output. With *Show on print* on (the default), every printed or logged line opens the window when it is closed. The checkbox in the window is saved with the settings; a script can change it for the running session only.")
+local output = area("output", "The Lua engine window and its output. With *Show on print* on (the default), every printed or logged line opens the window when it is closed. Set in the window's View menu, it is saved with the settings; a script can change it for the running session only.")
 
 define(output, "show", {
   returns = "nothing",

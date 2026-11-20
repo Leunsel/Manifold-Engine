@@ -303,7 +303,9 @@ namespace Manifold::UI
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_EYE "  Show on print", nullptr, m_engine.Lua().ShowOnPrint()))
                 RememberShowOnPrint(!m_engine.Lua().ShowOnPrint());
-            ItemTooltip("Opens this window when a script prints or logs while it is closed.");
+            ItemTooltip("Opens this window when a script prints or logs while it is closed. Saved with the settings.");
+            ImGui::MenuItem(ICON_FA_ARROW_DOWN "  Follow new entries", nullptr, &m_view.Following());
+            ItemTooltip("Scroll the console along with new entries.");
             bool changed = false;
             if (ImGui::MenuItem(ICON_FA_ALIGN_LEFT "  Wrap lines", nullptr, m_filter.Wrap))
             {
@@ -370,23 +372,14 @@ namespace Manifold::UI
             if (warnings)
                 status += "  \xC2\xB7  " + Grouped(warnings) + (warnings == 1 ? " warning" : " warnings");
         }
-        bool show = lua.ShowOnPrint();
-        const float checkWidth = CheckboxWidth("Show on print");
-        const float right = origin + total - checkWidth;
-        TextFitted(status, std::max(Px(40.0f), right - ImGui::GetCursorPosX() - Px(8.0f)), ManifoldTheme::Muted);
-        ImGui::SameLine();
-        if (right > ImGui::GetCursorPosX())
-            ImGui::SetCursorPosX(right);
-        if (ImGui::Checkbox("Show on print", &show))
-            RememberShowOnPrint(show);
-        ItemTooltip("Opens this window when a script prints or logs while it is closed. Saved with the settings.");
+        TextFitted(status, std::max(Px(40.0f), origin + total - ImGui::GetCursorPosX()), ManifoldTheme::Muted);
     }
 
     void LuaWindow::DrawConsole()
     {
         Lua::LuaEngine& lua = m_engine.Lua();
         bool changed = false;
-        m_view.DrawFilterBar(lua.Console(), m_filter, changed, [this]() { m_engine.Lua().ClearOutput(); });
+        m_view.DrawFilterBar(lua.Console(), m_filter, changed);
         if (changed && (m_filter.Wrap != m_engine.Options().LuaWrapOutput || m_filter.Time != m_engine.Options().LuaConsoleTime || m_filter.Hex != m_engine.Options().LuaConsoleHex))
             SaveViewSettings();
         ImGui::Spacing();

@@ -206,12 +206,69 @@ namespace Manifold::UI
             m_workspace.Core().Notify(LogLevel::Error, "The file could not be written: " + WideToUtf8(path->wstring()));
     }
 
+    void TableFilesWindow::StartRename(const Table::TableFile& file)
+    {
+        if (!EqualsNoCase(file.Name, m_selected))
+            Select(file.Name);
+        m_renaming = true;
+        m_renameFocus = true;
+        m_rename = file.Name;
+    }
+
+    void TableFilesWindow::Delete(const std::string& name)
+    {
+        m_workspace.Confirm("Delete table file", "Delete \"" + name + "\" from the table?", [this, name]()
+            {
+                Table::AddressList& files = m_workspace.Core().Table();
+                files.Files.erase(std::remove_if(files.Files.begin(), files.Files.end(), [&](const Table::TableFile& entry) { return EqualsNoCase(entry.Name, name); }), files.Files.end());
+                files.Touch();
+                if (EqualsNoCase(m_selected, name))
+                    m_selected.clear();
+            }, "Delete");
+    }
+
+    void TableFilesWindow::FileMenu(const Table::TableFile* file)
+    {
+        if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Rename", nullptr, false, file != nullptr) && file)
+            StartRename(*file);
+        if (ImGui::MenuItem(ICON_FA_FILE_EXPORT "  Export...", nullptr, false, file != nullptr) && file)
+            Export(*file);
+        ItemTooltip("Save a copy of the file to disk.");
+        ImGui::Separator();
+        if (DangerMenuItem(ICON_FA_TRASH "  Delete...", nullptr, file != nullptr) && file)
+            Delete(file->Name);
+    }
+
+    void TableFilesWindow::MenuBar()
+    {
+        if (!ImGui::BeginMenuBar())
+            return;
+        Table::AddressList& list = m_workspace.Core().Table();
+        if (ImGui::BeginMenu("File"))
+        {
+            if (ImGui::MenuItem(ICON_FA_PLUS "  Add files..."))
+                Import();
+            ItemTooltip("Copy files from disk into the table. Pick as many as you like; a file with the same name is updated.");
+            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Add a folder..."))
+                ImportFolder();
+            ItemTooltip("Copy every file that lies directly in a folder into the table.");
+            if (ImGui::MenuItem(ICON_FA_FILE_ALT "  New text file"))
+                NewTextFile();
+            ImGui::Separator();
+            FileMenu(m_selected.empty() ? nullptr : list.FindFile(m_selected));
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
+
     void TableFilesWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_FILE_ARCHIVE "  Table files###tablefiles", ImVec2(820.0f, 560.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse, ImVec2(560.0f, 320.0f)))
+        if (!BeginWindow(ICON_FA_FILE_ARCHIVE "  Table files###tablefiles", ImVec2(820.0f, 560.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_MenuBar,
+                ImVec2(560.0f, 320.0f)))
             return;
         Engine& engine = m_workspace.Core();
         Table::AddressList& list = engine.Table();
+        MenuBar();
 
         if (list.Files.empty())
         {
@@ -233,8 +290,7 @@ namespace Manifold::UI
         BeginCard("##filelist", nullptr, ImVec2(listWidth, height));
         ImGui::SetNextItemWidth(-FLT_MIN);
         InputTextWithHint("##filefilter", ICON_FA_SEARCH " Filter", m_filter);
-        const float buttons = ImGui::GetFrameHeight() * 2.0f + ImGui::GetStyle().ItemSpacing.y + Px(10.0f);
-        ImGui::BeginChild("##files", ImVec2(0.0f, ImGui::GetContentRegionAvail().y - buttons), ImGuiChildFlags_None);
+        ImGui::BeginChild("##files", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None);
         for (const Table::TableFile& file : list.Files)
         {
             if (!m_filter.empty() && !ContainsNoCase(file.Name, m_filter))
@@ -245,22 +301,27 @@ namespace Manifold::UI
             const ImVec2 pos = ImGui::GetCursorScreenPos();
             if (ImGui::Selectable(label.c_str(), EqualsNoCase(file.Name, m_selected)))
                 Select(file.Name);
+            if (ImGui::BeginPopupContextItem("##filemenu"))
+            {
+                FileMenu(&file);
+                ImGui::EndPopup();
+            }
             const std::string size = SizeText(file.Data->size());
             const float sizeWidth = ImGui::CalcTextSize(size.c_str()).x;
             ImGui::GetWindowDrawList()->AddText(ImVec2(pos.x + ImGui::GetContentRegionAvail().x - sizeWidth, pos.y), ImGui::GetColorU32(ManifoldTheme::Muted), size.c_str());
             ImGui::PopID();
         }
+        if (ImGui::BeginPopupContextWindow("##listmenu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+        {
+            if (ImGui::MenuItem(ICON_FA_PLUS "  Add files..."))
+                Import();
+            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Add a folder..."))
+                ImportFolder();
+            if (ImGui::MenuItem(ICON_FA_FILE_ALT "  New text file"))
+                NewTextFile();
+            ImGui::EndPopup();
+        }
         ImGui::EndChild();
-        const float half = std::floor((ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f);
-        if (ImGui::Button(ICON_FA_PLUS "  Add files", ImVec2(half, 0.0f)))
-            Import();
-        ItemTooltip("Copy files from disk into the table. Pick as many as you like; a file with the same name is updated.");
-        ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Add folder", ImVec2(-FLT_MIN, 0.0f)))
-            ImportFolder();
-        ItemTooltip("Copy every file that lies directly in a folder into the table");
-        if (ImGui::Button(ICON_FA_FILE_ALT "  New text file", ImVec2(-FLT_MIN, 0.0f)))
-            NewTextFile();
         EndCard();
 
         ImGui::SameLine();
@@ -313,31 +374,6 @@ namespace Manifold::UI
             ImGui::PopFont();
             ImGui::SameLine(0.0f, Px(10.0f));
             Muted(SizeText(file->Data->size()) + (text ? "  ·  text" : "  ·  binary"));
-            const float actions = ImGui::CalcTextSize(ICON_FA_I_CURSOR "  Rename" ICON_FA_FILE_EXPORT "  Export" ICON_FA_TRASH "  Delete").x + ImGui::GetStyle().FramePadding.x * 6.0f + Px(16.0f);
-            ImGui::SameLine(std::max(ImGui::GetCursorPosX() + Px(10.0f), ImGui::GetWindowContentRegionMax().x - actions));
-            if (ImGui::Button(ICON_FA_I_CURSOR "  Rename"))
-            {
-                m_renaming = true;
-                m_renameFocus = true;
-                m_rename = file->Name;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button(ICON_FA_FILE_EXPORT "  Export"))
-                Export(*file);
-            ItemTooltip("Save a copy of the file to disk");
-            ImGui::SameLine();
-            if (DangerButton(ICON_FA_TRASH "  Delete"))
-            {
-                const std::string name = file->Name;
-                m_workspace.Confirm("Delete table file", "Delete \"" + name + "\" from the table?", [this, name]()
-                    {
-                        Table::AddressList& files = m_workspace.Core().Table();
-                        files.Files.erase(std::remove_if(files.Files.begin(), files.Files.end(), [&](const Table::TableFile& entry) { return EqualsNoCase(entry.Name, name); }), files.Files.end());
-                        files.Touch();
-                        if (EqualsNoCase(m_selected, name))
-                            m_selected.clear();
-                    }, "Delete");
-            }
         }
         ImGui::Spacing();
 

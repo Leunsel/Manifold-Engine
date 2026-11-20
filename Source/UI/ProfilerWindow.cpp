@@ -360,7 +360,7 @@ namespace Manifold::UI
 
     void ProfilerWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_TACHOMETER_ALT "  Profiler and diagnostics###profiler", ImVec2(940.0f, 660.0f), 0, ImVec2(640.0f, 440.0f)))
+        if (!BeginWindow(ICON_FA_TACHOMETER_ALT "  Profiler and diagnostics###profiler", ImVec2(940.0f, 660.0f), ImGuiWindowFlags_MenuBar, ImVec2(640.0f, 440.0f)))
             return;
         const double now = ImGui::GetTime();
         if (now - m_sampledAt > 1.0)
@@ -383,6 +383,7 @@ namespace Manifold::UI
         if (m_pinned && SelectedAgo() < 0)
             m_pinned = false;
 
+        MenuBar();
         Toolbar();
         int issues = 0;
         for (const Diagnostics::Check& check : m_checks)
@@ -440,42 +441,57 @@ namespace Manifold::UI
             ImGui::TextUnformatted(ICON_FA_PAUSE "  The profiler is off");
             ImGui::PopStyleColor();
         }
-
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const char* pauseLabel = paused ? ICON_FA_PLAY "  Resume" : ICON_FA_PAUSE "  Pause";
-        const char* resetLabel = ICON_FA_UNDO "  Reset";
-        const bool copied = ImGui::GetTime() - m_copiedAt < 1.5;
-        const char* copyLabel = copied ? ICON_FA_CHECK_CIRCLE "  Copied###copyreport" : ICON_FA_COPY "  Copy report###copyreport";
-        const char* saveLabel = ICON_FA_SAVE "  Save report...";
-        const auto width = [&](const char* label) { return ImGui::CalcTextSize(label, nullptr, true).x + style.FramePadding.x * 2.0f; };
-        const float total = width(pauseLabel) + width(resetLabel) + width(ICON_FA_CHECK_CIRCLE "  Copy report") + width(saveLabel) + style.ItemSpacing.x * 3.0f + Px(10.0f);
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX() + Px(10.0f), ImGui::GetWindowContentRegionMax().x - total));
-        ImGui::BeginDisabled(!on);
-        if (ImGui::Button(pauseLabel))
-            Profiler::SetPaused(!paused);
-        ItemTooltip("Freeze the measured frames to look at them; new frames are not recorded meanwhile");
-        ImGui::SameLine();
-        if (ImGui::Button(resetLabel))
-        {
-            Profiler::Reset();
-            m_pinned = false;
-            m_graphTop = {};
-            m_sparkTops.clear();
-        }
-        ItemTooltip("Forget the measured frames and start again");
-        ImGui::EndDisabled();
-        ImGui::SameLine(0.0f, style.ItemSpacing.x + Px(10.0f));
-        if (ImGui::Button(copyLabel))
-        {
-            ImGui::SetClipboardText(DiagnosticsReport(m_workspace).c_str());
-            m_copiedAt = ImGui::GetTime();
-        }
-        ItemTooltip("Copy checks, app info, frame times and threads as text, for a bug report");
-        ImGui::SameLine();
-        if (ImGui::Button(saveLabel))
-            SaveReport();
         ImGui::Spacing();
+    }
+
+    void ProfilerWindow::MenuBar()
+    {
+        if (!ImGui::BeginMenuBar())
+            return;
+        const bool on = Profiler::Enabled();
+        const bool paused = Profiler::Paused();
+        if (ImGui::BeginMenu("Profiler"))
+        {
+            if (ImGui::MenuItem(paused ? ICON_FA_PLAY "  Resume" : ICON_FA_PAUSE "  Pause", nullptr, false, on))
+                Profiler::SetPaused(!paused);
+            ItemTooltip("Freeze the measured frames to look at them. New frames are not recorded meanwhile.");
+            if (ImGui::MenuItem(ICON_FA_UNDO "  Reset", nullptr, false, on))
+            {
+                Profiler::Reset();
+                m_pinned = false;
+                m_graphTop = {};
+                m_sparkTops.clear();
+            }
+            ItemTooltip("Forget the measured frames and start again.");
+            if (!on)
+            {
+                ImGui::Separator();
+                if (ImGui::MenuItem(ICON_FA_TACHOMETER_ALT "  Turn on the profiler"))
+                    RunAction(Diagnostics::Action::TurnOnProfiler);
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Report"))
+        {
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy report"))
+            {
+                ImGui::SetClipboardText(DiagnosticsReport(m_workspace).c_str());
+                m_workspace.Core().Notify(LogLevel::Success, "Copied the diagnostics report");
+            }
+            ItemTooltip("Checks, app info, frame times and threads as text, for a bug report.");
+            if (ImGui::MenuItem(ICON_FA_SAVE "  Save report..."))
+                SaveReport();
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("View"))
+        {
+            ImGui::MenuItem(ICON_FA_FILTER "  Hide zones under 10 \xC2\xB5s", nullptr, &m_hideTiny);
+            ItemTooltip("Breakdown: leave out the zones that took less than 10 microseconds, so the slow parts stand out.");
+            ImGui::MenuItem(ICON_FA_EXCLAMATION_TRIANGLE "  Only problems and warnings", nullptr, &m_onlyIssues);
+            ItemTooltip("Checks: hide the notes and the checks that found nothing.");
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
     }
 
     bool ProfilerWindow::ProfilerOffCard()
@@ -887,13 +903,12 @@ namespace Manifold::UI
         {
             Muted("Average of the last " + std::to_string(summary.Frames) + " frames. Click a bar in the frame graph to look at a single frame.");
         }
-        ImGui::SameLine();
-        const char* tinyLabel = "Hide zones under 10 us";
-        const float tinyWidth = ImGui::CalcTextSize(tinyLabel).x + ToggleSwitchWidth() + Px(10.0f);
-        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX() + Px(10.0f), ImGui::GetWindowContentRegionMax().x - tinyWidth));
-        ImGui::TextUnformatted(tinyLabel);
-        ImGui::SameLine(0.0f, Px(8.0f));
-        ToggleSwitch("##hidetiny", &m_hideTiny);
+        if (m_hideTiny)
+        {
+            ImGui::SameLine(0.0f, Px(14.0f));
+            Muted("Zones under 10 \xC2\xB5s hidden");
+            ItemTooltip("View > Hide zones under 10 \xC2\xB5s shows them again.");
+        }
 
         std::vector<double> value(m_topOf.size(), 0.0);
         std::vector<double> children(m_topOf.size(), 0.0);
@@ -1134,15 +1149,15 @@ namespace Manifold::UI
             ImGui::Text("%s  %d %s", LevelGlyph(levels[i]), count, count == 1 ? single[i] : names[i]);
             ImGui::PopStyleColor();
         }
+        if (m_onlyIssues)
+        {
+            ImGui::SameLine(0.0f, Px(14.0f));
+            Muted("Notes and fine checks hidden");
+            ItemTooltip("View > Only problems and warnings shows them again.");
+        }
         const char* againLabel = ICON_FA_SYNC "  Check again";
-        const char* issuesLabel = "Only problems and warnings";
-        const float widthNeeded = ImGui::CalcTextSize(againLabel).x + ImGui::GetStyle().FramePadding.x * 2.0f + ImGui::CalcTextSize(issuesLabel).x + ToggleSwitchWidth() + Px(30.0f);
         ImGui::SameLine();
-        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX() + Px(10.0f), ImGui::GetWindowContentRegionMax().x - widthNeeded));
-        ImGui::TextUnformatted(issuesLabel);
-        ImGui::SameLine(0.0f, Px(8.0f));
-        ToggleSwitch("##onlyissues", &m_onlyIssues);
-        ImGui::SameLine(0.0f, Px(14.0f));
+        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX() + Px(10.0f), ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize(againLabel).x - ImGui::GetStyle().FramePadding.x * 2.0f));
         if (ImGui::Button(againLabel))
             RefreshChecks(true);
         ImGui::Dummy(ImVec2(0.0f, Px(6.0f)));

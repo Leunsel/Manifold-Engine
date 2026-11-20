@@ -28,8 +28,9 @@ namespace Manifold::UI
             float Height = 0.0f;
         };
 
+        void MenuBar();
         void Toolbar();
-        void AreaFilter();
+        void AreaMenu();
         void Refresh();
         void Rebuild();
         void Layout(float width);
@@ -55,6 +56,7 @@ namespace Manifold::UI
         bool m_details = true;
         bool m_dirty = true;
         bool m_focusSearch = false;
+        bool m_logTab = true;
         std::uint64_t m_generation = 0;
         std::vector<LogEntry> m_entries;
         std::vector<Row> m_rows;

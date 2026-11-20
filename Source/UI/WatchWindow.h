@@ -17,6 +17,9 @@ namespace Manifold::UI
         bool Closed() const override { return !m_open; }
 
     private:
+        void EntryMenu(const Debug::WatchEntry& entry);
+        void CopyList() const;
+
         Workspace& m_workspace;
         Engine& m_engine;
         std::string m_title;

@@ -72,7 +72,7 @@ Coloured, levelled lines in the Lua engine output. Each line shows the time, the
 
 ## manifold.output
 
-The Lua engine window and its output. With *Show on print* on (the default), every printed or logged line opens the window when it is closed. The checkbox in the window is saved with the settings; a script can change it for the running session only.
+The Lua engine window and its output. With *Show on print* on (the default), every printed or logged line opens the window when it is closed. Set in the window's View menu, it is saved with the settings; a script can change it for the running session only.
 
 | Function | Returns | |
 | --- | --- | --- |

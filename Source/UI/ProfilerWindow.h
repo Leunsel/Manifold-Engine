@@ -49,6 +49,7 @@ namespace Manifold::UI
             float Fade(double now) const;
         };
 
+        void MenuBar();
         void Toolbar();
         void Overview();
         void Breakdown();
@@ -78,7 +79,6 @@ namespace Manifold::UI
         double m_threadsAt = -100.0;
         double m_checkedAt = -100.0;
         double m_infoAt = -100.0;
-        double m_copiedAt = -100.0;
         std::vector<Diagnostics::Check> m_checks;
         std::vector<Diagnostics::InfoGroup> m_info;
         std::vector<Profiler::ZoneView> m_tree;
