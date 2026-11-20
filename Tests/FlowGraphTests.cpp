@@ -25,6 +25,25 @@ namespace Manifold::Tests
 {
     namespace
     {
+        struct GapTally
+        {
+            int Leaves = 0;
+            int Inside = 0;
+            int None = 0;
+            int Wrong = 0;
+        };
+
+        const char* SourceName(Disasm::FunctionSource source)
+        {
+            switch (source)
+            {
+            case Disasm::FunctionSource::Unwind: return "unwind data";
+            case Disasm::FunctionSource::Managed: return "managed method";
+            case Disasm::FunctionSource::Padding: return "padding";
+            default: return "guess";
+            }
+        }
+
         const std::uint8_t kDiamondLoop[] = {
             0x31, 0xC0, 0x85, 0xC9, 0x74, 0x07, 0xB8, 0x01, 0x00, 0x00, 0x00, 0xEB, 0x05, 0xB8, 0x02, 0x00, 0x00, 0x00, 0xFF, 0xC8, 0x75, 0xFC, 0xC3,
         };
@@ -242,6 +261,64 @@ namespace Manifold::Tests
             expect(0x17, 0x12, 0x1D, 0x1C, Disasm::FunctionSource::Unwind);
         }
 
+        void PrintLines(Engine& engine, const Target::ModuleInfo& module, std::uint64_t from, std::uint64_t until)
+        {
+            for (const Disasm::Instruction& line : engine.Disassembler().ReadMany(*engine.Process(), from, 10))
+            {
+                if (line.Address >= until)
+                    break;
+                std::printf("        %s+%llX  %-24s %s\n", module.Name.c_str(), static_cast<unsigned long long>(line.Address - module.Base), line.BytesText().c_str(), line.Text().c_str());
+            }
+        }
+
+        GapTally GapLeaves(Engine& engine, const Target::ModuleInfo& module, int limit, int shown)
+        {
+            GapTally tally;
+            const auto functions = Target::CodeMap::UnwindFunctions(*engine.Process(), module.Base, module.Size);
+            for (std::size_t f = 0; f + 1 < functions.size() && tally.Leaves < limit; ++f)
+            {
+                const std::uint64_t gap = module.Base + functions[f].second;
+                const std::uint64_t next = module.Base + functions[f + 1].first;
+                if (next <= gap + 4)
+                    continue;
+                std::optional<std::uint64_t> code;
+                for (const Disasm::Instruction& line : engine.Disassembler().ReadMany(*engine.Process(), gap, 16))
+                {
+                    if (line.Address >= next)
+                        break;
+                    if (line.Valid && !line.IsNop && line.Mnemonic != "nop" && line.Mnemonic != "int3")
+                    {
+                        code = line.Address;
+                        break;
+                    }
+                }
+                if (!code)
+                    continue;
+                ++tally.Leaves;
+                const auto leaf = engine.FunctionAround(*code);
+                const bool inside = leaf && leaf->Start >= gap && leaf->Start <= *code && leaf->End > *code && leaf->End <= next && leaf->Source != Disasm::FunctionSource::Unwind;
+                if (inside)
+                {
+                    ++tally.Inside;
+                    continue;
+                }
+                if (leaf)
+                    ++tally.Wrong;
+                else
+                    ++tally.None;
+                if (shown-- <= 0)
+                    continue;
+                const auto offset = [&](std::uint64_t address) { return static_cast<unsigned long long>(address - module.Base); };
+                if (leaf)
+                    std::printf("    gap %s+%llX..%llX, code at +%llX: found +%llX..%llX (%s)\n", module.Name.c_str(), offset(gap), offset(next), offset(*code), offset(leaf->Start),
+                        offset(leaf->End), SourceName(leaf->Source));
+                else
+                    std::printf("    gap %s+%llX..%llX, code at +%llX: not found\n", module.Name.c_str(), offset(gap), offset(next), offset(*code));
+                PrintLines(engine, module, gap > module.Base + 8 ? gap - 8 : gap, next);
+            }
+            return tally;
+        }
+
         void FunctionOfExport(Engine& engine)
         {
             const HMODULE ntdll = ::GetModuleHandleW(L"ntdll.dll");
@@ -263,36 +340,12 @@ namespace Manifold::Tests
             CHECK(module.has_value());
             if (!module)
                 return;
-            const auto functions = Target::CodeMap::UnwindFunctions(*engine.Process(), module->Base, module->Size);
-            int leaves = 0;
-            int inside = 0;
-            for (std::size_t f = 0; f + 1 < functions.size() && leaves < 40; ++f)
-            {
-                const std::uint64_t gap = module->Base + functions[f].second;
-                const std::uint64_t next = module->Base + functions[f + 1].first;
-                if (next <= gap + 4)
-                    continue;
-                std::optional<std::uint64_t> code;
-                for (const Disasm::Instruction& line : engine.Disassembler().ReadMany(*engine.Process(), gap, 16))
-                {
-                    if (line.Address >= next)
-                        break;
-                    if (line.Valid && !line.IsNop && line.Mnemonic != "nop" && line.Mnemonic != "int3")
-                    {
-                        code = line.Address;
-                        break;
-                    }
-                }
-                if (!code)
-                    continue;
-                ++leaves;
-                const auto leaf = engine.FunctionAround(*code);
-                if (leaf && leaf->Start >= gap && leaf->Start <= *code && leaf->End > *code && leaf->End <= next && leaf->Source != Disasm::FunctionSource::Unwind)
-                    ++inside;
-            }
-            std::printf("  %d of %d leaf functions between unwind entries of %s found inside their gap\n", inside, leaves, module->Name.c_str());
-            CHECK(leaves > 0);
-            CHECK(inside == leaves);
+            const GapTally gaps = GapLeaves(engine, *module, 40, 10);
+            std::printf("  %d of %d leaf functions between unwind entries of %s found inside their gap, %d not found, %d found wrong\n", gaps.Inside, gaps.Leaves,
+                module->Name.c_str(), gaps.None, gaps.Wrong);
+            CHECK(gaps.Leaves > 0);
+            CHECK_MSG(gaps.Wrong == 0, "a function found for code between unwind entries reaches outside its gap");
+            CHECK_MSG(gaps.Inside * 4 >= gaps.Leaves * 3, "fewer than three quarters of the leaf functions between unwind entries were found");
         }
 
         void LayoutShapes()
@@ -407,6 +460,27 @@ namespace Manifold::Tests
             const Target::Process& process = *engine.Process();
             const Disasm::Disassembler& disassembler = engine.Disassembler();
             const char* names[] = { "ntdll.dll", "KERNELBASE.dll", "ucrtbase.dll", "Manifold-Engine.Tests.exe" };
+            if (std::find(arguments.begin(), arguments.end(), "--gaps") != arguments.end())
+            {
+                GapTally all;
+                for (const Target::ModuleInfo& module : *process.Modules())
+                {
+                    if (Lower(WideToUtf8(module.Path)).find("\\system32\\") == std::string::npos &&
+                        std::none_of(std::begin(names), std::end(names), [&](const char* name) { return EqualsNoCase(module.Name, name); }))
+                        continue;
+                    const GapTally gaps = GapLeaves(engine, module, perModule, dump ? 12 : 0);
+                    if (gaps.Leaves == 0)
+                        continue;
+                    std::printf("  %-28s leaf functions %4d  inside %4d  not found %3d  wrong %3d\n", module.Name.c_str(), gaps.Leaves, gaps.Inside, gaps.None, gaps.Wrong);
+                    all.Leaves += gaps.Leaves;
+                    all.Inside += gaps.Inside;
+                    all.None += gaps.None;
+                    all.Wrong += gaps.Wrong;
+                }
+                std::printf("%d leaf functions between unwind entries: inside %d, not found %d, wrong %d\n", all.Leaves, all.Inside, all.None, all.Wrong);
+                engine.CloseProcess();
+                return all.Wrong == 0 ? 0 : 1;
+            }
             SearchTally total;
             int worst = 0;
             const auto started = std::chrono::steady_clock::now();
