@@ -1681,8 +1681,8 @@ for _, name in ipairs(UI_COLORS) do
   UI_COLOR_SET[name] = true
 end
 
-local UI_HANDLER_BITS = { onClick = 1, onChange = 2, onSelect = 4, onActivate = 8, onMenu = 16, onHover = 32, onSubmit = 64, onClose = 128, onView = 256 }
-local UI_EVENTS = { click = "onClick", change = "onChange", select = "onSelect", activate = "onActivate", menu = "onMenu", hover = "onHover", submit = "onSubmit", close = "onClose", view = "onView" }
+local UI_HANDLER_BITS = { onClick = 1, onChange = 2, onSelect = 4, onActivate = 8, onMenu = 16, onHover = 32, onSubmit = 64, onClose = 128, onView = 256, onKey = 512 }
+local UI_EVENTS = { click = "onClick", change = "onChange", select = "onSelect", activate = "onActivate", menu = "onMenu", hover = "onHover", submit = "onSubmit", close = "onClose", view = "onView", key = "onKey" }
 
 local COMMON_KEYS = { visible = "boolean", enabled = "boolean", tooltip = "string", width = "number", height = "number" }
 
@@ -1718,7 +1718,7 @@ local WIDGET_KEYS = {
   tree = withCommon({ items = "table", value = "string", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
   progress = withCommon({ value = "number", text = "string" }),
   image = withCommon({ image = "table" }),
-  canvas = withCommon({ background = "string", zoom = "boolean", menu = "table", onClick = "function", onHover = "function", onMenu = "function", onView = "function" }),
+  canvas = withCommon({ background = "string", zoom = "boolean", menu = "table", onClick = "function", onHover = "function", onMenu = "function", onView = "function", onKey = "function" }),
 }
 local WIDGET_KINDS = {}
 for kind in pairs(WIDGET_KEYS) do
@@ -2172,7 +2172,7 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
-    "- `canvas`: draws what `draw` gave it on the GPU. `background` is a colour, `zoom = true` lets the user zoom with the wheel and pan by dragging; `onClick(x, y, button, widget)`, `onHover(x, y, widget)`, `onView(x, y, scale, widget)` and `menu` with `onMenu(choice, text, x, y, widget)` get canvas coordinates.",
+    "- `canvas`: draws what `draw` gave it on the GPU. `background` is a colour, `zoom = true` lets the user zoom with the wheel and pan by dragging; `onClick(x, y, button, widget)`, `onHover(x, y, widget)`, `onView(x, y, scale, widget)` and `menu` with `onMenu(choice, text, x, y, widget)` get canvas coordinates; `onKey(key, widget)` gets every key pressed (and repeated while held) while the canvas's window has the focus, by name: `LeftArrow`, `W`, `Space`, `Enter`, `F1`… (Escape also closes the window).",
   }, "\n"),
 })
 local WIDGET_METHOD_DOCS = {

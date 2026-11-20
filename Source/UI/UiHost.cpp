@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <set>
 
 #include <windows.h>
@@ -174,7 +175,21 @@ namespace Manifold::UI
         }
         bool open = true;
         const ImVec2 size(window.Width > 0.0f ? window.Width : 420.0f, window.Height > 0.0f ? window.Height : 320.0f);
-        const bool visible = BeginToolWindow(title.c_str(), &open, size, window.Dock ? 0 : ImGuiWindowFlags_NoDocking, ImVec2(160.0f, 100.0f), false);
+        const std::function<bool(const Lua::UiNode&)> wantsKeys = [&](const Lua::UiNode& node)
+            {
+                if (node.Kind == Lua::UiKind::Canvas && (node.Handlers & Lua::UiHandler::Key))
+                    return true;
+                for (const int child : node.Children)
+                {
+                    if (const Lua::UiNode* found = Model().Find(child); found && wantsKeys(*found))
+                        return true;
+                }
+                return false;
+            };
+        ImGuiWindowFlags flags = window.Dock ? 0 : ImGuiWindowFlags_NoDocking;
+        if (wantsKeys(window))
+            flags |= ImGuiWindowFlags_NoNavInputs;
+        const bool visible = BeginToolWindow(title.c_str(), &open, size, flags, ImVec2(160.0f, 100.0f), false);
         if (visible)
         {
             ImGui::PushID(id);
@@ -812,6 +827,14 @@ namespace Manifold::UI
         }
         if (viewChanged && (node.Handlers & H::View))
             Post(node.Id, "view", { static_cast<double>(node.ViewX), static_cast<double>(node.ViewY), static_cast<double>(node.Scale) });
+        if ((node.Handlers & H::Key) && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput)
+        {
+            for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_GamepadStart; ++key)
+            {
+                if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(key), true))
+                    Post(node.Id, "key", { std::string(ImGui::GetKeyName(static_cast<ImGuiKey>(key))) });
+            }
+        }
         int choice = 0;
         ContextMenu(node, "##context", choice);
     }

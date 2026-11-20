@@ -6709,8 +6709,8 @@ for _, name in ipairs(UI_COLORS) do
   UI_COLOR_SET[name] = true
 end
 
-local UI_HANDLER_BITS = { onClick = 1, onChange = 2, onSelect = 4, onActivate = 8, onMenu = 16, onHover = 32, onSubmit = 64, onClose = 128, onView = 256 }
-local UI_EVENTS = { click = "onClick", change = "onChange", select = "onSelect", activate = "onActivate", menu = "onMenu", hover = "onHover", submit = "onSubmit", close = "onClose", view = "onView" }
+local UI_HANDLER_BITS = { onClick = 1, onChange = 2, onSelect = 4, onActivate = 8, onMenu = 16, onHover = 32, onSubmit = 64, onClose = 128, onView = 256, onKey = 512 }
+local UI_EVENTS = { click = "onClick", change = "onChange", select = "onSelect", activate = "onActivate", menu = "onMenu", hover = "onHover", submit = "onSubmit", close = "onClose", view = "onView", key = "onKey" }
 
 local COMMON_KEYS = { visible = "boolean", enabled = "boolean", tooltip = "string", width = "number", height = "number" }
 
@@ -6746,7 +6746,7 @@ local WIDGET_KEYS = {
   tree = withCommon({ items = "table", value = "string", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
   progress = withCommon({ value = "number", text = "string" }),
   image = withCommon({ image = "table" }),
-  canvas = withCommon({ background = "string", zoom = "boolean", menu = "table", onClick = "function", onHover = "function", onMenu = "function", onView = "function" }),
+  canvas = withCommon({ background = "string", zoom = "boolean", menu = "table", onClick = "function", onHover = "function", onMenu = "function", onView = "function", onKey = "function" }),
 }
 local WIDGET_KINDS = {}
 for kind in pairs(WIDGET_KEYS) do
@@ -6873,10 +6873,10 @@ local function keepHandlers(entry, options)
   end
 end
 
-local function dropEntry(id)
-  local entry = uiEntries[id]
 )MLUA"),
-            std::string_view(R"MLUA(  if not entry then
+            std::string_view(R"MLUA(local function dropEntry(id)
+  local entry = uiEntries[id]
+  if not entry then
     return
   end
   uiEntries[id] = nil
@@ -7202,7 +7202,7 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
-    "- `canvas`: draws what `draw` gave it on the GPU. `background` is a colour, `zoom = true` lets the user zoom with the wheel and pan by dragging; `onClick(x, y, button, widget)`, `onHover(x, y, widget)`, `onView(x, y, scale, widget)` and `menu` with `onMenu(choice, text, x, y, widget)` get canvas coordinates.",
+    "- `canvas`: draws what `draw` gave it on the GPU. `background` is a colour, `zoom = true` lets the user zoom with the wheel and pan by dragging; `onClick(x, y, button, widget)`, `onHover(x, y, widget)`, `onView(x, y, scale, widget)` and `menu` with `onMenu(choice, text, x, y, widget)` get canvas coordinates; `onKey(key, widget)` gets every key pressed (and repeated while held) while the canvas's window has the focus, by name: `LeftArrow`, `W`, `Space`, `Enter`, `F1`… (Escape also closes the window).",
   }, "\n"),
 })
 local WIDGET_METHOD_DOCS = {
@@ -7378,11 +7378,11 @@ local function noticeObject(entry)
           state.progress = options.progress
         end
         if options.sticky ~= nil then
-          state.sticky = options.sticky
+)MLUA"),
+            std::string_view(R"MLUA(          state.sticky = options.sticky
         end
         local sticky = state.sticky or (state.progress >= 0 and state.progress < 1)
-)MLUA"),
-            std::string_view(R"MLUA(        if not native.uiNoticeUpdate(entry.id, state.text, state.level, state.progress, sticky) then
+        if not native.uiNoticeUpdate(entry.id, state.text, state.level, state.progress, sticky) then
           return gone("notice")
         end
         return true
@@ -7666,14 +7666,14 @@ local INTRO = [[
 
 `manifold` is Manifold Engine's own Lua API. It lives beside the Cheat Engine functions in [LUA-API.md](LUA-API.md). Those keep Cheat Engine's names and habits for compatibility; `manifold` follows one fixed schema instead, and every call is checked against it.
 
-This file is generated from the API itself (`Manifold-Engine.Tests.exe --manifold-markdown`), and the tests fail when it is out of date.
+)MLUA"),
+            std::string_view(R"MLUA(This file is generated from the API itself (`Manifold-Engine.Tests.exe --manifold-markdown`), and the tests fail when it is out of date.
 ]]
 
 local RULES = [[
 ## Schema
 
-)MLUA"),
-            std::string_view(R"MLUA(1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`. An area may group its functions into sub-areas one level down (`manifold.ui.window`, `manifold.ui.dialog`).
+1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`. An area may group its functions into sub-areas one level down (`manifold.ui.window`, `manifold.ui.dialog`).
 2. **Names.** Areas are lower-case nouns. Functions are lowerCamelCase: a lookup without side effects is named after what it returns (`process.module`, `log.channel`), everything else starts with a verb (`open`, `read`, `create`). Predicates start with `is` or `has` and return a boolean. Settings come in `get…`/`set…` pairs. The five log functions are named after their level. Constants are lowerCamelCase fields. There are no aliases and no capitalised duplicates.
 3. **Calls use a dot.** `manifold.log.info("ready")`, never `manifold.log:info("ready")`. No function takes `self`, and the objects the API returns (channels) work the same way. A colon call raises an error that says so.
 4. **Arguments.** Required arguments come first, optional ones after them, and settings go into one `options` table at the end. A `?` after a name marks it optional. A missing, extra or wrongly typed argument and an unknown option key raise `ME-7007`, naming the function and the argument. Addresses are integers or address expressions such as `"game.exe+10"`.

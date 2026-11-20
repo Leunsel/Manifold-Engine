@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -850,6 +851,98 @@ return M
                 return "ok")LUA");
         }
 
+        void SnakeExample(Engine& engine)
+        {
+            Lua::UiModel& model = engine.Lua().Ui();
+            LuaCheck(engine, "canvas keys", R"LUA(
+                uiKeys = {}
+                local w = manifold.ui.window.create("Keys", { key = "keys probe" })
+                uiKeyCanvas = w.add("canvas", { height = 40, onKey = function(key, widget) uiKeys[#uiKeys + 1] = key .. ":" .. widget.kind end })
+                return "ok")LUA");
+            const Lua::UiNode* keyed = nullptr;
+            for (const int id : model.Windows())
+            {
+                if (const Lua::UiNode* window = model.Find(id); window && window->Title == "Keys" && !window->Children.empty())
+                    keyed = model.Find(window->Children.front());
+            }
+            CHECK(keyed && (keyed->Handlers & Lua::UiHandler::Key));
+            if (keyed)
+            {
+                model.Post({ keyed->Id, "key", { std::string("LeftArrow") } });
+                model.Post({ keyed->Id, "key", { std::string("Space") } });
+            }
+            engine.Lua().Tick(2000.0);
+            LuaCheck(engine, "canvas keys seen", R"LUA(
+                if #uiKeys ~= 2 or uiKeys[1] ~= "LeftArrow:canvas" or uiKeys[2] ~= "Space:canvas" then return table.concat(uiKeys, ",") end
+                uiKeyCanvas.remove()
+                return "ok")LUA");
+
+            std::filesystem::path at = std::filesystem::current_path();
+            for (int i = 0; i < 8 && !std::filesystem::exists(at / "Examples" / "Manifold-Snake.lua"); ++i)
+                at = at.parent_path();
+            const std::filesystem::path script = at / "Examples" / "Manifold-Snake.lua";
+            if (!std::filesystem::exists(script))
+            {
+                Skip("Examples/Manifold-Snake.lua not found above " + std::filesystem::current_path().string());
+                return;
+            }
+            std::ifstream file(script, std::ios::binary);
+            std::stringstream content;
+            content << file.rdbuf();
+            const Status loaded = engine.Lua().Run(content.str(), "Manifold-Snake.lua");
+            CHECK_MSG(loaded.Ok(), loaded.Text);
+            const Lua::UiNode* board = nullptr;
+            const Lua::UiNode* window = nullptr;
+            for (const int id : model.Windows())
+            {
+                const Lua::UiNode* candidate = model.Find(id);
+                if (!candidate || candidate->Title != "Snake")
+                    continue;
+                window = candidate;
+                const std::function<void(const Lua::UiNode&)> search = [&](const Lua::UiNode& node)
+                    {
+                        for (const int child : node.Children)
+                        {
+                            const Lua::UiNode* found = model.Find(child);
+                            if (!found)
+                                continue;
+                            if (found->Kind == Lua::UiKind::Canvas)
+                                board = found;
+                            search(*found);
+                        }
+                    };
+                search(*candidate);
+            }
+            CHECK(window && window->Updates);
+            CHECK(board && (board->Handlers & Lua::UiHandler::Key) && (board->Handlers & Lua::UiHandler::Click));
+            if (!board || !window)
+                return;
+            const int boardId = board->Id;
+            const int windowId = window->Id;
+            double now = 3000.0;
+            for (int frame = 0; frame < 120; ++frame)
+            {
+                if (frame == 10)
+                    model.Post({ boardId, "key", { std::string("UpArrow") } });
+                if (frame == 40)
+                    model.Post({ boardId, "key", { std::string("P") } });
+                if (frame == 60)
+                    model.Post({ boardId, "key", { std::string("Space") } });
+                if (frame == 80)
+                    model.Post({ boardId, "click", { 10.0, 10.0, 1.0 } });
+                if (frame == 100)
+                    model.Post({ boardId, "key", { std::string("R") } });
+                now += 1.0 / 60.0;
+                engine.Lua().Tick(now);
+            }
+            const Lua::UiNode* drawn = model.Find(boardId);
+            CHECK(drawn && drawn->Draws.size() >= 6);
+            const Lua::UiNode* still = model.Find(windowId);
+            CHECK_MSG(still && still->Updates, "the game's onUpdate failed and was switched off");
+            CHECK(engine.Lua().Run("", "Manifold-Snake.lua").Ok());
+            CHECK(!model.Find(windowId));
+        }
+
         void Documentation(Engine& engine)
         {
             const std::string markdown = Lua::ManifoldApiMarkdown(engine.Lua());
@@ -896,6 +989,7 @@ return M
         DocApi(engine);
         Documentation(engine);
         UiApi(engine);
+        SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;
     }

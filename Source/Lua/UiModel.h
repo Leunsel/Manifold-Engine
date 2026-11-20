@@ -163,6 +163,7 @@ namespace Manifold::Lua
         constexpr std::uint32_t Submit = 1u << 6;
         constexpr std::uint32_t Close = 1u << 7;
         constexpr std::uint32_t View = 1u << 8;
+        constexpr std::uint32_t Key = 1u << 9;
     }
 
     struct UiImage
