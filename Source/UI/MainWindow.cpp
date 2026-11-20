@@ -1,5 +1,6 @@
 #include "UI/MainWindow.h"
 
+#include "Core/Errors.h"
 #include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
@@ -3564,7 +3565,9 @@ namespace Manifold::UI
         const std::optional<LogEntry> newest = RuntimeLog::Last();
         const char* logIcon = newest ? LevelIcon(newest->Level) : "";
         const std::string message = newest ? (m_release ? Workspace::WithoutCodes(newest->Message) : newest->Message) : std::string();
-        const std::string logText = newest ? std::string(logIcon) + "  " + message : std::string();
+        const ErrorInfo* logError = newest && !m_release ? ErrorOf(newest->Message) : nullptr;
+        const std::string logCode = logError ? ErrorName(logError->Code) : std::string();
+        const std::string logText = newest ? std::string(logIcon) + "  " + (logError ? logCode : message) : std::string();
         const float logFull = newest ? measure(logText) : 0.0f;
         float logWant = logFull;
 
@@ -3648,10 +3651,46 @@ namespace Manifold::UI
                 }
                 else
                 {
-                    if (!ErrorTooltip(newest->Message) && ImGui::IsItemClicked())
+                    // ∑ One action per click: the left button opens the log, the code and
+                    // the message are copied from the right-click menu. A code stands in for
+                    // the message in the bar; the tooltip explains it and keeps the text.
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                    if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
                         m_workspace.OpenLog();
-                    const std::string tip = cut ? message + "\n\nClick to open the log" : std::string("Click to open the log");
-                    ItemTooltip(tip.c_str());
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip) && !ImGui::IsPopupOpen("##statuslog"))
+                    {
+                        ShowTooltip([&]()
+                            {
+                                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+                                if (logError)
+                                {
+                                    ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Accent);
+                                    ImGui::Text("%s  %s", logCode.c_str(), std::string(ErrorArea(logError->Code)).c_str());
+                                    ImGui::PopStyleColor();
+                                    ImGui::TextUnformatted(logError->Cause.data(), logError->Cause.data() + logError->Cause.size());
+                                    ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Label);
+                                    ImGui::TextUnformatted(logError->Help.data(), logError->Help.data() + logError->Help.size());
+                                    ImGui::PopStyleColor();
+                                    ImGui::Separator();
+                                }
+                                if (logError || cut)
+                                    ImGui::TextColored(ManifoldTheme::Muted, "%s", message.c_str());
+                                ImGui::TextDisabled("%s", logError ? "Click to open the log, right-click to copy the code" : "Click to open the log, right-click to copy");
+                                ImGui::PopTextWrapPos();
+                            });
+                    }
+                    if (ImGui::BeginPopupContextItem("##statuslog"))
+                    {
+                        if (logError && ImGui::MenuItem(("Copy " + logCode).c_str()))
+                            ImGui::SetClipboardText(logCode.c_str());
+                        if (ImGui::MenuItem("Copy the message"))
+                            ImGui::SetClipboardText(message.c_str());
+                        ImGui::Separator();
+                        if (ImGui::MenuItem(ICON_FA_STREAM "  Open the log"))
+                            m_workspace.OpenLog();
+                        ImGui::EndPopup();
+                    }
                 }
             }
         }
