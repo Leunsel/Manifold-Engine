@@ -34,6 +34,7 @@ namespace Manifold::Disasm
         bool Stops = false;
         bool Truncated = false;
         bool LoopHead = false;
+        int Cases = 0;
         std::vector<std::uint64_t> Calls;
         std::vector<std::uint64_t> Exits;
     };

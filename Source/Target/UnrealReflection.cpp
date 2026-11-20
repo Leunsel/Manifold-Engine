@@ -216,14 +216,18 @@ namespace Manifold::Target
         stages.Mark("objects");
 
         step("Reading the types");
-        IndexTypes();
+        {
+            const std::shared_ptr<const UnrealTypeIndex> read = ReadTypes();
+            std::lock_guard lock(m_indexLock);
+            m_index = read;
+        }
         stages.Mark("types");
         if (cancelled())
             return fail("cancelled");
         for (const char* required : { "Object", "Field", "Struct", "Class" })
         {
             if (!Type(required))
-                return fail(std::string("core class '") + required + "' not found among " + std::to_string(m_typeList.size()) + " types");
+                return fail(std::string("core class '") + required + "' not found among " + std::to_string(Index()->List.size()) + " types");
         }
         step("Reading the reflection layout");
         if (!ProbeSuper())
@@ -255,7 +259,7 @@ namespace Manifold::Target
         m_summary.Objects = m_array;
         m_summary.ObjectsSource = source;
         m_summary.ObjectCount = Count();
-        m_summary.TypeCount = m_typeList.size();
+        m_summary.TypeCount = Index()->List.size();
         m_summary.Seconds = stages.Seconds();
         m_summary.Timings = stages.Text();
         m_summary.Layout = m_layout;

@@ -215,6 +215,15 @@ namespace Manifold::Tests
 
             std::uint64_t Address(int index) const { return reinterpret_cast<std::uint64_t>(m_objects) + static_cast<std::uint64_t>(index) * kObjectStride; }
 
+            std::uint64_t LoadClass(int index, const char* name)
+            {
+                const std::uint64_t at = Object(index, Name(name), 0);
+                g_pool.Cursor = static_cast<std::uint32_t>(m_used / 2);
+                Put<std::uint64_t>(at, 0x10, ClassClass);
+                Super(at, Actor);
+                return at;
+            }
+
             std::uint64_t Package = 0, ObjectClass = 0, FieldClass = 0, StructClass = 0, ClassClass = 0, PackageClass = 0, ScriptStructClass = 0, EnumClass = 0;
             std::uint64_t Vector = 0, Vector2D = 0, LinearColor = 0, IntPoint = 0, Actor = 0, SceneComponent = 0, GameEngineClass = 0, Mode = 0;
             std::uint64_t ActorInstance = 0, SceneInstance = 0, Engine = 0;
@@ -540,7 +549,8 @@ namespace Manifold::Tests
             if (!functions.empty())
                 std::printf(", first %s flags %X with %zu parameters", functions.front().Name.c_str(), functions.front().Flags, functions.front().Parameters.size());
             std::printf("\n");
-            for (const auto& type : runtime.Types())
+            const std::shared_ptr<const Target::UnrealTypeIndex> index = runtime.Index();
+            for (const auto& type : index->List)
             {
                 if (type.Kind != Target::UnrealKind::Enum)
                     continue;
@@ -583,6 +593,23 @@ namespace Manifold::Tests
             configured.Objects = reinterpret_cast<std::uint64_t>(&g_objects);
             configured.Layout["extra"] = 0x78;
             SyntheticLayout(engine, fake, configured, "configured");
+            {
+                Target::UnrealRuntime late;
+                CHECK(late.Resolve(engine.Process(), configured, true, nullptr).Ok());
+                const std::shared_ptr<const Target::UnrealTypeIndex> first = late.Index();
+                CHECK(!late.RefreshTypes());
+                CHECK(late.Index() == first);
+                CHECK(late.Type("LateBlueprint_C") == 0);
+                CHECK(!late.ResolveSymbol("LateBlueprint_C"));
+                const std::uint64_t loaded = fake.LoadClass(1500, "LateBlueprint_C");
+                CHECK(late.Type("LateBlueprint_C") == 0);
+                CHECK(late.RefreshTypes());
+                CHECK(late.Type("lateblueprint_c") == loaded);
+                CHECK(late.Index() != first && late.Index()->List.size() == first->List.size() + 1);
+                CHECK(first->Types.count("lateblueprint_c") == 0);
+                CHECK(late.Type("Actor") == fake.Actor && late.Enum("EMyMode") == fake.Mode);
+                CHECK(!late.RefreshTypes());
+            }
             Target::UnrealConfig wrong;
             wrong.NamePool = reinterpret_cast<std::uint64_t>(&g_objects);
             Target::UnrealRuntime runtime;

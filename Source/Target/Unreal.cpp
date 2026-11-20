@@ -1006,11 +1006,39 @@ namespace Manifold::Target
         return kind;
     }
 
-    void UnrealRuntime::IndexTypes()
+    std::shared_ptr<const UnrealTypeIndex> UnrealRuntime::Index() const
     {
-        m_types.clear();
-        m_enums.clear();
-        m_typeList.clear();
+        std::lock_guard lock(m_indexLock);
+        return m_index;
+    }
+
+    bool UnrealRuntime::RefreshTypes() const
+    {
+        const std::shared_ptr<const UnrealTypeIndex> before = Index();
+        const std::shared_ptr<const UnrealTypeIndex> read = ReadTypes();
+        for (const char* required : { "object", "field", "struct", "class" })
+        {
+            if (!read->Types.count(required))
+                return false;
+        }
+        const bool same = read->List.size() == before->List.size() &&
+            std::equal(read->List.begin(), read->List.end(), before->List.begin(), [](const UnrealType& a, const UnrealType& b) { return a.Object == b.Object && a.Name == b.Name; });
+        if (same)
+            return false;
+        {
+            std::lock_guard lock(m_indexLock);
+            m_index = read;
+        }
+        std::lock_guard lock(m_lock);
+        for (auto it = m_symbols.begin(); it != m_symbols.end();)
+            it = it->second ? std::next(it) : m_symbols.erase(it);
+        return true;
+    }
+
+    std::shared_ptr<const UnrealTypeIndex> UnrealRuntime::ReadTypes() const
+    {
+        const auto built = std::make_shared<UnrealTypeIndex>();
+        built->Objects = Count();
         const int first = std::min(m_layout.Class, m_layout.Name);
         const std::size_t span = static_cast<std::size_t>(std::max(m_layout.Class, m_layout.Name) + 8 - first);
         std::vector<std::pair<std::uint64_t, int>> objects;
@@ -1059,24 +1087,27 @@ namespace Manifold::Target
             const UnrealKind kind = KindOf(meta);
             const std::string key = Lower(*name);
             if (kind == UnrealKind::Enum)
-                m_enums.emplace(key, object);
+                built->Enums.emplace(key, object);
             else
-                m_types.emplace(key, object);
-            m_typeList.push_back({ *name, object, kind });
+                built->Types.emplace(key, object);
+            built->List.push_back({ *name, object, kind });
         }
-        std::sort(m_typeList.begin(), m_typeList.end(), [](const UnrealType& a, const UnrealType& b) { return Lower(a.Name) < Lower(b.Name); });
+        std::stable_sort(built->List.begin(), built->List.end(), [](const UnrealType& a, const UnrealType& b) { return Lower(a.Name) < Lower(b.Name); });
+        return built;
     }
 
     std::uint64_t UnrealRuntime::Type(std::string_view name) const
     {
-        if (const auto it = m_types.find(Lower(name)); it != m_types.end())
+        const std::shared_ptr<const UnrealTypeIndex> index = Index();
+        if (const auto it = index->Types.find(Lower(name)); it != index->Types.end())
             return it->second;
         return 0;
     }
 
     std::uint64_t UnrealRuntime::Enum(std::string_view name) const
     {
-        if (const auto it = m_enums.find(Lower(name)); it != m_enums.end())
+        const std::shared_ptr<const UnrealTypeIndex> index = Index();
+        if (const auto it = index->Enums.find(Lower(name)); it != index->Enums.end())
             return it->second;
         return 0;
     }

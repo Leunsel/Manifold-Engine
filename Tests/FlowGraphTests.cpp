@@ -142,6 +142,72 @@ namespace Manifold::Tests
             CHECK(!trap.Blocks.empty() && trap.Blocks[0].Stops);
         }
 
+        const std::uint8_t kRelativeSwitch[] = {
+            0x83, 0xF9, 0x03, 0x77, 0x3B, 0x48, 0x8D, 0x15, 0xF4, 0xFD, 0xFF, 0xFF, 0x8B, 0x84, 0x8A, 0x80, 0x02, 0x00, 0x00, 0x48, 0x03, 0xC2, 0xFF, 0xE0,
+        };
+        const std::uint8_t kPointerSwitch[] = { 0x83, 0xF9, 0x02, 0x73, 0x2B, 0x48, 0x8D, 0x15, 0x74, 0x00, 0x00, 0x00, 0xFF, 0x24, 0xCA };
+        constexpr std::size_t kRelativeAt = 0x200;
+        constexpr std::size_t kRelativeTable = 0x280;
+        constexpr std::size_t kPointerAt = 0x300;
+        constexpr std::size_t kPointerTable = 0x380;
+
+        void SwitchTables(Engine& engine, std::uint8_t* code)
+        {
+            const auto base = reinterpret_cast<std::uint64_t>(code);
+            std::memcpy(code + kRelativeAt, kRelativeSwitch, sizeof(kRelativeSwitch));
+            code[0x220] = code[0x224] = code[0x229] = code[0x240] = 0xC3;
+            code[0x228] = 0x90;
+            const std::int32_t offsets[] = { 0x220, 0x224, 0x228, 0x220 };
+            std::memcpy(code + kRelativeTable, offsets, sizeof(offsets));
+            std::memcpy(code + kPointerAt, kPointerSwitch, sizeof(kPointerSwitch));
+            code[0x310] = code[0x314] = code[0x330] = 0xC3;
+            const std::uint64_t pointers[] = { base + 0x310, base + 0x314 };
+            std::memcpy(code + kPointerTable, pointers, sizeof(pointers));
+
+            const auto edgeTo = [&](const Disasm::FlowGraph& graph, int from, std::uint64_t target) {
+                const int to = graph.BlockStarting(target);
+                return to >= 0 && HasEdge(graph, from, to, Disasm::EdgeKind::Jump, false);
+            };
+            const Disasm::FlowGraph relative = Disasm::BuildFlowGraph(engine.Disassembler(), *engine.Process(), base + kRelativeAt, nullptr, nullptr, {});
+            CHECK_EQ(relative.Blocks.size(), 6u);
+            const int dispatch = relative.BlockStarting(base + kRelativeAt + 5);
+            CHECK(dispatch >= 0);
+            if (dispatch >= 0)
+            {
+                const Disasm::FlowBlock& block = relative.Blocks[static_cast<std::size_t>(dispatch)];
+                CHECK(!block.Indirect && block.Cases == 3 && block.Lines.size() == 4);
+                CHECK(edgeTo(relative, dispatch, base + 0x220) && edgeTo(relative, dispatch, base + 0x224) && edgeTo(relative, dispatch, base + 0x228));
+                CHECK(!edgeTo(relative, dispatch, base + 0x240));
+            }
+            CHECK(relative.BlockStarting(base + 0x240) >= 0);
+
+            const Disasm::FlowGraph pointer = Disasm::BuildFlowGraph(engine.Disassembler(), *engine.Process(), base + kPointerAt, nullptr, nullptr, {});
+            CHECK_EQ(pointer.Blocks.size(), 5u);
+            const int jump = pointer.BlockStarting(base + kPointerAt + 5);
+            CHECK(jump >= 0);
+            if (jump >= 0)
+            {
+                CHECK(!pointer.Blocks[static_cast<std::size_t>(jump)].Indirect && pointer.Blocks[static_cast<std::size_t>(jump)].Cases == 2);
+                CHECK(edgeTo(pointer, jump, base + 0x310) && edgeTo(pointer, jump, base + 0x314));
+            }
+
+            const Disasm::FlowGraph unbounded = Disasm::BuildFlowGraph(engine.Disassembler(), *engine.Process(), base + kPointerAt + 5, nullptr, nullptr, {});
+            CHECK(unbounded.Blocks.size() == 1 && unbounded.Blocks[0].Indirect && unbounded.Blocks[0].Cases == 0);
+
+            const std::int32_t intoTable = static_cast<std::int32_t>(kRelativeTable);
+            std::memcpy(code + kRelativeTable + 8, &intoTable, sizeof(intoTable));
+            const Disasm::FlowGraph damaged = Disasm::BuildFlowGraph(engine.Disassembler(), *engine.Process(), base + kRelativeAt, nullptr, nullptr, {});
+            const int refused = damaged.BlockStarting(base + kRelativeAt + 5);
+            CHECK(refused >= 0 && damaged.Blocks[static_cast<std::size_t>(refused)].Indirect && damaged.Blocks[static_cast<std::size_t>(refused)].Cases == 0);
+            CHECK_EQ(damaged.Blocks.size(), 3u);
+
+            Disasm::FlowLimits nearby;
+            nearby.Reach = 0x12;
+            const Disasm::FlowGraph tight = Disasm::BuildFlowGraph(engine.Disassembler(), *engine.Process(), base + kPointerAt, nullptr, nullptr, {}, nearby);
+            const int outside = tight.BlockStarting(base + kPointerAt + 5);
+            CHECK(outside >= 0 && tight.Blocks[static_cast<std::size_t>(outside)].Indirect);
+        }
+
         bool Overlap(const Layout::Point& a, const Layout::Size& as, const Layout::Point& b, const Layout::Size& bs)
         {
             return a.X < b.X + bs.Width && b.X < a.X + as.Width && a.Y < b.Y + bs.Height && b.Y < a.Y + as.Height;
@@ -449,6 +515,7 @@ namespace Manifold::Tests
             FunctionSearch(engine, code);
             HashBeforeFunction(engine, code);
             TailJumpsAndIndirect(engine, code);
+            SwitchTables(engine, code);
             ::VirtualFree(code, 0, MEM_RELEASE);
         }
         FunctionOfExport(engine);

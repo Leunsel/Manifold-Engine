@@ -285,7 +285,14 @@ namespace Manifold::Lua
         int SendMessageCompat(lua_State* state)
         {
             const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(luaL_checkinteger(state, 1)));
-            const LRESULT result = ::SendMessageW(window, static_cast<UINT>(luaL_checkinteger(state, 2)), static_cast<WPARAM>(luaL_optinteger(state, 3, 0)), static_cast<LPARAM>(luaL_optinteger(state, 4, 0)));
+            constexpr UINT kAnswerMilliseconds = 5000;
+            DWORD_PTR result = 0;
+            if (!::SendMessageTimeoutW(window, static_cast<UINT>(luaL_checkinteger(state, 2)), static_cast<WPARAM>(luaL_optinteger(state, 3, 0)), static_cast<LPARAM>(luaL_optinteger(state, 4, 0)),
+                    SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT, kAnswerMilliseconds, &result))
+            {
+                LOG_WARN("Script", "sendMessage got no answer from window " + Hex(reinterpret_cast<std::uintptr_t>(window)) + " and gave up");
+                result = 0;
+            }
             lua_pushinteger(state, static_cast<lua_Integer>(result));
             return 1;
         }
@@ -1245,6 +1252,30 @@ namespace Manifold::Lua
             return folder / (Utf8ToWide(name) + L"-" + std::to_wstring(::GetCurrentProcessId()) + L".CT");
         }
 
+        int StageTableCompat(lua_State* state)
+        {
+            if (lua_type(state, 1) == LUA_TSTRING)
+            {
+                std::error_code missing;
+                if (!std::filesystem::is_regular_file(Utf8ToWide(lua_tostring(state, 1)), missing))
+                    return PushStatus(state, Status::Fail(ErrorCode::TableNotRead, lua_tostring(state, 1)));
+                lua_pushvalue(state, 1);
+                lua_pushboolean(state, 0);
+                return 2;
+            }
+            const auto data = StreamData(state, 1);
+            if (!data)
+                return luaL_argerror(state, 1, "a file name or a stream");
+            const std::filesystem::path path = StreamFile("staged-table");
+            std::ofstream file(path, std::ios::binary | std::ios::trunc);
+            file.write(reinterpret_cast<const char*>(data->data()), static_cast<std::streamsize>(data->size()));
+            if (!file)
+                return PushStatus(state, Status::Fail(ErrorCode::TableNotRead, WideToUtf8(path.wstring())));
+            lua_pushstring(state, WideToUtf8(path.wstring()).c_str());
+            lua_pushboolean(state, 1);
+            return 2;
+        }
+
         int LoadTableCompat(lua_State* state)
         {
             Engine& engine = Owner(state);
@@ -1252,7 +1283,10 @@ namespace Manifold::Lua
             std::filesystem::path path;
             bool fromStream = false;
             if (lua_type(state, 1) == LUA_TSTRING)
+            {
                 path = Utf8ToWide(lua_tostring(state, 1));
+                fromStream = lua_toboolean(state, 3) != 0;
+            }
             else if (const auto data = StreamData(state, 1))
             {
                 fromStream = true;
@@ -1499,6 +1533,7 @@ namespace Manifold::Lua
             { "__manifoldWindowList", &WindowList },
             { "__manifoldThreadList", &ThreadList },
             { "__manifoldLoadTable", &LoadTableCompat },
+            { "__manifoldStageTable", &StageTableCompat },
             { "__manifoldOpenAutoAssembler", &OpenAutoAssembler },
             { "__manifoldTimerIntervals", &TimerIntervals },
             { "__manifoldCanWait", [](lua_State* s) -> int { lua_pushboolean(s, lua_isyieldable(s) && EngineOf(s).IsCooperative(s)); return 1; } },

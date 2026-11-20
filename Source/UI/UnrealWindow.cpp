@@ -74,6 +74,27 @@ namespace Manifold::UI
             m_instances.clear();
             m_instancesOf = 0;
             m_hits.clear();
+            m_index.reset();
+            m_whoisResult.clear();
+            m_whoisObject = 0;
+            ++m_whoisSerial;
+        }
+        if (const std::shared_ptr<const Target::UnrealTypeIndex> index = runtime ? runtime->Index() : nullptr; index != m_index)
+        {
+            const std::uint64_t selected = m_index && m_selected < m_index->List.size() ? m_index->List[m_selected].Object : 0;
+            m_index = index;
+            m_selected = kNone;
+            for (std::size_t i = 0; index && selected && i < index->List.size(); ++i)
+            {
+                if (index->List[i].Object == selected)
+                {
+                    m_selected = i;
+                    break;
+                }
+            }
+            m_appliedFilter = "\x01";
+            m_appliedKind = -1;
+            m_hits.clear();
         }
 
         ImGui::AlignTextToFramePadding();
@@ -198,13 +219,26 @@ namespace Manifold::UI
         ImGui::SameLine();
         if ((ImGui::Button(ICON_FA_SEARCH "  Who owns it", ImVec2(button, 0.0f)) || enter) && !Trim(m_whoisText).empty())
         {
+            (void)runtime;
             Status error;
             m_whoisObject = 0;
+            const std::uint64_t serial = ++m_whoisSerial;
             if (const auto address = m_workspace.Core().Evaluate(m_whoisText, &error))
             {
-                m_whoisResult = runtime.Whois(*address).value_or("No Unreal object contains " + Hex(*address) + ".");
-                if (const auto owner = runtime.OwnerOf(*address))
-                    m_whoisObject = owner->first;
+                m_whoisResult = "Looking through the objects...";
+                m_workspace.Core().Work().Start({ .Title = "Finding the owner of an address", .Group = "unrealwhois", .Cancellable = true, .Quiet = true },
+                    [this, found = m_runtime, where = *address, serial](WorkProgress&) -> BackgroundWork::Finish
+                    {
+                        std::string text = found->Whois(where).value_or("No Unreal object contains " + Hex(where) + ".");
+                        const auto owner = found->OwnerOf(where);
+                        return [this, found, serial, text = std::move(text), object = owner ? owner->first : 0]()
+                            {
+                                if (serial != m_whoisSerial || found != m_runtime)
+                                    return;
+                                m_whoisResult = text;
+                                m_whoisObject = object;
+                            };
+                    });
             }
             else
             {
@@ -245,7 +279,8 @@ namespace Manifold::UI
         m_workspace.Core().Work().CancelGroup(kSearchGroup);
         m_searching = false;
         m_hits.clear();
-        const auto& types = runtime.Types();
+        (void)runtime;
+        const auto& types = m_index->List;
         for (std::size_t i = 0; i < types.size(); ++i)
         {
             const Target::UnrealKind kind = types[i].Kind;
@@ -267,10 +302,10 @@ namespace Manifold::UI
         const std::string needle = Trim(m_filter).substr(1);
         const std::string filter = m_filter;
         work.Start({ .Title = "Searching the Unreal properties", .Group = kSearchGroup, .Cancellable = true, .Quiet = true },
-            [this, runtime, needle, filter](WorkProgress& progress) -> BackgroundWork::Finish
+            [this, runtime, needle, filter, index = m_index](WorkProgress& progress) -> BackgroundWork::Finish
             {
                 std::vector<Hit> hits;
-                const auto& types = runtime->Types();
+                const auto& types = index->List;
                 for (std::size_t i = 0; i < types.size() && hits.size() < kHitLimit && !progress.Cancelled(); ++i)
                 {
                     if (types[i].Kind == Target::UnrealKind::Enum)
@@ -281,9 +316,9 @@ namespace Manifold::UI
                             hits.push_back({ types[i].Name + "." + field.Name + "  " + runtime->TypeText(field), i });
                     }
                 }
-                return [this, hits = std::move(hits), filter, runtime]()
+                return [this, hits = std::move(hits), filter, runtime, index]()
                     {
-                        if (filter != m_filter || runtime != m_runtime)
+                        if (filter != m_filter || runtime != m_runtime || index != m_index)
                             return;
                         m_hits = hits;
                         m_searching = false;
@@ -298,27 +333,47 @@ namespace Manifold::UI
         InputTextWithHint("##unrealfilter", ICON_FA_SEARCH "  Type name, or .name to search properties", m_filter);
         Segmented("##unrealkind", &m_kind, { "All", "Classes", "Structs", "Enums" }, ImGui::GetContentRegionAvail().x);
         RefreshFilter(runtime);
-        if (!m_pendingType.empty())
+        if (!m_pendingType.empty() && !m_refreshing)
         {
-            const auto& types = runtime.Types();
-            for (std::size_t i = 0; i < types.size(); ++i)
+            const auto& types = m_index->List;
+            bool found = false;
+            for (std::size_t i = 0; i < types.size() && !found; ++i)
             {
                 if (EqualsNoCase(types[i].Name, m_pendingType))
                 {
                     m_selected = i;
                     m_tab = types[i].Kind == Target::UnrealKind::Enum ? Tab::Entries : Tab::Properties;
-                    break;
+                    found = true;
                 }
             }
-            m_pendingType.clear();
+            if (found || m_pendingRead)
+            {
+                m_pendingType.clear();
+                m_pendingRead = false;
+            }
+            else
+            {
+                m_pendingRead = true;
+                ReadTypesAgain(false);
+            }
         }
         const bool properties = Trim(m_filter).size() > 2 && Trim(m_filter).front() == '.';
+        ImGui::AlignTextToFramePadding();
         if (properties)
             Muted(m_searching ? std::string("Searching...") : Format("%zu properties%s", m_hits.size(), m_hits.size() >= kHitLimit ? " (first ones)" : ""));
         else
-            Muted(Format("%zu of %zu types", m_visible.size(), runtime.Types().size()));
+            Muted(m_refreshing ? std::string("Reading the types again...") : Format("%zu of %zu types", m_visible.size(), m_index->List.size()));
+        {
+            const GhostButtons ghost;
+            ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - ImGui::GetStyle().FramePadding.x * 2.0f));
+            ImGui::BeginDisabled(m_refreshing);
+            if (ImGui::Button(ICON_FA_SYNC "##unrealtypesagain"))
+                ReadTypesAgain(true);
+            ImGui::EndDisabled();
+            ItemTooltip("Reads the types again. Classes a game loads later, such as the Blueprints of a level, are listed after this.");
+        }
         ImGui::BeginChild("##unrealtypes", ImVec2(0.0f, 0.0f));
-        const auto& types = runtime.Types();
+        const auto& types = m_index->List;
         const auto row = [&](std::size_t type, const std::string& label, int index)
             {
                 const bool selected = type == m_selected;
@@ -346,9 +401,28 @@ namespace Manifold::UI
         ImGui::EndChild();
     }
 
+    void UnrealWindow::ReadTypesAgain(bool report)
+    {
+        if (m_refreshing || !m_runtime)
+            return;
+        m_refreshing = true;
+        m_workspace.Core().Work().Start({ .Title = "Reading the Unreal types again", .Group = "unrealtypes", .Cancellable = false, .Quiet = true },
+            [this, runtime = m_runtime, report](WorkProgress&) -> BackgroundWork::Finish
+            {
+                const bool changed = runtime->RefreshTypes();
+                return [this, runtime, report, changed]()
+                    {
+                        m_refreshing = false;
+                        if (!report || runtime != m_runtime)
+                            return;
+                        m_workspace.Core().Notify(LogLevel::Info, changed ? Format("The game has %zu types now", runtime->Index()->List.size()) : std::string("The types of the game have not changed"));
+                    };
+            });
+    }
+
     void UnrealWindow::Details(const Target::UnrealRuntime& runtime)
     {
-        const auto& types = runtime.Types();
+        const auto& types = m_index->List;
         if (m_selected >= types.size())
         {
             EmptyState(ICON_FA_CUBES, "Pick a type", "Classes, structs and enums of the game are on the left. Type a name to filter them, or .name to find a property in all of them.", {}, false);
@@ -396,8 +470,16 @@ namespace Manifold::UI
             {
                 if (ImGui::Button(ICON_FA_SITEMAP "  Dissect an instance"))
                 {
-                    const auto found = runtime.Instances(type, 1);
-                    Dissect(found.empty() ? 0 : found.front(), ("A live " + entry.Name).c_str());
+                    m_workspace.Core().Work().Start({ .Title = "Finding an instance of " + entry.Name, .Group = "unrealinstance", .Cancellable = true, .Quiet = true },
+                        [this, found = m_runtime, type, name = entry.Name](WorkProgress&) -> BackgroundWork::Finish
+                        {
+                            const std::vector<std::uint64_t> objects = found->Instances(type, 1);
+                            return [this, found, name, object = objects.empty() ? 0 : objects.front()]()
+                                {
+                                    if (found == m_runtime)
+                                        Dissect(object, ("A live " + name).c_str());
+                                };
+                        });
                 }
                 ImGui::SameLine();
             }

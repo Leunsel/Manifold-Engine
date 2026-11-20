@@ -1,6 +1,10 @@
 #include "Disasm/FlowGraph.h"
 
+#include "Core/Text.h"
+#include "Target/Process.h"
+
 #include <algorithm>
+#include <cstring>
 #include <deque>
 #include <map>
 #include <string_view>
@@ -26,6 +30,79 @@ namespace Manifold::Disasm
         {
             const std::string_view mnemonic = instruction.Mnemonic;
             return mnemonic == "int3" || mnemonic == "ud2" || mnemonic == "hlt" || mnemonic == "int1";
+        }
+
+        constexpr std::size_t kMaxCases = 1024;
+        constexpr std::size_t kLookBack = 12;
+
+        std::string_view FirstOperand(const Instruction& line)
+        {
+            const std::string_view text = line.Operands;
+            return text.substr(0, text.find(','));
+        }
+
+        std::optional<std::uint64_t> LoadedAddress(const Instruction& line, bool wide)
+        {
+            if (line.Mnemonic != "lea")
+                return std::nullopt;
+            std::size_t at = 0;
+            while (wide && at < line.Length && (line.Bytes[at] & 0xF0) == 0x40)
+                ++at;
+            if (at + 6 != line.Length || line.Bytes[at] != 0x8D || (line.Bytes[at + 1] & 0xC7) != 0x05)
+                return std::nullopt;
+            std::int32_t displacement = 0;
+            std::memcpy(&displacement, &line.Bytes[at + 2], sizeof(displacement));
+            if (!wide)
+                return static_cast<std::uint32_t>(displacement);
+            return line.Next() + static_cast<std::uint64_t>(static_cast<std::int64_t>(displacement));
+        }
+
+        std::optional<std::size_t> CompareImmediate(const Instruction& line)
+        {
+            if (line.Mnemonic != "cmp" || line.Length < 2)
+                return std::nullopt;
+            std::size_t at = 0;
+            bool narrow = false;
+            for (; at + 1 < line.Length && (line.Bytes[at] == 0x66 || (line.Bytes[at] & 0xF0) == 0x40); ++at)
+                narrow = narrow || line.Bytes[at] == 0x66;
+            const std::uint8_t opcode = line.Bytes[at];
+            std::uint32_t value = 0;
+            if (opcode == 0x83 || opcode == 0x80 || opcode == 0x3C)
+            {
+                value = line.Bytes[line.Length - 1];
+                if (value >= 0x80)
+                    return std::nullopt;
+            }
+            else if (opcode == 0x81 || opcode == 0x3D)
+            {
+                const std::size_t width = narrow ? 2 : 4;
+                if (line.Length < width + 1)
+                    return std::nullopt;
+                for (std::size_t i = 0; i < width; ++i)
+                    value |= static_cast<std::uint32_t>(line.Bytes[line.Length - width + i]) << (8 * i);
+            }
+            else
+                return std::nullopt;
+            return value <= kMaxCases ? std::optional<std::size_t>(value) : std::nullopt;
+        }
+
+        std::optional<std::size_t> CasesBehind(const std::vector<Instruction>& lines, bool taken)
+        {
+            if (lines.size() < 2 || lines.back().Kind != Flow::ConditionalJump)
+                return std::nullopt;
+            const std::string_view jump = lines.back().Mnemonic;
+            const bool leavesAbove = jump == "ja" || jump == "jnbe";
+            const bool leavesAboveOrEqual = jump == "jae" || jump == "jnb" || jump == "jnc";
+            const bool entersBelowOrEqual = jump == "jbe" || jump == "jna";
+            const bool entersBelow = jump == "jb" || jump == "jc" || jump == "jnae";
+            if (taken ? !(entersBelowOrEqual || entersBelow) : !(leavesAbove || leavesAboveOrEqual))
+                return std::nullopt;
+            for (std::size_t back = 2; back <= lines.size() && back <= 5; ++back)
+            {
+                if (const auto bound = CompareImmediate(lines[lines.size() - back]))
+                    return *bound + (leavesAbove || entersBelowOrEqual ? 1u : 0u);
+            }
+            return std::nullopt;
         }
     }
 
@@ -80,6 +157,153 @@ namespace Manifold::Disasm
                 return std::nullopt;
             };
 
+        const auto loadedAddress = [&](int reg, const std::vector<Instruction>& own) -> std::optional<std::uint64_t>
+            {
+                if (!reg)
+                    return std::nullopt;
+                const std::string name = Disassembler::RegisterName(reg);
+                const auto value = [&](const Instruction& line) -> std::optional<std::uint64_t>
+                    {
+                        if (!EqualsNoCase(FirstOperand(line), name))
+                            return std::nullopt;
+                        return LoadedAddress(line, process.Is64Bit());
+                    };
+                for (auto line = own.rbegin(); line != own.rend(); ++line)
+                {
+                    if (const auto found = value(*line))
+                        return found;
+                }
+                std::optional<std::uint64_t> only;
+                for (const Draft& draft : drafts)
+                {
+                    for (const Instruction& line : draft.Block.Lines)
+                    {
+                        const auto found = value(line);
+                        if (found && only && *only != *found)
+                            return std::nullopt;
+                        if (found)
+                            only = found;
+                    }
+                }
+                return only;
+            };
+        const auto caseCount = [&](std::uint64_t start) -> std::optional<std::size_t>
+            {
+                if (const auto before = start ? containing(start - 1) : std::nullopt; before && drafts[*before].Block.End == start)
+                {
+                    if (const auto count = CasesBehind(drafts[*before].Block.Lines, false))
+                        return count;
+                }
+                for (const Draft& draft : drafts)
+                {
+                    const bool enters = std::any_of(draft.Next.begin(), draft.Next.end(), [&](const Pending& next) { return next.Target == start && next.Kind == EdgeKind::Taken; });
+                    if (const auto count = enters ? CasesBehind(draft.Block.Lines, true) : std::nullopt)
+                        return count;
+                }
+                return std::nullopt;
+            };
+        const auto switchTargets = [&](const Draft& draft) -> std::vector<std::uint64_t>
+            {
+                const std::vector<Instruction>& lines = draft.Block.Lines;
+                const Instruction& jump = lines.back();
+                const bool wide = process.Is64Bit();
+                const int pointer = wide ? 8 : 4;
+                const auto narrowed = [&](std::uint64_t address) { return wide ? address : address & 0xFFFFFFFFull; };
+                std::size_t loadAt = lines.size() - 1;
+                bool relative = false;
+                if (jump.Memory.Present)
+                {
+                    if (!jump.Memory.Index || jump.Memory.Scale != pointer || jump.Memory.Size != pointer)
+                        return {};
+                }
+                else
+                {
+                    bool added = false;
+                    bool found = false;
+                    for (std::size_t back = 1; back < lines.size() && back <= kLookBack && !found; ++back)
+                    {
+                        const Instruction& line = lines[lines.size() - 1 - back];
+                        if (line.Mnemonic == "add")
+                            added = true;
+                        else if ((line.Mnemonic == "mov" || line.Mnemonic == "movsxd") && line.Memory.Present && !line.Memory.Written && line.Memory.Size == 4 && line.Memory.Index &&
+                            line.Memory.Scale == 4)
+                        {
+                            loadAt = lines.size() - 1 - back;
+                            found = true;
+                        }
+                    }
+                    if (!found || !added)
+                        return {};
+                    relative = true;
+                }
+                const Instruction& load = lines[loadAt];
+                std::uint64_t base = 0;
+                if (load.Memory.Base)
+                {
+                    const auto address = loadedAddress(load.Memory.Base, lines);
+                    if (!address)
+                        return {};
+                    base = *address;
+                }
+                else if (relative)
+                    return {};
+                const std::uint64_t table = narrowed(base + static_cast<std::uint64_t>(load.Memory.Displacement));
+
+                std::optional<std::size_t> count = caseCount(draft.Block.Start);
+                if (!count || *count == 0)
+                    return {};
+                for (std::size_t back = 1; back <= loadAt && back <= kLookBack; ++back)
+                {
+                    const Instruction& line = lines[loadAt - back];
+                    if (line.Mnemonic != "movzx" || !line.Memory.Present || line.Memory.Size != 1)
+                        continue;
+                    std::optional<std::uint64_t> indexBase = loadedAddress(line.Memory.Base, lines);
+                    if (!indexBase)
+                        indexBase = loadedAddress(line.Memory.Index, lines);
+                    if (!indexBase && (wide || static_cast<std::uint32_t>(line.Memory.Displacement) < 0x10000u))
+                        break;
+                    std::vector<std::uint8_t> indexes(*count);
+                    if (!process.ReadExact(narrowed(indexBase.value_or(0) + static_cast<std::uint64_t>(line.Memory.Displacement)), indexes.data(), indexes.size()))
+                        return {};
+                    count = static_cast<std::size_t>(*std::max_element(indexes.begin(), indexes.end())) + 1;
+                    break;
+                }
+
+                const std::size_t entry = relative ? 4u : static_cast<std::size_t>(pointer);
+                std::vector<std::uint64_t> targets;
+                for (std::size_t i = 0; i < *count; ++i)
+                {
+                    const std::uint64_t at = table + i * entry;
+                    std::uint64_t target = 0;
+                    if (relative)
+                    {
+                        const auto offset = process.ReadValue<std::int32_t>(at);
+                        if (!offset)
+                            return {};
+                        target = base + static_cast<std::uint64_t>(static_cast<std::int64_t>(*offset));
+                    }
+                    else if (wide)
+                    {
+                        const auto value = process.ReadValue<std::uint64_t>(at);
+                        if (!value)
+                            return {};
+                        target = *value;
+                    }
+                    else
+                    {
+                        const auto value = process.ReadValue<std::uint32_t>(at);
+                        if (!value)
+                            return {};
+                        target = *value;
+                    }
+                    if (!target || (target >= table && target < table + *count * entry) || !inside(target, EdgeKind::Jump))
+                        return {};
+                    if (std::find(targets.begin(), targets.end(), target) == targets.end())
+                        targets.push_back(target);
+                }
+                return targets;
+            };
+
         while (!work.empty())
         {
             const std::uint64_t start = work.front();
@@ -103,6 +327,7 @@ namespace Manifold::Disasm
                     tail.Block.Lines.assign(cut, old.Block.Lines.end());
                     tail.Block.Returns = old.Block.Returns;
                     tail.Block.Indirect = old.Block.Indirect;
+                    tail.Block.Cases = std::exchange(old.Block.Cases, 0);
                     tail.Block.Stops = old.Block.Stops;
                     tail.Block.Truncated = old.Block.Truncated;
                     tail.Next = std::move(old.Next);
@@ -170,7 +395,16 @@ namespace Manifold::Disasm
                     else if (line.Kind == Flow::Jump)
                     {
                         if (!line.Target)
-                            draft.Block.Indirect = true;
+                        {
+                            const std::vector<std::uint64_t> cases = switchTargets(draft);
+                            draft.Block.Indirect = cases.empty();
+                            draft.Block.Cases = static_cast<int>(cases.size());
+                            for (const std::uint64_t target : cases)
+                            {
+                                draft.Next.push_back({ target, EdgeKind::Jump });
+                                work.push_back(target);
+                            }
+                        }
                         else if (inside(*line.Target, EdgeKind::Jump))
                         {
                             draft.Next.push_back({ *line.Target, EdgeKind::Jump });

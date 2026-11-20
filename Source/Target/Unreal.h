@@ -98,6 +98,14 @@ namespace Manifold::Target
         UnrealKind Kind = UnrealKind::None;
     };
 
+    struct UnrealTypeIndex
+    {
+        std::unordered_map<std::string, std::uint64_t> Types;
+        std::unordered_map<std::string, std::uint64_t> Enums;
+        std::vector<UnrealType> List;
+        int Objects = 0;
+    };
+
     struct UnrealField
     {
         std::uint64_t Address = 0;
@@ -183,7 +191,8 @@ namespace Manifold::Target
         std::optional<std::string> WideText(std::uint64_t address, std::size_t length) const { return ReadWide(address, length); }
         const UnrealLayout& Layout() const { return m_layout; }
         std::uint64_t EngineObject() const { return m_engine.load(); }
-        const std::vector<UnrealType>& Types() const { return m_typeList; }
+        std::shared_ptr<const UnrealTypeIndex> Index() const;
+        bool RefreshTypes() const;
 
         int Count() const;
         std::optional<std::uint64_t> ObjectAt(int index) const;
@@ -276,7 +285,7 @@ namespace Manifold::Target
         std::optional<std::pair<LiveArray, std::string>> FindObjectArray() const;
 
         bool ResolveClassAndOuter(const LiveArray& live);
-        void IndexTypes();
+        std::shared_ptr<const UnrealTypeIndex> ReadTypes() const;
         bool ProbeSuper();
         bool ProbePropertyFields(std::uint64_t x, std::uint64_t y, std::uint64_t z);
         bool ProbeChain();
@@ -313,9 +322,8 @@ namespace Manifold::Target
         std::uint64_t m_array = 0;
         int m_fieldBlock = 0;
         std::map<std::string, int> m_overrides;
-        std::unordered_map<std::string, std::uint64_t> m_types;
-        std::unordered_map<std::string, std::uint64_t> m_enums;
-        std::vector<UnrealType> m_typeList;
+        mutable std::mutex m_indexLock;
+        mutable std::shared_ptr<const UnrealTypeIndex> m_index = std::make_shared<UnrealTypeIndex>();
         mutable std::atomic<std::uint64_t> m_engine{ 0 };
 
         mutable std::mutex m_lock;

@@ -63,11 +63,16 @@ namespace Manifold::UI
         void RefreshFilter(const Target::UnrealRuntime& runtime);
         void SearchProperties(const std::shared_ptr<const Target::UnrealRuntime>& runtime);
         void FindInstances(const std::shared_ptr<const Target::UnrealRuntime>& runtime, std::uint64_t type);
+        void ReadTypesAgain(bool report);
         void Dissect(std::uint64_t address, const char* what);
         std::string Dump(const Target::UnrealRuntime& runtime, std::uint64_t type) const;
 
         Workspace& m_workspace;
         std::shared_ptr<const Target::UnrealRuntime> m_runtime;
+        std::shared_ptr<const Target::UnrealTypeIndex> m_index;
+        bool m_refreshing = false;
+        bool m_pendingRead = false;
+        std::uint64_t m_whoisSerial = 0;
         std::string m_filter;
         std::string m_appliedFilter = "\x01";
         int m_kind = 0;

@@ -125,8 +125,12 @@ define("loadTable", function(source, merge)
   if merge then
     return __manifoldLoadTable(source, true)
   end
+  local path, temporary = __manifoldStageTable(source)
+  if not path then
+    return nil, temporary
+  end
   createTimer(1, function()
-    __manifoldLoadTable(source, false)
+    __manifoldLoadTable(path, false, temporary)
   end)
   return true
 end)

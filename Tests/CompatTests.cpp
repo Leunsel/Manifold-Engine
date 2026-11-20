@@ -1299,6 +1299,24 @@ namespace Manifold::Tests
         CHECK(engine.Options().RecentTables == recent);
         CHECK(engine.Table().FilePath.empty());
         engine.NewTable();
+
+        LuaCheck(engine, "loadTable says at once what it cannot load and keeps a stream's content", R"LUA(
+            local loaded, why = loadTable([[Z:\no\such\folder\table.CT]])
+            if loaded ~= nil or type(why) ~= "string" then return "a missing file gave " .. tostring(loaded) end
+            local stream = createStringStream('<CheatTable><CheatEntries><CheatEntry><ID>9003</ID><Description>"Loaded later"</Description><VariableType>4 Bytes</VariableType><Address>1000</Address></CheatEntry></CheatEntries></CheatTable>')
+            if loadTable(stream) ~= true then return "deferred" end
+            pcall(function() stream.destroy() end)
+            if getAddressList().Count ~= 0 then return "loaded too early" end
+            return "ok")LUA");
+        for (int i = 0; i < 200 && engine.Table().Count() == 0; ++i)
+        {
+            engine.Tick();
+            ::Sleep(5);
+        }
+        CHECK(engine.Table().FindByDescription("Loaded later") != nullptr);
+        CHECK(engine.Options().RecentTables == recent);
+        CHECK(engine.Table().FilePath.empty());
+        engine.NewTable();
     }
 
     int RunCompatTests()

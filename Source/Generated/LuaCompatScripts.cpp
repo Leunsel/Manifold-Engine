@@ -4655,8 +4655,12 @@ define("loadTable", function(source, merge)
   if merge then
     return __manifoldLoadTable(source, true)
   end
+  local path, temporary = __manifoldStageTable(source)
+  if not path then
+    return nil, temporary
+  end
   createTimer(1, function()
-    __manifoldLoadTable(source, false)
+    __manifoldLoadTable(path, false, temporary)
   end)
   return true
 end)
@@ -4991,12 +4995,12 @@ local function standInTimer(index)
     D[timer].props.enabled = true
     timers[index] = timer
   end
-  D[timer].props.interval = select(index, __manifoldTimerIntervals())
+)MLUA"),
+            std::string_view(R"MLUA(  D[timer].props.interval = select(index, __manifoldTimerIntervals())
   return timer
 end
 define("getFreezeTimer", function() return standInTimer(1) end)
-)MLUA"),
-            std::string_view(R"MLUA(define("getUpdateTimer", function() return standInTimer(2) end)
+define("getUpdateTimer", function() return standInTimer(2) end)
 
 local globalMeta = getmetatable(_G) or {}
 local previousIndex = globalMeta.__index

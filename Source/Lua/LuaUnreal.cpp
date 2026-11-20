@@ -517,7 +517,8 @@ namespace Manifold::Lua
                 {
                     lua_newtable(state);
                     lua_Integer index = 1;
-                    for (const Target::UnrealType& type : runtime.Types())
+                    const std::shared_ptr<const Target::UnrealTypeIndex> types = runtime.Index();
+                    for (const Target::UnrealType& type : types->List)
                     {
                         if (!filter.empty() && !ContainsNoCase(type.Name, filter))
                             continue;

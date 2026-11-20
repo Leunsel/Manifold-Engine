@@ -128,7 +128,7 @@ namespace Manifold::UI
             float width = measure(BlockTitle(static_cast<int>(b))) + m_fontSize * 3.0f;
             for (const Disasm::Instruction& line : block.Lines)
                 width = std::max(width, m_offsetWidth + std::max(m_mnemonicWidth, measure(line.Mnemonic + " ")) + measure(line.Operands));
-            const std::size_t extra = block.Exits.size() + (block.Indirect ? 1u : 0u) + (block.Truncated ? 1u : 0u);
+            const std::size_t extra = block.Exits.size() + (block.Indirect || block.Cases ? 1u : 0u) + (block.Truncated ? 1u : 0u);
             for (const std::uint64_t exit : block.Exits)
                 width = std::max(width, measure("-> " + m_workspace.Core().Describe(exit)));
             const float height = m_lineHeight * static_cast<float>(1 + block.Lines.size() + extra) + m_padding * 2.0f;
@@ -472,6 +472,8 @@ namespace Manifold::UI
                 note("-> " + engine.Describe(exit), ManifoldTheme::FlowJump);
             if (block.Indirect)
                 note("-> indirect jump", ManifoldTheme::Muted);
+            else if (block.Cases)
+                note("-> jump table, " + std::to_string(block.Cases) + (block.Cases == 1 ? " target" : " targets"), ManifoldTheme::Muted);
             if (block.Truncated)
                 note("... the code ends here", ManifoldTheme::Warning);
         }
