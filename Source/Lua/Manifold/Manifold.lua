@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 8
+local API_VERSION = 9
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -1557,6 +1557,145 @@ define(unreal, "claims", {
   doc = "Whether the tool names the address itself (a live object or a remembered array), for other dissect scripts that step aside for Unreal objects. Never raises, false before it is ready.",
 }, function(address)
   return native.unrealClaims(address) == true
+end)
+
+local rtti = area("rtti", "C++ class names from the run-time type information of the opened process, built into the program. Every object of a C++ class with virtual functions starts with a pointer to its class's virtual function table, and in programs built with MSVC or clang-cl with RTTI on (the compiler's default) the slot in front of that table leads to the class's name and base classes. This area reads that in 64-bit and 32-bit processes; nothing is injected or called. Structure Dissect uses it to name structures and pointer fields and to embed member objects (Extensions > C++ RTTI turns that off), and `<Class>::vftable` and `<Class>::vftable@<Base>` symbols resolve in every session. Unreal Engine builds switch RTTI off and GCC builds use another format; there the lookups find nothing. Classes are given by name with their namespaces (`\"Game::Player\"`) or by decorated name (`\".?AVPlayer@Game@@\"`).")
+
+define(rtti, "className", {
+  params = { { name = "address", type = "address" } },
+  returns = "string or nil, or nil, error",
+  doc = "The class of the object whose virtual function table pointer is stored at the address; nil when there is none.",
+}, function(address)
+  return many(native.rttiClassName(address))
+end)
+
+define(rtti, "object", {
+  params = { { name = "address", type = "address" } },
+  returns = "`{ address, start, offset, class, decorated, vtable, module, viaVirtualBase }` or nil, or nil, error",
+  doc = "The object whose virtual function table pointer is stored at the address. `start` is where the complete object starts, which is below the address when it holds a base class's table pointer; `viaVirtualBase` says the object starts with a virtual base table and was found through it.",
+}, function(address)
+  return many(native.rttiObject(address))
+end)
+
+define(rtti, "owner", {
+  params = {
+    { name = "address", type = "address" },
+    { name = "window", type = "integer", optional = true },
+  },
+  returns = "the table `object` gives or nil, or nil, error",
+  doc = "The nearest object at or before the address, searched back over `window` bytes (0x4000 by default); `offset` is the address's offset in it. A member object with virtual functions of its own counts as an object, because RTTI does not say how large a class is.",
+}, function(address, window)
+  return many(native.rttiOwner(address, window))
+end)
+
+define(rtti, "whois", {
+  params = { { name = "address", type = "address" } },
+  returns = "string, or nil, error",
+  doc = "Several lines about the object at or before an address: the class, the object's start, the decorated name, the virtual function table, the module and the base classes with their offsets. `ME-4301` when no object is found.",
+}, function(address)
+  return result(native.rttiWhois(address))
+end)
+
+define(rtti, "bases", {
+  params = { { name = "what", type = "string|integer" } },
+  returns = "list of `{ name, decorated, depth, offset, virtual }`, or nil, error",
+  doc = "A class and its base classes in the order of the hierarchy, the class itself first; `depth` is the level below it. `what` is a class name (a string is always a name, since names such as `Face` would also read as hex) or the address of an object. The offset of a virtual base is known only for an object and missing for a name.",
+}, function(what)
+  return result(native.rttiBases(what))
+end)
+
+define(rtti, "vtable", {
+  params = {
+    { name = "name", type = "string" },
+    { name = "base", type = "string", optional = true },
+  },
+  returns = "address or nil, or nil, error",
+  doc = "A class's virtual function table: the primary one, or the one for a base class part, given by the base's name or its offset in hex. The class is searched in the process's modules by name, without an index of the whole game; nil when it is not found.",
+}, function(name, base)
+  return many(native.rttiVTable(name, base))
+end)
+
+define(rtti, "vtables", {
+  params = { { name = "name", type = "string" } },
+  returns = "list of `{ address, offset, symbol, module }`, or nil, error",
+  doc = "Every virtual function table of a class, ordered by the offset of the part it belongs to, with the symbol it is registered under.",
+}, function(name)
+  return result(native.rttiVTables(name))
+end)
+
+define(rtti, "instances", {
+  params = {
+    { name = "name", type = "string" },
+    { name = "limit", type = "integer", optional = true },
+  },
+  returns = "list of addresses, or nil, error",
+  doc = "The objects of exactly that class: one search of the process's writable memory for the class's primary table pointer, at most `limit` hits (100000 by default, 1000000 at most). Objects of derived classes have another table and are not found.",
+}, function(name, limit)
+  return result(native.rttiInstances(name, limit))
+end)
+
+define(rtti, "classes", {
+  returns = "list of names, or nil, error",
+  doc = "The classes met so far in this process, sorted. It is what the lookups have seen, not an index of the game.",
+}, function()
+  return result(native.rttiClasses())
+end)
+
+define(rtti, "demangle", {
+  params = { { name = "decorated", type = "string" } },
+  returns = "string",
+  doc = "The readable name of a decorated type name: `.?AVPlayer@Game@@` gives `Game::Player`. Templates, nested and anonymous namespaces, local classes and lambdas are read; a name it cannot read comes back unchanged. Needs no process.",
+}, function(decorated)
+  return native.rttiDemangle(decorated)
+end)
+
+define(rtti, "mangle", {
+  params = { { name = "name", type = "string" } },
+  returns = "list of decorated names, or nil",
+  doc = "The decorated names a plain class name can have, as a class and as a struct: `Game::Player` gives `.?AVPlayer@Game@@` and `.?AUPlayer@Game@@`. nil for a name with template arguments or other characters. Needs no process.",
+}, function(name)
+  return native.rttiMangle(name)
+end)
+
+define(rtti, "dissect", {
+  params = { { name = "address", type = "address" } },
+  returns = "true, or nil, error",
+  doc = "Opens Structure Dissect on the object at or before the address, with a structure named after its class; the structure is made, labelled and given its embedded members when none of that name exists.",
+}, function(address)
+  return result(native.rttiDissect(address))
+end)
+
+define(rtti, "label", {
+  params = {
+    { name = "structure", type = "any" },
+    { name = "address", type = "address" },
+  },
+  returns = "number of labelled fields, or nil, error",
+  doc = "What Structure Dissect does after its guess, for a structure that already exists (a Cheat Engine structure object): pointer fields without a name of their own are named `vftable`, `vftable (Base)`, `<Class> vftable`, `<Class>*` or `vbtable`, member objects with a table of another class become embedded structures named after that class, and a structure laid over a virtual function table gets `virtual N`. 0 when the address is neither an object's start nor a table.",
+}, function(structure, address)
+  return result(native.rttiLabel(structure, address))
+end)
+
+define(rtti, "status", {
+  returns = "`{ text, dissect, process, is64Bit, modules, classes, vtables }`",
+  doc = "What is known about the opened process: `text` is the line the menu shows, `dissect` whether Structure Dissect uses RTTI, and the counts are what the lookups have seen. Without a process only `text` and `dissect` are there.",
+}, function()
+  return native.rttiStatus()
+end)
+
+define(rtti, "reset", {
+  returns = "true",
+  doc = "Forgets what was learned about the process and takes back the `::vftable` symbols it registered. The next lookup starts fresh.",
+}, function()
+  return native.rttiReset()
+end)
+
+define(rtti, "claims", {
+  params = { { name = "address", type = "any" } },
+  returns = "boolean",
+  doc = "Whether Structure Dissect's RTTI stage names the address itself: an object or a virtual function table that neither the Unreal tool nor a Godot script claims. Never raises, false without a process or with the stage turned off.",
+}, function(address)
+  return native.rttiClaims(address) == true
 end)
 
 local doc = area("doc", "The documentation behind completion, signature help, hover tooltips and the docs panel. Manifold, Cheat Engine and Lua functions are documented already. A module documents its own functions with `register`, or writes LuaLS annotations (`---@param name type`) above them and calls `registerModule`. A script never replaces Manifold's own documentation.")

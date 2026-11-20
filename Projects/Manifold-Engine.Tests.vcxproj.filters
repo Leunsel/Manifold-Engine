@@ -69,6 +69,9 @@
     <ClCompile Include="..\Source\App\Notifications.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\RttiSession.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\SessionBackup.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -249,6 +252,9 @@
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaRtti.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -286,6 +292,9 @@
       <Filter>Source\Table</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\RttiStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Table\Structures.cpp">
@@ -328,6 +337,12 @@
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\RemoteCall.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\Rtti.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\RttiMsvc.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Symbols.cpp">
@@ -426,6 +441,9 @@
     <ClCompile Include="..\Tests\RelayTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
+    <ClCompile Include="..\Tests\RttiTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
     <ClCompile Include="..\Tests\StructureTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
@@ -451,6 +469,9 @@
       <Filter>Tests</Filter>
     </ClInclude>
     <ClInclude Include="..\Tests\Target\FakeIl2CppScene.h">
+      <Filter>Tests\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Tests\Target\FakeRtti.h">
       <Filter>Tests\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Tests\Target\FakeUnreal.h">

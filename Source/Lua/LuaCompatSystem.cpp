@@ -990,72 +990,14 @@ namespace Manifold::Lua
             return 1;
         }
 
-        std::string DemangleTypeName(std::string name)
-        {
-            if (name.rfind(".?A", 0) != 0 || name.size() < 5)
-                return {};
-            name = name.substr(4);
-            if (name.size() >= 2 && name.compare(name.size() - 2, 2, "@@") == 0)
-                name.resize(name.size() - 2);
-            if (name.find('?') != std::string::npos || name.find('$') != std::string::npos)
-                return name;
-            std::vector<std::string> parts = Split(name, '@');
-            std::string result;
-            for (auto part = parts.rbegin(); part != parts.rend(); ++part)
-            {
-                if (part->empty())
-                    continue;
-                if (!result.empty())
-                    result += "::";
-                result += *part;
-            }
-            return result;
-        }
-
         int RttiClassName(lua_State* state)
         {
-            Engine& engine = Owner(state);
-            const auto& process = engine.Process();
-            const auto object = ResolveAddress(state, 1);
-            if (!process || !object)
+            const auto runtime = Owner(state).Rtti().Runtime();
+            const auto address = runtime ? ResolveAddress(state, 1) : std::nullopt;
+            const auto object = address ? runtime->ObjectAt(*address) : std::nullopt;
+            if (!object)
                 return 0;
-            const int pointer = process->PointerSize();
-            const auto table = process->ReadPointer(*object);
-            if (!table || *table < static_cast<std::uint64_t>(pointer))
-                return 0;
-            const auto locator = process->ReadPointer(*table - static_cast<std::uint64_t>(pointer));
-            if (!locator)
-                return 0;
-            std::uint64_t descriptor = 0;
-            std::uint64_t nameOffset = 0;
-            if (pointer == 8)
-            {
-                const auto signature = process->ReadValue<std::uint32_t>(*locator);
-                const auto typeRva = process->ReadValue<std::uint32_t>(*locator + 0x0C);
-                const auto selfRva = process->ReadValue<std::uint32_t>(*locator + 0x14);
-                if (!signature || *signature != 1 || !typeRva || !selfRva || *selfRva > *locator)
-                    return 0;
-                descriptor = *locator - *selfRva + *typeRva;
-                nameOffset = 0x10;
-            }
-            else
-            {
-                const auto signature = process->ReadValue<std::uint32_t>(*locator);
-                const auto type = process->ReadValue<std::uint32_t>(*locator + 0x0C);
-                if (!signature || *signature != 0 || !type)
-                    return 0;
-                descriptor = *type;
-                nameOffset = 0x08;
-            }
-            char raw[256]{};
-            const std::size_t read = process->Read(descriptor + nameOffset, raw, sizeof(raw) - 1);
-            if (read == 0)
-                return 0;
-            raw[std::min(read, sizeof(raw) - 1)] = '\0';
-            const std::string name = DemangleTypeName(raw);
-            if (name.empty())
-                return 0;
-            lua_pushstring(state, name.c_str());
+            lua_pushlstring(state, object->Class->Name.data(), object->Class->Name.size());
             return 1;
         }
 

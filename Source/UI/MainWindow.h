@@ -84,6 +84,7 @@ namespace Manifold::UI
         void DetectMono();
         void UnityMenu();
         void UnrealMenu();
+        void RttiMenu();
 
         struct ValueUndo
         {

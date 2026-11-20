@@ -9,6 +9,7 @@
 #include "Lua/LuaDocBinding.h"
 #include "Lua/LuaEngine.h"
 #include "Lua/LuaUi.h"
+#include "Lua/LuaRtti.h"
 #include "Lua/LuaUnreal.h"
 #include "Scan/Scanner.h"
 #include "Target/Process.h"
@@ -775,6 +776,7 @@ namespace Manifold::Lua
             RegisterDocNatives(state, -1);
             RegisterUiNatives(state, -1);
             RegisterUnrealNatives(state, -1);
+            RegisterRttiNatives(state, -1);
             if (lua_pcall(state, 1, 1, 0) != LUA_OK)
             {
                 std::string message = lua_tostring(state, -1) ? lua_tostring(state, -1) : "";

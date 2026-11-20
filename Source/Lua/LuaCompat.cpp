@@ -3511,6 +3511,14 @@ namespace Manifold::Lua
         PushStructure(state, definition);
     }
 
+    Table::StructDefinition* StructureObject(lua_State* state, int index)
+    {
+        auto** holder = static_cast<Table::StructDefinition**>(luaL_testudata(state, index, kStructureType));
+        if (!holder || !StructureAlive(state, *holder))
+            return nullptr;
+        return *holder;
+    }
+
     std::optional<std::vector<std::uint8_t>> StreamData(lua_State* state, int index)
     {
         if (auto* holder = static_cast<std::shared_ptr<StreamState>*>(luaL_testudata(state, index, kStreamType)))

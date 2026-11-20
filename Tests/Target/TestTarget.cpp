@@ -1,3 +1,4 @@
+#include "FakeRtti.h"
 #include "FakeUnreal.h"
 
 #include <windows.h>
@@ -921,6 +922,7 @@ struct UnrealMarker
 };
 
 extern "C" __declspec(dllexport) FakeUnreal::Image g_unrealFake = {};
+extern "C" __declspec(dllexport) FakeRtti::Image g_rttiFake = {};
 extern "C" __declspec(dllexport) UnrealMarker g_unrealNames = { { 'M', 'F', 'U', 'E', 'P', 'O', 'O', 'L' }, &FakeUnreal::g_pool };
 extern "C" __declspec(dllexport) UnrealMarker g_unrealObjects = { { 'M', 'F', 'U', 'E', 'O', 'B', 'J', 'S' }, &FakeUnreal::g_objects };
 
@@ -940,6 +942,12 @@ int main(int argc, char** argv)
             g_scene = true;
         else if (std::strcmp(argv[i], "--il2cpp-alt") == 0)
             g_sceneAlt = true;
+        else if (std::strcmp(argv[i], "--rtti") == 0)
+        {
+            static FakeRtti::Builder rtti;
+            if (rtti.Build())
+                g_rttiFake = rtti.Fake;
+        }
         else if (std::strcmp(argv[i], "--mono-values") == 0)
             g_monoValues = true;
         else if (std::strcmp(argv[i], "--mono-agent") == 0)

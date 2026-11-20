@@ -31,6 +31,7 @@ namespace Manifold
         m_lua = std::make_unique<Lua::LuaEngine>(*this);
         m_unreal.RegisterTypes(*m_lua);
         m_unreal.SetReadyHandler([this]() { m_lua->DispatchEvent("unrealReady"); });
+        m_rtti.SetOtherEngines([this](std::uint64_t address) { return UnrealClaims(address) || m_lua->EngineScriptClaims(address); });
         m_debugger.SetLogDebugStrings(settings.LogDebugStrings);
         m_debugger.SetPreferHardware(settings.UseHardwareExecuteBreakpoints);
         m_target.Mono().SetPauseCheck([this] { return m_debugger.Attached() && m_debugger.Broken(); });
@@ -218,6 +219,7 @@ namespace Manifold
         }
         m_settings.LastProcess = m_target.Process()->Name();
         LOG_SUCCESS("Process", Format("Opened %s (pid %u, %s)", m_target.Process()->Name().c_str(), Raw(m_target.Process()->Id()), m_target.Process()->Is64Bit() ? "64-bit" : "32-bit"));
+        m_rtti.ProcessOpened();
         m_lua->OnProcessOpened();
         m_unreal.ProcessOpened();
         m_tables.RefreshValues(true);
@@ -242,6 +244,7 @@ namespace Manifold
         m_tracer.Stop();
         m_debugger.Detach();
         m_unreal.ProcessClosed();
+        m_rtti.ProcessClosed();
         m_managed.NoteExplorer(false);
         m_target.Mono().Stop();
         m_scanner.Reset();
@@ -491,6 +494,12 @@ namespace Manifold
         if (!fromScript)
             m_tables.NoteActivationByHand(record);
         m_activation.RequestActive(record, active, fromScript);
+    }
+
+    bool Engine::UnrealClaims(std::uint64_t address) const
+    {
+        const auto runtime = m_unreal.Runtime();
+        return runtime && (m_unreal.ArrayAt(address).has_value() || runtime->OwnerOf(address).has_value());
     }
 
     void Engine::Notify(LogLevel level, std::string text)

@@ -4,6 +4,7 @@
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
 #include "Table/ManagedStructures.h"
+#include "Table/RttiStructures.h"
 #include "Table/UnrealStructures.h"
 #include "Target/Mono.h"
 #include "UI/Fonts.h"
@@ -19,6 +20,7 @@
 #include <cstring>
 #include <map>
 #include <optional>
+#include <set>
 #include <string_view>
 
 namespace Manifold::UI
@@ -50,6 +52,11 @@ namespace Manifold::UI
             return { .Title = "Reading the Unreal object", .Group = "structure", .Cancellable = false, .Quiet = true, .Serial = true };
         }
 
+        WorkOptions RttiLookup()
+        {
+            return { .Title = "Reading the C++ class", .Group = "structure", .Cancellable = false, .Quiet = true, .Serial = true };
+        }
+
         Table::UnrealArrayLookup UnrealArrays(Engine& engine, std::shared_ptr<const Target::UnrealRuntime> runtime)
         {
             return [&engine, runtime = std::move(runtime)](std::uint64_t data) -> std::optional<std::pair<Target::UnrealField, std::uint64_t>>
@@ -63,7 +70,7 @@ namespace Manifold::UI
 
         bool NativeLookups(Engine& engine)
         {
-            return engine.MonoPresent() || engine.Unreal().Names() || engine.Lua().HasStructureNameLookups();
+            return engine.MonoPresent() || engine.Unreal().Names() || engine.Rtti().Dissects() || engine.Lua().HasStructureNameLookups();
         }
     }
 
@@ -303,7 +310,31 @@ namespace Manifold::UI
                             done(std::move(found));
                     });
             };
-        auto managed = [&engine, alive, address, containing, scripts, done]()
+        auto rtti = [&engine, alive, address, scripts, done]()
+            {
+                if (alive.expired())
+                    return;
+                const auto runtime = engine.Rtti().Dissects() ? engine.Rtti().Runtime() : nullptr;
+                if (!runtime)
+                {
+                    scripts();
+                    return;
+                }
+                engine.Work().Start(RttiLookup(), [&engine, runtime, alive, address, scripts, done](WorkProgress&) -> BackgroundWork::Finish
+                    {
+                        const auto name = Table::RttiStructureName(*runtime, address);
+                        return [&engine, alive, address, name, scripts, done]()
+                            {
+                                if (alive.expired())
+                                    return;
+                                if (!name || (name->Object && engine.Rtti().OthersClaim(address)))
+                                    scripts();
+                                else
+                                    done(Lua::StructureLookup{ name->Name, name->Start });
+                            };
+                    });
+            };
+        auto managed = [&engine, alive, address, containing, scripts = rtti, done]()
             {
                 if (alive.expired())
                     return;
@@ -478,7 +509,7 @@ namespace Manifold::UI
         if (!m_engine.HasProcess())
             return definition;
         const bool mono = address && m_engine.MonoPresent();
-        if (mono || (address && (m_engine.Unreal().Dissects() || m_engine.Lua().HasDissectOverrides())))
+        if (mono || (address && (m_engine.Unreal().Dissects() || m_engine.Rtti().Dissects() || m_engine.Lua().HasDissectOverrides())))
         {
             Fill(&definition, address, size, mono);
             return definition;
@@ -523,12 +554,49 @@ namespace Manifold::UI
                 }
                 engine.Lua().DissectStructureLater(definition, address, [finish](bool handled) { finish(handled, false); });
             };
+        auto rtti = [this, &engine, alive, definition, address, size, scripts, finish]()
+            {
+                const auto runtime = engine.Rtti().Dissects() ? engine.Rtti().Runtime() : nullptr;
+                if (!runtime || !LiveStructure(engine, definition))
+                {
+                    scripts();
+                    return;
+                }
+                const std::uint64_t generation = engine.ProcessGeneration();
+                std::set<std::string> existing = Table::StructureNames(engine.Structures());
+                engine.Work().Start(RttiLookup(), [this, &engine, runtime, alive, generation, definition, address, size, existing = std::move(existing), scripts, finish](WorkProgress&) -> BackgroundWork::Finish
+                    {
+                        auto fill = std::make_shared<Table::RttiFill>(Table::FillFromRtti(*runtime, address, size, existing));
+                        return [this, &engine, alive, generation, definition, address, fill, scripts, finish]()
+                            {
+                                if (generation != engine.ProcessGeneration())
+                                {
+                                    if (!alive.expired())
+                                        m_filling.erase(definition);
+                                    return;
+                                }
+                                if (!fill->Handled || (fill->Object && engine.Rtti().OthersClaim(address)))
+                                {
+                                    scripts();
+                                    return;
+                                }
+                                Table::StructDefinition* live = LiveStructure(engine, definition);
+                                if (!live)
+                                {
+                                    finish(false, true);
+                                    return;
+                                }
+                                Table::ApplyRttiFill(engine.Structures(), *live, std::move(*fill));
+                                finish(true, true);
+                            };
+                    });
+            };
         if (!mono && engine.Unreal().Dissects())
         {
             const auto runtime = engine.Unreal().Runtime();
             const bool customTypes = engine.Unreal().Config().Types;
             const std::uint64_t generation = engine.ProcessGeneration();
-            engine.Work().Start(UnrealLookup(), [this, &engine, runtime, alive, generation, definition, address, customTypes, scripts, finish](WorkProgress&) -> BackgroundWork::Finish
+            engine.Work().Start(UnrealLookup(), [this, &engine, runtime, alive, generation, definition, address, customTypes, scripts = rtti, finish](WorkProgress&) -> BackgroundWork::Finish
                 {
                     Table::UnrealFill fill = Table::FillFromUnreal(*runtime, address, UnrealArrays(engine, runtime), customTypes);
                     return [this, &engine, alive, generation, definition, fill = std::move(fill), scripts, finish]()
@@ -562,10 +630,10 @@ namespace Manifold::UI
         }
         if (!mono)
         {
-            scripts();
+            rtti();
             return;
         }
-        engine.Work().Start(ManagedLookup(), [&engine, definition, address, scripts, finish](WorkProgress&) -> BackgroundWork::Finish
+        engine.Work().Start(ManagedLookup(), [&engine, definition, address, scripts = rtti, finish](WorkProgress&) -> BackgroundWork::Finish
             {
                 std::vector<Target::MonoField> fields;
                 Table::ManagedLayouts nested;

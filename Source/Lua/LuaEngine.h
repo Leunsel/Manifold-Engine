@@ -356,6 +356,7 @@ namespace Manifold::Lua
         void OnProcessOpened();
         void OnProcessClosed();
         void DispatchEvent(const char* name);
+        bool EngineScriptClaims(std::uint64_t address);
 
         std::uint64_t AddEntry(ConsoleEntry entry);
         void PrintError(const std::string& message, std::uint64_t inputId = 0);

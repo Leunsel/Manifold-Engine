@@ -7,6 +7,7 @@
 #include "App/Settings.h"
 #include "App/TableRuntime.h"
 #include "App/TargetSession.h"
+#include "App/RttiSession.h"
 #include "App/UnrealSession.h"
 #include "App/WriteHistory.h"
 #include "App/SettingsStore.h"
@@ -128,6 +129,8 @@ namespace Manifold
         const ManagedSession& Managed() const { return m_managed; }
         UnrealSession& Unreal() { return m_unreal; }
         const UnrealSession& Unreal() const { return m_unreal; }
+        RttiSession& Rtti() { return m_rtti; }
+        bool UnrealClaims(std::uint64_t address) const;
         WriteHistory& Writes() { return m_writes; }
         SessionBackup& Backups() { return m_backup; }
         Target::MonoBridge& Mono() { return m_target.Mono(); }
@@ -228,5 +231,6 @@ namespace Manifold
         SessionBackup m_backup{ *this };
         ManagedSession m_managed{ m_target, m_work, m_settings, [this](LogLevel level, std::string text) { Notify(level, std::move(text)); } };
         UnrealSession m_unreal{ m_target, m_work, [this](LogLevel level, std::string text) { Notify(level, std::move(text)); } };
+        RttiSession m_rtti{ m_target, m_settings };
     };
 }

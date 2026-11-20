@@ -45,6 +45,7 @@ namespace Manifold::Lua
     void PushRecord(lua_State* state, const Table::MemoryRecord* record);
     void PushAddressList(lua_State* state);
     void PushStructureObject(lua_State* state, Table::StructDefinition* definition);
+    Table::StructDefinition* StructureObject(lua_State* state, int index);
     bool PushExtra(lua_State* state, int id, std::string_view key);
     std::vector<int> RecordsWithFunction(lua_State* state, std::string_view key);
     void DropExtras(lua_State* state, int id);

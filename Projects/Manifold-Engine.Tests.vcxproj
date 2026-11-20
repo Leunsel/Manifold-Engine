@@ -111,6 +111,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\App\Engine.cpp" />
     <ClCompile Include="..\Source\App\ManagedSession.cpp" />
     <ClCompile Include="..\Source\App\Notifications.cpp" />
+    <ClCompile Include="..\Source\App\RttiSession.cpp" />
     <ClCompile Include="..\Source\App\SessionBackup.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
     <ClCompile Include="..\Source\App\SettingsStore.cpp" />
@@ -171,6 +172,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaMono.cpp" />
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaRtti.cpp" />
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp" />
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
@@ -186,6 +188,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Table\AddressList.cpp" />
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />
+    <ClCompile Include="..\Source\Table\RttiStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
     <ClCompile Include="..\Source\Target\CodeCall.cpp" />
@@ -200,6 +203,8 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Target\PdbSymbols.cpp" />
     <ClCompile Include="..\Source\Target\Process.cpp" />
     <ClCompile Include="..\Source\Target\RemoteCall.cpp" />
+    <ClCompile Include="..\Source\Target\Rtti.cpp" />
+    <ClCompile Include="..\Source\Target\RttiMsvc.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
     <ClCompile Include="..\Source\Target\UnityExplorer.cpp" />
     <ClCompile Include="..\Source\Target\UnityExplorerIl2Cpp.cpp" />
@@ -232,6 +237,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\ManifoldApiTests.cpp" />
     <ClCompile Include="..\Tests\MonoTests.cpp" />
     <ClCompile Include="..\Tests\RelayTests.cpp" />
+    <ClCompile Include="..\Tests\RttiTests.cpp" />
     <ClCompile Include="..\Tests\StructureTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
     <ClCompile Include="..\Tests\TextTests.cpp" />
@@ -243,6 +249,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
   <ItemGroup>
     <ClInclude Include="..\Tests\TestKit.h" />
     <ClInclude Include="..\Tests\Target\FakeIl2CppScene.h" />
+    <ClInclude Include="..\Tests\Target\FakeRtti.h" />
     <ClInclude Include="..\Tests\Target\FakeUnreal.h" />
   </ItemGroup>
   <ItemGroup>

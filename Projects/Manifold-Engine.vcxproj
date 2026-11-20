@@ -124,6 +124,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\App\Engine.cpp" />
     <ClCompile Include="..\Source\App\ManagedSession.cpp" />
     <ClCompile Include="..\Source\App\Notifications.cpp" />
+    <ClCompile Include="..\Source\App\RttiSession.cpp" />
     <ClCompile Include="..\Source\App\SessionBackup.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
     <ClCompile Include="..\Source\App\SettingsStore.cpp" />
@@ -185,6 +186,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Lua\LuaMono.cpp" />
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaRtti.cpp" />
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp" />
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
@@ -200,6 +202,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Table\AddressList.cpp" />
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />
+    <ClCompile Include="..\Source\Table\RttiStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
     <ClCompile Include="..\Source\Target\CodeCall.cpp" />
@@ -214,6 +217,8 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Target\PdbSymbols.cpp" />
     <ClCompile Include="..\Source\Target\Process.cpp" />
     <ClCompile Include="..\Source\Target\RemoteCall.cpp" />
+    <ClCompile Include="..\Source\Target\Rtti.cpp" />
+    <ClCompile Include="..\Source\Target\RttiMsvc.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
     <ClCompile Include="..\Source\Target\UnityExplorer.cpp" />
     <ClCompile Include="..\Source\Target\UnityExplorerIl2Cpp.cpp" />
@@ -283,6 +288,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\App\Engine.h" />
     <ClInclude Include="..\Source\App\ManagedSession.h" />
     <ClInclude Include="..\Source\App\Notifications.h" />
+    <ClInclude Include="..\Source\App\RttiSession.h" />
     <ClInclude Include="..\Source\App\SessionBackup.h" />
     <ClInclude Include="..\Source\App\Settings.h" />
     <ClInclude Include="..\Source\App\SettingsStore.h" />
@@ -340,6 +346,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Lua\LuaDocBinding.h" />
     <ClInclude Include="..\Source\Lua\LuaDocs.h" />
     <ClInclude Include="..\Source\Lua\LuaEngine.h" />
+    <ClInclude Include="..\Source\Lua\LuaRtti.h" />
     <ClInclude Include="..\Source\Lua\LuaSnapshot.h" />
     <ClInclude Include="..\Source\Lua\LuaUi.h" />
     <ClInclude Include="..\Source\Lua\LuaUnreal.h" />
@@ -351,6 +358,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Table\AddressList.h" />
     <ClInclude Include="..\Source\Table\CheatTable.h" />
     <ClInclude Include="..\Source\Table\ManagedStructures.h" />
+    <ClInclude Include="..\Source\Table\RttiStructures.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
     <ClInclude Include="..\Source\Table\UnrealStructures.h" />
     <ClInclude Include="..\Source\Target\CodeCall.h" />
@@ -366,6 +374,8 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Target\PdbSymbols.h" />
     <ClInclude Include="..\Source\Target\Process.h" />
     <ClInclude Include="..\Source\Target\RemoteCall.h" />
+    <ClInclude Include="..\Source\Target\Rtti.h" />
+    <ClInclude Include="..\Source\Target\RttiMsvc.h" />
     <ClInclude Include="..\Source\Target\Symbols.h" />
     <ClInclude Include="..\Source\Target\UnityExplorer.h" />
     <ClInclude Include="..\Source\Target\UnityExplorerIl2Cpp.h" />

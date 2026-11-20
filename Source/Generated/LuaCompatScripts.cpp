@@ -5024,7 +5024,7 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 8
+local API_VERSION = 9
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -6586,6 +6586,146 @@ define(unreal, "claims", {
   return native.unrealClaims(address) == true
 end)
 
+local rtti = area("rtti", "C++ class names from the run-time type information of the opened process, built into the program. Every object of a C++ class with virtual functions starts with a pointer to its class's virtual function table, and in programs built with MSVC or clang-cl with RTTI on (the compiler's default) the slot in front of that table leads to the class's name and base classes. This area reads that in 64-bit and 32-bit processes; nothing is injected or called. Structure Dissect uses it to name structures and pointer fields and to embed member objects (Extensions > C++ RTTI turns that off), and `<Class>::vftable` and `<Class>::vftable@<Base>` symbols resolve in every session. Unreal Engine builds switch RTTI off and GCC builds use another format; there the lookups find nothing. Classes are given by name with their namespaces (`\"Game::Player\"`) or by decorated name (`\".?AVPlayer@Game@@\"`).")
+
+define(rtti, "className", {
+  params = { { name = "address", type = "address" } },
+  returns = "string or nil, or nil, error",
+  doc = "The class of the object whose virtual function table pointer is stored at the address; nil when there is none.",
+}, function(address)
+  return many(native.rttiClassName(address))
+end)
+
+define(rtti, "object", {
+  params = { { name = "address", type = "address" } },
+)MLUA"),
+            std::string_view(R"MLUA(  returns = "`{ address, start, offset, class, decorated, vtable, module, viaVirtualBase }` or nil, or nil, error",
+  doc = "The object whose virtual function table pointer is stored at the address. `start` is where the complete object starts, which is below the address when it holds a base class's table pointer; `viaVirtualBase` says the object starts with a virtual base table and was found through it.",
+}, function(address)
+  return many(native.rttiObject(address))
+end)
+
+define(rtti, "owner", {
+  params = {
+    { name = "address", type = "address" },
+    { name = "window", type = "integer", optional = true },
+  },
+  returns = "the table `object` gives or nil, or nil, error",
+  doc = "The nearest object at or before the address, searched back over `window` bytes (0x4000 by default); `offset` is the address's offset in it. A member object with virtual functions of its own counts as an object, because RTTI does not say how large a class is.",
+}, function(address, window)
+  return many(native.rttiOwner(address, window))
+end)
+
+define(rtti, "whois", {
+  params = { { name = "address", type = "address" } },
+  returns = "string, or nil, error",
+  doc = "Several lines about the object at or before an address: the class, the object's start, the decorated name, the virtual function table, the module and the base classes with their offsets. `ME-4301` when no object is found.",
+}, function(address)
+  return result(native.rttiWhois(address))
+end)
+
+define(rtti, "bases", {
+  params = { { name = "what", type = "string|integer" } },
+  returns = "list of `{ name, decorated, depth, offset, virtual }`, or nil, error",
+  doc = "A class and its base classes in the order of the hierarchy, the class itself first; `depth` is the level below it. `what` is a class name (a string is always a name, since names such as `Face` would also read as hex) or the address of an object. The offset of a virtual base is known only for an object and missing for a name.",
+}, function(what)
+  return result(native.rttiBases(what))
+end)
+
+define(rtti, "vtable", {
+  params = {
+    { name = "name", type = "string" },
+    { name = "base", type = "string", optional = true },
+  },
+  returns = "address or nil, or nil, error",
+  doc = "A class's virtual function table: the primary one, or the one for a base class part, given by the base's name or its offset in hex. The class is searched in the process's modules by name, without an index of the whole game; nil when it is not found.",
+}, function(name, base)
+  return many(native.rttiVTable(name, base))
+end)
+
+define(rtti, "vtables", {
+  params = { { name = "name", type = "string" } },
+  returns = "list of `{ address, offset, symbol, module }`, or nil, error",
+  doc = "Every virtual function table of a class, ordered by the offset of the part it belongs to, with the symbol it is registered under.",
+}, function(name)
+  return result(native.rttiVTables(name))
+end)
+
+define(rtti, "instances", {
+  params = {
+    { name = "name", type = "string" },
+    { name = "limit", type = "integer", optional = true },
+  },
+  returns = "list of addresses, or nil, error",
+  doc = "The objects of exactly that class: one search of the process's writable memory for the class's primary table pointer, at most `limit` hits (100000 by default, 1000000 at most). Objects of derived classes have another table and are not found.",
+}, function(name, limit)
+  return result(native.rttiInstances(name, limit))
+end)
+
+define(rtti, "classes", {
+  returns = "list of names, or nil, error",
+  doc = "The classes met so far in this process, sorted. It is what the lookups have seen, not an index of the game.",
+}, function()
+  return result(native.rttiClasses())
+end)
+
+define(rtti, "demangle", {
+  params = { { name = "decorated", type = "string" } },
+  returns = "string",
+  doc = "The readable name of a decorated type name: `.?AVPlayer@Game@@` gives `Game::Player`. Templates, nested and anonymous namespaces, local classes and lambdas are read; a name it cannot read comes back unchanged. Needs no process.",
+}, function(decorated)
+  return native.rttiDemangle(decorated)
+end)
+
+define(rtti, "mangle", {
+  params = { { name = "name", type = "string" } },
+  returns = "list of decorated names, or nil",
+  doc = "The decorated names a plain class name can have, as a class and as a struct: `Game::Player` gives `.?AVPlayer@Game@@` and `.?AUPlayer@Game@@`. nil for a name with template arguments or other characters. Needs no process.",
+}, function(name)
+  return native.rttiMangle(name)
+end)
+
+define(rtti, "dissect", {
+  params = { { name = "address", type = "address" } },
+  returns = "true, or nil, error",
+  doc = "Opens Structure Dissect on the object at or before the address, with a structure named after its class; the structure is made, labelled and given its embedded members when none of that name exists.",
+}, function(address)
+  return result(native.rttiDissect(address))
+end)
+
+define(rtti, "label", {
+  params = {
+    { name = "structure", type = "any" },
+    { name = "address", type = "address" },
+  },
+  returns = "number of labelled fields, or nil, error",
+  doc = "What Structure Dissect does after its guess, for a structure that already exists (a Cheat Engine structure object): pointer fields without a name of their own are named `vftable`, `vftable (Base)`, `<Class> vftable`, `<Class>*` or `vbtable`, member objects with a table of another class become embedded structures named after that class, and a structure laid over a virtual function table gets `virtual N`. 0 when the address is neither an object's start nor a table.",
+}, function(structure, address)
+  return result(native.rttiLabel(structure, address))
+end)
+
+define(rtti, "status", {
+  returns = "`{ text, dissect, process, is64Bit, modules, classes, vtables }`",
+  doc = "What is known about the opened process: `text` is the line the menu shows, `dissect` whether Structure Dissect uses RTTI, and the counts are what the lookups have seen. Without a process only `text` and `dissect` are there.",
+}, function()
+  return native.rttiStatus()
+end)
+
+define(rtti, "reset", {
+  returns = "true",
+  doc = "Forgets what was learned about the process and takes back the `::vftable` symbols it registered. The next lookup starts fresh.",
+}, function()
+  return native.rttiReset()
+end)
+
+define(rtti, "claims", {
+  params = { { name = "address", type = "any" } },
+  returns = "boolean",
+  doc = "Whether Structure Dissect's RTTI stage names the address itself: an object or a virtual function table that neither the Unreal tool nor a Godot script claims. Never raises, false without a process or with the stage turned off.",
+}, function(address)
+  return native.rttiClaims(address) == true
+end)
+
 local doc = area("doc", "The documentation behind completion, signature help, hover tooltips and the docs panel. Manifold, Cheat Engine and Lua functions are documented already. A module documents its own functions with `register`, or writes LuaLS annotations (`---@param name type`) above them and calls `registerModule`. A script never replaces Manifold's own documentation.")
 
 define(doc, "register", {
@@ -6606,8 +6746,7 @@ define(doc, "registerModule", {
     { name = "options", type = "table", optional = true, keys = { doc = "string" } },
   },
   returns = "number of registered functions, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Documents every function of a module table under `path` (such as `\"ManifoldGodot\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
+  doc = "Documents every function of a module table under `path` (such as `\"ManifoldGodot\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
 }, function(path, module, options)
   return docResult(native.docRegisterModule(path, module, options))
 end)
@@ -6694,7 +6833,8 @@ do
   end)
 end
 
-local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
+)MLUA"),
+            std::string_view(R"MLUA(local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
 
 local function subarea(parent, name, summary)
   local path = parent.path .. "." .. name
@@ -6880,8 +7020,7 @@ local function keepHandlers(entry, options)
   end
 end
 
-)MLUA"),
-            std::string_view(R"MLUA(local function dropEntry(id)
+local function dropEntry(id)
   local entry = uiEntries[id]
   if not entry then
     return
@@ -6991,7 +7130,8 @@ widgetObject = function(entry)
     end
     return result(native.uiSet(entry.id, value))
   end)
-  method("draw", { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } } }, function(drawings, options)
+)MLUA"),
+            std::string_view(R"MLUA(  method("draw", { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } } }, function(drawings, options)
     if entry.kind ~= "canvas" then
       misuse(prefix .. ".draw: only a canvas draws")
     end
@@ -7184,8 +7324,7 @@ local WINDOW_METHOD_DOCS = {
   remove = { returns = "boolean", doc = "Removes the window and its widgets for good." },
   update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, update interval or handlers." },
   show = { returns = "boolean", doc = "Shows the window again after the user or `hide` closed it." },
-)MLUA"),
-            std::string_view(R"MLUA(  hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
+  hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
   focus = { returns = "boolean", doc = "Shows the window and brings it to the front." },
   isOpen = { returns = "boolean", doc = "Whether the window exists and is shown." },
 }
@@ -7216,7 +7355,8 @@ local WIDGET_METHOD_DOCS = {
   add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget to a container (`row`, `column`, `section`, `tab`, `split`; `tabs` take `tab` widgets only)." },
   clear = { returns = "boolean", doc = "Removes a container's widgets, or a canvas's drawings." },
   remove = { returns = "boolean", doc = "Removes the widget and everything in it." },
-  update = { params = { { name = "options", type = "table" } }, returns = "boolean", doc = "Changes options of the widget: the same keys `add` takes for its kind, handlers included." },
+)MLUA"),
+            std::string_view(R"MLUA(  update = { params = { { name = "options", type = "table" } }, returns = "boolean", doc = "Changes options of the widget: the same keys `add` takes for its kind, handlers included." },
   get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a number, the chosen combo item's or table row's number, the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
   set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
   draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
@@ -7385,8 +7525,7 @@ local function noticeObject(entry)
           state.progress = options.progress
         end
         if options.sticky ~= nil then
-)MLUA"),
-            std::string_view(R"MLUA(          state.sticky = options.sticky
+          state.sticky = options.sticky
         end
         local sticky = state.sticky or (state.progress >= 0 and state.progress < 1)
         if not native.uiNoticeUpdate(entry.id, state.text, state.level, state.progress, sticky) then
@@ -7473,7 +7612,8 @@ end
 
 local function addEntry(kind, keys, values, options)
   options = checkOptions("manifold.ui." .. kind .. ".add", keys, options)
-  local owner = ownerSource()
+)MLUA"),
+            std::string_view(R"MLUA(  local owner = ownerSource()
   local copy = {}
   for key, value in pairs(values) do
     copy[key] = value
@@ -7673,8 +7813,7 @@ local INTRO = [[
 
 `manifold` is Manifold Engine's own Lua API. It lives beside the Cheat Engine functions in [LUA-API.md](LUA-API.md). Those keep Cheat Engine's names and habits for compatibility; `manifold` follows one fixed schema instead, and every call is checked against it.
 
-)MLUA"),
-            std::string_view(R"MLUA(This file is generated from the API itself (`Manifold-Engine.Tests.exe --manifold-markdown`), and the tests fail when it is out of date.
+This file is generated from the API itself (`Manifold-Engine.Tests.exe --manifold-markdown`), and the tests fail when it is out of date.
 ]]
 
 local RULES = [[
@@ -7712,6 +7851,143 @@ local function markdown()
 end
 
 return markdown
+)MLUA"),
+        };
+        constexpr std::array<std::string_view, 1> kManifold1 = {
+            std::string_view(R"MLUA(local manifold = manifold
+local rtti = manifold.rtti
+
+local RTTI = {}
+RTTI.VERSION = "3.0.0"
+
+local function ready()
+  if not manifold.process.isOpen() then
+    error("no process is opened", 3)
+  end
+end
+
+local function toAddress(value)
+  if math.type(value) == "integer" then
+    return value
+  end
+  if type(value) == "number" then
+    return math.tointeger(math.floor(value))
+  end
+  if type(value) == "string" and value ~= "" then
+    local address = manifold.process.address(value)
+    if address and address ~= 0 then
+      return address
+    end
+  end
+  return nil
+end
+
+function RTTI.demangle(decorated)
+  if type(decorated) ~= "string" then
+    return nil
+  end
+  return rtti.demangle(decorated)
+end
+
+function RTTI.mangle(name)
+  if type(name) ~= "string" then
+    return nil
+  end
+  return rtti.mangle(name)
+end
+
+function RTTI.className(address)
+  ready()
+  local at = toAddress(address)
+  return at and (rtti.className(at)) or nil
+end
+
+function RTTI.object(address)
+  ready()
+  local at = toAddress(address)
+  return at and (rtti.object(at)) or nil
+end
+
+function RTTI.owner(address, window)
+  ready()
+  local at = toAddress(address)
+  if not at then
+    return nil
+  end
+  return (rtti.owner(at, math.type(window) == "integer" and window or nil))
+end
+
+function RTTI.whois(address)
+  ready()
+  local at = toAddress(address)
+  return at and (rtti.whois(at)) or nil
+end
+
+function RTTI.bases(what)
+  ready()
+  if type(what) ~= "string" then
+    what = toAddress(what)
+  end
+  return what and (rtti.bases(what)) or nil
+end
+
+function RTTI.vtable(name, base)
+  ready()
+  if type(name) ~= "string" then
+    return nil
+  end
+  return (rtti.vtable(name, type(base) == "string" and base or nil))
+end
+
+function RTTI.vtables(name)
+  ready()
+  if type(name) ~= "string" then
+    return nil
+  end
+  return (rtti.vtables(name))
+end
+
+function RTTI.instances(name, limit)
+  ready()
+  if type(name) ~= "string" then
+    return nil
+  end
+  local count = type(limit) == "number" and math.tointeger(math.floor(limit)) or nil
+  return (rtti.instances(name, count))
+end
+
+function RTTI.dissect(address)
+  ready()
+  local at = toAddress(address)
+  local ok = at and rtti.dissect(at)
+  if not ok then
+    error(string.format("no object with run-time type information at %X", at or 0), 2)
+  end
+  return true
+end
+
+function RTTI.label(structure, address)
+  ready()
+  local at = toAddress(address)
+  return at and (rtti.label(structure, at)) or 0
+end
+
+function RTTI.classes()
+  ready()
+  return (rtti.classes())
+end
+
+function RTTI.status()
+  return rtti.status().text
+end
+
+function RTTI.reset()
+  rtti.reset()
+end
+
+rawset(_G, "ManifoldRTTI", RTTI)
+
+manifold.doc.registerModule("ManifoldRTTI", RTTI, { doc = "The names of the Manifold-RTTI autorun script, kept for tables and scripts written against it. The run-time type information is built into the program now: these functions call manifold.rtti and return what the script returned (nil where it found nothing, an error without a process)." })
 )MLUA"),
         };
         constexpr std::array<std::string_view, 2> kDoc0 = {
@@ -8272,8 +8548,9 @@ function utf8.codepoint(s, i, j) end
             CompatScript{ "Functions.lua", std::span<const std::string_view>(kScript4) },
         };
 
-        const std::array<CompatScript, 1> kManifoldScripts = {
+        const std::array<CompatScript, 2> kManifoldScripts = {
             CompatScript{ "Manifold.lua", std::span<const std::string_view>(kManifold0) },
+            CompatScript{ "RttiCompat.lua", std::span<const std::string_view>(kManifold1) },
         };
 
         const std::array<CompatScript, 1> kDocScripts = {

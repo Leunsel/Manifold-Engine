@@ -578,6 +578,7 @@ namespace Manifold::UI
             {
                 UnrealMenu();
                 UnityMenu();
+                RttiMenu();
                 if (scriptRoots || workspace.Ui().HasMenu())
                     ImGui::Separator();
             }
@@ -2267,6 +2268,29 @@ namespace Manifold::UI
         ItemTooltip("Type_Property symbols such as Actor_RootComponent, and GObjects, FNamePool and GameEngine, work in addresses.");
         ImGui::MenuItem("Custom types", nullptr, &config.Types);
         ItemTooltip("UE FName, UE FString and UE Object Index show names, strings and weak references as text.");
+        ImGui::EndMenu();
+    }
+
+    void MainWindow::RttiMenu()
+    {
+        if (!ImGui::BeginMenu(ICON_FA_SITEMAP "  C++ RTTI"))
+            return;
+        RttiSession& rtti = m_engine.Rtti();
+        SectionLabel(m_engine.HasProcess() ? rtti.StatusText().c_str() : "No process is open");
+        ImGui::Separator();
+        bool enabled = rtti.Enabled();
+        if (ImGui::MenuItem("Structure Dissect uses RTTI", nullptr, &enabled))
+        {
+            rtti.SetEnabled(enabled);
+            m_engine.SaveOptionsSoon();
+        }
+        ItemTooltip("New structures and expanded pointers are named after the object's C++ class, pointer fields are labelled (vftable, Class*), "
+            "and member objects with a virtual function table of their own become embedded structures. Programs built with MSVC or clang-cl, 64-bit and 32-bit.");
+        if (ImGui::MenuItem(ICON_FA_ERASER "  Forget what was learned", nullptr, false, m_engine.HasProcess()))
+            rtti.Reset();
+        ItemTooltip("Drops the classes seen in this process and the Class::vftable symbols registered for them. The next lookup starts fresh.");
+        ImGui::Separator();
+        SectionLabel("Who owns an address, objects of a class: manifold.rtti in the Lua engine");
         ImGui::EndMenu();
     }
 

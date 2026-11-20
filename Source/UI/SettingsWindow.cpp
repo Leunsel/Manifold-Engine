@@ -1417,6 +1417,13 @@ namespace Manifold::UI
             changed |= ToggleSwitch("##dissecttabs", &settings.StructureTabs);
             list.EndRow();
         }
+        if (list.Row("Use C++ RTTI",
+                "Structures and expanded pointers are named after the object's C++ class, pointer fields are labelled (vftable, Class*), and member objects "
+                "with a virtual function table of their own become embedded structures. Reads the run-time type information of programs built with MSVC or clang-cl.", toggle))
+        {
+            changed |= ToggleSwitch("##dissectrtti", &settings.StructureRtti);
+            list.EndRow();
+        }
 
         list.Section("Breakpoints");
         if (list.Row("Hardware breakpoints for code", "Use a free debug register instead of changing the code, so integrity checks do not see it. There are only four.", toggle))

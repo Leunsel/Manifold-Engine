@@ -21,7 +21,7 @@ namespace Manifold
 
     UnrealSession::UnrealSession(TargetSession& target, BackgroundWork& work, Notifier notify) : m_target(target), m_work(work), m_notify(std::move(notify))
     {
-        m_target.SetExtraSymbols([this](std::string_view name) { return ResolveSymbol(name); });
+        m_target.AddExtraSymbols([this](std::string_view name) { return ResolveSymbol(name); });
     }
 
     std::shared_ptr<const Target::UnrealRuntime> UnrealSession::Runtime() const

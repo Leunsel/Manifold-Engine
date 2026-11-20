@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 8 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 9 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -197,6 +197,29 @@ Unreal Engine 4 and 5 reflection for 64-bit and 32-bit games, built into the pro
 | `manifold.unreal.walk(object, steps, root?)` | address, expression, field, or nil, error | Follows properties by name from an object: `walk(manifold.unreal.pawn(), { "RootComponent", "RelativeLocation" })`. Object properties are followed, structs entered, and `Name[i]` picks a TArray element. Gives the address of the last step, an address expression from `root` (the object's address by default) with offset symbols, such as `[GameEngine+GameEngine_GameViewport]+...`, and the last field. |
 | `manifold.unreal.dump(type)` | list of lines, or nil, error | A class or struct as C++-like lines: its name, parent and size, then one line per property with offset, type, name and the class that declares it. |
 | `manifold.unreal.claims(address)` | boolean | Whether the tool names the address itself (a live object or a remembered array), for other dissect scripts that step aside for Unreal objects. Never raises, false before it is ready. |
+
+## manifold.rtti
+
+C++ class names from the run-time type information of the opened process, built into the program. Every object of a C++ class with virtual functions starts with a pointer to its class's virtual function table, and in programs built with MSVC or clang-cl with RTTI on (the compiler's default) the slot in front of that table leads to the class's name and base classes. This area reads that in 64-bit and 32-bit processes; nothing is injected or called. Structure Dissect uses it to name structures and pointer fields and to embed member objects (Extensions > C++ RTTI turns that off), and `<Class>::vftable` and `<Class>::vftable@<Base>` symbols resolve in every session. Unreal Engine builds switch RTTI off and GCC builds use another format; there the lookups find nothing. Classes are given by name with their namespaces (`"Game::Player"`) or by decorated name (`".?AVPlayer@Game@@"`).
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.rtti.className(address)` | string or nil, or nil, error | The class of the object whose virtual function table pointer is stored at the address; nil when there is none. |
+| `manifold.rtti.object(address)` | `{ address, start, offset, class, decorated, vtable, module, viaVirtualBase }` or nil, or nil, error | The object whose virtual function table pointer is stored at the address. `start` is where the complete object starts, which is below the address when it holds a base class's table pointer; `viaVirtualBase` says the object starts with a virtual base table and was found through it. |
+| `manifold.rtti.owner(address, window?)` | the table `object` gives or nil, or nil, error | The nearest object at or before the address, searched back over `window` bytes (0x4000 by default); `offset` is the address's offset in it. A member object with virtual functions of its own counts as an object, because RTTI does not say how large a class is. |
+| `manifold.rtti.whois(address)` | string, or nil, error | Several lines about the object at or before an address: the class, the object's start, the decorated name, the virtual function table, the module and the base classes with their offsets. `ME-4301` when no object is found. |
+| `manifold.rtti.bases(what)` | list of `{ name, decorated, depth, offset, virtual }`, or nil, error | A class and its base classes in the order of the hierarchy, the class itself first; `depth` is the level below it. `what` is a class name (a string is always a name, since names such as `Face` would also read as hex) or the address of an object. The offset of a virtual base is known only for an object and missing for a name. |
+| `manifold.rtti.vtable(name, base?)` | address or nil, or nil, error | A class's virtual function table: the primary one, or the one for a base class part, given by the base's name or its offset in hex. The class is searched in the process's modules by name, without an index of the whole game; nil when it is not found. |
+| `manifold.rtti.vtables(name)` | list of `{ address, offset, symbol, module }`, or nil, error | Every virtual function table of a class, ordered by the offset of the part it belongs to, with the symbol it is registered under. |
+| `manifold.rtti.instances(name, limit?)` | list of addresses, or nil, error | The objects of exactly that class: one search of the process's writable memory for the class's primary table pointer, at most `limit` hits (100000 by default, 1000000 at most). Objects of derived classes have another table and are not found. |
+| `manifold.rtti.classes()` | list of names, or nil, error | The classes met so far in this process, sorted. It is what the lookups have seen, not an index of the game. |
+| `manifold.rtti.demangle(decorated)` | string | The readable name of a decorated type name: `.?AVPlayer@Game@@` gives `Game::Player`. Templates, nested and anonymous namespaces, local classes and lambdas are read; a name it cannot read comes back unchanged. Needs no process. |
+| `manifold.rtti.mangle(name)` | list of decorated names, or nil | The decorated names a plain class name can have, as a class and as a struct: `Game::Player` gives `.?AVPlayer@Game@@` and `.?AUPlayer@Game@@`. nil for a name with template arguments or other characters. Needs no process. |
+| `manifold.rtti.dissect(address)` | true, or nil, error | Opens Structure Dissect on the object at or before the address, with a structure named after its class; the structure is made, labelled and given its embedded members when none of that name exists. |
+| `manifold.rtti.label(structure, address)` | number of labelled fields, or nil, error | What Structure Dissect does after its guess, for a structure that already exists (a Cheat Engine structure object): pointer fields without a name of their own are named `vftable`, `vftable (Base)`, `<Class> vftable`, `<Class>*` or `vbtable`, member objects with a table of another class become embedded structures named after that class, and a structure laid over a virtual function table gets `virtual N`. 0 when the address is neither an object's start nor a table. |
+| `manifold.rtti.status()` | `{ text, dissect, process, is64Bit, modules, classes, vtables }` | What is known about the opened process: `text` is the line the menu shows, `dissect` whether Structure Dissect uses RTTI, and the counts are what the lookups have seen. Without a process only `text` and `dissect` are there. |
+| `manifold.rtti.reset()` | true | Forgets what was learned about the process and takes back the `::vftable` symbols it registered. The next lookup starts fresh. |
+| `manifold.rtti.claims(address)` | boolean | Whether Structure Dissect's RTTI stage names the address itself: an object or a virtual function table that neither the Unreal tool nor a Godot script claims. Never raises, false without a process or with the stage turned off. |
 
 ## manifold.doc
 

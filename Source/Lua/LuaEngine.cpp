@@ -31,13 +31,17 @@ namespace Manifold::Lua
             return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
         }
 
-        bool BuiltInUnrealScript(const std::filesystem::path& path)
+        const char* BuiltInScript(const std::filesystem::path& path)
         {
             std::ifstream file(path, std::ios::binary);
             std::string head(16384, '\0');
             file.read(head.data(), static_cast<std::streamsize>(head.size()));
             head.resize(static_cast<std::size_t>(file.gcount()));
-            return head.find("__MANIFOLD_UE_RUNTIME__") != std::string::npos;
+            if (head.find("__MANIFOLD_UE_RUNTIME__") != std::string::npos)
+                return "Unreal Engine support is built into the program now (Extensions > Unreal Engine, manifold.unreal)";
+            if (head.find("__MANIFOLD_RTTI_RUNTIME__") != std::string::npos)
+                return "C++ run-time type information is built into the program now (Extensions > C++ RTTI, manifold.rtti; ManifoldRTTI still works)";
+            return nullptr;
         }
 
         int Traceback(lua_State* state)
@@ -352,10 +356,9 @@ namespace Manifold::Lua
         Status first;
         for (const auto& script : scripts)
         {
-            if (BuiltInUnrealScript(script))
+            if (const char* builtIn = BuiltInScript(script))
             {
-                LOG_INFO("Autorun", "Skipped " + WideToUtf8(script.filename().wstring()) +
-                    ": Unreal Engine support is built into the program now (Extensions > Unreal Engine, manifold.unreal). The file stays in the autorun folder and can be deleted.");
+                LOG_INFO("Autorun", "Skipped " + WideToUtf8(script.filename().wstring()) + ": " + builtIn + ". The file stays in the autorun folder and can be deleted.");
                 continue;
             }
             const Status status = RunFile(script);
@@ -1337,6 +1340,34 @@ namespace Manifold::Lua
         std::string error;
         if (!CallStack(1, 0, error))
             m_engine.Notify(Status::Fail(ErrorCode::LuaRuntime, FirstLine(error)));
+    }
+
+    bool LuaEngine::EngineScriptClaims(std::uint64_t address)
+    {
+        if (!Manifold::OnMainThread())
+            return false;
+        bool claimed = false;
+        for (const char* module : { "ManifoldGodot" })
+        {
+            const int top = lua_gettop(m_state);
+            lua_pushglobaltable(m_state);
+            lua_pushstring(m_state, module);
+            lua_rawget(m_state, -2);
+            if (lua_istable(m_state, -1))
+            {
+                lua_pushstring(m_state, "claims");
+                lua_rawget(m_state, -2);
+                if (lua_isfunction(m_state, -1))
+                {
+                    lua_pushinteger(m_state, static_cast<lua_Integer>(address));
+                    claimed = lua_pcall(m_state, 1, 1, 0) == LUA_OK && lua_toboolean(m_state, -1) != 0;
+                }
+            }
+            lua_settop(m_state, top);
+            if (claimed)
+                break;
+        }
+        return claimed;
     }
 
     std::vector<std::string> LuaEngine::FunctionNames() const

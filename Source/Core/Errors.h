@@ -75,6 +75,8 @@
     X(UnrealUnknownType, 4202) \
     X(UnrealNoProperty, 4203) \
     X(UnrealNoObject, 4204) \
+    X(RttiNoObject, 4301) \
+    X(RttiUnknownClass, 4302) \
     X(WindowClassFailed, 5001) \
     X(WindowFailed, 5002) \
     X(DeviceFailed, 5003) \

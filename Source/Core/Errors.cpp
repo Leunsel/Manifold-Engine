@@ -251,6 +251,13 @@ namespace Manifold
             { ErrorCode::UnrealNoObject, "No Unreal object contains {}.",
                 "The address is not inside a live UObject: it is a struct on the heap, freed memory, or not Unreal data at all.",
                 "Use an address inside a live object, for example one from a dissect of the engine, the world or the pawn." },
+            { ErrorCode::RttiNoObject, "No object with run-time type information at or before {}.",
+                "No virtual function table pointer with MSVC run-time type information was found at the address or in the memory in front of it. "
+                "The program may be built without RTTI (Unreal Engine games are), with GCC, or the address is not inside a C++ object with virtual functions.",
+                "Use an address inside an object of a class with virtual functions." },
+            { ErrorCode::RttiUnknownClass, "No class {} with a virtual function table was found.",
+                "The modules of the opened process hold no run-time type information for a class of that name. Names are case sensitive and written with their namespaces, as in Game::Player.",
+                "Check the spelling, or take the name from manifold.rtti.className on an object of the class." },
 
             { ErrorCode::WindowClassFailed, "The window class could not be registered.",
                 "Windows refused to register the program's window class.",

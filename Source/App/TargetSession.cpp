@@ -12,7 +12,7 @@ namespace Manifold
         m_symbols.Attach(m_process);
         m_codeMap.Attach(m_process, &m_mono, &m_symbols);
         ++m_generation;
-        if (m_extraSymbols)
+        if (!m_extraSymbols.empty())
             RefreshSymbolProvider();
     }
 
@@ -56,7 +56,7 @@ namespace Manifold
     void TargetSession::RefreshSymbolProvider()
     {
         const bool pdb = m_pdbActive;
-        if (!pdb && !m_mono.Present() && !m_extraSymbols)
+        if (!pdb && !m_mono.Present() && m_extraSymbols.empty())
         {
             m_symbols.SetSymbolProvider({}, {});
             return;
@@ -70,8 +70,8 @@ namespace Manifold
                 if (m_mono.Present())
                     if (const auto address = m_mono.AddressOf(name))
                         return address;
-                if (m_extraSymbols)
-                    if (const auto address = m_extraSymbols(name))
+                for (const Target::SymbolForward& extra : m_extraSymbols)
+                    if (const auto address = extra(name))
                         return address;
                 return std::nullopt;
             },
@@ -102,9 +102,9 @@ namespace Manifold
             });
     }
 
-    void TargetSession::SetExtraSymbols(Target::SymbolForward forward)
+    void TargetSession::AddExtraSymbols(Target::SymbolForward forward)
     {
-        m_extraSymbols = std::move(forward);
+        m_extraSymbols.push_back(std::move(forward));
         if (m_process)
             RefreshSymbolProvider();
     }
