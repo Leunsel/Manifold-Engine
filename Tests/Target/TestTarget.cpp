@@ -715,14 +715,52 @@ extern "C" __declspec(dllexport) __declspec(noinline) long long Touch(volatile l
     return *value;
 }
 
+extern "C" __declspec(dllexport) volatile long g_faultsOn = 0;
+extern "C" __declspec(dllexport) volatile long g_faultsHandled = 0;
+
+// An access violation the program handles itself, for the debugger's
+// "break on unexpected exceptions": writing to address 0x10 always faults,
+// and the program's own vectored handler (added last, after any debugger's)
+// steps over the store. Not __try: clang-cl drops an __except around a plain
+// store without /EHa.
+extern "C" __declspec(dllexport) __declspec(noinline) void Fault()
+{
+    *reinterpret_cast<volatile int*>(static_cast<std::uintptr_t>(0x10)) = 1;
+}
+
+namespace
+{
+    LONG CALLBACK SkipFault(EXCEPTION_POINTERS* info)
+    {
+        const EXCEPTION_RECORD& record = *info->ExceptionRecord;
+        if (record.ExceptionCode != EXCEPTION_ACCESS_VIOLATION || record.NumberParameters < 2 || record.ExceptionInformation[1] != 0x10)
+            return EXCEPTION_CONTINUE_SEARCH;
+#if defined(_M_X64)
+        const unsigned char* at = reinterpret_cast<const unsigned char*>(info->ContextRecord->Rip);
+        if (at[0] != 0xC7 || at[1] != 0x04 || at[2] != 0x25)
+            return EXCEPTION_CONTINUE_SEARCH;
+        info->ContextRecord->Rip += 11;
+#else
+        const unsigned char* at = reinterpret_cast<const unsigned char*>(static_cast<std::uintptr_t>(info->ContextRecord->Eip));
+        if (at[0] != 0xC7 || at[1] != 0x05)
+            return EXCEPTION_CONTINUE_SEARCH;
+        info->ContextRecord->Eip += 10;
+#endif
+        ::InterlockedIncrement(&g_faultsHandled);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+}
+
 namespace
 {
     DWORD WINAPI Worker(void*)
     {
         HANDLE wake = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        for (;;)
+        for (unsigned round = 0;; ++round)
         {
             Work(&g_shared);
+            if (g_faultsOn && round % 64 == 0)
+                Fault();
             ::WaitForSingleObject(wake, 1);
         }
     }
@@ -854,6 +892,7 @@ int main(int argc, char** argv)
                 ::Sleep(1000);
         }
     }
+    ::AddVectoredExceptionHandler(0, &SkipFault);
     for (int i = 0; i < 6; ++i)
         ::CloseHandle(::CreateThread(nullptr, 0, &Worker, nullptr, 0, nullptr));
     bool stress = false;

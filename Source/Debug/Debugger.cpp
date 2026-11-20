@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -271,6 +272,32 @@ namespace Manifold::Debug
                 std::memcpy(m_wow.ExtendedRegisters + kFxsaveMxcsr, &v.Mxcsr, sizeof(v.Mxcsr));
             }
 
+            bool HasFpuArea() const
+            {
+                return m_is64 ? (m_native.ContextFlags & CONTEXT_FLOATING_POINT) == CONTEXT_FLOATING_POINT
+                              : (m_wow.ContextFlags & WOW64_CONTEXT_EXTENDED_REGISTERS) == WOW64_CONTEXT_EXTENDED_REGISTERS;
+            }
+
+            FpuRegisters Fpu() const
+            {
+                FpuRegisters f;
+                if (!HasFpuArea())
+                    return f;
+                const std::uint8_t* area = m_is64 ? reinterpret_cast<const std::uint8_t*>(&m_native.FltSave) : m_wow.ExtendedRegisters;
+                std::memcpy(f.Area.data(), area, FpuRegisters::kBytes);
+                f.Valid = true;
+                return f;
+            }
+
+            void ApplyFpu(const FpuRegisters& f)
+            {
+                if (!HasFpuArea() || !f.Valid)
+                    return;
+                std::uint8_t* area = m_is64 ? reinterpret_cast<std::uint8_t*>(&m_native.FltSave) : m_wow.ExtendedRegisters;
+                std::memcpy(area, f.Area.data(), 24);
+                std::memcpy(area + 32, f.Area.data() + 32, FpuRegisters::kBytes - 32);
+            }
+
         private:
             static constexpr int kFxsaveMxcsr = 24;
             static constexpr int kFxsaveXmm = 160;
@@ -376,6 +403,159 @@ namespace Manifold::Debug
         case BreakpointType::Write: return "Write";
         case BreakpointType::Access: return "Access";
         default: return "Execute";
+        }
+    }
+
+    std::uint16_t FpuRegisters::Control() const
+    {
+        return static_cast<std::uint16_t>(Area[0] | (Area[1] << 8));
+    }
+
+    std::uint16_t FpuRegisters::Status() const
+    {
+        return static_cast<std::uint16_t>(Area[2] | (Area[3] << 8));
+    }
+
+    std::uint8_t FpuRegisters::Tags() const
+    {
+        return Area[4];
+    }
+
+    std::uint16_t FpuRegisters::Opcode() const
+    {
+        return static_cast<std::uint16_t>(Area[6] | (Area[7] << 8));
+    }
+
+    void FpuRegisters::SetControl(std::uint16_t value)
+    {
+        Area[0] = static_cast<std::uint8_t>(value);
+        Area[1] = static_cast<std::uint8_t>(value >> 8);
+    }
+
+    void FpuRegisters::SetStatus(std::uint16_t value)
+    {
+        Area[2] = static_cast<std::uint8_t>(value);
+        Area[3] = static_cast<std::uint8_t>(value >> 8);
+    }
+
+    void FpuRegisters::SetTags(std::uint8_t value)
+    {
+        Area[4] = value;
+    }
+
+    double ExtendedToDouble(const std::uint8_t* tenBytes)
+    {
+        std::uint64_t mantissa = 0;
+        std::memcpy(&mantissa, tenBytes, 8);
+        const unsigned top = static_cast<unsigned>(tenBytes[8] | (tenBytes[9] << 8));
+        const bool negative = (top & 0x8000) != 0;
+        const int exponent = static_cast<int>(top & 0x7FFF);
+        double value = 0.0;
+        if (exponent == 0x7FFF)
+            value = (mantissa << 1) == 0 ? HUGE_VAL : std::nan("");
+        else if (exponent != 0 || mantissa != 0)
+            value = std::ldexp(static_cast<double>(mantissa), exponent - 16383 - 63);
+        return negative ? -value : value;
+    }
+
+    void DoubleToExtended(double value, std::uint8_t* tenBytes)
+    {
+        std::uint64_t mantissa = 0;
+        unsigned top = std::signbit(value) ? 0x8000u : 0u;
+        if (std::isnan(value))
+        {
+            mantissa = 0xC000000000000000ull;
+            top |= 0x7FFF;
+        }
+        else if (std::isinf(value))
+        {
+            mantissa = 0x8000000000000000ull;
+            top |= 0x7FFF;
+        }
+        else if (value != 0.0)
+        {
+            int exponent = 0;
+            const double fraction = std::frexp(std::fabs(value), &exponent);
+            mantissa = static_cast<std::uint64_t>(std::ldexp(fraction, 64));
+            top |= static_cast<unsigned>(exponent - 1 + 16383) & 0x7FFF;
+        }
+        std::memcpy(tenBytes, &mantissa, 8);
+        tenBytes[8] = static_cast<std::uint8_t>(top);
+        tenBytes[9] = static_cast<std::uint8_t>(top >> 8);
+    }
+
+    std::string ExtendedText(const std::uint8_t* tenBytes)
+    {
+        const double value = ExtendedToDouble(tenBytes);
+        if (std::isnan(value))
+            return "NaN";
+        if (std::isinf(value))
+            return value < 0 ? "-Inf" : "+Inf";
+        return Format("%.17g", value);
+    }
+
+    std::string ExceptionName(std::uint32_t code)
+    {
+        switch (code)
+        {
+        case 0xC0000005: return "Access violation";
+        case 0xC0000006: return "In-page error";
+        case 0xC000001D: return "Illegal instruction";
+        case 0xC0000025: return "Non-continuable exception";
+        case 0xC000008C: return "Array bounds exceeded";
+        case 0xC000008D: return "Float denormal operand";
+        case 0xC000008E: return "Float divide by zero";
+        case 0xC000008F: return "Float inexact result";
+        case 0xC0000090: return "Float invalid operation";
+        case 0xC0000091: return "Float overflow";
+        case 0xC0000092: return "Float stack check";
+        case 0xC0000093: return "Float underflow";
+        case 0xC0000094: return "Integer divide by zero";
+        case 0xC0000095: return "Integer overflow";
+        case 0xC0000096: return "Privileged instruction";
+        case 0xC00000FD: return "Stack overflow";
+        case 0xC0000374: return "Heap corruption";
+        case 0xC0000409: return "Stack buffer overrun";
+        case 0xC0000420: return "Assertion failure";
+        case 0x80000001: return "Guard page";
+        case 0x80000002: return "Misaligned data";
+        case 0x80000003: return "Breakpoint instruction";
+        case 0x4000001F: return "Breakpoint instruction";
+        case 0xE06D7363: return "C++ exception";
+        case 0xE0434352: return ".NET exception";
+        case 0xE0434F4D: return ".NET exception";
+        default: return "Exception " + Hex(code, 8);
+        }
+    }
+
+    std::string DescribeException(const BreakException& exception)
+    {
+        std::string text = ExceptionName(exception.Code);
+        if ((exception.Code == 0xC0000005 || exception.Code == 0xC0000006) && exception.ParamCount >= 2)
+        {
+            const std::uint64_t kind = exception.Params[0];
+            text += kind == 0 ? " reading " : kind == 1 ? " writing " : kind == 8 ? " executing " : " at ";
+            text += Hex(exception.Params[1]);
+        }
+        if (!exception.FirstChance)
+            text += ", the program did not handle it";
+        return text;
+    }
+
+    bool UnexpectedException(std::uint32_t code)
+    {
+        switch (code)
+        {
+        case 0x40010006:
+        case 0x4001000A:
+        case 0x406D1388:
+        case 0x40010005:
+        case 0x40010008:
+        case 0x80000004:
+        case 0x4000001E:
+            return false;
+        default:
+            return true;
         }
     }
 
@@ -1058,6 +1238,52 @@ namespace Manifold::Debug
         ++m_generation;
     }
 
+    void Debugger::SetFpu(const FpuRegisters& fpu)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_break.Broken || !m_break.Fpu.Valid)
+            return;
+        if (m_backend == Backend::Veh)
+        {
+            if (!m_vehBlock || !m_process)
+                return;
+            m_process->Write(m_vehBlock + offsetof(Veh::Block, NewFpu), fpu.Area.data(), FpuRegisters::kBytes);
+            const std::uint32_t dirty = 1;
+            m_process->Write(m_vehBlock + offsetof(Veh::Block, FpuDirty), &dirty, sizeof(dirty));
+        }
+        else
+        {
+            m_newFpu = fpu;
+            m_newFpu.Valid = true;
+            m_fpuChanged = true;
+        }
+        m_break.Fpu = fpu;
+        m_break.Fpu.Valid = true;
+        ++m_generation;
+    }
+
+    void Debugger::ResumeHandled()
+    {
+        {
+            std::lock_guard lock(m_lock);
+            if (!m_break.Broken || !m_break.Exception.Raised)
+                return;
+            if (m_backend == Backend::Veh)
+            {
+                if (m_vehBlock && m_process)
+                {
+                    const std::uint32_t one = 1;
+                    m_process->Write(m_vehBlock + offsetof(Veh::Block, ExceptionHandled), &one, sizeof(one));
+                }
+            }
+            else
+            {
+                m_exceptionHandled = true;
+            }
+        }
+        Resume(ResumeMode::Continue);
+    }
+
     Status Debugger::BreakNow()
     {
         if (!m_attached)
@@ -1170,12 +1396,17 @@ namespace Manifold::Debug
         m_break.BreakpointAddress = breakpointAddress;
         m_break.Registers = context.Values();
         m_break.Vectors = context.Vectors();
+        m_break.Fpu = context.Fpu();
+        m_break.Exception = m_cause;
+        m_cause = {};
         m_break.Reason = reason;
         m_break.Is64Bit = m_is64Bit;
         m_break.Serial = ++m_breakSerial;
         m_resumeRequested = false;
         m_registersChanged = false;
         m_vectorsChanged = false;
+        m_fpuChanged = false;
+        m_exceptionHandled = false;
         ++m_generation;
         LOG_INFO("Debugger", reason + " at " + Hex(m_break.Address) + " in thread " + std::to_string(threadId));
     }
@@ -1308,10 +1539,8 @@ namespace Manifold::Debug
                     breakThread = Wow64BreakThread(event.dwThreadId);
                 return DBG_CONTINUE;
             }
-            return DBG_EXCEPTION_NOT_HANDLED;
         }
-
-        if (code == EXCEPTION_SINGLE_STEP || code == kWx86SingleStep)
+        else if (code == EXCEPTION_SINGLE_STEP || code == kWx86SingleStep)
         {
             ContextHolder context(m_is64Bit);
             if (!context.Read(thread.Handle))
@@ -1466,7 +1695,53 @@ namespace Manifold::Debug
 
         if (event.u.Exception.dwFirstChance == 0)
             LOG_WARN("Debugger", "Second chance exception " + Hex(code, 8) + " at " + Hex(at));
+        if (BreaksOnException(code, at))
+        {
+            m_cause = {};
+            m_cause.Raised = true;
+            m_cause.Code = code;
+            m_cause.FirstChance = event.u.Exception.dwFirstChance != 0;
+            m_cause.ParamCount = static_cast<int>(std::min<DWORD>(record.NumberParameters, 2));
+            for (int i = 0; i < m_cause.ParamCount; ++i)
+                m_cause.Params[i] = record.ExceptionInformation[i];
+            enterBreak = true;
+            reason = DescribeException(m_cause);
+            breakpointAddress = 0;
+        }
         return DBG_EXCEPTION_NOT_HANDLED;
+    }
+
+    bool Debugger::BreaksOnException(std::uint32_t code, std::uint64_t address) const
+    {
+        const ExceptionBreak mode = m_exceptionMode.load();
+        if (mode == ExceptionBreak::Never || !UnexpectedException(code))
+            return false;
+        if (mode == ExceptionBreak::Always)
+            return true;
+        return address >= m_exceptionStart.load() && address < m_exceptionStop.load();
+    }
+
+    void Debugger::SetExceptionBreak(ExceptionBreak mode, std::uint64_t start, std::uint64_t stop)
+    {
+        m_exceptionStart = start;
+        m_exceptionStop = stop;
+        m_exceptionMode = mode;
+        if (m_backend == Backend::Veh)
+        {
+            std::lock_guard lock(m_lock);
+            VehWriteExceptionBreak();
+        }
+    }
+
+    void Debugger::VehWriteExceptionBreak()
+    {
+        if (!m_vehBlock || !m_process)
+            return;
+        const std::uint64_t range[2] = { m_exceptionStart.load(), m_exceptionStop.load() };
+        m_process->Write(m_vehBlock + offsetof(Veh::Block, ExceptionStart), range, sizeof(range));
+        const ExceptionBreak mode = m_exceptionMode.load();
+        const std::uint32_t raw = mode == ExceptionBreak::Always ? Veh::ExceptionAlways : mode == ExceptionBreak::InRegion ? Veh::ExceptionInRegion : Veh::ExceptionNever;
+        m_process->Write(m_vehBlock + offsetof(Veh::Block, ExceptionMode), &raw, sizeof(raw));
     }
 
     void Debugger::Loop(std::shared_ptr<std::promise<Status>> attached)
@@ -1598,6 +1873,8 @@ namespace Manifold::Debug
                             context.Apply(m_newRegisters);
                         if (m_vectorsChanged)
                             context.ApplyVectors(m_newVectors);
+                        if (m_fpuChanged)
+                            context.ApplyFpu(m_newFpu);
                         std::uint64_t flags = context.Flags();
                         if (thread.ResumeFlag)
                         {
@@ -1641,9 +1918,14 @@ namespace Manifold::Debug
                         context.Write();
                     }
                 }
+                if (m_break.Exception.Raised && (m_registersChanged || m_vectorsChanged || m_fpuChanged || m_exceptionHandled))
+                    status = DBG_CONTINUE;
                 m_break.Broken = false;
+                m_break.Exception = {};
                 m_registersChanged = false;
                 m_vectorsChanged = false;
+                m_fpuChanged = false;
+                m_exceptionHandled = false;
                 ++m_generation;
             }
             lock.unlock();
@@ -1941,8 +2223,28 @@ namespace Manifold::Debug
             std::string reason = "Breakpoint";
             std::uint64_t breakpointAddress = head.BreakAddress;
             const int breakSlot = static_cast<int>(head.BreakSlot);
-            if (head.BreakSlot == 0xFFFFFFFFu)
+            BreakException exception;
+            if (head.BreakSlot == Veh::kSlotBreakNow)
                 reason = "Break";
+            else if (head.BreakSlot == Veh::kSlotException)
+            {
+                struct
+                {
+                    std::uint32_t Code;
+                    std::uint32_t Count;
+                    std::uint64_t Params[2];
+                } cause{};
+                if (m_process->ReadExact(m_vehBlock + offsetof(Veh::Block, BreakCode), &cause, sizeof(cause)))
+                {
+                    exception.Raised = true;
+                    exception.Code = cause.Code;
+                    exception.ParamCount = static_cast<int>(std::min<std::uint32_t>(cause.Count, 2));
+                    exception.Params[0] = cause.Params[0];
+                    exception.Params[1] = cause.Params[1];
+                }
+                reason = DescribeException(exception);
+                breakpointAddress = 0;
+            }
             else if (std::find(m_vehTempSlots.begin(), m_vehTempSlots.end(), breakSlot) != m_vehTempSlots.end())
                 reason = "Step";
             else
@@ -1968,6 +2270,11 @@ namespace Manifold::Debug
                 m_break.Vectors.Mxcsr = vectors.Mxcsr;
                 m_break.Vectors.Count = static_cast<int>(vectors.Count);
             }
+            std::uint32_t fpuValid = 0;
+            if (m_process->ReadExact(m_vehBlock + offsetof(Veh::Block, FpuValid), &fpuValid, sizeof(fpuValid)) && fpuValid &&
+                m_process->ReadExact(m_vehBlock + offsetof(Veh::Block, BreakFpu), m_break.Fpu.Area.data(), FpuRegisters::kBytes))
+                m_break.Fpu.Valid = true;
+            m_break.Exception = exception;
             m_stepping = false;
             m_break.Broken = true;
             m_break.ThreadId = head.BrokenThread;
@@ -2052,6 +2359,7 @@ namespace Manifold::Debug
             m_vehTempSlots.clear();
             m_hiddenThreads = 0;
             m_mainThreadHidden = false;
+            VehWriteExceptionBreak();
         }
         m_vehStop = false;
         m_attached = true;
@@ -2073,7 +2381,7 @@ namespace Manifold::Debug
             const std::uint32_t stop = 1;
             m_process->Write(m_vehBlock + offsetof(Veh::Block, Stop), &stop, sizeof(stop));
             std::uint32_t running = 1;
-            for (int tries = 0; tries < 100 && running; ++tries)
+            for (int tries = 0; tries < 400 && running && m_process->Alive(); ++tries)
             {
                 if (!m_process->ReadExact(m_vehBlock + offsetof(Veh::Block, Running), &running, sizeof(running)))
                 {

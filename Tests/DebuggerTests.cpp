@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <windows.h>
+#include <tlhelp32.h>
 
 namespace Manifold::Tests
 {
@@ -341,6 +342,338 @@ namespace Manifold::Tests
         }
     }
 
+    namespace
+    {
+        bool AgentLoaded(DWORD processId)
+        {
+            HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, processId);
+            if (snapshot == INVALID_HANDLE_VALUE)
+                return false;
+            MODULEENTRY32W entry{};
+            entry.dwSize = sizeof(entry);
+            bool found = false;
+            if (::Module32FirstW(snapshot, &entry))
+            {
+                do
+                {
+                    found = found || _wcsicmp(entry.szModule, L"ManifoldAgent.dll") == 0 || _wcsicmp(entry.szModule, L"ManifoldAgent32.dll") == 0;
+                } while (::Module32NextW(snapshot, &entry));
+            }
+            ::CloseHandle(snapshot);
+            return found;
+        }
+
+        std::int32_t ReadShared(Engine& engine)
+        {
+            std::int32_t value = 0;
+            engine.Process()->ReadExact(engine.Evaluate("TestTarget.g_shared").value_or(0), &value, sizeof(value));
+            return value;
+        }
+
+        bool SharedMoves(Engine& engine, int milliseconds)
+        {
+            const std::int32_t before = ReadShared(engine);
+            Wait(engine, milliseconds);
+            return ReadShared(engine) != before;
+        }
+
+        void SetFaults(Engine& engine, bool on)
+        {
+            const std::int32_t value = on ? 1 : 0;
+            const std::uint64_t address = engine.Evaluate("TestTarget.g_faultsOn").value_or(0);
+            const Status written = engine.Process()->Write(address, &value, sizeof(value));
+            std::int32_t back = -1;
+            engine.Process()->ReadExact(address, &back, sizeof(back));
+            CHECK_MSG(written.Ok() && back == value, "g_faultsOn at " + Hex(address) + " reads " + std::to_string(back) + " " + written.Text);
+        }
+    }
+
+    void CheckFpuAndExceptions(Engine& engine, bool veh)
+    {
+        Debug::Debugger& debugger = engine.Debugger();
+        const Target::Process& process = *engine.Process();
+        const char* backend = veh ? "in-process" : "windows";
+        const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);
+        const std::uint64_t fault = engine.Evaluate("TestTarget.Fault").value_or(0);
+        const std::uint64_t handled = engine.Evaluate("TestTarget.g_faultsHandled").value_or(0);
+        CHECK_MSG(work && fault && handled, backend);
+        if (!work || !fault || !handled)
+            return;
+
+        for (const double value : { 0.0, -0.0, 1.0, -2.5, 3.141592653589793, 1e-310, 6.02214076e23, -1e300 })
+        {
+            std::uint8_t ten[10] = {};
+            Debug::DoubleToExtended(value, ten);
+            const double back = Debug::ExtendedToDouble(ten);
+            CHECK_MSG(back == value && std::signbit(back) == std::signbit(value), Format("%.17g came back as %.17g", value, back));
+        }
+        {
+            const std::uint8_t one[10] = { 0, 0, 0, 0, 0, 0, 0, 0x80, 0xFF, 0x3F };
+            CHECK_EQ(Debug::ExtendedToDouble(one), 1.0);
+            const std::uint8_t infinity[10] = { 0, 0, 0, 0, 0, 0, 0, 0x80, 0xFF, 0xFF };
+            CHECK_EQ(Debug::ExtendedText(infinity), std::string("-Inf"));
+        }
+
+        {
+            const Status set = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false);
+            CHECK_MSG(set.Ok(), set.Text);
+            const bool broke = set && WaitForBreak(engine, 0, 4000);
+            CHECK_MSG(broke, std::string(backend) + ": no break to read the FPU at");
+            if (broke)
+            {
+                const Debug::BreakInfo info = debugger.Break();
+                CHECK_MSG(info.Fpu.Valid, std::string(backend) + ": the break came without x87 registers");
+                CHECK_MSG(info.Fpu.Control() == 0x027F, std::string(backend) + ": x87 control word " + Hex(info.Fpu.Control(), 4));
+                CHECK_MSG(!info.Exception.Raised, backend);
+            }
+            CHECK(debugger.RemoveBreakpoint(work).Ok());
+            if (broke)
+                debugger.Resume(Debug::ResumeMode::Continue);
+            Wait(engine, 100);
+        }
+
+        std::int32_t handledBefore = 0;
+        process.ReadExact(handled, &handledBefore, sizeof(handledBefore));
+        debugger.SetExceptionBreak(Debug::ExceptionBreak::InRegion, work, work + 1);
+        SetFaults(engine, true);
+        Wait(engine, 1500);
+        std::int32_t handledOutside = 0;
+        process.ReadExact(handled, &handledOutside, sizeof(handledOutside));
+        CHECK_MSG(!debugger.Broken(), std::string(backend) + ": stopped on an exception outside the region");
+        CHECK_MSG(handledOutside > handledBefore, std::string(backend) + ": the program did not handle its own exceptions (" + std::to_string(handledBefore) + " -> " + std::to_string(handledOutside) + ")");
+        std::printf("  exception check %s: handled %d -> %d\n", backend, static_cast<int>(handledBefore), static_cast<int>(handledOutside));
+        std::fflush(stdout);
+        if (debugger.Broken())
+            debugger.Resume(Debug::ResumeMode::Continue);
+
+        debugger.SetExceptionBreak(Debug::ExceptionBreak::InRegion, fault, fault + 0x100);
+        const std::uint64_t serial = debugger.Break().Serial;
+        const bool broke = WaitForBreak(engine, serial, 4000);
+        CHECK_MSG(broke, std::string(backend) + ": no stop on the access violation inside the region");
+        if (broke)
+        {
+            const Debug::BreakInfo info = debugger.Break();
+            CHECK_MSG(info.Exception.Raised && info.Exception.Code == 0xC0000005, std::string(backend) + ": stopped for " + info.Reason);
+            CHECK_MSG(info.Exception.ParamCount == 2 && info.Exception.Params[0] == 1 && info.Exception.Params[1] == 0x10,
+                std::string(backend) + ": " + Debug::DescribeException(info.Exception));
+            CHECK_MSG(info.Address >= fault && info.Address < fault + 0x100, std::string(backend) + " " + Hex(info.Address));
+            CHECK_MSG(info.Reason.find("writing 10") != std::string::npos, info.Reason);
+            debugger.SetExceptionBreak(Debug::ExceptionBreak::Never, 0, 0);
+            std::int32_t handledAtBreak = 0;
+            process.ReadExact(handled, &handledAtBreak, sizeof(handledAtBreak));
+            debugger.Resume(Debug::ResumeMode::Continue);
+            Wait(engine, 600);
+            std::int32_t handledAfter = 0;
+            process.ReadExact(handled, &handledAfter, sizeof(handledAfter));
+            CHECK_MSG(handledAfter > handledAtBreak, std::string(backend) + ": after Run the program did not get its exception");
+        }
+
+        debugger.SetExceptionBreak(Debug::ExceptionBreak::Always, 0, 0);
+        const bool again = WaitForBreak(engine, debugger.Break().Serial, 4000);
+        CHECK_MSG(again, std::string(backend) + ": no stop with Always");
+        if (again)
+        {
+            Debug::BreakInfo info = debugger.Break();
+            debugger.SetExceptionBreak(Debug::ExceptionBreak::Never, 0, 0);
+            const Disasm::Instruction faulting = engine.Disassembler().Read(process, info.Registers.Rip, nullptr);
+            CHECK(faulting.Valid);
+            if (faulting.Valid && info.Exception.Code == 0xC0000005)
+            {
+                Disasm::RegisterValues skip = info.Registers;
+                skip.Rip = faulting.Next();
+                debugger.SetRegisters(skip);
+            }
+            debugger.Resume(Debug::ResumeMode::Continue);
+        }
+        SetFaults(engine, false);
+        debugger.SetExceptionBreak(Debug::ExceptionBreak::Never, 0, 0);
+        Wait(engine, 300);
+        if (debugger.Broken())
+            debugger.Resume(Debug::ResumeMode::Continue);
+        CHECK_MSG(process.Alive(), std::string(backend) + ": the target died after the exception checks");
+        CHECK_MSG(SharedMoves(engine, 300), std::string(backend) + ": the target stopped running after the exception checks");
+    }
+
+    void CheckDetachPaths(Engine& engine)
+    {
+        Debug::Debugger& debugger = engine.Debugger();
+        const DWORD pid = Raw(engine.Process()->Id());
+        const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);
+        const std::uint64_t shared = engine.Evaluate("TestTarget.g_shared").value_or(0);
+        CHECK(work && shared);
+        if (!work || !shared)
+            return;
+
+        for (int round = 1; round <= 3; ++round)
+        {
+            const std::string label = "detach round " + std::to_string(round);
+            const Status attached = engine.EnsureDebugger();
+            CHECK_MSG(attached.Ok(), label + ": " + attached.Text);
+            if (!attached)
+                return;
+            if (round == 1)
+            {
+                const Status set = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false);
+                CHECK_MSG(set.Ok(), set.Text);
+                CHECK_MSG(set && WaitForBreak(engine, 0, 4000), label + ": no break before detaching");
+            }
+            else if (round == 2)
+            {
+                int writes = 0;
+                const Status started = debugger.StartWatch(Debug::WatchKind::Writes, shared, 4, writes);
+                CHECK_MSG(started.Ok(), started.Text);
+                Wait(engine, 500);
+            }
+            else
+            {
+                const Status set = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false);
+                CHECK_MSG(set.Ok(), set.Text);
+                CHECK_MSG(set && WaitForBreak(engine, 0, 4000), label + ": no break before stepping");
+                debugger.Resume(Debug::ResumeMode::StepInto);
+            }
+            const auto started = std::chrono::steady_clock::now();
+            debugger.Detach();
+            const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+            CHECK_MSG(took < 5000, label + ": detaching took " + std::to_string(took) + " ms");
+            CHECK_MSG(!debugger.Attached(), label);
+            CHECK_MSG(SharedMoves(engine, 400), label + ": the target does not run after detaching");
+            Wait(engine, 1500);
+            CHECK_MSG(engine.Process()->Alive(), label + ": the target died after detaching");
+            CHECK_MSG(!AgentLoaded(pid), label + ": the agent is still loaded after detaching");
+        }
+    }
+
+    int RunVehHost(const std::vector<std::string>& arguments)
+    {
+        DWORD pid = 0;
+        std::string how = "normal";
+        for (const std::string& argument : arguments)
+        {
+            if (argument.rfind("--pid=", 0) == 0)
+                pid = static_cast<DWORD>(std::strtoul(argument.c_str() + 6, nullptr, 10));
+            if (argument.rfind("--exit=", 0) == 0)
+                how = argument.substr(7);
+        }
+        Settings settings;
+        settings.UseInProcessDebugger = true;
+        Engine engine(settings);
+        if (!engine.OpenProcess(MakeProcessId(pid)) || !engine.EnsureDebugger())
+            return 3;
+        const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);
+        if (!work || !engine.Debugger().SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false) || !WaitForBreak(engine, 0, 4000))
+            return 4;
+        if (how == "kill")
+            ::TerminateProcess(::GetCurrentProcess(), 9);
+        return 0;
+    }
+
+    void CheckHostExits(const std::filesystem::path& targetPath)
+    {
+        wchar_t self[MAX_PATH] = L"";
+        ::GetModuleFileNameW(nullptr, self, MAX_PATH);
+        for (const char* how : { "normal", "kill" })
+        {
+            PROCESS_INFORMATION target{};
+            if (!StartTestTarget(target, targetPath))
+            {
+                CHECK_MSG(false, "could not start the test target for the host exit check");
+                return;
+            }
+            std::wstring command = L"\"" + std::wstring(self) + L"\" --veh-host --pid=" + std::to_wstring(target.dwProcessId) + L" --exit=" + Utf8ToWide(how);
+            STARTUPINFOW startup{ sizeof(startup) };
+            PROCESS_INFORMATION host{};
+            const bool started = ::CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &host) != FALSE;
+            CHECK_MSG(started, std::string("could not start the host for ") + how);
+            DWORD hostCode = 0;
+            if (started)
+            {
+                ::WaitForSingleObject(host.hProcess, 30000);
+                ::GetExitCodeProcess(host.hProcess, &hostCode);
+                ::CloseHandle(host.hThread);
+                ::CloseHandle(host.hProcess);
+            }
+            CHECK_MSG(hostCode == 0 || (std::string(how) == "kill" && hostCode == 9), std::string(how) + ": the host ended with " + std::to_string(hostCode));
+            const std::uint64_t until = ::GetTickCount64() + (std::string(how) == "kill" ? 8000 : 2000);
+            Settings settings;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            bool moving = false;
+            while (opened && !moving && ::GetTickCount64() < until)
+                moving = SharedMoves(engine, 200);
+            CHECK_MSG(moving, std::string(how) + " host exit: the target did not run again");
+            Wait(engine, 1200);
+            DWORD code = 0;
+            ::GetExitCodeProcess(target.hProcess, &code);
+            CHECK_MSG(code == STILL_ACTIVE, std::string(how) + " host exit: the target ended with " + Hex(code, 8));
+            CHECK_MSG(!AgentLoaded(target.dwProcessId), std::string(how) + " host exit: the agent is still loaded");
+            EndTestTarget(target, code);
+        }
+    }
+
+    int RunVehDetachStress(const std::vector<std::string>& arguments)
+    {
+        int rounds = 20;
+        bool breakFirst = false;
+        std::string module = "TestTarget";
+        for (const std::string& argument : arguments)
+        {
+            if (argument.rfind("--rounds=", 0) == 0)
+                rounds = std::max(1, std::atoi(argument.c_str() + 9));
+            breakFirst = breakFirst || argument == "--break";
+            if (argument == "--32")
+                module = "TestTarget32";
+        }
+        wchar_t self[MAX_PATH] = L"";
+        ::GetModuleFileNameW(nullptr, self, MAX_PATH);
+        const std::filesystem::path targetPath = std::filesystem::path(self).parent_path() / Utf8ToWide(module + ".exe");
+        int died = 0;
+        int stuck = 0;
+        int loaded = 0;
+        for (int round = 1; round <= rounds; ++round)
+        {
+            std::wstring command = L"\"" + targetPath.wstring() + L"\" --stress";
+            STARTUPINFOW startup{ sizeof(startup) };
+            PROCESS_INFORMATION info{};
+            if (!::CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info))
+                return 2;
+            std::this_thread::sleep_for(std::chrono::milliseconds(800));
+            {
+                Settings settings;
+                settings.UseInProcessDebugger = true;
+                Engine engine(settings);
+                if (!engine.OpenProcess(MakeProcessId(info.dwProcessId)) || !engine.EnsureDebugger())
+                    return 3;
+                const std::uint64_t stress = engine.Evaluate(module + ".g_stress").value_or(0);
+                int watch = 0;
+                engine.Debugger().StartWatch(Debug::WatchKind::Writes, stress, 8, watch);
+                if (breakFirst)
+                {
+                    const std::uint64_t touch = engine.Evaluate(module + ".Touch").value_or(0);
+                    engine.Debugger().SetBreakpoint(touch, Debug::BreakpointType::Execute, 1, false);
+                    WaitForBreak(engine, 0, 3000);
+                }
+                Wait(engine, 300);
+                engine.Debugger().Detach();
+                Wait(engine, 1500);
+            }
+            DWORD code = 0;
+            ::GetExitCodeProcess(info.hProcess, &code);
+            const bool alive = code == STILL_ACTIVE;
+            const bool agent = alive && AgentLoaded(info.dwProcessId);
+            died += alive ? 0 : 1;
+            loaded += agent ? 1 : 0;
+            if (!alive || agent)
+                std::printf("  round %d: %s%s\n", round, alive ? "alive" : ("ended " + Hex(code, 8)).c_str(), agent ? ", agent still loaded" : "");
+            ::TerminateProcess(info.hProcess, 0);
+            ::CloseHandle(info.hThread);
+            ::CloseHandle(info.hProcess);
+            std::fflush(stdout);
+        }
+        std::printf("detach under load: %d rounds, target died %d, agent left loaded %d, stuck %d\n", rounds, died, loaded, stuck);
+        return died == 0 ? 0 : 1;
+    }
+
     void CheckAttachArmsMainThread(Engine& engine, HANDLE mainThread, std::uint64_t address)
     {
         DWORD_PTR processMask = 0;
@@ -443,6 +776,7 @@ namespace Manifold::Tests
             {
                 CheckBreakActions(engine, veh);
                 CheckWatchesOnOneInstruction(engine, veh);
+                CheckFpuAndExceptions(engine, veh);
                 if (veh)
                     CheckHostSilence(engine);
                 engine.Debugger().Detach();
@@ -480,15 +814,18 @@ namespace Manifold::Tests
                 CHECK(engine.Debugger().UsingVeh());
                 CheckBreakActions(engine, true);
                 CheckWatchesOnOneInstruction(engine, true);
+                CheckFpuAndExceptions(engine, true);
                 CheckHostSilence(engine);
                 engine.Debugger().Detach();
                 Wait(engine, 400);
                 CHECK(engine.Process()->Alive());
+                CheckDetachPaths(engine);
             }
         }
         DWORD code = 0;
         EndTestTarget(info, code);
         CHECK_MSG(code == STILL_ACTIVE, "the target of the in-process debugger ended with " + Hex(code, 8));
+        CheckHostExits(targetPath);
         return Totals().Failures - before;
     }
 }
@@ -503,4 +840,6 @@ namespace Manifold::Tests
 
     MANIFOLD_MODE("--debugger-check", &RunDebuggerCheck);
     MANIFOLD_MODE("--watch-arm-check", &RunWatchArmCheck);
+    MANIFOLD_MODE("--veh-host", &RunVehHost);
+    MANIFOLD_MODE("--veh-detach-stress", &RunVehDetachStress);
 }

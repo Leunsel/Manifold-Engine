@@ -892,8 +892,13 @@ namespace Manifold::UI
         m_engine.RequestDeactivateAll();
     }
 
+    // A process stopped at a breakpoint holds its locks (the loader lock, the
+    // heap's, its own): a script that turns off with a remote call or a new
+    // thread would wait on it forever and the quit would hang with the game
+    // frozen. The debugger goes away on quit anyway, so it goes first.
     void Workspace::TurnOffAndQuit()
     {
+        m_engine.Debugger().Detach();
         const std::vector<std::string> failures = m_engine.DeactivateAll();
         if (failures.empty())
         {
@@ -911,6 +916,7 @@ namespace Manifold::UI
 
     void Workspace::FinishQuit()
     {
+        m_engine.Debugger().Detach();
         m_quitConfirmed = true;
         m_shell.Close();
     }

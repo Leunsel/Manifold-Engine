@@ -23,6 +23,10 @@ namespace Manifold::UI
     private:
         void Start();
         void Collect();
+        void MenuBar();
+        std::vector<std::size_t> VisibleRows() const;
+        void RestoreAll(const std::vector<std::size_t>& rows);
+        Status Restore(const Target::CodePatch& patch);
         void Notes();
         void Results();
         void PatchRow(std::size_t index);

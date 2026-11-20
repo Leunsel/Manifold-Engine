@@ -41,7 +41,34 @@ namespace Manifold::UI
         void Disassembly(float height);
         void HexView(float height);
         void Registers(float width, float height, const Debug::BreakInfo& info, bool running);
+        bool RegisterSection(const char* label, int bit, std::string_view note);
+        void RegisterViewItems();
+        void GeneralRegisters(const Debug::BreakInfo& info, const Disasm::ConditionInfo& condition, float rowHeight, float nameWidth);
+        void FlagCells(const Debug::BreakInfo& info, const Disasm::ConditionInfo& condition);
+        void VectorSection(const Debug::BreakInfo& info, float rowHeight, float nameWidth);
+        void FpuSection(const Debug::BreakInfo& info, float rowHeight, float nameWidth);
+        const char* EditHint() const;
+        struct StackNote
+        {
+            enum Type
+            {
+                Plain,
+                Pointer,
+                Code,
+                Return
+            };
+            Type Kind = Plain;
+            std::string Text;
+            std::uint64_t Call = 0;
+            std::uint64_t Target = 0;
+        };
+        StackNote NoteFor(std::uint64_t value, bool is64Bit);
+        void StackViewItems();
         void Stack(float width, float height, const Debug::BreakInfo& info, bool running);
+        void SetHighlight(const std::string& token);
+        void HighlightItems(const Disasm::Instruction* instruction);
+        void ExceptionBreakItems();
+        void ExceptionDialog();
         Debug::BreakInfo ShownBreak() const;
         bool RegisterLine(const std::string& id, std::string_view name, const std::string& editText, float rowHeight, float nameWidth, std::string& edited, ImVec2& valueMin, ImVec2& valueMax);
         void CodeMenu(const Disasm::Instruction& instruction);
@@ -134,7 +161,7 @@ namespace Manifold::UI
         std::uint64_t m_conditionSerial = 0;
         std::uint64_t m_conditionAddress = 0;
         Disasm::Instruction m_conditionInstruction;
-        int m_vectorFormat = 0;
+        bool m_registersEditable = false;
         std::string m_registerEdit;
         std::string m_registerEditText;
         bool m_registerEditFocus = false;
@@ -144,6 +171,25 @@ namespace Manifold::UI
         Disasm::RegisterValues m_lastRegisters;
         Debug::VectorRegisters m_previousVectors;
         Debug::VectorRegisters m_lastVectors;
+        Debug::FpuRegisters m_previousFpu;
+        Debug::FpuRegisters m_lastFpu;
+        std::uint64_t m_stackSerial = 0;
+        std::uint64_t m_stackTop = 0;
+        std::uint64_t m_stackWrites = 0;
+        std::vector<std::uint8_t> m_stackData;
+        std::vector<int> m_stackRows;
+        std::unordered_map<int, StackNote> m_stackNotes;
+        bool m_stackCallsOnly = false;
+        std::uint64_t m_stackPreviousSerial = 0;
+        std::vector<std::uint8_t> m_stackPrevious;
+        std::uint64_t m_stackPreviousTop = 0;
+        std::vector<std::uint8_t> m_stackShown;
+        std::uint64_t m_stackShownTop = 0;
+        std::string m_highlight;
+        bool m_exceptionDialog = false;
+        std::string m_exceptionStart;
+        std::string m_exceptionStop;
+        std::string m_exceptionError;
         std::uint64_t m_lastBreak = 0;
         bool m_focusCode = false;
         float m_addressWidth = 0.0f;

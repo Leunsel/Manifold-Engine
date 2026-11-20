@@ -49,194 +49,6 @@ namespace Manifold::UI
             return keys.empty() ? std::string(".") : ". Undo with " + keys + ".";
         }
 
-        struct RegisterRow
-        {
-            const char* Name;
-            std::uint64_t Disasm::RegisterValues::*Field;
-            bool Only64;
-        };
-
-        const RegisterRow kRegisterRows[] = {
-            { "RAX", &Disasm::RegisterValues::Rax, false }, { "RBX", &Disasm::RegisterValues::Rbx, false }, { "RCX", &Disasm::RegisterValues::Rcx, false },
-            { "RDX", &Disasm::RegisterValues::Rdx, false }, { "RSI", &Disasm::RegisterValues::Rsi, false }, { "RDI", &Disasm::RegisterValues::Rdi, false },
-            { "RBP", &Disasm::RegisterValues::Rbp, false }, { "RSP", &Disasm::RegisterValues::Rsp, false }, { "R8", &Disasm::RegisterValues::R8, true },
-            { "R9", &Disasm::RegisterValues::R9, true }, { "R10", &Disasm::RegisterValues::R10, true }, { "R11", &Disasm::RegisterValues::R11, true },
-            { "R12", &Disasm::RegisterValues::R12, true }, { "R13", &Disasm::RegisterValues::R13, true }, { "R14", &Disasm::RegisterValues::R14, true },
-            { "R15", &Disasm::RegisterValues::R15, true }, { "RIP", &Disasm::RegisterValues::Rip, false },
-        };
-
-        struct FlagBit
-        {
-            const char* Name;
-            int Bit;
-        };
-
-        const FlagBit kFlags[] = { { "CF", 0 }, { "PF", 2 }, { "AF", 4 }, { "ZF", 6 }, { "SF", 7 }, { "TF", 8 }, { "DF", 10 }, { "OF", 11 } };
-
-        struct FlagHelp
-        {
-            const char* Title;
-            const char* Meaning;
-            const char* Readers;
-        };
-
-        const FlagHelp kFlagHelp[] = {
-            { "Carry", "1 when an unsigned addition carried out of the top bit, or a subtraction or comparison had to borrow because the first value was below the second. Shifts and rotates put the bit they move out here.",
-              "jb/jc, jae/jnc, jbe, ja, adc, sbb, setb, cmovb" },
-            { "Parity", "1 when the lowest byte of the result has an even number of set bits. Compilers check it after float comparisons (ucomiss, comisd) to catch NaN.",
-              "jp/jpe, jnp/jpo, setp, cmovp" },
-            { "Auxiliary carry", "1 when bit 3 carried into bit 4 or borrowed from it. Only the decimal (BCD) adjustments use it.", "daa, das, aaa, aas" },
-            { "Zero", "1 when the result was zero: cmp of two equal values, test of a zero value, or a count that reached zero.", "je/jz, jne/jnz, jbe, ja, jle, jg, sete, cmove" },
-            { "Sign", "Copy of the top bit of the result: 1 when the result is negative as a signed number.", "js, jns, jl, jge, jle, jg, sets, cmovs" },
-            { "Trap", "When 1, the processor stops the thread after every instruction. The debugger sets it itself for single steps; switching it on here makes the thread stop again after its next instruction.",
-              "" },
-            { "Direction", "Direction of the string instructions movs, stos, cmps, scas and lods: 0 counts up, 1 counts down. Code expects 0 outside of such loops.",
-              "rep movs, rep stos, cmps, scas, lods" },
-            { "Overflow", "1 when a signed result did not fit, for example when adding two large positive numbers gave a negative one.", "jo, jno, jl, jge, jle, jg, seto, cmovo" },
-        };
-
-        const std::vector<const char*> kVectorFormats = { "Float", "Double", "Int", "Hex" };
-
-        int VectorLanes(int format)
-        {
-            return format == 1 ? 2 : format == 3 ? 1 : 4;
-        }
-
-        std::string NumberText(double value, int digits)
-        {
-            if (std::isnan(value))
-                return "nan";
-            if (std::isinf(value))
-                return value < 0 ? "-inf" : "inf";
-            return Format("%.*g", digits, value);
-        }
-
-        std::string LaneText(const std::array<std::uint8_t, 16>& xmm, int format, int lane, int digits)
-        {
-            switch (format)
-            {
-            case 0:
-            {
-                float value = 0.0f;
-                std::memcpy(&value, xmm.data() + lane * 4, sizeof(value));
-                return NumberText(value, digits);
-            }
-            case 1:
-            {
-                double value = 0.0;
-                std::memcpy(&value, xmm.data() + lane * 8, sizeof(value));
-                return NumberText(value, digits);
-            }
-            case 2:
-            {
-                std::int32_t value = 0;
-                std::memcpy(&value, xmm.data() + lane * 4, sizeof(value));
-                return std::to_string(value);
-            }
-            default:
-            {
-                std::uint64_t low = 0;
-                std::uint64_t high = 0;
-                std::memcpy(&low, xmm.data(), 8);
-                std::memcpy(&high, xmm.data() + 8, 8);
-                return Hex(high, 16) + " " + Hex(low, 16);
-            }
-            }
-        }
-
-        std::string VectorText(const std::array<std::uint8_t, 16>& xmm, int format)
-        {
-            std::string text;
-            for (int lane = 0; lane < VectorLanes(format); ++lane)
-            {
-                if (lane)
-                    text += ' ';
-                text += LaneText(xmm, format, lane, format == 1 ? 17 : 9);
-            }
-            return text;
-        }
-
-        std::optional<std::array<std::uint8_t, 16>> ParseVector(std::string_view text, int format)
-        {
-            std::string cleaned(text);
-            for (char& c : cleaned)
-            {
-                if (c == ',' || c == ';' || c == '\t')
-                    c = ' ';
-            }
-            std::array<std::uint8_t, 16> xmm{};
-            if (format == 3)
-            {
-                std::string digits;
-                for (const char c : cleaned)
-                {
-                    if (c != ' ')
-                        digits += c;
-                }
-                if (digits.size() > 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X'))
-                    digits.erase(0, 2);
-                if (digits.empty() || digits.size() > 32)
-                    return std::nullopt;
-                digits.insert(0, 32 - digits.size(), '0');
-                const auto high = ParseHex(digits.substr(0, 16));
-                const auto low = ParseHex(digits.substr(16));
-                if (!high || !low)
-                    return std::nullopt;
-                std::memcpy(xmm.data(), &*low, 8);
-                std::memcpy(xmm.data() + 8, &*high, 8);
-                return xmm;
-            }
-            const std::vector<std::string> parts = Split(cleaned, ' ');
-            if (static_cast<int>(parts.size()) != VectorLanes(format))
-                return std::nullopt;
-            for (int lane = 0; lane < VectorLanes(format); ++lane)
-            {
-                const std::string& part = parts[static_cast<std::size_t>(lane)];
-                if (format == 2)
-                {
-                    const bool hex = part.size() > 2 && part[0] == '0' && (part[1] == 'x' || part[1] == 'X');
-                    std::int64_t value = 0;
-                    if (hex)
-                    {
-                        const auto parsed = ParseHex(part.substr(2));
-                        if (!parsed || *parsed > 0xFFFFFFFFull)
-                            return std::nullopt;
-                        value = static_cast<std::int64_t>(*parsed);
-                    }
-                    else
-                    {
-                        const auto parsed = ParseDecimal(part);
-                        if (!parsed || *parsed < INT32_MIN || *parsed > static_cast<std::int64_t>(UINT32_MAX))
-                            return std::nullopt;
-                        value = *parsed;
-                    }
-                    const std::uint32_t bits = static_cast<std::uint32_t>(value);
-                    std::memcpy(xmm.data() + lane * 4, &bits, 4);
-                    continue;
-                }
-                const auto parsed = ParseDouble(part);
-                if (!parsed)
-                    return std::nullopt;
-                if (format == 0)
-                {
-                    const float value = static_cast<float>(*parsed);
-                    std::memcpy(xmm.data() + lane * 4, &value, 4);
-                }
-                else
-                {
-                    std::memcpy(xmm.data() + lane * 8, &*parsed, 8);
-                }
-            }
-            return xmm;
-        }
-
-        void ClippedText(ImDrawList* draw, ImVec2 at, float width, ImU32 color, const std::string& text)
-        {
-            draw->PushClipRect(at, ImVec2(at.x + width, at.y + ImGui::GetTextLineHeight() + 2.0f), true);
-            draw->AddText(at, color, text.c_str());
-            draw->PopClipRect();
-        }
-
         void DrawSkeleton(ImVec2 min, ImVec2 max)
         {
             ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -577,6 +389,7 @@ namespace Manifold::UI
         InjectDialog();
         RegionDialog();
         ThreadDialog();
+        ExceptionDialog();
         m_templates.Draw();
         if (const auto generated = m_templates.TakeText())
             m_workspace.OpenScript(*generated);
@@ -653,8 +466,21 @@ namespace Manifold::UI
                 ImGui::EndMenu();
             }
             ImGui::MenuItem(ICON_FA_CROSSHAIRS "  Follow breaks", nullptr, &m_followBreaks);
+            ItemTooltip("Jump to the instruction when the process stops at a breakpoint.");
             ImGui::MenuItem(ICON_FA_TAGS "  Show symbols", nullptr, &m_engine.Options().ShowSymbols);
             ItemTooltip("Names in the code: function headers with offsets below them, symbol names in operands, module+offset addresses. Off shows plain addresses.");
+            HighlightItems(nullptr);
+            ImGui::Separator();
+            if (ImGui::BeginMenu(ICON_FA_MICROCHIP "  Registers"))
+            {
+                RegisterViewItems();
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu(ICON_FA_LAYER_GROUP "  Stack"))
+            {
+                StackViewItems();
+                ImGui::EndMenu();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Debug", process))
@@ -664,6 +490,15 @@ namespace Manifold::UI
             item(ICON_FA_SHARE "  Step over", Command::DebugStepOver, broken);
             item(ICON_FA_SIGN_OUT_ALT "  Run until return", Command::DebugRunToReturn, broken);
             item(ICON_FA_PAUSE "  Break", Command::DebugBreak, !broken);
+            const bool onException = broken && debugger.Break().Exception.Raised;
+            if (ImGui::MenuItem(ICON_FA_FORWARD "  Continue, exception handled", nullptr, false, onException))
+                debugger.ResumeHandled();
+            ItemTooltip("For a stop on an exception: go on at the current registers without giving the exception to the program. Run gives it to the program.");
+            if (ImGui::BeginMenu(ICON_FA_EXCLAMATION_TRIANGLE "  Break on unexpected exceptions"))
+            {
+                ExceptionBreakItems();
+                ImGui::EndMenu();
+            }
             ImGui::Separator();
             item(ICON_FA_CIRCLE "  Toggle breakpoint", Command::ToggleBreakpoint);
             item(ICON_FA_SLIDERS_H "  Breakpoint with a condition...", Command::EditBreakpoint);
@@ -744,6 +579,135 @@ namespace Manifold::UI
         }
     }
 
+    void MemoryViewer::SetHighlight(const std::string& token)
+    {
+        const std::string wanted = HighlightToken(token);
+        m_highlight = m_highlight == wanted ? std::string() : wanted;
+    }
+
+    void MemoryViewer::HighlightItems(const Disasm::Instruction* instruction)
+    {
+        if (!ImGui::BeginMenu(ICON_FA_HIGHLIGHTER "  Highlight"))
+            return;
+        if (instruction && instruction->Valid)
+        {
+            const std::vector<std::string> used = AsmRegisters(instruction->Operands);
+            for (const std::string& name : used)
+            {
+                if (ImGui::MenuItem(name.c_str(), nullptr, m_highlight == name))
+                    SetHighlight(name);
+            }
+            if (used.empty())
+                ImGui::TextDisabled("No registers in this instruction");
+            ImGui::Separator();
+        }
+        const bool is64 = !m_engine.Process() || m_engine.Process()->Is64Bit();
+        if (ImGui::BeginMenu("Register"))
+        {
+            const char* const names64[] = { "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15" };
+            for (int i = 0; i < (is64 ? 16 : 8); ++i)
+            {
+                const std::string shown = is64 ? names64[i] : "e" + std::string(names64[i] + 1);
+                if (ImGui::MenuItem(shown.c_str(), nullptr, m_highlight == names64[i]))
+                    SetHighlight(names64[i]);
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::MenuItem("Clear highlight", nullptr, false, !m_highlight.empty()))
+            m_highlight.clear();
+        ImGui::Separator();
+        ImGui::TextDisabled("Middle-click a register or value in the code");
+        ImGui::EndMenu();
+    }
+
+    void MemoryViewer::ExceptionBreakItems()
+    {
+        Settings& options = m_engine.Options();
+        const auto choose = [&](int mode)
+            {
+                options.BreakOnException = mode;
+                m_engine.SaveOptionsSoon();
+                m_workspace.Report(m_engine.ApplyExceptionBreak());
+            };
+        if (ImGui::MenuItem("Never", nullptr, options.BreakOnException == 0))
+            choose(0);
+        ItemTooltip("Exceptions go straight to the program (the default).");
+        if (ImGui::MenuItem("Always", nullptr, options.BreakOnException == 1))
+            choose(1);
+        ItemTooltip("Stop at every exception the program raises before its own handlers see it: access violations, C++ and .NET throws, divisions by zero... Mono and Unity games raise many on purpose.");
+        std::string region = "In a region...";
+        if (options.BreakOnException == 2 && !options.ExceptionRegionStart.empty())
+            region = "In " + options.ExceptionRegionStart + (options.ExceptionRegionStop.empty() ? "" : " - " + options.ExceptionRegionStop) + "...";
+        if (ImGui::MenuItem(region.c_str(), nullptr, options.BreakOnException == 2))
+        {
+            m_exceptionStart = options.ExceptionRegionStart;
+            m_exceptionStop = options.ExceptionRegionStop;
+            if (m_exceptionStart.empty())
+            {
+                if (const auto module = m_engine.Process()->ModuleAt(m_selected))
+                    m_exceptionStart = module->Name;
+            }
+            m_exceptionError.clear();
+            m_exceptionDialog = true;
+        }
+        ItemTooltip("Stop only at exceptions raised by code in one module or address range, for example the game's own module.");
+        ImGui::Separator();
+        ImGui::TextDisabled("Debug output and thread names are never stopped at");
+    }
+
+    void MemoryViewer::ExceptionDialog()
+    {
+        if (m_exceptionDialog && !ImGui::IsPopupOpen("##exceptionregion"))
+            ImGui::OpenPopup("##exceptionregion");
+        if (!BeginModal("##exceptionregion", ICON_FA_EXCLAMATION_TRIANGLE, "Break on exceptions in a region", ImVec2(440.0f, 0.0f), &m_exceptionDialog, m_viewport))
+            return;
+        Muted("A module name stops at exceptions raised anywhere in that module. Or give the first and the last address of the range.");
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Start (module or address)");
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        bool enter = InputTextWithHint("##exceptionstart", "game.exe or 7FF6A0001000", m_exceptionStart, ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::TextUnformatted("End (empty for the whole module)");
+        ImGui::SetNextItemWidth(-1.0f);
+        enter = InputTextWithHint("##exceptionstop", "7FF6A0200000", m_exceptionStop, ImGuiInputTextFlags_EnterReturnsTrue) || enter;
+        if (!m_exceptionError.empty())
+        {
+            ImGui::Spacing();
+            TextWithError(m_exceptionError, ManifoldTheme::Error);
+        }
+        const DialogChoice choice = DialogButtons("Break in this region", !Trim(m_exceptionStart).empty(), false);
+        if (choice == DialogChoice::Ok || enter)
+        {
+            Settings& options = m_engine.Options();
+            const Settings before = options;
+            options.BreakOnException = 2;
+            options.ExceptionRegionStart = Trim(m_exceptionStart);
+            options.ExceptionRegionStop = Trim(m_exceptionStop);
+            const Status applied = m_engine.ApplyExceptionBreak();
+            if (applied)
+            {
+                m_engine.SaveOptionsSoon();
+                m_exceptionDialog = false;
+                ImGui::CloseCurrentPopup();
+            }
+            else
+            {
+                options.BreakOnException = before.BreakOnException;
+                options.ExceptionRegionStart = before.ExceptionRegionStart;
+                options.ExceptionRegionStop = before.ExceptionRegionStop;
+                m_engine.ApplyExceptionBreak();
+                m_exceptionError = applied.Text;
+            }
+        }
+        else if (choice == DialogChoice::Cancel)
+        {
+            m_exceptionDialog = false;
+            ImGui::CloseCurrentPopup();
+        }
+        EndModal();
+    }
+
     void MemoryViewer::BookmarkItems()
     {
         for (int slot = 0; slot < 10; ++slot)
@@ -795,9 +759,6 @@ namespace Manifold::UI
         button(ICON_FA_CODE, "Auto Assembler", Command::ViewerAutoAssemble);
         ImGui::SameLine();
         button(ICON_FA_SITEMAP, "Dissect data at the hex view address", Command::DissectData);
-        ImGui::SameLine(0.0f, Px(14.0f));
-        ImGui::Checkbox("Follow breaks", &m_followBreaks);
-        ItemTooltip("Jump to the instruction when the process stops at a breakpoint");
 
         const auto region = m_engine.Process()->RegionAt(m_selected);
         std::string where = m_engine.Describe(m_selected);
@@ -1038,6 +999,22 @@ namespace Manifold::UI
         separator("##addresscolumn", bytesX, m_addressWidth, true);
         separator("##bytescolumn", textX, m_bytesWidth, false);
         separator("##opcodecolumn", commentX, m_opcodeWidth, false);
+        if (!m_highlight.empty())
+        {
+            const std::string chip = ICON_FA_HIGHLIGHTER "  " + m_highlight + "  " ICON_FA_TIMES;
+            const ImVec2 size = ImGui::CalcTextSize(chip.c_str());
+            const ImVec2 chipMin(rightX - size.x - Px(16.0f), frame.y + Px(3.0f));
+            const ImVec2 chipMax(rightX - Px(4.0f), origin.y - Px(3.0f));
+            ImGui::SetCursorScreenPos(chipMin);
+            if (ImGui::InvisibleButton("##highlightchip", ImVec2(chipMax.x - chipMin.x, chipMax.y - chipMin.y)))
+                m_highlight.clear();
+            const bool chipHovered = ImGui::IsItemHovered();
+            drawList->AddRectFilled(chipMin, chipMax, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, chipHovered ? 0.32f : 0.20f)), Px(4.0f));
+            drawList->AddText(ImVec2(chipMin.x + Px(6.0f), std::round((chipMin.y + chipMax.y - size.y) * 0.5f)), ImGui::GetColorU32(ManifoldTheme::Text), chip.c_str());
+            if (chipHovered)
+                ImGui::SetTooltip("Highlighting %s and the parts of it in the operands. Rows that write it are marked red in the gutter, rows that only read it in the accent colour. Click to stop.",
+                    m_highlight.c_str());
+        }
 
         PushMono();
         ImFont* font = ImGui::GetFont();
@@ -1072,6 +1049,17 @@ namespace Manifold::UI
         if (hovered && hoveredRow >= 0 && hoveredRow < static_cast<int>(m_lines.size()))
         {
             const Disasm::Instruction& line = m_lines[static_cast<std::size_t>(hoveredRow)];
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
+            {
+                PushMono();
+                const float operandStart = textX + charWidth * static_cast<float>(std::max<std::size_t>(line.Mnemonic.size() + 1, 7));
+                const std::string token = AsmTokenAt(ImGui::GetFont(), ImGui::GetFontSize(), operandStart, line.Operands, ImGui::GetIO().MousePos.x);
+                PopMono();
+                if (!token.empty())
+                    SetHighlight(token);
+                else if (ImGui::GetIO().MousePos.x >= textX)
+                    m_highlight.clear();
+            }
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right))
             {
                 if (ImGui::GetIO().KeyShift && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
@@ -1149,7 +1137,12 @@ namespace Manifold::UI
             {
                 const ImVec4 operandClip(operandX, textY, std::min(commentX - Px(6.0f), rightX - Px(4.0f)), textY + rowHeight);
                 if (operandClip.z > operandClip.x)
-                    AsmOperands(drawList, font, fontSize, ImVec2(operandX, textY), operandClip, line.Operands);
+                    AsmOperands(drawList, font, fontSize, ImVec2(operandX, textY), operandClip, line.Operands, m_highlight);
+            }
+            if (const int use = HighlightUse(line.Mnemonic, line.Operands, m_highlight))
+            {
+                const ImU32 mark = ImGui::GetColorU32(use == 2 ? ManifoldTheme::Changed : ManifoldTheme::Accent);
+                drawList->AddRectFilled(ImVec2(origin.x + gutter - Px(4.0f), y + Px(2.0f)), ImVec2(origin.x + gutter - Px(1.0f), y + rowHeight - Px(2.0f)), mark, Px(1.0f));
             }
 
             const std::optional<std::string>& methodHeader = headers[i];
@@ -1823,6 +1816,7 @@ namespace Manifold::UI
             BookmarkItems();
             ImGui::EndMenu();
         }
+        HighlightItems(&instruction);
         ImGui::Separator();
         item(ICON_FA_EDIT "  Assemble", Command::AssembleInstruction);
         item(m_nopped.count(instruction.Address) ? ICON_FA_UNDO "  Restore original code" : ICON_FA_BAN "  Replace with code that does nothing", Command::NopInstruction);
@@ -1890,480 +1884,6 @@ namespace Manifold::UI
                 m_engine.Lua().ClickMenuItem(clicked);
             }
         }
-    }
-
-    bool MemoryViewer::RegisterLine(const std::string& id, std::string_view name, const std::string& editText, float rowHeight, float nameWidth, std::string& edited,
-        ImVec2& valueMin, ImVec2& valueMax)
-    {
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        const ImVec2 start = ImGui::GetCursorScreenPos();
-        const float line = ImGui::GetTextLineHeight();
-        const float right = start.x + ImGui::GetContentRegionAvail().x;
-        valueMin = valueMax = start;
-        if (m_registerEdit == id)
-        {
-            const float frame = ImGui::GetFrameHeight();
-            const float height = std::max(rowHeight, frame);
-            draw->AddText(ImVec2(start.x + Px(4.0f), std::round(start.y + (height - line) * 0.5f)), ImGui::GetColorU32(ManifoldTheme::CodeRegister),
-                std::string(name).c_str());
-            ImGui::SetCursorScreenPos(ImVec2(start.x + nameWidth, start.y + (height - frame) * 0.5f));
-            ImGui::SetNextItemWidth(right - (start.x + nameWidth));
-            if (m_registerEditFocus)
-            {
-                ImGui::SetKeyboardFocusHere();
-                m_registerEditFocus = false;
-            }
-            const bool enter = InputText("##edit", m_registerEditText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
-            bool committed = false;
-            if (enter)
-            {
-                edited = m_registerEditText;
-                committed = true;
-                m_registerEdit.clear();
-            }
-            else if (ImGui::IsItemDeactivated() || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
-            {
-                m_registerEdit.clear();
-            }
-            ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + height));
-            ImGui::Dummy(ImVec2(0.0f, 0.0f));
-            return committed;
-        }
-        if (ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, rowHeight)) && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
-            !m_registersRunning)
-        {
-            m_registerEdit = id;
-            m_registerEditText = editText;
-            m_registerEditFocus = true;
-        }
-        const float textY = std::round(start.y + (rowHeight - line) * 0.5f);
-        draw->AddText(ImVec2(start.x + Px(4.0f), textY), ImGui::GetColorU32(ManifoldTheme::CodeRegister), std::string(name).c_str());
-        valueMin = ImVec2(start.x + nameWidth, textY);
-        valueMax = ImVec2(right - Px(2.0f), textY + line);
-        return false;
-    }
-
-    Debug::BreakInfo MemoryViewer::ShownBreak() const
-    {
-        const Debug::BreakInfo live = m_engine.Debugger().Break();
-        if (!live.Broken && m_heldBreak.Broken && m_engine.Debugger().Stepping())
-            return m_heldBreak;
-        return live;
-    }
-
-    void MemoryViewer::Registers(float width, float height, const Debug::BreakInfo& info, bool running)
-    {
-        Debug::Debugger& debugger = m_engine.Debugger();
-        m_registersRunning = running;
-        if (running)
-            m_registerEdit.clear();
-        if (info.Serial != m_registerSerial)
-        {
-            m_havePreviousRegisters = m_registerSerial != 0;
-            m_previousRegisters = m_lastRegisters;
-            m_previousVectors = m_lastVectors;
-            m_registerSerial = info.Serial;
-            m_registerEdit.clear();
-        }
-        m_lastRegisters = info.Registers;
-        m_lastVectors = info.Vectors;
-
-        if (info.Serial != m_conditionSerial || info.Registers.Rip != m_conditionAddress)
-        {
-            m_conditionSerial = info.Serial;
-            m_conditionAddress = info.Registers.Rip;
-            std::uint8_t bytes[16] = {};
-            const std::size_t got = m_engine.Process()->Read(info.Registers.Rip, bytes, sizeof(bytes));
-            debugger.Unpatch(info.Registers.Rip, bytes, sizeof(bytes));
-            m_conditionInstruction = got ? m_engine.Disassembler().Decode(info.Registers.Rip, bytes, got, nullptr) : Disasm::Instruction{};
-        }
-        const Disasm::ConditionInfo condition = m_conditionInstruction.Valid ? Disasm::EvaluateCondition(m_conditionInstruction.Mnemonic, info.Registers, info.Is64Bit)
-                                                                            : Disasm::ConditionInfo{};
-
-        BeginCard("##registers", nullptr, ImVec2(width, height));
-        CardTitle(ICON_FA_MICROCHIP, "Registers", "thread " + std::to_string(info.ThreadId) + (running ? "  ·  stepping..." : ""));
-        PushMono();
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        const float line = ImGui::GetTextLineHeight();
-        const float rowHeight = std::round(line + Px(5.0f));
-        const float nameWidth = ImGui::CalcTextSize("XMM15").x + Px(14.0f);
-        const ImU32 textColor = ImGui::GetColorU32(ManifoldTheme::Text);
-        const ImU32 changedColor = ImGui::GetColorU32(ManifoldTheme::Changed);
-        const ImU32 mutedColor = ImGui::GetColorU32(ManifoldTheme::Muted);
-        const int digits = info.Is64Bit ? 16 : 8;
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
-
-        Disasm::RegisterValues values = info.Registers;
-        bool changed = false;
-        for (const RegisterRow& row : kRegisterRows)
-        {
-            if (row.Only64 && !info.Is64Bit)
-                continue;
-            std::string name = row.Name;
-            if (!info.Is64Bit)
-                name[0] = 'E';
-            const std::uint64_t value = values.*row.Field;
-            const std::string text = Hex(value, digits);
-            ImGui::PushID(row.Name);
-            std::string edited;
-            ImVec2 valueMin;
-            ImVec2 valueMax;
-            if (RegisterLine(row.Name, name, text, rowHeight, nameWidth, edited, valueMin, valueMax))
-            {
-                if (const auto parsed = ParseHex(edited))
-                {
-                    values.*row.Field = info.Is64Bit ? *parsed : (*parsed & 0xFFFFFFFFull);
-                    changed = true;
-                }
-                else
-                {
-                    m_engine.Notify(LogLevel::Error, "\"" + edited + "\" is not a hex number.");
-                }
-            }
-            if (valueMax.x > valueMin.x)
-            {
-                if (condition.UsesCounter && row.Field == &Disasm::RegisterValues::Rcx)
-                    draw->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImGui::GetColorU32(ManifoldTheme::Accent), ImGui::GetStyle().FrameRounding);
-                const bool differs = m_havePreviousRegisters && m_previousRegisters.*row.Field != value;
-                draw->AddText(valueMin, differs ? changedColor : textColor, text.c_str());
-                const std::string described = m_engine.Describe(value);
-                const float used = ImGui::CalcTextSize(text.c_str()).x + Px(10.0f);
-                if (described != Hex(value) && valueMax.x - valueMin.x > used + Px(30.0f))
-                    ClippedText(draw, ImVec2(valueMin.x + used, valueMin.y), valueMax.x - valueMin.x - used, ImGui::GetColorU32(ManifoldTheme::AddressText), described);
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::BeginTooltip();
-                    ImGui::Text("%s = %s", name.c_str(), Hex(value).c_str());
-                    ImGui::TextColored(ManifoldTheme::Muted, "%llu  ·  %lld", static_cast<unsigned long long>(value), static_cast<long long>(value));
-                    if (described != Hex(value))
-                        ImGui::TextColored(ManifoldTheme::AddressText, "%s", described.c_str());
-                    if (m_havePreviousRegisters && m_previousRegisters.*row.Field != value)
-                        ImGui::TextColored(ManifoldTheme::Changed, "was %s", Hex(m_previousRegisters.*row.Field, digits).c_str());
-                    if (condition.UsesCounter && row.Field == &Disasm::RegisterValues::Rcx)
-                        ImGui::TextColored(ManifoldTheme::Accent, "%s at %s reads this register", m_conditionInstruction.Mnemonic.c_str(), info.Is64Bit ? "RIP" : "EIP");
-                    ImGui::TextColored(ManifoldTheme::Muted, "%s", running ? "The thread is running a step" : "Double-click to change it");
-                    ImGui::EndTooltip();
-                }
-            }
-            if (ImGui::BeginPopupContextItem("##regmenu"))
-            {
-                if (ImGui::MenuItem("Change value", nullptr, false, !running))
-                {
-                    m_registerEdit = row.Name;
-                    m_registerEditText = text;
-                    m_registerEditFocus = true;
-                }
-                if (ImGui::MenuItem("Show in hex view"))
-                {
-                    m_hexTop = value & ~0xFull;
-                    m_hexSelected = value;
-                }
-                if (ImGui::MenuItem("Show in disassembler"))
-                    Navigate(value);
-                if (ImGui::MenuItem("Copy"))
-                    ImGui::SetClipboardText(Hex(value).c_str());
-                ImGui::EndPopup();
-            }
-            ImGui::PopID();
-        }
-
-        ImGui::Dummy(ImVec2(0.0f, Px(6.0f)));
-        SectionLabel("Flags");
-        if (condition.Kind != Disasm::ConditionKind::None)
-        {
-            const char* verdict = condition.Kind == Disasm::ConditionKind::Move ? (condition.Taken ? "moves" : "does not move")
-                                : condition.Kind == Disasm::ConditionKind::Set  ? (condition.Taken ? "sets 1" : "sets 0")
-                                                                                : (condition.Taken ? "jumps" : "does not jump");
-            const std::string hint = m_conditionInstruction.Mnemonic + " " + verdict;
-            const float hintWidth = ImGui::CalcTextSize(hint.c_str()).x;
-            ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - hintWidth - Px(2.0f)));
-            ImGui::TextColored(condition.Taken ? ManifoldTheme::Accent : ManifoldTheme::Muted, "%s", hint.c_str());
-            if (ImGui::IsItemHovered())
-            {
-                ImGui::BeginTooltip();
-                ImGui::Text("%s at %s", m_conditionInstruction.Text().c_str(), info.Is64Bit ? "RIP" : "EIP");
-                ImGui::TextColored(ManifoldTheme::Muted, "%s", condition.UsesCounter ? "It depends on RCX; the flags it reads are outlined." : "The flags it reads are outlined.");
-                ImGui::EndTooltip();
-            }
-        }
-        ImGui::Dummy(ImVec2(0.0f, Px(2.0f)));
-        {
-            const float available = ImGui::GetContentRegionAvail().x;
-            const float spacing = Px(4.0f);
-            const float cell = std::floor((available - spacing * 3.0f) / 4.0f);
-            const float cellHeight = std::round(line + Px(6.0f));
-            const ImVec2 origin = ImGui::GetCursorScreenPos();
-            for (int i = 0; i < static_cast<int>(std::size(kFlags)); ++i)
-            {
-                const FlagBit& flag = kFlags[i];
-                const ImVec2 min(origin.x + static_cast<float>(i % 4) * (cell + spacing), origin.y + static_cast<float>(i / 4) * (cellHeight + spacing));
-                const ImVec2 max(min.x + cell, min.y + cellHeight);
-                ImGui::SetCursorScreenPos(min);
-                ImGui::PushID(flag.Name);
-                const bool clicked = ImGui::InvisibleButton("##flag", ImVec2(cell, cellHeight));
-                const bool hovered = ImGui::IsItemHovered();
-                ImGui::PopID();
-                const bool set = (values.Flags >> flag.Bit) & 1;
-                const bool differs = m_havePreviousRegisters && (((m_previousRegisters.Flags ^ values.Flags) >> flag.Bit) & 1);
-                const bool read = (condition.FlagsRead >> flag.Bit) & 1u;
-                const ImVec4 fill = set ? ManifoldTheme::WithAlpha(ManifoldTheme::Accent, hovered ? 0.34f : 0.24f) : ImGui::GetStyleColorVec4(hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
-                draw->AddRectFilled(min, max, ImGui::GetColorU32(fill), ImGui::GetStyle().FrameRounding);
-                if (read)
-                    draw->AddRect(min, max, ImGui::GetColorU32(ManifoldTheme::Accent), ImGui::GetStyle().FrameRounding, 0, Px(1.5f));
-                const std::string label = std::string(flag.Name) + " " + (set ? "1" : "0");
-                const ImVec2 size = ImGui::CalcTextSize(label.c_str());
-                draw->AddText(ImVec2(std::round(min.x + (cell - size.x) * 0.5f), std::round(min.y + (cellHeight - size.y) * 0.5f)),
-                    differs ? changedColor : set ? textColor : mutedColor, label.c_str());
-                if (hovered)
-                {
-                    const FlagHelp& help = kFlagHelp[i];
-                    PopMono();
-                    ImGui::BeginTooltip();
-                    ImGui::Text("%s  ·  %s", flag.Name, help.Title);
-                    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
-                    ImGui::TextUnformatted(help.Meaning);
-                    if (help.Readers[0])
-                        ImGui::TextColored(ManifoldTheme::Muted, "Read by %s", help.Readers);
-                    ImGui::PopTextWrapPos();
-                    ImGui::Separator();
-                    if (differs)
-                        ImGui::TextColored(ManifoldTheme::Changed, "Now %d, was %d at the last stop", set ? 1 : 0, set ? 0 : 1);
-                    else
-                        ImGui::Text("Now %d", set ? 1 : 0);
-                    if (read)
-                        ImGui::TextColored(ManifoldTheme::Accent, "%s at %s reads it: %s", m_conditionInstruction.Mnemonic.c_str(), info.Is64Bit ? "RIP" : "EIP",
-                            condition.Taken ? (condition.Kind == Disasm::ConditionKind::Jump ? "it jumps" : condition.Kind == Disasm::ConditionKind::Move ? "it moves" : "it sets 1")
-                                            : (condition.Kind == Disasm::ConditionKind::Jump ? "it does not jump" : condition.Kind == Disasm::ConditionKind::Move ? "it does not move" : "it sets 0"));
-                    ImGui::TextColored(ManifoldTheme::Muted, "%s", running ? "The thread is running a step" : "Click to switch it");
-                    ImGui::EndTooltip();
-                    PushMono();
-                }
-                if (clicked && !running)
-                {
-                    values.Flags ^= 1ull << flag.Bit;
-                    changed = true;
-                }
-            }
-            ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + (cellHeight + spacing) * 2.0f));
-            ImGui::Dummy(ImVec2(0.0f, 0.0f));
-        }
-        if (changed && !running)
-            debugger.SetRegisters(values);
-
-        ImGui::Dummy(ImVec2(0.0f, Px(6.0f)));
-        const Debug::VectorRegisters& vectors = info.Vectors;
-        if (vectors.Count > 0)
-        {
-            SectionLabel("XMM");
-            PopMono();
-            const float segmentWidth = std::min(ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("XMM").x - Px(16.0f), Px(220.0f));
-            ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - segmentWidth);
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() - (ImGui::GetFrameHeight() - line) * 0.5f);
-            if (Segmented("##vectorformat", &m_vectorFormat, kVectorFormats, segmentWidth))
-                m_registerEdit.clear();
-            PushMono();
-            ImGui::Dummy(ImVec2(0.0f, Px(2.0f)));
-            Debug::VectorRegisters newVectors = vectors;
-            bool vectorsChanged = false;
-            const int lanes = VectorLanes(m_vectorFormat);
-            for (int i = 0; i <= vectors.Count; ++i)
-            {
-                const bool mxcsr = i == vectors.Count;
-                const std::string name = mxcsr ? "MXCSR" : "XMM" + std::to_string(i);
-                const std::string id = "##" + name;
-                const auto& xmm = vectors.Xmm[static_cast<std::size_t>(mxcsr ? 0 : i)];
-                const std::string editText = mxcsr ? Hex(vectors.Mxcsr, 8) : VectorText(xmm, m_vectorFormat);
-                ImGui::PushID(name.c_str());
-                std::string edited;
-                ImVec2 valueMin;
-                ImVec2 valueMax;
-                if (RegisterLine(id, name, editText, rowHeight, nameWidth, edited, valueMin, valueMax))
-                {
-                    if (mxcsr)
-                    {
-                        if (const auto parsed = ParseHex(edited); parsed && *parsed <= 0xFFFFFFFFull)
-                        {
-                            newVectors.Mxcsr = static_cast<std::uint32_t>(*parsed);
-                            vectorsChanged = true;
-                        }
-                        else
-                        {
-                            m_engine.Notify(LogLevel::Error, "\"" + edited + "\" is not a 32-bit hex number.");
-                        }
-                    }
-                    else if (const auto parsed = ParseVector(edited, m_vectorFormat))
-                    {
-                        newVectors.Xmm[static_cast<std::size_t>(i)] = *parsed;
-                        vectorsChanged = true;
-                    }
-                    else
-                    {
-                        m_engine.Notify(LogLevel::Error, "\"" + edited + "\" does not give " + std::to_string(lanes) + (lanes == 1 ? " 128-bit hex value." : " " + std::string(kVectorFormats[static_cast<std::size_t>(m_vectorFormat)]) + " values."));
-                    }
-                }
-                if (valueMax.x > valueMin.x)
-                {
-                    const bool differs = m_havePreviousRegisters && m_previousVectors.Count == vectors.Count && (mxcsr ? m_previousVectors.Mxcsr != vectors.Mxcsr : m_previousVectors.Xmm[static_cast<std::size_t>(i)] != xmm);
-                    const ImU32 color = differs ? changedColor : textColor;
-                    if (mxcsr)
-                    {
-                        draw->AddText(valueMin, color, Hex(vectors.Mxcsr, 8).c_str());
-                    }
-                    else
-                    {
-                        const float laneWidth = std::floor((valueMax.x - valueMin.x) / static_cast<float>(lanes));
-                        for (int lane = 0; lane < lanes; ++lane)
-                        {
-                            std::string text = LaneText(xmm, m_vectorFormat, lane, m_vectorFormat == 1 ? 10 : 7);
-                            for (int fewer = m_vectorFormat == 1 ? 8 : 5; fewer >= 2 && m_vectorFormat < 2 && ImGui::CalcTextSize(text.c_str()).x > laneWidth - Px(8.0f); fewer -= 2)
-                                text = LaneText(xmm, m_vectorFormat, lane, fewer);
-                            ClippedText(draw, ImVec2(valueMin.x + laneWidth * static_cast<float>(lane), valueMin.y), laneWidth - Px(6.0f), color, text);
-                        }
-                    }
-                    if (ImGui::IsItemHovered())
-                    {
-                        ImGui::BeginTooltip();
-                        if (mxcsr)
-                        {
-                            ImGui::Text("MXCSR = %s", Hex(vectors.Mxcsr, 8).c_str());
-                        }
-                        else
-                        {
-                            ImGui::Text("%s", name.c_str());
-                            for (int format = 0; format < static_cast<int>(kVectorFormats.size()); ++format)
-                            {
-                                std::string all;
-                                for (int lane = 0; lane < VectorLanes(format); ++lane)
-                                    all += (lane ? "   " : "") + LaneText(xmm, format, lane, format == 1 ? 17 : 9);
-                                ImGui::TextColored(ManifoldTheme::Muted, "%-6s", kVectorFormats[static_cast<std::size_t>(format)]);
-                                ImGui::SameLine();
-                                ImGui::TextUnformatted(all.c_str());
-                            }
-                            ImGui::TextColored(ManifoldTheme::Muted, "Lane 0 first. Double-click to change it.");
-                        }
-                        ImGui::EndTooltip();
-                    }
-                }
-                if (ImGui::BeginPopupContextItem("##xmmmenu"))
-                {
-                    if (ImGui::MenuItem("Change value", nullptr, false, !running))
-                    {
-                        m_registerEdit = id;
-                        m_registerEditText = editText;
-                        m_registerEditFocus = true;
-                    }
-                    if (ImGui::MenuItem("Copy"))
-                        ImGui::SetClipboardText(editText.c_str());
-                    if (!mxcsr && ImGui::MenuItem("Set to zero", nullptr, false, !running))
-                    {
-                        newVectors.Xmm[static_cast<std::size_t>(i)] = {};
-                        vectorsChanged = true;
-                    }
-                    ImGui::EndPopup();
-                }
-                ImGui::PopID();
-            }
-            if (vectorsChanged && !running)
-                debugger.SetVectors(newVectors);
-            ImGui::Dummy(ImVec2(0.0f, Px(6.0f)));
-        }
-        else if (debugger.UsingVeh())
-        {
-            ImGui::PushTextWrapPos(0.0f);
-            ImGui::TextColored(ManifoldTheme::Muted, "XMM registers come from the in-process debugger. The one loaded into this process is older and does not send them; they appear after the process restarts.");
-            ImGui::PopTextWrapPos();
-            ImGui::Dummy(ImVec2(0.0f, Px(6.0f)));
-        }
-
-        ImGui::PopStyleVar();
-        PopMono();
-        EndCard();
-    }
-
-    void MemoryViewer::Stack(float width, float height, const Debug::BreakInfo& info, bool running)
-    {
-        const Disasm::RegisterValues& values = info.Registers;
-        const int pointer = info.Is64Bit ? 8 : 4;
-        BeginCard("##stack", nullptr, ImVec2(width, height));
-        CardTitle(ICON_FA_LAYER_GROUP, "Stack", std::string(info.Is64Bit ? "RSP " : "ESP ") + Hex(values.Rsp, pointer * 2) + (running ? "  ·  stepping..." : ""));
-        PushMono();
-        constexpr int kEntries = 512;
-        std::vector<std::uint8_t> data(static_cast<std::size_t>(kEntries * pointer));
-        const std::size_t got = m_engine.Process()->Read(values.Rsp, data.data(), data.size());
-        const int entries = static_cast<int>(got / static_cast<std::size_t>(pointer));
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-        const float line = ImGui::GetTextLineHeight();
-        const float rowHeight = std::round(line + Px(5.0f));
-        const float offsetWidth = ImGui::CalcTextSize("+0000").x + Px(14.0f);
-        const ImU32 textColor = ImGui::GetColorU32(ManifoldTheme::Text);
-        const ImU32 mutedColor = ImGui::GetColorU32(ManifoldTheme::Muted);
-        const ImU32 registerColor = ImGui::GetColorU32(ManifoldTheme::CodeRegister);
-        const ImU32 symbolColor = ImGui::GetColorU32(ManifoldTheme::AddressText);
-        if (entries == 0)
-            ImGui::TextColored(ManifoldTheme::Muted, "The stack at %s cannot be read.", Hex(values.Rsp).c_str());
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
-        ImGuiListClipper clipper;
-        clipper.Begin(entries, rowHeight);
-        while (clipper.Step())
-        {
-            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-            {
-                const std::uint64_t at = values.Rsp + static_cast<std::uint64_t>(i * pointer);
-                std::uint64_t value = 0;
-                std::memcpy(&value, data.data() + static_cast<std::size_t>(i * pointer), static_cast<std::size_t>(pointer));
-                ImGui::PushID(i);
-                const ImVec2 start = ImGui::GetCursorScreenPos();
-                const float right = start.x + ImGui::GetContentRegionAvail().x;
-                if (ImGui::Selectable("##slot", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, rowHeight)) && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                    Navigate(value);
-                const float textY = std::round(start.y + (rowHeight - line) * 0.5f);
-                const bool frame = at == values.Rbp;
-                const std::string offset = frame ? std::string(info.Is64Bit ? "RBP" : "EBP") : Format("+%X", i * pointer);
-                draw->AddText(ImVec2(start.x + Px(4.0f), textY), frame ? registerColor : mutedColor, offset.c_str());
-                const std::string text = Hex(value, pointer * 2);
-                draw->AddText(ImVec2(start.x + offsetWidth, textY), textColor, text.c_str());
-                const std::string described = m_engine.Describe(value);
-                const bool named = described != Hex(value);
-                const float used = offsetWidth + ImGui::CalcTextSize(text.c_str()).x + Px(10.0f);
-                if (named && right - (start.x + used) > Px(30.0f))
-                    ClippedText(draw, ImVec2(start.x + used, textY), right - (start.x + used), symbolColor, described);
-                if (ImGui::IsItemHovered())
-                {
-                    ImGui::BeginTooltip();
-                    ImGui::TextColored(ManifoldTheme::Muted, "%s  (%s+%X)", Hex(at).c_str(), info.Is64Bit ? "RSP" : "ESP", i * pointer);
-                    ImGui::TextUnformatted(Hex(value).c_str());
-                    if (named)
-                        ImGui::TextColored(ManifoldTheme::AddressText, "%s", described.c_str());
-                    ImGui::TextColored(ManifoldTheme::Muted, "Double-click to show the value in the disassembler");
-                    ImGui::EndTooltip();
-                }
-                if (ImGui::BeginPopupContextItem("##stackmenu"))
-                {
-                    if (ImGui::MenuItem("Show value in disassembler"))
-                        Navigate(value);
-                    if (ImGui::MenuItem("Show value in hex view"))
-                    {
-                        m_hexTop = value & ~0xFull;
-                        m_hexSelected = value;
-                    }
-                    if (ImGui::MenuItem("Show this slot in hex view"))
-                    {
-                        m_hexTop = at & ~0xFull;
-                        m_hexSelected = at;
-                    }
-                    ImGui::Separator();
-                    if (ImGui::MenuItem("Copy value"))
-                        ImGui::SetClipboardText(Hex(value).c_str());
-                    if (ImGui::MenuItem("Copy address"))
-                        ImGui::SetClipboardText(Hex(at).c_str());
-                    ImGui::EndPopup();
-                }
-                ImGui::PopID();
-            }
-        }
-        ImGui::PopStyleVar();
-        PopMono();
-        EndCard();
     }
 
     void MemoryViewer::HexView(float height)

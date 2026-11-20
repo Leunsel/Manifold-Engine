@@ -196,50 +196,97 @@ namespace Manifold::UI
         EditDialog();
     }
 
+    void BreakpointWindow::MenuBar()
+    {
+        if (!ImGui::BeginMenuBar())
+            return;
+        Debug::Debugger& debugger = m_engine.Debugger();
+        if (ImGui::BeginMenu("Breakpoints"))
+        {
+            if (ImGui::MenuItem(ICON_FA_PLUS "  Add...", nullptr, false, m_engine.HasProcess()))
+                Edit(0, Debug::BreakpointType::Execute, 1);
+            const Debug::Breakpoint* selected = Selected();
+            if (ImGui::MenuItem(ICON_FA_EDIT "  Edit...", "Enter", false, selected != nullptr) && selected)
+                Edit(selected->Address, selected->Type, selected->Size);
+            if (ImGui::MenuItem(ICON_FA_TRASH "  Remove", "Del", false, selected != nullptr) && selected)
+                debugger.RemoveBreakpoint(selected->Address);
+            ImGui::Separator();
+            if (DangerMenuItem(ICON_FA_TRASH "  Remove all", nullptr, !m_list.empty()))
+            {
+                const std::vector<Debug::Breakpoint> all = m_list;
+                m_workspace.Confirm("Remove breakpoints", "Remove all " + std::to_string(all.size()) + (all.size() == 1 ? " breakpoint?" : " breakpoints?"), [this, all]()
+                    {
+                        for (const Debug::Breakpoint& breakpoint : all)
+                            m_engine.Debugger().RemoveBreakpoint(breakpoint.Address);
+                    }, "Remove");
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Debugger"))
+        {
+            if (ImGui::MenuItem(ICON_FA_BUG "  Attach", nullptr, false, m_engine.HasProcess() && !debugger.Attached()))
+                m_workspace.Report(m_engine.EnsureDebugger());
+            if (ImGui::MenuItem(ICON_FA_UNLINK "  Detach", nullptr, false, debugger.Attached()))
+                debugger.Detach();
+            ImGui::Separator();
+            ImGui::TextDisabled("%s, %d of 4 debug registers free", debugger.UsingVeh() ? "In-process debugger" : "Windows debugger", debugger.Attached() ? debugger.FreeHardwareSlots() : 4);
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
+
+    const Debug::Breakpoint* BreakpointWindow::Selected() const
+    {
+        for (const Debug::Breakpoint& breakpoint : m_list)
+        {
+            if (breakpoint.Address == m_selected)
+                return &breakpoint;
+        }
+        return nullptr;
+    }
+
     void BreakpointWindow::DrawWindow()
     {
-        if (!BeginWindow(ICON_FA_CIRCLE "  Breakpoints###breakpoints", ImVec2(640.0f, 360.0f), 0, ImVec2(460.0f, 240.0f)))
+        if (!BeginWindow(ICON_FA_CIRCLE "  Breakpoints###breakpoints", ImVec2(760.0f, 360.0f), ImGuiWindowFlags_MenuBar, ImVec2(480.0f, 240.0f)))
             return;
         m_selfViewport = ImGui::GetWindowViewport()->ID;
         Debug::Debugger& debugger = m_engine.Debugger();
         if (debugger.Generation() != m_generation)
         {
             m_generation = debugger.Generation();
-            m_list = debugger.Breakpoints();
+            m_list.clear();
+            for (const Debug::Breakpoint& breakpoint : debugger.Breakpoints())
+            {
+                if (!breakpoint.Temporary && !breakpoint.WatchId)
+                    m_list.push_back(breakpoint);
+            }
             std::sort(m_list.begin(), m_list.end(), [](const Debug::Breakpoint& a, const Debug::Breakpoint& b) { return a.Address < b.Address; });
         }
+        MenuBar();
 
         const bool attached = debugger.Attached();
-        ImGui::BeginDisabled(!m_engine.HasProcess());
-        if (ImGui::Button(ICON_FA_PLUS "  Add"))
-            Edit(0, Debug::BreakpointType::Execute, 1);
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::BeginDisabled(m_list.empty());
-        if (ImGui::Button(ICON_FA_TRASH "  Remove all"))
-        {
-            for (const Debug::Breakpoint& breakpoint : m_list)
-                debugger.RemoveBreakpoint(breakpoint.Address);
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::AlignTextToFramePadding();
-        Muted(attached ? std::to_string(m_list.size()) + (m_list.size() == 1 ? " breakpoint" : " breakpoints") : "the debugger is not attached");
-
         if (m_list.empty())
         {
-            m_workspace.NoProcessState(ICON_FA_CIRCLE, "No breakpoints. Add one here, or from the memory viewer (F5 on an instruction, or right click for a condition).");
+            const std::string text = attached ? "Set one with F5 on an instruction in the memory viewer, Shift+F5 for one with a condition, or add one here."
+                                              : "The debugger is not attached. Breakpoints are set from the memory viewer (F5 on an instruction) or added here; that attaches it.";
+            if (EmptyState(ICON_FA_CIRCLE, "No breakpoints", text, { { ICON_FA_PLUS "  Add a breakpoint", nullptr, m_engine.HasProcess() } }, false) == 0)
+                Edit(0, Debug::BreakpointType::Execute, 1);
             EndToolWindow();
             return;
         }
+        const Debug::BreakInfo info = debugger.Break();
+        Muted(std::to_string(m_list.size()) + (m_list.size() == 1 ? " breakpoint" : " breakpoints") + "  ·  " + std::to_string(debugger.FreeHardwareSlots()) + " of 4 debug registers free" +
+              (info.Broken ? "  ·  stopped at " + m_engine.Describe(info.Address) : std::string()));
 
         const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp;
-        if (ImGui::BeginTable("##bplist", 4, flags))
+        if (ImGui::BeginTable("##bplist", 6, flags))
         {
             ImGui::TableSetupScrollFreeze(0, 1);
             ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 1.4f);
-            ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(70.0f));
-            ImGui::TableSetupColumn("Condition and changes", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+            ImGui::TableSetupColumn("Instruction", ImGuiTableColumnFlags_WidthStretch, 1.4f);
+            ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthFixed, Px(110.0f));
+            ImGui::TableSetupColumn("How", ImGuiTableColumnFlags_WidthFixed, Px(96.0f));
+            ImGui::TableSetupColumn("Condition and changes", ImGuiTableColumnFlags_WidthStretch, 1.6f);
             ImGui::TableSetupColumn("Hits", ImGuiTableColumnFlags_WidthFixed, Px(64.0f));
             ImGui::TableHeadersRow();
             for (const Debug::Breakpoint& breakpoint : m_list)
@@ -247,29 +294,71 @@ namespace Manifold::UI
                 ImGui::TableNextRow();
                 ImGui::PushID(static_cast<int>(breakpoint.Address));
                 ImGui::TableNextColumn();
+                const bool stoppedHere = info.Broken && (info.BreakpointAddress == breakpoint.Address || info.Address == breakpoint.Address);
                 PushMono();
-                if (ImGui::Selectable(m_engine.Describe(breakpoint.Address).c_str(), false, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
+                if (stoppedHere)
+                    ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Warning);
+                const std::string label = (stoppedHere ? ICON_FA_CARET_RIGHT " " : "") + m_engine.Describe(breakpoint.Address);
+                if (ImGui::Selectable(label.c_str(), m_selected == breakpoint.Address, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
                 {
+                    m_selected = breakpoint.Address;
                     if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                         m_workspace.OpenMemoryViewer(breakpoint.Address);
                 }
+                if (stoppedHere)
+                    ImGui::PopStyleColor();
                 PopMono();
                 if (ImGui::BeginPopupContextItem("##bpmenu"))
                 {
-                    if (ImGui::MenuItem(ICON_FA_EDIT "  Edit..."))
+                    m_selected = breakpoint.Address;
+                    if (ImGui::MenuItem(ICON_FA_EDIT "  Edit...", "Enter"))
                         Edit(breakpoint.Address, breakpoint.Type, breakpoint.Size);
                     if (ImGui::MenuItem(ICON_FA_CODE "  Show in the disassembler"))
                         m_workspace.OpenMemoryViewer(breakpoint.Address);
-                    if (ImGui::MenuItem(ICON_FA_TRASH "  Remove"))
+                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the address"))
+                        ImGui::SetClipboardText(m_engine.Symbols().ModuleOffset(breakpoint.Address).c_str());
+                    ImGui::Separator();
+                    if (DangerMenuItem(ICON_FA_TRASH "  Remove", "Del"))
                         debugger.RemoveBreakpoint(breakpoint.Address);
                     ImGui::EndPopup();
                 }
                 ImGui::TableNextColumn();
-                ImGui::TextUnformatted(breakpoint.Type == Debug::BreakpointType::Write ? "Write" : breakpoint.Type == Debug::BreakpointType::Access ? "Access" : "Execute");
+                PushMono();
+                if (breakpoint.Type == Debug::BreakpointType::Execute && m_engine.HasProcess())
+                {
+                    const Disasm::Instruction instruction = m_engine.Disassembler().Read(*m_engine.Process(), breakpoint.Address, &m_engine.Symbols());
+                    if (instruction.Valid)
+                        ImGui::TextUnformatted(instruction.Text().c_str());
+                    else
+                        Muted("??");
+                }
+                else
+                {
+                    Muted(breakpoint.Type == Debug::BreakpointType::Write ? "data, written" : "data, read or written");
+                }
+                PopMono();
                 ImGui::TableNextColumn();
-                const std::string describe = Debug::DescribeAction(breakpoint.Action);
+                const char* type = breakpoint.Type == Debug::BreakpointType::Write ? "Write" : breakpoint.Type == Debug::BreakpointType::Access ? "Access" : "Execute";
+                if (breakpoint.Type == Debug::BreakpointType::Execute)
+                    ImGui::TextUnformatted(type);
+                else
+                    ImGui::Text("%s, %d %s", type, breakpoint.Size, breakpoint.Size == 1 ? "byte" : "bytes");
+                ImGui::TableNextColumn();
+                if (breakpoint.Hardware || breakpoint.Slot >= 0)
+                    ImGui::Text("DR%d", breakpoint.Slot);
+                else
+                    ImGui::TextUnformatted("int3");
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", breakpoint.Hardware || breakpoint.Slot >= 0 ? "Hardware breakpoint in a debug register: leaves the code unchanged, so checksums do not see it. There are 4."
+                                                                                       : "Software breakpoint: an int3 byte written over the instruction while it is set.");
+                ImGui::TableNextColumn();
+                std::string describe = Debug::DescribeAction(breakpoint.Action);
+                if (breakpoint.Action.ThreadId)
+                    describe += (describe.empty() ? "" : ", ") + std::string("thread ") + std::to_string(breakpoint.Action.ThreadId);
+                if (!breakpoint.Action.Break)
+                    describe += (describe.empty() ? "" : ", ") + std::string("does not stop");
                 if (describe.empty())
-                    Muted("—");
+                    Muted("always stops");
                 else
                     ImGui::TextUnformatted(describe.c_str());
                 ImGui::TableNextColumn();
@@ -277,6 +366,16 @@ namespace Manifold::UI
                 ImGui::PopID();
             }
             ImGui::EndTable();
+        }
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId))
+        {
+            if (const Debug::Breakpoint* selected = Selected())
+            {
+                if (ImGui::IsKeyPressed(ImGuiKey_Delete, false))
+                    debugger.RemoveBreakpoint(selected->Address);
+                else if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false))
+                    Edit(selected->Address, selected->Type, selected->Size);
+            }
         }
         EndToolWindow();
     }

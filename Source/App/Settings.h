@@ -105,6 +105,14 @@ namespace Manifold
         bool UseHardwareExecuteBreakpoints = false;
         bool UseInProcessDebugger = false;
         bool ShowRegistersOnBreak = true;
+        int BreakOnException = 0;
+        std::string ExceptionRegionStart;
+        std::string ExceptionRegionStop;
+        bool StackFollowPointers = true;
+        int RegisterSections = 7;
+        int VectorFormat = 0;
+        bool RegisterEditing = true;
+        int StackOffsets = 0;
         bool ShowSymbols = true;
         bool MemoryHexView = true;
         int MemoryCodeShare = 620;

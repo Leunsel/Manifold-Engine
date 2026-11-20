@@ -417,6 +417,9 @@
     <ClCompile Include="..\Source\UI\MemoryViewer.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\MemoryViewerRegisters.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\MonoInspector.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>

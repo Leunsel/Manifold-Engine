@@ -42,8 +42,8 @@ namespace Manifold
         CancelActivations();
         m_activation.WaitForActivation();
         m_tracer.Stop();
-        m_target.Mono().Stop();
         m_debugger.Detach();
+        m_target.Mono().Stop();
         m_scanner.Reset();
         m_lua.reset();
     }
@@ -227,11 +227,11 @@ namespace Manifold
         CancelActivations();
         m_activation.WaitForActivation();
         m_managed.CancelWork();
-        m_unreal.ProcessClosed();
         m_tracer.Stop();
+        m_debugger.Detach();
+        m_unreal.ProcessClosed();
         m_managed.NoteExplorer(false);
         m_target.Mono().Stop();
-        m_debugger.Detach();
         m_scanner.Reset();
         m_tables.Table().ForEach([](Table::MemoryRecord& record)
             {
@@ -265,7 +265,57 @@ namespace Manifold
         m_debugger.SetLogDebugStrings(m_settings.LogDebugStrings);
         m_debugger.SetPreferHardware(m_settings.UseHardwareExecuteBreakpoints);
         m_debugger.SetBackend(m_settings.UseInProcessDebugger ? Debug::Backend::Veh : Debug::Backend::Windows);
-        return m_debugger.Attach(m_target.Process());
+        ApplyExceptionBreak();
+        Status attached = m_debugger.Attach(m_target.Process());
+        if (attached)
+            ApplyExceptionBreak();
+        return attached;
+    }
+
+    Status Engine::ApplyExceptionBreak()
+    {
+        const int mode = std::clamp(m_settings.BreakOnException, 0, 2);
+        if (mode != 2)
+        {
+            m_debugger.SetExceptionBreak(mode == 1 ? Debug::ExceptionBreak::Always : Debug::ExceptionBreak::Never, 0, 0);
+            return Status::Success();
+        }
+        std::uint64_t start = 0;
+        std::uint64_t stop = 0;
+        Status status = Status::Success();
+        const std::string first = Trim(m_settings.ExceptionRegionStart);
+        const std::string last = Trim(m_settings.ExceptionRegionStop);
+        if (first.empty())
+            status = Status::Fail(ErrorCode::DebugBadExpression, "the region has no start");
+        if (status && last.empty() && m_target.Process())
+        {
+            if (const auto module = m_target.Process()->FindModule(first))
+            {
+                start = module->Base;
+                stop = module->Base + module->Size;
+            }
+        }
+        if (status && !stop)
+        {
+            if (const auto value = Evaluate(first, &status))
+                start = *value;
+            if (status && !last.empty())
+            {
+                if (const auto value = Evaluate(last, &status))
+                    stop = *value;
+            }
+            else if (status)
+                status = Status::Fail(ErrorCode::DebugBadExpression, "give the end of the region, or a module name as its start");
+        }
+        if (status && stop <= start)
+            status = Status::Fail(ErrorCode::DebugBadExpression, "the region ends before it starts");
+        if (!status)
+        {
+            m_debugger.SetExceptionBreak(Debug::ExceptionBreak::Never, 0, 0);
+            return status;
+        }
+        m_debugger.SetExceptionBreak(Debug::ExceptionBreak::InRegion, start, stop);
+        return Status::Success();
     }
 
     void Engine::LookUpProcessLater(std::string name, std::function<void(std::optional<ProcessId>)> found)
