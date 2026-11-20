@@ -79,7 +79,7 @@ namespace Manifold::Target
     // DLL is injected; the one worker thread is attached to the runtime's
     // domain once. On Mono it loads the small managed dumper into the root
     // domain to read every class in one pass, and falls back to the C API
-    // when that fails. The Unity explorer on top is Mono only.
+    // when that fails. The Unity explorer on top serves both runtimes.
     class MonoBridge
     {
     public:
@@ -100,7 +100,7 @@ namespace Manifold::Target
         static const char* RuntimeName(ManagedRuntime runtime);
 
         // The scene and object explorer and the inspector on top of this
-        // bridge (Mono only). Created on first use; it starts nothing in the
+        // bridge. Created on first use; it starts nothing in the
         // game until a scene or object request needs the game's main thread.
         UnityExplorer& Unity();
         std::optional<UnityStatus> UnityState();

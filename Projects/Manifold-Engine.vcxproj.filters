@@ -312,6 +312,9 @@
     <ClCompile Include="..\Source\Target\CodeMap.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\FrameCalls.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -343,6 +346,9 @@
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\UnityExplorer.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\UnityExplorerIl2Cpp.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Unreal.cpp">
@@ -753,6 +759,9 @@
     <ClInclude Include="..\Source\Target\CodeMap.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Target\FrameCalls.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Target\Il2CppRuntime.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
@@ -787,6 +796,9 @@
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\UnityExplorer.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\UnityExplorerIl2Cpp.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\Unreal.h">

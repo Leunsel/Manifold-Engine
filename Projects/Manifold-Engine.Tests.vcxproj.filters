@@ -300,6 +300,9 @@
     <ClCompile Include="..\Source\Target\CodeMap.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\FrameCalls.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -331,6 +334,9 @@
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\UnityExplorer.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\UnityExplorerIl2Cpp.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Unreal.cpp">
@@ -443,6 +449,9 @@
     </ClCompile>
     <ClInclude Include="..\Tests\TestKit.h">
       <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Tests\Target\FakeIl2CppScene.h">
+      <Filter>Tests\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Tests\Target\FakeUnreal.h">
       <Filter>Tests\Target</Filter>

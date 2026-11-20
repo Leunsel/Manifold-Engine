@@ -25,6 +25,8 @@ namespace Manifold::Target
 {
     class MonoBridge;
     class Process;
+    class FrameBatch;
+    struct Il2CppExplorerState;
 
     // MONO_TYPE_* codes the explorer reads and formats.
     namespace MonoTypeCode
@@ -283,6 +285,11 @@ namespace Manifold::Target
     // straight from the game's memory. Requests run on one job thread here, so
     // the interface never waits for a frame of the game; it reads the
     // published snapshots instead.
+    //
+    // An IL2CPP game cannot load a managed assembly, so there the same
+    // requests run as batches of il2cpp_runtime_invoke calls from a small
+    // native stub (FrameCalls) that a per-frame Unity method's MethodInfo
+    // points at; objects are held by GC handles (UnityExplorerIl2Cpp.cpp).
     class UnityExplorer
     {
     public:
@@ -430,7 +437,36 @@ namespace Manifold::Target
         void DoInvokeMethod(int id, int member, const std::vector<std::string>& arguments);
         std::optional<AgentArg> ArgumentFor(const MonoTypeInfo& type, const std::string& text, std::string& error);
 
+        struct Il2Recipe;
+        struct Il2Node;
+        bool Il2() const;
+        Status Il2EnsureHook();
+        void Il2Shutdown(bool alive);
+        std::uint64_t Il2Method(std::string_view className, std::string_view name, std::initializer_list<const char*> parameters);
+        Status Il2Run(Il2Recipe& recipe, std::chrono::milliseconds timeout, bool cancellable = true);
+        void Il2Keep(Il2Recipe& recipe, int group);
+        int Il2Register(std::uint64_t address, std::uint64_t handle, int group);
+        void Il2Hold(int group, const std::vector<int>& slots);
+        void Il2Release(int group);
+        std::string Il2Thrown(std::uint64_t exception);
+        std::vector<std::uint64_t> Il2Drain(const char* function, std::uint64_t object);
+        void Il2LoadMembers(MonoClassLayout& layout, std::uint64_t klass);
+        void Il2RefreshStatics(std::uint64_t klass);
+        void Il2ReadScenes();
+        void Il2ExpandScene(int scene);
+        void Il2ExpandNode(int node);
+        Status Il2DontDestroyScene(int& slot, int& handle);
+        Status Il2Nodes(const std::vector<std::uint64_t>& gameObjects, std::uint64_t parentTransform, std::size_t children, int group, std::vector<Il2Node>& out);
+        void Il2Search(const UnitySearch& request, std::uint64_t klass, UnitySearchResult& result);
+        void Il2Inspect(UnityInspection& inspection, bool properties, int group);
+        Status Il2Edit(const std::string& what, std::uint64_t method, std::uint64_t self, const std::vector<AgentArg>& arguments);
+        Status Il2SetRunInBackground(bool enabled);
+        bool Il2Fits(const MonoTypeInfo& type, const AgentArg& argument, std::string& error);
+        Status Il2SetField(const UnityInspection& inspection, const MonoMember& member, const AgentArg& argument);
+        MonoReadValue Il2Invoke(const UnityInspection& inspection, const MonoMember& member, const std::vector<AgentArg>& arguments, int group);
+
         MonoBridge& m_mono;
+        std::unique_ptr<Il2CppExplorerState> m_il2;
 
         std::thread m_thread;
         mutable std::mutex m_jobLock;

@@ -15,8 +15,9 @@
 // The IL2CPP side of MonoBridge. IL2CPP compiles every method ahead of time
 // into GameAssembly.dll, so there is no JIT: a method's code address is read
 // from its MethodInfo, and an address is named by looking it up in a sorted
-// table of every method's code. The worker only makes metadata calls here
-// (no il2cpp_runtime_invoke, no main thread, no GC handles).
+// table of every method's code. The worker only makes metadata calls here;
+// the scene explorer's calls into the game run on its main thread instead
+// (UnityExplorerIl2Cpp.cpp).
 namespace Manifold::Target
 {
     namespace
@@ -40,6 +41,13 @@ namespace Manifold::Target
             "il2cpp_class_get_fields", "il2cpp_field_get_name", "il2cpp_field_get_offset", "il2cpp_field_get_type",
             "il2cpp_field_get_flags", "il2cpp_type_get_type",
             "il2cpp_class_from_type", "il2cpp_class_is_valuetype", "il2cpp_class_is_enum", "il2cpp_class_enum_basetype", "il2cpp_class_value_size",
+            "il2cpp_class_get_image", "il2cpp_class_get_type", "il2cpp_type_get_name", "il2cpp_free", "il2cpp_class_get_rank",
+            "il2cpp_class_get_element_class", "il2cpp_class_array_element_size", "il2cpp_class_get_type_token", "il2cpp_class_get_properties",
+            "il2cpp_property_get_name", "il2cpp_property_get_get_method", "il2cpp_property_get_set_method", "il2cpp_method_get_flags",
+            "il2cpp_method_get_return_type", "il2cpp_method_get_param", "il2cpp_method_get_param_name", "il2cpp_method_is_generic",
+            "il2cpp_class_get_static_field_data", "il2cpp_field_static_get_value", "il2cpp_runtime_invoke", "il2cpp_gchandle_new",
+            "il2cpp_gchandle_free", "il2cpp_string_new", "il2cpp_type_get_object", "il2cpp_object_new", "il2cpp_value_box",
+            "il2cpp_field_set_value", "il2cpp_field_static_set_value",
         };
         const char* const kIl2CppRequired[] = {
             "il2cpp_domain_get", "il2cpp_thread_attach", "il2cpp_domain_get_assemblies", "il2cpp_assembly_get_image",

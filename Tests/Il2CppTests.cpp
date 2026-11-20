@@ -4,6 +4,7 @@
 #include "App/Settings.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
+#include "Target/FrameCalls.h"
 #include "Target/Mono.h"
 #include "Target/Process.h"
 #include "Target/RemoteCall.h"
@@ -11,8 +12,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -42,7 +45,7 @@ namespace Manifold::Tests
                 }
             }
 
-            bool Start(const std::filesystem::path& path)
+            bool Start(const std::filesystem::path& path, const std::wstring& extra = L"")
             {
                 SECURITY_ATTRIBUTES security{ sizeof(security), nullptr, TRUE };
                 HANDLE read = nullptr;
@@ -54,7 +57,7 @@ namespace Manifold::Tests
                 startup.dwFlags = STARTF_USESTDHANDLES;
                 startup.hStdOutput = write;
                 startup.hStdError = write;
-                std::wstring command = L"\"" + path.wstring() + L"\" --il2cpp";
+                std::wstring command = L"\"" + path.wstring() + L"\" --il2cpp" + extra;
                 const BOOL started = ::CreateProcessW(nullptr, command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &Info);
                 ::CloseHandle(write);
                 std::string text;
@@ -92,6 +95,479 @@ namespace Manifold::Tests
             }
             return nullptr;
         }
+    }
+
+    namespace
+    {
+        bool Until(const std::function<bool()>& done, int milliseconds = 10000)
+        {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                if (done())
+                    return true;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            return done();
+        }
+
+        bool Act(Target::UnityExplorer& unity, const std::function<void()>& action, int milliseconds = 15000)
+        {
+            const std::uint64_t before = unity.Generation();
+            action();
+            if (!Until([&] { return unity.Generation() != before; }, milliseconds))
+                return false;
+            return Until([&] { return !unity.State().Busy; }, milliseconds);
+        }
+
+        int NodeNamed(const Target::UnityTree& tree, const std::string& name)
+        {
+            for (std::size_t i = 0; i < tree.Nodes.size(); ++i)
+            {
+                if (tree.Nodes[i].Name == name)
+                    return static_cast<int>(i);
+            }
+            return -1;
+        }
+
+        int MemberNamed(const Target::MonoClassLayout& layout, Target::MonoMemberKind kind, const std::string& name)
+        {
+            for (std::size_t i = 0; i < layout.Members.size(); ++i)
+            {
+                if (layout.Members[i].Kind == kind && layout.Members[i].Name == name)
+                    return static_cast<int>(i);
+            }
+            return -1;
+        }
+
+        Target::MonoShown FieldShown(Target::UnityExplorer& unity, const Target::MonoClassLayout& layout, const std::string& name, std::uint64_t object)
+        {
+            const int index = MemberNamed(layout, Target::MonoMemberKind::Field, name);
+            if (index < 0)
+                return { "no field " + name };
+            Target::MonoShown shown;
+            Until([&]
+                {
+                    shown = unity.ReadField(layout.Members[static_cast<std::size_t>(index)], object);
+                    return !shown.Pending;
+                }, 5000);
+            return shown;
+        }
+
+        Target::MonoShown ValueShown(Target::UnityExplorer& unity, const Target::UnityInspection& inspection, Target::MonoMemberKind kind, const std::string& name)
+        {
+            const int index = inspection.Layout ? MemberNamed(*inspection.Layout, kind, name) : -1;
+            if (index < 0)
+                return { "no member " + name };
+            const auto found = inspection.Values.find(index);
+            if (found == inspection.Values.end())
+                return { "no value for " + name };
+            Target::MonoShown shown;
+            Until([&]
+                {
+                    shown = unity.Shown(inspection.Layout->Members[static_cast<std::size_t>(index)], found->second);
+                    return !shown.Pending;
+                }, 5000);
+            return shown;
+        }
+
+        std::optional<Target::UnityInspection> Inspected(Target::UnityExplorer& unity, std::uint64_t object)
+        {
+            int id = 0;
+            Act(unity, [&] { id = unity.Inspect(object); });
+            Until([&] { const auto got = unity.Inspection(id); return got && !got->Loading; });
+            return unity.Inspection(id);
+        }
+
+        bool Near(const float* actual, float x, float y, float z)
+        {
+            return std::fabs(actual[0] - x) < 0.001f && std::fabs(actual[1] - y) < 0.001f && std::fabs(actual[2] - z) < 0.001f;
+        }
+    }
+
+    // The scene explorer on IL2CPP, against the fake scene of
+    // TestTarget.exe --il2cpp --il2cpp-scene: the frame stub on a per-frame
+    // method, scenes, the hierarchy, the inspector, edits, the search and
+    // taking everything out again. The target counts calls that arrive off
+    // its main thread and GC handles that are wrong or left over.
+    void CheckIl2CppScene(Engine& engine, std::uint32_t mainThread, bool alt)
+    {
+        const Target::Process& process = *engine.Process();
+        const std::string stem = std::filesystem::path(process.Name()).stem().string();
+        const auto counter = [&](const char* name) { return ReadInt(process, engine.Evaluate(stem + "." + name).value_or(0)); };
+        const auto pause = [&](std::int32_t paused)
+            {
+                CHECK(process.Write(engine.Evaluate(stem + ".g_il2cppPaused").value_or(0), &paused, sizeof(paused)).Ok());
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            };
+        const Status loaded = engine.Managed().Ensure();
+        CHECK_MSG(loaded.Ok(), loaded.Text);
+        if (!loaded)
+            return;
+        Target::MonoBridge& bridge = engine.Mono();
+        CHECK(bridge.IsIl2Cpp());
+        Target::UnityExplorer& unity = bridge.Unity();
+        const char* const hookClass = alt ? "UnityEngine.BeforeRenderHelper" : "UnityEngine.UnitySynchronizationContext";
+        const char* const hookMethod = alt ? "Invoke" : "ExecuteTasks";
+        const char* const frameCounter = alt ? "g_il2cppRenders" : "g_il2cppFrames";
+        std::uint64_t hookSlot = 0;
+        std::uint64_t hookCode = 0;
+        if (const auto details = bridge.ClassDetails(hookClass))
+        {
+            if (const Target::MonoMethod* method = Method(*details, hookMethod, 0))
+            {
+                hookSlot = method->Handle;
+                hookCode = method->Address;
+            }
+        }
+        CHECK(hookSlot != 0 && hookCode != 0);
+        CHECK_EQ(ReadValue(process, hookSlot), hookCode);
+
+        unity.SetEnabled(true);
+        CHECK(Act(unity, [&] { unity.ReadScenes(); }));
+        Target::UnityStatus status = unity.State();
+        CHECK_MSG(status.Error.empty(), status.Error);
+        CHECK(status.Hooked);
+        CHECK_EQ(status.Hook, std::string(alt ? "BeforeRenderHelper.Invoke" : "UnitySynchronizationContext.ExecuteTasks"));
+        CHECK_EQ(status.UnityVersion, std::string("2021.3.99f1"));
+        CHECK_EQ(status.MainThread, mainThread);
+        CHECK(status.CallbackRuns > 0);
+        CHECK(status.RunInBackground.has_value() && !*status.RunInBackground);
+        CHECK(status.Missing.empty());
+        CHECK(ReadValue(process, hookSlot) != hookCode);
+        const std::int32_t framesBefore = counter(frameCounter);
+        CHECK(Until([&] { return counter(frameCounter) > framesBefore + 3; }, 3000));
+
+        Target::UnityTree tree = unity.Tree();
+        CHECK(tree.Read);
+        CHECK_EQ(tree.Scenes.size(), 3u);
+        if (tree.Scenes.size() != 3)
+            return;
+        CHECK(tree.Scenes[0].Name == "Main" && tree.Scenes[0].Handle == 0x10 && tree.Scenes[0].Active && tree.Scenes[0].BuildIndex == 0 &&
+              tree.Scenes[0].RootCount == 3 && tree.Scenes[0].Loaded);
+        CHECK(tree.Scenes[1].Name == "Additive" && tree.Scenes[1].Handle == 0x20 && !tree.Scenes[1].Active && tree.Scenes[1].BuildIndex == 1 &&
+              tree.Scenes[1].RootCount == 2);
+        CHECK(tree.Scenes[2].DontDestroy);
+
+        CHECK(Act(unity, [&] { unity.ExpandScene(0); }));
+        tree = unity.Tree();
+        CHECK_MSG(unity.State().Error.empty(), unity.State().Error);
+        CHECK(tree.Scenes[0].RootsLoaded);
+        CHECK_EQ(tree.Scenes[0].Roots.size(), 3u);
+        const int player = NodeNamed(tree, "Player");
+        const int enemies = NodeNamed(tree, "Enemies");
+        const int ui = NodeNamed(tree, "UI");
+        CHECK(player >= 0 && enemies >= 0 && ui >= 0);
+        if (player < 0 || enemies < 0 || ui < 0)
+            return;
+        const Target::UnityNode playerNode = tree.Nodes[static_cast<std::size_t>(player)];
+        const Target::UnityNode enemiesNode = tree.Nodes[static_cast<std::size_t>(enemies)];
+        CHECK(playerNode.Active && playerNode.ChildCount == 2 && playerNode.Object != 0 && playerNode.Transform != 0 && playerNode.Scene == 0 && playerNode.Parent == -1);
+        CHECK(!enemiesNode.Active && enemiesNode.ChildCount == 2);
+        CHECK_EQ(unity.ClassNameOf(playerNode.Object), std::string("UnityEngine.GameObject"));
+        CHECK_EQ(unity.ClassNameOf(playerNode.Transform), std::string("UnityEngine.Transform"));
+        if (alt)
+        {
+            // Shut down while the game's main thread does not come by: the
+            // helper thread gives the GC handles back instead.
+            CHECK_EQ(counter("g_il2cppOffThread"), 0);
+            CHECK_EQ(counter("g_il2cppHandleErrors"), 0);
+            CHECK(counter("g_il2cppHandlesLive") >= 8);
+            pause(1);
+            engine.Managed().Stop();
+            CHECK_EQ(counter("g_il2cppHandlesLive"), 0);
+            CHECK_EQ(counter("g_il2cppHandleErrors"), 0);
+            CHECK_EQ(ReadValue(process, hookSlot), hookCode);
+            pause(0);
+            return;
+        }
+
+        CHECK(Act(unity, [&] { unity.ExpandNode(player); }));
+        CHECK(Act(unity, [&] { unity.ExpandNode(enemies); }));
+        CHECK(Act(unity, [&] { unity.ExpandNode(ui); }));
+        tree = unity.Tree();
+        const int weapon = NodeNamed(tree, "Weapon");
+        const int camera = NodeNamed(tree, "Camera");
+        const int enemyA = NodeNamed(tree, "Enemy A");
+        CHECK(weapon >= 0 && camera >= 0 && enemyA >= 0 && NodeNamed(tree, "Enemy B") >= 0);
+        CHECK(NodeNamed(tree, "Gr\xC3\xB6\xC3\x9F" "e") >= 0);
+        if (weapon < 0 || camera < 0 || enemyA < 0)
+            return;
+        CHECK(tree.Nodes[static_cast<std::size_t>(player)].ChildrenLoaded);
+        CHECK_EQ(tree.Nodes[static_cast<std::size_t>(player)].Children.size(), 2u);
+        CHECK(tree.Nodes[static_cast<std::size_t>(weapon)].Parent == player && tree.Nodes[static_cast<std::size_t>(weapon)].ChildCount == 1);
+        CHECK_EQ(tree.Nodes[static_cast<std::size_t>(camera)].ChildCount, 0);
+        const Target::UnityNode weaponNode = tree.Nodes[static_cast<std::size_t>(weapon)];
+        const Target::UnityNode enemyNode = tree.Nodes[static_cast<std::size_t>(enemyA)];
+        CHECK(Act(unity, [&] { unity.ExpandNode(weapon); }));
+        tree = unity.Tree();
+        const int muzzle = NodeNamed(tree, "Muzzle");
+        CHECK(muzzle >= 0 && tree.Nodes[static_cast<std::size_t>(muzzle)].Parent == weapon);
+
+        // The DontDestroyOnLoad scene is found through a probe object, once.
+        CHECK(Act(unity, [&] { unity.ExpandScene(2); }));
+        tree = unity.Tree();
+        CHECK_MSG(unity.State().Error.empty(), unity.State().Error);
+        CHECK(tree.Scenes[2].RootsLoaded && tree.Scenes[2].Handle == 0x30);
+        CHECK(NodeNamed(tree, "Services") >= 0);
+        CHECK_EQ(counter("g_il2cppProbesMade"), 1);
+        CHECK_EQ(counter("g_il2cppProbesLive"), 0);
+
+        // A long list takes several batches and many frames.
+        CHECK(Act(unity, [&] { unity.ExpandScene(1); }));
+        tree = unity.Tree();
+        const int crowd = NodeNamed(tree, "Crowd");
+        CHECK(crowd >= 0 && tree.Nodes[static_cast<std::size_t>(std::max(0, crowd))].ChildCount == 3000);
+        if (crowd >= 0)
+        {
+            const std::uint64_t framesAtStart = unity.State().CallbackRuns;
+            CHECK(Act(unity, [&] { unity.ExpandNode(crowd); }, 30000));
+            tree = unity.Tree();
+            const Target::UnityNode& crowdNode = tree.Nodes[static_cast<std::size_t>(crowd)];
+            CHECK_MSG(unity.State().Error.empty(), unity.State().Error);
+            CHECK(crowdNode.ChildrenLoaded);
+            CHECK_EQ(crowdNode.Children.size(), 3000u);
+            if (crowdNode.Children.size() == 3000)
+            {
+                CHECK_EQ(tree.Nodes[static_cast<std::size_t>(crowdNode.Children.front())].Name, std::string("Unit 0"));
+                CHECK_EQ(tree.Nodes[static_cast<std::size_t>(crowdNode.Children.back())].Name, std::string("Unit 2999"));
+                CHECK(tree.Nodes[static_cast<std::size_t>(crowdNode.Children[1234])].Object != 0);
+            }
+            CHECK(unity.State().CallbackRuns >= framesAtStart + 20);
+        }
+
+        // A GameObject in the inspector.
+        std::uint64_t health = 0;
+        if (const auto inspection = Inspected(unity, playerNode.Object))
+        {
+            CHECK_MSG(inspection->Error.empty(), inspection->Error);
+            CHECK(!inspection->Unheld && !inspection->FromScan);
+            CHECK(inspection->Layout && inspection->Layout->Name == "UnityEngine.GameObject" && inspection->Layout->GameObject && inspection->Layout->UnityObject);
+            CHECK(inspection->GameObject.has_value());
+            if (inspection->GameObject)
+            {
+                const Target::UnityGameObject& info = *inspection->GameObject;
+                CHECK(info.Name == "Player" && info.Tag == "Player" && info.Layer == 3 && info.ActiveSelf && info.ActiveInHierarchy && info.Scene == "Main");
+                CHECK(info.Parent == 0 && info.ParentName.empty());
+                CHECK(info.Transform.Read && info.Transform.Object == playerNode.Transform);
+                CHECK(Near(info.Transform.LocalPosition, 1.0f, 2.0f, 3.0f) && Near(info.Transform.LocalScale, 1.0f, 1.0f, 1.0f) && Near(info.Transform.Position, 1.0f, 2.0f, 3.0f));
+                CHECK_EQ(info.ChildCount, 2);
+                CHECK(info.Children.size() == 2 && info.Children[0].Name == "Weapon" && info.Children[0].Object == weaponNode.Object && info.Children[1].Name == "Camera");
+                CHECK_EQ(info.Components.size(), 2u);
+                if (info.Components.size() == 2)
+                {
+                    CHECK(info.Components[0].Class == "UnityEngine.Transform" && info.Components[0].Object == playerNode.Transform && !info.Components[0].HasEnabled);
+                    CHECK(info.Components[1].Class == "Game.Health" && info.Components[1].HasEnabled && info.Components[1].Enabled);
+                    health = info.Components[1].Object;
+                }
+            }
+            CHECK_EQ(ValueShown(unity, *inspection, Target::MonoMemberKind::Property, "tag").Text, std::string("\"Player\""));
+            CHECK_EQ(ValueShown(unity, *inspection, Target::MonoMemberKind::Property, "layer").Text, std::string("3"));
+            CHECK(inspection->RoundTrips >= 2 && inspection->Calls > 10);
+        }
+        else
+        {
+            CHECK_MSG(false, "the player was not inspected");
+        }
+        if (const auto inspection = Inspected(unity, weaponNode.Object))
+        {
+            CHECK(inspection->GameObject && inspection->GameObject->Parent == playerNode.Object && inspection->GameObject->ParentName == "Player");
+            CHECK(inspection->GameObject && Near(inspection->GameObject->Transform.Position, 1.5f, 2.0f, 3.0f));
+        }
+        CHECK(health != 0);
+        if (!health)
+            return;
+
+        // A component: fields from memory, properties and methods through the
+        // frame stub, reference values held so they can be opened.
+        int id = 0;
+        Act(unity, [&] { id = unity.Inspect(health); });
+        Until([&] { const auto got = unity.Inspection(id); return got && !got->Loading; });
+        std::optional<Target::UnityInspection> inspection = unity.Inspection(id);
+        CHECK(inspection.has_value() && inspection->Layout != nullptr);
+        if (!inspection || !inspection->Layout)
+            return;
+        const std::shared_ptr<const Target::MonoClassLayout> layout = inspection->Layout;
+        CHECK_MSG(inspection->Error.empty(), inspection->Error);
+        CHECK(layout->Name == "Game.Health" && layout->Behaviour && layout->Component && layout->UnityObject && !layout->GameObject);
+        CHECK(layout->Chain.size() >= 5 && layout->Chain[1] == "UnityEngine.MonoBehaviour");
+        CHECK(inspection->ObjectName == "Player" && inspection->Owner == playerNode.Object && inspection->OwnerName == "Player");
+        CHECK(inspection->Enabled.has_value() && *inspection->Enabled);
+        CHECK_EQ(FieldShown(unity, *layout, "hp", health).Text, std::string("100"));
+        CHECK_EQ(FieldShown(unity, *layout, "regen", health).Text, std::string("1.5"));
+        CHECK_EQ(FieldShown(unity, *layout, "label", health).Text, std::string("\"hero\""));
+        CHECK_EQ(FieldShown(unity, *layout, "spawn", health).Text, std::string("(4.0, 5.0, 6.0)"));
+        CHECK_EQ(FieldShown(unity, *layout, "mode", health).Text, std::string("Fight (1)"));
+        CHECK_EQ(FieldShown(unity, *layout, "s_count", health).Text, std::string("7"));
+        CHECK_EQ(FieldShown(unity, *layout, "MaxHp", health).Text, std::string("const"));
+        const Target::MonoShown target = FieldShown(unity, *layout, "target", health);
+        CHECK(target.Reference == enemyNode.Object && target.Text == "GameObject");
+        CHECK_EQ(ValueShown(unity, *inspection, Target::MonoMemberKind::Property, "Hp").Text, std::string("100"));
+        CHECK_EQ(ValueShown(unity, *inspection, Target::MonoMemberKind::Property, "Label").Text, std::string("\"hero\""));
+        CHECK_EQ(ValueShown(unity, *inspection, Target::MonoMemberKind::Property, "Target").Reference, enemyNode.Object);
+        CHECK_EQ(ValueShown(unity, *inspection, Target::MonoMemberKind::Property, "enabled").Text, std::string("true"));
+        CHECK_EQ(ValueShown(unity, *inspection, Target::MonoMemberKind::Property, "name").Text, std::string("\"Player\""));
+        CHECK_EQ(ValueShown(unity, *inspection, Target::MonoMemberKind::Property, "gameObject").Reference, playerNode.Object);
+        const std::string broken = ValueShown(unity, *inspection, Target::MonoMemberKind::Property, "Broken").Text;
+        CHECK_MSG(broken.find("System.InvalidOperationException") != std::string::npos, broken);
+        const int tryRead = MemberNamed(*layout, Target::MonoMemberKind::Method, "TryRead");
+        CHECK(tryRead >= 0 && layout->Members[static_cast<std::size_t>(tryRead)].Params.size() == 1 &&
+              layout->Members[static_cast<std::size_t>(tryRead)].Params[0].Code == Target::MonoTypeCode::ByRef);
+        const int heal = MemberNamed(*layout, Target::MonoMemberKind::Method, "Heal");
+        CHECK(heal >= 0 && Target::UnityExplorer::Signature(layout->Members[static_cast<std::size_t>(std::max(0, heal))]) == "(int amount)");
+        CHECK(MemberNamed(*layout, Target::MonoMemberKind::Method, "get_Hp") < 0);
+
+        const auto refreshed = [&]
+            {
+                Until([&] { const auto got = unity.Inspection(id); return got && !got->Loading; });
+                inspection = unity.Inspection(id);
+                return inspection.has_value();
+            };
+        const auto setMember = [&](Target::MonoMemberKind kind, const char* name, const std::string& text)
+            {
+                const int index = MemberNamed(*layout, kind, name);
+                CHECK_MSG(index >= 0, name);
+                Act(unity, [&] { unity.SetMember(id, index, text); });
+                refreshed();
+            };
+        const auto invoke = [&](const char* name, std::vector<std::string> arguments)
+            {
+                const int index = MemberNamed(*layout, Target::MonoMemberKind::Method, name);
+                CHECK_MSG(index >= 0, name);
+                Act(unity, [&] { unity.InvokeMethod(id, index, std::move(arguments)); });
+                refreshed();
+                Target::MonoReadValue value;
+                if (inspection)
+                {
+                    if (const auto found = inspection->Values.find(index); found != inspection->Values.end())
+                        value = found->second;
+                }
+                return index >= 0 ? std::make_pair(unity.Shown(layout->Members[static_cast<std::size_t>(index)], value), value) : std::make_pair(Target::MonoShown{}, value);
+            };
+        setMember(Target::MonoMemberKind::Field, "hp", "250");
+        CHECK_EQ(FieldShown(unity, *layout, "hp", health).Text, std::string("250"));
+        setMember(Target::MonoMemberKind::Property, "Hp", "300");
+        CHECK_MSG(unity.State().Error.empty(), unity.State().Error);
+        CHECK_EQ(FieldShown(unity, *layout, "hp", health).Text, std::string("300"));
+        setMember(Target::MonoMemberKind::Field, "label", "\"boss\"");
+        CHECK_MSG(unity.State().Error.empty(), unity.State().Error);
+        CHECK_EQ(FieldShown(unity, *layout, "label", health).Text, std::string("\"boss\""));
+        setMember(Target::MonoMemberKind::Property, "Label", "\"chief\"");
+        CHECK_EQ(FieldShown(unity, *layout, "label", health).Text, std::string("\"chief\""));
+        setMember(Target::MonoMemberKind::Field, "target", Hex(playerNode.Object));
+        CHECK_MSG(unity.State().Error.empty(), unity.State().Error);
+        CHECK_EQ(FieldShown(unity, *layout, "target", health).Reference, playerNode.Object);
+        setMember(Target::MonoMemberKind::Field, "target", Hex(health));
+        CHECK_MSG(unity.State().Error.find("not a UnityEngine.GameObject") != std::string::npos, unity.State().Error);
+        CHECK_EQ(FieldShown(unity, *layout, "target", health).Reference, playerNode.Object);
+        setMember(Target::MonoMemberKind::Property, "Target", Hex(enemyNode.Object));
+        CHECK_EQ(FieldShown(unity, *layout, "target", health).Reference, enemyNode.Object);
+        setMember(Target::MonoMemberKind::Field, "target", "null");
+        CHECK(FieldShown(unity, *layout, "target", health).Null);
+
+        CHECK_EQ(invoke("Heal", { "5" }).first.Text, std::string("305"));
+        CHECK_EQ(FieldShown(unity, *layout, "hp", health).Text, std::string("305"));
+        CHECK_EQ(invoke("Describe", { "x" }).first.Text, std::string("\"x:chief\""));
+        CHECK_EQ(invoke("Count", {}).first.Text, std::string("7"));
+        const std::string exploded = invoke("Explode", {}).second.Error;
+        CHECK_MSG(exploded.find("System.InvalidOperationException") != std::string::npos, exploded);
+        const std::string byRef = invoke("TryRead", { "1" }).second.Error;
+        CHECK_MSG(byRef.find("ref or out") != std::string::npos, byRef);
+
+        // Edits through Unity's own methods.
+        Act(unity, [&] { unity.SetEnabled(health, false, id); });
+        refreshed();
+        CHECK(inspection && inspection->Enabled.has_value() && !*inspection->Enabled);
+        Act(unity, [&] { unity.SetActive(enemiesNode.Object, true, 0); });
+        CHECK(unity.Tree().Nodes[static_cast<std::size_t>(enemies)].Active);
+        if (const auto enemy = Inspected(unity, enemyNode.Object))
+        {
+            CHECK(!enemy->Unheld);
+            CHECK(enemy->GameObject && enemy->GameObject->Name == "Enemy A" && enemy->GameObject->ActiveInHierarchy);
+        }
+        Act(unity, [&] { unity.SetActive(enemiesNode.Object, false, 0); });
+        Act(unity, [&] { unity.SetName(playerNode.Object, "Hero", 0); });
+        CHECK_EQ(unity.Tree().Nodes[static_cast<std::size_t>(player)].Name, std::string("Hero"));
+        const float moved[3] = { 7.0f, 8.0f, 9.0f };
+        Act(unity, [&] { unity.SetVector(playerNode.Transform, 0, moved, 0); });
+        if (const auto again = Inspected(unity, playerNode.Object))
+            CHECK(again->GameObject && again->GameObject->Name == "Hero" && Near(again->GameObject->Transform.LocalPosition, 7.0f, 8.0f, 9.0f));
+        Act(unity, [&] { unity.SetRunInBackground(true); });
+        status = unity.State();
+        CHECK(status.RunInBackground.has_value() && *status.RunInBackground && status.ChangedRunInBackground);
+        CHECK_EQ(counter("g_il2cppRunInBackground"), 1);
+
+        // The search: Unity objects through Unity, other classes by their
+        // class pointer in memory.
+        const auto search = [&](const std::string& klass, const std::string& filter, bool hidden)
+            {
+                unity.Search({ klass, filter, hidden });
+                Until([&] { return unity.SearchResult().Done; }, 15000);
+                return unity.SearchResult();
+            };
+        Target::UnitySearchResult found = search("UnityEngine.Transform", "", false);
+        CHECK_MSG(found.Error.empty(), found.Error);
+        CHECK(found.Total == 3009 && found.Hits.size() == 3009 && !found.HeapScan);
+        CHECK(std::all_of(found.Hits.begin(), found.Hits.end(), [](const Target::UnityHit& hit) { return hit.Class == "UnityEngine.Transform" && hit.Object != 0; }));
+        found = search("Transform", "", true);
+        CHECK_EQ(found.Hits.size(), 3012u);
+        found = search("UnityEngine.Transform", "enemy", true);
+        CHECK(found.Total == 3012 && found.Hits.size() == 2);
+        found = search("Game.Health", "", false);
+        CHECK(found.Hits.size() == 1 && found.Hits[0].Object == health && found.Hits[0].Name == "Hero");
+        found = search("System.Type", "", false);
+        CHECK_MSG(found.Error.empty(), found.Error);
+        CHECK(found.HeapScan && found.Total >= 2 && !found.Hits.empty());
+
+        // Nothing ran off the game's main thread, every GC handle was a real
+        // one, and Shutdown gives all of them back, sets runInBackground
+        // back and takes the stub off the method again.
+        CHECK_EQ(counter("g_il2cppOffThread"), 0);
+        CHECK_EQ(counter("g_il2cppHandleErrors"), 0);
+        CHECK(counter("g_il2cppHandlesLive") > 10);
+        CHECK(counter("g_il2cppInvokes") > 100);
+
+        // A game whose main thread stops coming by: the request can be
+        // stopped, nothing of it runs later, and the next one works again.
+        pause(1);
+        const std::int32_t invokesPaused = counter("g_il2cppInvokes");
+        unity.ExpandNode(camera);
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        CHECK(unity.State().Busy);
+        unity.Cancel();
+        CHECK(Until([&] { return !unity.State().Busy; }, 5000));
+        CHECK_MSG(unity.State().Error.find("cancelled") != std::string::npos, unity.State().Error);
+        CHECK(!unity.Tree().Nodes[static_cast<std::size_t>(camera)].ChildrenLoaded);
+        pause(0);
+        CHECK_EQ(counter("g_il2cppInvokes"), invokesPaused);
+        CHECK(Act(unity, [&] { unity.ExpandNode(camera); }));
+        CHECK(unity.Tree().Nodes[static_cast<std::size_t>(camera)].ChildrenLoaded);
+        CHECK(counter("g_il2cppInvokes") > invokesPaused);
+        CHECK_EQ(counter("g_il2cppOffThread"), 0);
+        engine.Managed().Stop();
+        CHECK_EQ(counter("g_il2cppHandlesLive"), 0);
+        CHECK_EQ(counter("g_il2cppHandleErrors"), 0);
+        CHECK_EQ(counter("g_il2cppRunInBackground"), 0);
+        CHECK_EQ(ReadValue(process, hookSlot), hookCode);
+        const std::int32_t framesAfter = counter(frameCounter);
+        CHECK(Until([&] { return counter(frameCounter) > framesAfter + 3; }, 3000));
+
+        // A second session in the same game works like the first.
+        const Status again = engine.Managed().Ensure();
+        CHECK_MSG(again.Ok(), again.Text);
+        if (!again)
+            return;
+        Target::UnityExplorer& second = engine.Mono().Unity();
+        second.SetEnabled(true);
+        CHECK(Act(second, [&] { second.ReadScenes(); }));
+        CHECK_MSG(second.State().Error.empty(), second.State().Error);
+        CHECK(second.State().Hooked && second.Tree().Scenes.size() == 3);
+        CHECK(Act(second, [&] { second.ExpandScene(0); }));
+        CHECK(NodeNamed(second.Tree(), "Hero") >= 0);
+        engine.Managed().Stop();
+        CHECK_EQ(counter("g_il2cppHandlesLive"), 0);
+        CHECK_EQ(counter("g_il2cppOffThread"), 0);
+        CHECK_EQ(ReadValue(process, hookSlot), hookCode);
     }
 
     void CheckIl2Cpp(Engine& engine)
@@ -282,12 +758,14 @@ namespace Manifold::Tests
         CHECK(!bridge.ClassNameAt(engine.Evaluate(stem + ".g_il2cppNotClass").value_or(0)).has_value());
         CHECK(!bridge.ClassNameAt(engine.Evaluate(stem + ".g_il2cppStray").value_or(0)).has_value());
 
-        // The Unity explorer is Mono only and refuses, even switched on.
+        // This target has no Unity classes, so the explorer finds no
+        // per-frame method to sit on and says so; nothing stays in the game.
         Target::UnityExplorer& unity = bridge.Unity();
         unity.SetEnabled(true);
-        unity.ReadScenes();
-        CHECK_MSG(unity.State().Error.find("IL2CPP") != std::string::npos, unity.State().Error);
+        Act(unity, [&] { unity.ReadScenes(); });
+        CHECK_MSG(unity.State().Error.find("per-frame Unity methods") != std::string::npos, unity.State().Error);
         CHECK(!unity.State().Hooked);
+        CHECK(!unity.Tree().Read);
         unity.SetEnabled(false);
 
         // The mono_* Lua functions serve IL2CPP too, as in Cheat Engine.
@@ -328,8 +806,51 @@ namespace Manifold::Tests
         engine.Managed().Stop();
     }
 
+    namespace
+    {
+        void CheckFrameStub()
+        {
+            for (const bool is64 : { true, false })
+            {
+                std::vector<std::uint64_t> labels;
+                const Result<std::vector<std::uint8_t>> code = Target::FrameCalls::Code(is64, 0x20000000, 0x30000000, &labels);
+                CHECK_MSG(code.Ok(), code ? std::string() : code.Error().Text);
+                if (!code)
+                    continue;
+                CHECK(code->size() > 100 && code->size() < 0x1000);
+                CHECK_EQ(labels.size(), static_cast<std::size_t>(Target::FrameCalls::kHookSlots) + 5);
+                CHECK(std::all_of(labels.begin(), labels.end(), [&](std::uint64_t label) { return label >= 0x20000000 && label < 0x20000000 + code->size(); }));
+                CHECK(labels.size() > 1 && labels[0] == 0x20000000 && labels[1] > labels[0]);
+            }
+        }
+
+        void CheckIl2CppSceneTarget(const std::filesystem::path& targetPath, bool alt)
+        {
+            Il2CppTarget target;
+            const bool started = target.Start(targetPath, alt ? L" --il2cpp-scene --il2cpp-alt" : L" --il2cpp-scene");
+            CHECK_MSG(started, "could not start " + WideToUtf8(targetPath.wstring()) + " --il2cpp --il2cpp-scene");
+            if (!started)
+                return;
+            {
+                Settings settings;
+                Engine engine(settings);
+                const Status opened = engine.OpenProcess(MakeProcessId(target.Info.dwProcessId));
+                CHECK_MSG(opened.Ok(), opened.Text);
+                if (opened)
+                    CheckIl2CppScene(engine, target.Info.dwThreadId, alt);
+                engine.CloseProcess();
+            }
+            DWORD code = 0;
+            ::GetExitCodeProcess(target.Info.hProcess, &code);
+            CHECK_MSG(code == STILL_ACTIVE, "the IL2CPP scene target ended with " + Hex(static_cast<std::uint32_t>(code), 8));
+        }
+    }
+
     void CheckIl2CppTarget(const std::filesystem::path& targetPath)
     {
+        CheckFrameStub();
+        CheckIl2CppSceneTarget(targetPath, false);
+        CheckIl2CppSceneTarget(targetPath, true);
         Il2CppTarget target;
         const bool started = target.Start(targetPath);
         CHECK_MSG(started, "could not start " + WideToUtf8(targetPath.wstring()) + " --il2cpp");

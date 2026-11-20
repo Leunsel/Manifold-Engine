@@ -127,7 +127,7 @@ namespace Manifold
     void ManagedSession::NoteExplorer(bool exited)
     {
         const std::shared_ptr<Target::Process> process = m_target.Process();
-        if (!process || !m_target.Mono().Present() || m_target.Mono().IsIl2Cpp())
+        if (!process || !m_target.Mono().Present())
             return;
         const std::optional<Target::UnityStatus> unity = m_target.Mono().UnityState();
         if (!unity || !unity->Hooked)

@@ -568,9 +568,24 @@ namespace
 {
     struct FakeIl2CppImage;
     struct FakeIl2CppClass;
-    struct FakeIl2CppType { int Type; };
-    struct FakeFieldInfo { const char* Name; const FakeIl2CppType* Type; const FakeIl2CppClass* Parent; int Offset; unsigned Token; int Flags; };
-    struct FakeMethodInfo { void* MethodPointer; void* VirtualMethodPointer; void* Invoker; const char* Name; const FakeIl2CppClass* Klass; void* ReturnType; void* Parameters; unsigned ParamCount; };
+    struct FakeIl2CppType { int Type; const FakeIl2CppClass* Klass = nullptr; bool ByRef = false; };
+    struct FakeFieldInfo { const char* Name; const FakeIl2CppType* Type; const FakeIl2CppClass* Parent; int Offset; unsigned Token; int Flags; long long Literal = 0; };
+    struct FakeMethodInfo
+    {
+        void* MethodPointer;
+        void* VirtualMethodPointer;
+        void* Invoker;
+        const char* Name;
+        const FakeIl2CppClass* Klass;
+        void* ReturnType;
+        void* Parameters;
+        unsigned ParamCount;
+        unsigned Flags = 0;
+        const FakeIl2CppType* const* ParamTypes = nullptr;
+        const char* const* ParamNames = nullptr;
+        bool Generic = false;
+    };
+    struct FakePropertyInfo { const char* Name; const FakeMethodInfo* Get; const FakeMethodInfo* Set; const FakeIl2CppClass* Parent; };
     struct FakeIl2CppClass
     {
         const FakeIl2CppImage* Image;
@@ -583,6 +598,16 @@ namespace
         const FakeFieldInfo* Fields;
         unsigned FieldCount;
         bool Generic;
+        bool ValueType = false;
+        bool Enum = false;
+        int ValueSize = 0;
+        int Rank = 0;
+        const FakeIl2CppClass* Element = nullptr;
+        void* StaticData = nullptr;
+        const FakePropertyInfo* Properties = nullptr;
+        unsigned PropertyCount = 0;
+        FakeIl2CppType ByVal = { 0x12 };
+        const FakeIl2CppType* EnumBase = nullptr;
     };
     struct FakeIl2CppImage { const char* Name; const FakeIl2CppClass* Classes; unsigned ClassCount; };
     struct FakeIl2CppAssembly { const FakeIl2CppImage* Image; };
@@ -658,6 +683,8 @@ namespace
     int g_il2cppThread = 0x7D;
 }
 
+#include "FakeIl2CppScene.h"
+
 extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppPlayer = { &kGameClasses[2], nullptr, 42, 0, 1000, 30, 3.5f };
 extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppList = { &kListOfInt, nullptr, 0, 0, 0, 0, 0.0f };
 extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppWild = { reinterpret_cast<const FakeIl2CppClass*>(0x01000001A9DE141Dull), nullptr, 0, 0, 0, 0, 0.0f };
@@ -682,6 +709,11 @@ extern "C"
     }
     __declspec(dllexport) const FakeIl2CppAssembly* const* il2cpp_domain_get_assemblies(const void*, std::size_t* size)
     {
+        if (g_scene)
+        {
+            *size = sizeof(g_sceneAssemblies) / sizeof(g_sceneAssemblies[0]);
+            return g_sceneAssemblies;
+        }
         *size = sizeof(kAssemblies) / sizeof(kAssemblies[0]);
         return kAssemblies;
     }
@@ -904,6 +936,10 @@ int main(int argc, char** argv)
             if (unreal.Build())
                 g_unrealFake = unreal.Fake;
         }
+        else if (std::strcmp(argv[i], "--il2cpp-scene") == 0)
+            g_scene = true;
+        else if (std::strcmp(argv[i], "--il2cpp-alt") == 0)
+            g_sceneAlt = true;
         else if (std::strcmp(argv[i], "--mono-values") == 0)
             g_monoValues = true;
         else if (std::strcmp(argv[i], "--mono-agent") == 0)
@@ -948,6 +984,8 @@ int main(int argc, char** argv)
         StartStress(hidden, hideLater);
     if (hiddenMain)
         HideCurrentThread();
+    if (g_scene)
+        BuildScene();
     ::SetConsoleTitleW(L"Manifold Test Target");
     g_world = new World();
     g_world->Hero = new Player();
@@ -965,6 +1003,8 @@ int main(int argc, char** argv)
         {
             if (hiddenMain)
                 Touch(&g_stress[0]);
+            if (g_scene && !g_il2cppPaused)
+                SceneFrame();
             ::Sleep(2);
         } while (::GetTickCount64() < until);
         g_ticks = g_ticks + 1;

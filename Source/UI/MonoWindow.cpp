@@ -98,7 +98,7 @@ namespace Manifold::UI
         }
         if (!m_engine.HasProcess())
         {
-            m_workspace.NoProcessState(ICON_FA_DICE_D6, "Open a Unity game to explore its classes, and for a Mono game its scenes and objects.");
+            m_workspace.NoProcessState(ICON_FA_DICE_D6, "Open a Unity game to explore its classes, scenes and objects.");
             EndToolWindow();
             return;
         }
@@ -122,8 +122,8 @@ namespace Manifold::UI
             const bool il2cpp = Target::MonoBridge::DetectRuntime(*m_engine.Process()) == Target::ManagedRuntime::Il2Cpp;
             std::vector<EmptyAction> actions = { { il2cpp ? ICON_FA_PLUG "  Load the IL2CPP runtime" : ICON_FA_PLUG "  Load the Mono runtime", nullptr, true } };
             if (EmptyState(ICON_FA_DICE_D6, "No managed runtime loaded",
-                    "This reads the game's Mono or IL2CPP runtime by running a small helper inside it. For IL2CPP games the classes, "
-                    "method addresses and field offsets are read; the scene explorer and inspector need a Mono game.",
+                    "This reads the game's Mono or IL2CPP runtime by running a small helper inside it: the classes, method addresses and "
+                    "field offsets, and with the explorer switched on the scenes, the objects and an inspector.",
                     actions, true) == 0)
                 m_engine.Managed().Load();
             EndToolWindow();
@@ -135,10 +135,6 @@ namespace Manifold::UI
             m_generation = mono.Generation();
             m_classes = mono.Classes();
             m_lastFilter = "\x01";
-            // Scenes and Objects need the Mono explorer; an IL2CPP game opens
-            // on its classes.
-            if (mono.IsIl2Cpp() && m_leftTab != 2)
-                m_requestLeftTab = 2;
             if (!m_selectedName.empty())
             {
                 const auto found = std::find_if(m_classes.begin(), m_classes.end(), [&](const Target::MonoClass& c) { return c.FullName() == m_selectedName; });
@@ -273,14 +269,15 @@ namespace Manifold::UI
                 m_open = false;
             ImGui::EndMenu();
         }
-        if (present && !stopped && !mono.IsIl2Cpp() && ImGui::BeginMenu("Explorer"))
+        if (present && !stopped && ImGui::BeginMenu("Explorer"))
         {
             Target::UnityExplorer& unity = mono.Unity();
             if (!unity.Enabled())
             {
                 if (ImGui::MenuItem(ICON_FA_PLAY "  Turn the explorer on"))
                     unity.SetEnabled(true);
-                ItemTooltip("Starts Manifold's managed agent in the game for scenes, objects and the inspector");
+                ItemTooltip(mono.IsIl2Cpp() ? "Puts Manifold's frame stub on a per-frame Unity method in the game for scenes, objects and the inspector"
+                                            : "Starts Manifold's managed agent in the game for scenes, objects and the inspector");
                 ImGui::Separator();
             }
             const bool background = m_status.RunInBackground.value_or(false);
@@ -324,7 +321,7 @@ namespace Manifold::UI
         else if (m_busySince < 0.0)
             m_busySince = now;
         const bool showBusy = m_status.Busy && now - m_busySince > 0.4;
-        const bool explorer = !mono.IsIl2Cpp() && mono.Unity().Enabled();
+        const bool explorer = mono.Unity().Enabled();
         const ImGuiStyle& style = ImGui::GetStyle();
         const float gap = Px(14.0f);
         const std::string task = m_status.Task.empty() ? std::string("Working") : m_status.Task;
@@ -351,8 +348,10 @@ namespace Manifold::UI
         if (explorer)
         {
             ImGui::TextColored(ManifoldTheme::Label, "%s", explorerOn);
-            ItemTooltip("Manifold's managed agent answers from the game's frame callback while this is on, a few milliseconds per frame at most. "
-                        "Shut down takes it back out; the assembly itself stays loaded until the game ends.");
+            ItemTooltip(mono.IsIl2Cpp() ? "Manifold's frame stub answers from a per-frame Unity method while this is on, a bounded number of calls per frame. "
+                                          "Shut down takes it back out."
+                                        : "Manifold's managed agent answers from the game's frame callback while this is on, a few milliseconds per frame at most. "
+                                          "Shut down takes it back out; the assembly itself stays loaded until the game ends.");
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() - style.ItemSpacing.x + gap);
         }
         if (infoWidth > Px(24.0f))
@@ -370,22 +369,18 @@ namespace Manifold::UI
 
     bool MonoWindow::ExplorerGate(Target::UnityExplorer& unity, const char* icon, const char* what)
     {
-        if (m_engine.Mono().IsIl2Cpp())
-        {
-            EmptyState(icon, "Needs a Mono game",
-                "This game runs IL2CPP. Scenes, objects and the inspector call into the game's managed code on its main thread, "
-                "which Manifold Engine does for Mono games only so far.\n\n"
-                "The Classes tab, method addresses, method names in the disassembler and Structure Dissect's class lookup work for IL2CPP.",
-                {}, false);
-            return false;
-        }
         if (unity.Enabled())
             return true;
         std::vector<EmptyAction> actions = { { ICON_FA_PLAY "  Turn the explorer on", nullptr, true } };
         const int chose = EmptyState(icon, what,
-            "Scenes, objects and the inspector run through Manifold's managed agent inside the game. It answers from the game's frame callback, "
-            "a few milliseconds per frame at most, and Runtime > Shut down takes it out again. Setters and method calls change the game, so save first.\n\n"
-            "The class list, method addresses and Structure Dissect's Mono lookup do not need it.",
+            m_engine.Mono().IsIl2Cpp()
+                ? "Scenes, objects and the inspector run through a small stub that Manifold puts on a per-frame Unity method inside the game. It calls into "
+                  "the game on its main thread, a bounded number of calls per frame, and Runtime > Shut down takes it out again. Setters and method "
+                  "calls change the game, so save first.\n\n"
+                  "The class list, method addresses and Structure Dissect's class lookup do not need it."
+                : "Scenes, objects and the inspector run through Manifold's managed agent inside the game. It answers from the game's frame callback, "
+                  "a few milliseconds per frame at most, and Runtime > Shut down takes it out again. Setters and method calls change the game, so save first.\n\n"
+                  "The class list, method addresses and Structure Dissect's Mono lookup do not need it.",
             actions, false);
         if (chose == 0)
             unity.SetEnabled(true);
@@ -739,12 +734,11 @@ namespace Manifold::UI
                 }
                 if (ImGui::BeginPopupContextItem())
                 {
-                    const bool il2cpp = m_engine.Mono().IsIl2Cpp();
-                    const bool live = !il2cpp && m_engine.Mono().Unity().Enabled();
+                    const bool live = m_engine.Mono().Unity().Enabled();
                     if (ImGui::MenuItem(ICON_FA_EYE "  Static members", nullptr, false, live))
                         OpenStatics(info.Handle);
                     if (!live)
-                        ItemTooltip(il2cpp ? "Needs the explorer, which works with Mono games only" : "Needs the explorer, which is off: turn it on under Scenes or Objects");
+                        ItemTooltip("Needs the explorer, which is off: turn it on under Scenes or Objects");
                     if (ImGui::MenuItem(ICON_FA_SEARCH "  Find objects of this class", nullptr, false, live))
                     {
                         m_searchClass = info.FullName();
@@ -768,23 +762,18 @@ namespace Manifold::UI
         const Target::MonoClass* info = m_selected >= 0 && m_selected < static_cast<int>(m_classes.size()) ? &m_classes[static_cast<std::size_t>(m_selected)] : nullptr;
         if (info)
         {
-            // Static members and the object search go through the explorer,
-            // which IL2CPP does not have yet.
-            if (!m_engine.Mono().IsIl2Cpp())
+            if (ImGui::SmallButton(ICON_FA_EYE "  Static members"))
+                OpenStatics(info->Handle);
+            ItemTooltip("Opens the class in the inspector: static fields and properties with their values");
+            ImGui::SameLine();
+            if (ImGui::SmallButton(ICON_FA_SEARCH "  Find objects"))
             {
-                if (ImGui::SmallButton(ICON_FA_EYE "  Static members"))
-                    OpenStatics(info->Handle);
-                ItemTooltip("Opens the class in the inspector: static fields and properties with their values");
-                ImGui::SameLine();
-                if (ImGui::SmallButton(ICON_FA_SEARCH "  Find objects"))
-                {
-                    m_searchClass = info->FullName();
-                    m_requestLeftTab = 1;
-                    m_engine.Mono().Unity().Search({ m_searchClass, std::string(), m_searchHidden });
-                }
-                ItemTooltip("Lists the live objects of this class");
-                ImGui::SameLine();
+                m_searchClass = info->FullName();
+                m_requestLeftTab = 1;
+                m_engine.Mono().Unity().Search({ m_searchClass, std::string(), m_searchHidden });
             }
+            ItemTooltip("Lists the live objects of this class");
+            ImGui::SameLine();
             if (ImGui::SmallButton(ICON_FA_TIMES "##closeclass"))
                 m_showClass = false;
             ItemTooltip("Back to the inspector");

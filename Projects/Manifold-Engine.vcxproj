@@ -204,6 +204,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
     <ClCompile Include="..\Source\Target\CodeCall.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
+    <ClCompile Include="..\Source\Target\FrameCalls.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
     <ClCompile Include="..\Source\Target\ManagedAgent.cpp" />
     <ClCompile Include="..\Source\Target\ManagedDumper.cpp" />
@@ -215,6 +216,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Target\RemoteCall.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
     <ClCompile Include="..\Source\Target\UnityExplorer.cpp" />
+    <ClCompile Include="..\Source\Target\UnityExplorerIl2Cpp.cpp" />
     <ClCompile Include="..\Source\Target\Unreal.cpp" />
     <ClCompile Include="..\Source\Target\UnrealReflection.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateCheck.cpp" />
@@ -353,6 +355,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Table\UnrealStructures.h" />
     <ClInclude Include="..\Source\Target\CodeCall.h" />
     <ClInclude Include="..\Source\Target\CodeMap.h" />
+    <ClInclude Include="..\Source\Target\FrameCalls.h" />
     <ClInclude Include="..\Source\Target\Il2CppRuntime.h" />
     <ClInclude Include="..\Source\Target\ManagedAgent.h" />
     <ClInclude Include="..\Source\Target\ManagedDumper.h" />
@@ -365,6 +368,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Target\RemoteCall.h" />
     <ClInclude Include="..\Source\Target\Symbols.h" />
     <ClInclude Include="..\Source\Target\UnityExplorer.h" />
+    <ClInclude Include="..\Source\Target\UnityExplorerIl2Cpp.h" />
     <ClInclude Include="..\Source\Target\Unreal.h" />
     <ClInclude Include="..\Source\Templates\BuiltinTemplates.h" />
     <ClInclude Include="..\Source\Templates\TemplateCheck.h" />

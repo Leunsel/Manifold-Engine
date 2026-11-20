@@ -190,6 +190,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
     <ClCompile Include="..\Source\Target\CodeCall.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
+    <ClCompile Include="..\Source\Target\FrameCalls.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
     <ClCompile Include="..\Source\Target\ManagedAgent.cpp" />
     <ClCompile Include="..\Source\Target\ManagedDumper.cpp" />
@@ -201,6 +202,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Target\RemoteCall.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
     <ClCompile Include="..\Source\Target\UnityExplorer.cpp" />
+    <ClCompile Include="..\Source\Target\UnityExplorerIl2Cpp.cpp" />
     <ClCompile Include="..\Source\Target\Unreal.cpp" />
     <ClCompile Include="..\Source\Target\UnrealReflection.cpp" />
     <ClCompile Include="..\Source\Templates\TemplateCheck.cpp" />
@@ -240,6 +242,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Tests\TestKit.h" />
+    <ClInclude Include="..\Tests\Target\FakeIl2CppScene.h" />
     <ClInclude Include="..\Tests\Target\FakeUnreal.h" />
   </ItemGroup>
   <ItemGroup>

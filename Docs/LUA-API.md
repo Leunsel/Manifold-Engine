@@ -183,7 +183,7 @@ The Lua engine is `getLuaEngine()`: `cbShowOnPrint.Checked` (and `State`) is the
 
 ## Mono / .NET
 
-For a Unity game, Mono-based (one with `mono-2.0-bdwgc.dll` or `mono.dll`) or IL2CPP (one with `GameAssembly.dll`), the runtime is read through a small in-process worker, without injecting a native DLL. On Mono the class list comes from a small managed dumper that Manifold loads into the game's root domain (it stays loaded until the game ends), with the `mono_*` C functions as the fallback. As in Cheat Engine, the same `mono_*` functions serve both runtimes. On IL2CPP only metadata is read: there is no JIT, every method already has its code in `GameAssembly.dll`, and nothing runs managed code in the game.
+For a Unity game, Mono-based (one with `mono-2.0-bdwgc.dll` or `mono.dll`) or IL2CPP (one with `GameAssembly.dll`), the runtime is read through a small in-process worker, without injecting a native DLL. On Mono the class list comes from a small managed dumper that Manifold loads into the game's root domain (it stays loaded until the game ends), with the `mono_*` C functions as the fallback. As in Cheat Engine, the same `mono_*` functions serve both runtimes. On IL2CPP these functions read metadata only: there is no JIT, every method already has its code in `GameAssembly.dll`, and they run no managed code in the game.
 
 | Function | Result |
 | --- | --- |
@@ -200,7 +200,7 @@ For a Unity game, Mono-based (one with `mono-2.0-bdwgc.dll` or `mono.dll`) or IL
 
 When Mono or IL2CPP is loaded, Structure Dissect uses it automatically: dissecting the address of a managed object names the structure by its class and fills the fields (names, offsets and types) from the runtime, and following a pointer to another object looks that one up too. No script or manual structure is needed. On IL2CPP an object of a class that no assembly lists (a generic instance such as `List<int>`) is named from its class's memory only and its fields are guessed, because such a class pointer is never handed to the runtime.
 
-The scene explorer, the inspector and `mono_showDissector()`'s Scenes and Objects tabs run managed code on the game's main thread and work with Mono games only. They go through Manifold's managed agent, which hangs on the game's per-frame callback (`Application.onBeforeRender`) and answers requests a few milliseconds per frame at most; Shut down takes it back out.
+The scene explorer, the inspector and `mono_showDissector()`'s Scenes and Objects tabs run managed code on the game's main thread. On Mono they go through Manifold's managed agent, which hangs on the game's per-frame callback (`Application.onBeforeRender`) and answers requests a few milliseconds per frame at most. On IL2CPP a small native stub sits on a per-frame Unity method instead and runs the requests as `il2cpp_runtime_invoke` calls. Shut down takes either back out.
 
 ## Checking a table without the program window
 

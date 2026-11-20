@@ -9,7 +9,7 @@ Lower layers never include higher ones. `Core` includes nothing from the other f
 | Layer | Folders | Holds |
 | --- | --- | --- |
 | Foundation | `Source/Core`, `Source/Text` | error codes and `Status`/`Result<T>`, the log, text helpers, ini and XML, paths, `BackgroundWork`, main-thread helpers, `CheckedMutex`, the profiler; JSON and other text formats |
-| Engine core | `Source/Disasm`, `Source/Asm`, `Source/Syscalls`, `Source/Target`, `Source/Scan`, `Source/Debug`, `Source/Table` | Zydis disassembler, code dissect; the assembler and the Auto Assembler; direct system calls; process access, modules, symbols, address expressions and the code map; Mono/IL2CPP (`MonoBridge`, `RemoteCall`, `UnityExplorer`, the managed agent link); the scanner; the debugger, watches and tracer; the address list, cheat table files and structures |
+| Engine core | `Source/Disasm`, `Source/Asm`, `Source/Syscalls`, `Source/Target`, `Source/Scan`, `Source/Debug`, `Source/Table` | Zydis disassembler, code dissect; the assembler and the Auto Assembler; direct system calls; process access, modules, symbols, address expressions and the code map; Mono/IL2CPP (`MonoBridge`, `RemoteCall`, `UnityExplorer`, the managed agent link, `FrameCalls` for IL2CPP's main-thread calls); the scanner; the debugger, watches and tracer; the address list, cheat table files and structures |
 | Application | `Source/App`, `Source/Templates` | `Engine` and its parts, settings, commands, diagnostics, the window host; the template engine |
 | Scripting | `Source/Lua` | the Lua engine, the Cheat Engine compatible API, the `manifold.*` API and its documentation registry |
 | Interface | `Source/UI` | `Workspace`, the main window and every tool window, widgets and theme |
@@ -41,7 +41,7 @@ Outside the program: `Agent` is the in-process debugger DLL (VEH) that is inject
 | Debugger | `Debug::Debugger::Loop`, every debug event | the breakpoint and watch state is under the debugger's lock |
 | Scanner, PDB loader, Unity explorer jobs, sounds | their own work | they publish results under their own locks |
 | RemoteCall worker (in the game) | Mono and IL2CPP calls, one at a time | every call holds `MonoBridge::m_lock`, a `CheckedMutex`. `RemoteCall` asserts it, and the integration tests fail when a call ran without it. Pages handed to the worker are never freed while it can still use them |
-| Game main thread | the managed agent (`Managed/ManifoldDumper/Agent.cs`), from the game's frame callback | every Unity engine call happens here. The host only writes requests into the mailbox, and `StopNow` hands over to `Tick` when the agent is busy |
+| Game main thread | the managed agent (`Managed/ManifoldDumper/Agent.cs`), from the game's frame callback; on IL2CPP the `FrameCalls` stub, from a per-frame Unity method | every Unity engine call happens here. The host only writes requests into the mailbox, and `StopNow` hands over to `Tick` when the agent is busy. The IL2CPP stub runs a batch of calls the host wrote, a bounded number per frame, and its pages are never freed |
 
 ## Frame order
 

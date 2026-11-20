@@ -174,14 +174,6 @@ namespace Manifold::UI
 
     void MonoWindow::InspectorPane(Target::UnityExplorer& unity)
     {
-        if (m_engine.Mono().IsIl2Cpp())
-        {
-            EmptyState(ICON_FA_EYE, "No inspector for IL2CPP yet",
-                "The inspector runs managed code on the game's main thread, which Manifold Engine does for Mono games only so far. "
-                "Pick a class under Classes for its methods, code addresses and field offsets.",
-                {}, false);
-            return;
-        }
         if (!unity.Enabled())
         {
             EmptyState(ICON_FA_EYE, "Inspector is off",

@@ -6,6 +6,7 @@
 #include "Target/ManagedAgent.h"
 #include "Target/Mono.h"
 #include "Target/Process.h"
+#include "Target/UnityExplorerIl2Cpp.h"
 
 #include <algorithm>
 #include <array>
@@ -18,19 +19,14 @@
 
 namespace Manifold::Target
 {
+    using namespace ExplorerLimits;
+
     namespace
     {
         constexpr std::size_t kArgsSize = 0x10000;
         constexpr const char* kGoneText = "the object is gone (the game destroyed it, e.g. on a scene change), so nothing was called on it";
         constexpr const char* kUnheldText = "Manifold does not hold this object; open it from its parent (the scene tree, a field or a property) first";
         constexpr auto kHeartbeatEvery = std::chrono::seconds(2);
-        constexpr int kTreeGroup = 1;
-        constexpr int kSearchGroup = 2;
-        constexpr std::size_t kMaxShownElements = 256;
-        constexpr std::size_t kMaxNodes = 200000;
-        constexpr std::size_t kMaxChildren = 20000;
-        constexpr std::size_t kMaxHits = 5000;
-        constexpr std::size_t kMaxShownChildren = 500;
         constexpr int kMaxMembers = 4096;
         constexpr std::uint32_t kFieldStatic = 0x10;
         constexpr std::uint32_t kFieldLiteral = 0x40;
@@ -39,11 +35,6 @@ namespace Manifold::Target
         // Set on the explorer's job thread, the only thread that may make
         // remote calls for names and layouts; drawing code only reads caches.
         thread_local bool t_jobThread = false;
-
-        int InspectionGroup(int id)
-        {
-            return 1000 + id;
-        }
 
         int PrimitiveSize(int code, int pointer)
         {
@@ -222,15 +213,11 @@ namespace Manifold::Target
 
     bool UnityExplorer::Allowed()
     {
-        // The explorer runs managed code through Mono's own API; an IL2CPP
-        // game has none of it (stage 1 reads its metadata only).
-        const bool il2cpp = m_mono.IsIl2Cpp();
-        if (m_enabled.load() && !il2cpp)
+        if (m_enabled.load())
             return true;
         {
             std::lock_guard state(m_stateLock);
-            m_status.Error = il2cpp ? "The scene explorer and inspector work with Mono games only; this game runs IL2CPP."
-                                    : "The scene explorer and inspector are switched off for this session.";
+            m_status.Error = "The scene explorer and inspector are switched off for this session.";
         }
         Publish();
         return false;
@@ -238,11 +225,11 @@ namespace Manifold::Target
 
     void UnityExplorer::Post(std::string task, std::function<void()> job)
     {
-        if (!m_enabled.load() || m_mono.IsIl2Cpp())
+        if (!m_enabled.load())
             return;
         {
             std::lock_guard bridge(m_mono.m_lock);
-            if (!m_mono.m_present || !m_mono.m_process || m_mono.m_runtime.load() != ManagedRuntime::Mono)
+            if (!m_mono.m_present || !m_mono.m_process || m_mono.m_runtime.load() == ManagedRuntime::None)
                 return;
             std::lock_guard state(m_stateLock);
             m_process = m_mono.m_process;
@@ -377,6 +364,7 @@ namespace Manifold::Target
             m_agent.reset();
         }
         m_agentReady = false;
+        Il2Shutdown(present);
         m_args = 0;
         m_argsUsed = 0;
         m_dontDestroyHandle = 0;
@@ -438,8 +426,21 @@ namespace Manifold::Target
     // ---------------------------------------------------------------------
     // Remote calls
 
+    bool UnityExplorer::Il2() const
+    {
+        return m_mono.IsIl2Cpp();
+    }
+
     std::optional<std::uint64_t> UnityExplorer::Worker(const char* function, std::uint64_t a0, std::uint64_t a1, std::uint64_t a2, std::uint64_t a3)
     {
+        std::string translated;
+        if (const std::string_view name(function); name.starts_with("mono_") && Il2())
+        {
+            translated = name == "mono_class_from_mono_type" ? "il2cpp_class_from_type"
+                       : name == "mono_array_element_size" ? "il2cpp_class_array_element_size"
+                       : "il2cpp_" + std::string(name.substr(5));
+            function = translated.c_str();
+        }
         std::lock_guard bridge(m_mono.m_lock);
         if (!m_mono.m_present)
             return std::nullopt;
@@ -671,6 +672,8 @@ namespace Manifold::Target
         const auto vtable = process->ReadPointer(object);
         if (!vtable || *vtable < 0x10000)
             return 0;
+        if (Il2())
+            return IsClass(*vtable) ? *vtable : 0;
         // ∑ Whatever comes back here can end up in mono_class_get_type /
         // mono_type_get_name on the worker, and Mono dereferences it blindly.
         // A field of an object the game had destroyed and collected (Content
@@ -795,7 +798,7 @@ namespace Manifold::Target
         else
         {
             m_classShape.Failed = true;
-            LOG_WARN("Unity", "Could not learn where this Mono keeps a class's image and name; objects of generic and array classes stay unnamed");
+            LOG_WARN("Unity", "Could not learn where this runtime keeps a class's image and name; objects of generic and array classes stay unnamed");
         }
     }
 
@@ -869,6 +872,15 @@ namespace Manifold::Target
                 if (const auto type = Worker("mono_class_get_type", *element); type && *type)
                     layout->Element = TypeInfo(*type);
             layout->ElementSize = static_cast<int>(Worker("mono_array_element_size", klass).value_or(static_cast<std::uint64_t>(process->PointerSize())) & 0xFFFF);
+        }
+
+        if (Il2())
+        {
+            Il2LoadMembers(*layout, klass);
+            std::lock_guard state(m_stateLock);
+            m_layouts[klass] = layout;
+            m_layoutQueued.erase(klass);
+            return layout;
         }
 
         std::uint64_t domain = 0;
@@ -1285,6 +1297,8 @@ namespace Manifold::Target
         std::uint64_t address = 0;
         if (field.Static)
         {
+            if (!field.StaticData && field.Offset >= 0 && Il2())
+                return { "(not set up yet)" };
             if (!field.StaticData || field.Offset < 0 || field.Offset > 0x1000000)
                 return { "(thread static)" };
             address = field.StaticData + static_cast<std::uint64_t>(field.Offset);
@@ -1533,6 +1547,8 @@ namespace Manifold::Target
 
     void UnityExplorer::HoldSlots(int group, const std::vector<int>& slots)
     {
+        if (Il2())
+            return Il2Hold(group, slots);
         if (slots.empty() || !m_agent || !m_agent->Connected())
             return;
         AgentRequest request;
@@ -1545,6 +1561,8 @@ namespace Manifold::Target
 
     void UnityExplorer::ReleaseGroup(int group)
     {
+        if (Il2())
+            return Il2Release(group);
         if (!m_agent || !m_agent->Connected() || m_agent->RemoteState() != AgentProtocol::kStateHooked)
             return;
         AgentRequest request;
@@ -1701,6 +1719,8 @@ namespace Manifold::Target
 
     void UnityExplorer::DoReadScenes()
     {
+        if (Il2())
+            return Il2ReadScenes();
         {
             std::lock_guard state(m_stateLock);
             m_status.Error.clear();
@@ -1765,6 +1785,8 @@ namespace Manifold::Target
 
     void UnityExplorer::DoExpandScene(int sceneIndex)
     {
+        if (Il2())
+            return Il2ExpandScene(sceneIndex);
         UnityScene scene;
         std::uint64_t generation = 0;
         {
@@ -1847,6 +1869,8 @@ namespace Manifold::Target
 
     void UnityExplorer::DoExpandNode(int nodeIndex)
     {
+        if (Il2())
+            return Il2ExpandNode(nodeIndex);
         UnityNode parent;
         std::uint64_t generation = 0;
         {
@@ -1978,6 +2002,13 @@ namespace Manifold::Target
             return;
         }
         const std::string className = ClassName(klass);
+        if (Il2() && IsUnityObjectClass(klass))
+        {
+            Il2Search(request, klass, result);
+            publish(true);
+            Publish();
+            return;
+        }
         if (IsUnityObjectClass(klass))
         {
             if (Status ready = EnsureAgent(); !ready)
@@ -2092,11 +2123,14 @@ namespace Manifold::Target
             };
 
         std::vector<std::uint64_t> vtables;
-        sweep({ klass }, false, [&](std::uint64_t address)
-            {
-                vtables.push_back(address);
-                return vtables.size() < kMaxVTables;
-            });
+        if (Il2())
+            vtables.push_back(klass);
+        else
+            sweep({ klass }, false, [&](std::uint64_t address)
+                {
+                    vtables.push_back(address);
+                    return vtables.size() < kMaxVTables;
+                });
         if (vtables.empty())
         {
             result.Error = "Found no vtable for " + className + ", so its instances cannot be located in memory";
@@ -2110,6 +2144,12 @@ namespace Manifold::Target
                 // merely held the same value is dropped here.
                 if (ClassOf(object) != klass)
                     return true;
+                if (Il2())
+                {
+                    const std::uint64_t monitor = process->ReadPointer(object + pointer).value_or(1);
+                    if (monitor != 0 && (monitor < 0x10000 || (monitor & (pointer - 1)) != 0))
+                        return true;
+                }
                 ++result.Total;
                 if (result.Hits.size() < kMaxHits)
                     result.Hits.push_back({ object, std::string(), className });
@@ -2236,6 +2276,8 @@ namespace Manifold::Target
             inspection.Error = "This address does not hold a managed object.";
         else
         {
+            if (Il2())
+                Il2RefreshStatics(inspection.Klass);
             inspection.Layout = LoadLayout(inspection.Klass);
             inspection.Title = inspection.Layout->Name;
         }
@@ -2243,7 +2285,9 @@ namespace Manifold::Target
         const int group = InspectionGroup(id);
         const int self = inspection.Object ? SlotOf(inspection.Object) : 0;
         const bool callable = inspection.Layout && !inspection.FromScan && !inspection.Gone && (!inspection.Object || self);
-        if (callable)
+        if (callable && Il2())
+            Il2Inspect(inspection, properties, group);
+        else if (callable)
         {
             const MonoClassLayout& layout = *inspection.Layout;
             AgentRequest request;
@@ -2507,15 +2551,26 @@ namespace Manifold::Target
     {
         Post(active ? "Activating an object" : "Deactivating an object", [this, gameObject, active, refresh]
             {
-                if (Status ready = EnsureAgent(); !ready)
+                if (Status ready = Il2() ? Il2EnsureHook() : EnsureAgent(); !ready)
                     return Fail(ready.Text);
                 const int slot = SlotOf(gameObject);
                 if (!slot)
                     return Fail(std::string("SetActive: ") + kUnheldText);
-                AgentRequest request;
-                request.Op(AgentProtocol::SetActive).I32(slot).U8(active ? 1 : 0);
-                if (Status done = Command(request, "SetActive failed"); !done)
-                    return Fail(done.Text);
+                if (Il2())
+                {
+                    AgentArg value;
+                    value.Kind = AgentProtocol::ArgBytes;
+                    value.Bytes = { static_cast<std::uint8_t>(active ? 1 : 0) };
+                    if (Status done = Il2Edit("SetActive failed", Il2Method("UnityEngine.GameObject", "SetActive", { "System.Boolean" }), gameObject, { value }); !done)
+                        return Fail(done.Text);
+                }
+                else
+                {
+                    AgentRequest request;
+                    request.Op(AgentProtocol::SetActive).I32(slot).U8(active ? 1 : 0);
+                    if (Status done = Command(request, "SetActive failed"); !done)
+                        return Fail(done.Text);
+                }
                 {
                     std::lock_guard state(m_stateLock);
                     for (UnityNode& node : m_tree.Nodes)
@@ -2534,15 +2589,26 @@ namespace Manifold::Target
     {
         Post(enabled ? "Enabling a component" : "Disabling a component", [this, behaviour, enabled, refresh]
             {
-                if (Status ready = EnsureAgent(); !ready)
+                if (Status ready = Il2() ? Il2EnsureHook() : EnsureAgent(); !ready)
                     return Fail(ready.Text);
                 const int slot = SlotOf(behaviour);
                 if (!slot)
                     return Fail(std::string("Setting enabled: ") + kUnheldText);
-                AgentRequest request;
-                request.Op(AgentProtocol::SetEnabled).I32(slot).U8(enabled ? 1 : 0);
-                if (Status done = Command(request, "Setting enabled failed"); !done)
-                    return Fail(done.Text);
+                if (Il2())
+                {
+                    AgentArg value;
+                    value.Kind = AgentProtocol::ArgBytes;
+                    value.Bytes = { static_cast<std::uint8_t>(enabled ? 1 : 0) };
+                    if (Status done = Il2Edit("Setting enabled failed", Il2Method("UnityEngine.Behaviour", "set_enabled", { "System.Boolean" }), behaviour, { value }); !done)
+                        return Fail(done.Text);
+                }
+                else
+                {
+                    AgentRequest request;
+                    request.Op(AgentProtocol::SetEnabled).I32(slot).U8(enabled ? 1 : 0);
+                    if (Status done = Command(request, "Setting enabled failed"); !done)
+                        return Fail(done.Text);
+                }
                 if (refresh)
                     DoInspect(refresh, false);
             });
@@ -2552,15 +2618,26 @@ namespace Manifold::Target
     {
         Post("Renaming an object", [this, object, name, refresh]
             {
-                if (Status ready = EnsureAgent(); !ready)
+                if (Status ready = Il2() ? Il2EnsureHook() : EnsureAgent(); !ready)
                     return Fail(ready.Text);
                 const int slot = SlotOf(object);
                 if (!slot)
                     return Fail(std::string("Renaming: ") + kUnheldText);
-                AgentRequest request;
-                request.Op(AgentProtocol::SetName).I32(slot).Text(name);
-                if (Status done = Command(request, "Renaming failed"); !done)
-                    return Fail(done.Text);
+                if (Il2())
+                {
+                    AgentArg value;
+                    value.Kind = AgentProtocol::ArgText;
+                    value.Text = name;
+                    if (Status done = Il2Edit("Renaming failed", Il2Method("UnityEngine.Object", "set_name", { "System.String" }), object, { value }); !done)
+                        return Fail(done.Text);
+                }
+                else
+                {
+                    AgentRequest request;
+                    request.Op(AgentProtocol::SetName).I32(slot).Text(name);
+                    if (Status done = Command(request, "Renaming failed"); !done)
+                        return Fail(done.Text);
+                }
                 {
                     std::lock_guard state(m_stateLock);
                     for (UnityNode& node : m_tree.Nodes)
@@ -2580,15 +2657,28 @@ namespace Manifold::Target
         const std::array<float, 3> vector{ value[0], value[1], value[2] };
         Post("Moving an object", [this, transform, which, vector, refresh]
             {
-                if (Status ready = EnsureAgent(); !ready)
+                if (Status ready = Il2() ? Il2EnsureHook() : EnsureAgent(); !ready)
                     return Fail(ready.Text);
                 const int slot = SlotOf(transform);
                 if (!slot)
                     return Fail(std::string("Moving: ") + kUnheldText);
-                AgentRequest request;
-                request.Op(AgentProtocol::SetVector).I32(slot).I32(std::clamp(which, 0, 2)).F32(vector[0]).F32(vector[1]).F32(vector[2]);
-                if (Status done = Command(request, "Moving failed"); !done)
-                    return Fail(done.Text);
+                if (Il2())
+                {
+                    static const char* const kSetters[] = { "set_localPosition", "set_localEulerAngles", "set_localScale" };
+                    AgentArg value;
+                    value.Kind = AgentProtocol::ArgBytes;
+                    value.Bytes.resize(sizeof(float) * 3);
+                    std::memcpy(value.Bytes.data(), vector.data(), value.Bytes.size());
+                    if (Status done = Il2Edit("Moving failed", Il2Method("UnityEngine.Transform", kSetters[std::clamp(which, 0, 2)], { "UnityEngine.Vector3" }), transform, { value }); !done)
+                        return Fail(done.Text);
+                }
+                else
+                {
+                    AgentRequest request;
+                    request.Op(AgentProtocol::SetVector).I32(slot).I32(std::clamp(which, 0, 2)).F32(vector[0]).F32(vector[1]).F32(vector[2]);
+                    if (Status done = Command(request, "Moving failed"); !done)
+                        return Fail(done.Text);
+                }
                 if (refresh)
                     DoInspect(refresh, false);
             });
@@ -2602,6 +2692,12 @@ namespace Manifold::Target
                 // it on the main thread. If the game is not rendering (so the
                 // main thread never reaches the agent) this cannot be set; the
                 // game has to be in the foreground once to turn it on.
+                if (Il2())
+                {
+                    if (Status done = Il2SetRunInBackground(enabled); !done)
+                        Fail(done.Text);
+                    return;
+                }
                 if (Status ready = EnsureAgent(); !ready)
                     return Fail(ready.Text);
                 AgentRequest request;
@@ -2624,6 +2720,11 @@ namespace Manifold::Target
     std::optional<UnityExplorer::AgentArg> UnityExplorer::ArgumentFor(const MonoTypeInfo& type, const std::string& text, std::string& error)
     {
         AgentArg arg;
+        if (type.Code == MonoTypeCode::ByRef)
+        {
+            error = "a ref or out value cannot be passed from here";
+            return std::nullopt;
+        }
         if (type.ValueType)
         {
             if (type.Class && !IsPrimitive(type.ValueCode))
@@ -2711,18 +2812,30 @@ namespace Manifold::Target
             return;
         if (member.Kind == MonoMemberKind::Field && member.Literal)
             return Fail(member.Name + " is a constant");
-        if (member.Kind == MonoMemberKind::Property && (!member.Setter || !member.SetterToken))
+        if (member.Kind == MonoMemberKind::Property && (!member.Setter || (!member.SetterToken && !Il2())))
             return Fail(member.Name + " has no setter");
         if (!member.Static && !inspection->Object)
             return Fail(member.Name + " needs an object");
         const int self = member.Static ? 0 : SlotOf(inspection->Object);
         if (!member.Static && !self)
             return Fail(member.Name + ": " + kUnheldText);
-        if (Status ready = EnsureAgent(); !ready)
+        if (Status ready = Il2() ? Il2EnsureHook() : EnsureAgent(); !ready)
             return Fail(ready.Text);
         const auto arg = ArgumentFor(member.Type, text, error);
         if (!arg)
             return Fail(member.Name + ": " + error);
+        if (Il2())
+        {
+            if (!Il2Fits(member.Type, *arg, error))
+                return Fail(member.Name + ": " + error);
+            const Status done = member.Kind == MonoMemberKind::Field
+                ? Il2SetField(*inspection, member, *arg)
+                : Il2Edit("Setting " + member.Name + " failed", member.Setter, member.Static ? 0 : inspection->Object, { *arg });
+            if (!done)
+                return Fail(done.Text);
+            DoInspect(id, member.Kind == MonoMemberKind::Property);
+            return;
+        }
         AgentRequest request;
         if (member.Kind == MonoMemberKind::Field)
         {
@@ -2760,7 +2873,7 @@ namespace Manifold::Target
         const int self = member.Static ? 0 : SlotOf(inspection->Object);
         if (!member.Static && !self)
             error = kUnheldText;
-        if (!member.Token)
+        if (!member.Token && !Il2())
             error = "this runtime does not name the method's token";
         for (std::size_t i = 0; i < member.Params.size() && error.empty(); ++i)
         {
@@ -2772,6 +2885,8 @@ namespace Manifold::Target
         }
         if (!error.empty())
             value.Error = error;
+        else if (Il2())
+            value = Il2Invoke(*inspection, member, args, InspectionGroup(id));
         else if (Status ready = EnsureAgent(); !ready)
             value.Error = ready.Text;
         else
