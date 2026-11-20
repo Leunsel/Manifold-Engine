@@ -2419,10 +2419,10 @@ namespace Manifold::Debug
         }
         HANDLE breakEvent = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
         HANDLE resumeEvent = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        HANDLE remoteBreak = nullptr;
+        HANDLE remoteResume = nullptr;
         if (HANDLE duplicator = ::OpenProcess(PROCESS_DUP_HANDLE, FALSE, Raw(m_process->Id())))
         {
-            HANDLE remoteBreak = nullptr;
-            HANDLE remoteResume = nullptr;
             if (breakEvent && resumeEvent && ::DuplicateHandle(::GetCurrentProcess(), breakEvent, duplicator, &remoteBreak, 0, FALSE, DUPLICATE_SAME_ACCESS) &&
                 ::DuplicateHandle(::GetCurrentProcess(), resumeEvent, duplicator, &remoteResume, 0, FALSE, DUPLICATE_SAME_ACCESS))
             {
@@ -2431,13 +2431,35 @@ namespace Manifold::Debug
             }
             ::CloseHandle(duplicator);
         }
-        const auto dropEvents = [&]()
+        const auto dropEvents = [&](bool remoteToo = true)
             {
                 if (breakEvent)
                     ::CloseHandle(breakEvent);
                 if (resumeEvent)
                     ::CloseHandle(resumeEvent);
                 breakEvent = resumeEvent = nullptr;
+                if (!remoteToo || (!remoteBreak && !remoteResume))
+                    return;
+                if (HANDLE duplicator = ::OpenProcess(PROCESS_DUP_HANDLE, FALSE, Raw(m_process->Id())))
+                {
+                    for (HANDLE remote : { remoteBreak, remoteResume })
+                    {
+                        if (remote)
+                            ::DuplicateHandle(duplicator, remote, nullptr, nullptr, 0, FALSE, DUPLICATE_CLOSE_SOURCE);
+                    }
+                    ::CloseHandle(duplicator);
+                }
+                remoteBreak = remoteResume = nullptr;
+            };
+        const auto dropAgent = [&]()
+            {
+                const auto module = m_process->FindModule(agentName);
+                const std::uint64_t freeLibrary = m_process->FindExport("kernel32.dll", "FreeLibrary");
+                if (!module || !freeLibrary || !m_process->Alive())
+                    return;
+                if (Status freed = m_process->CreateThread(freeLibrary, module->Base, true, 5000); !freed)
+                    LOG_WARN("Debugger","The extra reference to the agent in " + m_process->Name() + " was not released: " + freed.Text);
+                m_process->RefreshModules();
             };
         const bool loadedBefore = m_process->FindModule(agentName).has_value();
         if (Status injected = m_process->InjectLibrary(agent); !injected)
@@ -2451,13 +2473,18 @@ namespace Manifold::Debug
         {
             dropEvents();
             m_process->Free(block);
+            dropAgent();
             return Status::Fail(ErrorCode::InjectFailed, "ManifoldAgentStart was not found in the agent");
         }
         if (Status thread = m_process->CreateThread(start, block, true); !thread)
         {
-            dropEvents();
-            if (thread.Code != ErrorCode::ThreadTimedOut)
+            const bool timedOut = thread.Code == ErrorCode::ThreadTimedOut;
+            dropEvents(!timedOut);
+            if (!timedOut)
+            {
                 m_process->Free(block);
+                dropAgent();
+            }
             return thread;
         }
         std::uint32_t running = 0;
@@ -2474,6 +2501,9 @@ namespace Manifold::Debug
             std::uint32_t lastError = 0;
             m_process->ReadExact(block + offsetof(Veh::Block, LastError), &lastError, sizeof(lastError));
             m_process->Free(block);
+            dropAgent();
+            if (lastError == ERROR_BUSY)
+                return Status::Fail(ErrorCode::InjectFailed, "another program already runs the in-process debugger in this process");
             if (loadedBefore && !lastError)
                 return Status::Fail(ErrorCode::DebugAgentVersion);
             return Status::Fail(ErrorCode::InjectFailed, "the agent did not start" + (lastError ? " (" + SystemErrorText(lastError) + ")" : std::string()));

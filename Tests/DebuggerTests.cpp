@@ -613,6 +613,40 @@ namespace Manifold::Tests
         }
     }
 
+    void CheckSecondAttach(Engine& engine)
+    {
+        Debug::Debugger& debugger = engine.Debugger();
+        const DWORD pid = Raw(engine.Process()->Id());
+        const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);
+        const Status first = engine.EnsureDebugger();
+        CHECK_MSG(first.Ok(), "second attach: " + first.Text);
+        if (!first || !work)
+            return;
+        for (int attempt = 1; attempt <= 2; ++attempt)
+        {
+            const auto opened = Target::Process::Open(MakeProcessId(pid));
+            CHECK_MSG(opened.Ok(), opened.Error().Text);
+            if (!opened)
+                return;
+            (*opened)->RefreshModules();
+            Debug::Debugger second;
+            second.SetBackend(Debug::Backend::Veh);
+            const Status attached = second.Attach(*opened);
+            CHECK_MSG(!attached.Ok(), "a second in-process debugger attached to the same process");
+            CHECK_MSG(attached.Text.find("another program") != std::string::npos, "second attach " + std::to_string(attempt) + ": " + attached.Text);
+            CHECK(!second.Attached());
+        }
+        CHECK_MSG(AgentLoaded(pid), "second attach: the running agent was unloaded");
+        const Status set = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false);
+        CHECK_MSG(set.Ok(), set.Text);
+        CHECK_MSG(set && WaitForBreak(engine, 0, 4000), "second attach: the first debugger no longer breaks");
+        debugger.Detach();
+        CHECK_MSG(SharedMoves(engine, 400), "second attach: the target does not run after detaching");
+        Wait(engine, 1500);
+        CHECK_MSG(engine.Process()->Alive(), "second attach: the target died after detaching");
+        CHECK_MSG(!AgentLoaded(pid), "second attach: the agent is still loaded after the first debugger detached");
+    }
+
     int RunVehHost(const std::vector<std::string>& arguments)
     {
         DWORD pid = 0;
@@ -900,6 +934,7 @@ namespace Manifold::Tests
                 Wait(engine, 400);
                 CHECK(engine.Process()->Alive());
                 CheckDetachPaths(engine);
+                CheckSecondAttach(engine);
             }
         }
         DWORD code = 0;

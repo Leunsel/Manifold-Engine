@@ -1005,7 +1005,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldAgentStart(LPVOID paramete
     if (!block || block->Magic != kMagic || block->Version != kVersion)
         return 1;
     if (_InterlockedCompareExchange(&g_started, 1, 0) != 0)
+    {
+        block->LastError = ERROR_BUSY;
         return 2;
+    }
     block->Stop = 0;
     block->AppliedThreads = 0;
     for (int i = 0; i < kRecentSlots; ++i)
@@ -1014,6 +1017,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldAgentStart(LPVOID paramete
         g_recent[i].Tick = 0;
     }
     g_block = block;
+    const bool addedHandler = !g_handler;
     if (!g_handler)
         g_handler = ::AddVectoredExceptionHandler(1, &Handler);
     if (!g_handler)
@@ -1030,6 +1034,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldAgentStart(LPVOID paramete
     {
         block->LastError = ::GetLastError();
         g_block = nullptr;
+        if (addedHandler)
+        {
+            ::RemoveVectoredExceptionHandler(g_handler);
+            g_handler = nullptr;
+        }
         block->Running = 0;
         _InterlockedExchange(&g_started, 0);
         return 4;
