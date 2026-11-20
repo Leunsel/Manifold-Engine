@@ -1000,6 +1000,16 @@ namespace Manifold::UI
             }
             list.EndRow();
         }
+        if (list.Row("Window corners", "Rounded like Windows 11 windows, slightly rounded, or square. Applies to the main window and every tool window in its own window.", modeWidth))
+        {
+            int corners = std::clamp(theme.Corners, 0, 2);
+            if (Segmented("##corners", &corners, { "Round", "Slight", "Square" }, modeWidth))
+            {
+                theme.Corners = corners;
+                edited = true;
+            }
+            list.EndRow();
+        }
 
         const auto colorCell = [&](const std::string& key, const char* label, ImVec4 current) {
             if (!list.Row(label, {}, colorControl))

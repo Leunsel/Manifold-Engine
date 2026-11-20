@@ -86,6 +86,7 @@ namespace Manifold
     Application::Application(StartOptions options) : m_options(std::move(options)), m_settings(LoadSettings()), m_host(*this, HostSetup())
     {
         RuntimeLog::SetVerbose(m_settings.VerboseLog);
+        m_host.SetCorners(m_settings.Theme.Corners);
         WatchSystemTheme();
     }
 
@@ -288,6 +289,7 @@ namespace Manifold
     void Application::Restyle()
     {
         ManifoldTheme::Configure(m_settings.Theme);
+        m_host.SetCorners(m_settings.Theme.Corners);
         m_host.Restyle();
     }
 

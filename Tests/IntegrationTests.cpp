@@ -24,6 +24,7 @@ namespace Manifold::Tests
 {
     void CheckBreakActions(Engine& engine, bool veh);
     void CheckFpuAndExceptions(Engine& engine, bool veh);
+    void CheckStepOut(Engine& engine, bool veh);
     void CheckWatchesOnOneInstruction(Engine& engine, bool veh);
     void CheckAttachArmsMainThread(Engine& engine, HANDLE mainThread, std::uint64_t address);
     void CheckMono(Engine& engine);
@@ -880,6 +881,7 @@ namespace Manifold::Tests
             CHECK(process.ReadExact(damage, &afterBreakpoints, 1) && afterBreakpoints == original[0]);
             CheckBreakActions(engine, false);
             CheckFpuAndExceptions(engine, false);
+            CheckStepOut(engine, false);
             CheckWatchesOnOneInstruction(engine, false);
             CHECK(process.ReadExact(damage, &afterBreakpoints, 1) && afterBreakpoints == original[0]);
             CheckMono(engine);

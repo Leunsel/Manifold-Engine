@@ -58,9 +58,18 @@ namespace Manifold::UI
                 Return
             };
             Type Kind = Plain;
+            std::string Short;
             std::string Text;
+            std::string Pointee;
+            bool Named = false;
+            bool Literal = false;
             std::uint64_t Call = 0;
             std::uint64_t Target = 0;
+        };
+        struct StackRow
+        {
+            int Index = 0;
+            int Count = 1;
         };
         StackNote NoteFor(std::uint64_t value, bool is64Bit);
         void StackViewItems();
@@ -177,9 +186,10 @@ namespace Manifold::UI
         std::uint64_t m_stackTop = 0;
         std::uint64_t m_stackWrites = 0;
         std::vector<std::uint8_t> m_stackData;
-        std::vector<int> m_stackRows;
+        std::vector<StackRow> m_stackRows;
         std::unordered_map<int, StackNote> m_stackNotes;
         bool m_stackCallsOnly = false;
+        int m_stackDigits = 16;
         std::uint64_t m_stackPreviousSerial = 0;
         std::vector<std::uint8_t> m_stackPrevious;
         std::uint64_t m_stackPreviousTop = 0;

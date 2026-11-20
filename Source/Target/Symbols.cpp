@@ -817,10 +817,10 @@ namespace Manifold::Target
                 return false;
         }
         if (!m_process)
-            return false;
+            return true;
         const auto module = m_process->ModuleAt(address);
         if (!module)
-            return false;
+            return true;
         const auto table = Exports(*module);
         const auto found = std::lower_bound(table->ByAddress.begin(), table->ByAddress.end(), address,
             [](const ExportSymbol& symbol, std::uint64_t value)

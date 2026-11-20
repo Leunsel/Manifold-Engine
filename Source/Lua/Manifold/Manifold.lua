@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 6
+local API_VERSION = 7
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -2533,6 +2533,21 @@ native.docDefine(nil, "manifold.ui.image.Image.remove", { returns = "boolean", d
 native.docDefine(nil, "manifold.ui.image.Image.id", { kind = "field", type = "integer", doc = "The image's number." })
 native.docDefine(nil, "manifold.ui.image.Image.width", { kind = "field", type = "integer", doc = "Width in pixels." })
 native.docDefine(nil, "manifold.ui.image.Image.height", { kind = "field", type = "integer", doc = "Height in pixels." })
+
+define(ui, "getMode", {
+  returns = "table",
+  doc = "How the main window looks: `{ release = boolean, compact = boolean }`. *Release* shows three columns, hides the Edit, Tools and Debug menus and toggles records with a double click; *compact* hides the scanner and shows only the address list. View > Compact mode and View > Release mode (Ctrl+Shift+C, Ctrl+Shift+R) switch the same.",
+}, function()
+  return native.uiMode()
+end)
+
+define(ui, "setMode", {
+  params = { { name = "mode", type = "table", keys = { release = "boolean", compact = "boolean" } } },
+  returns = "nothing",
+  doc = "Switches release and/or compact mode, like View > Release mode and View > Compact mode, and saves it with the settings. A key left out keeps its state, so `setMode{ compact = true }` changes only compact mode.",
+}, function(mode)
+  native.setUiMode(mode.release, mode.compact)
+end)
 
 local theme = subarea(ui, "theme", "The names `manifold.ui` takes for colours and icons.")
 

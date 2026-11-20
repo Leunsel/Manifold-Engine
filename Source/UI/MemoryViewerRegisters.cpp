@@ -199,6 +199,17 @@ namespace Manifold::UI
             return xmm;
         }
 
+        std::string FitText(const std::string& text, float width)
+        {
+            if (ImGui::CalcTextSize(text.c_str()).x <= width)
+                return text;
+            const float dots = ImGui::CalcTextSize("...").x;
+            std::size_t keep = text.size();
+            while (keep > 0 && ImGui::CalcTextSize(text.c_str(), text.c_str() + keep).x + dots > width)
+                --keep;
+            return text.substr(0, keep) + "...";
+        }
+
         void ClippedText(ImDrawList* draw, ImVec2 at, float width, ImU32 color, const std::string& text)
         {
             draw->PushClipRect(at, ImVec2(at.x + width, at.y + ImGui::GetTextLineHeight() + 2.0f), true);
@@ -1037,9 +1048,10 @@ namespace Manifold::UI
                     }
                 }
             }
-            note.Text = (note.Kind == StackNote::Return ? "return to " : "code ") + m_engine.Describe(value);
+            note.Short = m_engine.Describe(value);
+            note.Text = (note.Kind == StackNote::Return ? "Return to " : "Code at ") + note.Short;
             if (note.Kind == StackNote::Return && note.Target)
-                note.Text += " from " + m_engine.Describe(note.Target);
+                note.Text += "\nfrom a call of " + m_engine.Describe(note.Target);
             return note;
         }
         if (region && region->Committed() && region->Readable() && !region->Guarded())
@@ -1048,34 +1060,48 @@ namespace Manifold::UI
             const std::string named = m_engine.Describe(value);
             std::uint8_t bytes[64] = {};
             const std::size_t got = process.Read(value, bytes, sizeof(bytes));
-            std::string what;
+            std::string text;
             if (got >= 8)
             {
-                what = AsciiAt(bytes, got);
-                if (what.empty())
-                    what = WideAt(bytes, got);
+                text = AsciiAt(bytes, got);
+                if (text.empty())
+                    text = WideAt(bytes, got);
             }
-            if (what.empty() && got >= static_cast<std::size_t>(pointer))
+            std::string target;
+            if (got >= static_cast<std::size_t>(pointer))
             {
                 std::uint64_t inner = 0;
                 std::memcpy(&inner, bytes, static_cast<std::size_t>(pointer));
                 const std::string innerName = m_engine.Describe(inner);
-                what = "-> " + Hex(inner) + (innerName != Hex(inner) ? "  " + innerName : std::string());
+                target = "-> " + (innerName != Hex(inner) ? innerName : Hex(inner));
+                note.Named = innerName != Hex(inner);
             }
-            note.Text = (named != Hex(value) ? named + "  " : std::string()) + what;
+            if (named != Hex(value))
+                note.Short = named;
+            else if (!text.empty())
+            {
+                note.Short = text;
+                note.Literal = true;
+            }
+            else if (note.Named)
+                note.Short = target;
+            note.Target = 0;
+            note.Text = (named != Hex(value) ? named + "\n" : std::string()) + (text.empty() ? target : text);
+            note.Pointee = target;
             return note;
         }
         const std::uint32_t low = static_cast<std::uint32_t>(value);
         if (value != 0 && (value >> 32) == 0 && low <= 1000000)
-            note.Text = std::to_string(low);
+            note.Short = std::to_string(low);
         else if (value != 0 && (value >> 32) == 0 && PlausibleFloat(low))
         {
             float number = 0.0f;
             std::memcpy(&number, &low, sizeof(number));
-            note.Text = "float " + Format("%g", number);
+            note.Short = Format("%gf", number);
         }
         else if (static_cast<std::int64_t>(value) < 0 && static_cast<std::int64_t>(value) > -1000000)
-            note.Text = std::to_string(static_cast<std::int64_t>(value));
+            note.Short = std::to_string(static_cast<std::int64_t>(value));
+        note.Text = note.Short;
         note.Kind = StackNote::Plain;
         return note;
     }
@@ -1095,7 +1121,16 @@ namespace Manifold::UI
         ImGui::Separator();
         if (ImGui::MenuItem("Describe values", nullptr, &options.StackFollowPointers))
             m_engine.SaveOptionsSoon();
-        ItemTooltip("Return addresses with the call they come from, code and symbol names, strings and what a pointer points to.");
+        ItemTooltip("Return addresses, symbol names, strings and small numbers beside the values. The full description is in the tooltip.");
+        if (ImGui::MenuItem("Show where plain pointers point", nullptr, &options.StackPointerTargets, options.StackFollowPointers))
+            m_engine.SaveOptionsSoon();
+        ItemTooltip("Also \"-> value\" for pointers into memory without a name. Off keeps those in the tooltip, which makes the stack much quieter.");
+        if (ImGui::MenuItem("Fold runs of zeros", nullptr, &options.StackCollapseZeros))
+        {
+            m_engine.SaveOptionsSoon();
+            m_stackSerial = 0;
+        }
+        ItemTooltip("Three or more zero slots in a row show as one line.");
         if (ImGui::MenuItem("Only return addresses (call stack)", nullptr, &m_stackCallsOnly))
             m_stackSerial = 0;
         ItemTooltip("Leaves the slots that hold a return address: the functions this thread is in, the innermost first. Found by the call in front of each address, so a stale one can show up.");
@@ -1108,8 +1143,12 @@ namespace Manifold::UI
         const int pointer = info.Is64Bit ? 8 : 4;
         const char* sp = info.Is64Bit ? "RSP" : "ESP";
         const char* bp = info.Is64Bit ? "RBP" : "EBP";
+        const int offsetMode = std::clamp(options.StackOffsets, 0, 2);
         BeginCard("##stack", nullptr, ImVec2(width, height));
-        CardTitle(ICON_FA_LAYER_GROUP, m_stackCallsOnly ? "Call stack" : "Stack", std::string(sp) + " " + Hex(values.Rsp, pointer * 2) + (running ? "  ·  stepping..." : ""));
+        const std::string note = offsetMode == 0 ? std::string("from ") + sp + " " + Hex(values.Rsp, pointer * 2)
+                               : offsetMode == 1 ? std::string("from ") + bp + " " + Hex(values.Rbp, pointer * 2)
+                                                 : std::string(sp) + " " + Hex(values.Rsp, pointer * 2);
+        CardTitle(ICON_FA_LAYER_GROUP, m_stackCallsOnly ? "Call stack" : "Stack", note + (running ? "  ·  stepping..." : ""));
         if (ImGui::BeginPopupContextWindow("##stackpanel", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
         {
             StackViewItems();
@@ -1122,6 +1161,19 @@ namespace Manifold::UI
             m_stackPrevious = m_stackShown;
             m_stackPreviousTop = m_stackShownTop;
         }
+        const auto slotValue = [&](int i)
+            {
+                std::uint64_t value = 0;
+                std::memcpy(&value, m_stackData.data() + static_cast<std::size_t>(i * pointer), static_cast<std::size_t>(pointer));
+                return value;
+            };
+        const auto noteAt = [&](int i) -> const StackNote&
+            {
+                auto found = m_stackNotes.find(i);
+                if (found == m_stackNotes.end())
+                    found = m_stackNotes.emplace(i, NoteFor(slotValue(i), info.Is64Bit)).first;
+                return found->second;
+            };
         if (info.Serial != m_stackSerial || values.Rsp != m_stackTop || m_stackWrites != m_engine.Writes().Revision())
         {
             m_stackSerial = info.Serial;
@@ -1133,36 +1185,45 @@ namespace Manifold::UI
             m_stackNotes.clear();
             m_stackRows.clear();
             const int entries = static_cast<int>(m_stackData.size() / static_cast<std::size_t>(pointer));
+            m_stackDigits = 4;
             for (int i = 0; i < entries; ++i)
-                m_stackRows.push_back(i);
-            if (m_stackCallsOnly)
+                m_stackDigits = std::max(m_stackDigits, static_cast<int>(Hex(slotValue(i)).size()));
+            for (int i = 0; i < entries;)
             {
-                std::vector<int> calls;
-                for (int i = 0; i < entries; ++i)
+                if (m_stackCallsOnly)
                 {
-                    std::uint64_t value = 0;
-                    std::memcpy(&value, m_stackData.data() + static_cast<std::size_t>(i * pointer), static_cast<std::size_t>(pointer));
-                    auto found = m_stackNotes.find(i);
-                    if (found == m_stackNotes.end())
-                        found = m_stackNotes.emplace(i, NoteFor(value, info.Is64Bit)).first;
-                    if (found->second.Kind == StackNote::Return)
-                        calls.push_back(i);
+                    if (noteAt(i).Kind == StackNote::Return)
+                        m_stackRows.push_back({ i, 1 });
+                    ++i;
+                    continue;
                 }
-                m_stackRows = std::move(calls);
+                int run = 1;
+                if (options.StackCollapseZeros && slotValue(i) == 0)
+                {
+                    while (i + run < entries && slotValue(i + run) == 0 && values.Rsp + static_cast<std::uint64_t>((i + run) * pointer) != values.Rbp)
+                        ++run;
+                    if (run < 3 || values.Rsp + static_cast<std::uint64_t>(i * pointer) == values.Rbp)
+                        run = 1;
+                }
+                m_stackRows.push_back({ i, run });
+                i += run;
             }
         }
         PushMono();
         ImDrawList* draw = ImGui::GetWindowDrawList();
         const float line = ImGui::GetTextLineHeight();
         const float rowHeight = std::round(line + Px(5.0f));
-        const int offsetMode = std::clamp(options.StackOffsets, 0, 2);
-        const float offsetWidth = offsetMode == 2 ? ImGui::CalcTextSize(std::string(static_cast<std::size_t>(pointer * 2), '0').c_str()).x + Px(12.0f)
-                                                  : ImGui::CalcTextSize("RSP+0000").x + Px(12.0f);
-        const float markWidth = Px(14.0f);
+        const float offsetWidth = offsetMode == 2 ? ImGui::CalcTextSize(std::string(static_cast<std::size_t>(pointer * 2), '0').c_str()).x + Px(10.0f)
+                                                  : ImGui::CalcTextSize("-0000").x + Px(10.0f);
+        const float digitWidth = ImGui::CalcTextSize("0").x;
+        const float valueWidth = digitWidth * static_cast<float>(std::clamp(m_stackDigits, 4, pointer * 2)) + Px(12.0f);
+        const float markWidth = Px(10.0f);
         const ImU32 textColor = ImGui::GetColorU32(ManifoldTheme::Text);
         const ImU32 mutedColor = ImGui::GetColorU32(ManifoldTheme::Muted);
+        const ImU32 faintColor = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.55f));
         const ImU32 registerColor = ImGui::GetColorU32(ManifoldTheme::CodeRegister);
         const ImU32 symbolColor = ImGui::GetColorU32(ManifoldTheme::AddressText);
+        const ImU32 stringColor = ImGui::GetColorU32(ManifoldTheme::CodeString);
         const ImU32 returnColor = ImGui::GetColorU32(ManifoldTheme::FlowReturn);
         const ImU32 changedColor = ImGui::GetColorU32(ManifoldTheme::Changed);
         if (m_stackRows.empty())
@@ -1182,18 +1243,11 @@ namespace Manifold::UI
         {
             for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
             {
-                const int i = m_stackRows[static_cast<std::size_t>(row)];
+                const StackRow& entry = m_stackRows[static_cast<std::size_t>(row)];
+                const int i = entry.Index;
                 const std::uint64_t at = values.Rsp + static_cast<std::uint64_t>(i * pointer);
-                std::uint64_t value = 0;
-                std::memcpy(&value, m_stackData.data() + static_cast<std::size_t>(i * pointer), static_cast<std::size_t>(pointer));
-                const StackNote* note = nullptr;
-                if (options.StackFollowPointers || m_stackCallsOnly)
-                {
-                    auto found = m_stackNotes.find(i);
-                    if (found == m_stackNotes.end())
-                        found = m_stackNotes.emplace(i, NoteFor(value, info.Is64Bit)).first;
-                    note = &found->second;
-                }
+                const std::uint64_t value = slotValue(i);
+                const StackNote* note = (options.StackFollowPointers || m_stackCallsOnly) && entry.Count == 1 ? &noteAt(i) : nullptr;
                 const bool isReturn = note && note->Kind == StackNote::Return;
                 ImGui::PushID(i);
                 const ImVec2 start = ImGui::GetCursorScreenPos();
@@ -1225,7 +1279,8 @@ namespace Manifold::UI
                     ImGui::PopID();
                     continue;
                 }
-                if (ImGui::Selectable("##slot", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, rowHeight)) && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                if (ImGui::Selectable("##slot", false, ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, rowHeight)) && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+                    entry.Count == 1)
                 {
                     if (note && (note->Kind == StackNote::Code || note->Kind == StackNote::Return))
                         Navigate(isReturn ? note->Call : value);
@@ -1239,7 +1294,7 @@ namespace Manifold::UI
                 if (isReturn)
                 {
                     draw->AddLine(ImVec2(start.x, start.y), ImVec2(right, start.y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::FlowReturn, 0.35f)), Px(1.0f));
-                    draw->AddCircleFilled(ImVec2(start.x + Px(5.0f), start.y + rowHeight * 0.5f), Px(2.5f), returnColor);
+                    draw->AddCircleFilled(ImVec2(start.x + Px(4.0f), start.y + rowHeight * 0.5f), Px(2.5f), returnColor);
                 }
                 std::string offset;
                 ImU32 offsetColor = mutedColor;
@@ -1254,13 +1309,24 @@ namespace Manifold::UI
                     offsetColor = registerColor;
                 }
                 else if (offsetMode == 0)
-                    offset = Format("%s+%X", sp, i * pointer);
+                    offset = Format("+%X", i * pointer);
                 else if (offsetMode == 1)
-                    offset = at >= values.Rbp ? Format("%s+%llX", bp, static_cast<unsigned long long>(at - values.Rbp)) : Format("%s-%llX", bp, static_cast<unsigned long long>(values.Rbp - at));
+                    offset = at >= values.Rbp ? Format("+%llX", static_cast<unsigned long long>(at - values.Rbp)) : Format("-%llX", static_cast<unsigned long long>(values.Rbp - at));
                 else
                     offset = Hex(at, pointer * 2);
                 ClippedText(draw, ImVec2(start.x + markWidth, textY), offsetWidth - Px(4.0f), offsetColor, offset);
-                const std::string text = Hex(value, pointer * 2);
+                const float valueX = start.x + markWidth + offsetWidth;
+                if (entry.Count > 1)
+                {
+                    draw->AddText(ImVec2(valueX + valueWidth - Px(12.0f) - digitWidth, textY), faintColor, "0");
+                    const std::string folded = Format("x %d zero", entry.Count);
+                    ClippedText(draw, ImVec2(valueX + valueWidth, textY), right - (valueX + valueWidth), faintColor, folded);
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("%d zero slots, %s+%X to %s+%X", entry.Count, sp, i * pointer, sp, (i + entry.Count - 1) * pointer);
+                    ImGui::PopID();
+                    continue;
+                }
+                const std::string text = Hex(value);
                 bool changed = false;
                 if (m_stackPreviousTop && at >= m_stackPreviousTop)
                 {
@@ -1268,14 +1334,8 @@ namespace Manifold::UI
                     changed = before % static_cast<std::uint64_t>(pointer) == 0 && before + static_cast<std::uint64_t>(pointer) <= m_stackPrevious.size() &&
                               std::memcmp(m_stackPrevious.data() + before, &value, static_cast<std::size_t>(pointer)) != 0;
                 }
-                draw->AddText(ImVec2(start.x + markWidth + offsetWidth, textY), changed ? changedColor : textColor, text.c_str());
-                std::string comment = note ? note->Text : std::string();
-                if (!note)
-                {
-                    const std::string described = m_engine.Describe(value);
-                    if (described != Hex(value))
-                        comment = described;
-                }
+                draw->AddText(ImVec2(valueX + valueWidth - Px(12.0f) - digitWidth * static_cast<float>(text.size()), textY), changed ? changedColor : value == 0 ? faintColor : textColor,
+                    text.c_str());
                 std::string held;
                 for (const auto& reg : pointers)
                 {
@@ -1284,32 +1344,53 @@ namespace Manifold::UI
                     if (values.*reg.Field != at)
                         continue;
                     const std::string name = info.Is64Bit ? std::string(reg.Name) : "E" + std::string(reg.Name + 1);
-                    held += (held.empty() ? "<- " : " ") + name;
+                    held += (held.empty() ? "" : " ") + name;
                 }
+                std::string comment;
+                ImU32 commentColor = mutedColor;
+                if (note)
+                {
+                    comment = note->Short;
+                    if (comment.empty() && options.StackPointerTargets && !note->Pointee.empty())
+                        comment = note->Pointee;
+                    if (isReturn)
+                        commentColor = returnColor;
+                    else if (note->Kind == StackNote::Code || (note->Kind == StackNote::Pointer && (note->Named || !note->Short.empty())))
+                        commentColor = note->Literal ? stringColor : symbolColor;
+                }
+                float commentX = valueX + valueWidth;
                 if (!held.empty())
-                    comment = held + (comment.empty() ? "" : "  " + comment);
-                const float used = markWidth + offsetWidth + ImGui::CalcTextSize(text.c_str()).x + Px(10.0f);
-                if (!comment.empty() && right - (start.x + used) > Px(30.0f))
-                    ClippedText(draw, ImVec2(start.x + used, textY), right - (start.x + used), isReturn ? returnColor : !held.empty() ? registerColor : symbolColor, comment);
+                {
+                    const std::string tag = held + " ";
+                    ClippedText(draw, ImVec2(commentX, textY), right - commentX, registerColor, tag);
+                    commentX += ImGui::CalcTextSize(tag.c_str()).x;
+                }
+                if (!comment.empty() && right - commentX > Px(24.0f))
+                    ClippedText(draw, ImVec2(commentX, textY), right - commentX, commentColor, FitText(comment, right - commentX - Px(2.0f)));
                 if (ImGui::IsItemHovered())
                 {
                     ImGui::BeginTooltip();
                     ImGui::TextColored(ManifoldTheme::Muted, "%s  (%s+%X)", Hex(at).c_str(), sp, i * pointer);
                     ImGui::TextUnformatted(Hex(value).c_str());
-                    if (!comment.empty())
-                        ImGui::TextColored(isReturn ? ManifoldTheme::FlowReturn : ManifoldTheme::AddressText, "%s", comment.c_str());
-                    if (isReturn)
-                        ImGui::TextColored(ManifoldTheme::Muted, "Called at %s", m_engine.Describe(note->Call).c_str());
-                    ImGui::TextColored(ManifoldTheme::Muted, "%s", isReturn ? "Double-click to show the call" : note && note->Kind == StackNote::Code ? "Double-click to show the code"
-                                                                                                                   : "Double-click to show the value in the hex view");
+                    if (!held.empty())
+                        ImGui::TextColored(ManifoldTheme::CodeRegister, "%s points here", held.c_str());
+                    const StackNote& full = noteAt(i);
+                    if (!full.Text.empty())
+                        ImGui::TextColored(full.Kind == StackNote::Return ? ManifoldTheme::FlowReturn : ManifoldTheme::AddressText, "%s", full.Text.c_str());
+                    if (full.Kind == StackNote::Return)
+                        ImGui::TextColored(ManifoldTheme::Muted, "Called at %s", m_engine.Describe(full.Call).c_str());
+                    ImGui::TextColored(ManifoldTheme::Muted, "%s", full.Kind == StackNote::Return ? "Double-click to show the call"
+                                                                 : full.Kind == StackNote::Code ? "Double-click to show the code"
+                                                                                                : "Double-click to show the value in the hex view");
                     ImGui::EndTooltip();
                 }
                 if (ImGui::BeginPopupContextItem("##stackmenu"))
                 {
-                    if (isReturn && ImGui::MenuItem("Show the call"))
-                        Navigate(note->Call);
-                    if (isReturn && note->Target && ImGui::MenuItem("Show the called function"))
-                        Navigate(note->Target);
+                    const StackNote& full = noteAt(i);
+                    if (full.Kind == StackNote::Return && ImGui::MenuItem("Show the call"))
+                        Navigate(full.Call);
+                    if (full.Kind == StackNote::Return && full.Target && ImGui::MenuItem("Show the called function"))
+                        Navigate(full.Target);
                     if (ImGui::MenuItem("Show value in disassembler"))
                         Navigate(value);
                     if (ImGui::MenuItem("Show value in hex view"))
@@ -1333,8 +1414,8 @@ namespace Manifold::UI
                         ImGui::SetClipboardText(Hex(value).c_str());
                     if (ImGui::MenuItem("Copy address"))
                         ImGui::SetClipboardText(Hex(at).c_str());
-                    if (!comment.empty() && ImGui::MenuItem("Copy the description"))
-                        ImGui::SetClipboardText(comment.c_str());
+                    if (!full.Text.empty() && ImGui::MenuItem("Copy the description"))
+                        ImGui::SetClipboardText(full.Text.c_str());
                     ImGui::Separator();
                     StackViewItems();
                     ImGui::EndPopup();

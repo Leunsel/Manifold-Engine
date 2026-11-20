@@ -249,6 +249,8 @@ namespace Manifold
             return collapsed.empty() ? std::string("Manifold Engine") : collapsed;
         }
 
+        DWORD g_cornerPreference = 2;
+
         void MatchViewportChrome(ImGuiViewport* viewport)
         {
             HWND hwnd = static_cast<HWND>(viewport->PlatformHandleRaw);
@@ -256,6 +258,8 @@ namespace Manifold
                 return;
             const BOOL dark = ManifoldTheme::IsLight() ? FALSE : TRUE;
             ::DwmSetWindowAttribute(hwnd, kUseImmersiveDarkMode, &dark, sizeof(dark));
+            const DWORD corner = g_cornerPreference;
+            ::DwmSetWindowAttribute(hwnd, 33, &corner, sizeof(corner));
         }
 
         void CreateViewportWindow(ImGuiViewport* viewport)
@@ -282,8 +286,11 @@ namespace Manifold
         constexpr DWORD kWindowCornerPreference = 33;
         constexpr DWORD kBorderColor = 34;
         constexpr DWORD kCornerRound = 2;
+        constexpr DWORD kCornerSmall = 3;
+        constexpr DWORD kCornerSquare = 1;
         constexpr COLORREF kColorNone = 0xFFFFFFFE;
         constexpr float kCornerRadius = 8.0f;
+        constexpr float kCornerRadiusSmall = 4.0f;
         constexpr float kResizeEdge = 5.0f;
         constexpr float kResizeCorner = 14.0f;
         constexpr UINT_PTR kSizeMoveTimer = 1;
@@ -547,15 +554,20 @@ namespace Manifold
     {
         const BOOL dark = ManifoldTheme::IsLight() ? FALSE : TRUE;
         ::DwmSetWindowAttribute(m_hwnd, kUseImmersiveDarkMode, &dark, sizeof(dark));
-        const DWORD corner = kCornerRound;
-        m_roundedCorners = SUCCEEDED(::DwmSetWindowAttribute(m_hwnd, kWindowCornerPreference, &corner, sizeof(corner)));
+        const DWORD corner = g_cornerPreference;
+        m_roundedCorners = SUCCEEDED(::DwmSetWindowAttribute(m_hwnd, kWindowCornerPreference, &corner, sizeof(corner))) && corner != kCornerSquare;
         const COLORREF border = kColorNone;
         ::DwmSetWindowAttribute(m_hwnd, kBorderColor, &border, sizeof(border));
     }
 
     float WindowHost::CornerRadius() const
     {
-        return m_roundedCorners && !Maximised() ? kCornerRadius * WindowScale() : 0.0f;
+        return m_roundedCorners && !Maximised() ? (g_cornerPreference == kCornerSmall ? kCornerRadiusSmall : kCornerRadius) * WindowScale() : 0.0f;
+    }
+
+    void WindowHost::SetCorners(int corners)
+    {
+        g_cornerPreference = corners == 2 ? kCornerSquare : corners == 1 ? kCornerSmall : kCornerRound;
     }
 
     void WindowHost::AddDragArea(float left, float top, float right, float bottom)

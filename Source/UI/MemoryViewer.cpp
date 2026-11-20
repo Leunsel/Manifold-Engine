@@ -488,7 +488,8 @@ namespace Manifold::UI
             item(ICON_FA_PLAY "  Run", Command::DebugRun, broken);
             item(ICON_FA_LEVEL_DOWN_ALT "  Step into", Command::DebugStepInto, broken);
             item(ICON_FA_SHARE "  Step over", Command::DebugStepOver, broken);
-            item(ICON_FA_SIGN_OUT_ALT "  Run until return", Command::DebugRunToReturn, broken);
+            item(ICON_FA_SIGN_OUT_ALT "  Step out", Command::DebugRunToReturn, broken);
+            ItemTooltip("Runs until the current function returns and stops at its caller, right after the call.");
             item(ICON_FA_PAUSE "  Break", Command::DebugBreak, !broken);
             const bool onException = broken && debugger.Break().Exception.Raised;
             if (ImGui::MenuItem(ICON_FA_FORWARD "  Continue, exception handled", nullptr, false, onException))
@@ -747,7 +748,7 @@ namespace Manifold::UI
         ImGui::SameLine();
         button(ICON_FA_SHARE, "Step over", Command::DebugStepOver);
         ImGui::SameLine();
-        button(ICON_FA_SIGN_OUT_ALT, "Run until return", Command::DebugRunToReturn);
+        button(ICON_FA_SIGN_OUT_ALT, "Step out: run until the function returns to its caller", Command::DebugRunToReturn);
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::BeginDisabled(broken);
@@ -868,7 +869,7 @@ namespace Manifold::UI
         drawList->AddRectFilled(frame, ImVec2(frame.x + width, frame.y + height), ImGui::GetColorU32(ManifoldTheme::Card), Px(4.0f));
         const ImVec2 origin(frame.x, frame.y + headerHeight);
         const float rightX = frame.x + width;
-        const float gutter = Px(18.0f);
+        const float gutter = Px(26.0f);
         const float arrows = Px(26.0f);
 
         const ImVec2 linesOrigin(origin.x, origin.y + stickyHeight);
@@ -892,7 +893,7 @@ namespace Manifold::UI
                 header = m_engine.Symbols().ExactName(line.Address);
                 if (header)
                 {
-                    blockStart = !m_engine.Symbols().LabelOnly(line.Address);
+                    blockStart = m_engine.FunctionStartAt(line.Address);
                     if (blockStart)
                     {
                         functionStart = line.Address;
@@ -1124,9 +1125,9 @@ namespace Manifold::UI
             const bool hasBreakpoint = std::any_of(breakpoints.begin(), breakpoints.end(), [&](const Debug::Breakpoint& breakpoint) { return breakpoint.Address == line.Address; });
             const float textY = y + Px(1.5f);
             if (hasBreakpoint)
-                drawList->AddCircleFilled(ImVec2(origin.x + gutter * 0.55f, y + rowHeight * 0.5f), rowHeight * 0.28f, ImGui::GetColorU32(ManifoldTheme::Breakpoint));
+                drawList->AddCircleFilled(ImVec2(origin.x + Px(19.0f), y + rowHeight * 0.5f), std::min(rowHeight * 0.28f, Px(5.0f)), ImGui::GetColorU32(ManifoldTheme::Breakpoint));
             if (isIp)
-                drawList->AddText(ImVec2(origin.x + Px(3.0f), textY), ImGui::GetColorU32(ManifoldTheme::Warning), ICON_FA_CARET_RIGHT);
+                drawList->AddText(ImVec2(origin.x + Px(6.0f), textY), ImGui::GetColorU32(ManifoldTheme::Warning), ICON_FA_CARET_RIGHT);
             if (m_nopped.count(line.Address))
                 drawList->AddText(ImVec2(origin.x + gutter + Px(2.0f), textY), ImGui::GetColorU32(ManifoldTheme::Warning), ICON_FA_BAN);
 
@@ -1142,7 +1143,7 @@ namespace Manifold::UI
             if (const int use = HighlightUse(line.Mnemonic, line.Operands, m_highlight))
             {
                 const ImU32 mark = ImGui::GetColorU32(use == 2 ? ManifoldTheme::Changed : ManifoldTheme::Accent);
-                drawList->AddRectFilled(ImVec2(origin.x + gutter - Px(4.0f), y + Px(2.0f)), ImVec2(origin.x + gutter - Px(1.0f), y + rowHeight - Px(2.0f)), mark, Px(1.0f));
+                drawList->AddRectFilled(ImVec2(origin.x + Px(1.0f), y + Px(2.0f)), ImVec2(origin.x + Px(4.0f), y + rowHeight - Px(2.0f)), mark, Px(1.0f));
             }
 
             const std::optional<std::string>& methodHeader = headers[i];

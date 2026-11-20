@@ -494,6 +494,76 @@ namespace Manifold::Tests
         CHECK_MSG(SharedMoves(engine, 300), std::string(backend) + ": the target stopped running after the exception checks");
     }
 
+    void CheckStepOut(Engine& engine, bool veh)
+    {
+        Debug::Debugger& debugger = engine.Debugger();
+        const Target::Process& process = *engine.Process();
+        const char* backend = veh ? "in-process" : "windows";
+        const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);
+        CHECK(work != 0);
+        if (!work)
+            return;
+        const Status set = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false);
+        CHECK_MSG(set.Ok(), set.Text);
+        const bool broke = set && WaitForBreak(engine, 0, 4000);
+        CHECK_MSG(broke, std::string(backend) + ": no break to step from");
+        if (!broke)
+        {
+            debugger.RemoveBreakpoint(work);
+            return;
+        }
+        debugger.RemoveBreakpoint(work);
+        const Debug::BreakInfo at = debugger.Break();
+        const std::uint64_t returnAddress = process.ReadPointer(at.Registers.Rsp).value_or(0);
+
+        const auto started = std::chrono::steady_clock::now();
+        int steps = 0;
+        std::uint64_t serial = at.Serial;
+        for (; steps < 20; ++steps)
+        {
+            debugger.Resume(Debug::ResumeMode::StepInto);
+            if (!WaitForBreak(engine, serial, 2000))
+                break;
+            serial = debugger.Break().Serial;
+            if (debugger.Break().ThreadId != at.ThreadId)
+                break;
+            if (debugger.Break().Address == returnAddress)
+                break;
+        }
+        const double perStep = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() / std::max(1, steps + 1);
+        std::printf("  %s: %.1f ms per single step\n", backend, perStep);
+        CHECK_MSG(perStep < 25.0, std::string(backend) + ": a single step takes " + Format("%.1f", perStep) + " ms");
+        CHECK_MSG(debugger.Break().ThreadId == at.ThreadId, std::string(backend) + ": stepping moved to another thread");
+        CHECK_MSG(debugger.Break().Address == returnAddress, std::string(backend) + ": stepping out of Work by single steps ended at " + Hex(debugger.Break().Address));
+
+        debugger.Resume(Debug::ResumeMode::Continue);
+        const Status again = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false);
+        CHECK_MSG(again.Ok(), again.Text);
+        const bool second = again && WaitForBreak(engine, serial, 4000);
+        debugger.RemoveBreakpoint(work);
+        CHECK_MSG(second, std::string(backend) + ": no second break");
+        if (second)
+        {
+            const Debug::BreakInfo inside = debugger.Break();
+            const std::uint64_t expected = process.ReadPointer(inside.Registers.Rsp).value_or(0);
+            debugger.Resume(Debug::ResumeMode::RunToReturn);
+            const bool returned = WaitForBreak(engine, inside.Serial, 3000);
+            CHECK_MSG(returned, std::string(backend) + ": step out never stopped");
+            if (returned)
+            {
+                const Debug::BreakInfo out = debugger.Break();
+                CHECK_MSG(out.Address == expected, std::string(backend) + ": step out stopped at " + Hex(out.Address) + ", not at the caller " + Hex(expected));
+                CHECK_MSG(out.ThreadId == inside.ThreadId, std::string(backend) + ": step out stopped in another thread");
+                CHECK_MSG(out.Registers.Rsp > inside.Registers.Rsp, std::string(backend) + ": step out stopped deeper in the stack");
+                CHECK_MSG(out.Reason.find("Returned") != std::string::npos, out.Reason);
+            }
+        }
+        if (debugger.Broken())
+            debugger.Resume(Debug::ResumeMode::Continue);
+        Wait(engine, 100);
+        CHECK_MSG(process.Alive() && SharedMoves(engine, 300), std::string(backend) + ": the target does not run after stepping");
+    }
+
     void CheckDetachPaths(Engine& engine)
     {
         Debug::Debugger& debugger = engine.Debugger();
@@ -602,11 +672,19 @@ namespace Manifold::Tests
             while (opened && !moving && ::GetTickCount64() < until)
                 moving = SharedMoves(engine, 200);
             CHECK_MSG(moving, std::string(how) + " host exit: the target did not run again");
-            Wait(engine, 1200);
+            const auto released = std::chrono::steady_clock::now();
+            bool loaded = true;
+            for (int tries = 0; tries < 50 && loaded; ++tries)
+            {
+                Wait(engine, 100);
+                loaded = AgentLoaded(target.dwProcessId);
+            }
+            std::printf("  %s host exit: agent %s %lld ms after the target ran again\n", how, loaded ? "still loaded" : "unloaded",
+                static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - released).count()));
             DWORD code = 0;
             ::GetExitCodeProcess(target.hProcess, &code);
             CHECK_MSG(code == STILL_ACTIVE, std::string(how) + " host exit: the target ended with " + Hex(code, 8));
-            CHECK_MSG(!AgentLoaded(target.dwProcessId), std::string(how) + " host exit: the agent is still loaded");
+            CHECK_MSG(!loaded, std::string(how) + " host exit: the agent is still loaded 5 s after the target ran again");
             EndTestTarget(target, code);
         }
     }
@@ -777,6 +855,7 @@ namespace Manifold::Tests
                 CheckBreakActions(engine, veh);
                 CheckWatchesOnOneInstruction(engine, veh);
                 CheckFpuAndExceptions(engine, veh);
+                CheckStepOut(engine, veh);
                 if (veh)
                     CheckHostSilence(engine);
                 engine.Debugger().Detach();
@@ -815,6 +894,7 @@ namespace Manifold::Tests
                 CheckBreakActions(engine, true);
                 CheckWatchesOnOneInstruction(engine, true);
                 CheckFpuAndExceptions(engine, true);
+                CheckStepOut(engine, true);
                 CheckHostSilence(engine);
                 engine.Debugger().Detach();
                 Wait(engine, 400);

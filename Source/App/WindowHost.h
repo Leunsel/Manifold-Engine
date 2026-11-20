@@ -85,6 +85,7 @@ namespace Manifold
 
         float CornerRadius() const;
         void Restyle();
+        void SetCorners(int corners);
         void AddDragArea(float left, float top, float right, float bottom);
         void Minimise() { ::ShowWindow(m_hwnd, SW_MINIMIZE); }
         bool Maximised() const { return ::IsZoomed(m_hwnd) != FALSE; }

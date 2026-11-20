@@ -50,9 +50,24 @@ namespace
         block->Stop = 1;
     }
 
+    HANDLE EventOf(std::uint64_t value)
+    {
+        return reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(value));
+    }
+
+    void SignalBreak(Block* block)
+    {
+        if (block->BreakEvent)
+            ::SetEvent(EventOf(block->BreakEvent));
+    }
+
+    // The host sets the resume event right after the command, so the thread
+    // goes on at once instead of after the next 15 ms scheduler tick that a
+    // Sleep(2) would wait for.
     void WaitForResume(Block* block)
     {
         HostWatch host;
+        const HANDLE resume = EventOf(block->ResumeEvent);
         while (block->ResumeCmd == ResumeNone && !block->Stop)
         {
             if (HostGone(block, host))
@@ -60,7 +75,10 @@ namespace
                 LetGo(block);
                 break;
             }
-            ::Sleep(2);
+            if (resume)
+                ::WaitForSingleObject(resume, 20);
+            else
+                ::Sleep(2);
         }
     }
 
@@ -83,6 +101,9 @@ namespace
     volatile DWORD g_breakOwner = 0;
     DWORD g_suspended[kMaxThreads];
     int g_suspendedCount = 0;
+    volatile LONG g_kept = 0;
+    volatile ULONGLONG g_keptSince = 0;
+    constexpr ULONGLONG kKeepMs = 300;
     Recent g_recent[kRecentSlots] = {};
 
     long volatile* LockOf(Block* block)
@@ -577,13 +598,21 @@ namespace
     // Returns whether the host changed registers while the thread stood here.
     bool EnterBreak(Block* block, CONTEXT& context, std::uint64_t address, std::uint32_t slot, const BreakCause& cause = {})
     {
-        if (_InterlockedCompareExchange(&g_breaking, 1, 0) != 0)
+        for (int attempt = 0; _InterlockedCompareExchange(&g_breaking, 1, 0) != 0; ++attempt)
         {
             for (int wait = 0; wait < 50 && g_breaking && !block->Broken && !block->Stop; ++wait)
                 ::Sleep(1);
+            const bool stopped = block->Broken != 0;
             while (block->Broken && !block->Stop)
                 ::Sleep(1);
-            return false;
+            // Only a real stop of another thread swallows this hit; the apply
+            // thread also holds the flag for a moment to let kept threads go.
+            if (stopped || block->Stop || attempt >= 3)
+                return false;
+            if (slot < static_cast<std::uint32_t>(kMaxWatches) && !block->Watches[slot].Active)
+                return false;
+            if (slot == kSlotException && block->ExceptionMode == ExceptionNever)
+                return false;
         }
         g_breakOwner = ::GetCurrentThreadId();
         CaptureRegs(block->BreakRegs, context);
@@ -600,9 +629,11 @@ namespace
         block->BreakSlot = slot;
         block->BrokenThread = ::GetCurrentThreadId();
         block->ResumeCmd = ResumeNone;
-        SuspendOthers();
+        if (!_InterlockedExchange(&g_kept, 0))
+            SuspendOthers();
         block->BreakSerial = block->BreakSerial + 1;
         block->Broken = 1;
+        SignalBreak(block);
         WaitForResume(block);
         bool changed = false;
         if (block->RegsDirty)
@@ -625,9 +656,21 @@ namespace
         }
         const bool handled = block->ExceptionHandled != 0;
         block->ExceptionHandled = 0;
+        // A single step may leave the other threads stopped: one instruction
+        // cannot wait on them, and skipping the thread snapshot makes a step
+        // take well under a millisecond. The apply loop lets them go if the
+        // step does not come back within kKeepMs (a syscall that waits).
+        const bool keep = block->KeepSuspended != 0 && !block->Stop;
+        block->KeepSuspended = 0;
         block->ResumeCmd = ResumeNone;
         block->Broken = 0;
-        ResumeOthers();
+        if (keep)
+        {
+            g_keptSince = ::GetTickCount64();
+            _InterlockedExchange(&g_kept, 1);
+        }
+        else
+            ResumeOthers();
         g_breakOwner = 0;
         _InterlockedExchange(&g_breaking, 0);
         return changed || handled;
@@ -707,7 +750,7 @@ namespace
                 if (Breaks(watch.Mode))
                 {
                     const std::uint64_t at = InstructionPointer(context);
-                    if (RunAction(block->Actions[slot], context, tid) && !breakHit)
+                    if (RunAction(block->Actions[slot], context, tid) && !breakHit && !block->Stop)
                     {
                         breakHit = true;
                         breakAddr = at;
@@ -814,6 +857,11 @@ namespace
             RememberArmed(block->Watches[slot].Address);
             block->Watches[slot].Active = 0;
         }
+        const ULONGLONG until = ::GetTickCount64() + 3000;
+        while (g_breaking && ::GetTickCount64() < until)
+            ::Sleep(1);
+        if (_InterlockedExchange(&g_kept, 0))
+            ResumeOthers();
         const std::uint64_t none[4] = {};
         bool disarmed = false;
         for (int pass = 0; pass < 40 && !disarmed; ++pass)
@@ -832,6 +880,12 @@ namespace
             g_handler = nullptr;
             unload = WaitUntilOutside(2000);
         }
+        if (block->BreakEvent)
+            ::CloseHandle(EventOf(block->BreakEvent));
+        if (block->ResumeEvent)
+            ::CloseHandle(EventOf(block->ResumeEvent));
+        block->BreakEvent = 0;
+        block->ResumeEvent = 0;
         block->AppliedThreads = 0;
         block->Running = 0;
         return unload;
@@ -862,10 +916,18 @@ namespace
                     lastClear[slot] = block->Watches[slot].Clear;
                 }
             }
+            if (g_kept && !block->Broken && ::GetTickCount64() - g_keptSince > kKeepMs && _InterlockedCompareExchange(&g_breaking, 1, 0) == 0)
+            {
+                if (_InterlockedExchange(&g_kept, 0))
+                    ResumeOthers();
+                _InterlockedExchange(&g_breaking, 0);
+            }
             if (block->BreakNow && !block->Broken && _InterlockedCompareExchange(&g_breaking, 1, 0) == 0)
             {
                 g_breakOwner = ::GetCurrentThreadId();
                 block->BreakNow = 0;
+                if (_InterlockedExchange(&g_kept, 0))
+                    ResumeOthers();
                 SuspendOthers();
                 const DWORD target = g_suspendedCount > 0 ? g_suspended[0] : 0;
                 HANDLE thread = target ? ::OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, target) : nullptr;
@@ -888,7 +950,9 @@ namespace
                     block->ResumeCmd = ResumeNone;
                     block->BreakSerial = block->BreakSerial + 1;
                     block->Broken = 1;
+                    SignalBreak(block);
                     WaitForResume(block);
+                    block->KeepSuspended = 0;
                     const bool registers = block->RegsDirty != 0;
                     const bool vectors = block->XmmDirty != 0;
                     const bool fpu = block->FpuDirty != 0;

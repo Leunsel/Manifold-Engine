@@ -53,6 +53,7 @@ namespace Manifold
     {
         ThemeFamily Family = ThemeFamily::Standard;
         ThemeMode Mode = ThemeMode::Dark;
+        int Corners = 0;
         std::map<std::string, std::array<float, 4>> Colors;
         std::map<std::string, float> Sizes;
     };
@@ -109,6 +110,8 @@ namespace Manifold
         std::string ExceptionRegionStart;
         std::string ExceptionRegionStop;
         bool StackFollowPointers = true;
+        bool StackPointerTargets = false;
+        bool StackCollapseZeros = true;
         int RegisterSections = 7;
         int VectorFormat = 0;
         bool RegisterEditing = true;

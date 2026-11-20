@@ -58,7 +58,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 6 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 7 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -115,6 +115,20 @@ namespace Manifold::Tests
                 if tostring(manifold.process) ~= "manifold.process" then return "tostring " .. tostring(manifold.process) end
                 if not manifold.has("log.info") or manifold.has("log.warn") or not manifold.has("memory") then return "has" end
                 if not manifold.has("manifold.process.info") or not manifold.has("apiVersion") or not manifold.has("has") then return "has prefix" end
+                return "ok")LUA");
+            LuaCheck(engine, "ui mode", R"LUA(
+                local before = manifold.ui.getMode()
+                if type(before.release) ~= "boolean" or type(before.compact) ~= "boolean" then return "getMode" end
+                manifold.ui.setMode{ compact = not before.compact }
+                local after = manifold.ui.getMode()
+                if after.compact == before.compact or after.release ~= before.release then return "setMode compact" end
+                manifold.ui.setMode{ release = true }
+                if not manifold.ui.getMode().release then return "setMode release" end
+                manifold.ui.setMode{ release = before.release, compact = before.compact }
+                local back = manifold.ui.getMode()
+                if back.release ~= before.release or back.compact ~= before.compact then return "setMode back" end
+                local ok = pcall(manifold.ui.setMode, { compact = "yes" })
+                if ok then return "a string was taken for a boolean" end
                 return "ok")LUA");
             LuaCheck(engine, "schema calls", R"LUA(
                 local function raises(fn, needle)

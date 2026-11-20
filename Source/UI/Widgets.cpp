@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <set>
 #include <string_view>
 #include <utility>
@@ -1284,6 +1285,42 @@ namespace Manifold::UI
         return true;
     }
 
+    namespace
+    {
+        std::map<ImGuiID, ImRect> g_restoreRects;
+
+        // ∑ A tool window is its own OS window, so a double click on its title
+        // does what it does on any Windows window: fill the monitor's work
+        // area, and again to go back. ImGui's own double click collapsed the
+        // window to its title, and the minimum size pulled it straight back,
+        // which only showed as a jump. Same test ImGui uses for the collapse:
+        // nothing under the mouse this frame or the last (no close button).
+        void MaximiseOnTitleDoubleClick(ImGuiWindowFlags flags)
+        {
+            ImGuiContext& g = *GImGui;
+            ImGuiWindow* window = ImGui::GetCurrentWindow();
+            if ((flags & ImGuiWindowFlags_NoTitleBar) || window->DockIsActive || g.HoveredWindow != window || g.HoveredId != 0 || g.HoveredIdPreviousFrame != 0 ||
+                g.IO.MouseClickedCount[0] != 2 || !ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                return;
+            const ImRect bar = window->TitleBarRect();
+            if (!ImGui::IsMouseHoveringRect(bar.Min, bar.Max, false))
+                return;
+            if (const auto found = g_restoreRects.find(window->ID); found != g_restoreRects.end())
+            {
+                ImGui::SetWindowPos(window, found->second.Min);
+                ImGui::SetWindowSize(window, found->second.GetSize());
+                g_restoreRects.erase(found);
+                return;
+            }
+            const ImGuiPlatformMonitor* monitor = ImGui::GetViewportPlatformMonitor(window->Viewport);
+            if (!monitor)
+                return;
+            g_restoreRects[window->ID] = window->Rect();
+            ImGui::SetWindowPos(window, monitor->WorkPos);
+            ImGui::SetWindowSize(window, monitor->WorkSize);
+        }
+    }
+
     bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags, ImVec2 minimum, bool escapeCloses)
     {
         const bool raise = FocusRequested();
@@ -1323,8 +1360,9 @@ namespace Manifold::UI
             }
         }
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ManifoldTheme::Page);
-        const bool visible = ImGui::Begin(title, open, flags);
+        const bool visible = ImGui::Begin(title, open, flags | ImGuiWindowFlags_NoCollapse);
         ImGui::PopStyleColor();
+        MaximiseOnTitleDoubleClick(flags);
         g_toolEscape.push_back({ ImGui::GetCurrentWindow()->ID, open, escapeCloses && open != nullptr, false });
         RaisePlatformWindow(raise);
         return visible;

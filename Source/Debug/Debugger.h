@@ -75,6 +75,7 @@ namespace Manifold::Debug
         std::uint8_t Original = 0;
         bool Inserted = false;
         std::uint32_t OwnerThread = 0;
+        std::uint64_t AboveStack = 0;
         BreakAction Action;
         std::uint64_t Hits = 0;
     };
@@ -283,6 +284,8 @@ namespace Manifold::Debug
         void VehCheckBreak();
         std::vector<std::uint64_t> VehStepTargets(const Disasm::Instruction& instruction, const Disasm::RegisterValues& registers, ResumeMode mode) const;
         void VehClearTempSlots();
+        std::optional<std::uint64_t> ReturnSlot(const Disasm::RegisterValues& registers) const;
+        void VehWakeAgent();
         std::wstring AgentPath() const;
         std::wstring AgentName() const;
 
@@ -336,5 +339,8 @@ namespace Manifold::Debug
         std::atomic<bool> m_vehStop{ false };
         std::uint64_t m_vehBreakSerial = 0;
         std::vector<int> m_vehTempSlots;
+        bool m_vehStepOut = false;
+        void* m_vehBreakEvent = nullptr;
+        void* m_vehResumeEvent = nullptr;
     };
 }

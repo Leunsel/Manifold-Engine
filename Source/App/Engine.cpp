@@ -145,7 +145,19 @@ namespace Manifold
             return row.empty() ? start : row.front().Next();
         };
         if (Symbols().LabelOnly(start))
+        {
+            if (map)
+            {
+                if (const auto function = map->FunctionAt(start); function && function->first == start)
+                    return function->second;
+            }
+            if (MonoPresent())
+            {
+                if (const auto method = Mono().MethodRange(start); method && method->first == start)
+                    return method->second;
+            }
             return ownRow();
+        }
         if (const std::uint64_t size = Symbols().RegisteredSize(start))
             return std::max(ownRow(), start + size);
         if (map)

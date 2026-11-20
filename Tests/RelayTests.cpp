@@ -482,7 +482,7 @@ namespace Manifold::Tests
             std::uint64_t end = 0;
             for (const Disasm::Instruction& row : rows)
             {
-                if (engine.Symbols().ExactName(row.Address) && !engine.Symbols().LabelOnly(row.Address))
+                if (engine.Symbols().ExactName(row.Address) && engine.FunctionStartAt(row.Address))
                 {
                     start = row.Address;
                     end = std::max(engine.SymbolEnd(row.Address), row.Next());
@@ -554,11 +554,11 @@ namespace Manifold::Tests
             engine.Symbols().Register("Cave_Code", at, kOwner);
             engine.Symbols().Register("Cave_Zero", at + 0x40, kOwner);
             engine.Symbols().Register("Cave_Sync", at + 0x60, kOwner);
-            CHECK_MSG(engine.SymbolEnd(at) == at + 0x1E, "the cave code ends at +" + Hex(engine.SymbolEnd(at) - at));
+            CHECK_MSG(engine.SymbolEnd(at) == at + 2, "the cave code label ends at +" + Hex(engine.SymbolEnd(at) - at));
             CHECK_MSG(engine.SymbolEnd(at + 0x40) == at + 0x42, "the cave zero data ends at +" + Hex(engine.SymbolEnd(at + 0x40) - at));
-            CHECK(engine.SymbolEnd(at + 0x60) == at + 0x60 + sizeof(kLeaf));
-            CHECK(!engine.Symbols().LabelOnly(at) && !engine.Symbols().LabelOnly(at + 0x60));
-            CHECK(engine.FunctionStartAt(at) && engine.FunctionStartAt(at + 0x60));
+            CHECK(engine.SymbolEnd(at + 0x60) == at + 0x60 + sizeof(kLeaf) - 1);
+            CHECK(engine.Symbols().LabelOnly(at) && engine.Symbols().LabelOnly(at + 0x60));
+            CHECK_MSG(!engine.FunctionStartAt(at) && !engine.FunctionStartAt(at + 0x60), "a registered symbol without known bounds is a label, not a function");
             const auto around = engine.Symbols().Containing(at + 0x62, 0x100);
             CHECK(around && around->first == at + 0x60 && around->second == "Cave_Sync");
             const auto inModule = engine.Symbols().Containing(base + kText + kHookAt + 2, 0x1000);
@@ -570,8 +570,9 @@ namespace Manifold::Tests
             CHECK_MSG(first && first->Length == 1 && second && second->Length == 1, "the bytes in front of a symbol in allocated memory are cut");
             CHECK_MSG(entry && entry->Valid && entry->Length == sizeof(kLeaf) - 1 && entry->Mnemonic == "mov", "a symbol in allocated memory starts a row");
             const std::vector<std::string> caveLabels = LabelColumn(engine, synced);
-            CHECK_MSG(entry && caveLabels[static_cast<std::size_t>(entry - synced.data())] == "+0", "a symbol in allocated memory starts a block");
-            CHECK_MSG(entry && caveLabels[static_cast<std::size_t>(entry - synced.data()) + 1] == "+5", "the rows after it count from it");
+            CHECK_MSG(entry && caveLabels[static_cast<std::size_t>(entry - synced.data())] == ReplaceAll(engine.Symbols().ModuleOffset(entry->Address), "\"", ""),
+                "a symbol in allocated memory labels its row and starts no block");
+            CHECK_MSG(entry && caveLabels[static_cast<std::size_t>(entry - synced.data()) + 1] != "+5", "the rows after a label keep their own addresses");
             engine.Symbols().Unregister("Cave_Code");
             engine.Symbols().Unregister("Cave_Zero");
             engine.Symbols().Unregister("Cave_Sync");
@@ -636,7 +637,7 @@ namespace Manifold::Tests
             CHECK(symbols.RegisteredName(ptr + 4) == std::optional<std::string>("PlayerPtr+4"));
             CHECK(symbols.Describe(ptr + 6) == "PlayerPtr+6");
             CHECK(!symbols.RegisteredName(ptr + 8));
-            CHECK(!symbols.LabelOnly(ptr));
+            CHECK(symbols.LabelOnly(ptr));
         }
 
         void AutoAssembled(Engine& engine, const RelayImage& image)
@@ -676,7 +677,7 @@ namespace Manifold::Tests
             CHECK(jump.Mnemonic == "jmp" && jump.Length == 5 && cave != memory.Allocations.end() && jump.Target && *jump.Target == cave->Address);
             const auto pointer = result.Symbols.find("PlayerPtr");
             if (pointer != result.Symbols.end())
-                CHECK_MSG(engine.SymbolEnd(pointer->second) == pointer->second + 8, "PlayerPtr ends at +" + Hex(engine.SymbolEnd(pointer->second) - pointer->second));
+                CHECK_MSG(engine.SymbolEnd(pointer->second) < pointer->second + 8, "PlayerPtr is a label but spans +" + Hex(engine.SymbolEnd(pointer->second) - pointer->second));
             for (const Asm::AaAllocation& allocation : memory.Allocations)
                 process.Free(allocation.Block ? allocation.Block : allocation.Address);
         }

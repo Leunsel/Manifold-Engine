@@ -111,7 +111,7 @@ namespace Manifold
             { DebugRun, "DebugRun", Scope::MemoryViewer, "Run", ImGuiKey_F9, 0, CE },
             { DebugStepInto, "DebugStepInto", Scope::MemoryViewer, "Step into", ImGuiKey_F7, 0, CE },
             { DebugStepOver, "DebugStepOver", Scope::MemoryViewer, "Step over", ImGuiKey_F8, 0, CE },
-            { DebugRunToReturn, "DebugRunToReturn", Scope::MemoryViewer, "Run until the function returns", Shift | ImGuiKey_F8, 0, CE },
+            { DebugRunToReturn, "DebugRunToReturn", Scope::MemoryViewer, "Step out: run until the function returns", Shift | ImGuiKey_F8, 0, CE },
             { DebugBreak, "DebugBreak", Scope::MemoryViewer, "Break into the process", ImGuiKey_F12, 0, Own },
             { ToggleBreakpoint, "ToggleBreakpoint", Scope::MemoryViewer, "Toggle a breakpoint on the selected instruction", ImGuiKey_F5, 0, CE },
             { SetInstructionPointer, "SetInstructionPointer", Scope::MemoryViewer, "Set the instruction pointer to the selected instruction", Ctrl | ImGuiKey_F4, 0, CE },

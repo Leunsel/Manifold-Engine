@@ -1480,7 +1480,7 @@ namespace Manifold::Debug
                 }
                 if (breakpoint.Temporary)
                 {
-                    if (breakpoint.OwnerThread && breakpoint.OwnerThread != event.dwThreadId)
+                    if ((breakpoint.OwnerThread && breakpoint.OwnerThread != event.dwThreadId) || (breakpoint.AboveStack && context.Values().Rsp <= breakpoint.AboveStack))
                     {
                         thread.Reinsert = at;
                         PlanStepAccess(thread, context.Values());
@@ -1488,10 +1488,11 @@ namespace Manifold::Debug
                         context.Write();
                         return DBG_CONTINUE;
                     }
+                    const bool stepOut = breakpoint.AboveStack != 0;
                     m_breakpoints.erase(found);
                     context.Write();
                     enterBreak = true;
-                    reason = "Stepped over";
+                    reason = stepOut ? "Returned to the caller" : "Stepped over";
                     return DBG_CONTINUE;
                 }
                 Disasm::RegisterValues values = context.Values();
@@ -1882,6 +1883,25 @@ namespace Manifold::Debug
                             thread.ResumeFlag = false;
                         }
                         ResumeMode mode = m_stop ? ResumeMode::Continue : m_resumeMode;
+                        if (mode == ResumeMode::RunToReturn)
+                        {
+                            const Disasm::Instruction current = m_disassembler->Read(*m_process, context.Ip(), nullptr);
+                            if (current.Valid && current.Kind == Disasm::Flow::Return)
+                                mode = ResumeMode::StepInto;
+                            else if (const auto slot = ReturnSlot(context.Values()))
+                            {
+                                Breakpoint temporary;
+                                temporary.Address = m_process->ReadPointer(*slot).value_or(0);
+                                temporary.Temporary = true;
+                                temporary.OwnerThread = thread.Id;
+                                temporary.AboveStack = *slot;
+                                if (temporary.Address && !m_breakpoints.count(temporary.Address) && InsertSoftware(temporary))
+                                {
+                                    m_breakpoints[temporary.Address] = temporary;
+                                    mode = ResumeMode::Continue;
+                                }
+                            }
+                        }
                         if (mode == ResumeMode::StepOver)
                         {
                             const Disasm::Instruction current = m_disassembler->Read(*m_process, context.Ip(), nullptr);
@@ -2162,10 +2182,36 @@ namespace Manifold::Debug
         if (!m_break.Broken || !m_vehBlock || !m_process)
             return;
         VehClearTempSlots();
+        m_vehStepOut = false;
+        bool keep = false;
         if (mode != ResumeMode::Continue)
         {
             const Disasm::Instruction current = m_disassembler->Read(*m_process, m_break.Address, nullptr);
-            std::vector<std::uint64_t> targets = VehStepTargets(current, m_break.Registers, mode);
+            keep = current.Valid && current.Kind != Disasm::Flow::Interrupt && current.Mnemonic != "syscall" && current.Mnemonic != "sysenter" &&
+                   (mode == ResumeMode::StepInto || (mode == ResumeMode::StepOver && current.Kind != Disasm::Flow::Call) ||
+                       (mode == ResumeMode::RunToReturn && current.Kind == Disasm::Flow::Return));
+            if (mode == ResumeMode::RunToReturn && current.Kind != Disasm::Flow::Return)
+            {
+                if (const auto slot = ReturnSlot(m_break.Registers))
+                {
+                    const std::uint64_t target = m_process->ReadPointer(*slot).value_or(0);
+                    const int free = VehFreeSlot();
+                    if (target && free >= 0)
+                    {
+                        BreakAction action;
+                        action.Condition = Format("%s > 0x%llX", m_is64Bit ? "RSP" : "ESP", static_cast<unsigned long long>(*slot));
+                        const SymbolResolver none = [](std::string_view) { return std::optional<std::uint64_t>(); };
+                        if (CompileAction(action, m_is64Bit, none))
+                        {
+                            m_vehTempSlots.push_back(free);
+                            VehWriteAction(free, &action, m_break.ThreadId, false);
+                            VehWriteSlot(free, Veh::ModeBreak, target, 1, true);
+                            m_vehStepOut = true;
+                        }
+                    }
+                }
+            }
+            std::vector<std::uint64_t> targets = m_vehStepOut ? std::vector<std::uint64_t>{} : VehStepTargets(current, m_break.Registers, mode);
             for (std::uint64_t target : targets)
             {
                 if (!target || target == m_break.Address)
@@ -2191,8 +2237,65 @@ namespace Manifold::Debug
         m_stepping = mode != ResumeMode::Continue;
         m_break.Broken = false;
         ++m_generation;
+        const std::uint32_t keepThreads = keep ? 1u : 0u;
+        m_process->Write(m_vehBlock + offsetof(Veh::Block, KeepSuspended), &keepThreads, sizeof(keepThreads));
         const std::uint32_t cmd = Veh::ResumeContinue;
         m_process->Write(m_vehBlock + offsetof(Veh::Block, ResumeCmd), &cmd, sizeof(cmd));
+        VehWakeAgent();
+    }
+
+    void Debugger::VehWakeAgent()
+    {
+        if (m_vehResumeEvent)
+            ::SetEvent(static_cast<HANDLE>(m_vehResumeEvent));
+    }
+
+    // The innermost return address on the stack: the first slot from RSP up
+    // whose value follows a call instruction in executable memory. Frames
+    // without unwind data (allocated code, 32-bit) have no better source, and
+    // a stale value can only make the step out stop early, never run away,
+    // because the temporary breakpoint also waits for RSP above the slot.
+    std::optional<std::uint64_t> Debugger::ReturnSlot(const Disasm::RegisterValues& registers) const
+    {
+        constexpr std::size_t kScan = 0x4000;
+        const int pointer = m_is64Bit ? 8 : 4;
+        std::vector<std::uint8_t> stack(kScan);
+        const std::size_t got = m_process->Read(registers.Rsp, stack.data(), stack.size());
+        std::uint64_t regionStart = 0;
+        std::uint64_t regionEnd = 0;
+        bool executable = false;
+        for (std::size_t at = 0; at + static_cast<std::size_t>(pointer) <= got; at += static_cast<std::size_t>(pointer))
+        {
+            std::uint64_t value = 0;
+            std::memcpy(&value, stack.data() + at, static_cast<std::size_t>(pointer));
+            if (value < 0x10000)
+                continue;
+            if (value < regionStart || value >= regionEnd)
+            {
+                const auto region = m_process->RegionAt(value);
+                if (!region)
+                {
+                    regionStart = regionEnd = 0;
+                    continue;
+                }
+                regionStart = region->Base;
+                regionEnd = region->End();
+                executable = region->Committed() && region->Executable();
+            }
+            if (!executable)
+                continue;
+            std::uint8_t bytes[7] = {};
+            if (m_process->Read(value - 7, bytes, sizeof(bytes)) != sizeof(bytes))
+                continue;
+            UnpatchLocked(value - 7, bytes, sizeof(bytes));
+            for (const int length : { 5, 6, 2, 3, 7, 4 })
+            {
+                const Disasm::Instruction call = m_disassembler->Decode(value - static_cast<std::uint64_t>(length), bytes + (7 - length), static_cast<std::size_t>(length), nullptr);
+                if (call.Valid && call.Kind == Disasm::Flow::Call && call.Length == length)
+                    return registers.Rsp + at;
+            }
+        }
+        return std::nullopt;
     }
 
     void Debugger::VehSetRegisters(const Disasm::RegisterValues& registers)
@@ -2246,7 +2349,7 @@ namespace Manifold::Debug
                 breakpointAddress = 0;
             }
             else if (std::find(m_vehTempSlots.begin(), m_vehTempSlots.end(), breakSlot) != m_vehTempSlots.end())
-                reason = "Step";
+                reason = m_vehStepOut ? "Returned to the caller" : "Step";
             else
             {
                 for (const auto& [address, breakpoint] : m_breakpoints)
@@ -2314,20 +2417,45 @@ namespace Manifold::Debug
             m_process->Free(block);
             return written;
         }
+        HANDLE breakEvent = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        HANDLE resumeEvent = ::CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (HANDLE duplicator = ::OpenProcess(PROCESS_DUP_HANDLE, FALSE, Raw(m_process->Id())))
+        {
+            HANDLE remoteBreak = nullptr;
+            HANDLE remoteResume = nullptr;
+            if (breakEvent && resumeEvent && ::DuplicateHandle(::GetCurrentProcess(), breakEvent, duplicator, &remoteBreak, 0, FALSE, DUPLICATE_SAME_ACCESS) &&
+                ::DuplicateHandle(::GetCurrentProcess(), resumeEvent, duplicator, &remoteResume, 0, FALSE, DUPLICATE_SAME_ACCESS))
+            {
+                const std::uint64_t remote[2] = { reinterpret_cast<std::uintptr_t>(remoteBreak), reinterpret_cast<std::uintptr_t>(remoteResume) };
+                m_process->Write(block + offsetof(Veh::Block, BreakEvent), remote, sizeof(remote));
+            }
+            ::CloseHandle(duplicator);
+        }
+        const auto dropEvents = [&]()
+            {
+                if (breakEvent)
+                    ::CloseHandle(breakEvent);
+                if (resumeEvent)
+                    ::CloseHandle(resumeEvent);
+                breakEvent = resumeEvent = nullptr;
+            };
         const bool loadedBefore = m_process->FindModule(agentName).has_value();
         if (Status injected = m_process->InjectLibrary(agent); !injected)
         {
+            dropEvents();
             m_process->Free(block);
             return injected;
         }
         const std::uint64_t start = m_process->FindExport(agentName, "ManifoldAgentStart");
         if (!start)
         {
+            dropEvents();
             m_process->Free(block);
             return Status::Fail(ErrorCode::InjectFailed, "ManifoldAgentStart was not found in the agent");
         }
         if (Status thread = m_process->CreateThread(start, block, true); !thread)
         {
+            dropEvents();
             if (thread.Code != ErrorCode::ThreadTimedOut)
                 m_process->Free(block);
             return thread;
@@ -2342,6 +2470,7 @@ namespace Manifold::Debug
         }
         if (!running)
         {
+            dropEvents();
             std::uint32_t lastError = 0;
             m_process->ReadExact(block + offsetof(Veh::Block, LastError), &lastError, sizeof(lastError));
             m_process->Free(block);
@@ -2359,6 +2488,9 @@ namespace Manifold::Debug
             m_vehTempSlots.clear();
             m_hiddenThreads = 0;
             m_mainThreadHidden = false;
+            m_vehStepOut = false;
+            m_vehBreakEvent = breakEvent;
+            m_vehResumeEvent = resumeEvent;
             VehWriteExceptionBreak();
         }
         m_vehStop = false;
@@ -2380,6 +2512,7 @@ namespace Manifold::Debug
         {
             const std::uint32_t stop = 1;
             m_process->Write(m_vehBlock + offsetof(Veh::Block, Stop), &stop, sizeof(stop));
+            VehWakeAgent();
             std::uint32_t running = 1;
             for (int tries = 0; tries < 400 && running && m_process->Alive(); ++tries)
             {
@@ -2404,6 +2537,12 @@ namespace Manifold::Debug
             m_vehTempSlots.clear();
             m_attached = false;
             ++m_generation;
+        }
+        for (void** event : { &m_vehBreakEvent, &m_vehResumeEvent })
+        {
+            if (*event)
+                ::CloseHandle(static_cast<HANDLE>(*event));
+            *event = nullptr;
         }
         m_process.reset();
         LOG_INFO("Debugger", "Detached");
@@ -2490,7 +2629,10 @@ namespace Manifold::Debug
         bool lostReported = false;
         while (!m_vehStop)
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            if (m_vehBreakEvent)
+                ::WaitForSingleObject(static_cast<HANDLE>(m_vehBreakEvent), 30);
+            else
+                std::this_thread::sleep_for(std::chrono::milliseconds(30));
             if (!m_process || !m_process->Alive())
             {
                 std::lock_guard lock(m_lock);

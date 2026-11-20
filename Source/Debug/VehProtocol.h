@@ -133,6 +133,10 @@ namespace Manifold::Debug::Veh
         std::uint8_t NewFpu[kFpuBytes];
         volatile std::uint32_t FpuDirty;
         volatile std::uint32_t FpuValid;
+        volatile std::uint64_t BreakEvent;
+        volatile std::uint64_t ResumeEvent;
+        volatile std::uint32_t KeepSuspended;
+        std::uint32_t Pad7;
     };
 
     static_assert(alignof(std::uint64_t) == 8, "the 32-bit and the 64-bit agent share this layout");
