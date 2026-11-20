@@ -1,3 +1,5 @@
+#include "FakeUnreal.h"
+
 #include <windows.h>
 
 #include <algorithm>
@@ -880,12 +882,28 @@ namespace
     }
 }
 
+struct UnrealMarker
+{
+    char Tag[8];
+    void* Target;
+};
+
+extern "C" __declspec(dllexport) FakeUnreal::Image g_unrealFake = {};
+extern "C" __declspec(dllexport) UnrealMarker g_unrealNames = { { 'M', 'F', 'U', 'E', 'P', 'O', 'O', 'L' }, &FakeUnreal::g_pool };
+extern "C" __declspec(dllexport) UnrealMarker g_unrealObjects = { { 'M', 'F', 'U', 'E', 'O', 'B', 'J', 'S' }, &FakeUnreal::g_objects };
+
 int main(int argc, char** argv)
 {
     for (int i = 1; i < argc; ++i)
     {
         if (std::strcmp(argv[i], "--il2cpp") == 0)
             g_il2cpp = true;
+        else if (std::strcmp(argv[i], "--unreal") == 0)
+        {
+            static FakeUnreal::Builder unreal;
+            if (unreal.Build())
+                g_unrealFake = unreal.Fake;
+        }
         else if (std::strcmp(argv[i], "--mono-values") == 0)
             g_monoValues = true;
         else if (std::strcmp(argv[i], "--mono-agent") == 0)

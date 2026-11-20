@@ -49,7 +49,7 @@ The run goes through these suites in order; `--list` names them and `--filter=co
 | --- | --- |
 | `assembler`, `core`, `text`, `work` | the assembler, value parsing, XML and cheat table round trips, the limits for tables from elsewhere, the error table, offline Auto Assembler runs, syntax highlighting, JSON and the editor's text buffer, background work |
 | `disasm`, `flowgraph`, `relays` | the disassembler, function bounds and the flow graph, relays in a module header and symbol offsets |
-| `unreal` | the Unreal Engine reader against a made-up name table, object array and reflection |
+| `unreal` | the Unreal Engine reader against a made-up name table, object array and reflection: in the tests' own process, and with the 64-bit and the 32-bit layout inside `TestTarget.exe --unreal` and `TestTarget32.exe --unreal` |
 | `commands`, `docs`, `console`, `templates` | commands and shortcuts, the generated documentation, the Lua console, script templates |
 | `compat`, `manifold-api`, `autorun` | the Cheat Engine Lua API, the `manifold` API, the Autorun modules |
 | `managed` | the managed dumper: its data format, the embedded assembly, and a run on the .NET Framework |

@@ -9,6 +9,8 @@
 #include "Target/Process.h"
 #include "Target/Unreal.h"
 
+#include "Target/FakeUnreal.h"
+
 #include <windows.h>
 
 #include <algorithm>
@@ -25,284 +27,58 @@ namespace Manifold::Tests
 {
     namespace
     {
-        struct FakePool
+        using Fake = FakeUnreal::ImageOf<std::uint64_t>;
+        using FakeUnreal::kObjectCount;
+        constexpr std::size_t kFakeSlots = sizeof(Fake) / sizeof(std::uint64_t);
+
+        Fake Widen(const FakeUnreal::Image& image)
         {
-            std::uint64_t Lock;
-            std::uint32_t CurrentBlock;
-            std::uint32_t Cursor;
-            std::uint64_t Blocks[8192];
-        };
+            std::uintptr_t narrow[kFakeSlots] = {};
+            std::uint64_t wide[kFakeSlots] = {};
+            std::memcpy(narrow, &image, sizeof(narrow));
+            std::copy(std::begin(narrow), std::end(narrow), std::begin(wide));
+            Fake fake{};
+            std::memcpy(&fake, wide, sizeof(fake));
+            return fake;
+        }
 
-        struct FakeArray
+        Fake ReadFake(const Target::Process& process, std::uint64_t table)
         {
-            std::uint64_t Objects;
-            std::uint64_t PreAllocated;
-            std::int32_t Max;
-            std::int32_t Num;
-            std::int32_t MaxChunks;
-            std::int32_t NumChunks;
-        };
+            std::uint64_t wide[kFakeSlots] = {};
+            for (std::size_t i = 0; i < kFakeSlots; ++i)
+                wide[i] = process.ReadPointer(table + i * static_cast<std::uint64_t>(process.PointerSize())).value_or(0);
+            Fake fake{};
+            std::memcpy(&fake, wide, sizeof(fake));
+            return fake;
+        }
 
-        FakePool g_pool;
-        FakeArray g_objects;
-        const std::uint64_t g_vtable[4] = { 0x11, 0x22, 0x33, 0x44 };
-
-        constexpr int kObjectCount = 2100;
-        constexpr std::size_t kObjectStride = 0x300;
-        constexpr std::size_t kFieldStride = 0xA0;
-
-        class FakeUnreal
+        void SyntheticLayout(Engine& engine, const Fake& fake, const FakeUnreal::Offsets& o, const Target::UnrealConfig& config, const char* label)
         {
-        public:
-            ~FakeUnreal()
-            {
-                for (void* block : { m_names, m_objects, m_items, m_fields })
-                {
-                    if (block)
-                        ::VirtualFree(block, 0, MEM_RELEASE);
-                }
-                std::memset(&g_pool, 0, sizeof(g_pool));
-                std::memset(&g_objects, 0, sizeof(g_objects));
-            }
-
-            bool Build()
-            {
-                m_names = static_cast<std::uint8_t*>(::VirtualAlloc(nullptr, 0x10000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-                m_objects = static_cast<std::uint8_t*>(::VirtualAlloc(nullptr, kObjectCount * kObjectStride, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-                m_items = static_cast<std::uint8_t*>(::VirtualAlloc(nullptr, 0x10000 * 0x18 + 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-                m_fields = static_cast<std::uint8_t*>(::VirtualAlloc(nullptr, 0x10000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
-                if (!m_names || !m_objects || !m_items || !m_fields)
-                    return false;
-                Name("None");
-                Name("ByteProperty");
-                Name("IntProperty");
-
-                const auto object = [&](int index, const char* name, std::uint32_t number = 0) { return Object(index, Name(name), number); };
-                Package = object(0, "/Script/CoreUObject");
-                ObjectClass = object(1, "Object");
-                FieldClass = object(2, "Field");
-                StructClass = object(3, "Struct");
-                ClassClass = object(4, "Class");
-                PackageClass = object(5, "Package");
-                ScriptStructClass = object(6, "ScriptStruct");
-                EnumClass = object(7, "Enum");
-                Vector = object(8, "Vector");
-                Vector2D = object(9, "Vector2D");
-                LinearColor = object(10, "LinearColor");
-                IntPoint = object(11, "IntPoint");
-                Actor = object(12, "Actor");
-                SceneComponent = object(13, "SceneComponent");
-                GameEngineClass = object(14, "GameEngine");
-                Mode = object(15, "EMyMode");
-                ActorInstance = object(16, "MyActor");
-                SceneInstance = object(17, "Root");
-                Engine = object(18, "GameEngine", 2);
-                const std::uint32_t filler = Name("Filler");
-                for (int i = 19; i < kObjectCount; ++i)
-                    Object(i, filler, static_cast<std::uint32_t>(i));
-
-                for (int i = 0; i < kObjectCount; ++i)
-                {
-                    const std::uint64_t at = Address(i);
-                    std::uint64_t meta = ObjectClass;
-                    if (at == Package)
-                        meta = PackageClass;
-                    else if (at >= ObjectClass && at <= EnumClass)
-                        meta = ClassClass;
-                    else if (at >= Vector && at <= IntPoint)
-                        meta = ScriptStructClass;
-                    else if (at == Actor || at == SceneComponent || at == GameEngineClass)
-                        meta = ClassClass;
-                    else if (at == Mode)
-                        meta = EnumClass;
-                    else if (at == ActorInstance)
-                        meta = Actor;
-                    else if (at == SceneInstance)
-                        meta = SceneComponent;
-                    else if (at == Engine)
-                        meta = GameEngineClass;
-                    Put<std::uint64_t>(at, 0x10, meta);
-                    Put<std::uint64_t>(at, 0x20, at == Package ? 0 : Package);
-                }
-                Super(FieldClass, ObjectClass);
-                Super(StructClass, FieldClass);
-                Super(ClassClass, StructClass);
-                Super(Actor, ObjectClass);
-                Super(SceneComponent, ObjectClass);
-                Super(GameEngineClass, ObjectClass);
-                Size(Vector, 12);
-                Size(Vector2D, 8);
-                Size(LinearColor, 16);
-                Size(IntPoint, 8);
-                Size(Actor, 0x220);
-                Size(SceneComponent, 0x200);
-                Size(GameEngineClass, 0x100);
-                Size(ObjectClass, 0x28);
-
-                const std::uint64_t floatClass = FieldClassNamed("FloatProperty");
-                const std::uint64_t objectClass = FieldClassNamed("ObjectProperty");
-                const std::uint64_t boolClass = FieldClassNamed("BoolProperty");
-                const std::uint64_t arrayClass = FieldClassNamed("ArrayProperty");
-                const std::uint64_t nameClass = FieldClassNamed("NameProperty");
-                const std::uint64_t structClass = FieldClassNamed("StructProperty");
-
-                const std::uint64_t z = Field(floatClass, Vector, "Z", 8, 4, 0);
-                const std::uint64_t y = Field(floatClass, Vector, "Y", 4, 4, z);
-                const std::uint64_t x = Field(floatClass, Vector, "X", 0, 4, y);
-                Put<std::uint64_t>(Vector, 0x50, x);
-
-                const std::uint64_t location = Field(structClass, SceneComponent, "RelativeLocation", 0x11C, 12, 0);
-                Put<std::uint64_t>(location, 0x78, Vector);
-                Put<std::uint64_t>(SceneComponent, 0x50, location);
-
-                const std::uint64_t inner = Field(nameClass, Actor, "Tags", 0, 8, 0);
-                const std::uint64_t tags = Field(arrayClass, Actor, "Tags", 0x208, 0x10, 0);
-                Put<std::uint64_t>(tags, 0x78, inner);
-                const std::uint64_t hidden = Field(boolClass, Actor, "bHidden", 0x58, 1, tags);
-                const std::uint8_t bits[4] = { 1, 0, 0x02, 0x02 };
-                std::memcpy(reinterpret_cast<void*>(hidden + 0x78), bits, 4);
-                const std::uint64_t root = Field(objectClass, Actor, "RootComponent", 0x130, 8, hidden);
-                Put<std::uint64_t>(root, 0x78, SceneComponent);
-                const std::uint64_t health = Field(floatClass, Actor, "Health", 0x200, 4, root);
-                Put<std::uint64_t>(Actor, 0x50, health);
-
-                std::uint8_t* entries = m_fields + 0xF000;
-                const char* names[] = { "EMyMode::A", "EMyMode::B", "EMyMode_MAX" };
-                for (int i = 0; i < 3; ++i)
-                {
-                    Put<std::uint32_t>(reinterpret_cast<std::uint64_t>(entries), static_cast<std::size_t>(i) * 16, Name(names[i]));
-                    Put<std::int64_t>(reinterpret_cast<std::uint64_t>(entries), static_cast<std::size_t>(i) * 16 + 8, i);
-                }
-                Put<std::uint64_t>(Mode, 0x40, reinterpret_cast<std::uint64_t>(entries));
-                Put<std::int32_t>(Mode, 0x48, 3);
-                Put<std::int32_t>(Mode, 0x4C, 3);
-
-                Put<std::uint64_t>(ActorInstance, 0x130, SceneInstance);
-                Put<float>(ActorInstance, 0x200, 75.0f);
-                Put<std::uint8_t>(ActorInstance, 0x58, 0x02);
-                std::uint8_t* tagData = m_fields + 0xF100;
-                Put<std::uint32_t>(reinterpret_cast<std::uint64_t>(tagData), 0, Name("Hero"));
-                Put<std::uint32_t>(reinterpret_cast<std::uint64_t>(tagData), 8, Name("Brave"));
-                Put<std::uint64_t>(ActorInstance, 0x208, reinterpret_cast<std::uint64_t>(tagData));
-                Put<std::int32_t>(ActorInstance, 0x210, 2);
-                Put<std::int32_t>(ActorInstance, 0x214, 2);
-                Put<float>(SceneInstance, 0x11C, 1.0f);
-                Put<float>(SceneInstance, 0x120, 2.0f);
-                Put<float>(SceneInstance, 0x124, 3.0f);
-
-                const std::uint64_t chunkTable = reinterpret_cast<std::uint64_t>(m_items) + 0x10000 * 0x18;
-                Put<std::uint64_t>(chunkTable, 0, reinterpret_cast<std::uint64_t>(m_items));
-                for (int i = 0; i < kObjectCount; ++i)
-                    Put<std::uint64_t>(reinterpret_cast<std::uint64_t>(m_items), static_cast<std::size_t>(i) * 0x18, Address(i));
-                g_objects = { chunkTable, 0, 0x10000, kObjectCount, 1, 1 };
-                g_pool.Blocks[0] = reinterpret_cast<std::uint64_t>(m_names);
-                g_pool.Cursor = static_cast<std::uint32_t>(m_used / 2);
-                return true;
-            }
-
-            std::uint32_t Name(std::string_view text)
-            {
-                if (const auto it = m_known.find(std::string(text)); it != m_known.end())
-                    return it->second;
-                const std::uint32_t index = static_cast<std::uint32_t>(m_used / 2);
-                const std::uint16_t header = static_cast<std::uint16_t>(text.size() << 6);
-                std::memcpy(m_names + m_used, &header, 2);
-                std::memcpy(m_names + m_used + 2, text.data(), text.size());
-                m_used += (2 + text.size() + 1) & ~std::size_t(1);
-                m_known[std::string(text)] = index;
-                return index;
-            }
-
-            std::uint64_t Address(int index) const { return reinterpret_cast<std::uint64_t>(m_objects) + static_cast<std::uint64_t>(index) * kObjectStride; }
-
-            std::uint64_t LoadClass(int index, const char* name)
-            {
-                const std::uint64_t at = Object(index, Name(name), 0);
-                g_pool.Cursor = static_cast<std::uint32_t>(m_used / 2);
-                Put<std::uint64_t>(at, 0x10, ClassClass);
-                Super(at, Actor);
-                return at;
-            }
-
-            std::uint64_t Package = 0, ObjectClass = 0, FieldClass = 0, StructClass = 0, ClassClass = 0, PackageClass = 0, ScriptStructClass = 0, EnumClass = 0;
-            std::uint64_t Vector = 0, Vector2D = 0, LinearColor = 0, IntPoint = 0, Actor = 0, SceneComponent = 0, GameEngineClass = 0, Mode = 0;
-            std::uint64_t ActorInstance = 0, SceneInstance = 0, Engine = 0;
-
-        private:
-            template <class T>
-            static void Put(std::uint64_t base, std::size_t offset, T value)
-            {
-                std::memcpy(reinterpret_cast<void*>(base + offset), &value, sizeof(T));
-            }
-
-            std::uint64_t Object(int index, std::uint32_t name, std::uint32_t number)
-            {
-                const std::uint64_t at = Address(index);
-                Put<std::uint64_t>(at, 0, reinterpret_cast<std::uint64_t>(&g_vtable[0]));
-                Put<std::int32_t>(at, 0x0C, index);
-                Put<std::uint32_t>(at, 0x18, name);
-                Put<std::uint32_t>(at, 0x1C, number);
-                return at;
-            }
-
-            void Super(std::uint64_t type, std::uint64_t parent) { Put<std::uint64_t>(type, 0x40, parent); }
-            void Size(std::uint64_t type, std::int32_t size) { Put<std::int32_t>(type, 0x58, size); }
-
-            std::uint64_t FieldClassNamed(const char* name)
-            {
-                const std::uint64_t at = reinterpret_cast<std::uint64_t>(m_fields) + m_fieldUsed;
-                m_fieldUsed += kFieldStride;
-                Put<std::uint32_t>(at, 0, Name(name));
-                return at;
-            }
-
-            std::uint64_t Field(std::uint64_t fieldClass, std::uint64_t owner, const char* name, std::int32_t offset, std::int32_t size, std::uint64_t next)
-            {
-                const std::uint64_t at = reinterpret_cast<std::uint64_t>(m_fields) + m_fieldUsed;
-                m_fieldUsed += kFieldStride;
-                Put<std::uint64_t>(at, 0x08, fieldClass);
-                Put<std::uint64_t>(at, 0x10, owner);
-                Put<std::uint64_t>(at, 0x20, next);
-                Put<std::uint32_t>(at, 0x28, Name(name));
-                Put<std::int32_t>(at, 0x38, 1);
-                Put<std::int32_t>(at, 0x3C, size);
-                Put<std::int32_t>(at, 0x4C, offset);
-                return at;
-            }
-
-            std::uint8_t* m_names = nullptr;
-            std::uint8_t* m_objects = nullptr;
-            std::uint8_t* m_items = nullptr;
-            std::uint8_t* m_fields = nullptr;
-            std::size_t m_used = 0;
-            std::size_t m_fieldUsed = 0;
-            std::map<std::string, std::uint32_t> m_known;
-        };
-
-        void SyntheticLayout(Engine& engine, const FakeUnreal& fake, const Target::UnrealConfig& config, const char* label)
-        {
+            using namespace FakeUnreal;
             Target::UnrealRuntime runtime;
             const Status status = runtime.Resolve(engine.Process(), config, true, nullptr);
             CHECK_MSG(status.Ok(), std::string(label) + ": " + status.Text);
             if (!status)
                 return;
             const Target::UnrealSummary& summary = runtime.Summary();
-            CHECK(summary.NamePool == reinterpret_cast<std::uint64_t>(&g_pool));
-            CHECK(summary.Objects == reinterpret_cast<std::uint64_t>(&g_objects));
+            CHECK_MSG(runtime.PointerSize() == o.Pointer, label);
+            CHECK_MSG(summary.NamePool == fake.Pool, label);
+            CHECK_MSG(summary.Objects == fake.Objects, label);
             CHECK(summary.ObjectCount == kObjectCount);
             CHECK(!summary.LegacyNames);
             const Target::UnrealLayout& l = runtime.Layout();
-            CHECK_MSG(l.Index == 0x0C && l.Class == 0x10 && l.Name == 0x18 && l.Outer == 0x20, label);
-            CHECK_MSG(l.Super == 0x40 && l.ChildProperties == 0x50 && l.StructSize == 0x58, label);
-            CHECK_MSG(l.FField && l.FieldClass == 0x08 && l.FieldName == 0x28 && l.Next == 0x20 && l.Offset == 0x4C && l.Size == 0x3C && l.Extra == 0x78 && l.Component == 4, label);
-            CHECK(l.ItemSize == 0x18 && l.ItemOffset == 0);
+            CHECK_MSG(l.Index == o.Index && l.Class == o.Class && l.Name == o.Name && l.Outer == o.Outer, label);
+            CHECK_MSG(l.Super == o.Super && l.ChildProperties == o.ChildProperties && l.StructSize == o.StructSize, label);
+            CHECK_MSG(l.FField && l.FieldClass == o.FieldClass && l.FieldName == o.FieldName && l.Next == o.FieldNext && l.Offset == o.FieldOffset && l.Size == o.FieldSize &&
+                l.Extra == o.Extra && l.Component == 4, label);
+            CHECK_MSG(l.ItemSize == o.ItemSize && l.ItemOffset == 0, label);
 
             CHECK(runtime.Type("actor") == fake.Actor);
             CHECK(runtime.Enum("EMyMode") == fake.Mode);
             CHECK(runtime.CppName(fake.Actor) == "AActor");
             CHECK(runtime.CppName(fake.SceneComponent) == "USceneComponent");
             CHECK(runtime.CppName(fake.Vector) == "FVector");
-            CHECK(runtime.StructSize(fake.Actor) == 0x220);
+            CHECK(runtime.StructSize(fake.Actor) == kActorSize);
             CHECK(runtime.FullName(fake.ActorInstance) == "/Script/CoreUObject.MyActor");
             CHECK(runtime.NameOf(fake.Engine) == "GameEngine_1");
             CHECK(runtime.IsObject(fake.ActorInstance));
@@ -312,10 +88,10 @@ namespace Manifold::Tests
             CHECK(fields.size() == 4);
             if (fields.size() == 4)
             {
-                CHECK(fields[0].Name == "bHidden" && fields[0].Bitfield && fields[0].Mask == 0x02 && fields[0].Start() == 0x58);
-                CHECK(fields[1].Name == "RootComponent" && runtime.TypeText(fields[1]) == "USceneComponent*");
+                CHECK(fields[0].Name == "bHidden" && fields[0].Bitfield && fields[0].Mask == 0x02 && fields[0].Start() == kHidden);
+                CHECK(fields[1].Name == "RootComponent" && runtime.TypeText(fields[1]) == "USceneComponent*" && fields[1].Size == o.Pointer);
                 CHECK(fields[2].Name == "Health" && runtime.TypeText(fields[2]) == "float");
-                CHECK(fields[3].Name == "Tags" && runtime.TypeText(fields[3]) == "TArray<FName>");
+                CHECK(fields[3].Name == "Tags" && runtime.TypeText(fields[3]) == "TArray<FName>" && fields[3].Size == o.Pointer + 8);
             }
             CHECK(runtime.FindField(fake.Actor, "health").has_value());
             CHECK(!runtime.FindField(fake.Actor, "Nope").has_value());
@@ -323,27 +99,36 @@ namespace Manifold::Tests
             CHECK(location && runtime.TypeText(*location) == "FVector" && location->Inner == fake.Vector);
 
             const auto entries = runtime.EnumEntries(fake.Mode);
-            CHECK(entries.size() == 3 && entries.back().Name == "EMyMode_MAX" && entries.back().Value == 2);
+            CHECK_MSG(entries.size() == 3 && entries.back().Name == "EMyMode_MAX" && entries.back().Value == 2, label);
 
             CHECK(runtime.Engine() == fake.Engine);
             const auto owner = runtime.OwnerOf(fake.ActorInstance + 0x204);
-            CHECK(owner && owner->first == fake.ActorInstance && owner->second == fake.Actor);
+            CHECK_MSG(owner && owner->first == fake.ActorInstance && owner->second == fake.Actor, label);
+            const auto odd = runtime.OwnerOf(fake.ActorInstance + 0x207);
+            CHECK_MSG(odd && odd->first == fake.ActorInstance, label);
             CHECK(!runtime.OwnerOf(fake.ActorInstance + 0x2F0).has_value());
-            const auto whois = runtime.Whois(fake.ActorInstance + 0x130);
+            const auto whois = runtime.Whois(fake.ActorInstance + kRoot);
             CHECK_MSG(whois && whois->find("RootComponent  USceneComponent*") != std::string::npos, whois.value_or("-"));
-            const auto hit = runtime.Locate(fake.SceneInstance + 0x120);
+            const auto header = runtime.Whois(fake.ActorInstance + static_cast<std::uint64_t>(o.Outer));
+            CHECK_MSG(header && header->find("OuterPrivate") != std::string::npos && header->find("+") != std::string::npos, header.value_or("-"));
+            int inside = -1;
+            CHECK(runtime.HeaderField(o.Pointer, inside) == "ObjectFlags" && inside == 0);
+            CHECK(runtime.HeaderField(o.Class + o.Pointer - 1, inside) == "ClassPrivate" && inside == o.Pointer - 1);
+            const auto hit = runtime.Locate(fake.SceneInstance + kLocation + 4);
             CHECK(hit && hit->Field && hit->Field->Name == "Y" && hit->Struct == 0);
-            const auto start = runtime.Locate(fake.SceneInstance + 0x11C);
+            const auto start = runtime.Locate(fake.SceneInstance + kLocation);
             CHECK(start && start->Struct == fake.Vector);
 
-            CHECK(runtime.ResolveSymbol("Actor_RootComponent") == 0x130);
-            CHECK(runtime.ResolveSymbol("SceneComponent_RelativeLocation") == 0x11C);
-            CHECK(runtime.ResolveSymbol("GObjects") == reinterpret_cast<std::uint64_t>(&g_objects));
+            CHECK(runtime.ResolveSymbol("Actor_RootComponent") == static_cast<std::uint64_t>(kRoot));
+            CHECK(runtime.ResolveSymbol("SceneComponent_RelativeLocation") == static_cast<std::uint64_t>(kLocation));
+            CHECK(runtime.ResolveSymbol("GObjects") == fake.Objects);
+            CHECK(runtime.ResolveSymbol("FNamePool") == fake.Pool);
             CHECK(!runtime.ResolveSymbol("Actor_Nope").has_value());
 
             const auto walk = runtime.Walk(fake.ActorInstance, "A", { "RootComponent", "RelativeLocation" });
-            CHECK(walk.Ok() && walk->Address == fake.SceneInstance + 0x11C && walk->Expression == "[A+Actor_RootComponent]+SceneComponent_RelativeLocation");
+            CHECK_MSG(walk.Ok() && walk->Address == fake.SceneInstance + kLocation && walk->Expression == "[A+Actor_RootComponent]+SceneComponent_RelativeLocation", label);
             CHECK(!runtime.Walk(fake.ActorInstance, "A", { "Nope" }).Ok());
+            CHECK_MSG(runtime.Follow(fake.ActorInstance, { "RootComponent" }) == fake.SceneInstance, label);
 
             const auto firstMember = runtime.ResolveSymbol("Vector_X");
             CHECK(firstMember.has_value() && *firstMember == 0);
@@ -351,10 +136,10 @@ namespace Manifold::Tests
             CHECK(firstMemberAgain.has_value() && *firstMemberAgain == 0);
             CHECK(!runtime.ResolveSymbol("Vector_W").has_value() && !runtime.ResolveSymbol("Vector_W").has_value());
 
-            std::uint64_t tagData = 0;
-            std::memcpy(&tagData, reinterpret_cast<const void*>(fake.ActorInstance + 0x208), sizeof(tagData));
+            CHECK(engine.Process()->ReadPointer(fake.ActorInstance + kTags) == fake.TagData);
             const auto element = runtime.Walk(fake.ActorInstance, "A", { "Tags[1]" });
-            CHECK(element.Ok() && element->Address == tagData + 8 && element->Expression == "[A+Actor_Tags]+8");
+            CHECK_MSG(element.Ok() && element->Address == fake.TagData + 8 && element->Expression == "[A+Actor_Tags]+8", label);
+            CHECK(runtime.NameAt(fake.TagData + 8) == "Brave");
             CHECK(!runtime.Walk(fake.ActorInstance, "A", { "Tags[2]" }).Ok());
             CHECK(!runtime.Walk(fake.ActorInstance, "A", { "Tags[99999999999]" }).Ok());
             CHECK(!runtime.Walk(fake.ActorInstance, "A", { "Tags[1]", "Health" }).Ok());
@@ -381,17 +166,29 @@ namespace Manifold::Tests
 
             const Table::UnrealFill fill = Table::FillUnrealObject(runtime, fake.ActorInstance, true);
             const auto named = [&](const std::string& prefix) { return std::find_if(fill.Fields.begin(), fill.Fields.end(), [&](const Table::StructField& f) { return f.Name.rfind(prefix, 0) == 0; }); };
-            CHECK(named("Health") != fill.Fields.end() && named("Health")->Offset == 0x200 && named("Health")->Type == Scan::ValueType::Float);
-            CHECK(named("NamePrivate") != fill.Fields.end() && named("NamePrivate")->CustomType == Target::kUnrealFNameType);
+            CHECK(named("Health") != fill.Fields.end() && named("Health")->Offset == kHealth && named("Health")->Type == Scan::ValueType::Float);
+            CHECK(named("VTable") != fill.Fields.end() && named("VTable")->Offset == 0 && named("VTable")->Size == o.Pointer);
+            CHECK(named("ObjectFlags") != fill.Fields.end() && named("ObjectFlags")->Offset == o.Pointer);
+            CHECK(named("ClassPrivate") != fill.Fields.end() && named("ClassPrivate")->Offset == o.Class && named("ClassPrivate")->Type == Scan::ValueType::Pointer);
+            CHECK(named("NamePrivate") != fill.Fields.end() && named("NamePrivate")->CustomType == Target::kUnrealFNameType && named("NamePrivate")->Offset == o.Name);
+            CHECK(named("OuterPrivate") != fill.Fields.end() && named("OuterPrivate")->Offset == o.Outer && named("OuterPrivate")->Size == o.Pointer);
             CHECK(named("bHidden") != fill.Fields.end() && named("bHidden")->Type == Scan::ValueType::Binary && named("bHidden")->BitStart == 1);
-            CHECK(named("RootComponent") != fill.Fields.end() && named("RootComponent")->Type == Scan::ValueType::Pointer);
-            CHECK(named("(not reflected)") != fill.Fields.end());
+            CHECK(named("RootComponent") != fill.Fields.end() && named("RootComponent")->Type == Scan::ValueType::Pointer && named("RootComponent")->Size == o.Pointer);
+            CHECK(named("Tags.Num") != fill.Fields.end() && named("Tags.Num")->Offset == kTags + o.Pointer);
+            CHECK(named("Tags.Max") != fill.Fields.end() && named("Tags.Max")->Offset == kTags + o.Pointer + 4);
+            CHECK(named("(not reflected)") != fill.Fields.end() && named("(not reflected)")->Offset == o.Outer + o.Pointer);
+            bool overlap = false;
+            for (std::size_t i = 1; i < fill.Fields.size(); ++i)
+                overlap = overlap || (fill.Fields[i].Type != Scan::ValueType::Binary && fill.Fields[i - 1].Type != Scan::ValueType::Binary &&
+                    fill.Fields[i].Offset < fill.Fields[i - 1].Offset + fill.Fields[i - 1].Size);
+            CHECK_MSG(!overlap, label);
             CHECK(fill.Arrays.size() == 1);
-            const Table::UnrealFill vector = Table::FillFromUnreal(runtime, fake.SceneInstance + 0x11C, {}, true);
+            const Table::UnrealFill vector = Table::FillFromUnreal(runtime, fake.SceneInstance + kLocation, {}, true);
             CHECK(vector.Handled && vector.Fields.size() == 3 && vector.Fields[2].Name == "Z" && vector.Fields[2].Offset == 8);
             if (!fill.Arrays.empty())
             {
                 const Table::UnrealArrayRef array = fill.Arrays.front();
+                CHECK(array.Data == fake.TagData && array.Header == fake.ActorInstance + kTags);
                 const auto lookup = [&](std::uint64_t data) -> std::optional<std::pair<Target::UnrealField, std::uint64_t>>
                     {
                         if (data != array.Data)
@@ -401,17 +198,18 @@ namespace Manifold::Tests
                 const Table::UnrealFill items = Table::FillFromUnreal(runtime, array.Data, lookup, true);
                 CHECK(items.Handled && items.Fields.size() == 2 && items.Fields[1].Name == "[1]" && items.Fields[1].CustomType == Target::kUnrealFNameType);
                 const auto name = Table::UnrealStructureName(runtime, array.Data, false, lookup);
-                CHECK(name && name->first == "TArray<FName>[2]");
+                CHECK_MSG(name && name->first == "TArray<FName>[2]", label);
             }
             const auto name = Table::UnrealStructureName(runtime, fake.ActorInstance + 0x10, true, {});
             CHECK(name && name->first == "Actor" && name->second == fake.ActorInstance);
         }
 
-        void SessionAndLua(Engine& engine, const FakeUnreal& fake)
+        void SessionAndLua(Engine& engine, const Fake& fake, const FakeUnreal::Offsets& o)
         {
+            using namespace FakeUnreal;
             UnrealSession& session = engine.Unreal();
-            session.Config().NamePool = reinterpret_cast<std::uint64_t>(&g_pool);
-            session.Config().Objects = reinterpret_cast<std::uint64_t>(&g_objects);
+            session.Config().NamePool = fake.Pool;
+            session.Config().Objects = fake.Objects;
             const Status status = session.ResolveNow();
             CHECK_MSG(status.Ok(), status.Text);
             CHECK(session.Ready());
@@ -420,18 +218,42 @@ namespace Manifold::Tests
             if (fname)
             {
                 std::uint8_t bytes[8] = {};
-                std::memcpy(bytes, reinterpret_cast<const void*>(fake.ActorInstance + 0x18), 8);
+                CHECK(engine.Process()->ReadExact(fake.ActorInstance + static_cast<std::uint64_t>(o.Name), bytes, 8));
                 std::string text;
                 CHECK(engine.Lua().CustomToText(*fname, bytes, 0, text) && text == "MyActor");
                 std::vector<std::uint8_t> back;
                 CHECK(engine.Lua().CustomFromText(*fname, "MyActor", 0, back) && back.size() == 8 && std::memcmp(back.data(), bytes, 8) == 0);
             }
+            const Lua::CustomType* fstring = engine.Lua().FindCustomType(Target::kUnrealFStringType);
+            CHECK(fstring != nullptr);
+            if (fstring)
+            {
+                std::uint8_t bytes[16] = {};
+                const std::int32_t count = 6;
+                std::memcpy(bytes, &fake.Text, static_cast<std::size_t>(o.Pointer));
+                std::memcpy(bytes + o.Pointer, &count, 4);
+                std::memcpy(bytes + o.Pointer + 4, &count, 4);
+                std::string text;
+                CHECK_MSG(engine.Lua().CustomToText(*fstring, bytes, 0, text) && text == "Hello", text);
+                CHECK(fstring->ByteCount() == o.Pointer + 8);
+                std::string narrow;
+                CHECK_MSG(engine.Lua().CustomToText(*fstring, std::span<const std::uint8_t>(bytes, static_cast<std::size_t>(o.Pointer) + 8), 0, narrow) && narrow == "Hello", narrow);
+            }
+            const Lua::CustomType* index = engine.Lua().FindCustomType(Target::kUnrealObjectIndexType);
+            CHECK(index != nullptr);
+            if (index)
+            {
+                const std::uint8_t bytes[8] = { 16, 0, 0, 0, 0, 0, 0, 0 };
+                std::string text;
+                CHECK_MSG(engine.Lua().CustomToText(*index, bytes, 0, text) && text == "MyActor (Actor)", text);
+            }
             const auto symbol = engine.Evaluate("[" + Hex(fake.ActorInstance) + "+Actor_RootComponent]+SceneComponent_RelativeLocation");
-            CHECK(symbol == fake.SceneInstance + 0x11C);
+            CHECK(symbol == fake.SceneInstance + kLocation);
             std::string result;
             const std::string code = Format(R"LUA(
                 local unreal = manifold.unreal
                 local actor = 0x%llX
+                local extra = %d
                 if unreal.status().state ~= "ready" then return "state " .. unreal.status().state end
                 local symbol, offset = unreal.offset("Actor", "RootComponent")
                 if symbol ~= "Actor_RootComponent" or offset ~= 0x130 then return "offset " .. tostring(symbol) end
@@ -454,12 +276,12 @@ namespace Manifold::Tests
                 if #unreal.dump("Actor") ~= 5 then return "dump" end
                 unreal.configure({ symbols = false })
                 if manifold.process.address("Actor_RootComponent") ~= nil then return "symbols still on" end
-                unreal.configure({ symbols = true, layout = { extra = 0x78 } })
-                if unreal.config().layout.extra ~= 0x78 then return "config layout" end
+                unreal.configure({ symbols = true, layout = { extra = extra } })
+                if unreal.config().layout.extra ~= extra then return "config layout" end
                 unreal.configure({ layout = false })
                 if next(unreal.config().layout) ~= nil then return "layout not cleared" end
                 return "ok")LUA",
-                static_cast<unsigned long long>(fake.ActorInstance));
+                static_cast<unsigned long long>(fake.ActorInstance), o.Extra);
             const Status lua = engine.Lua().RunWithResult(code, "unreal api", result);
             CHECK_MSG(lua.Ok() && result == "ok", lua.Ok() ? result : lua.Text);
             session.Stop();
@@ -572,7 +394,110 @@ namespace Manifold::Tests
 
 namespace Manifold::Tests
 {
-    int RunUnrealTests()
+    namespace
+    {
+        struct UnrealTarget
+        {
+            PROCESS_INFORMATION Info{};
+
+            UnrealTarget() = default;
+            UnrealTarget(const UnrealTarget&) = delete;
+            UnrealTarget& operator=(const UnrealTarget&) = delete;
+
+            ~UnrealTarget()
+            {
+                if (Info.hProcess)
+                {
+                    ::TerminateProcess(Info.hProcess, 0);
+                    ::WaitForSingleObject(Info.hProcess, 3000);
+                    ::CloseHandle(Info.hProcess);
+                    ::CloseHandle(Info.hThread);
+                }
+            }
+
+            bool Start(const std::filesystem::path& path)
+            {
+                SECURITY_ATTRIBUTES security{ sizeof(security), nullptr, TRUE };
+                HANDLE read = nullptr;
+                HANDLE write = nullptr;
+                if (!::CreatePipe(&read, &write, &security, 0))
+                    return false;
+                ::SetHandleInformation(read, HANDLE_FLAG_INHERIT, 0);
+                STARTUPINFOW startup{ sizeof(startup) };
+                startup.dwFlags = STARTF_USESTDHANDLES;
+                startup.hStdOutput = write;
+                startup.hStdError = write;
+                std::wstring command = L"\"" + path.wstring() + L"\" --unreal";
+                const BOOL started = ::CreateProcessW(nullptr, command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &Info);
+                ::CloseHandle(write);
+                std::string text;
+                char buffer[512];
+                DWORD got = 0;
+                while (started && text.find("shoot at") == std::string::npos)
+                {
+                    if (!::ReadFile(read, buffer, sizeof(buffer), &got, nullptr) || got == 0)
+                        break;
+                    text.append(buffer, got);
+                }
+                ::CloseHandle(read);
+                return started && text.find("shoot at") != std::string::npos;
+            }
+        };
+
+        void SyntheticTarget(const std::filesystem::path& targetPath, const FakeUnreal::Offsets& o, const char* label)
+        {
+            std::error_code missing;
+            if (!std::filesystem::exists(targetPath, missing))
+            {
+                Skip("the test target " + targetPath.string() + " was not built");
+                return;
+            }
+            UnrealTarget target;
+            const bool started = target.Start(targetPath);
+            CHECK_MSG(started, "could not start " + WideToUtf8(targetPath.wstring()) + " --unreal");
+            if (!started)
+                return;
+            Settings settings;
+            Engine engine(settings);
+            engine.Lua().Run("__manifoldHeadless = true", "headless");
+            engine.Unreal().Config().AutoStart = false;
+            const Status opened = engine.OpenProcess(MakeProcessId(target.Info.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            if (!opened)
+                return;
+            const Target::Process& process = *engine.Process();
+            CHECK_MSG(process.PointerSize() == o.Pointer, label);
+            const std::string stem = std::filesystem::path(process.Name()).stem().string();
+            const std::uint64_t table = engine.Evaluate(stem + ".g_unrealFake").value_or(0);
+            CHECK_MSG(table != 0, label);
+            const Fake fake = ReadFake(process, table);
+            CHECK_MSG(fake.Pool != 0 && fake.Objects != 0 && fake.ActorInstance != 0, label);
+            if (fake.Pool && fake.Objects && fake.ActorInstance)
+            {
+                CHECK_MSG(fake.ActorInstance % 8 == static_cast<std::uint64_t>(o.ObjectBias), label);
+                SyntheticLayout(engine, fake, o, Target::UnrealConfig{}, label);
+                Target::UnrealConfig configured;
+                configured.NamePool = fake.Pool;
+                configured.Objects = fake.Objects;
+                configured.Layout["extra"] = o.Extra;
+                SyntheticLayout(engine, fake, o, configured, label);
+                Target::UnrealConfig pattern;
+                pattern.NamePatterns.push_back({ .Bytes = "4D 46 55 45 50 4F 4F 4C", .Offset = 8, .Relative = false });
+                pattern.ObjectPatterns.push_back({ .Bytes = "4D 46 55 45 4F 42 4A 53", .Offset = 8, .Relative = false });
+                Target::UnrealRuntime byPattern;
+                const Status found = byPattern.Resolve(engine.Process(), pattern, true, nullptr);
+                CHECK_MSG(found.Ok() && byPattern.Summary().ObjectsSource == "pattern" && byPattern.Summary().NamePool == fake.Pool && byPattern.Summary().Objects == fake.Objects,
+                    std::string(label) + ": " + (found.Ok() ? byPattern.Summary().ObjectsSource : found.Text));
+                SessionAndLua(engine, fake, o);
+            }
+            engine.CloseProcess();
+            DWORD code = 0;
+            ::GetExitCodeProcess(target.Info.hProcess, &code);
+            CHECK_MSG(code == STILL_ACTIVE, std::string(label) + ": the target ended with " + Hex(code, 8));
+        }
+    }
+
+    int RunUnrealTests(const std::filesystem::path& target)
     {
         const int before = Totals().Failures;
         Settings settings;
@@ -585,14 +510,16 @@ namespace Manifold::Tests
         if (!opened)
             return Totals().Failures - before;
         {
-            FakeUnreal fake;
-            CHECK(fake.Build());
-            SyntheticLayout(engine, fake, Target::UnrealConfig{}, "search");
+            FakeUnreal::Builder builder;
+            CHECK(builder.Build());
+            const Fake fake = Widen(builder.Fake);
+            const FakeUnreal::Offsets& o = FakeUnreal::kNative;
+            SyntheticLayout(engine, fake, o, Target::UnrealConfig{}, "search");
             Target::UnrealConfig configured;
-            configured.NamePool = reinterpret_cast<std::uint64_t>(&g_pool);
-            configured.Objects = reinterpret_cast<std::uint64_t>(&g_objects);
-            configured.Layout["extra"] = 0x78;
-            SyntheticLayout(engine, fake, configured, "configured");
+            configured.NamePool = fake.Pool;
+            configured.Objects = fake.Objects;
+            configured.Layout["extra"] = o.Extra;
+            SyntheticLayout(engine, fake, o, configured, "configured");
             {
                 Target::UnrealRuntime late;
                 CHECK(late.Resolve(engine.Process(), configured, true, nullptr).Ok());
@@ -601,7 +528,7 @@ namespace Manifold::Tests
                 CHECK(late.Index() == first);
                 CHECK(late.Type("LateBlueprint_C") == 0);
                 CHECK(!late.ResolveSymbol("LateBlueprint_C"));
-                const std::uint64_t loaded = fake.LoadClass(1500, "LateBlueprint_C");
+                const std::uint64_t loaded = builder.LoadClass(1500, "LateBlueprint_C");
                 CHECK(late.Type("LateBlueprint_C") == 0);
                 CHECK(late.RefreshTypes());
                 CHECK(late.Type("lateblueprint_c") == loaded);
@@ -611,19 +538,21 @@ namespace Manifold::Tests
                 CHECK(!late.RefreshTypes());
             }
             Target::UnrealConfig wrong;
-            wrong.NamePool = reinterpret_cast<std::uint64_t>(&g_objects);
+            wrong.NamePool = fake.Objects;
             Target::UnrealRuntime runtime;
             const Status refused = runtime.Resolve(engine.Process(), wrong, true, nullptr);
             CHECK(!refused.Ok() && refused.Code == ErrorCode::UnrealNotResolved && refused.Text.find("configured name table") != std::string::npos);
             Target::UnrealRuntime gated;
             const Status rejected = gated.Resolve(engine.Process(), Target::UnrealConfig{}, false, nullptr);
             CHECK(!rejected.Ok() && gated.Rejected());
-            SessionAndLua(engine, fake);
+            SessionAndLua(engine, fake, o);
         }
         engine.CloseProcess();
+        SyntheticTarget(target.parent_path() / L"TestTarget32.exe", FakeUnreal::kOffsets32, "32-bit target");
+        SyntheticTarget(target.parent_path() / L"TestTarget.exe", FakeUnreal::kOffsets64, "64-bit target");
         return Totals().Failures - before;
     }
 
-    MANIFOLD_SUITE("unreal", "Unreal Engine", 36, [](const SuiteContext&) { return RunUnrealTests(); });
+    MANIFOLD_SUITE("unreal", "Unreal Engine", 36, [](const SuiteContext& context) { return RunUnrealTests(context.Target); });
     MANIFOLD_MODE("--unreal-check", [](const std::vector<std::string>& arguments) { return RunUnrealLive(arguments); });
 }

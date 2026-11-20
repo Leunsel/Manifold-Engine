@@ -35,6 +35,34 @@ namespace Manifold
         return m_stopped ? "(Unreal Engine tool shut down)" : "(Unreal Engine not resolved)";
     }
 
+    void UnrealSession::RegisterStringType(int pointerSize)
+    {
+        if (!m_lua)
+            return;
+        Lua::CustomType string;
+        string.Name = Target::kUnrealFStringType;
+        string.String = true;
+        string.SetByteCount(pointerSize + 8);
+        string.NativeText = [this](std::span<const std::uint8_t> bytes) -> std::optional<std::string>
+            {
+                const auto runtime = Runtime();
+                if (!runtime || !m_config.Types)
+                    return m_config.Types ? Unavailable() : std::string("(Unreal types are off)");
+                const bool wide = runtime->PointerSize() == 8;
+                const std::uint64_t data = wide ? Bytes<std::uint64_t>(bytes, 0) : Bytes<std::uint32_t>(bytes, 0);
+                const auto count = Bytes<std::int32_t>(bytes, wide ? 8 : 4);
+                if (count == 0 || data == 0)
+                    return std::string();
+                if (data < 0x10000 || data > 0x7FFFFFFFFFFF || count < 0 || count > 0x10000)
+                    return std::string("(not a string)");
+                const int length = std::min(count - 1, 512);
+                if (length <= 0)
+                    return std::string();
+                return runtime->WideText(data, static_cast<std::size_t>(length)).value_or("??");
+            };
+        m_lua->RegisterCustomType(std::move(string));
+    }
+
     void UnrealSession::RegisterTypes(Lua::LuaEngine& lua)
     {
         Lua::CustomType name;
@@ -61,28 +89,8 @@ namespace Manifold
                 return out;
             };
         lua.RegisterCustomType(std::move(name));
-
-        Lua::CustomType string;
-        string.Name = Target::kUnrealFStringType;
-        string.String = true;
-        string.SetByteCount(16);
-        string.NativeText = [this](std::span<const std::uint8_t> bytes) -> std::optional<std::string>
-            {
-                const auto runtime = Runtime();
-                if (!runtime || !m_config.Types)
-                    return m_config.Types ? Unavailable() : std::string("(Unreal types are off)");
-                const auto data = Bytes<std::uint64_t>(bytes, 0);
-                const auto count = Bytes<std::int32_t>(bytes, 8);
-                if (count == 0 || data == 0)
-                    return std::string();
-                if (data < 0x10000 || data > 0x7FFFFFFFFFFF || count < 0 || count > 0x10000)
-                    return std::string("(not a string)");
-                const int length = std::min(count - 1, 512);
-                if (length <= 0)
-                    return std::string();
-                return runtime->WideText(data, static_cast<std::size_t>(length)).value_or("??");
-            };
-        lua.RegisterCustomType(std::move(string));
+        m_lua = &lua;
+        RegisterStringType(8);
 
         Lua::CustomType index;
         index.Name = Target::kUnrealObjectIndexType;
@@ -216,6 +224,7 @@ namespace Manifold
             m_runtime = runtime;
         }
         m_state = UnrealState::Ready;
+        RegisterStringType(runtime->PointerSize());
         RegisterCoreSymbols();
         m_target.RefreshSymbolProvider();
         const Target::UnrealSummary& summary = runtime->Summary();

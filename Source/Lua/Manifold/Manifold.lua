@@ -1244,7 +1244,7 @@ local DOC_SPEC = {
   see = "table",
 }
 
-local unreal = area("unreal", "Unreal Engine 4 and 5 reflection, built into the program: it finds the game's name table, object array and reflection layout itself, without an SDK or game offsets, and only reads. Structure Dissect then knows Unreal objects (real property names, nested structs, bitfield bools, the native gaps), the custom types `UE FName`, `UE FString` and `UE Object Index` show names, strings and weak references, and `<Type>_<Property>` symbols such as `Actor_RootComponent` resolve to offsets in every session. It starts by itself when an Unreal game is opened, unless `configure{ autoStart = false }` says otherwise, and the window is in Extensions > Unreal Engine. The queries need it resolved and return `nil` and an `ME-4201` error before that. Types are given by name (`\"Actor\"`, without the U, A or F prefix) or by address.")
+local unreal = area("unreal", "Unreal Engine 4 and 5 reflection for 64-bit and 32-bit games, built into the program: it finds the game's name table, object array and reflection layout itself, without an SDK or game offsets, and only reads. Structure Dissect then knows Unreal objects (real property names, nested structs, bitfield bools, the native gaps), the custom types `UE FName`, `UE FString` and `UE Object Index` show names, strings and weak references, and `<Type>_<Property>` symbols such as `Actor_RootComponent` resolve to offsets in every session. It starts by itself when an Unreal game is opened, unless `configure{ autoStart = false }` says otherwise, and the window is in Extensions > Unreal Engine. The queries need it resolved and return `nil` and an `ME-4201` error before that. Types are given by name (`\"Actor\"`, without the U, A or F prefix) or by address.")
 
 local function many(first, ...)
   if first == nil and select("#", ...) > 0 and (...) ~= nil then
@@ -1253,7 +1253,7 @@ local function many(first, ...)
   return first, ...
 end
 
-local PATTERN_TEXT = "A pattern is an AOB string, or `{ pattern, offset, length, relative, add, module }`: the hit plus `offset` holds a 32-bit displacement relative to the end of the instruction (`length` bytes long, `offset + 4` by default), or with `relative = false` an absolute pointer; `add` is added to the result, and `module` (the executable by default) is where the pattern is searched."
+local PATTERN_TEXT = "A pattern is an AOB string, or `{ pattern, offset, length, relative, add, module }`: the hit plus `offset` holds a 32-bit displacement relative to the end of the instruction (`length` bytes long, `offset + 4` by default), or with `relative = false` an absolute pointer of the game's pointer size, which is what 32-bit code holds; `add` is added to the result, and `module` (the executable by default) is where the pattern is searched."
 
 define(unreal, "status", {
   returns = "`{ state, text, failure, objects, types, namePool, objectArray, objectArraySource, legacyNames, doubleVectors, seconds }`",

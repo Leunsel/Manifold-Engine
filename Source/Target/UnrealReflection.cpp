@@ -14,14 +14,8 @@ namespace Manifold::Target
     namespace
     {
         constexpr std::uint64_t kPointerMin = 0x10000;
-        constexpr std::uint64_t kPointerMax = 0x7FFFFFFFFFFF;
         constexpr std::uint64_t kOwnerWindow = 0x10000;
         constexpr std::uint64_t kOwnerBlock = 0x1000;
-
-        bool IsPtr(std::uint64_t value)
-        {
-            return value >= kPointerMin && value <= kPointerMax && (value & 7) == 0;
-        }
 
         bool EndsWith(std::string_view text, std::string_view tail)
         {
@@ -118,6 +112,7 @@ namespace Manifold::Target
         Stages stages;
         const ProgressScope scope(m_progress, progress);
         m_process = std::move(process);
+        m_pointer = m_process ? m_process->PointerSize() : 8;
         m_full = full;
         m_overrides = config.Layout;
         m_layout = UnrealLayout{};
@@ -140,8 +135,6 @@ namespace Manifold::Target
             m_rejected = true;
             return fail("not an Unreal Engine process (no CoreUObject in " + m_main.Name + ")");
         }
-        if (!m_process->Is64Bit())
-            return fail("only 64-bit games are supported");
 
         step("Finding the name table");
         m_pool = 0;
@@ -278,7 +271,7 @@ namespace Manifold::Target
         const int slot = m_layout.FField ? m_layout.FieldClass : m_layout.Class;
         if (slot < 0)
             return std::nullopt;
-        const auto value = block ? From<std::uint64_t>(block, slot) : ReadPointer(property + static_cast<std::uint64_t>(slot));
+        const auto value = block ? PointerFrom(block, slot) : ReadPointer(property + static_cast<std::uint64_t>(slot));
         if (!value || !*value)
             return std::nullopt;
         const std::uint64_t typeClass = *value;
@@ -298,7 +291,7 @@ namespace Manifold::Target
 
     std::optional<std::pair<std::uint64_t, std::string>> UnrealRuntime::InnerProperty(std::uint64_t property, int slot, const std::vector<std::uint8_t>* block) const
     {
-        const auto value = block ? From<std::uint64_t>(block, slot) : ReadPointer(property + static_cast<std::uint64_t>(slot));
+        const auto value = block ? PointerFrom(block, slot) : ReadPointer(property + static_cast<std::uint64_t>(slot));
         if (!value || !IsPtr(*value))
             return std::nullopt;
         const auto kind = TypeOf(*value, nullptr);
@@ -327,7 +320,7 @@ namespace Manifold::Target
             };
         const auto readObject = [&](int offset) -> std::uint64_t
             {
-                const auto value = block ? From<std::uint64_t>(block, offset) : ReadPointer(property + static_cast<std::uint64_t>(offset));
+                const auto value = block ? PointerFrom(block, offset) : ReadPointer(property + static_cast<std::uint64_t>(offset));
                 return value && IsPtr(*value) ? *value : 0;
             };
         UnrealField info;
@@ -380,7 +373,7 @@ namespace Manifold::Target
         }
         else if (kind == "EnumProperty")
         {
-            info.Inner = readObject(extra + 8);
+            info.Inner = readObject(extra + m_pointer);
             if (const auto underlying = InnerProperty(property, extra, block))
             {
                 info.InnerProperty = underlying->first;
@@ -391,7 +384,7 @@ namespace Manifold::Target
         {
             auto inner = InnerProperty(property, extra, block);
             if (!inner)
-                inner = InnerProperty(property, extra + 8, block);
+                inner = InnerProperty(property, extra + m_pointer, block);
             if (inner)
             {
                 info.InnerProperty = inner->first;
@@ -404,14 +397,14 @@ namespace Manifold::Target
             auto inner = InnerProperty(property, slot, block);
             if (!inner)
             {
-                slot = extra + 8;
+                slot = extra + m_pointer;
                 inner = InnerProperty(property, slot, block);
             }
             if (inner)
             {
                 info.InnerProperty = inner->first;
                 info.InnerType = inner->second;
-                if (const auto value = InnerProperty(property, slot + 8, block))
+                if (const auto value = InnerProperty(property, slot + m_pointer, block))
                 {
                     info.ValueProperty = value->first;
                     info.ValueType = value->second;
@@ -422,7 +415,7 @@ namespace Manifold::Target
         {
             info.Inner = readObject(extra);
             if (kind == "ClassProperty" || kind == "ClassPtrProperty" || kind == "SoftClassProperty")
-                info.MetaClass = readObject(extra + 8);
+                info.MetaClass = readObject(extra + m_pointer);
         }
         return info;
     }
@@ -450,7 +443,7 @@ namespace Manifold::Target
                 if (auto info = DescribeWith(field, *kind, owner, data))
                     out.push_back(std::move(*info));
             }
-            const auto next = data ? From<std::uint64_t>(data, m_layout.Next) : ReadPointer(field + static_cast<std::uint64_t>(m_layout.Next));
+            const auto next = data ? PointerFrom(data, m_layout.Next) : ReadPointer(field + static_cast<std::uint64_t>(m_layout.Next));
             field = next && IsPtr(*next) ? *next : 0;
         }
         std::lock_guard lock(m_lock);
@@ -581,11 +574,12 @@ namespace Manifold::Target
                 return it->second;
         }
         std::vector<UnrealEnumEntry> entries;
-        for (std::uint64_t offset = 0x28; offset <= 0x80; offset += 8)
+        const std::uint64_t pointer = static_cast<std::uint64_t>(m_pointer);
+        for (std::uint64_t offset = m_pointer == 8 ? 0x28 : 0x1C; offset <= 0x80; offset += pointer)
         {
             const std::uint64_t data = ReadObject(enumObject + offset);
-            const auto count = ReadInt(enumObject + offset + 8);
-            const auto max = ReadInt(enumObject + offset + 0xC);
+            const auto count = ReadInt(enumObject + offset + pointer);
+            const auto max = ReadInt(enumObject + offset + pointer + 4);
             if (!data || !count || !max || *count <= 0 || *count > 4096 || *max < *count)
                 continue;
             const std::string last = Upper(NameAt(data + static_cast<std::uint64_t>(*count - 1) * 16).value_or(""));
@@ -690,7 +684,8 @@ namespace Manifold::Target
     {
         if (m_layout.Index < 0)
             return std::nullopt;
-        const std::uint64_t start = address - address % 8;
+        const std::uint64_t step = static_cast<std::uint64_t>(m_pointer);
+        const std::uint64_t start = address - address % step;
         if (!IsPtr(start))
             return std::nullopt;
         const std::uint64_t stop = std::max(start > kOwnerWindow ? start - kOwnerWindow : 0, kPointerMin);
@@ -707,9 +702,9 @@ namespace Manifold::Target
             };
         for (std::uint64_t top = start; top >= stop;)
         {
-            const std::uint64_t bottom = std::max(top >= kOwnerBlock - 8 ? top - kOwnerBlock + 8 : 0, stop);
+            const std::uint64_t bottom = std::max(top >= kOwnerBlock - step ? top - kOwnerBlock + step : 0, stop);
             const bool read = ReadBlock(bottom + static_cast<std::uint64_t>(m_layout.Index), slots, static_cast<std::size_t>(top - bottom + 4));
-            for (std::uint64_t candidate = top;; candidate -= 8)
+            for (std::uint64_t candidate = top;; candidate -= step)
             {
                 std::optional<std::int32_t> index;
                 if (read)
@@ -730,12 +725,12 @@ namespace Manifold::Target
                     if (it->second == candidate)
                         return check(candidate);
                 }
-                if (candidate <= bottom || candidate < 8)
+                if (candidate <= bottom || candidate < step)
                     break;
             }
-            if (bottom < 8 + stop)
+            if (bottom < step + stop)
                 break;
-            top = bottom - 8;
+            top = bottom - step;
         }
         std::uint64_t best = 0;
         Each([&](std::uint64_t object, int)
@@ -757,10 +752,10 @@ namespace Manifold::Target
             int Width;
             const char* Name;
         };
-        std::vector<Slot> slots = { { 0, 8, "VTable" }, { m_layout.Index, 4, "InternalIndex" }, { m_layout.Class, 8, "ClassPrivate" }, { m_layout.Name, 8, "NamePrivate" },
-            { m_layout.Outer, 8, "OuterPrivate" } };
-        if (m_layout.Index == 0x0C)
-            slots.push_back({ 0x08, 4, "ObjectFlags" });
+        std::vector<Slot> slots = { { 0, m_pointer, "VTable" }, { m_layout.Index, 4, "InternalIndex" }, { m_layout.Class, m_pointer, "ClassPrivate" },
+            { m_layout.Name, 8, "NamePrivate" }, { m_layout.Outer, m_pointer, "OuterPrivate" } };
+        if (m_layout.Index == m_pointer + 4)
+            slots.push_back({ m_pointer, 4, "ObjectFlags" });
         for (const Slot& slot : slots)
         {
             if (slot.At >= 0 && offset >= slot.At && offset < slot.At + slot.Width)
@@ -869,7 +864,7 @@ namespace Manifold::Target
             if (f->Type == "ArrayProperty" && index)
             {
                 const std::uint64_t data = ReadPointer(slot).value_or(0);
-                slot = data ? data + static_cast<std::uint64_t>(*index) * 8 : 0;
+                slot = data ? data + static_cast<std::uint64_t>(*index) * static_cast<std::uint64_t>(m_pointer) : 0;
             }
             current = slot ? ReadPointer(slot).value_or(0) : 0;
         }
@@ -911,7 +906,7 @@ namespace Manifold::Target
         const auto clients = FindField(ClassOf(*driver), "ClientConnections");
         if (!server || !clients)
             return std::nullopt;
-        return ReadPointer(*driver + static_cast<std::uint64_t>(server->Offset)) == 0 && ReadInt(*driver + static_cast<std::uint64_t>(clients->Offset) + 8).value_or(0) == 0;
+        return ReadPointer(*driver + static_cast<std::uint64_t>(server->Offset)) == 0 && ReadInt(*driver + static_cast<std::uint64_t>(clients->Offset) + static_cast<std::uint64_t>(m_pointer)).value_or(0) == 0;
     }
 
     std::string UnrealRuntime::OffsetSymbol(const std::string& owner, const std::string& field)
@@ -949,13 +944,13 @@ namespace Manifold::Target
             else if (f->Type == "ArrayProperty" && index)
             {
                 const auto data = ReadPointer(walk.Address);
-                const auto count = ReadInt(walk.Address + 8);
+                const auto count = ReadInt(walk.Address + static_cast<std::uint64_t>(m_pointer));
                 if (!data || !*data || !count)
                     return Status::Fail(ErrorCode::ReadFailed, Hex(walk.Address));
                 if (*index >= *count)
                     return Status::Fail(ErrorCode::UnrealNoProperty, NameOf(type).value_or("?") + "." + steps[i] + " (the array has " + std::to_string(std::max(*count, 0)) + " elements)");
                 const auto element = f->InnerProperty ? Describe(f->InnerProperty, f->InnerType, f->Owner) : std::nullopt;
-                const std::uint64_t stride = element && element->Size > 0 ? static_cast<std::uint64_t>(element->Size) : 8;
+                const std::uint64_t stride = element && element->Size > 0 ? static_cast<std::uint64_t>(element->Size) : static_cast<std::uint64_t>(m_pointer);
                 const std::uint64_t offset = static_cast<std::uint64_t>(*index) * stride;
                 walk.Address = *data + offset;
                 walk.Expression = Format("[%s]+%llX", walk.Expression.c_str(), static_cast<unsigned long long>(offset));

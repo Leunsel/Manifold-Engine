@@ -46,6 +46,9 @@
     <Filter Include="Tests">
       <UniqueIdentifier>{08C95972-B402-5B3A-A3B9-36F843A24550}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Tests\Target">
+      <UniqueIdentifier>{E2284010-CF13-5AF1-97F4-F9BADA74312F}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\Source\App\ActivationRunner.cpp">
@@ -440,6 +443,9 @@
     </ClCompile>
     <ClInclude Include="..\Tests\TestKit.h">
       <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Tests\Target\FakeUnreal.h">
+      <Filter>Tests\Target</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

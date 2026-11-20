@@ -48,6 +48,7 @@ namespace Manifold
         UnrealSession& operator=(const UnrealSession&) = delete;
 
         void RegisterTypes(Lua::LuaEngine& lua);
+        void RegisterStringType(int pointerSize);
         void ProcessOpened();
         void ProcessClosed();
         void Start(bool automatic = false);
@@ -88,6 +89,7 @@ namespace Manifold
         BackgroundWork& m_work;
         Notifier m_notify;
         std::function<void()> m_ready;
+        Lua::LuaEngine* m_lua = nullptr;
         Target::UnrealConfig m_config;
         UnrealState m_state = UnrealState::Idle;
         std::string m_failure;

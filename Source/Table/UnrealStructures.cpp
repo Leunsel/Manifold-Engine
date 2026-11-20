@@ -32,12 +32,7 @@ namespace Manifold::Table
             int Width = 8;
         };
 
-        bool IsPointer(std::uint64_t value)
-        {
-            return value >= 0x10000 && value <= 0x7FFFFFFFFFFF && (value & 7) == 0;
-        }
-
-        int SizeOf(ValueType type, int bytes)
+        int SizeOf(ValueType type, int bytes, int pointer)
         {
             switch (type)
             {
@@ -46,8 +41,8 @@ namespace Manifold::Table
             case ValueType::FourBytes:
             case ValueType::Float: return 4;
             case ValueType::EightBytes:
-            case ValueType::Double:
-            case ValueType::Pointer: return 8;
+            case ValueType::Double: return 8;
+            case ValueType::Pointer: return pointer;
             default: return std::max(1, bytes);
             }
         }
@@ -86,7 +81,7 @@ namespace Manifold::Table
         {
         public:
             Filler(const Target::UnrealRuntime& runtime, const Target::Process& process, std::uint64_t base, bool customTypes)
-                : m_runtime(runtime), m_process(process), m_base(base), m_custom(customTypes)
+                : m_runtime(runtime), m_process(process), m_base(base), m_custom(customTypes), m_pointer(runtime.PointerSize())
             {
             }
 
@@ -102,7 +97,7 @@ namespace Manifold::Table
                 spec.Offset = offset;
                 spec.Name = std::move(name);
                 spec.Type = type;
-                spec.Size = SizeOf(type, width);
+                spec.Size = SizeOf(type, width, m_pointer);
                 spec.Display = display;
                 spec.Custom = m_custom ? std::move(custom) : std::string();
                 spec.Bit = bit;
@@ -158,18 +153,18 @@ namespace Manifold::Table
                 {
                     if (m_custom)
                     {
-                        Add(offset, name, ValueType::ByteArray, 16, FieldDisplay::Unsigned, Target::kUnrealFStringType);
+                        Add(offset, name, ValueType::ByteArray, m_pointer + 8, FieldDisplay::Unsigned, Target::kUnrealFStringType);
                     }
                     else
                     {
-                        Add(offset, name, ValueType::Pointer, 8);
-                        Add(offset + 8, name + ".Num", ValueType::FourBytes, 4, FieldDisplay::Signed);
+                        Add(offset, name, ValueType::Pointer, m_pointer);
+                        Add(offset + m_pointer, name + ".Num", ValueType::FourBytes, 4, FieldDisplay::Signed);
                     }
                     return;
                 }
                 if (Target::IsObjectProperty(kind) || kind == "InterfaceProperty")
                 {
-                    Add(offset, Annotated(name, m_runtime.TypeText(f)), ValueType::Pointer, 8);
+                    Add(offset, Annotated(name, m_runtime.TypeText(f)), ValueType::Pointer, m_pointer);
                     return;
                 }
                 if (kind == "WeakObjectProperty" || kind == "LazyObjectProperty" || kind == "SoftObjectProperty" || kind == "SoftClassProperty")
@@ -191,23 +186,23 @@ namespace Manifold::Table
                     {
                         const std::uint64_t header = m_base + static_cast<std::uint64_t>(offset);
                         const auto data = m_process.ReadPointer(header);
-                        if (data && IsPointer(*data))
+                        if (data && m_runtime.IsPointer(*data))
                             m_arrays.push_back({ *data, f, header });
                     }
-                    Add(offset, Annotated(name, m_runtime.TypeText(f)), ValueType::Pointer, 8);
-                    Add(offset + 8, name + ".Num", ValueType::FourBytes, 4, FieldDisplay::Signed);
-                    Add(offset + 12, name + ".Max", ValueType::FourBytes, 4, FieldDisplay::Signed);
+                    Add(offset, Annotated(name, m_runtime.TypeText(f)), ValueType::Pointer, m_pointer);
+                    Add(offset + m_pointer, name + ".Num", ValueType::FourBytes, 4, FieldDisplay::Signed);
+                    Add(offset + m_pointer + 4, name + ".Max", ValueType::FourBytes, 4, FieldDisplay::Signed);
                     return;
                 }
                 if (kind == "SetProperty" || kind == "MapProperty")
                 {
-                    Add(offset, Annotated(name + ".Elements", m_runtime.TypeText(f)), ValueType::Pointer, 8);
-                    Add(offset + 8, name + ".Num", ValueType::FourBytes, 4, FieldDisplay::Signed);
+                    Add(offset, Annotated(name + ".Elements", m_runtime.TypeText(f)), ValueType::Pointer, m_pointer);
+                    Add(offset + m_pointer, name + ".Num", ValueType::FourBytes, 4, FieldDisplay::Signed);
                     return;
                 }
                 if (kind == "TextProperty")
                 {
-                    Add(offset, Annotated(name, "FText"), ValueType::Pointer, 8);
+                    Add(offset, Annotated(name, "FText"), ValueType::Pointer, m_pointer);
                     return;
                 }
                 if (kind == "StructProperty" && f.Inner)
@@ -268,26 +263,27 @@ namespace Manifold::Table
                 for (const auto& [from, to] : gaps)
                 {
                     const int stop = std::min(to, from + kGapLimit);
-                    live.assign(static_cast<std::size_t>(std::max(0, std::min(to, stop + 8) - from)), 0);
+                    const int word = m_pointer;
+                    live.assign(static_cast<std::size_t>(std::max(0, std::min(to, stop + word) - from)), 0);
                     const bool read = m_base && !live.empty() && m_process.ReadExact(m_base + static_cast<std::uint64_t>(from), live.data(), live.size());
                     for (int at = from; at < stop && m_count < kElementLimit;)
                     {
-                        if (at % 8 == 0 && at + 8 <= to)
+                        if (at % word == 0 && at + word <= to)
                         {
                             std::optional<std::uint64_t> value;
-                            if (read && static_cast<std::size_t>(at - from + 8) <= live.size())
+                            if (read && static_cast<std::size_t>(at - from + word) <= live.size())
                             {
                                 std::uint64_t raw = 0;
-                                std::memcpy(&raw, live.data() + (at - from), 8);
+                                std::memcpy(&raw, live.data() + (at - from), static_cast<std::size_t>(word));
                                 value = raw;
                             }
                             else if (m_base)
                             {
                                 value = m_process.ReadPointer(m_base + static_cast<std::uint64_t>(at));
                             }
-                            const bool pointer = value && IsPointer(*value);
-                            Add(at, "(not reflected)", pointer ? ValueType::Pointer : ValueType::EightBytes, 8, pointer ? FieldDisplay::Unsigned : FieldDisplay::Hex);
-                            at += 8;
+                            const bool pointer = value && m_runtime.IsPointer(*value);
+                            Add(at, "(not reflected)", pointer ? ValueType::Pointer : BySize(word), word, pointer ? FieldDisplay::Unsigned : FieldDisplay::Hex);
+                            at += word;
                         }
                         else
                         {
@@ -302,13 +298,13 @@ namespace Manifold::Table
             void Header()
             {
                 const Target::UnrealLayout& l = m_runtime.Layout();
-                Add(0, "VTable", ValueType::Pointer, 8);
-                if (l.Index == 0x0C)
-                    Add(0x08, "ObjectFlags", ValueType::FourBytes, 4, FieldDisplay::Hex);
+                Add(0, "VTable", ValueType::Pointer, m_pointer);
+                if (l.Index == m_pointer + 4)
+                    Add(m_pointer, "ObjectFlags", ValueType::FourBytes, 4, FieldDisplay::Hex);
                 Add(l.Index, "InternalIndex", ValueType::FourBytes, 4, FieldDisplay::Signed);
-                Add(l.Class, "ClassPrivate", ValueType::Pointer, 8);
+                Add(l.Class, "ClassPrivate", ValueType::Pointer, m_pointer);
                 Add(l.Name, "NamePrivate", m_custom ? ValueType::ByteArray : ValueType::EightBytes, 8, FieldDisplay::Hex, Target::kUnrealFNameType);
-                Add(l.Outer, "OuterPrivate", ValueType::Pointer, 8);
+                Add(l.Outer, "OuterPrivate", ValueType::Pointer, m_pointer);
             }
 
             std::vector<StructField> Flush()
@@ -353,6 +349,7 @@ namespace Manifold::Table
             const Target::Process& m_process;
             std::uint64_t m_base = 0;
             bool m_custom = true;
+            int m_pointer = 8;
             int m_count = 0;
             std::vector<Spec> m_specs;
             std::vector<UnrealArrayRef> m_arrays;
@@ -386,7 +383,7 @@ namespace Manifold::Table
             int perEntry = 1;
             if (info->Type == "StructProperty" && info->Inner)
                 perEntry = std::max<int>(1, static_cast<int>(runtime.Fields(info->Inner).size()));
-            const int count = std::max(1, process.ReadValue<std::int32_t>(header + 8).value_or(1));
+            const int count = std::max(1, process.ReadValue<std::int32_t>(header + static_cast<std::uint64_t>(runtime.PointerSize())).value_or(1));
             const int entries = std::min(count, std::max(4, std::min(kArrayPreview, kArrayPreviewElements / perEntry)));
             const std::uint64_t data = process.ReadPointer(header).value_or(0);
             Filler filler(runtime, process, data, customTypes);
@@ -433,7 +430,7 @@ namespace Manifold::Table
             if (const auto array = arrays(address))
             {
                 const auto process = runtime.ProcessHandle();
-                const int count = process ? std::max(0, process->ReadValue<std::int32_t>(array->second + 8).value_or(0)) : 0;
+                const int count = process ? std::max(0, process->ReadValue<std::int32_t>(array->second + static_cast<std::uint64_t>(runtime.PointerSize())).value_or(0)) : 0;
                 return std::make_pair(runtime.TypeText(array->first) + "[" + std::to_string(count) + "]", address);
             }
         }

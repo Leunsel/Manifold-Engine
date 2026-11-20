@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <initializer_list>
+#include <span>
 #include <unordered_set>
 
 namespace Manifold::Target
@@ -16,7 +18,7 @@ namespace Manifold::Target
     {
         constexpr std::uint64_t kPointerMin = 0x10000;
         constexpr std::uint64_t kPointerMax = 0x7FFFFFFFFFFF;
-        constexpr std::uint64_t kNameBlocksAt = 0x10;
+        constexpr std::uint64_t kPointerMax32 = 0xFFFFFFFF;
         constexpr std::uint32_t kNameMaxBlocks = 8192;
         constexpr std::size_t kNameMaxLength = 1024;
         constexpr std::size_t kNamePeek = 0x3E;
@@ -34,11 +36,6 @@ namespace Manifold::Target
         constexpr const char* kCoreUObjectUtf16 = "2F 00 53 00 63 00 72 00 69 00 70 00 74 00 2F 00 43 00 6F 00 72 00 65 00 55 00 4F 00 62 00 6A 00 65 00 63 00 74 00";
         constexpr const char* kNoneByteProperty = "4E 6F 6E 65 ?? ?? 42 79 74 65 50 72 6F 70 65 72 74 79";
 
-        bool IsPtr(std::uint64_t value)
-        {
-            return value >= kPointerMin && value <= kPointerMax && (value & 7) == 0;
-        }
-
         bool EndsWith(std::string_view text, std::string_view tail)
         {
             return text.size() >= tail.size() && text.substr(text.size() - tail.size()) == tail;
@@ -54,32 +51,12 @@ namespace Manifold::Target
             return a < b + bWidth && b < a + aWidth;
         }
 
-        std::string PointerPattern(std::uint64_t value)
-        {
-            std::string text;
-            for (int i = 0; i < 8; ++i)
-            {
-                if (i)
-                    text += ' ';
-                text += Hex((value >> (i * 8)) & 0xFF, 2);
-            }
-            return text;
-        }
-
         template <class T>
         T Get(const std::uint8_t* data, std::size_t offset)
         {
             T value{};
             std::memcpy(&value, data + offset, sizeof(T));
             return value;
-        }
-
-        template <class T>
-        std::optional<T> From(const std::vector<std::uint8_t>* block, int offset)
-        {
-            if (!block || offset < 0 || static_cast<std::size_t>(offset) + sizeof(T) > block->size())
-                return std::nullopt;
-            return Get<T>(block->data(), static_cast<std::size_t>(offset));
         }
 
         UnrealLayout ArrayLayout(bool chunked, int objects, int max, int num, int maxChunks, int numChunks)
@@ -102,7 +79,21 @@ namespace Manifold::Target
             ArrayLayout(false, 0x00, 0x08, 0x0C, 0, 0),
         };
 
+        const UnrealLayout kArrayLayouts32[] = {
+            ArrayLayout(true, 0x00, 0x08, 0x0C, 0x10, 0x14),
+            ArrayLayout(true, 0x10, 0x00, 0x04, 0x08, 0x0C),
+            ArrayLayout(false, 0x00, 0x04, 0x08, 0, 0),
+        };
+
         const int kItemSizes[] = { 0x18, 0x10, 0x20, 0x28, 0x30 };
+        const int kItemSizes32[] = { 0x10, 0x0C, 0x14, 0x18, 0x20 };
+
+        std::span<const UnrealLayout> ArrayLayouts(int pointer)
+        {
+            if (pointer == 8)
+                return kArrayLayouts;
+            return kArrayLayouts32;
+        }
 
         const std::unordered_set<std::string_view> kObjectKinds = { "ObjectProperty", "ObjectPtrProperty", "ClassProperty", "ClassPtrProperty" };
     }
@@ -124,11 +115,44 @@ namespace Manifold::Target
         return kObjectKinds.count(kind) > 0;
     }
 
+    bool UnrealRuntime::IsPtr(std::uint64_t value) const
+    {
+        if (m_pointer == 8)
+            return value >= kPointerMin && value <= kPointerMax && (value & 7) == 0;
+        return value >= kPointerMin && value <= kPointerMax32 && (value & 3) == 0;
+    }
+
+    std::uint64_t UnrealRuntime::PointerIn(const std::uint8_t* data, std::size_t offset) const
+    {
+        if (m_pointer == 8)
+            return Get<std::uint64_t>(data, offset);
+        return Get<std::uint32_t>(data, offset);
+    }
+
+    std::optional<std::uint64_t> UnrealRuntime::PointerFrom(const std::vector<std::uint8_t>* block, int offset) const
+    {
+        if (!block || offset < 0 || static_cast<std::size_t>(offset) + static_cast<std::size_t>(m_pointer) > block->size())
+            return std::nullopt;
+        return PointerIn(block->data(), static_cast<std::size_t>(offset));
+    }
+
+    std::string UnrealRuntime::PointerPattern(std::uint64_t value) const
+    {
+        std::string text;
+        for (int i = 0; i < m_pointer; ++i)
+        {
+            if (i)
+                text += ' ';
+            text += Hex((value >> (i * 8)) & 0xFF, 2);
+        }
+        return text;
+    }
+
     std::optional<std::uint64_t> UnrealRuntime::ReadPointer(std::uint64_t address) const
     {
         if (!address || !m_process)
             return std::nullopt;
-        return m_process->ReadValue<std::uint64_t>(address);
+        return m_process->ReadPointer(address);
     }
 
     std::uint64_t UnrealRuntime::ReadObject(std::uint64_t address) const
@@ -160,7 +184,9 @@ namespace Manifold::Target
 
     std::optional<std::uint64_t> UnrealRuntime::ReadQword(std::uint64_t address) const
     {
-        return ReadPointer(address);
+        if (!address || !m_process)
+            return std::nullopt;
+        return m_process->ReadValue<std::uint64_t>(address);
     }
 
     bool UnrealRuntime::ReadBlock(std::uint64_t address, std::vector<std::uint8_t>& out, std::size_t size) const
@@ -353,8 +379,8 @@ namespace Manifold::Target
             }
             if (!base)
             {
-                const auto value = ReadPointer(m_pool + kNameBlocksAt + static_cast<std::uint64_t>(block) * 8);
-                if (!value || *value < kPointerMin || *value > kPointerMax)
+                const auto value = ReadPointer(m_pool + NameBlocksAt() + static_cast<std::uint64_t>(block) * static_cast<std::uint64_t>(m_pointer));
+                if (!value || *value < kPointerMin || *value > (m_pointer == 8 ? kPointerMax : kPointerMax32))
                     return std::nullopt;
                 base = *value;
                 std::lock_guard lock(m_lock);
@@ -373,13 +399,13 @@ namespace Manifold::Target
             }
             if (!chunk)
             {
-                chunk = ReadObject(m_pool + static_cast<std::uint64_t>(chunkIndex) * 8);
+                chunk = ReadObject(m_pool + static_cast<std::uint64_t>(chunkIndex) * static_cast<std::uint64_t>(m_pointer));
                 if (!chunk)
                     return std::nullopt;
                 std::lock_guard lock(m_lock);
                 m_blocks[chunkIndex] = chunk;
             }
-            const auto entry = ReadPointer(chunk + static_cast<std::uint64_t>(index % kLegacyPerChunk) * 8);
+            const auto entry = ReadPointer(chunk + static_cast<std::uint64_t>(index % kLegacyPerChunk) * static_cast<std::uint64_t>(m_pointer));
             if (entry)
                 text = LegacyEntry(*entry, m_legacyIndexAt, m_legacyNameAt);
         }
@@ -446,11 +472,11 @@ namespace Manifold::Target
     {
         for (const std::uint64_t slot : slots)
         {
-            const std::uint64_t pool = slot - kNameBlocksAt;
+            const std::uint64_t pool = slot - NameBlocksAt();
             if (!InImage(slot))
                 continue;
-            const auto current = ReadUInt(pool + 8);
-            const auto cursor = ReadUInt(pool + 0xC);
+            const auto current = ReadUInt(pool + static_cast<std::uint64_t>(m_pointer));
+            const auto cursor = ReadUInt(pool + static_cast<std::uint64_t>(m_pointer) + 4);
             if (current && cursor && *current < kNameMaxBlocks && *cursor < 0x20000)
                 return pool;
         }
@@ -468,9 +494,9 @@ namespace Manifold::Target
             const std::string pattern = PointerPattern(block);
             std::uint64_t pool = 0;
             if (m_main.Size)
-                pool = NamePoolAmong(FindBytes(pattern, m_main.Base, m_main.Base + m_main.Size, true, 8, 64));
+                pool = NamePoolAmong(FindBytes(pattern, m_main.Base, m_main.Base + m_main.Size, true, static_cast<std::uint64_t>(m_pointer), 64));
             if (!pool)
-                pool = NamePoolAmong(FindBytes(pattern, 0, ~0ull, true, 8, 64));
+                pool = NamePoolAmong(FindBytes(pattern, 0, ~0ull, true, static_cast<std::uint64_t>(m_pointer), 64));
             if (pool)
                 return pool;
         }
@@ -485,7 +511,7 @@ namespace Manifold::Target
         std::uint64_t entries[3] = {};
         for (int i = 0; i < 3; ++i)
         {
-            entries[i] = ReadObject(chunk + static_cast<std::uint64_t>(i) * 8);
+            entries[i] = ReadObject(chunk + static_cast<std::uint64_t>(i) * static_cast<std::uint64_t>(m_pointer));
             if (!entries[i])
                 return false;
         }
@@ -514,9 +540,9 @@ namespace Manifold::Target
             pattern += "4E 6F 6E 65 00";
             for (const std::uint64_t entry : FindBytes(pattern, 0, ~0ull, true, 4, 32))
             {
-                for (const std::uint64_t slot : FindBytes(PointerPattern(entry), 0, ~0ull, true, 8, 8))
+                for (const std::uint64_t slot : FindBytes(PointerPattern(entry), 0, ~0ull, true, static_cast<std::uint64_t>(m_pointer), 8))
                 {
-                    for (const std::uint64_t chunks : FindBytes(PointerPattern(slot), 0, ~0ull, true, 8, 8))
+                    for (const std::uint64_t chunks : FindBytes(PointerPattern(slot), 0, ~0ull, true, static_cast<std::uint64_t>(m_pointer), 8))
                     {
                         if (IsNameEntryArray(chunks, nameAt))
                             return chunks;
@@ -542,6 +568,8 @@ namespace Manifold::Target
                     continue;
                 const int length = pattern.Length > 0 ? pattern.Length : pattern.Offset + 4;
                 target = hit + static_cast<std::uint64_t>(length) + static_cast<std::uint64_t>(static_cast<std::int64_t>(*displacement));
+                if (m_pointer == 4)
+                    target &= 0xFFFFFFFFull;
             }
             else
             {
@@ -561,7 +589,7 @@ namespace Manifold::Target
     {
         if (!legacy)
         {
-            const std::uint64_t block = ReadObject(pool + kNameBlocksAt);
+            const std::uint64_t block = ReadObject(pool + NameBlocksAt());
             if (!block)
                 return false;
             const auto header = ReadWord(block);
@@ -578,7 +606,7 @@ namespace Manifold::Target
 
     bool UnrealRuntime::Plausible(const std::uint8_t* data, const UnrealLayout& layout) const
     {
-        const std::uint64_t objects = Get<std::uint64_t>(data, static_cast<std::size_t>(layout.ObjectsAt));
+        const std::uint64_t objects = PointerIn(data, static_cast<std::size_t>(layout.ObjectsAt));
         if (!IsPtr(objects) || InImage(objects))
             return false;
         const std::int32_t max = Get<std::int32_t>(data, static_cast<std::size_t>(layout.MaxAt));
@@ -615,15 +643,15 @@ namespace Manifold::Target
                 cache[object] = known;
                 return known;
             };
-        for (const int size : kItemSizes)
+        for (const int size : m_pointer == 8 ? std::span<const int>(kItemSizes) : std::span<const int>(kItemSizes32))
         {
-            for (int offset = 0; offset <= std::min(28, size - 8); offset += 4)
+            for (int offset = 0; offset <= std::min(28, size - m_pointer); offset += 4)
             {
                 int good = 0;
                 std::unordered_set<std::uint64_t> seen;
                 for (int i = 0; i < 64; ++i)
                 {
-                    const std::uint64_t object = Get<std::uint64_t>(raw.data(), static_cast<std::size_t>(i * size + offset));
+                    const std::uint64_t object = PointerIn(raw.data(), static_cast<std::size_t>(i * size + offset));
                     if (!seen.count(object) && vtableIn(object))
                     {
                         ++good;
@@ -652,7 +680,7 @@ namespace Manifold::Target
         live.Headers.assign(64, {});
         for (int i = 0; i < 64; ++i)
         {
-            const std::uint64_t object = Get<std::uint64_t>(raw.data(), static_cast<std::size_t>(i * live.Layout.ItemSize + live.Layout.ItemOffset));
+            const std::uint64_t object = PointerIn(raw.data(), static_cast<std::size_t>(i * live.Layout.ItemSize + live.Layout.ItemOffset));
             live.First[static_cast<std::size_t>(i)] = object;
             if (IsPtr(object) && !ReadBlock(object, live.Headers[static_cast<std::size_t>(i)], 0x48))
                 live.Headers[static_cast<std::size_t>(i)].clear();
@@ -749,11 +777,12 @@ namespace Manifold::Target
             if (got < 0x28)
                 continue;
             const std::size_t last = std::min<std::size_t>(static_cast<std::size_t>(kSectionStep), got - 0x28);
-            for (std::size_t pos = (8 - (at % 8)) % 8; pos <= last; pos += 8)
+            const std::size_t stride = static_cast<std::size_t>(m_pointer);
+            for (std::size_t pos = (stride - (at % stride)) % stride; pos <= last; pos += stride)
             {
                 if (generic)
                 {
-                    for (const UnrealLayout& layout : kArrayLayouts)
+                    for (const UnrealLayout& layout : ArrayLayouts(m_pointer))
                     {
                         if (Plausible(data.data() + pos, layout))
                         {
@@ -762,9 +791,9 @@ namespace Manifold::Target
                         }
                     }
                 }
-                else if (Plausible(data.data() + pos, kArrayLayouts[0]))
+                else if (Plausible(data.data() + pos, ArrayLayouts(m_pointer)[0]))
                 {
-                    if (auto live = LiveLayout(at + pos, kArrayLayouts[0]))
+                    if (auto live = LiveLayout(at + pos, ArrayLayouts(m_pointer)[0]))
                         return live;
                 }
             }
@@ -775,11 +804,11 @@ namespace Manifold::Target
     std::optional<UnrealRuntime::LiveArray> UnrealRuntime::CheckObjects(std::uint64_t array) const
     {
         std::vector<std::uint8_t> data;
-        for (std::uint64_t offset = 0; offset <= 0x50; offset += 8)
+        for (std::uint64_t offset = 0; offset <= 0x50; offset += static_cast<std::uint64_t>(m_pointer))
         {
             if (!ReadBlock(array + offset, data, 0x28))
                 continue;
-            for (const UnrealLayout& layout : kArrayLayouts)
+            for (const UnrealLayout& layout : ArrayLayouts(m_pointer))
             {
                 if (Plausible(data.data(), layout))
                 {
@@ -855,7 +884,7 @@ namespace Manifold::Target
                 return it->second;
         }
         const std::uint64_t table = ReadPointer(m_array + static_cast<std::uint64_t>(m_layout.ObjectsAt)).value_or(0);
-        const std::uint64_t chunk = table ? ReadObject(table + static_cast<std::uint64_t>(index) * 8) : 0;
+        const std::uint64_t chunk = table ? ReadObject(table + static_cast<std::uint64_t>(index) * static_cast<std::uint64_t>(m_pointer)) : 0;
         if (chunk)
         {
             std::lock_guard lock(m_lock);
@@ -898,7 +927,7 @@ namespace Manifold::Target
                 continue;
             for (int i = 0; i < n; ++i)
             {
-                const std::uint64_t object = Get<std::uint64_t>(raw.data(), static_cast<std::size_t>(i) * static_cast<std::size_t>(m_layout.ItemSize) + static_cast<std::size_t>(m_layout.ItemOffset));
+                const std::uint64_t object = PointerIn(raw.data(), static_cast<std::size_t>(i) * static_cast<std::size_t>(m_layout.ItemSize) + static_cast<std::size_t>(m_layout.ItemOffset));
                 if (IsPtr(object) && visit(object, first + i))
                     return;
             }
@@ -952,9 +981,11 @@ namespace Manifold::Target
             return false;
         if (m_layout.Class < 0)
         {
-            for (const int offset : { 0x10, 0x08, 0x18, 0x20, 0x28, 0x30, 0x38 })
+            const std::initializer_list<int> wide = { 0x10, 0x08, 0x18, 0x20, 0x28, 0x30, 0x38 };
+            const std::initializer_list<int> narrow = { 0x0C, 0x04, 0x08, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24 };
+            for (const int offset : m_pointer == 8 ? wide : narrow)
             {
-                if (Overlaps(offset, 8, m_layout.Name, 8) || Overlaps(offset, 8, m_layout.Index, 4))
+                if (Overlaps(offset, m_pointer, m_layout.Name, 8) || Overlaps(offset, m_pointer, m_layout.Index, 4))
                     continue;
                 const std::uint64_t meta = ReadObject(objectClass + static_cast<std::uint64_t>(offset));
                 const std::uint64_t packageMeta = ReadObject(package + static_cast<std::uint64_t>(offset));
@@ -970,9 +1001,11 @@ namespace Manifold::Target
             return false;
         if (m_layout.Outer < 0)
         {
-            for (const int offset : { 0x20, 0x28, 0x18, 0x10, 0x30, 0x38, 0x40 })
+            const std::initializer_list<int> wide = { 0x20, 0x28, 0x18, 0x10, 0x30, 0x38, 0x40 };
+            const std::initializer_list<int> narrow = { 0x18, 0x1C, 0x14, 0x10, 0x0C, 0x08, 0x04, 0x20, 0x24, 0x28 };
+            for (const int offset : m_pointer == 8 ? wide : narrow)
             {
-                if (!Overlaps(offset, 8, m_layout.Name, 8) && offset != m_layout.Class && ReadPointer(objectClass + static_cast<std::uint64_t>(offset)) == package)
+                if (!Overlaps(offset, m_pointer, m_layout.Name, 8) && offset != m_layout.Class && ReadPointer(objectClass + static_cast<std::uint64_t>(offset)) == package)
                 {
                     m_layout.Outer = offset;
                     break;
@@ -1066,7 +1099,7 @@ namespace Manifold::Target
             if (pageSize && at >= pageBase && at + span <= pageBase + pageSize)
             {
                 const std::uint8_t* header = page.data() + (at - pageBase);
-                meta = Get<std::uint64_t>(header, static_cast<std::size_t>(m_layout.Class - first));
+                meta = PointerIn(header, static_cast<std::size_t>(m_layout.Class - first));
                 const std::size_t nameAt = static_cast<std::size_t>(m_layout.Name - first);
                 if (IsPtr(meta))
                 {
@@ -1122,7 +1155,7 @@ namespace Manifold::Target
             return false;
         if (m_layout.Super >= 0)
             return true;
-        for (int offset = m_layout.Outer + 8; offset <= 0x80; offset += 8)
+        for (int offset = m_layout.Outer + m_pointer; offset <= 0x80; offset += m_pointer)
         {
             const auto at = static_cast<std::uint64_t>(offset);
             if (ReadPointer(structType + at) == field && ReadPointer(field + at) == object && ReadPointer(classType + at) == structType)
@@ -1136,7 +1169,7 @@ namespace Manifold::Target
 
     bool UnrealRuntime::ProbePropertyFields(std::uint64_t x, std::uint64_t y, std::uint64_t z)
     {
-        for (int offset = 0x20; offset <= 0x90; offset += 4)
+        for (int offset = m_pointer == 8 ? 0x20 : 0x18; offset <= 0x90; offset += 4)
         {
             if (const auto preset = Override("offset"); preset && offset != *preset)
                 continue;
@@ -1150,7 +1183,7 @@ namespace Manifold::Target
                 m_layout.Component = *b;
                 if (m_layout.Size < 0)
                 {
-                    for (int size = 0x24; size <= offset - 4; size += 4)
+                    for (int size = m_pointer == 8 ? 0x24 : 0x14; size <= offset - 4; size += 4)
                     {
                         const auto s = static_cast<std::uint64_t>(size);
                         if (ReadInt(x + s) == *b && ReadInt(y + s) == *b && ReadInt(z + s) == *b && ReadInt(x + s - 4) == 1)
@@ -1171,7 +1204,7 @@ namespace Manifold::Target
         const std::uint64_t vector = Type("Vector");
         if (!vector)
             return false;
-        for (int list = m_layout.Super + 8; list <= m_layout.Super + 0x48; list += 8)
+        for (int list = m_layout.Super + m_pointer; list <= m_layout.Super + 0x48; list += m_pointer)
         {
             if (m_layout.ChildProperties >= 0 && list != m_layout.ChildProperties)
                 continue;
@@ -1184,11 +1217,11 @@ namespace Manifold::Target
                     continue;
                 if (NameAt(x + static_cast<std::uint64_t>(name)) != "X")
                     continue;
-                for (int next = 8; next <= 0x48; next += 8)
+                for (int next = m_pointer; next <= 0x48; next += m_pointer)
                 {
                     if (const auto preset = Override("next"); preset && next != *preset)
                         continue;
-                    if (next + 8 > name && next < name + 8)
+                    if (next + m_pointer > name && next < name + 8)
                         continue;
                     const std::uint64_t y = ReadObject(x + static_cast<std::uint64_t>(next));
                     const std::uint64_t z = y && NameAt(y + static_cast<std::uint64_t>(name)) == "Y" ? ReadObject(y + static_cast<std::uint64_t>(next)) : 0;
@@ -1203,7 +1236,7 @@ namespace Manifold::Target
                         m_layout.FField = *preset != 0;
                     if (m_layout.FField && m_layout.FieldClass < 0)
                     {
-                        for (int slot = 8; slot <= name - 8; slot += 8)
+                        for (int slot = m_pointer; slot <= name - m_pointer; slot += m_pointer)
                         {
                             const std::uint64_t fieldClass = ReadObject(x + static_cast<std::uint64_t>(slot));
                             if (fieldClass && IsPropertyKind(NameAt(fieldClass).value_or("")))
@@ -1228,7 +1261,7 @@ namespace Manifold::Target
             return;
         const int c = m_layout.Component;
         const std::pair<const char*, int> known[] = { { "Vector", 3 * c }, { "Vector2D", 2 * c }, { "LinearColor", 16 }, { "IntPoint", 8 } };
-        for (int offset = m_layout.ChildProperties + 8; offset <= m_layout.ChildProperties + 0x40; offset += 4)
+        for (int offset = m_layout.ChildProperties + m_pointer; offset <= m_layout.ChildProperties + 0x40; offset += 4)
         {
             bool ok = true;
             for (const auto& [name, size] : known)
@@ -1287,7 +1320,7 @@ namespace Manifold::Target
         const std::uint64_t location = FieldIn(scene, "RelativeLocation");
         if (!root || !location)
             return;
-        for (int offset = (m_layout.Offset + 4 + 7) & ~7; offset <= 0x100; offset += 8)
+        for (int offset = (m_layout.Offset + 4 + m_pointer - 1) & ~(m_pointer - 1); offset <= 0x100; offset += m_pointer)
         {
             if (ReadPointer(root + static_cast<std::uint64_t>(offset)) == scene && ReadPointer(location + static_cast<std::uint64_t>(offset)) == vector)
             {
@@ -1348,11 +1381,12 @@ namespace Manifold::Target
             }
             else
             {
-                for (int children = 0x28; children <= 0x100 && m_layout.Children < 0; children += 8)
+                const int first = m_pointer == 8 ? 0x28 : 0x1C;
+                for (int children = first; children <= 0x100 && m_layout.Children < 0; children += m_pointer)
                 {
                     if (children == m_layout.ChildProperties || children == m_layout.Super)
                         continue;
-                    for (int next = 0x28; next <= 0x40; next += 8)
+                    for (int next = first; next <= first + 3 * m_pointer; next += m_pointer)
                     {
                         int chains = 0;
                         bool foreign = false;

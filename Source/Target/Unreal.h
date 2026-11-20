@@ -187,6 +187,8 @@ namespace Manifold::Target
 
         const UnrealSummary& Summary() const { return m_summary; }
         bool Rejected() const { return m_rejected; }
+        int PointerSize() const { return m_pointer; }
+        bool IsPointer(std::uint64_t value) const { return IsPtr(value); }
         std::shared_ptr<const Process> ProcessHandle() const { return m_process; }
         std::optional<std::string> WideText(std::uint64_t address, std::size_t length) const { return ReadWide(address, length); }
         const UnrealLayout& Layout() const { return m_layout; }
@@ -251,6 +253,11 @@ namespace Manifold::Target
             std::vector<std::vector<std::uint8_t>> Headers;
         };
 
+        bool IsPtr(std::uint64_t value) const;
+        std::uint64_t PointerIn(const std::uint8_t* data, std::size_t offset) const;
+        std::optional<std::uint64_t> PointerFrom(const std::vector<std::uint8_t>* block, int offset) const;
+        std::string PointerPattern(std::uint64_t value) const;
+        std::uint64_t NameBlocksAt() const { return static_cast<std::uint64_t>(m_pointer) + 8; }
         std::optional<std::uint64_t> ReadPointer(std::uint64_t address) const;
         std::uint64_t ReadObject(std::uint64_t address) const;
         std::optional<std::int32_t> ReadInt(std::uint64_t address) const;
@@ -312,6 +319,7 @@ namespace Manifold::Target
         std::vector<std::pair<std::uint64_t, std::uint64_t>> m_images;
         ModuleInfo m_main;
         bool m_full = false;
+        int m_pointer = 8;
         bool m_rejected = false;
         UnrealLayout m_layout;
         UnrealSummary m_summary;

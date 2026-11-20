@@ -240,6 +240,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Tests\TestKit.h" />
+    <ClInclude Include="..\Tests\Target\FakeUnreal.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="Dependencies.vcxproj">
