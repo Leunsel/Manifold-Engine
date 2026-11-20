@@ -22,6 +22,7 @@ namespace Manifold::UI::EditorShared
 
     ImU32 TokenColor(Text::Token kind);
     void ClearAssist(CodeAssistState& assist);
+    const CodeAssist& ProviderAt(const CodeAssist& provider, const std::string& text, std::size_t cursor);
     void UpdateAssist(CodeAssistState& assist, const CodeAssist& provider, const std::string& text, std::size_t cursor, bool changed, bool force);
     std::shared_ptr<const Lua::DocRecord> BufferDoc(CodeAssistState& assist, const std::string& text, std::string_view chain);
     std::shared_ptr<const Lua::DocRecord> DescribeAt(CodeAssistState& assist, const CodeAssist& provider, const std::string& text, std::string_view chain, bool method);

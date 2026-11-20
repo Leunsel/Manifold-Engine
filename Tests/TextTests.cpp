@@ -1,10 +1,13 @@
 #include "TestKit.h"
 
+#include "Asm/AsmAssist.h"
+
 #include "Text/Highlight.h"
 #include "Text/Json.h"
 #include "Text/LuaContext.h"
 #include "Text/TextBuffer.h"
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -235,6 +238,87 @@ namespace Manifold::Tests
             CHECK_EQ(Text::AssignedCall("x = 5", 5, "x"), std::string());
             CHECK_EQ(Text::AssignedCall("s = \"x = f()\"", 13, "x"), std::string());
             CHECK_EQ(Text::AssignedCall("", 0, "x"), std::string());
+        }
+
+        bool Offers(const std::vector<Asm::AsmCompletion>& items, std::string_view name)
+        {
+            return std::any_of(items.begin(), items.end(), [&](const Asm::AsmCompletion& item) { return item.Name == name; });
+        }
+
+        void AssemblerAssist()
+        {
+            const std::string script =
+                "[ENABLE]\n"
+                "aobscanmodule(INJECT,game.exe,48 8B 05)\n"
+                "alloc(newmem,$1000,INJECT)\n"
+                "label(code,return)\n"
+                "registersymbol(INJECT)\n"
+                "\n"
+                "newmem:\n"
+                "code:\n"
+                "  mov rax,[rbx+10]\n"
+                "  jmp return\n"
+                "// label(commented)\n"
+                "{$lua}\n"
+                "local hidden = 1\n"
+                "{$asm}\n"
+                "INJECT:\n"
+                "  jmp newmem\n"
+                "return:\n";
+            const std::vector<std::string> names = Asm::ScriptNames(script);
+            for (const char* name : { "INJECT", "newmem", "code", "return" })
+                CHECK_MSG(std::find(names.begin(), names.end(), name) != names.end(), name);
+            CHECK(std::find(names.begin(), names.end(), "commented") == names.end());
+            CHECK(std::find(names.begin(), names.end(), "hidden") == names.end());
+            CHECK_EQ(names.size(), 4u);
+
+            const std::string luaBlock = "{$lua}\nprint(1)\n{$asm}\nmov eax,1\n{$LUA}\nx";
+            CHECK(Asm::InLuaBlock(luaBlock, 10) && !Asm::InLuaBlock(luaBlock, 30) && Asm::InLuaBlock(luaBlock, luaBlock.size()));
+            CHECK(!Asm::InLuaBlock("mov eax,1", 9));
+
+            Asm::AsmWord word = Asm::AsmWordAt("  mo", 4);
+            CHECK(word.Place == Asm::AsmPlace::LineStart && word.Prefix == "mo" && word.Start == 2);
+            word = Asm::AsmWordAt("mov rax,[rb", 11);
+            CHECK(word.Place == Asm::AsmPlace::Operand && word.Command == "mov" && word.Prefix == "rb");
+            word = Asm::AsmWordAt("aobscanmodule(INJECT,ga", 23);
+            CHECK(word.Place == Asm::AsmPlace::Argument && word.Command == "aobscanmodule" && word.Argument == 1 && word.Prefix == "ga");
+            CHECK(Asm::AsmWordAt("{$lu", 4).Place == Asm::AsmPlace::Directive);
+            CHECK(Asm::AsmWordAt("[ENA", 4).Place == Asm::AsmPlace::Section);
+            CHECK(Asm::AsmWordAt("mov eax,1 // co", 15).Place == Asm::AsmPlace::None);
+            CHECK(Asm::AsmWordAt("newmem:", 6).Place == Asm::AsmPlace::LineStart);
+            CHECK(Asm::AsmWordAt("alloc(a,1)  x", 13).Place == Asm::AsmPlace::None);
+
+            Asm::AsmAssistInput input;
+            input.Modules = { "game.exe", "kernel32.dll" };
+            input.Symbols = { "playerBase", "gameTimer" };
+            const auto at = [&](std::string_view text) { return Asm::CompleteAsm(text, text.size(), input); };
+            const auto start = at("al");
+            CHECK(Offers(start, "alloc") && Offers(start, "aobscanmodule") && !Offers(start, "rax"));
+            const auto mnemonic = at("mo");
+            CHECK(Offers(mnemonic, "mov") && Offers(mnemonic, "movss") && Offers(mnemonic, "movzx"));
+            const auto operand = at(script + "  mov r");
+            CHECK(Offers(operand, "rax") && Offers(operand, "r15") && Offers(operand, "newmem"));
+            CHECK(Offers(at("mov rax,ga"), "game.exe"));
+            input.Is64Bit = false;
+            const auto narrow = at("mov e");
+            CHECK(Offers(narrow, "eax") && !Offers(narrow, "rax") && !Offers(narrow, "r8"));
+            input.Is64Bit = true;
+            CHECK(Offers(at("mov rax,pl"), "playerBase") && !Offers(at("mov rax,p"), "playerBase"));
+            const auto module = at("aobscanmodule(X,ga");
+            CHECK(Offers(module, "game.exe") && !Offers(module, "playerBase"));
+            CHECK(at("aobscanmodule(ne").empty());
+            CHECK(Offers(at(script + "dealloc("), "newmem"));
+            CHECK(Offers(at("{$l"), "$lua}") && Offers(at("{$l"), "$asm}"));
+            CHECK(Offers(at("[EN"), "ENABLE]") && Offers(at("[EN"), "DISABLE]"));
+            CHECK(at("{$lua}\nloc").empty());
+            CHECK(at("mov eax,1 // re").empty());
+
+            const Asm::AsmCommandDoc* alloc = Asm::FindAsmCommand("ALLOC");
+            CHECK(alloc && alloc->Params.size() == 3 && alloc->Params[2].Optional);
+            CHECK(!Asm::FindAsmCommand("mov"));
+            CHECK(Asm::AsmCommands().size() >= 19);
+            CHECK(Asm::AsmWordAt("mov ", 4).Place == Asm::AsmPlace::Operand);
+            CHECK(Asm::AsmWordAt("  ", 2).Place == Asm::AsmPlace::LineStart);
         }
 
         void Calls()
@@ -604,6 +688,7 @@ namespace Manifold::Tests
         JsonHighlight();
         JsonFormat();
         Words();
+        AssemblerAssist();
         Calls();
         Chains();
         Functions();

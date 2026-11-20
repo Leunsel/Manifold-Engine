@@ -40,6 +40,9 @@ namespace Manifold::UI
         std::function<std::string(const std::string& type, const std::string& scope)> ResolveType;
         std::function<std::vector<CodeSuggestion>(const std::string& className, const std::string& prefix, bool method)> CompleteClass;
         std::function<std::shared_ptr<const Lua::DocRecord>(const std::string& className, const std::string& member)> ClassMember;
+        std::function<std::vector<CodeSuggestion>(const std::string& text, std::size_t cursor, std::size_t& start)> CompleteAt;
+        const CodeAssist* Embedded = nullptr;
+        std::function<bool(const std::string& text, std::size_t cursor)> UseEmbedded;
     };
 
     struct CodeAssistState

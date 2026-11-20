@@ -90,6 +90,9 @@
     <ClCompile Include="..\Source\App\WriteHistory.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Asm\AsmAssist.cpp">
+      <Filter>Source\Asm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Asm\Assembler.cpp">
       <Filter>Source\Asm</Filter>
     </ClCompile>

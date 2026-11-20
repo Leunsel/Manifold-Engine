@@ -20,6 +20,8 @@ namespace Manifold
 
 namespace Manifold::UI
 {
+    CodeAssist MakeLuaAssist(Engine& engine);
+
     class LuaWindow : public ToolWindowBase
     {
     public:

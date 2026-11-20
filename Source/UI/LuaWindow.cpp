@@ -30,30 +30,34 @@ namespace Manifold::UI
         }
     }
 
+    CodeAssist MakeLuaAssist(Engine& engine)
+    {
+        const auto convert = [](std::vector<Lua::LuaCompletion> items)
+            {
+                std::vector<CodeSuggestion> result;
+                result.reserve(items.size());
+                for (Lua::LuaCompletion& item : items)
+                    result.push_back({ std::move(item.Name), std::move(item.Kind), std::move(item.Signature), std::move(item.Text), std::move(item.Doc) });
+                return result;
+            };
+        Engine* owner = &engine;
+        CodeAssist assist;
+        assist.Complete = [owner, convert](const std::string& chain, const std::string& prefix, bool method) { return convert(owner->Lua().Complete(chain, prefix, method)); };
+        assist.Signatures = [owner](const std::string& chain, bool method) { return owner->Lua().CallSignatures(chain, method); };
+        assist.Choices = [owner](const std::string& chain, bool method, int argument) { return owner->Lua().CallArgumentChoices(chain, method, argument); };
+        assist.Describe = [owner](const std::string& chain, bool method) { return owner->Lua().Describe(chain, method); };
+        assist.ResolveType = [owner](const std::string& type, const std::string& scope) { return owner->Lua().ResolveDocType(type, scope); };
+        assist.CompleteClass = [owner, convert](const std::string& className, const std::string& prefix, bool method) { return convert(owner->Lua().CompleteClass(className, prefix, method)); };
+        assist.ClassMember = [owner](const std::string& className, const std::string& member) { return owner->Lua().ClassMember(className, member); };
+        return assist;
+    }
+
     LuaWindow::LuaWindow(Workspace& workspace) : m_workspace(workspace), m_engine(workspace.Core()), m_history(HistoryFile())
     {
         m_text = "-- Lua 5.4 with the Manifold API. Ctrl+Enter runs the script.\n"
                  "print(\"Process: \" .. getOpenedProcessID())\n";
         m_savedText = m_text;
-        m_assist.Complete = [this](const std::string& chain, const std::string& prefix, bool method)
-            {
-                std::vector<CodeSuggestion> result;
-                for (Lua::LuaCompletion& item : m_engine.Lua().Complete(chain, prefix, method))
-                    result.push_back({ std::move(item.Name), std::move(item.Kind), std::move(item.Signature), std::move(item.Text), std::move(item.Doc) });
-                return result;
-            };
-        m_assist.Signatures = [this](const std::string& chain, bool method) { return m_engine.Lua().CallSignatures(chain, method); };
-        m_assist.Choices = [this](const std::string& chain, bool method, int argument) { return m_engine.Lua().CallArgumentChoices(chain, method, argument); };
-        m_assist.Describe = [this](const std::string& chain, bool method) { return m_engine.Lua().Describe(chain, method); };
-        m_assist.ResolveType = [this](const std::string& type, const std::string& scope) { return m_engine.Lua().ResolveDocType(type, scope); };
-        m_assist.CompleteClass = [this](const std::string& className, const std::string& prefix, bool method)
-            {
-                std::vector<CodeSuggestion> result;
-                for (Lua::LuaCompletion& item : m_engine.Lua().CompleteClass(className, prefix, method))
-                    result.push_back({ std::move(item.Name), std::move(item.Kind), std::move(item.Signature), std::move(item.Text), std::move(item.Doc) });
-                return result;
-            };
-        m_assist.ClassMember = [this](const std::string& className, const std::string& member) { return m_engine.Lua().ClassMember(className, member); };
+        m_assist = MakeLuaAssist(m_engine);
         m_editor.Assist = &m_assist;
         m_inputEditor.Assist = &m_assist;
         m_inputEditor.Console = true;

@@ -2628,6 +2628,16 @@ namespace Manifold::Asm
         return "Unknown";
     }
 
+    std::vector<std::string> KnownMnemonics()
+    {
+        std::vector<std::string> names;
+        names.reserve(Mnemonics().size());
+        for (const auto& [name, info] : Mnemonics())
+            names.push_back(name);
+        std::sort(names.begin(), names.end());
+        return names;
+    }
+
     AssembleResult Assemble(std::string_view line, const AssembleOptions& options)
     {
         AssembleResult result;

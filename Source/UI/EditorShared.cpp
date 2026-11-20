@@ -86,6 +86,37 @@ namespace Manifold::UI::EditorShared
             }
         }
 
+        void Present(CodeAssistState& assist, std::vector<CodeSuggestion> items, const std::string& prefix, std::size_t start, const std::string& chain, bool method)
+        {
+            std::stable_sort(items.begin(), items.end(), [&](const CodeSuggestion& a, const CodeSuggestion& b)
+                {
+                    const int left = Text::FuzzyScore(a.Name, prefix);
+                    const int right = Text::FuzzyScore(b.Name, prefix);
+                    if (left != right)
+                        return left > right;
+                    return Lower(a.Name) < Lower(b.Name);
+                });
+            items.erase(std::remove_if(items.begin(), items.end(), [&](const CodeSuggestion& item) { return Text::FuzzyScore(item.Name, prefix) < 0; }), items.end());
+            if (items.empty() || (items.size() == 1 && items.front().Name == prefix))
+            {
+                assist.Open = false;
+                return;
+            }
+            const std::string previous = assist.Open && assist.Selected < static_cast<int>(assist.Items.size()) ? assist.Items[static_cast<std::size_t>(assist.Selected)].Name : std::string();
+            assist.Items = std::move(items);
+            assist.Selected = 0;
+            assist.ShownSelected = -1;
+            for (std::size_t i = 0; i < assist.Items.size(); ++i)
+            {
+                if (!previous.empty() && assist.Items[i].Name == previous)
+                    assist.Selected = static_cast<int>(i);
+            }
+            assist.Open = true;
+            assist.WordStart = start;
+            assist.Chain = chain;
+            assist.Method = method;
+        }
+
         std::pair<std::string, std::string> SplitLast(std::string_view chain)
         {
             const std::size_t at = chain.find_last_of(".:");
@@ -143,33 +174,41 @@ namespace Manifold::UI::EditorShared
                 }
             }
             AddBufferWords(text, word, items);
-            std::stable_sort(items.begin(), items.end(), [&](const CodeSuggestion& a, const CodeSuggestion& b)
-                {
-                    const int left = Text::FuzzyScore(a.Name, word.Prefix);
-                    const int right = Text::FuzzyScore(b.Name, word.Prefix);
-                    if (left != right)
-                        return left > right;
-                    return Lower(a.Name) < Lower(b.Name);
-                });
-            items.erase(std::remove_if(items.begin(), items.end(), [&](const CodeSuggestion& item) { return Text::FuzzyScore(item.Name, word.Prefix) < 0; }), items.end());
-            if (items.empty() || (items.size() == 1 && items.front().Name == word.Prefix))
+            Present(assist, std::move(items), word.Prefix, word.Start, word.Chain, word.Method);
+        }
+
+        bool AsmWordChar(char c)
+        {
+            return IsIdentifier(c) || c == '.' || c == '$' || c == '@';
+        }
+
+        void UpdateAsmCompletion(CodeAssistState& assist, const CodeAssist& provider, const std::string& text, std::size_t cursor, bool changed, bool force)
+        {
+            if (assist.JustAccepted)
             {
-                assist.Open = false;
+                assist.JustAccepted = false;
                 return;
             }
-            const std::string previous = assist.Open && assist.Selected < static_cast<int>(assist.Items.size()) ? assist.Items[static_cast<std::size_t>(assist.Selected)].Name : std::string();
-            assist.Items = std::move(items);
-            assist.Selected = 0;
-            assist.ShownSelected = -1;
-            for (std::size_t i = 0; i < assist.Items.size(); ++i)
+            const char typed = cursor > 0 ? text[cursor - 1] : '\0';
+            if (force || changed)
             {
-                if (!previous.empty() && assist.Items[i].Name == previous)
-                    assist.Selected = static_cast<int>(i);
+                std::size_t start = cursor;
+                std::vector<CodeSuggestion> items = provider.CompleteAt(text, cursor, start);
+                const std::string prefix = text.substr(start, cursor - start);
+                const bool want = force || typed == '[' || (AsmWordChar(typed) && !prefix.empty() && (prefix.size() >= 2 || assist.Open || typed == '$' || typed == '.'));
+                if (want)
+                    Present(assist, std::move(items), prefix, start, std::string(), false);
+                else
+                    assist.Open = false;
+                return;
             }
-            assist.Open = true;
-            assist.WordStart = word.Start;
-            assist.Chain = word.Chain;
-            assist.Method = word.Method;
+            if (!assist.Open)
+                return;
+            bool inside = cursor >= assist.WordStart;
+            for (std::size_t i = assist.WordStart; inside && i < cursor; ++i)
+                inside = AsmWordChar(text[i]);
+            if (!inside)
+                assist.Open = false;
         }
 
         const char* KindIcon(const std::string& kind)
@@ -316,11 +355,25 @@ namespace Manifold::UI::EditorShared
         return found;
     }
 
+    const CodeAssist& ProviderAt(const CodeAssist& provider, const std::string& text, std::size_t cursor)
+    {
+        if (provider.Embedded && provider.UseEmbedded && provider.UseEmbedded(text, std::min(cursor, text.size())))
+            return *provider.Embedded;
+        return provider;
+    }
+
     void UpdateAssist(CodeAssistState& assist, const CodeAssist& provider, const std::string& text, std::size_t cursor, bool changed, bool force)
     {
         cursor = std::min(cursor, text.size());
-        const Text::WordContext word = Text::WordAt(text, cursor);
-        if (assist.JustAccepted)
+        if (const CodeAssist& inner = ProviderAt(provider, text, cursor); &inner != &provider)
+        {
+            UpdateAssist(assist, inner, text, cursor, changed, force);
+            return;
+        }
+        const Text::WordContext word = provider.CompleteAt ? Text::WordContext{} : Text::WordAt(text, cursor);
+        if (provider.CompleteAt)
+            UpdateAsmCompletion(assist, provider, text, cursor, changed, force);
+        else if (assist.JustAccepted)
         {
             assist.JustAccepted = false;
         }

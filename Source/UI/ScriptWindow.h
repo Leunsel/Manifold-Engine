@@ -44,6 +44,8 @@ namespace Manifold::UI
         int m_recordId = 0;
         bool m_lua = false;
         CodeEditorState m_editor;
+        CodeAssist m_luaAssist;
+        CodeAssist m_asmAssist;
         std::string m_result;
         bool m_resultOk = true;
         std::string m_shownError;

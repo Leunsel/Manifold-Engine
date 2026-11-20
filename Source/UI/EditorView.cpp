@@ -248,7 +248,7 @@ namespace Manifold::UI
         ImGuiWindow* window = ImGui::GetCurrentWindow();
         const bool focused = ImGui::IsWindowFocused();
         CodeAssistState& assist = state.Assisting;
-        const bool assistEnabled = language == Language::Lua && state.Assist && !state.ReadOnly;
+        const bool assistEnabled = (language == Language::Lua || language == Language::AutoAssembler) && state.Assist && !state.ReadOnly;
         const bool editable = !state.ReadOnly;
         ImVec2 textOrigin(window->Pos.x + metrics.Gutter + metrics.PadX - window->Scroll.x, window->Pos.y + metrics.PadY - window->Scroll.y);
 
@@ -722,7 +722,7 @@ namespace Manifold::UI
         {
             hoverDoc = assist.HoverDoc;
         }
-        else if (language == Language::Lua && state.Assist && overText && !view.Dragging && !ImGui::IsAnyMouseDown())
+        else if ((language == Language::Lua || language == Language::AutoAssembler) && state.Assist && overText && !view.Dragging && !ImGui::IsAnyMouseDown())
         {
             const int line = std::clamp(static_cast<int>(std::floor((io.MousePos.y - textOrigin.y) / metrics.Row)), 0, buffer.LineCount() - 1);
             const int column = static_cast<int>(std::floor((io.MousePos.x - textOrigin.x) / metrics.Char));
@@ -743,7 +743,8 @@ namespace Manifold::UI
             {
                 if (!assist.HoverResolved && ImGui::GetTime() - assist.HoverSince > 0.4)
                 {
-                    assist.HoverDoc = EditorShared::DescribeAt(assist, *state.Assist, buffer.Text(), chain.Chain, chain.Method);
+                    const CodeAssist& provider = EditorShared::ProviderAt(*state.Assist, buffer.Text(), chain.Start);
+                    assist.HoverDoc = EditorShared::DescribeAt(assist, provider, buffer.Text(), chain.Chain, chain.Method);
                     assist.HoverResolved = true;
                     assist.HoverShown = false;
                     assist.HoverAnchor = ImVec2(io.MousePos.x, textOrigin.y + static_cast<float>(line) * metrics.Row);

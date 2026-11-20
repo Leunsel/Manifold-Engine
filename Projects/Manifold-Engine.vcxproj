@@ -133,6 +133,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\App\UnrealSession.cpp" />
     <ClCompile Include="..\Source\App\WindowHost.cpp" />
     <ClCompile Include="..\Source\App\WriteHistory.cpp" />
+    <ClCompile Include="..\Source\Asm\AsmAssist.cpp" />
     <ClCompile Include="..\Source\Asm\Assembler.cpp" />
     <ClCompile Include="..\Source\Asm\AutoAssembler.cpp" />
     <ClCompile Include="..\Source\Asm\ScriptTemplates.cpp" />
@@ -284,6 +285,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\App\UnrealSession.h" />
     <ClInclude Include="..\Source\App\WindowHost.h" />
     <ClInclude Include="..\Source\App\WriteHistory.h" />
+    <ClInclude Include="..\Source\Asm\AsmAssist.h" />
     <ClInclude Include="..\Source\Asm\Assembler.h" />
     <ClInclude Include="..\Source\Asm\AutoAssembler.h" />
     <ClInclude Include="..\Source\Core\BackgroundWork.h" />

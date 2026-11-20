@@ -62,4 +62,6 @@ namespace Manifold::Asm
     std::optional<std::uint64_t> ParseNumber(std::string_view text);
 
     std::string_view ErrorName(AsmError error);
+
+    std::vector<std::string> KnownMnemonics();
 }
