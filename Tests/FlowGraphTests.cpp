@@ -261,6 +261,40 @@ namespace Manifold::Tests
             expect(0x17, 0x12, 0x1D, 0x1C, Disasm::FunctionSource::Unwind);
         }
 
+        constexpr std::size_t kHashAt = 0x600;
+
+        void HashBeforeFunction(Engine& engine, std::uint8_t* code)
+        {
+            const std::uint8_t before[] = { 0x31, 0xC0, 0xC3 };
+            const std::uint8_t hash[] = { 0x71, 0x38, 0x56, 0x12, 0x14, 0xBF, 0x23, 0x89 };
+            const std::uint8_t function[] = { 0xB8, 0x09, 0x00, 0x00, 0x00, 0xC3 };
+            const std::uint8_t leaf[] = { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3 };
+            std::memcpy(code + kHashAt, before, sizeof(before));
+            std::memcpy(code + kHashAt + 0x08, hash, sizeof(hash));
+            std::memcpy(code + kHashAt + 0x10, function, sizeof(function));
+            std::memcpy(code + kHashAt + 0x100, before, sizeof(before));
+            std::memcpy(code + kHashAt + 0x108, leaf, sizeof(leaf));
+            std::memcpy(code + kHashAt + 0x110, function, sizeof(function));
+            const std::uint64_t base = reinterpret_cast<std::uint64_t>(code) + kHashAt;
+            const auto find = [&](std::uint64_t offset)
+                {
+                    const std::uint64_t group = offset & ~std::uint64_t(0xFF);
+                    Disasm::FunctionClues clues;
+                    clues.Floor = base + group + sizeof(before);
+                    clues.FloorIsBoundary = true;
+                    clues.Ceiling = base + group + 0x10;
+                    return Disasm::FindFunction(engine.Disassembler(), *engine.Process(), base + offset, nullptr, clues);
+                };
+            for (const std::uint64_t offset : { 0x08, 0x0A, 0x0E })
+            {
+                const auto span = find(offset);
+                CHECK_MSG(!span.has_value(), "8 bytes before a known function at +" + std::to_string(offset) + " were taken for a function at +" +
+                    (span ? std::to_string(span->Start - base) + "..+" + std::to_string(span->End - base) : std::string()));
+            }
+            const auto real = find(0x10A);
+            CHECK(real && real->Start == base + 0x108 && real->End == base + 0x10E && real->Source == Disasm::FunctionSource::Padding);
+        }
+
         void PrintLines(Engine& engine, const Target::ModuleInfo& module, std::uint64_t from, std::uint64_t until)
         {
             for (const Disasm::Instruction& line : engine.Disassembler().ReadMany(*engine.Process(), from, 10))
@@ -413,6 +447,7 @@ namespace Manifold::Tests
             code[kIndirectAt + 1] = 0xE0;
             DiamondAndLoop(engine, code);
             FunctionSearch(engine, code);
+            HashBeforeFunction(engine, code);
             TailJumpsAndIndirect(engine, code);
             ::VirtualFree(code, 0, MEM_RELEASE);
         }

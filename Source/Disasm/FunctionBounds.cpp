@@ -169,6 +169,8 @@ namespace Manifold::Disasm
             return std::nullopt;
         }
         const FlowGraph graph = build(candidates[*chosen].Address, true);
+        if (std::any_of(graph.Blocks.begin(), graph.Blocks.end(), [&](const FlowBlock& block) { return block.End > clues.Ceiling; }))
+            return std::nullopt;
         FunctionSpan span;
         span.Start = candidates[*chosen].Address;
         span.Source = candidates[*chosen].Kind == Evidence::Strong ? FunctionSource::Padding : FunctionSource::Guess;
