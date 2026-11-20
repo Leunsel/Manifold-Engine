@@ -53,8 +53,19 @@ namespace Manifold::Debug
     void Tracer::Finish(const std::string& status)
     {
         m_debugger.RemoveBreakpoint(m_address.load());
-        if (m_debugger.Broken())
+        const BreakInfo held = m_debugger.Break();
+        if (held.Broken)
+        {
             m_debugger.Resume(ResumeMode::Continue);
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            while (m_debugger.Attached() && std::chrono::steady_clock::now() < until)
+            {
+                const BreakInfo now = m_debugger.Break();
+                if (!now.Broken || now.Serial != held.Serial)
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
         {
             std::lock_guard lock(m_lock);
             m_status = status;

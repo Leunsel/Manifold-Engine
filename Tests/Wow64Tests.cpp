@@ -512,6 +512,21 @@ namespace Manifold::Tests
                 }
                 CHECK_MSG(wrote && returned, "windows: the trace did not run through Damage and back to its caller");
                 CHECK(!debugger.Broken() && !debugger.HasBreakpoint(damage));
+
+                int leftBroken = 0;
+                int notStarted = 0;
+                request.Count = 3;
+                for (int round = 0; round < 25; ++round)
+                {
+                    if (!tracer.Start(engine.Process(), engine.Disassembler(), request))
+                    {
+                        ++notStarted;
+                        continue;
+                    }
+                    WaitUntil(engine, 5000, [&] { return !tracer.Running(); });
+                    leftBroken += debugger.Broken() || debugger.HasBreakpoint(damage) ? 1 : 0;
+                }
+                CHECK_MSG(leftBroken == 0 && notStarted == 0, "windows: of 25 traces " + std::to_string(leftBroken) + " ended with the process still stopped and " + std::to_string(notStarted) + " did not start");
             }
 
             {
