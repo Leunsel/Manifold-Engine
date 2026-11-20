@@ -200,6 +200,7 @@ namespace Manifold::Table
 
     private:
         void IndexTree(MemoryRecord& record);
+        void ClaimTree(MemoryRecord& record);
         void ForgetTree(const MemoryRecord& record);
         void IndexDescriptions();
 

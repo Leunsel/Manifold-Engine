@@ -106,9 +106,15 @@ namespace Manifold::Table
 
     MemoryRecord& AddressList::Add(std::unique_ptr<MemoryRecord> record, MemoryRecord* parent, int index)
     {
+        const std::function<void(const MemoryRecord&)> note = [&](const MemoryRecord& node)
+            {
+                NoteId(node.Id);
+                for (const auto& child : node.Children)
+                    note(*child);
+            };
+        note(*record);
         if (record->Id <= 0 || FindById(record->Id))
             record->Id = NextId();
-        NoteId(record->Id);
         record->Parent = parent;
         auto& siblings = parent ? parent->Children : m_roots;
         MemoryRecord& added = *record;
@@ -116,9 +122,21 @@ namespace Manifold::Table
             siblings.push_back(std::move(record));
         else
             siblings.insert(siblings.begin() + index, std::move(record));
-        IndexTree(added);
+        m_byId[added.Id] = &added;
+        for (const auto& child : added.Children)
+            ClaimTree(*child);
         Touch();
         return added;
+    }
+
+    void AddressList::ClaimTree(MemoryRecord& record)
+    {
+        const auto taken = m_byId.find(record.Id);
+        if (record.Id < 0 || (taken != m_byId.end() && taken->second != &record))
+            record.Id = NextId();
+        m_byId[record.Id] = &record;
+        for (const auto& child : record.Children)
+            ClaimTree(*child);
     }
 
     MemoryRecord& AddressList::AddValue(std::string description, std::string address, Scan::ValueType type, MemoryRecord* parent)

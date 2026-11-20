@@ -585,7 +585,7 @@ namespace Manifold::UI
                                 continue;
                             ImGui::TableNextRow();
                             ImGui::TableNextColumn();
-                            ImGui::PushID(module.Name.c_str());
+                            ImGui::PushID(reinterpret_cast<const void*>(static_cast<std::uintptr_t>(module.Base)));
                             if (ImGui::Selectable(module.Name.c_str(), m_module == module.Name, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
                             {
                                 m_module = module.Name;
@@ -617,8 +617,10 @@ namespace Manifold::UI
                     {
                         for (const Target::ModuleInfo& module : *engine.Process()->Modules())
                         {
+                            ImGui::PushID(reinterpret_cast<const void*>(static_cast<std::uintptr_t>(module.Base)));
                             if (ImGui::Selectable(module.Name.c_str(), m_module == module.Name))
                                 m_module = module.Name;
+                            ImGui::PopID();
                         }
                         ImGui::EndCombo();
                     }

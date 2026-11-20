@@ -1347,6 +1347,57 @@ hostileRan = true
         std::filesystem::remove(path, ignored);
     }
 
+    void SharedRecordIds()
+    {
+        const char* text = R"CT(<CheatTable><CheatEntries>
+<CheatEntry><ID>3</ID><Description>"Scripts"</Description><GroupHeader>1</GroupHeader><CheatEntries>
+  <CheatEntry><ID>0</ID><Description>"Examples"</Description><GroupHeader>1</GroupHeader><CheatEntries>
+    <CheatEntry><ID>0</ID><Description>"Example A"</Description><VariableType>4 Bytes</VariableType><Address>1000</Address></CheatEntry>
+    <CheatEntry><ID>7</ID><Description>"Example B"</Description><VariableType>4 Bytes</VariableType><Address>1004</Address></CheatEntry>
+  </CheatEntries></CheatEntry>
+</CheatEntries></CheatEntry>
+<CheatEntry><ID>3</ID><Description>"Pointer"</Description><GroupHeader>1</GroupHeader><CheatEntries>
+  <CheatEntry><ID>0</ID><Description>"Examples"</Description><GroupHeader>1</GroupHeader><CheatEntries>
+    <CheatEntry><ID>7</ID><Description>"Example C"</Description><VariableType>4 Bytes</VariableType><Address>1008</Address></CheatEntry>
+  </CheatEntries></CheatEntry>
+  <CheatEntry><Description>"No ID"</Description><VariableType>4 Bytes</VariableType><Address>100C</Address></CheatEntry>
+</CheatEntries></CheatEntry>
+</CheatEntries></CheatTable>)CT";
+        Table::LoadedTable loaded;
+        CHECK(Table::ParseTable(text, loaded).Ok() && loaded.Records.size() == 2);
+        CHECK(std::any_of(loaded.Warnings.begin(), loaded.Warnings.end(), [](const std::string& warning) { return warning.find("the ID of another record") != std::string::npos; }));
+        Table::AddressList list;
+        for (auto& record : loaded.Records)
+            list.Add(std::move(record));
+        std::set<int> ids;
+        std::size_t records = 0;
+        list.ForEach([&](Table::MemoryRecord& record)
+            {
+                ++records;
+                ids.insert(record.Id);
+                CHECK_MSG(list.FindById(record.Id) == &record, record.Description + " is not found by its ID " + std::to_string(record.Id));
+            });
+        CHECK_EQ(records, 8u);
+        CHECK_EQ(ids.size(), records);
+        CHECK(list.FindById(3) && list.FindById(3)->Description == "Scripts");
+        CHECK(list.FindById(7) && list.FindById(7)->Description == "Example B");
+        const Table::MemoryRecord* first = list.FindById(0);
+        CHECK(first && first->Description == "Examples" && first->Parent && first->Parent->Description == "Scripts");
+
+        Table::MemoryRecord& extra = list.AddGroup("Extra");
+        CHECK(extra.Id > 7 && list.FindById(extra.Id) == &extra);
+        auto pasted = std::make_unique<Table::MemoryRecord>();
+        pasted->Id = 7;
+        pasted->Description = "Pasted";
+        auto child = std::make_unique<Table::MemoryRecord>();
+        child->Id = 3;
+        child->Description = "Pasted child";
+        pasted->Children.push_back(std::move(child));
+        Table::MemoryRecord& added = list.Add(std::move(pasted), &extra);
+        CHECK(added.Id != 7 && added.Children.size() == 1 && added.Children[0]->Id != 3);
+        CHECK(list.FindById(7)->Description == "Example B" && list.FindById(3)->Description == "Scripts");
+    }
+
     void HostileFiles()
     {
         std::vector<std::uint8_t> plain(3 * 1024 * 1024);
@@ -1515,6 +1566,7 @@ hostileRan = true
         RecordIndex();
         ProfilerZones();
         HostileXml();
+        SharedRecordIds();
         HostileHotkeys();
         HostileFiles();
         HostileExpressions();

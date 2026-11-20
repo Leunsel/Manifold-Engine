@@ -66,7 +66,7 @@ namespace Manifold::UI
                 ImGui::Separator();
                 for (const Target::ModuleInfo& module : *list)
                 {
-                    ImGui::PushID(module.Name.c_str());
+                    ImGui::PushID(reinterpret_cast<const void*>(static_cast<std::uintptr_t>(module.Base)));
                     if (ImGui::Selectable(module.Name.c_str(), scope.Kind == 3 && EqualsNoCase(scope.Module, module.Name)))
                         scope = { 3, module.Name };
                     ImGui::SameLine(ImGui::GetContentRegionAvail().x - Px(60.0f));

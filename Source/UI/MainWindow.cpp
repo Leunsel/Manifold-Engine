@@ -1739,11 +1739,13 @@ namespace Manifold::UI
                 }
                 for (const Target::ModuleInfo& module : *engine.Process()->Modules())
                 {
+                    ImGui::PushID(reinterpret_cast<const void*>(static_cast<std::uintptr_t>(module.Base)));
                     if (ImGui::Selectable(module.Name.c_str()))
                     {
                         m_start = Hex(module.Base);
                         m_stop = Hex(module.Base + module.Size);
                     }
+                    ImGui::PopID();
                 }
                 ImGui::EndCombo();
             }

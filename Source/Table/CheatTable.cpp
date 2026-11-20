@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <fstream>
+#include <functional>
+#include <set>
 #include <sstream>
 
 #include <windows.h>
@@ -398,6 +400,24 @@ namespace Manifold::Table
             for (const Xml::Node* entry : entries->ChildrenNamed("CheatEntry"))
                 table.Records.push_back(ReadEntry(*entry, table.Warnings));
         }
+        std::set<std::string> seen;
+        std::size_t shared = 0;
+        const std::function<void(const Xml::Node&, int)> count = [&](const Xml::Node& list, int depth)
+            {
+                for (const Xml::Node* entry : list.ChildrenNamed("CheatEntry"))
+                {
+                    const std::string id = Trim(entry->ChildText("ID"));
+                    if (!id.empty() && !seen.insert(id).second)
+                        ++shared;
+                    if (const Xml::Node* children = entry->Child("CheatEntries"); children && depth < kMaxRecordDepth)
+                        count(*children, depth + 1);
+                }
+            };
+        if (const Xml::Node* entries = root.Child("CheatEntries"))
+            count(*entries, 1);
+        if (shared > 0)
+            table.Warnings.push_back(std::to_string(shared) + (shared == 1 ? " record has" : " records have") +
+                " the ID of another record in the table and got a new one. The table is saved with the new IDs.");
         if (const Xml::Node* symbols = root.Child("UserdefinedSymbols"))
         {
             for (const Xml::Node* symbol : symbols->ChildrenNamed("SymbolEntry"))
