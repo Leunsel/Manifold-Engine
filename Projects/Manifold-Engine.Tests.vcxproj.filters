@@ -66,6 +66,9 @@
     <ClCompile Include="..\Source\App\Notifications.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\SessionBackup.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Settings.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>

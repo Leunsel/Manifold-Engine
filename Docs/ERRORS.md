@@ -119,6 +119,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-6004 | The table could not be saved to …. | The folder is not writable or the disk is full. | Save it somewhere else. |
 | ME-6005 | Entry … of the table is damaged and was skipped. | An entry misses required parts or has values that do not parse. | Check that entry in a text editor. |
 | ME-6006 | The table was written by a newer version (…). | Parts of it may be unknown to this version and are kept as they are. | Usually fine. Check the records that do not work. |
+| ME-6007 | The backup could not be written to …. | The backups folder is not writable or the disk is full. | Pick another folder in Settings, under Scripts, or turn the backups off there. |
 
 ## Lua
 

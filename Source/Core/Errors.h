@@ -94,6 +94,7 @@
     X(TableNotSaved, 6004) \
     X(TableEntryDamaged, 6005) \
     X(TableTooNew, 6006) \
+    X(BackupNotSaved, 6007) \
     X(LuaSyntax, 7001) \
     X(LuaRuntime, 7002) \
     X(LuaAutorunFailed, 7003) \

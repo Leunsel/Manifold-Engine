@@ -455,6 +455,7 @@ namespace Manifold
         m_pendingTableScript.clear();
         m_scriptsTrusted = true;
         m_hotkeyHoldNoted = false;
+        m_engine.Backups().TableReplaced();
     }
 
     Status TableRuntime::LoadTable(const std::filesystem::path& path, bool merge)
@@ -541,6 +542,19 @@ namespace Manifold
             m_engine.Activation().RunTableScript(m_pendingTableScript);
         }
         m_pendingTableScript.clear();
+    }
+
+    Status TableRuntime::RestoreTable(const std::filesystem::path& path)
+    {
+        const std::vector<std::string> recent = m_engine.Options().RecentTables;
+        const Status status = LoadTable(path, false);
+        if (!status)
+            return status;
+        m_engine.Options().RecentTables = recent;
+        m_table.FilePath.clear();
+        m_table.Touch();
+        m_engine.Backups().Restored(path);
+        return status;
     }
 
     Status TableRuntime::SaveTable(const std::filesystem::path& path)

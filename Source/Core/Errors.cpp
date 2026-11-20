@@ -310,6 +310,9 @@ namespace Manifold
             { ErrorCode::TableTooNew, "The table was written by a newer version ({}).",
                 "Parts of it may be unknown to this version and are kept as they are.",
                 "Usually fine. Check the records that do not work." },
+            { ErrorCode::BackupNotSaved, "The backup could not be written to {}.",
+                "The backups folder is not writable or the disk is full.",
+                "Pick another folder in Settings, under Scripts, or turn the backups off there." },
 
             { ErrorCode::LuaSyntax, "Lua syntax error: {}.",
                 "The script does not compile.",

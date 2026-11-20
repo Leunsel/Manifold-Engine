@@ -43,6 +43,7 @@
 
 #include <windows.h>
 #include <commdlg.h>
+#include <shellapi.h>
 #include <shobjidl.h>
 
 namespace Manifold::UI
@@ -827,7 +828,8 @@ namespace Manifold::UI
         std::filesystem::path path = Utf8ToWide(m_engine.Table().FilePath);
         if (askName || path.empty())
         {
-            std::string name = path.empty() ? (m_engine.HasProcess() ? m_engine.Process()->Name() : std::string("table")) : WideToUtf8(path.filename().wstring());
+            const std::string& restored = m_engine.Backups().RestoredName();
+            std::string name = !path.empty() ? WideToUtf8(path.filename().wstring()) : !restored.empty() ? restored + ".CT" : m_engine.HasProcess() ? m_engine.Process()->Name() : std::string("table");
             if (const std::size_t dot = name.rfind('.'); dot != std::string::npos)
                 name.resize(dot);
             std::error_code ignored;
@@ -846,6 +848,72 @@ namespace Manifold::UI
         }
         m_engine.Notify(LogLevel::Success, "Saved " + WideToUtf8(path.filename().wstring()));
         return true;
+    }
+
+    void Workspace::OpenBackupDialog()
+    {
+        std::filesystem::path folder = m_engine.Backups().SessionFolder();
+        std::error_code missing;
+        if (!std::filesystem::is_directory(folder, missing))
+        {
+            folder = Backups::Folder(m_engine.Options());
+            std::filesystem::create_directories(folder, missing);
+        }
+        if (const auto path = OpenFileDialog({ { L"Backups (*.CT)", L"*.CT;*.ct" } }, folder))
+            OpenBackup(*path);
+    }
+
+    void Workspace::OpenBackup(const std::filesystem::path& path)
+    {
+        const auto load = [this, path]()
+            {
+                const Status status = m_engine.RestoreTable(path);
+                if (!status)
+                {
+                    Report(status);
+                    return;
+                }
+                const std::string when = Backups::When(path);
+                m_engine.Notify(LogLevel::Success, "Opened the backup " + (when.empty() ? WideToUtf8(path.filename().wstring()) : "from " + when) + ". Save it under a name to keep it.");
+            };
+        if (m_engine.Table().Dirty() && m_engine.Table().Count() > 0)
+        {
+            Confirm("Open backup", "The current table has changes that are not saved. Open the backup anyway?", load, "Open");
+            return;
+        }
+        load();
+    }
+
+    void Workspace::OfferBackup(const std::filesystem::path& path, const std::string& name)
+    {
+        LOG_WARN("Backup", "The last run did not close properly. Its last backup is " + WideToUtf8(path.wstring()));
+        if (m_engine.Table().Count() > 0)
+        {
+            m_engine.Notify(LogLevel::Warning, "The last run did not close properly. Its last backup of " + name + " from " + Backups::When(path) + " can be opened with File, Backups, Open a backup.");
+            return;
+        }
+        Confirm("Open backup", "The last run did not close properly and left changes that were not saved.\n\nOpen the backup of " + name + " from " + Backups::When(path) + "?",
+            [this, path]() { OpenBackup(path); }, "Open");
+    }
+
+    void Workspace::BackUpNow()
+    {
+        bool written = false;
+        const Status status = m_engine.Backups().BackUpNow(&written);
+        if (!status)
+            Report(status);
+        else if (written)
+            m_engine.Notify(LogLevel::Success, "Backed up to " + WideToUtf8(m_engine.Backups().LastFile().wstring()));
+        else
+            m_engine.Notify(LogLevel::Info, "Nothing to back up: there are no changes since the last save or backup.");
+    }
+
+    void Workspace::OpenBackupFolder()
+    {
+        const std::filesystem::path folder = Backups::Folder(m_engine.Options());
+        std::error_code ignored;
+        std::filesystem::create_directories(folder, ignored);
+        ::ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     }
 
     void Workspace::NewTable()

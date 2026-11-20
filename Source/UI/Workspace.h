@@ -159,6 +159,11 @@ namespace Manifold::UI
         bool OpenTable(const std::filesystem::path& path, bool merge);
         void DropFiles(const std::vector<std::filesystem::path>& files, bool merge);
         bool SaveTable(bool askName);
+        void OpenBackupDialog();
+        void OpenBackup(const std::filesystem::path& path);
+        void OfferBackup(const std::filesystem::path& path, const std::string& name);
+        void BackUpNow();
+        void OpenBackupFolder();
         void NewTable();
         void RequestQuit();
         static std::string WithoutCodes(std::string_view text);

@@ -27,6 +27,7 @@ namespace Manifold
         std::filesystem::path SoundsFolder();
         std::filesystem::path TablesFolder();
         std::filesystem::path CrashFolder();
+        std::filesystem::path BackupFolder();
         std::filesystem::path ScanFolder();
         Migration AdoptEarlierFiles(const std::filesystem::path& programFolder);
         std::vector<std::string> LeftoverFiles(const std::filesystem::path& programFolder);

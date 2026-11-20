@@ -434,6 +434,30 @@ namespace Manifold::UI
             }
             Item(ICON_FA_SAVE "  Save", Command::SaveTable);
             Item(ICON_FA_SAVE "  Save as...", Command::SaveTableAs);
+            if (ImGui::BeginMenu(ICON_FA_LIFE_RING "  Backups"))
+            {
+                if (ImGui::IsWindowAppearing())
+                {
+                    m_backupVersions = Backups::Versions(engine.Backups().SessionFolder());
+                    if (m_backupVersions.size() > 12)
+                        m_backupVersions.resize(12);
+                }
+                const std::vector<std::filesystem::path> versions = m_backupVersions;
+                Muted(versions.empty() ? "No backups of " + engine.Backups().Name() + " yet" : "Backups of " + engine.Backups().Name());
+                for (const std::filesystem::path& version : versions)
+                {
+                    if (ImGui::MenuItem((ICON_FA_CLOCK "  " + Backups::When(version) + "##" + WideToUtf8(version.filename().wstring())).c_str()))
+                        workspace.OpenBackup(version);
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open a backup..."))
+                    workspace.OpenBackupDialog();
+                if (ImGui::MenuItem(ICON_FA_SAVE "  Back up now"))
+                    workspace.BackUpNow();
+                if (ImGui::MenuItem(ICON_FA_ARCHIVE "  Open the backups folder"))
+                    workspace.OpenBackupFolder();
+                ImGui::EndMenu();
+            }
             ScriptMenuInto("file", scriptOpened, scriptClicked);
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_SIGN_OUT_ALT "  Exit"))

@@ -111,6 +111,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\App\Engine.cpp" />
     <ClCompile Include="..\Source\App\ManagedSession.cpp" />
     <ClCompile Include="..\Source\App\Notifications.cpp" />
+    <ClCompile Include="..\Source\App\SessionBackup.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
     <ClCompile Include="..\Source\App\SettingsStore.cpp" />
     <ClCompile Include="..\Source\App\Sounds.cpp" />

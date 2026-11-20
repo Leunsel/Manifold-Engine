@@ -476,6 +476,7 @@ namespace Manifold
             PROFILE_ZONE("Finished background jobs");
             m_work.Drain();
         }
+        m_backup.Tick(now);
         const int scansBefore = m_scanner.ScanNumber();
         {
             PROFILE_ZONE("Scanner");

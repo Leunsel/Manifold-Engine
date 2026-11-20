@@ -6,6 +6,7 @@
 #include "UI/ToolWindowBase.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <set>
@@ -94,6 +95,7 @@ namespace Manifold::UI
         Engine& m_engine;
         bool m_release = false;
         float m_menusWidth = 0.0f;
+        std::vector<std::filesystem::path> m_backupVersions;
         IconCache m_processIcon;
         float m_chipHover = 0.0f;
         double m_chipConnectedAt = -1.0;

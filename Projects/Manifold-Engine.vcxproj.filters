@@ -78,6 +78,9 @@
     <ClCompile Include="..\Source\App\Notifications.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\SessionBackup.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Settings.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -511,6 +514,9 @@
       <Filter>Source\App</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\Notifications.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\SessionBackup.h">
       <Filter>Source\App</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\Settings.h">

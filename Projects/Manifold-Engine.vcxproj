@@ -124,6 +124,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\App\Engine.cpp" />
     <ClCompile Include="..\Source\App\ManagedSession.cpp" />
     <ClCompile Include="..\Source\App\Notifications.cpp" />
+    <ClCompile Include="..\Source\App\SessionBackup.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
     <ClCompile Include="..\Source\App\SettingsStore.cpp" />
     <ClCompile Include="..\Source\App\Sounds.cpp" />
@@ -273,6 +274,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\App\Engine.h" />
     <ClInclude Include="..\Source\App\ManagedSession.h" />
     <ClInclude Include="..\Source\App\Notifications.h" />
+    <ClInclude Include="..\Source\App\SessionBackup.h" />
     <ClInclude Include="..\Source\App\Settings.h" />
     <ClInclude Include="..\Source\App\SettingsStore.h" />
     <ClInclude Include="..\Source\App\Sounds.h" />

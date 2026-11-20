@@ -3,6 +3,7 @@
 #include "App/ActivationRunner.h"
 #include "App/ManagedSession.h"
 #include "App/Notifications.h"
+#include "App/SessionBackup.h"
 #include "App/Settings.h"
 #include "App/TableRuntime.h"
 #include "App/TargetSession.h"
@@ -127,6 +128,7 @@ namespace Manifold
         UnrealSession& Unreal() { return m_unreal; }
         const UnrealSession& Unreal() const { return m_unreal; }
         WriteHistory& Writes() { return m_writes; }
+        SessionBackup& Backups() { return m_backup; }
         Target::MonoBridge& Mono() { return m_target.Mono(); }
         bool MonoPresent() const { return m_target.Mono().Present(); }
         void LookUpProcessLater(std::string name, std::function<void(std::optional<ProcessId>)> found);
@@ -173,6 +175,7 @@ namespace Manifold
         ScriptCheck CheckScript(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory);
 
         Status LoadTable(const std::filesystem::path& path, bool merge) { return m_tables.LoadTable(path, merge); }
+        Status RestoreTable(const std::filesystem::path& path) { return m_tables.RestoreTable(path); }
         Status SaveTable(const std::filesystem::path& path) { return m_tables.SaveTable(path); }
         void NewTable() { m_tables.NewTable(); }
         std::vector<Table::TableSymbol> TableSymbols() const { return m_tables.TableSymbols(); }
@@ -221,6 +224,7 @@ namespace Manifold
         bool m_attachLookup = false;
         BackgroundWork m_work;
         WriteHistory m_writes;
+        SessionBackup m_backup{ *this };
         ManagedSession m_managed{ m_target, m_work, m_settings, [this](LogLevel level, std::string text) { Notify(level, std::move(text)); } };
         UnrealSession m_unreal{ m_target, m_work, [this](LogLevel level, std::string text) { Notify(level, std::move(text)); } };
     };

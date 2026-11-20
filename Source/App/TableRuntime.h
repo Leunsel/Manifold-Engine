@@ -42,6 +42,7 @@ namespace Manifold
         void UpdateHotkeys();
 
         Status LoadTable(const std::filesystem::path& path, bool merge);
+        Status RestoreTable(const std::filesystem::path& path);
         Status SaveTable(const std::filesystem::path& path);
         void NewTable();
         std::vector<Table::TableSymbol> TableSymbols() const;

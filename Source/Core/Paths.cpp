@@ -179,6 +179,11 @@ namespace Manifold
             return DataFolder() / L"crashes";
         }
 
+        std::filesystem::path BackupFolder()
+        {
+            return DataFolder() / L"backups";
+        }
+
         std::filesystem::path ScanFolder()
         {
             wchar_t temp[MAX_PATH + 1] = L"";

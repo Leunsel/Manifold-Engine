@@ -262,12 +262,17 @@ namespace Manifold::UI
             return static_cast<float>(std::log(static_cast<double>(std::max(value, min)) / min) / std::log(static_cast<double>(max) / min));
         }
 
-        bool Milliseconds(const char* id, int& value, int min, int max, float width)
+        bool LogSlider(const char* id, int& value, int min, int max, const char* format, float width)
         {
             BeginFillSlider(id, LogRatio(value, min, max), width);
-            ImGui::SliderInt(id, &value, min, max, "%d ms", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+            ImGui::SliderInt(id, &value, min, max, format, ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
             EndFillSlider();
             return ImGui::IsItemDeactivatedAfterEdit();
+        }
+
+        bool Milliseconds(const char* id, int& value, int min, int max, float width)
+        {
+            return LogSlider(id, value, min, max, "%d ms", width);
         }
     }
 
@@ -1256,6 +1261,50 @@ namespace Manifold::UI
             if (Segmented("##quitpolicy", &quit, { "Ask", "Turn off", "Leave" }, choice))
             {
                 settings.ActiveScriptsOnQuit = static_cast<QuitPolicy>(quit);
+                changed = true;
+            }
+            list.EndRow();
+        }
+
+        list.Section("Backups");
+        if (list.Row("Back up the session",
+                "While there are changes that are not saved, the address list, the structures and the table script are written to the backups folder, with or without a table file. "
+                "Each session gets a folder of its own, named after the table, or after the opened process when there is no table file. Script text in an open editor is not part of it until it is applied.", toggle))
+        {
+            changed |= ToggleSwitch("##backups", &settings.BackupsEnabled);
+            list.EndRow();
+        }
+        if (list.Row("Time between backups", "A backup is only written when something changed since the last one.", choice))
+        {
+            changed |= LogSlider("##backupinterval", settings.BackupIntervalMinutes, 1, 240, settings.BackupIntervalMinutes == 1 ? "%d minute" : "%d minutes", choice);
+            list.EndRow();
+        }
+        if (list.Row("Versions to keep", "Per session folder. Older backups are removed when a new one is written; other files in the folder are never touched.", choice))
+        {
+            changed |= LogSlider("##backupversions", settings.BackupVersions, 1, 500, "%d", choice);
+            list.EndRow();
+        }
+        const float twoButtons = folder * 2.0f + ImGui::GetStyle().ItemSpacing.x;
+        if (list.Row("Backups folder", WideToUtf8(Backups::Folder(settings).wstring()), twoButtons))
+        {
+            if (ImGui::Button(ICON_FA_FOLDER "  Choose...", ImVec2(folder, 0.0f)))
+            {
+                if (const auto chosen = m_workspace.FolderDialog())
+                {
+                    settings.BackupFolder = WideToUtf8(chosen->wstring());
+                    changed = true;
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open folder", ImVec2(folder, 0.0f)))
+                OpenFolder(Backups::Folder(settings));
+            list.EndRow();
+        }
+        if (!settings.BackupFolder.empty() && list.Row("Default backups folder", WideToUtf8(Paths::BackupFolder().wstring()), folder))
+        {
+            if (ImGui::Button(ICON_FA_UNDO "  Use this", ImVec2(folder, 0.0f)))
+            {
+                settings.BackupFolder.clear();
                 changed = true;
             }
             list.EndRow();

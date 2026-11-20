@@ -92,6 +92,11 @@ namespace Manifold
         TableScriptPolicy TableScripts = TableScriptPolicy::Ask;
         QuitPolicy ActiveScriptsOnQuit = QuitPolicy::Ask;
 
+        bool BackupsEnabled = true;
+        int BackupIntervalMinutes = 5;
+        int BackupVersions = 20;
+        std::string BackupFolder;
+
         bool CompactMode = false;
         bool PlaySounds = true;
         bool ReleaseMode = false;

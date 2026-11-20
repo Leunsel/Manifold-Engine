@@ -1458,6 +1458,186 @@ hostileRan = true
         CHECK_EQ(ran, "nil");
     }
 
+    void SessionBackups()
+    {
+        CHECK_EQ(Backups::SafeName("Crab: Champions?"), "Crab_ Champions_");
+        CHECK_EQ(Backups::SafeName(".."), "session");
+        CHECK_EQ(Backups::SafeName("..\\..\\evil"), ".._.._evil");
+        CHECK_EQ(Backups::SafeName("  name. "), "name");
+        CHECK_EQ(Backups::SafeName("con"), "_con");
+        CHECK_EQ(Backups::SafeName("NUL.txt"), "_NUL.txt");
+        CHECK_EQ(Backups::SafeName(""), "session");
+        CHECK_EQ(Utf8ToWide(Backups::SafeName(std::string(300, 'a'))).size(), Backups::kMaxNameLength);
+        CHECK_EQ(Backups::SessionName("C:\\Tables\\Crab Champions.CT", "game.exe"), "Crab Champions");
+        CHECK_EQ(Backups::SessionName("", "CrabChampions-Win64-Shipping.exe"), "CrabChampions-Win64-Shipping");
+        CHECK_EQ(Backups::SessionName("", "tool.v2"), "tool.v2");
+        CHECK_EQ(Backups::SessionName("", ""), "session");
+
+        const auto start = std::chrono::system_clock::now();
+        CHECK(Backups::IsVersion(Backups::StampName(start) + L".CT"));
+        CHECK(Backups::IsVersion(L"2026-11-20_04-15-30.CT") && Backups::IsVersion(L"folder\\2026-11-20_04-15-30_2.ct"));
+        CHECK(!Backups::IsVersion(L"2026-11-20_04-15-30.txt") && !Backups::IsVersion(L"2026-11-20 04-15-30.CT") && !Backups::IsVersion(L"table.CT"));
+        CHECK(!Backups::IsVersion(L"2026-11-20_04-15-30_.CT") && !Backups::IsVersion(L"2026-11-20_04-15-30_x.CT") && !Backups::IsVersion(L"2026-11-20_04-15-30_12345.CT"));
+        CHECK_EQ(Backups::When(L"2026-11-20_04-15-30_2.CT"), "2026-11-20 04:15:30");
+        CHECK_EQ(Backups::When(L"table.CT"), "");
+
+        Settings plain;
+        CHECK(Backups::Folder(plain) == Paths::BackupFolder());
+        plain.BackupFolder = "my backups";
+        CHECK(Backups::Folder(plain) == Paths::DataFolder() / L"my backups");
+
+        const auto put = [](const std::filesystem::path& file, std::string_view text) {
+            std::ofstream out(file, std::ios::binary | std::ios::trunc);
+            out << text;
+        };
+        const auto content = [](const std::filesystem::path& file) {
+            std::ifstream in(file, std::ios::binary);
+            return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        };
+        std::error_code ignored;
+
+        const std::filesystem::path folder = Paths::DataFolder() / L"backup-versions" / L"session";
+        for (int i = 0; i < 6; ++i)
+            CHECK(!Backups::Write(folder, "v" + std::to_string(i), start + std::chrono::seconds(i)).empty());
+        std::filesystem::path last;
+        for (int i = 0; i < 11; ++i)
+            last = Backups::Write(folder, "again" + std::to_string(i), start + std::chrono::seconds(5));
+        CHECK(last.stem().wstring().ends_with(L"_12"));
+        put(folder / L"notes.CT", "mine");
+        put(folder / L"2026-11-20_04-15-30.txt", "mine too");
+        std::vector<std::filesystem::path> versions = Backups::Versions(folder);
+        CHECK_EQ(versions.size(), 17u);
+        CHECK(!versions.empty() && versions.front() == last && content(versions.back()) == "v0");
+        CHECK(versions.size() == 17 && content(versions[1]) == "again9" && content(versions[11]) == "v5");
+        CHECK_EQ(Backups::Prune(folder, 3), 14);
+        versions = Backups::Versions(folder);
+        CHECK(versions.size() == 3 && content(versions[0]) == "again10" && content(versions[2]) == "again8");
+        last = Backups::Write(folder, "after", start + std::chrono::seconds(5));
+        CHECK(last.stem().wstring().ends_with(L"_13"));
+        const std::filesystem::path early = Backups::Write(folder, "clock set back", start - std::chrono::hours(48));
+        CHECK_EQ(Backups::Prune(folder, 2, early), 3);
+        versions = Backups::Versions(folder);
+        CHECK(versions.size() == 2 && versions[0] == last && versions[1] == early);
+        CHECK_EQ(content(folder / L"notes.CT"), "mine");
+        CHECK_EQ(content(folder / L"2026-11-20_04-15-30.txt"), "mine too");
+        CHECK(Backups::Versions(Paths::DataFolder() / L"backup-missing").empty());
+        CHECK_EQ(Backups::Prune(Paths::DataFolder() / L"backup-missing", 3), 0);
+
+        const unsigned long own = ::GetCurrentProcessId();
+        const std::filesystem::path marker = Backups::MarkerFile(Paths::ConfigFolder(), own);
+        const auto add = [](Engine& engine, const char* name) { engine.Table().AddValue(name, "game.exe+10", Scan::ValueType::FourBytes); };
+        {
+            Settings settings;
+            settings.BackupFolder = WideToUtf8((Paths::DataFolder() / L"backup-engine").wstring());
+            Engine engine(settings);
+            SessionBackup& backup = engine.Backups();
+            bool written = true;
+            CHECK(backup.BackUpNow(&written).Ok() && !written);
+            CHECK_EQ(backup.Name(), "session");
+
+            add(engine, "Health");
+            CHECK(engine.Table().Dirty());
+            CHECK(backup.BackUpNow(&written).Ok() && written);
+            const std::filesystem::path first = backup.LastFile();
+            CHECK(Backups::IsVersion(first) && first.parent_path() == Paths::DataFolder() / L"backup-engine" / L"session");
+            Table::LoadedTable loaded;
+            CHECK(Table::LoadTable(first, loaded).Ok() && loaded.Records.size() == 1);
+            CHECK(std::filesystem::exists(marker, ignored));
+            CHECK(backup.BackUpNow(&written).Ok() && !written);
+            CHECK(backup.LastFile() == first);
+
+            settings.BackupIntervalMinutes = 1;
+            add(engine, "Mana");
+            backup.Tick(1000.0);
+            backup.Tick(1030.0);
+            CHECK(backup.LastFile() == first);
+            backup.Tick(1061.0);
+            const std::filesystem::path second = backup.LastFile();
+            CHECK(second != first);
+            backup.Tick(1200.0);
+            CHECK(backup.LastFile() == second);
+            settings.BackupsEnabled = false;
+            add(engine, "Gold");
+            backup.Tick(2000.0);
+            backup.Tick(3000.0);
+            CHECK(backup.LastFile() == second);
+            settings.BackupsEnabled = true;
+            backup.Tick(3001.0);
+            CHECK(backup.LastFile() == second);
+            backup.Tick(3062.0);
+            CHECK(backup.LastFile() != second);
+
+            const std::filesystem::path saved = Paths::DataFolder() / L"My Table.CT";
+            CHECK(engine.SaveTable(saved).Ok());
+            CHECK(std::filesystem::exists(marker, ignored));
+            backup.Tick(3063.0);
+            CHECK(!std::filesystem::exists(marker, ignored));
+            CHECK(backup.BackUpNow(&written).Ok() && !written);
+            CHECK_EQ(backup.Name(), "My Table");
+            add(engine, "Ammo");
+            CHECK(backup.BackUpNow(&written).Ok() && written);
+            const std::filesystem::path named = backup.LastFile();
+            CHECK(named.parent_path().filename() == L"My Table");
+
+            const std::size_t records = engine.Table().Count();
+            engine.NewTable();
+            CHECK(!std::filesystem::exists(marker, ignored));
+            const std::vector<std::string> recent = settings.RecentTables;
+            CHECK(engine.RestoreTable(named).Ok());
+            CHECK_EQ(engine.Table().Count(), records);
+            CHECK(engine.Table().FilePath.empty() && engine.Table().Dirty());
+            CHECK(settings.RecentTables == recent);
+            CHECK_EQ(backup.RestoredName(), "My Table");
+            CHECK_EQ(backup.Name(), "My Table");
+            CHECK(backup.BackUpNow(&written).Ok() && !written);
+
+            settings.BackupVersions = 2;
+            for (const char* name : { "One", "Two", "Three" })
+            {
+                add(engine, name);
+                CHECK(backup.BackUpNow(&written).Ok() && written);
+            }
+            CHECK_EQ(Backups::Versions(backup.SessionFolder()).size(), 2u);
+            CHECK(std::filesystem::exists(marker, ignored));
+            add(engine, "Last");
+            backup.Finish();
+            CHECK(!std::filesystem::exists(marker, ignored));
+            CHECK(Table::LoadTable(backup.LastFile(), loaded).Ok());
+            CHECK_EQ(Backups::Versions(backup.SessionFolder()).size(), 2u);
+
+            settings.BackupFolder = WideToUtf8((saved / L"below a file").wstring());
+            add(engine, "Nowhere");
+            const Status failed = backup.BackUpNow(&written);
+            CHECK(!failed.Ok() && failed.Code == ErrorCode::BackupNotSaved && !written);
+        }
+
+        const std::filesystem::path markers = Paths::DataFolder() / L"backup-markers";
+        std::filesystem::create_directories(markers, ignored);
+        const std::filesystem::path lost = Backups::Write(markers / L"Crab", "<CheatTable/>", start);
+        const std::filesystem::path older = Backups::Write(markers / L"Isaac", "<CheatTable/>", start - std::chrono::hours(48));
+        const unsigned long running = 4000000000ul;
+        const HANDLE instance = ::CreateMutexW(nullptr, FALSE, Backups::InstanceMutexName(running).c_str());
+        put(Backups::MarkerFile(markers, 4), WideToUtf8(older.wstring()) + "\nIsaac\n");
+        put(Backups::MarkerFile(markers, 8), WideToUtf8(lost.wstring()) + "\r\nCrab\r\n");
+        put(Backups::MarkerFile(markers, 12), WideToUtf8((markers / L"Crab" / L"2020-01-01_00-00-00.CT").wstring()) + "\nGone\n");
+        put(Backups::MarkerFile(markers, 16), WideToUtf8((folder / L"notes.CT").wstring()) + "\nNotes\n");
+        put(Backups::MarkerFile(markers, running), WideToUtf8(lost.wstring()) + "\nRunning\n");
+        put(Backups::MarkerFile(markers, own), WideToUtf8(lost.wstring()) + "\nOwn\n");
+        put(markers / L"backup-x.open", "not a marker");
+        std::vector<Backups::Abandoned> abandoned = Backups::TakeAbandoned(markers, own);
+        CHECK_EQ(abandoned.size(), 2u);
+        CHECK(abandoned.size() == 2 && abandoned[0].File == lost && abandoned[0].Name == "Crab" && abandoned[1].File == older && abandoned[1].Name == "Isaac");
+        for (unsigned long gone : { 4ul, 8ul, 12ul, 16ul })
+            CHECK(!std::filesystem::exists(Backups::MarkerFile(markers, gone), ignored));
+        CHECK(std::filesystem::exists(Backups::MarkerFile(markers, running), ignored) && std::filesystem::exists(Backups::MarkerFile(markers, own), ignored));
+        CHECK(std::filesystem::exists(markers / L"backup-x.open", ignored) && std::filesystem::exists(lost, ignored));
+        if (instance)
+            ::CloseHandle(instance);
+        abandoned = Backups::TakeAbandoned(markers, own);
+        CHECK(abandoned.size() == 1 && abandoned[0].Name == "Running");
+        CHECK(Backups::TakeAbandoned(Paths::DataFolder() / L"backup-missing", own).empty());
+    }
+
     void DiagnosticsInfo()
     {
         CHECK_EQ(Diagnostics::Milliseconds(12.345), "12.3 ms");
@@ -1570,6 +1750,7 @@ hostileRan = true
         HostileHotkeys();
         HostileFiles();
         HostileExpressions();
+        SessionBackups();
         DiagnosticsInfo();
         return Totals().Failures - before;
     }
