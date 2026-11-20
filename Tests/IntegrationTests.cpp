@@ -31,6 +31,55 @@ namespace Manifold::Tests
     void CheckIl2CppTarget(const std::filesystem::path& targetPath);
     void CheckManagedDumperTarget(const std::filesystem::path& targetPath);
 
+    void CheckCodeCalls(Engine& engine, const std::string& module)
+    {
+        const bool wide = engine.Process()->Is64Bit();
+        std::string answer;
+        const Status lua = engine.Lua().RunWithResult("local module, wide = '" + module + "', " + (wide ? "true" : "false") + R"LUA(
+            local pid = executeCodeEx(0, nil, 'kernel32.GetCurrentProcessId')
+            if pid ~= getOpenedProcessID() then return 'process id ' .. tostring(pid) end
+            if executeCodeEx(0, 5000, 'kernel32.MulDiv', 6, 7, 2) ~= 21 then return 'three integers' end
+            if executeCodeEx(0, nil, 'kernel32.MultiByteToWideChar', 65001, 0, 'Hallo', -1, 0, 0) ~= 6 then return 'six parameters with text' end
+            if executeCodeEx(0, nil, 'kernel32.lstrlenW', { type = 4, value = 'Hallo du' }) ~= 8 then return 'wide text' end
+            if executeCodeEx(0, nil, 'kernel32.lstrlenA', { type = 3, value = 'Hallo' }) ~= 5 then return 'typed text' end
+            local mixed = executeCodeEx(1, nil, module .. '.MixedCall', 1, { type = 2, value = 2.5 }, { type = 1, value = 1.5 }, 4, 5, { type = 2, value = 0.25 })
+            if mixed ~= 1 + 2 + 3 + 40 + 500 + 250 then return 'mixed parameters ' .. tostring(mixed) end
+            if pcall(executeCodeEx, 0, nil, 0) then return 'address 0 accepted' end
+
+            local probe = readPointer(module .. '.g_callProbe')
+            local add = readPointer(readPointer(probe))
+            if executeMethod(0, nil, add, probe, 2, 5) ~= 57 then return 'method' end
+            if executeMethod(0, nil, add, { classinstance = probe }, 2, 5) ~= 57 then return 'method by table' end
+            if executeMethod(0, nil, add, { regnr = 1, classinstance = probe }, 3, 1) ~= 46 then return 'method in ECX' end
+
+            local script = wide and 'alloc(callprobe,64)\nregisterSymbol(callprobe)\ncallprobe:\nmov eax,[rbx]\nadd eax,ecx\nadd eax,edx\nret'
+              or 'alloc(callprobe,64)\nregisterSymbol(callprobe)\ncallprobe:\nmov eax,[ebx]\nadd eax,[esp+4]\nadd eax,[esp+8]\nret 8'
+            if not autoAssemble(script) then return 'the probe did not assemble' end
+            local cell = allocateMemory(16)
+            writeInteger(cell, 1000)
+            local viaRegister = executeMethod(0, nil, 'callprobe', { regnr = 3, classinstance = cell }, 20, 3)
+            deAlloc(cell)
+            if viaRegister ~= 1023 then return 'instance in EBX ' .. tostring(viaRegister) end
+            if pcall(executeMethod, 0, nil, 'callprobe', { regnr = 4, classinstance = 1 }) then
+              local value, reason = executeMethod(0, nil, 'callprobe', { regnr = 4, classinstance = 1 })
+              if value ~= nil or not reason then return 'the stack register was accepted' end
+            end
+
+            local damage = getAddress(module .. '.Damage')
+            local aob, offset = getUniqueAOB(damage)
+            if type(aob) ~= 'string' or offset == nil then return 'no unique AOB' end
+            local hits = AOBScan(aob)
+            if not hits or hits.Count ~= 1 then return 'the AOB is not unique: ' .. aob end
+            if tonumber(hits[0], 16) + offset ~= damage then return 'the AOB does not lead to the address' end
+            hits.destroy()
+            if getUniqueAOB(0x10) ~= nil then return 'an AOB for unreadable memory' end
+            return 'ok|' .. aob .. '|' .. offset)LUA",
+            "code calls", answer);
+        CHECK_MSG(lua.Ok(), lua.Text);
+        CHECK_MSG(answer.rfind("ok|", 0) == 0, module + ": " + answer);
+        std::printf("  %s: unique AOB of Damage: %s\n", module.c_str(), answer.c_str());
+    }
+
     namespace
     {
         struct TargetProgram
@@ -593,6 +642,7 @@ namespace Manifold::Tests
         CHECK_MSG(lua.Ok(), lua.Text);
         const auto parts = Split(luaResult, '|', true);
         CHECK_MSG(parts.size() == 4 && parts[0] == "7.25" && parts[1] == "1234.5" && parts[2] != "0" && parts[3] == "TestTarget.exe", luaResult);
+        CheckCodeCalls(engine, "TestTarget");
 
         lua = engine.Lua().RunWithResult(R"LUA(
             local memory = allocateMemory(16)

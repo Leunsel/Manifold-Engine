@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -149,6 +150,7 @@ namespace Manifold::Disasm
 
         std::optional<std::uint64_t> EffectiveAddress(const Instruction& instruction, const RegisterValues& registers) const;
         std::optional<InstructionFacts> Facts(const Instruction& instruction) const;
+        std::uint16_t AddressBytes(const Instruction& instruction, const std::function<bool(std::uint64_t)>& isAddress = {}) const;
         std::optional<std::uint64_t> PreviousStart(const Target::Process& process, std::uint64_t address) const;
         std::optional<std::uint64_t> PreviousStart(const std::uint8_t* buffer, std::size_t size, std::uint64_t base, std::uint64_t address) const;
         // The address the given number of lines above an address. Stops only

@@ -26,7 +26,7 @@ namespace Manifold::Lua
         constexpr GapReason kServer{ "ceserver", "Manifold Engine does not connect to ceserver" };
         constexpr GapReason kDatabase{ "Databases", "Manifold Engine has no SQLite or ODBC classes" };
         constexpr GapReason kXml{ "XML documents", "the XML document classes are not built in" };
-        constexpr GapReason kRemoteCall{ "Calls into the target", "calls with several arguments or a calling convention are not built in yet; executeCode takes one parameter" };
+        constexpr GapReason kRemoteCall{ "Calls into the target", "reusable call stubs and the remote executor are not built in; executeCodeEx and executeMethod make the call directly" };
         constexpr GapReason kSection{ "Shared sections", "sections are not mapped into the target yet; allocateSharedMemoryLocal works inside Manifold Engine" };
         constexpr GapReason kSpeedhack{ "Speedhack", "Manifold Engine has no speedhack" };
         constexpr GapReason kPipe{ "Pipes", "Lua pipes and the Lua server are not built in" };
@@ -50,7 +50,6 @@ namespace Manifold::Lua
         constexpr GapReason kApiPointer{ "API pointers", "Manifold Engine does not redirect its Windows API calls" };
         constexpr GapReason kStructures{ "Structure windows", "structure windows and their selection cannot be scripted yet" };
         constexpr GapReason kMemscan{ "Main scan", "the main window's scan cannot be scripted yet; createMemScan gives a scan of your own" };
-        constexpr GapReason kUniqueAob{ "Unique AOB", "the unique AOB search is not available from Lua yet" };
         constexpr GapReason kRipScanner{ "RIP-relative scanner", "the RIP-relative scanner is not built in yet" };
         constexpr GapReason kPdbStructures{ "PDB structures", "structures are not created from PDB types yet" };
         constexpr GapReason kSymbolLoader{ "Symbol loader", "the symbol loader cannot be stopped from Lua yet" };
@@ -191,8 +190,6 @@ namespace Manifold::Lua
             { "createXMLDocumentFromFile", U, GapResult::Nil, &kXml },
             { "createXMLDocumentFromStream", U, GapResult::Nil, &kXml },
 
-            { "executeCodeEx", U, GapResult::Nil, &kRemoteCall },
-            { "executeMethod", U, GapResult::Nil, &kRemoteCall },
             { "createExecuteCodeExStub", U, GapResult::Nil, &kRemoteCall },
             { "createExecuteMethodStub", U, GapResult::Nil, &kRemoteCall },
             { "createRemoteExecutor", U, GapResult::Nil, &kRemoteCall },
@@ -280,7 +277,6 @@ namespace Manifold::Lua
             { "getSelectedStructElement", U, GapResult::Nil, &kStructures },
             { "createStructureFromName", U, GapResult::Nil, &kPdbStructures },
             { "getCurrentMemscan", U, GapResult::Nil, &kMemscan },
-            { "getUniqueAOB", U, GapResult::Nil, &kUniqueAob },
             { "createRipRelativeScanner", U, GapResult::Nil, &kRipScanner },
             { "releaseDebugFiles", U, GapResult::Nothing, &kSymbolLoader },
         };

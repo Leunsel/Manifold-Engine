@@ -1,4 +1,5 @@
 #include "Lua/LuaApi.h"
+
 #include "Lua/LuaArgs.h"
 
 #include "App/Engine.h"
@@ -7,10 +8,12 @@
 #include "Core/Text.h"
 #include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
+#include "Disasm/UniqueAob.h"
 #include "Lua/LuaCompatGaps.h"
 #include "Lua/LuaCompatScripts.h"
 #include "Lua/LuaEngine.h"
 #include "Scan/Scanner.h"
+#include "Target/CodeCall.h"
 
 #include "lua.hpp"
 
@@ -1295,6 +1298,167 @@ namespace Manifold::Lua
         {
             lua_settop(state, 2);
             return ExecuteCodeLocalEx(state);
+        }
+
+        Target::CodeCallArgument CallArgument(lua_State* state, int index)
+        {
+            Target::CodeCallArgument argument;
+            const auto text = [&](int at, bool wide)
+                {
+                    if (wide)
+                    {
+                        argument.Kind = Target::CodeCallKind::WideText;
+                        argument.Wide = Utf8ToWide(lua_tostring(state, at));
+                    }
+                    else
+                    {
+                        argument.Kind = Target::CodeCallKind::Text;
+                        argument.Text = lua_tostring(state, at);
+                    }
+                };
+            if (lua_istable(state, index))
+            {
+                lua_getfield(state, index, "type");
+                const lua_Integer type = lua_tointeger(state, -1);
+                lua_pop(state, 1);
+                lua_getfield(state, index, "value");
+                if ((type == 3 || type == 4) && lua_type(state, -1) == LUA_TSTRING)
+                {
+                    text(-1, type == 4);
+                }
+                else if (type == 1)
+                {
+                    const float value = static_cast<float>(lua_tonumber(state, -1));
+                    std::uint32_t raw = 0;
+                    std::memcpy(&raw, &value, 4);
+                    argument.Kind = Target::CodeCallKind::Float;
+                    argument.Value = raw;
+                }
+                else if (type == 2)
+                {
+                    const double value = lua_tonumber(state, -1);
+                    argument.Kind = Target::CodeCallKind::Double;
+                    std::memcpy(&argument.Value, &value, 8);
+                }
+                else if (lua_type(state, -1) == LUA_TSTRING && !ParseHex(lua_tostring(state, -1)))
+                {
+                    text(-1, false);
+                }
+                else
+                {
+                    argument.Value = lua_isnoneornil(state, -1) ? 0 : NumberOrHex(state, -1);
+                }
+                lua_pop(state, 1);
+            }
+            else if (lua_type(state, index) == LUA_TSTRING)
+            {
+                text(index, false);
+            }
+            else if (lua_isboolean(state, index))
+            {
+                argument.Value = lua_toboolean(state, index) ? 1 : 0;
+            }
+            else
+            {
+                argument.Value = lua_isnoneornil(state, index) ? 0 : NumberOrHex(state, index);
+            }
+            return argument;
+        }
+
+        int RunCodeCall(lua_State* state, const char* name, bool method)
+        {
+            const auto& process = Owner(state).Process();
+            if (!process)
+                return luaL_error(state, "%s: no process is open", name);
+            Target::CodeCallRequest request;
+            request.Cdecl = luaL_optinteger(state, 1, 0) == 1;
+            if (!lua_isnoneornil(state, 2))
+            {
+                const lua_Integer timeout = luaL_checkinteger(state, 2);
+                request.Wait = timeout != 0;
+                if (timeout > 0)
+                    request.TimeoutMilliseconds = static_cast<std::uint32_t>(std::min<lua_Integer>(timeout, 0x7FFFFFFF));
+            }
+            std::optional<std::uint64_t> address;
+            if (lua_type(state, 3) == LUA_TSTRING)
+                address = Owner(state).Evaluate(lua_tostring(state, 3));
+            else if (!lua_isnoneornil(state, 3))
+                address = NumberOrHex(state, 3);
+            if (!address || *address < 0x10000)
+                return luaL_error(state, "%s: invalid address", name);
+            request.Function = *address;
+            int first = 4;
+            if (method)
+            {
+                request.HasInstance = true;
+                if (lua_istable(state, 4))
+                {
+                    lua_getfield(state, 4, "regnr");
+                    if (!lua_isnil(state, -1))
+                        request.InstanceRegister = static_cast<int>(lua_tointeger(state, -1));
+                    if (request.InstanceRegister == 1)
+                        request.InstanceRegister = -1;
+                    lua_pop(state, 1);
+                    lua_getfield(state, 4, "classinstance");
+                    request.Instance = lua_isnil(state, -1) ? 0 : NumberOrHex(state, -1);
+                    lua_pop(state, 1);
+                }
+                else
+                {
+                    request.Instance = lua_isnoneornil(state, 4) ? 0 : NumberOrHex(state, 4);
+                }
+                first = 5;
+            }
+            const int top = lua_gettop(state);
+            if (top - first + 1 > static_cast<int>(Target::kMaxCodeCallArguments))
+                return luaL_error(state, "%s: at most %d parameters", name, static_cast<int>(Target::kMaxCodeCallArguments));
+            for (int i = first; i <= top; ++i)
+                request.Arguments.push_back(CallArgument(state, i));
+            const Result<std::uint64_t> result = Target::CallCode(*process, request);
+            if (!result)
+            {
+                lua_pushnil(state);
+                lua_pushstring(state, result.Error().Text.c_str());
+                return 2;
+            }
+            if (!request.Wait)
+                return 0;
+            lua_pushinteger(state, static_cast<lua_Integer>(*result));
+            return 1;
+        }
+
+        int ExecuteCodeEx(lua_State* state)
+        {
+            return RunCodeCall(state, "executeCodeEx", false);
+        }
+
+        int ExecuteMethod(lua_State* state)
+        {
+            return RunCodeCall(state, "executeMethod", true);
+        }
+
+        int GetUniqueAob(lua_State* state)
+        {
+            Engine& engine = Owner(state);
+            const auto& process = engine.Process();
+            if (!process)
+                return luaL_error(state, "getUniqueAOB: no process is open");
+            std::optional<std::uint64_t> address;
+            if (lua_type(state, 1) == LUA_TSTRING)
+                address = engine.Evaluate(lua_tostring(state, 1));
+            else
+                address = NumberOrHex(state, 1);
+            if (!address)
+                return luaL_error(state, "getUniqueAOB: invalid address");
+            const auto found = Disasm::FindUniqueAob(*process, engine.Disassembler(), *address);
+            if (!found)
+            {
+                lua_pushnil(state);
+                return 1;
+            }
+            lua_pushstring(state, found->Text.c_str());
+            lua_pushinteger(state, found->Offset);
+            return 2;
         }
 
         std::string FileName(std::string_view path)
@@ -3448,6 +3612,9 @@ namespace Manifold::Lua
             { "writeBytesLocal", &WriteBytesLocal },
             { "executeCodeLocal", &ExecuteCodeLocal },
             { "executeCodeLocalEx", &ExecuteCodeLocalEx },
+            { "executeCodeEx", &ExecuteCodeEx },
+            { "executeMethod", &ExecuteMethod },
+            { "getUniqueAOB", &GetUniqueAob },
             { "extractFileName", &ExtractFileName },
             { "extractFileNameWithoutExt", &ExtractFileNameWithoutExt },
             { "extractFilePath", &ExtractFilePath },

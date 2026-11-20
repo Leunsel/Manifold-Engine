@@ -49,6 +49,25 @@ extern "C" __declspec(dllexport) __declspec(noinline) void Damage(Player* player
     player->Health -= amount;
 }
 
+extern "C" __declspec(dllexport) __declspec(noinline) int MixedCall(int a, double b, float c, int d, int e, double f)
+{
+    return a + static_cast<int>(b) + static_cast<int>(c * 2.0f) + d * 10 + e * 100 + static_cast<int>(f * 1000.0);
+}
+
+struct CallProbe
+{
+    virtual int Add(int add, int more);
+    int Base = 40;
+};
+
+__declspec(noinline) int CallProbe::Add(int add, int more)
+{
+    return Base + add + more * 3;
+}
+
+CallProbe g_callProbeObject;
+extern "C" __declspec(dllexport) CallProbe* g_callProbe = &g_callProbeObject;
+
 extern "C" __declspec(dllexport) volatile long g_shared = 0;
 
 extern "C" __declspec(dllexport) __declspec(noinline) void Work(volatile long* value)

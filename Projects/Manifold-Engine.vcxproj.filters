@@ -189,6 +189,9 @@
     <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Disasm\UniqueAob.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp">
       <Filter>Source\Generated</Filter>
     </ClCompile>
@@ -302,6 +305,9 @@
     </ClCompile>
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp">
       <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\CodeCall.cpp">
+      <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\CodeMap.cpp">
       <Filter>Source\Target</Filter>
@@ -654,6 +660,9 @@
     <ClInclude Include="..\Source\Disasm\FunctionBounds.h">
       <Filter>Source\Disasm</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Disasm\UniqueAob.h">
+      <Filter>Source\Disasm</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h">
       <Filter>Source\Generated</Filter>
     </ClInclude>
@@ -737,6 +746,9 @@
     </ClInclude>
     <ClInclude Include="..\Source\Table\UnrealStructures.h">
       <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\CodeCall.h">
+      <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\CodeMap.h">
       <Filter>Source\Target</Filter>

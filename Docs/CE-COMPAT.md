@@ -86,9 +86,9 @@ The XML document classes are not built in.
 
 ### Calls into the target
 
-Calls with several arguments or a calling convention are not built in yet; executeCode takes one parameter.
+Reusable call stubs and the remote executor are not built in; executeCodeEx and executeMethod make the call directly.
 
-`createExecuteCodeExStub`, `createExecuteMethodStub`, `createRemoteExecutor`, `executeCodeEx`, `executeMethod`
+`createExecuteCodeExStub`, `createExecuteMethodStub`, `createRemoteExecutor`
 
 ### Shared sections
 
@@ -233,12 +233,6 @@ Structures are not created from PDB types yet.
 The main window's scan cannot be scripted yet; createMemScan gives a scan of your own.
 
 `getCurrentMemscan`
-
-### Unique AOB
-
-The unique AOB search is not available from Lua yet.
-
-`getUniqueAOB`
 
 ### RIP-relative scanner
 

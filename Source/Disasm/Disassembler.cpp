@@ -683,6 +683,50 @@ namespace Manifold::Disasm
         return facts;
     }
 
+    std::uint16_t Disassembler::AddressBytes(const Instruction& line, const std::function<bool(std::uint64_t)>& isAddress) const
+    {
+        if (!line.Valid || line.Length == 0)
+            return 0;
+        ZydisDecodedInstruction instruction{};
+        ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT]{};
+        const std::size_t length = std::min<std::size_t>(line.Length, line.Bytes.size());
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&m_state->Decoder, line.Bytes.data(), length, &instruction, operands)))
+            return 0;
+        std::uint16_t bits = 0;
+        const auto mark = [&](unsigned offset, unsigned size)
+            {
+                for (unsigned i = offset; i < offset + size / 8 && i < 16; ++i)
+                    bits = static_cast<std::uint16_t>(bits | (1u << i));
+            };
+        if (instruction.raw.disp.size == 32 && (instruction.attributes & ZYDIS_ATTRIB_HAS_MODRM))
+        {
+            const bool noBase = instruction.raw.modrm.mod == 0 && (instruction.raw.modrm.rm == 5 || (instruction.raw.modrm.rm == 4 && instruction.raw.sib.base == 5));
+            const std::uint64_t value = static_cast<std::uint32_t>(instruction.raw.disp.value);
+            if (m_is64Bit ? (instruction.raw.modrm.mod == 0 && instruction.raw.modrm.rm == 5) : (noBase || (isAddress && isAddress(value))))
+                mark(instruction.raw.disp.offset, 32);
+        }
+        else if (instruction.raw.disp.size >= 32 && !(instruction.attributes & ZYDIS_ATTRIB_HAS_MODRM))
+        {
+            mark(instruction.raw.disp.offset, instruction.raw.disp.size);
+        }
+        for (const auto& immediate : instruction.raw.imm)
+        {
+            if (immediate.size == 0)
+                continue;
+            if (immediate.is_relative)
+            {
+                if (immediate.size >= 32)
+                    mark(immediate.offset, immediate.size);
+            }
+            else if (immediate.size >= 32 && isAddress && isAddress(immediate.size == 64 ? immediate.value.u : static_cast<std::uint32_t>(immediate.value.u)))
+            {
+                if (immediate.size == 64 || !m_is64Bit)
+                    mark(immediate.offset, immediate.size);
+            }
+        }
+        return bits;
+    }
+
     std::optional<std::uint64_t> Disassembler::EffectiveAddress(const Instruction& instruction, const RegisterValues& registers) const
     {
         if (!instruction.Memory.Present)

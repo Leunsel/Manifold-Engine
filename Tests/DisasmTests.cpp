@@ -521,9 +521,33 @@ namespace Manifold::Tests
         }
     }
 
+    void AddressByteMasks()
+    {
+        const auto bits = [](bool wide, std::initializer_list<std::uint8_t> bytes, bool pointers = false)
+            {
+                Disasm::Disassembler disassembler(wide);
+                const std::vector<std::uint8_t> code(bytes);
+                const Disasm::Instruction line = disassembler.Decode(0x140001000, code.data(), code.size());
+                return disassembler.AddressBytes(line, pointers ? std::function<bool(std::uint64_t)>([](std::uint64_t value) { return value >= 0x400000 && value < 0x500000; }) : std::function<bool(std::uint64_t)>());
+            };
+        CHECK_EQ(bits(true, { 0xE8, 0x10, 0x20, 0x30, 0x00 }), 0x1E);
+        CHECK_EQ(bits(true, { 0xEB, 0x10 }), 0);
+        CHECK_EQ(bits(true, { 0x0F, 0x84, 0x10, 0x20, 0x00, 0x00 }), 0x3C);
+        CHECK_EQ(bits(true, { 0x48, 0x8B, 0x05, 0x10, 0x20, 0x30, 0x00 }), 0x78);
+        CHECK_EQ(bits(true, { 0x48, 0x8B, 0x81, 0x10, 0x20, 0x00, 0x00 }), 0);
+        CHECK_EQ(bits(true, { 0xB8, 0x10, 0x00, 0x40, 0x00 }, true), 0);
+        CHECK_EQ(bits(false, { 0xA1, 0x10, 0x00, 0x40, 0x00 }), 0x1E);
+        CHECK_EQ(bits(false, { 0x8B, 0x0D, 0x10, 0x00, 0x40, 0x00 }), 0x3C);
+        CHECK_EQ(bits(false, { 0x68, 0x10, 0x00, 0x40, 0x00 }, true), 0x1E);
+        CHECK_EQ(bits(false, { 0x68, 0x10, 0x00, 0x00, 0x00 }, true), 0);
+        CHECK_EQ(bits(false, { 0x8B, 0x81, 0x10, 0x00, 0x40, 0x00 }, true), 0x3C);
+        CHECK_EQ(bits(false, { 0x8B, 0x81, 0x10, 0x00, 0x00, 0x00 }, true), 0);
+    }
+
     int RunDisasmTests()
     {
         const int before = Totals().Failures;
+        AddressByteMasks();
         Settings settings;
         Engine engine(settings);
         engine.Lua().Run("__manifoldHeadless = true", "headless");

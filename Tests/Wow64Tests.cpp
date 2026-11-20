@@ -24,6 +24,8 @@
 
 namespace Manifold::Tests
 {
+    void CheckCodeCalls(Engine& engine, const std::string& module);
+
     namespace
     {
         struct Target32
@@ -314,6 +316,7 @@ namespace Manifold::Tests
                 CHECK_MSG(parts[7].find("Damage") != std::string::npos, answer);
                 CHECK_MSG(ParseHex(parts[8]).value_or(0) == engine.Evaluate("kernel32.Sleep").value_or(1), answer);
             }
+            CheckCodeCalls(engine, "TestTarget32");
 
             const std::int32_t start = HealthOf(process, target.Health);
             Table::MemoryRecord& script = engine.Table().AddScript("Heal instead of damage (32-bit)",

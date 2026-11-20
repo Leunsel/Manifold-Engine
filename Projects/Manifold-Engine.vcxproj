@@ -161,6 +161,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
     <ClCompile Include="..\Source\Disasm\FlowGraph.cpp" />
     <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp" />
+    <ClCompile Include="..\Source\Disasm\UniqueAob.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\IconNames.cpp" />
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
@@ -201,6 +202,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
+    <ClCompile Include="..\Source\Target\CodeCall.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
     <ClCompile Include="..\Source\Target\ManagedAgent.cpp" />
@@ -320,6 +322,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Disasm\Disassembler.h" />
     <ClInclude Include="..\Source\Disasm\FlowGraph.h" />
     <ClInclude Include="..\Source\Disasm\FunctionBounds.h" />
+    <ClInclude Include="..\Source\Disasm\UniqueAob.h" />
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h" />
     <ClInclude Include="..\Source\Lua\ConsoleHistory.h" />
     <ClInclude Include="..\Source\Lua\DocAnnotations.h" />
@@ -348,6 +351,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Table\ManagedStructures.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
     <ClInclude Include="..\Source\Table\UnrealStructures.h" />
+    <ClInclude Include="..\Source\Target\CodeCall.h" />
     <ClInclude Include="..\Source\Target\CodeMap.h" />
     <ClInclude Include="..\Source\Target\Il2CppRuntime.h" />
     <ClInclude Include="..\Source\Target\ManagedAgent.h" />
