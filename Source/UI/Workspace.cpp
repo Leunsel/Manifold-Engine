@@ -770,6 +770,27 @@ namespace Manifold::UI
         return true;
     }
 
+    void Workspace::DropFiles(const std::vector<std::filesystem::path>& files, bool merge)
+    {
+        std::vector<std::filesystem::path> tables;
+        for (const std::filesystem::path& file : files)
+        {
+            std::error_code missing;
+            if (EqualsNoCase(WideToUtf8(file.extension().wstring()), ".ct") && std::filesystem::is_regular_file(file, missing))
+                tables.push_back(file);
+        }
+        if (tables.empty())
+        {
+            const std::string what = files.size() == 1 ? WideToUtf8(files.front().filename().wstring()) + " is not" : "None of the dropped files is";
+            m_engine.Notify(LogLevel::Warning, what + " a cheat table (.CT).");
+            return;
+        }
+        if (tables.size() > 1)
+            m_engine.Notify(LogLevel::Info, std::to_string(tables.size()) + " tables were dropped; " + WideToUtf8(tables.front().filename().wstring()) + " is opened. Drop one table at a time.");
+        LOG_INFO("Table", std::string(merge ? "Merging" : "Opening") + " the dropped table " + WideToUtf8(tables.front().wstring()));
+        OpenTable(tables.front(), merge);
+    }
+
     bool Workspace::SaveTable(bool askName)
     {
         std::filesystem::path path = Utf8ToWide(m_engine.Table().FilePath);

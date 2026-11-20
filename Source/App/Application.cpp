@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <utility>
 
 #include <windows.h>
 #include <shellapi.h>
@@ -105,6 +106,7 @@ namespace Manifold
     {
         if (!m_host.Open(instance))
             return false;
+        AcceptDroppedFiles();
         WindowPlacement placement;
         placement.X = m_settings.X;
         placement.Y = m_settings.Y;
@@ -305,10 +307,38 @@ namespace Manifold
         }
     }
 
-    bool Application::HandleMessage(UINT msg, WPARAM, LPARAM lp, LRESULT&)
+    void Application::AcceptDroppedFiles()
+    {
+        constexpr UINT kCopyGlobalData = 0x0049;
+        const HWND window = m_host.Window();
+        ::DragAcceptFiles(window, TRUE);
+        for (const UINT message : { static_cast<UINT>(WM_DROPFILES), static_cast<UINT>(WM_COPYDATA), kCopyGlobalData })
+            ::ChangeWindowMessageFilterEx(window, message, MSGFLT_ALLOW, nullptr);
+    }
+
+    bool Application::HandleMessage(UINT msg, WPARAM wp, LPARAM lp, LRESULT& result)
     {
         if (msg == WM_SETTINGCHANGE && lp && ::lstrcmpiW(reinterpret_cast<const wchar_t*>(lp), L"ImmersiveColorScheme") == 0)
             m_systemThemeChanged = true;
+        if (msg == WM_DROPFILES)
+        {
+            const auto drop = reinterpret_cast<HDROP>(wp);
+            const UINT count = ::DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+            for (UINT i = 0; i < count; ++i)
+            {
+                const UINT length = ::DragQueryFileW(drop, i, nullptr, 0);
+                std::wstring path(static_cast<std::size_t>(length) + 1, L'\0');
+                if (length && ::DragQueryFileW(drop, i, path.data(), length + 1) == length)
+                {
+                    path.resize(length);
+                    m_dropped.emplace_back(std::move(path));
+                }
+            }
+            ::DragFinish(drop);
+            m_dropMerges = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            result = 0;
+            return true;
+        }
         return false;
     }
 
@@ -348,6 +378,8 @@ namespace Manifold
     {
         if (!m_workspace)
             return;
+        if (!m_dropped.empty())
+            m_workspace->DropFiles(std::exchange(m_dropped, {}), m_dropMerges);
         m_workspace->Draw();
         if (!m_started && ++m_frames >= 2)
         {

@@ -52,6 +52,7 @@ namespace Manifold
     private:
         void BeforeFrame() override;
         bool HandleMessage(UINT msg, WPARAM wp, LPARAM lp, LRESULT& result) override;
+        void AcceptDroppedFiles();
         void WatchSystemTheme();
         void FollowSystemTheme();
         void DrawFrame() override;
@@ -80,5 +81,7 @@ namespace Manifold
         HKEY m_personalizeKey = nullptr;
         HANDLE m_themeEvent = nullptr;
         bool m_systemThemeChanged = false;
+        std::vector<std::filesystem::path> m_dropped;
+        bool m_dropMerges = false;
     };
 }
