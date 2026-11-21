@@ -25,6 +25,7 @@
 #include <vector>
 
 #include <dwmapi.h>
+#include <shellapi.h>
 #include <dxgi1_3.h>
 #include <windowsx.h>
 
@@ -54,6 +55,9 @@ namespace Manifold
         void (*g_resizeViewportChain)(ImGuiViewport*, ImVec2) = nullptr;
         HICON g_viewportIcon = nullptr;
         HICON g_viewportIconSmall = nullptr;
+        HWND g_mainWindow = nullptr;
+        HWND g_dropSource = nullptr;
+        WNDPROC g_viewportProc = nullptr;
         UINT g_frameLatency = 0;
 
         constexpr ULONGLONG kToolWindowRefreshMilliseconds = 1000;
@@ -262,6 +266,31 @@ namespace Manifold
             ::DwmSetWindowAttribute(hwnd, 33, &corner, sizeof(corner));
         }
 
+        LRESULT CALLBACK ViewportProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+        {
+            if (msg == WM_DROPFILES && g_mainWindow)
+            {
+                g_dropSource = hwnd;
+                const LRESULT result = ::SendMessageW(g_mainWindow, msg, wp, lp);
+                g_dropSource = nullptr;
+                return result;
+            }
+            return ::CallWindowProcW(g_viewportProc, hwnd, msg, wp, lp);
+        }
+
+        void AcceptViewportDrops(HWND hwnd)
+        {
+            constexpr UINT kCopyGlobalData = 0x0049;
+            const auto current = reinterpret_cast<WNDPROC>(::GetWindowLongPtrW(hwnd, GWLP_WNDPROC));
+            if (current == &ViewportProc || (g_viewportProc && current != g_viewportProc))
+                return;
+            g_viewportProc = current;
+            ::SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&ViewportProc));
+            ::DragAcceptFiles(hwnd, TRUE);
+            for (const UINT message : { static_cast<UINT>(WM_DROPFILES), static_cast<UINT>(WM_COPYDATA), kCopyGlobalData })
+                ::ChangeWindowMessageFilterEx(hwnd, message, MSGFLT_ALLOW, nullptr);
+        }
+
         void CreateViewportWindow(ImGuiViewport* viewport)
         {
             PROFILE_ZONE("Create a tool window");
@@ -269,6 +298,7 @@ namespace Manifold
             HWND hwnd = static_cast<HWND>(viewport->PlatformHandleRaw);
             if (!hwnd)
                 return;
+            AcceptViewportDrops(hwnd);
             MatchViewportChrome(viewport);
             if (g_viewportIcon)
                 ::SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(g_viewportIcon));
@@ -885,6 +915,11 @@ namespace Manifold
         m_client.Revealed();
     }
 
+    HWND WindowHost::DropSource()
+    {
+        return g_dropSource;
+    }
+
     bool WindowHost::StartRendering()
     {
         if (!CreateDeviceAndSwapChain())
@@ -927,6 +962,7 @@ namespace Manifold
         viewportChain.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         ImGui_ImplDX11_SetSwapChainDescs(&viewportChain, 1);
         ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+        g_mainWindow = m_hwnd;
         g_viewportIcon = static_cast<HICON>(::LoadImageW(m_instance, MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, ::GetSystemMetrics(SM_CXICON), ::GetSystemMetrics(SM_CYICON), LR_SHARED));
         g_viewportIconSmall = static_cast<HICON>(::LoadImageW(m_instance, MAKEINTRESOURCEW(IDI_APPICON), IMAGE_ICON, ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), LR_SHARED));
         if (platform.Platform_CreateWindow && platform.Platform_CreateWindow != &CreateViewportWindow)

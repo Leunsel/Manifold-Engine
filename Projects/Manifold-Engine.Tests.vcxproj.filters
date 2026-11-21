@@ -315,6 +315,9 @@
     <ClCompile Include="..\Source\Table\Structures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Table\TableFiles.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
@@ -466,6 +469,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\StructureTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\TableFileTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\TemplateTests.cpp">

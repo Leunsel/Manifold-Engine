@@ -269,3 +269,18 @@ While the log window has the focus.
 | `Ctrl+C` | Copy the selected entries | `LogCopy` | Manifold |
 | `Ctrl+A` | Select all shown entries | `LogSelectAll` | Manifold |
 | `Ctrl+F` | Search the log | `LogFind` | Manifold |
+
+## Table files
+
+While the table files window has the focus. List keys act on the selected files and rest while the cursor is in a text.
+
+| Keys | Command | Name in the settings | Origin |
+|---|---|---|---|
+| `Ctrl+O` | Add files from disk | `TableFilesAdd` | Manifold |
+| `Ctrl+E` | Export the selected files | `TableFilesExport` | Manifold |
+| `Ctrl+S` | Put the changes of the open file into the table; without changes, save the table | `TableFilesApply` | Manifold |
+| `F2` | Rename the file | `TableFilesRename` | Manifold |
+| `Del` | Delete the selected files | `TableFilesDelete` | Manifold |
+| `Ctrl+A` | Select all shown files | `TableFilesSelectAll` | Manifold |
+| `Ctrl+Shift+C` | Copy the names of the selected files | `TableFilesCopyName` | Manifold |
+| `Ctrl+F` | Find in the file, or filter the list | `TableFilesFind` | Manifold |

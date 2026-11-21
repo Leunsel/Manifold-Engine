@@ -208,6 +208,15 @@ namespace Manifold
             { LogCopy, "LogCopy", Scope::Log, "Copy the selected entries", Ctrl | ImGuiKey_C, 0, Own },
             { LogSelectAll, "LogSelectAll", Scope::Log, "Select all shown entries", Ctrl | ImGuiKey_A, 0, Own },
             { LogFind, "LogFind", Scope::Log, "Search the log", Ctrl | ImGuiKey_F, 0, Own },
+
+            { TableFilesAdd, "TableFilesAdd", Scope::TableFiles, "Add files from disk", Ctrl | ImGuiKey_O, 0, Own },
+            { TableFilesExport, "TableFilesExport", Scope::TableFiles, "Export the selected files", Ctrl | ImGuiKey_E, 0, Own },
+            { TableFilesApply, "TableFilesApply", Scope::TableFiles, "Put the changes of the open file into the table; without changes, save the table", Ctrl | ImGuiKey_S, 0, Own },
+            { TableFilesRename, "TableFilesRename", Scope::TableFiles, "Rename the file", ImGuiKey_F2, 0, Own },
+            { TableFilesDelete, "TableFilesDelete", Scope::TableFiles, "Delete the selected files", ImGuiKey_Delete, 0, Own },
+            { TableFilesSelectAll, "TableFilesSelectAll", Scope::TableFiles, "Select all shown files", Ctrl | ImGuiKey_A, 0, Own },
+            { TableFilesCopyName, "TableFilesCopyName", Scope::TableFiles, "Copy the names of the selected files", Ctrl | Shift | ImGuiKey_C, 0, Own },
+            { TableFilesFind, "TableFilesFind", Scope::TableFiles, "Find in the file, or filter the list", Ctrl | ImGuiKey_F, 0, Own },
         };
 
         static_assert(std::size(kCommands) == static_cast<std::size_t>(Command::Count));
@@ -475,6 +484,7 @@ namespace Manifold
         case CommandScope::CodeEditor: return "Code editors";
         case CommandScope::FlowGraph: return "Flow graph";
         case CommandScope::Log: return "Log";
+        case CommandScope::TableFiles: return "Table files";
         case CommandScope::Count: break;
         }
         return "";
@@ -497,6 +507,7 @@ namespace Manifold
         case CommandScope::CodeEditor: return "While the cursor is in a code editor: the Lua engine, Auto Assembler and script windows, the template manager and table files.";
         case CommandScope::FlowGraph: return "While the flow graph window has the focus.";
         case CommandScope::Log: return "While the log window has the focus.";
+        case CommandScope::TableFiles: return "While the table files window has the focus. List keys act on the selected files and rest while the cursor is in a text.";
         case CommandScope::Count: break;
         }
         return "";

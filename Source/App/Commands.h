@@ -26,6 +26,7 @@ namespace Manifold
         CodeEditor,
         FlowGraph,
         Log,
+        TableFiles,
         Count
     };
 
@@ -216,6 +217,15 @@ namespace Manifold
         LogCopy,
         LogSelectAll,
         LogFind,
+
+        TableFilesAdd,
+        TableFilesExport,
+        TableFilesApply,
+        TableFilesRename,
+        TableFilesDelete,
+        TableFilesSelectAll,
+        TableFilesCopyName,
+        TableFilesFind,
 
         Count
     };

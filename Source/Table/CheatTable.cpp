@@ -3,6 +3,7 @@
 #include "Core/Deflate.h"
 #include "Core/Text.h"
 #include "Core/Xml.h"
+#include "Table/TableFiles.h"
 
 #include <algorithm>
 #include <fstream>
@@ -436,7 +437,7 @@ namespace Manifold::Table
             for (const auto& file : files->Children)
             {
                 TableFile entry;
-                entry.Name = file->Name;
+                entry.Name = file->Attribute("Name").value_or(file->Name);
                 if (file->Attribute("Encoding").value_or("") == "Ascii85")
                 {
                     auto data = DecodeTableFile(file->Text, room);
@@ -553,7 +554,13 @@ namespace Manifold::Table
         {
             Xml::Node& node = root.Add("Files");
             for (const TableFile& file : list.Files)
-                node.Add(file.Name, EncodeTableFile(*file.Data)).SetAttribute("Encoding", "Ascii85");
+            {
+                const bool plain = IsXmlName(file.Name);
+                Xml::Node& entry = node.Add(plain ? file.Name : std::string("File"), EncodeTableFile(*file.Data));
+                if (!plain)
+                    entry.SetAttribute("Name", file.Name);
+                entry.SetAttribute("Encoding", "Ascii85");
+            }
         }
         for (const std::string& extra : list.ExtraXml)
         {

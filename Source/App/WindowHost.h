@@ -78,6 +78,7 @@ namespace Manifold
         void SetRelaxedPacing(bool relaxed) { m_relaxedPacing = relaxed; }
 
         HWND Window() const { return m_hwnd; }
+        static HWND DropSource();
         ID3D11Device* Device() const { return m_device; }
         ID3D11DeviceContext* Context() const { return m_context; }
         float WindowScale() const;

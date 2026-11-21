@@ -1,0 +1,323 @@
+#include "TestKit.h"
+
+#include "App/Engine.h"
+#include "App/Settings.h"
+#include "Core/Text.h"
+#include "Lua/LuaEngine.h"
+#include "Table/CheatTable.h"
+#include "Table/Structures.h"
+#include "Table/TableFiles.h"
+
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace Manifold::Tests
+{
+    namespace
+    {
+        std::vector<std::uint8_t> Bytes(std::string_view text)
+        {
+            return std::vector<std::uint8_t>(text.begin(), text.end());
+        }
+
+        void Put(Table::AddressList& list, const std::string& name, std::string_view text)
+        {
+            Table::SetFileData(list, list.AddFile(name), Bytes(text));
+        }
+
+        std::vector<std::string> Names(const std::vector<Table::FileRow>& rows)
+        {
+            std::vector<std::string> names;
+            for (const Table::FileRow& row : rows)
+                names.push_back(row.Name);
+            return names;
+        }
+
+        void Kinds()
+        {
+            using Table::FileKind;
+            using namespace std::string_view_literals;
+            CHECK(Table::DetectFileKind("module.lua", Bytes("return {}")) == FileKind::Lua);
+            CHECK(Table::DetectFileKind("Module.LUA", Bytes("return {}")) == FileKind::Lua);
+            CHECK(Table::DetectFileKind("theme.json", Bytes("{\"a\":1}")) == FileKind::Json);
+            CHECK(Table::DetectFileKind("theme", Bytes("  {\"a\": [1, 2]}")) == FileKind::Json);
+            CHECK(Table::DetectFileKind("form.xml", Bytes("<a/>")) == FileKind::Xml);
+            CHECK(Table::DetectFileKind("table", Bytes("<?xml version=\"1.0\"?><CheatTable/>")) == FileKind::Xml);
+            CHECK(Table::DetectFileKind("Hook.CEA", Bytes("[ENABLE]\nnop\n[DISABLE]\n")) == FileKind::AutoAssembler);
+            CHECK(Table::DetectFileKind("notes.txt", Bytes("hello")) == FileKind::Text);
+            CHECK(Table::DetectFileKind("notes", Bytes("hello there")) == FileKind::Text);
+            CHECK(Table::DetectFileKind("new.txt", {}) == FileKind::Text);
+            CHECK(Table::DetectFileKind("empty.lua", {}) == FileKind::Lua);
+            CHECK(Table::DetectFileKind("empty.png", {}) == FileKind::Image);
+            CHECK(Table::DetectFileKind("umlaut.txt", Bytes("Gr\xC3\xBC\xC3\x9F" "e")) == FileKind::Text);
+            CHECK(Table::DetectFileKind("wrong.txt", Bytes("\x89PNG\r\n\x1A\n...."sv)) == FileKind::Image);
+            CHECK(Table::DetectFileKind("photo", Bytes("\xFF\xD8\xFF\xE0" "JFIF"sv)) == FileKind::Image);
+            CHECK(Table::DetectFileKind("anim.gif", Bytes("GIF89a....")) == FileKind::Image);
+            CHECK(Table::DetectFileKind("sound.dat", Bytes("RIFF\x10\0\0\0WAVEfmt "sv)) == FileKind::Audio);
+            CHECK(Table::DetectFileKind("pack.bin", Bytes("PK\x03\x04rest"sv)) == FileKind::Archive);
+            CHECK(Table::DetectFileKind("blob", Bytes("\x01\x02\x00\x03"sv)) == FileKind::Binary);
+            CHECK(Table::DetectFileKind("blob.wav", Bytes("\x01\x02\x00\x03"sv)) == FileKind::Audio);
+            std::vector<std::uint8_t> program(128, 0);
+            program[0] = 'M';
+            program[1] = 'Z';
+            CHECK(Table::DetectFileKind("tool.dat", program) == FileKind::Program);
+            CHECK(Table::IsTextKind(FileKind::Lua) && Table::IsTextKind(FileKind::Text) && !Table::IsTextKind(FileKind::Image) && !Table::IsTextKind(FileKind::Binary));
+            CHECK(Table::LooksLikeText({}));
+            CHECK(!Table::LooksLikeText(Bytes("ab\0cd"sv)));
+            CHECK(!Table::LooksLikeText(Bytes("\xC3")));
+            std::vector<std::uint8_t> large(200 * 1024, 'a');
+            large[70 * 1024] = 0;
+            CHECK(Table::LooksLikeText(large));
+            CHECK_EQ(Table::FileExtension("a.b.LUA"), std::string("lua"));
+            CHECK(Table::FileExtension("noext").empty() && Table::FileExtension("dot.").empty());
+            CHECK_EQ(std::string(Table::FileKindName(FileKind::AutoAssembler)), std::string("Auto Assembler"));
+        }
+
+        void Arrange()
+        {
+            using Table::FileColumn;
+            using Table::FileKind;
+            std::vector<Table::FileRow> rows = {
+                { "hook10.CEA", FileKind::AutoAssembler, 300, 120, 0 },
+                { "Hook2.cea", FileKind::AutoAssembler, 200, 150, 3 },
+                { "theme.json", FileKind::Json, 5000, 900, 1 },
+                { "Bootstrap.lua", FileKind::Lua, 80, -1, 2 },
+                { "logo.png", FileKind::Image, 5000, 5100, 0 },
+            };
+            const auto names = [&](std::string_view filter, FileColumn sort, bool descending) { return Names(Table::ArrangeFiles(rows, filter, sort, descending)); };
+            CHECK(names("", FileColumn::Order, false) == (std::vector<std::string>{ "hook10.CEA", "Hook2.cea", "theme.json", "Bootstrap.lua", "logo.png" }));
+            CHECK(names("", FileColumn::Order, true) == (std::vector<std::string>{ "logo.png", "Bootstrap.lua", "theme.json", "Hook2.cea", "hook10.CEA" }));
+            CHECK(names("", FileColumn::Name, false) == (std::vector<std::string>{ "Bootstrap.lua", "Hook2.cea", "hook10.CEA", "logo.png", "theme.json" }));
+            CHECK(names("", FileColumn::Name, true) == (std::vector<std::string>{ "theme.json", "logo.png", "hook10.CEA", "Hook2.cea", "Bootstrap.lua" }));
+            CHECK(names("", FileColumn::Size, true) == (std::vector<std::string>{ "logo.png", "theme.json", "hook10.CEA", "Hook2.cea", "Bootstrap.lua" }));
+            CHECK(names("", FileColumn::Size, false) == (std::vector<std::string>{ "Bootstrap.lua", "Hook2.cea", "hook10.CEA", "logo.png", "theme.json" }));
+            CHECK(names("", FileColumn::Stored, false).front() == "Bootstrap.lua");
+            CHECK(names("", FileColumn::Uses, true) == (std::vector<std::string>{ "Hook2.cea", "Bootstrap.lua", "theme.json", "hook10.CEA", "logo.png" }));
+            CHECK(names("", FileColumn::Kind, false) == (std::vector<std::string>{ "Hook2.cea", "hook10.CEA", "logo.png", "theme.json", "Bootstrap.lua" }));
+            CHECK(names("HOOK", FileColumn::Name, false) == (std::vector<std::string>{ "Hook2.cea", "hook10.CEA" }));
+            CHECK(names("  json ", FileColumn::Order, false) == (std::vector<std::string>{ "theme.json" }));
+            CHECK(names("image", FileColumn::Order, false) == (std::vector<std::string>{ "logo.png" }));
+            CHECK(names("hook assembler 10", FileColumn::Order, false) == (std::vector<std::string>{ "hook10.CEA" }));
+            CHECK(names("nothing", FileColumn::Order, false).empty());
+            CHECK(Table::NaturalLess("file2", "file10") && !Table::NaturalLess("file10", "file2"));
+            CHECK(Table::NaturalLess("a", "B") && Table::NaturalLess("A", "b") && !Table::NaturalLess("b", "A"));
+            CHECK(Table::NaturalLess("x007", "x8") && Table::NaturalLess("abc", "abcd") && !Table::NaturalLess("same", "same"));
+        }
+
+        void NamesAndEdits()
+        {
+            Table::AddressList list;
+            Put(list, "Bootstrap.lua", "return 1");
+            Put(list, "theme.json", "{}");
+            list.SetClean();
+            CHECK(!list.Dirty());
+
+            CHECK(Table::FileNameProblem(list, "new.lua").empty());
+            CHECK(!Table::FileNameProblem(list, "").empty() && !Table::FileNameProblem(list, "   ").empty());
+            CHECK(!Table::FileNameProblem(list, "BOOTSTRAP.LUA").empty());
+            CHECK(Table::FileNameProblem(list, "BOOTSTRAP.LUA", "Bootstrap.lua").empty());
+            CHECK(!Table::FileNameProblem(list, "a/b.lua").empty() && !Table::FileNameProblem(list, "a\\b").empty() && !Table::FileNameProblem(list, "a<b>").empty());
+            CHECK(!Table::FileNameProblem(list, "line\nbreak").empty());
+            CHECK(!Table::FileNameProblem(list, std::string(Table::kMaxFileNameBytes + 1, 'a')).empty());
+            CHECK(Table::FileNameProblem(list, "with space (2).txt").empty());
+
+            CHECK_EQ(Table::UniqueFileName(list, "fresh.txt"), std::string("fresh.txt"));
+            CHECK_EQ(Table::UniqueFileName(list, "bootstrap.lua"), std::string("bootstrap_2.lua"));
+            Put(list, "bootstrap_2.lua", "x");
+            CHECK_EQ(Table::UniqueFileName(list, "Bootstrap.lua"), std::string("Bootstrap_3.lua"));
+            Put(list, "plain", "x");
+            CHECK_EQ(Table::UniqueFileName(list, "plain"), std::string("plain_2"));
+            list.SetClean();
+
+            CHECK(!Table::RenameFile(list, "missing.lua", "other.lua") && !list.Dirty());
+            CHECK(!Table::RenameFile(list, "Bootstrap.lua", "theme.json") && !list.Dirty());
+            CHECK(!Table::RenameFile(list, "Bootstrap.lua", " ") && !list.Dirty());
+            CHECK(Table::RenameFile(list, "Bootstrap.lua", "Bootstrap.lua") && !list.Dirty());
+            const std::uint64_t generation = list.Generation();
+            CHECK(Table::RenameFile(list, "bootstrap.lua", "  Start.lua "));
+            CHECK(list.Dirty() && list.Generation() != generation && list.FindFile("start.lua") && !list.FindFile("Bootstrap.lua"));
+            CHECK_EQ(list.Files[0].Name, std::string("Start.lua"));
+            list.SetClean();
+            CHECK(Table::RenameFile(list, "Start.lua", "START.lua") && list.Dirty() && list.Files[0].Name == "START.lua");
+
+            list.SetClean();
+            Table::TableFile* file = list.FindFile("theme.json");
+            CHECK(file != nullptr);
+            if (!file)
+                return;
+            const std::uint64_t version = *file->Version;
+            const auto* data = file->Data.get();
+            Table::SetFileData(list, *file, Bytes("{\"dark\":true}"));
+            CHECK(list.Dirty() && *file->Version == version + 1 && file->Data.get() == data && file->Data->size() == 13);
+
+            list.SetClean();
+            const Table::TableFile* copy = Table::DuplicateFile(list, "theme.json");
+            CHECK(copy && copy->Name == "theme_2.json" && list.Dirty());
+            CHECK(copy && *copy->Data == Bytes("{\"dark\":true}") && copy->Data.get() != list.FindFile("theme.json")->Data.get());
+            CHECK(Names({ { list.Files[0].Name }, { list.Files[1].Name }, { list.Files[2].Name } }) == (std::vector<std::string>{ "START.lua", "theme.json", "theme_2.json" }));
+            CHECK(!Table::DuplicateFile(list, "missing"));
+
+            list.SetClean();
+            CHECK_EQ(Table::RemoveFiles(list, { "missing" }), 0u);
+            CHECK(!list.Dirty());
+            const std::size_t before = list.Files.size();
+            CHECK_EQ(Table::RemoveFiles(list, { "THEME.JSON", "plain", "missing" }), 2u);
+            CHECK(list.Dirty() && list.Files.size() == before - 2 && !list.FindFile("theme.json") && list.FindFile("theme_2.json"));
+        }
+
+        void Uses()
+        {
+            const auto quoted = Table::QuotedNames("local a = findTableFile('One.lua')\n-- don't use \"two.json\" here\nx = \"\" .. 'three'");
+            CHECK(quoted.size() >= 3);
+            const auto has = [&](std::string_view name, int line)
+            {
+                for (const auto& [text, at] : quoted)
+                {
+                    if (text == name && at == line)
+                        return true;
+                }
+                return false;
+            };
+            CHECK(has("One.lua", 1) && has("two.json", 2) && has("three", 3));
+
+            Table::AddressList list;
+            Put(list, "Bootstrap.lua", "local json = findTableFile('Json.lua')\nlocal theme = findTableFile(\"Theme.json\")\nlocal self = 'Bootstrap.lua'");
+            Put(list, "Json.lua", "return {}");
+            Put(list, "theme.json", "{\"name\":\"Json.lua\"}");
+            Put(list, "Unused.bin", std::string_view("\x00\x01'Json.lua'", 12));
+            Put(list, "Hook.CEA", "[ENABLE]\n[DISABLE]\n");
+            list.TableLuaScript = "-- start\nlocal boot = findTableFile('bootstrap.lua')\nload(boot.Stream.DataString)()\nfindTableFile('bootstrap.lua')";
+            Table::MemoryRecord& script = list.AddScript("Enable hooks", "[ENABLE]\n{$lua}\nreturn findTableFile('Hook.CEA').Stream.DataString\n{$asm}\n[DISABLE]\n");
+            list.AddValue("Health", "game.exe+10", Scan::ValueType::FourBytes);
+
+            const Table::FileUses uses = Table::FindFileUses(list);
+            const auto of = [&](std::string_view name) -> std::vector<Table::FileUse>
+            {
+                const auto found = uses.find(Table::FileUseKey(name));
+                return found == uses.end() ? std::vector<Table::FileUse>() : found->second;
+            };
+            const auto boot = of("Bootstrap.lua");
+            CHECK(boot.size() == 1 && boot[0].Where == Table::FileUse::Place::TableScript && boot[0].Line == 2);
+            const auto json = of("json.lua");
+            CHECK(json.size() == 2 && json[0].Where == Table::FileUse::Place::File && json[0].Label == "Bootstrap.lua" && json[0].Line == 1 && json[1].Label == "theme.json");
+            const auto theme = of("theme.json");
+            CHECK(theme.size() == 1 && theme[0].Label == "Bootstrap.lua" && theme[0].Line == 2);
+            const auto hook = of("hook.cea");
+            CHECK(hook.size() == 1 && hook[0].Where == Table::FileUse::Place::Record && hook[0].RecordId == script.Id && hook[0].Label == "Enable hooks" && hook[0].Line == 3);
+            CHECK(of("Unused.bin").empty());
+            CHECK(Table::FindFileUses(list, 16).count("json.lua") == 0);
+
+            CHECK_EQ(Table::LuaFindSnippet("Bootstrap.lua"), std::string("findTableFile('Bootstrap.lua')"));
+            CHECK_EQ(Table::LuaFindSnippet("it's\\here"), std::string("findTableFile('it\\'s\\\\here')"));
+            CHECK(Table::LuaReadSnippet("a.lua").find("findTableFile('a.lua').Stream") != std::string::npos);
+        }
+
+        void RoundTrip()
+        {
+            Table::AddressList list;
+            std::vector<std::uint8_t> binary(70000);
+            for (std::size_t i = 0; i < binary.size(); ++i)
+                binary[i] = static_cast<std::uint8_t>((i * 31) ^ (i >> 7));
+            Put(list, "Manifold.Bootstrap.lua", "return 'boot'");
+            Put(list, "_InitMainHooks.CEA", "[ENABLE]\n[DISABLE]\n");
+            Put(list, "new file (2).txt", "spaces & brackets");
+            Put(list, "9lives.bin", std::string_view(reinterpret_cast<const char*>(binary.data()), binary.size()));
+            Put(list, "Gr\xC3\xBC\xC3\x9F" "e.txt", "umlaut");
+            Put(list, "empty.dat", "");
+            Put(list, "File", "plain name that equals the fallback tag");
+            CHECK(Table::IsXmlName("Manifold.Bootstrap.lua") && Table::IsXmlName("_InitMainHooks.CEA") && Table::IsXmlName("Dark-Aqua.Min.json") && Table::IsXmlName("File"));
+            CHECK(!Table::IsXmlName("new file (2).txt") && !Table::IsXmlName("9lives.bin") && !Table::IsXmlName("") && !Table::IsXmlName("a&b") && !Table::IsXmlName("-x"));
+
+            const Table::StructureStore structures;
+            const std::string xml = Table::WriteTable(list, structures, {});
+            CHECK(xml.find("<Manifold.Bootstrap.lua Encoding=\"Ascii85\">") != std::string::npos);
+            CHECK(xml.find("<File Name=\"new file (2).txt\" Encoding=\"Ascii85\">") != std::string::npos);
+            CHECK(xml.find("<new file") == std::string::npos && xml.find("<9lives") == std::string::npos);
+            Table::LoadedTable loaded;
+            CHECK(Table::ParseTable(xml, loaded).Ok());
+            CHECK(loaded.Warnings.empty());
+            CHECK_EQ(loaded.Files.size(), list.Files.size());
+            for (std::size_t i = 0; i < list.Files.size() && i < loaded.Files.size(); ++i)
+            {
+                CHECK_MSG(loaded.Files[i].Name == list.Files[i].Name, list.Files[i].Name);
+                CHECK_MSG(*loaded.Files[i].Data == *list.Files[i].Data, list.Files[i].Name);
+            }
+            CHECK_EQ(Table::StoredFileSize(*list.Files[0].Data), Table::EncodeTableFile(*list.Files[0].Data).size());
+            CHECK(Table::StoredFileSize(binary) > 0);
+
+            Table::LoadedTable old;
+            CHECK(Table::ParseTable("<CheatTable><Files><Old.lua Encoding=\"Ascii85\">" + Table::EncodeTableFile(Bytes("x")) + "</Old.lua></Files></CheatTable>", old).Ok());
+            CHECK(old.Files.size() == 1 && old.Files[0].Name == "Old.lua" && *old.Files[0].Data == Bytes("x"));
+        }
+
+        void LuaCheck(Engine& engine, const char* name, const std::string& code)
+        {
+            std::string result;
+            const Status status = engine.Lua().RunWithResult(code, name, result);
+            CHECK_MSG(status.Ok() && result == "ok", std::string(name) + ": " + (status.Ok() ? result : status.Text));
+        }
+
+        void LuaEdits()
+        {
+            Settings settings;
+            Engine engine(settings);
+            engine.Lua().Run("__manifoldHeadless = true", "headless");
+            Table::AddressList& list = engine.Table();
+            list.SetClean();
+            LuaCheck(engine, "create", "createTableFile('live.txt') return 'ok'");
+            Table::TableFile* file = list.FindFile("live.txt");
+            CHECK(file && list.Dirty());
+            if (!file)
+                return;
+            const auto version = file->Version;
+            const auto data = file->Data;
+
+            list.SetClean();
+            std::uint64_t before = *version;
+            LuaCheck(engine, "read", "local s = findTableFile('live.txt').Stream if s.Size ~= 0 then return 'size' end s.Position = 0 return 'ok'");
+            CHECK(!list.Dirty() && *version == before);
+
+            LuaCheck(engine, "write", "findTableFile('live.txt').Stream.writeString('hello') return 'ok'");
+            CHECK(list.Dirty() && *version > before && data->size() == 5 && list.FindFile("live.txt")->Data == data);
+
+            list.SetClean();
+            before = *version;
+            LuaCheck(engine, "size", "findTableFile('live.txt').Stream.Size = 2 return 'ok'");
+            CHECK(list.Dirty() && *version > before && data->size() == 2);
+
+            list.SetClean();
+            before = *version;
+            LuaCheck(engine, "clear", "findTableFile('live.txt').Stream.clear() return 'ok'");
+            CHECK(list.Dirty() && *version > before && data->empty());
+
+            list.SetClean();
+            before = *version;
+            LuaCheck(engine, "copy", "local copy = findTableFile('live.txt').getData() copy.writeString('own') return 'ok'");
+            CHECK(!list.Dirty() && *version == before && data->empty());
+
+            LuaCheck(engine, "plain stream", "local s = createMemoryStream() s.writeString('abc') s.Size = 1 s.clear() return 'ok'");
+            CHECK(!list.Dirty());
+
+            LuaCheck(engine, "delete", "findTableFile('live.txt').delete() return 'ok'");
+            CHECK(list.Dirty() && !list.FindFile("live.txt"));
+        }
+    }
+
+    int RunTableFileTests()
+    {
+        const int before = Totals().Failures;
+        Kinds();
+        Arrange();
+        NamesAndEdits();
+        Uses();
+        RoundTrip();
+        LuaEdits();
+        return Totals().Failures - before;
+    }
+}
+
+namespace Manifold::Tests
+{
+    MANIFOLD_SUITE("tablefiles", "Table files", 27, [](const SuiteContext&) { return RunTableFileTests(); });
+}

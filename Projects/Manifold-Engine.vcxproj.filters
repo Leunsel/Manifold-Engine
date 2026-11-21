@@ -327,6 +327,9 @@
     <ClCompile Include="..\Source\Table\Structures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Table\TableFiles.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
@@ -805,6 +808,9 @@
       <Filter>Source\Table</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Table\Structures.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Table\TableFiles.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Table\UnrealStructures.h">

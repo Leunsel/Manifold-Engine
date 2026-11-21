@@ -139,6 +139,7 @@ namespace Manifold::Table
     {
         std::string Name;
         std::shared_ptr<std::vector<std::uint8_t>> Data = std::make_shared<std::vector<std::uint8_t>>();
+        std::shared_ptr<std::uint64_t> Version = std::make_shared<std::uint64_t>(0);
     };
 
     class AddressList

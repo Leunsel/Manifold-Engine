@@ -196,6 +196,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />
     <ClCompile Include="..\Source\Table\RttiStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
+    <ClCompile Include="..\Source\Table\TableFiles.cpp" />
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
     <ClCompile Include="..\Source\Target\CodeCall.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
@@ -247,6 +248,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\RelayTests.cpp" />
     <ClCompile Include="..\Tests\RttiTests.cpp" />
     <ClCompile Include="..\Tests\StructureTests.cpp" />
+    <ClCompile Include="..\Tests\TableFileTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
     <ClCompile Include="..\Tests\TextTests.cpp" />
     <ClCompile Include="..\Tests\UnrealTests.cpp" />

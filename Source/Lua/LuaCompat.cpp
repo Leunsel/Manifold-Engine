@@ -13,6 +13,7 @@
 #include "Lua/LuaCompatScripts.h"
 #include "Lua/LuaEngine.h"
 #include "Scan/Scanner.h"
+#include "Table/TableFiles.h"
 #include "Target/CodeCall.h"
 
 #include "lua.hpp"
@@ -22,6 +23,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -110,6 +112,13 @@ namespace Manifold::Lua
             std::shared_ptr<std::vector<std::uint8_t>> Data = std::make_shared<std::vector<std::uint8_t>>();
             std::size_t Position = 0;
             bool StringStream = false;
+            std::function<void()> Changed;
+
+            void Wrote() const
+            {
+                if (Changed)
+                    Changed();
+            }
         };
 
         StreamState& CheckStream(lua_State* state, int index)
@@ -143,6 +152,7 @@ namespace Manifold::Lua
                 stream.Data->resize(stream.Position + size);
             std::memcpy(stream.Data->data() + stream.Position, data, size);
             stream.Position += size;
+            stream.Wrote();
         }
 
         template <class T>
@@ -268,6 +278,7 @@ namespace Manifold::Lua
                             return luaL_error(s, "the file %s could not be read", lua_tostring(s, 2));
                         *target.Data = *data;
                         target.Position = 0;
+                        target.Wrote();
                         return 0;
                     } },
                 { "loadfromfilenoerror", [](lua_State* s) -> int
@@ -282,6 +293,7 @@ namespace Manifold::Lua
                         }
                         *target.Data = *data;
                         target.Position = 0;
+                        target.Wrote();
                         lua_pushboolean(s, 1);
                         return 1;
                     } },
@@ -309,6 +321,7 @@ namespace Manifold::Lua
                         StreamState& target = CheckStream(s, 1);
                         target.Data->clear();
                         target.Position = 0;
+                        target.Wrote();
                         return 0;
                     } },
                 { "destroy", [](lua_State*) -> int { return 0; } },
@@ -336,6 +349,7 @@ namespace Manifold::Lua
             {
                 stream.Data->resize(static_cast<std::size_t>(std::max<lua_Integer>(0, luaL_checkinteger(state, 3))));
                 stream.Position = std::min(stream.Position, stream.Data->size());
+                stream.Wrote();
             }
             else if (key == "position")
                 stream.Position = static_cast<std::size_t>(std::clamp<lua_Integer>(luaL_checkinteger(state, 3), 0, static_cast<lua_Integer>(stream.Data->size())));
@@ -345,6 +359,7 @@ namespace Manifold::Lua
                 const char* text = luaL_checklstring(state, 3, &length);
                 stream.Data->assign(text, text + length);
                 stream.Position = 0;
+                stream.Wrote();
             }
             return 0;
         }
@@ -389,6 +404,11 @@ namespace Manifold::Lua
             {
                 auto stream = std::make_shared<StreamState>();
                 stream->Data = file->Data;
+                stream->Changed = [version = file->Version, table = &Owner(state).Table()]()
+                {
+                    ++*version;
+                    table->Touch();
+                };
                 PushStream(state, stream);
                 return 1;
             }
@@ -454,7 +474,7 @@ namespace Manifold::Lua
                 const auto data = ReadFile(Utf8ToWide(lua_tostring(state, 2)));
                 if (!data)
                     return luaL_error(state, "the file %s could not be read", lua_tostring(state, 2));
-                *file.Data = *data;
+                Table::SetFileData(Owner(state).Table(), file, *data);
             }
             PushTableFile(state, file.Name);
             return 1;
@@ -3538,6 +3558,7 @@ namespace Manifold::Lua
             return false;
         *(*holder)->Data = std::move(data);
         (*holder)->Position = 0;
+        (*holder)->Wrote();
         return true;
     }
 

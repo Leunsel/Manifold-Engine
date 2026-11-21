@@ -342,6 +342,9 @@ namespace Manifold
         if (msg == WM_DROPFILES)
         {
             const auto drop = reinterpret_cast<HDROP>(wp);
+            m_dropWindow = WindowHost::DropSource() ? WindowHost::DropSource() : m_host.Window();
+            ::DragQueryPoint(drop, &m_dropPoint);
+            ::ClientToScreen(m_dropWindow, &m_dropPoint);
             const UINT count = ::DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
             for (UINT i = 0; i < count; ++i)
             {
@@ -398,7 +401,7 @@ namespace Manifold
         if (!m_workspace)
             return;
         if (!m_dropped.empty())
-            m_workspace->DropFiles(std::exchange(m_dropped, {}), m_dropMerges);
+            m_workspace->DropFiles(std::exchange(m_dropped, {}), m_dropMerges, m_dropWindow, static_cast<float>(m_dropPoint.x), static_cast<float>(m_dropPoint.y));
         m_workspace->Draw();
         if (!m_started && ++m_frames >= 2)
         {

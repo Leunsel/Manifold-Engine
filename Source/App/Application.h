@@ -83,5 +83,7 @@ namespace Manifold
         bool m_systemThemeChanged = false;
         std::vector<std::filesystem::path> m_dropped;
         bool m_dropMerges = false;
+        HWND m_dropWindow = nullptr;
+        POINT m_dropPoint{};
     };
 }

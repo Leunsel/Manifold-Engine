@@ -165,7 +165,7 @@ namespace Manifold::UI
         std::optional<std::filesystem::path> FolderDialog();
 
         bool OpenTable(const std::filesystem::path& path, bool merge);
-        void DropFiles(const std::vector<std::filesystem::path>& files, bool merge);
+        void DropFiles(const std::vector<std::filesystem::path>& files, bool merge, void* window = nullptr, float x = 0.0f, float y = 0.0f);
         bool SaveTable(bool askName);
         void OpenBackupDialog();
         void OpenBackup(const std::filesystem::path& path);

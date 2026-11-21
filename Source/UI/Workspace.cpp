@@ -867,8 +867,14 @@ namespace Manifold::UI
         return true;
     }
 
-    void Workspace::DropFiles(const std::vector<std::filesystem::path>& files, bool merge)
+    void Workspace::DropFiles(const std::vector<std::filesystem::path>& files, bool merge, void* window, float x, float y)
     {
+        if (m_tableFiles && !m_tableFiles->Closed() && m_tableFiles->TakesDrop(window, x, y))
+        {
+            LOG_INFO("Table", std::to_string(files.size()) + (files.size() == 1 ? " file was" : " files were") + " dropped onto the table files window");
+            m_tableFiles->AddFiles(files);
+            return;
+        }
         std::vector<std::filesystem::path> tables;
         for (const std::filesystem::path& file : files)
         {
