@@ -7875,7 +7875,7 @@ local function formHeader(path, spec, handlers)
   end
   local options = {}
   for key, value in pairs(spec) do
-    if key ~= "form" and key ~= "title" and key ~= "children" and key ~= "script" and key ~= "fragment" then
+    if key ~= "form" and key ~= "title" and key ~= "children" and key ~= "script" and key ~= "fragment" and key ~= "editor" then
       if not WINDOW_KEYS[key] then
         misuse(("%s: form.%s is not a window option (known options: %s)"):format(path, tostring(key), table.concat(sortedNames(WINDOW_KEYS), ", ")))
       end
@@ -7934,9 +7934,9 @@ local function checkForm(path, spec, handlers)
       misuse(path .. ": the form nests deeper than 32 levels")
     end
     for index, child in ipairs(list) do
-      local copy, label = formWidget(path, child, ("%s.children[%d]"):format(where, index), resolve)
 )MLUA"),
-            std::string_view(R"MLUA(      local keys = WIDGET_KEYS[child.kind]
+            std::string_view(R"MLUA(      local copy, label = formWidget(path, child, ("%s.children[%d]"):format(where, index), resolve)
+      local keys = WIDGET_KEYS[child.kind]
       if not keys then
         misuse(('%s: %s: kind must be one of "%s", got %q'):format(path, label, table.concat(WIDGET_KINDS, '", "'), child.kind))
       end
@@ -8217,13 +8217,13 @@ end)
 local FILE_KEYS = { title = "string", filters = "table", name = "string", onClose = "function" }
 local FILE_TEXT = " `filters` is a list of `{ \"Lua scripts\", \"*.lua\" }` pairs; `onClose(path)` gets the full path, or nil."
 
-local function flatFilters(path, filters)
+)MLUA"),
+            std::string_view(R"MLUA(local function flatFilters(path, filters)
   if filters == nil then
     return nil
   end
   local flat = {}
-)MLUA"),
-            std::string_view(R"MLUA(  for index, pair in ipairs(filters) do
+  for index, pair in ipairs(filters) do
     if type(pair) ~= "table" or type(pair[1]) ~= "string" or type(pair[2]) ~= "string" then
       misuse(("%s: filter %d must be { description, pattern }"):format(path, index))
     end
@@ -8486,10 +8486,10 @@ define(ui, "setMode", {
   native.setUiMode(mode.release, mode.compact)
 end)
 
-local theme = subarea(ui, "theme", "The names `manifold.ui` takes for colours and icons.")
-
 )MLUA"),
-            std::string_view(R"MLUA(define(theme, "colors", {
+            std::string_view(R"MLUA(local theme = subarea(ui, "theme", "The names `manifold.ui` takes for colours and icons.")
+
+define(theme, "colors", {
   returns = "table",
   doc = "The theme colour names, which follow the theme and light or dark mode.",
 }, function()

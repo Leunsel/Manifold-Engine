@@ -48,6 +48,24 @@ namespace Manifold::Lua
         std::map<std::string, std::string> Handlers;
     };
 
+    struct FormNode
+    {
+        float X = 0.0f;
+        float Y = 0.0f;
+        bool Folded = false;
+    };
+
+    struct FormFunction
+    {
+        std::size_t Begin = 0;
+        std::size_t HeaderEnd = 0;
+        std::size_t BodyBegin = 0;
+        std::size_t BodyEnd = 0;
+        std::size_t End = 0;
+        std::string Indent;
+        std::string Params;
+    };
+
     struct FormDocument
     {
         UiModel Model;
@@ -56,6 +74,11 @@ namespace Manifold::Lua
         std::map<int, FormMeta> Meta;
         bool Fragment = false;
         std::string Script;
+        float CanvasX = 40.0f;
+        float CanvasY = 30.0f;
+        std::map<std::string, FormNode> Nodes;
+        std::string ScriptText;
+        bool ScriptLoaded = false;
     };
 
     struct FormTemplate
@@ -106,6 +129,9 @@ namespace Manifold::Lua
     std::vector<std::pair<std::string, std::string>> FormHandlerList(const FormDocument& form);
     FormMerge FormMergeScript(std::string_view script, const FormDocument& form);
     int FormFunctionLine(std::string_view script, std::string_view name);
+    std::optional<FormFunction> FormFindFunction(std::string_view script, std::string_view name);
+    std::string FormFunctionBody(std::string_view script, std::string_view name);
+    std::optional<std::string> FormReplaceBody(std::string_view script, std::string_view name, std::string_view body);
     int FormIndexOf(const FormDocument& form, int node);
     std::string FormUniqueName(const FormDocument& form, std::string_view base, int except = 0);
     bool FormIsIdentifier(std::string_view name);

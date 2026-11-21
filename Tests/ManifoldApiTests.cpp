@@ -1750,6 +1750,67 @@ return M
             CHECK(engine.Lua().Run("", "form link").Ok());
         }
 
+        void UiFormCanvas(Engine& engine)
+        {
+            // Function scanner: strings, comments and nested blocks never end a function early.
+            const std::string script =
+                "local handlers = {}\n"
+                "function handlers.saveClicked(widget)\n"
+                "    local s = \"end\" .. [[end]] -- end\n"
+                "    if widget then\n"
+                "        for i = 1, 2 do print(i) end\n"
+                "    end\n"
+                "    repeat local x = 1 until true\n"
+                "    local f = function() return 1 end\n"
+                "end\n"
+                "--[[ function handlers.ghost() end ]]\n"
+                "local function quick(a, b) return a end\n"
+                "handlers.later = function(value)\n"
+                "end\n"
+                "manifold.ui.form.load(\"x.form.lua\", handlers)\n";
+            const auto save = Lua::FormFindFunction(script, "saveClicked");
+            CHECK(save.has_value());
+            if (save)
+            {
+                CHECK_EQ(save->Params, std::string("widget"));
+                CHECK_EQ(script.compare(save->End - 3, 3, "end"), 0);
+                CHECK(script.substr(save->End).rfind("\n--[[", 0) == 0);
+            }
+            CHECK(!Lua::FormFindFunction(script, "ghost").has_value());
+            CHECK_EQ(Lua::FormFunctionLine(script, "quick"), 11);
+            CHECK_EQ(Lua::FormFunctionLine(script, "later"), 12);
+            CHECK_EQ(Lua::FormFunctionBody(script, "quick"), std::string("return a"));
+            const auto replaced = Lua::FormReplaceBody(script, "later", "    print(value)");
+            CHECK(replaced.has_value());
+            if (replaced)
+            {
+                CHECK(replaced->find("handlers.later = function(value)\n    print(value)\nend\nmanifold.ui.form.load") != std::string::npos);
+            }
+            CHECK(!Lua::FormReplaceBody(script, "missing", "x").has_value());
+
+            // Editor layout: form place and chip places survive save + load; the runtime ignores them.
+            Lua::FormDocument form = SampleForm();
+            form.CanvasX = 120.0f;
+            form.CanvasY = 64.0f;
+            form.Nodes["saveClicked"] = { 400.0f, 80.0f, false };
+            form.Nodes["godChanged"] = { 410.0f, 140.0f, true };
+            const std::string saved = Lua::FormSave(form);
+            CHECK(saved.find("editor = {") != std::string::npos);
+            Lua::FormDocument loaded;
+            std::string error;
+            std::vector<std::string> notes;
+            CHECK_MSG(Lua::FormLoad(saved, loaded, error, &notes) && notes.empty(), error);
+            CHECK_EQ(loaded.CanvasX, 120.0f);
+            CHECK_EQ(loaded.CanvasY, 64.0f);
+            CHECK_EQ(loaded.Nodes.size(), std::size_t(2));
+            CHECK(loaded.Nodes.count("godChanged") && loaded.Nodes["godChanged"].Folded && loaded.Nodes["godChanged"].Y == 140.0f);
+            CHECK(Lua::FormSave(SampleForm()).find("editor =") == std::string::npos);
+            LuaCheck(engine, "form editor key", R"LUA(
+                local made = manifold.ui.form.build({ form = 1, title = "Placed", editor = { form = { x = 1, y = 2 }, nodes = { a = { x = 3, y = 4 } } }, children = { { kind = "text", text = "x" } } })
+                made.remove()
+                return "ok")LUA");
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -1896,6 +1957,7 @@ return M
         UiFormReload(engine);
         UiWindowOptions(engine);
         UiFormLinks(engine);
+        UiFormCanvas(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

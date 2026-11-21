@@ -920,7 +920,7 @@ namespace Manifold::Lua
                         continue;
                     }
                     const std::string key = lua_tostring(State, -2);
-                    if (key == "name" || key == "kind" || key == "children" || key == "form" || (node.Kind == UiKind::Window && (key == "key" || key == "fragment" || key == "script")))
+                    if (key == "name" || key == "kind" || key == "children" || key == "form" || (node.Kind == UiKind::Window && (key == "key" || key == "fragment" || key == "script" || key == "editor")))
                     {
                         lua_pop(State, 1);
                         continue;
@@ -1035,6 +1035,48 @@ namespace Manifold::Lua
                 return true;
             }
 
+            static float Number(lua_State* state, int table, const char* key, float fallback)
+            {
+                lua_getfield(state, table, key);
+                const float value = lua_isnumber(state, -1) ? static_cast<float>(lua_tonumber(state, -1)) : fallback;
+                lua_pop(state, 1);
+                return value;
+            }
+
+            void ReadEditor(int editor)
+            {
+                if (lua_getfield(State, editor, "form") == LUA_TTABLE)
+                {
+                    const int at = lua_gettop(State);
+                    Form.CanvasX = Number(State, at, "x", Form.CanvasX);
+                    Form.CanvasY = Number(State, at, "y", Form.CanvasY);
+                }
+                lua_pop(State, 1);
+                if (lua_getfield(State, editor, "nodes") == LUA_TTABLE)
+                {
+                    const int nodes = lua_gettop(State);
+                    lua_pushnil(State);
+                    while (lua_next(State, nodes))
+                    {
+                        if (lua_type(State, -2) == LUA_TSTRING && lua_istable(State, -1) && Form.Nodes.size() < 4096)
+                        {
+                            const int at = lua_gettop(State);
+                            FormNode node;
+                            node.X = Number(State, at, "x", 0.0f);
+                            node.Y = Number(State, at, "y", 0.0f);
+                            lua_getfield(State, at, "folded");
+                            node.Folded = lua_toboolean(State, -1) != 0;
+                            lua_pop(State, 1);
+                            const std::string name = lua_tostring(State, -2);
+                            if (FormIsIdentifier(name))
+                                Form.Nodes[name] = node;
+                        }
+                        lua_pop(State, 1);
+                    }
+                }
+                lua_pop(State, 1);
+            }
+
             bool Run(int table)
             {
                 lua_getfield(State, table, "form");
@@ -1064,6 +1106,9 @@ namespace Manifold::Lua
                 lua_getfield(State, table, "script");
                 if (lua_type(State, -1) == LUA_TSTRING)
                     Form.Script = lua_tostring(State, -1);
+                lua_pop(State, 1);
+                if (lua_getfield(State, table, "editor") == LUA_TTABLE)
+                    ReadEditor(lua_gettop(State));
                 lua_pop(State, 1);
                 FormMeta meta;
                 if (!ReadMeta(table, window, meta))
@@ -1562,18 +1607,246 @@ namespace Manifold::Lua
         return merge;
     }
 
-    int FormFunctionLine(std::string_view script, std::string_view name)
+    namespace
+    {
+        struct LuaToken
+        {
+            enum class Type : std::uint8_t
+            {
+                Word,
+                String,
+                Symbol,
+            };
+
+            Type Kind = Type::Symbol;
+            std::size_t Begin = 0;
+            std::size_t End = 0;
+            std::string_view Text;
+        };
+
+        int LongBracket(std::string_view text, std::size_t at)
+        {
+            if (at >= text.size() || text[at] != '[')
+                return -1;
+            std::size_t i = at + 1;
+            int level = 0;
+            while (i < text.size() && text[i] == '=')
+            {
+                ++level;
+                ++i;
+            }
+            return i < text.size() && text[i] == '[' ? level : -1;
+        }
+
+        std::size_t CloseLong(std::string_view text, std::size_t from, int level)
+        {
+            const std::string closing = "]" + std::string(static_cast<std::size_t>(level), '=') + "]";
+            const std::size_t found = text.find(closing, from);
+            return found == std::string_view::npos ? text.size() : found + closing.size();
+        }
+
+        // ∑ Just enough of Lua's lexer to find a function's matching end:
+        // comments and strings (also long ones) are skipped, so an "end" in a
+        // string or a comment does not count.
+        std::vector<LuaToken> Tokenize(std::string_view text)
+        {
+            std::vector<LuaToken> tokens;
+            std::size_t i = 0;
+            const std::size_t n = text.size();
+            while (i < n)
+            {
+                const char c = text[i];
+                if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v')
+                {
+                    ++i;
+                    continue;
+                }
+                if (c == '-' && i + 1 < n && text[i + 1] == '-')
+                {
+                    i += 2;
+                    const int level = LongBracket(text, i);
+                    if (level >= 0)
+                        i = CloseLong(text, i + static_cast<std::size_t>(level) + 2, level);
+                    else
+                    {
+                        const std::size_t line = text.find('\n', i);
+                        i = line == std::string_view::npos ? n : line;
+                    }
+                    continue;
+                }
+                if (c == '[')
+                {
+                    const int level = LongBracket(text, i);
+                    if (level >= 0)
+                    {
+                        const std::size_t open = i + static_cast<std::size_t>(level) + 2;
+                        const std::size_t close = CloseLong(text, open, level);
+                        const std::size_t contentEnd = close >= n && text.substr(open).find(']') == std::string_view::npos ? n : close - static_cast<std::size_t>(level) - 2;
+                        tokens.push_back({ LuaToken::Type::String, i, close, text.substr(open, contentEnd > open ? contentEnd - open : 0) });
+                        i = close;
+                        continue;
+                    }
+                }
+                if (c == '"' || c == '\'')
+                {
+                    std::size_t j = i + 1;
+                    while (j < n && text[j] != c && text[j] != '\n')
+                        j += text[j] == '\\' && j + 1 < n ? 2 : 1;
+                    tokens.push_back({ LuaToken::Type::String, i, std::min(n, j + 1), text.substr(i + 1, std::min(n, j) - i - 1) });
+                    i = std::min(n, j + 1);
+                    continue;
+                }
+                if (std::isalpha(static_cast<unsigned char>(c)) || c == '_')
+                {
+                    std::size_t j = i + 1;
+                    while (j < n && (std::isalnum(static_cast<unsigned char>(text[j])) || text[j] == '_'))
+                        ++j;
+                    tokens.push_back({ LuaToken::Type::Word, i, j, text.substr(i, j - i) });
+                    i = j;
+                    continue;
+                }
+                if (std::isdigit(static_cast<unsigned char>(c)))
+                {
+                    std::size_t j = i + 1;
+                    while (j < n && (std::isalnum(static_cast<unsigned char>(text[j])) || text[j] == '.' ||
+                                        ((text[j] == '+' || text[j] == '-') && (text[j - 1] == 'e' || text[j - 1] == 'E' || text[j - 1] == 'p' || text[j - 1] == 'P'))))
+                        ++j;
+                    i = j;
+                    continue;
+                }
+                tokens.push_back({ LuaToken::Type::Symbol, i, i + 1, text.substr(i, 1) });
+                ++i;
+            }
+            return tokens;
+        }
+
+        bool Is(const std::vector<LuaToken>& tokens, std::size_t at, LuaToken::Type kind, std::string_view text)
+        {
+            return at < tokens.size() && tokens[at].Kind == kind && tokens[at].Text == text;
+        }
+    }
+
+    std::optional<FormFunction> FormFindFunction(std::string_view script, std::string_view name)
     {
         if (!FormIsIdentifier(name))
+            return std::nullopt;
+        using W = LuaToken::Type;
+        const std::vector<LuaToken> tokens = Tokenize(script);
+        for (std::size_t i = 0; i < tokens.size(); ++i)
+        {
+            std::size_t begin = 0;
+            std::size_t open = 0;
+            if (Is(tokens, i, W::Word, "function") && Is(tokens, i + 1, W::Word, "handlers") && Is(tokens, i + 2, W::Symbol, ".") && Is(tokens, i + 3, W::Word, name) && Is(tokens, i + 4, W::Symbol, "("))
+            {
+                begin = tokens[i].Begin;
+                open = i + 4;
+            }
+            else if (Is(tokens, i, W::Word, "local") && Is(tokens, i + 1, W::Word, "function") && Is(tokens, i + 2, W::Word, name) && Is(tokens, i + 3, W::Symbol, "("))
+            {
+                begin = tokens[i].Begin;
+                open = i + 3;
+            }
+            else if (Is(tokens, i, W::Word, "function") && Is(tokens, i + 1, W::Word, name) && Is(tokens, i + 2, W::Symbol, "(") && !(i > 0 && Is(tokens, i - 1, W::Word, "local")))
+            {
+                begin = tokens[i].Begin;
+                open = i + 2;
+            }
+            else if (Is(tokens, i, W::Word, "handlers") && Is(tokens, i + 1, W::Symbol, ".") && Is(tokens, i + 2, W::Word, name) && Is(tokens, i + 3, W::Symbol, "=") &&
+                     Is(tokens, i + 4, W::Word, "function") && Is(tokens, i + 5, W::Symbol, "("))
+            {
+                begin = tokens[i].Begin;
+                open = i + 5;
+            }
+            else if (Is(tokens, i, W::Word, "handlers") && Is(tokens, i + 1, W::Symbol, "[") && Is(tokens, i + 2, W::String, name) && Is(tokens, i + 3, W::Symbol, "]") &&
+                     Is(tokens, i + 4, W::Symbol, "=") && Is(tokens, i + 5, W::Word, "function") && Is(tokens, i + 6, W::Symbol, "("))
+            {
+                begin = tokens[i].Begin;
+                open = i + 6;
+            }
+            else
+                continue;
+            if (i > 0 && Is(tokens, i - 1, W::Symbol, "."))
+                continue;
+            std::size_t close = open + 1;
+            while (close < tokens.size() && !Is(tokens, close, W::Symbol, ")"))
+                ++close;
+            if (close >= tokens.size())
+                return std::nullopt;
+            int depth = 1;
+            std::size_t at = close + 1;
+            for (; at < tokens.size(); ++at)
+            {
+                const LuaToken& token = tokens[at];
+                if (token.Kind != W::Word)
+                    continue;
+                if (token.Text == "function" || token.Text == "do" || token.Text == "if" || token.Text == "repeat")
+                    ++depth;
+                else if (token.Text == "end" || token.Text == "until")
+                {
+                    if (--depth == 0)
+                        break;
+                }
+            }
+            if (at >= tokens.size() || tokens[at].Text != "end")
+                return std::nullopt;
+            FormFunction found;
+            found.Begin = begin;
+            found.HeaderEnd = tokens[close].End;
+            found.Params = std::string(script.substr(tokens[open].End, tokens[close].Begin - tokens[open].End));
+            std::size_t body = found.HeaderEnd;
+            while (body < script.size() && (script[body] == ' ' || script[body] == '\t' || script[body] == '\r'))
+                ++body;
+            found.BodyBegin = body < script.size() && script[body] == '\n' ? body + 1 : found.HeaderEnd;
+            std::size_t lineStart = tokens[at].Begin;
+            while (lineStart > 0 && (script[lineStart - 1] == ' ' || script[lineStart - 1] == '\t'))
+                --lineStart;
+            found.BodyEnd = lineStart > 0 && script[lineStart - 1] == '\n' && lineStart >= found.BodyBegin ? lineStart : tokens[at].Begin;
+            if (found.BodyEnd < found.BodyBegin)
+                found.BodyEnd = found.BodyBegin;
+            found.End = tokens[at].End;
+            std::size_t defLine = begin;
+            while (defLine > 0 && script[defLine - 1] != '\n')
+                --defLine;
+            found.Indent = std::string(script.substr(defLine, begin - defLine));
+            if (found.Indent.find_first_not_of(" \t") != std::string::npos)
+                found.Indent.clear();
+            return found;
+        }
+        return std::nullopt;
+    }
+
+    std::string FormFunctionBody(std::string_view script, std::string_view name)
+    {
+        const std::optional<FormFunction> found = FormFindFunction(script, name);
+        if (!found)
+            return {};
+        std::string body(script.substr(found->BodyBegin, found->BodyEnd - found->BodyBegin));
+        if (found->BodyEnd == found->End - 3 && found->BodyBegin == found->HeaderEnd)
+            body = Trim(body);
+        return body;
+    }
+
+    std::optional<std::string> FormReplaceBody(std::string_view script, std::string_view name, std::string_view body)
+    {
+        const std::optional<FormFunction> found = FormFindFunction(script, name);
+        if (!found)
+            return std::nullopt;
+        std::string text(script.substr(0, found->HeaderEnd));
+        text += "\n";
+        text += body;
+        if (!body.empty() && body.back() != '\n')
+            text += "\n";
+        text += found->Indent + "end";
+        text += script.substr(found->End);
+        return text;
+    }
+
+    int FormFunctionLine(std::string_view script, std::string_view name)
+    {
+        const std::optional<FormFunction> found = FormFindFunction(script, name);
+        if (!found)
             return 0;
-        const std::string word(name);
-        const std::regex pattern("(^|\\n)[^\\n]*(function\\s+(handlers\\s*\\.\\s*)?" + word + "\\s*\\(|handlers\\s*(\\.\\s*" + word + "|\\[\\s*[\"']" + word + "[\"']\\s*\\])\\s*=\\s*function)");
-        const std::string text(script);
-        std::smatch found;
-        if (!std::regex_search(text, found, pattern))
-            return 0;
-        const std::size_t at = static_cast<std::size_t>(found.position(0)) + static_cast<std::size_t>(found.length(1));
-        return 1 + static_cast<int>(std::count(text.begin(), text.begin() + static_cast<std::ptrdiff_t>(at), '\n'));
+        return 1 + static_cast<int>(std::count(script.begin(), script.begin() + static_cast<std::ptrdiff_t>(found->Begin), '\n'));
     }
 
     int FormIndexOf(const FormDocument& form, int node)
@@ -2020,6 +2293,19 @@ namespace Manifold::Lua
                     SaveNode(form, *item, 2, writer);
             }
             writer.Line(1, "},");
+            if (form.CanvasX != 40.0f || form.CanvasY != 30.0f || !form.Nodes.empty())
+            {
+                writer.Line(1, "editor = {");
+                writer.Line(2, "form = { x = " + NumberText(std::round(form.CanvasX)) + ", y = " + NumberText(std::round(form.CanvasY)) + " },");
+                if (!form.Nodes.empty())
+                {
+                    writer.Line(2, "nodes = {");
+                    for (const auto& [name, node] : form.Nodes)
+                        writer.Line(3, name + " = { x = " + NumberText(std::round(node.X)) + ", y = " + NumberText(std::round(node.Y)) + (node.Folded ? ", folded = true" : "") + " },");
+                    writer.Line(2, "},");
+                }
+                writer.Line(1, "},");
+            }
         }
         writer.Line(0, "}");
         return writer.Out;

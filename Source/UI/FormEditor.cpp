@@ -370,7 +370,22 @@ namespace Manifold::UI
         m_trying = false;
         m_selected = m_form.Window;
         m_hovered = 0;
+        m_scriptPath.clear();
+        m_scriptDisk.clear();
+        m_scriptConflict = false;
+        m_chipPlaces.clear();
+        m_pan = ImVec2(0.0f, 0.0f);
         ++m_revision;
+    }
+
+    bool FormEditorWindow::ScriptDirty() const
+    {
+        return m_form.ScriptLoaded && m_form.ScriptText != m_scriptDisk;
+    }
+
+    bool FormEditorWindow::Dirty() const
+    {
+        return m_dirty || ScriptDirty();
     }
 
     std::string FormEditorWindow::Title() const
@@ -378,7 +393,7 @@ namespace Manifold::UI
         std::string title = ICON_FA_PENCIL_RULER "  Form Editor";
         if (!m_path.empty())
             title += "  -  " + WideToUtf8(m_path.filename().wstring());
-        if (m_dirty)
+        if (Dirty())
             title += " *";
         return title + "###formeditor";
     }
@@ -452,6 +467,7 @@ namespace Manifold::UI
         m_form = std::move(m_undo.back());
         m_undo.pop_back();
         m_lastSource = 0;
+        m_scriptEditor.KeepCursor = true;
         if (!m_form.Model.Find(m_selected))
             m_selected = m_form.Window;
         m_dirty = true;
@@ -466,6 +482,7 @@ namespace Manifold::UI
         m_form = std::move(m_redo.back());
         m_redo.pop_back();
         m_lastSource = 0;
+        m_scriptEditor.KeepCursor = true;
         if (!m_form.Model.Find(m_selected))
             m_selected = m_form.Window;
         m_dirty = true;
@@ -639,6 +656,17 @@ namespace Manifold::UI
 
     void FormEditorWindow::RunScript()
     {
+        const std::filesystem::path script = LinkedScript();
+        std::error_code missing;
+        if (!script.empty() && std::filesystem::exists(script, missing))
+        {
+            if (Dirty() && !Save(false))
+                return;
+            const Status status = m_engine.Lua().RunFile(script);
+            if (!status)
+                m_engine.Notify(status);
+            return;
+        }
         const std::string code = Lua::FormScript(m_form, Lua::FormScriptStyle::Standalone);
         const Status status = m_engine.Lua().Run(code, kRunChunk);
         if (!status)
@@ -647,7 +675,7 @@ namespace Manifold::UI
 
     void FormEditorWindow::AskThen(Pending pending)
     {
-        if (!m_dirty)
+        if (!Dirty())
         {
             m_pending = pending;
             DoPending();
@@ -725,14 +753,17 @@ namespace Manifold::UI
         m_path = path;
         m_dirty = false;
         ++m_revision;
-        m_engine.Notify(LogLevel::Success, "Saved " + WideToUtf8(path.filename().wstring()));
+        const bool script = SaveScript();
+        m_engine.Notify(LogLevel::Success, "Saved " + WideToUtf8(path.filename().wstring()) + (script && !m_scriptPath.empty() ? " and " + WideToUtf8(m_scriptPath.filename().wstring()) : std::string()));
         return true;
     }
 
     void FormEditorWindow::Export()
     {
         const bool withFile = m_style == 1;
-        if (withFile && (m_path.empty() || m_dirty) && !Save(false))
+        if (withFile && (m_path.empty() || Dirty()) && !Save(false))
+            return;
+        if (!withFile && ScriptDirty() && !SaveScript())
             return;
         std::error_code ignored;
         if (m_path.empty())
@@ -743,6 +774,14 @@ namespace Manifold::UI
             WideToUtf8((linked.empty() ? folder / Utf8ToWide(ScriptFileName()) : linked).wstring()), L"lua");
         if (!chosen)
             return;
+        std::error_code missing;
+        if (!withFile && m_form.ScriptLoaded && !m_form.ScriptText.empty() && std::filesystem::exists(*chosen, missing) &&
+            (LinkedScript() == std::filesystem::path(*chosen).lexically_normal() || std::filesystem::equivalent(LinkedScript(), *chosen, missing)))
+        {
+            m_engine.Notify(LogLevel::Warning, WideToUtf8(chosen->filename().wstring()) + " holds this form's handler code; a standalone script would replace it. Export it to another file, or use Script + Form File.");
+            return;
+        }
+        m_form.ScriptLoaded = false;
         if (LinkedScript() != std::filesystem::path(*chosen).lexically_normal())
         {
             SetLink(*chosen);
@@ -997,8 +1036,12 @@ namespace Manifold::UI
     void FormEditorWindow::Outline()
     {
         SectionLabel("Outline");
-        ImGui::BeginChild("##outline", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+        ImGui::BeginChild("##outline", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+        // ∑ Deep trees: a narrower indent, and rows as wide as their text so
+        // the list scrolls sideways instead of cutting the names off.
+        ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, Px(13.0f));
         OutlineNode(m_form.Window, 0);
+        ImGui::PopStyleVar();
         ImGui::EndChild();
         m_scrollOutline = false;
     }
@@ -1110,6 +1153,14 @@ namespace Manifold::UI
             draw->AddText(ImVec2(at, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(FamilyColor(FamilyOf(node->Kind)), alpha)), KindIcon(node->Kind));
             at += Px(20.0f);
             const float right = rowMax.x - ImGui::GetFrameHeight() * 2.6f;
+            {
+                const float textWidth = ImGui::CalcTextSize(first.c_str()).x + (second.empty() ? 0.0f : Px(8.0f) + ImGui::CalcTextSize(second.c_str()).x);
+                const float need = at + textWidth + ImGui::GetFrameHeight() * 2.6f + ImGui::GetStyle().FramePadding.x;
+                ImGuiWindow* outline = ImGui::GetCurrentWindow();
+                outline->DC.CursorMaxPos.x = std::max(outline->DC.CursorMaxPos.x, need);
+                if (rowHovered && !overEye && at + textWidth > right && !ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+                    ImGui::SetTooltip("%s%s%s", first.c_str(), second.empty() ? "" : "  ", second.c_str());
+            }
             draw->PushClipRect(ImVec2(at, rowMin.y), ImVec2(std::max(at, right), rowMax.y), true);
             draw->AddText(ImVec2(at, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Text, alpha)), first.c_str());
             at += ImGui::CalcTextSize(first.c_str()).x + Px(8.0f);
@@ -1214,6 +1265,9 @@ namespace Manifold::UI
         ImGui::SameLine();
         if (ImGui::Button(ICON_FA_PLAY "  Run Script"))
             RunScript();
+        ImGui::SameLine();
+        if (IconButton(ICON_FA_CROSSHAIRS, "Bring the form back to the top left of the work surface"))
+            m_pan = ImVec2(Px(-m_form.CanvasX + 40.0f), Px(-m_form.CanvasY + 30.0f));
         ItemTooltip("Runs the script in Manifold's Lua engine, so the real window opens. Running it again replaces that window.");
         if (const std::filesystem::path script = LinkedScript(); !script.empty())
         {
@@ -1261,8 +1315,60 @@ namespace Manifold::UI
         for (const UiNode* node = m_form.Model.Find(m_selected); node; node = m_form.Model.Find(node->Parent))
             path.insert(path.begin(), node);
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(Px(4.0f), ImGui::GetStyle().ItemSpacing.y));
+        std::vector<std::string> labels;
+        std::vector<float> widths;
+        const float spacing = Px(4.0f);
+        const float separator = ImGui::CalcTextSize(ICON_FA_ANGLE_RIGHT).x + spacing * 2.0f;
+        for (const UiNode* node : path)
+        {
+            const auto meta = m_form.Meta.find(node->Id);
+            labels.push_back(std::string(KindIcon(node->Kind)) + " " + (meta != m_form.Meta.end() && !meta->second.Name.empty() ? meta->second.Name : std::string(Lua::FormKindTitle(node->Kind))));
+            widths.push_back(ImGui::CalcTextSize(labels.back().c_str()).x);
+        }
+        // ∑ A path wider than the bar keeps its first and last steps and folds
+        // the ones in between into a "..." menu, dropping from the root side.
+        const float avail = ImGui::GetContentRegionAvail().x;
+        const float ellipsis = ImGui::CalcTextSize("...").x + separator;
+        float total = 0.0f;
+        for (std::size_t i = 0; i < path.size(); ++i)
+            total += widths[i] + (i ? separator : 0.0f);
+        std::size_t hiddenEnd = 1;
+        while (total > avail && hiddenEnd + 1 < path.size())
+        {
+            total -= widths[hiddenEnd] + separator;
+            if (hiddenEnd == 1)
+                total += ellipsis;
+            ++hiddenEnd;
+        }
+        const bool folded = hiddenEnd > 1;
         for (std::size_t i = 0; i < path.size(); ++i)
         {
+            if (folded && i >= 1 && i < hiddenEnd)
+            {
+                if (i == 1)
+                {
+                    ImGui::SameLine();
+                    ImGui::TextColored(ManifoldTheme::Muted, ICON_FA_ANGLE_RIGHT);
+                    ImGui::SameLine();
+                    if (ImGui::TextLink("...##crumbs"))
+                        ImGui::OpenPopup("##crumbmenu");
+                    ItemTooltip("Show the folded steps of the path");
+                    if (ImGui::BeginPopup("##crumbmenu"))
+                    {
+                        for (std::size_t j = 1; j < hiddenEnd; ++j)
+                        {
+                            ImGui::PushID(path[j]->Id);
+                            ImGui::Indent(Px(10.0f) * static_cast<float>(j - 1));
+                            if (ImGui::MenuItem(labels[j].c_str()))
+                                Select(path[j]->Id);
+                            ImGui::Unindent(Px(10.0f) * static_cast<float>(j - 1));
+                            ImGui::PopID();
+                        }
+                        ImGui::EndPopup();
+                    }
+                }
+                continue;
+            }
             const UiNode& node = *path[i];
             if (i)
             {
@@ -1270,12 +1376,10 @@ namespace Manifold::UI
                 ImGui::TextColored(ManifoldTheme::Muted, ICON_FA_ANGLE_RIGHT);
                 ImGui::SameLine();
             }
-            const auto meta = m_form.Meta.find(node.Id);
-            std::string label = std::string(KindIcon(node.Kind)) + " " + (meta != m_form.Meta.end() && !meta->second.Name.empty() ? meta->second.Name : std::string(Lua::FormKindTitle(node.Kind)));
             ImGui::PushID(node.Id);
             if (i + 1 == path.size())
-                ImGui::TextUnformatted(label.c_str());
-            else if (ImGui::TextLink(label.c_str()))
+                ImGui::TextUnformatted(labels[i].c_str());
+            else if (ImGui::TextLink(labels[i].c_str()))
                 Select(node.Id);
             ImGui::PopID();
         }
@@ -1290,15 +1394,43 @@ namespace Manifold::UI
         if (!window)
             return;
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ManifoldTheme::Page);
-        ImGui::BeginChild("##previewarea", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+        ImGui::BeginChild("##previewarea", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::PopStyleColor();
         ImDrawList* draw = ImGui::GetWindowDrawList();
+        const ImVec2 areaMin = ImGui::GetWindowPos();
+        const ImVec2 areaMax(areaMin.x + ImGui::GetWindowWidth(), areaMin.y + ImGui::GetWindowHeight());
+        m_areaSize = ImVec2(areaMax.x - areaMin.x, areaMax.y - areaMin.y);
         {
-            const ImVec2 areaMin = ImGui::GetWindowPos();
-            const ImVec2 areaMax(areaMin.x + ImGui::GetWindowWidth(), areaMin.y + ImGui::GetWindowHeight());
+            // ∑ The work surface: dragging empty space (or the middle button
+            // anywhere, or the wheel) moves the view; the form and the function
+            // chips sit on it at their own places.
+            const ImGuiIO& io = ImGui::GetIO();
+            ImGui::SetCursorScreenPos(areaMin);
+            ImGui::SetNextItemAllowOverlap();
+            ImGui::InvisibleButton("##canvas", m_areaSize, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
+            const bool dragging = ImGui::IsItemActive() && (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 2.0f) || ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f));
+            const bool middle = !ImGui::IsItemActive() && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMouseDragging(ImGuiMouseButton_Middle, 0.0f);
+            if (dragging || middle)
+            {
+                m_pan.x += io.MouseDelta.x;
+                m_pan.y += io.MouseDelta.y;
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+            }
+            if (ImGui::IsWindowHovered() && io.MouseWheel != 0.0f && !io.KeyCtrl)
+            {
+                if (io.KeyShift)
+                    m_pan.x += io.MouseWheel * Px(60.0f);
+                else
+                    m_pan.y += io.MouseWheel * Px(60.0f);
+            }
+            if (ImGui::IsWindowHovered() && io.MouseWheelH != 0.0f)
+                m_pan.x += io.MouseWheelH * Px(60.0f);
+        }
+        const ImVec2 origin(areaMin.x + m_pan.x, areaMin.y + m_pan.y);
+        {
             const float step = Px(18.0f);
-            const float startX = areaMin.x + step - std::fmod(ImGui::GetScrollX(), step);
-            const float startY = areaMin.y + step - std::fmod(ImGui::GetScrollY(), step);
+            const float startX = areaMin.x + std::fmod(std::fmod(m_pan.x, step) + step, step);
+            const float startY = areaMin.y + std::fmod(std::fmod(m_pan.y, step) + step, step);
             const ImU32 dot = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.28f));
             const float radius = std::max(1.0f, Px(1.0f));
             for (float y = startY; y < areaMax.y; y += step)
@@ -1313,9 +1445,7 @@ namespace Manifold::UI
         const float pointsWidth = limit(window->Width > 0.0f ? window->Width : 420.0f, window->MinWidth > 0.0f ? window->MinWidth : 160.0f, window->MaxWidth);
         const float pointsHeight = limit(window->Height > 0.0f ? window->Height : 320.0f, window->MinHeight > 0.0f ? window->MinHeight : 100.0f, window->MaxHeight);
         const ImVec2 size(Px(pointsWidth), Px(pointsHeight));
-        const ImVec2 avail = ImGui::GetContentRegionAvail();
-        ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + std::max(Px(12.0f), (avail.x - size.x) * 0.5f), ImGui::GetCursorPosY() + Px(14.0f)));
-        const ImVec2 frameMin = ImGui::GetCursorScreenPos();
+        const ImVec2 frameMin(origin.x + Px(m_form.CanvasX), origin.y + Px(m_form.CanvasY));
         const float titleHeight = ImGui::GetFrameHeight() + Px(4.0f);
         const float bodyHeight = std::max(Px(40.0f), size.y - titleHeight);
         for (int i = 1; i <= 6; ++i)
@@ -1337,7 +1467,27 @@ namespace Manifold::UI
             const float dimensionsWidth = ImGui::CalcTextSize(dimensions).x;
             draw->AddText(ImVec2(closeX - Px(14.0f) - dimensionsWidth, textY), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.8f)), dimensions);
         }
-        ImGui::Dummy(ImVec2(size.x, titleHeight));
+        {
+            ImGui::SetCursorScreenPos(frameMin);
+            ImGui::InvisibleButton("##formtitle", ImVec2(size.x, titleHeight));
+            if (ImGui::IsItemActivated())
+                Remember();
+            if (ImGui::IsItemHovered() || ImGui::IsItemActive())
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+            if (ImGui::IsItemActive() && (ImGui::GetIO().MouseDelta.x != 0.0f || ImGui::GetIO().MouseDelta.y != 0.0f))
+            {
+                m_form.CanvasX += ImGui::GetIO().MouseDelta.x / Px(1.0f);
+                m_form.CanvasY += ImGui::GetIO().MouseDelta.y / Px(1.0f);
+                if (m_trying)
+                {
+                    m_try.CanvasX = m_form.CanvasX;
+                    m_try.CanvasY = m_form.CanvasY;
+                }
+                Changed();
+            }
+            if (ImGui::IsItemHovered() && !ImGui::IsItemActive())
+                ImGui::SetTooltip("Drag the title to move the form on the work surface.");
+        }
         ImGui::SetCursorScreenPos(ImVec2(frameMin.x, frameMin.y + titleHeight));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
         ImGui::PushStyleColor(ImGuiCol_Border, ManifoldTheme::Border);
@@ -1407,11 +1557,13 @@ namespace Manifold::UI
             {
                 const ImU32 color = ImGui::GetColorU32(m_gripping ? ManifoldTheme::Accent : over ? ManifoldTheme::Text : ManifoldTheme::Muted);
                 ImDrawList* foreground = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
+                foreground->PushClipRect(areaMin, areaMax, true);
                 for (int i = 1; i <= 3; ++i)
                 {
                     const float inset = Px(4.0f) * static_cast<float>(i);
                     foreground->AddLine(ImVec2(frameMax.x - inset, frameMax.y - 2.0f), ImVec2(frameMax.x - 2.0f, frameMax.y - inset), color, 1.5f);
                 }
+                foreground->PopClipRect();
             }
         }
         if (!m_trying)
@@ -1427,8 +1579,8 @@ namespace Manifold::UI
                         ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.8f)), "min");
                 }
             }
+            FunctionChips(origin, areaMin, areaMax, frameMin, frameMax, titleHeight);
         }
-        ImGui::Dummy(ImVec2(0.0f, Px(18.0f)));
         ImGui::EndChild();
     }
 
@@ -1552,6 +1704,14 @@ namespace Manifold::UI
 
     void FormEditorWindow::PreviewOverlay(ImVec2 min, ImVec2 max)
     {
+        // ∑ The form can be panned partly out of the work surface; the overlay
+        // (foreground list) must stop at the surface's edge like the body does.
+        {
+            const ImRect surface = ImGui::GetCurrentWindow()->InnerClipRect;
+            min = ImVec2(std::max(min.x, surface.Min.x), std::max(min.y, surface.Min.y));
+            max = ImVec2(std::min(max.x, surface.Max.x), std::min(max.y, surface.Max.y));
+            max = ImVec2(std::max(max.x, min.x), std::max(max.y, min.y));
+        }
         const ImGuiIO& io = ImGui::GetIO();
         const ImGuiID pick = ImGui::GetID("##previewpick");
         const bool inside = ImGui::IsMouseHoveringRect(min, max) && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
@@ -2135,20 +2295,71 @@ namespace Manifold::UI
     void FormEditorWindow::CodePane(float height)
     {
         ImGui::BeginChild("##code", ImVec2(0.0f, height), ImGuiChildFlags_None);
-        Segmented("##style", &m_style, { "Standalone Script", "Script + Form File" }, Px(300.0f));
-        ItemTooltip("Standalone: one script that builds the window with manifold.ui calls.\nScript + Form File: the layout stays in the .form.lua file, the script loads it with manifold.ui.form.load, so the layout can be changed here again later without touching the code.");
-        ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_COPY "  Copy"))
-            ImGui::SetClipboardText(Code().c_str());
-        ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_FILE_EXPORT "  Export..."))
-            Export();
-        ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_CODE "  Open as Script"))
-            m_workspace.OpenScript(Code(), kNoRecord, true);
-        std::string code = Code();
-        CodeEditor("##formcode", code, Language::Lua, ImVec2(0.0f, 0.0f), m_codeEditor);
+        const std::filesystem::path script = LinkedScript();
+        const std::string scriptTab = std::string(ICON_FA_FILE_CODE "  ") + (script.empty() ? std::string("Script") : WideToUtf8(script.filename().wstring())) + (ScriptDirty() ? " *" : "");
+        const std::string first = scriptTab;
+        Segmented("##codetab", &m_codeTab, { first.c_str(), ICON_FA_CODE "  Generated" }, Px(330.0f));
+        if (m_codeTab == 0)
+            ScriptPane();
+        else
+        {
+            ImGui::SameLine();
+            Segmented("##style", &m_style, { "Standalone", "Script + Form File" }, Px(240.0f));
+            ItemTooltip("Standalone: one script that builds the window with manifold.ui calls.\nScript + Form File: the layout stays in the .form.lua file, the script loads it with manifold.ui.form.load, so the layout can be changed here again later without touching the code.");
+            ImGui::SameLine();
+            if (IconButton(ICON_FA_COPY, "Copy the generated code"))
+                ImGui::SetClipboardText(Code().c_str());
+            ImGui::SameLine();
+            if (IconButton(ICON_FA_FILE_EXPORT, "Export Script... (writes or updates a script file)"))
+                Export();
+            std::string code = Code();
+            CodeEditor("##formcode", code, Language::Lua, ImVec2(0.0f, 0.0f), m_codeEditor);
+        }
         ImGui::EndChild();
+    }
+
+    void FormEditorWindow::ScriptPane()
+    {
+        const std::filesystem::path script = LinkedScript();
+        if (script.empty())
+        {
+            ImGui::Spacing();
+            ImGui::PushTextWrapPos(0.0f);
+            Muted("The handlers' code lives in a Lua script linked to this form. Create one (it loads the form and holds a function for every handler), or link a script you already have.");
+            ImGui::PopTextWrapPos();
+            ImGui::Spacing();
+            if (AccentButton(ICON_FA_FILE_EXPORT "  Create Script..."))
+            {
+                m_style = 1;
+                Export();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(ICON_FA_LINK "  Link Script..."))
+                LinkScript();
+            return;
+        }
+        EnsureScript();
+        ImGui::SameLine();
+        if (IconButton(ICON_FA_PLUS, "Add a function for every handler the script does not have yet"))
+            AddFunctions();
+        ImGui::SameLine();
+        if (IconButton(ICON_FA_EXTERNAL_LINK_ALT, "Open the script in a script window (saves it first)"))
+        {
+            SaveScript();
+            OpenLinked(m_scriptEditor.CursorLine);
+        }
+        if (m_scriptConflict)
+        {
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextColored(ManifoldTheme::Warning, ICON_FA_EXCLAMATION_TRIANGLE "  Changed on disk too; saving keeps this version");
+        }
+        std::string text = m_form.ScriptText;
+        if (CodeEditor("##scriptcode", text, Language::Lua, ImVec2(0.0f, 0.0f), m_scriptEditor) && text != m_form.ScriptText)
+        {
+            Remember(ImGui::GetID("##scriptcode"));
+            m_form.ScriptText = std::move(text);
+        }
     }
 
     void FormEditorWindow::Popups()
@@ -2174,6 +2385,7 @@ namespace Manifold::UI
             else if (choice == 2)
             {
                 m_dirty = false;
+                m_form.ScriptLoaded = false;
                 DoPending();
             }
             else if (choice == 3)
@@ -2495,6 +2707,8 @@ namespace Manifold::UI
         const std::filesystem::path script = LinkedScript();
         if (script.empty())
             return;
+        if (ScriptDirty())
+            SaveScript();
         if (!m_workspace.OpenScriptFile(script, line))
             m_engine.Notify(LogLevel::Error, "Could not open " + WideToUtf8(script.wstring()));
     }
@@ -2523,49 +2737,256 @@ namespace Manifold::UI
             m_engine.Notify(LogLevel::Warning, name + " is no Lua function name.");
             return;
         }
-        std::filesystem::path script = LinkedScript();
-        std::error_code ignored;
-        if (script.empty() || !std::filesystem::exists(script, ignored))
+        ShowFunction(name);
+    }
+
+    void FormEditorWindow::EnsureScript()
+    {
+        const std::filesystem::path script = LinkedScript();
+        if (script.empty())
         {
-            Export();
-            script = LinkedScript();
-            if (script.empty() || !std::filesystem::exists(script, ignored))
-                return;
-        }
-        ScriptWindow* window = m_workspace.ScriptFile(script);
-        std::string text;
-        if (window)
-            text = window->Text();
-        else if (!ReadFile(script, text))
-        {
-            m_engine.Notify(LogLevel::Error, "Could not read " + WideToUtf8(script.wstring()));
+            m_form.ScriptLoaded = false;
+            m_scriptPath.clear();
             return;
         }
-        int line = Lua::FormFunctionLine(text, name);
-        if (line == 0)
+        const double now = ImGui::GetTime();
+        if (m_form.ScriptLoaded && m_scriptPath == script)
         {
-            const Lua::FormMerge merge = Lua::FormMergeScript(text, m_form);
-            if (!merge.Anchored)
-            {
-                m_engine.Notify(LogLevel::Warning, WideToUtf8(script.filename().wstring()) + " neither loads the form nor creates its window, so " + name + " was not added; write it yourself.");
-                OpenLinked();
+            if (now < m_nextScriptPoll)
                 return;
-            }
-            if (window)
-                window->ReplaceText(merge.Text);
-            else if (!WriteFile(script, merge.Text))
-            {
-                m_engine.Notify(LogLevel::Error, "Could not write " + WideToUtf8(script.wstring()));
+            m_nextScriptPoll = now + 0.5;
+            const std::uint64_t stamp = Lua::UiModel::FileStamp(WideToUtf8(script.wstring()));
+            if (stamp == 0 || stamp == m_scriptStamp)
                 return;
+            m_scriptStamp = stamp;
+            std::string text;
+            if (!ReadFile(script, text) || text == m_scriptDisk)
+                return;
+            if (m_form.ScriptText == m_scriptDisk)
+            {
+                m_form.ScriptText = text;
+                m_scriptDisk = text;
+                m_scriptEditor.KeepCursor = true;
             }
-            std::string names;
-            for (const std::string& added : merge.Added)
-                names += (names.empty() ? "" : ", ") + added;
-            if (!names.empty())
-                m_engine.Notify(LogLevel::Success, "Added " + names + " to " + WideToUtf8(script.filename().wstring()) + (window ? " (not saved yet)." : "."));
-            line = Lua::FormFunctionLine(merge.Text, name);
+            else
+                m_scriptConflict = true;
+            return;
         }
-        OpenLinked(line);
+        std::string text;
+        if (ScriptWindow* window = m_workspace.ScriptFile(script); window && window->FileChanged())
+        {
+            ReadFile(script, m_scriptDisk);
+            text = window->Text();
+        }
+        else
+        {
+            ReadFile(script, text);
+            m_scriptDisk = text;
+        }
+        m_form.ScriptText = text;
+        m_form.ScriptLoaded = true;
+        m_scriptPath = script;
+        m_scriptStamp = Lua::UiModel::FileStamp(WideToUtf8(script.wstring()));
+        m_nextScriptPoll = now + 0.5;
+        m_scriptConflict = false;
+    }
+
+    bool FormEditorWindow::SaveScript()
+    {
+        if (!m_form.ScriptLoaded || m_scriptPath.empty() || m_form.ScriptText == m_scriptDisk)
+            return true;
+        ScriptWindow* window = m_workspace.ScriptFile(m_scriptPath);
+        if (window && window->FileChanged() && window->Text() != m_form.ScriptText)
+        {
+            m_engine.Notify(LogLevel::Warning, WideToUtf8(m_scriptPath.filename().wstring()) + " is open in a script window with other unsaved changes, so the form editor did not write it. Save or close that window first.");
+            return false;
+        }
+        if (!WriteFile(m_scriptPath, m_form.ScriptText))
+        {
+            m_engine.Notify(LogLevel::Error, "Could not write " + WideToUtf8(m_scriptPath.wstring()));
+            return false;
+        }
+        if (window)
+        {
+            window->ReplaceText(m_form.ScriptText);
+            window->SetFile(m_scriptPath);
+        }
+        m_scriptDisk = m_form.ScriptText;
+        m_scriptStamp = Lua::UiModel::FileStamp(WideToUtf8(m_scriptPath.wstring()));
+        m_scriptConflict = false;
+        return true;
+    }
+
+    bool FormEditorWindow::AddFunctions(const std::string& only)
+    {
+        EnsureScript();
+        if (!m_form.ScriptLoaded)
+            return false;
+        Lua::FormMerge merge;
+        if (only.empty())
+            merge = Lua::FormMergeScript(m_form.ScriptText, m_form);
+        else
+        {
+            // ∑ A chip click adds just its own function, not every missing one.
+            Lua::FormDocument one = m_form;
+            for (auto& [id, meta] : one.Meta)
+                std::erase_if(meta.Handlers, [&](const auto& entry) { return entry.second != only; });
+            merge = Lua::FormMergeScript(m_form.ScriptText, one);
+        }
+        if (!merge.Anchored)
+        {
+            m_engine.Notify(LogLevel::Warning, WideToUtf8(m_scriptPath.filename().wstring()) + " neither loads the form nor creates its window, so no function was added; write them yourself.");
+            return false;
+        }
+        if (merge.Added.empty())
+            return true;
+        Remember();
+        m_form.ScriptText = merge.Text;
+        m_scriptEditor.KeepCursor = true;
+        return true;
+    }
+
+    void FormEditorWindow::ShowFunction(const std::string& name)
+    {
+        std::filesystem::path script = LinkedScript();
+        std::error_code missing;
+        if (script.empty() || !std::filesystem::exists(script, missing))
+        {
+            m_style = 1;
+            Export();
+            script = LinkedScript();
+            if (script.empty() || !std::filesystem::exists(script, missing))
+                return;
+        }
+        EnsureScript();
+        if (Lua::FormFunctionLine(m_form.ScriptText, name) == 0)
+            AddFunctions(name);
+        const int line = Lua::FormFunctionLine(m_form.ScriptText, name);
+        m_codeTab = 0;
+        m_showCode = true;
+        if (line > 0)
+        {
+            m_scriptEditor.GotoLine = line + 1;
+            m_scriptEditor.Focus = true;
+        }
+        m_activeChip = name;
+    }
+
+    void FormEditorWindow::FunctionChips(ImVec2 origin, ImVec2 areaMin, ImVec2 areaMax, ImVec2 frameMin, ImVec2 frameMax, float titleHeight)
+    {
+        const std::vector<std::pair<std::string, std::string>> functions = Lua::FormHandlerList(m_form);
+        if (functions.empty())
+            return;
+        EnsureScript();
+        const bool linked = m_form.ScriptLoaded;
+        const ImGuiIO& io = ImGui::GetIO();
+        const float height = ImGui::GetFrameHeight() + Px(2.0f);
+        const float gapY = Px(10.0f);
+        float autoY = m_form.CanvasY;
+        const float autoX = m_form.CanvasX + (frameMax.x - frameMin.x) / Px(1.0f) + 56.0f;
+        std::map<std::string, std::pair<ImVec2, ImVec2>> rects;
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        std::string hovered;
+        for (const auto& [name, params] : functions)
+        {
+            ImVec2 place;
+            if (const auto stored = m_form.Nodes.find(name); stored != m_form.Nodes.end())
+                place = ImVec2(stored->second.X, stored->second.Y);
+            else
+            {
+                place = ImVec2(autoX, autoY);
+                autoY += (height + gapY) / Px(1.0f);
+            }
+            m_chipPlaces[name] = place;
+            const bool present = linked && Lua::FormFunctionLine(m_form.ScriptText, name) > 0;
+            const std::string label = std::string(ICON_FA_BOLT "  ") + name + "(" + params + ")";
+            const float width = ImGui::CalcTextSize(label.c_str()).x + Px(28.0f) + (present ? 0.0f : ImGui::CalcTextSize(ICON_FA_PLUS).x + Px(8.0f));
+            const ImVec2 min(origin.x + Px(place.x), origin.y + Px(place.y));
+            const ImVec2 max(min.x + width, min.y + height);
+            rects[name] = { min, max };
+            ImGui::PushID(name.c_str());
+            ImGui::SetCursorScreenPos(min);
+            ImGui::InvisibleButton("##chip", ImVec2(width, height));
+            const bool over = ImGui::IsItemHovered();
+            if (over)
+                hovered = name;
+            if (ImGui::IsItemActivated())
+                m_chipDragged = false;
+            if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f))
+            {
+                if (!m_chipDragged)
+                    Remember();
+                m_chipDragged = true;
+                Lua::FormNode& node = m_form.Nodes[name];
+                node.X = place.x + io.MouseDelta.x / Px(1.0f);
+                node.Y = place.y + io.MouseDelta.y / Px(1.0f);
+                if (m_form.Nodes.size() == 1 || true)
+                    Changed();
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+            }
+            if (ImGui::IsItemDeactivated() && !m_chipDragged)
+                ShowFunction(name);
+            if (over && !ImGui::IsItemActive())
+                ImGui::SetTooltip("%s", present ? "Click to show the function in the script below; drag to move the chip."
+                                                : linked ? "Not in the script yet: click to add it." : "Click to create the script that holds the handlers.");
+            ImGui::PopID();
+            const bool active = name == m_activeChip;
+            const ImVec4 family = ManifoldTheme::CodeKeyword;
+            draw->AddRectFilled(ImVec2(min.x + 2.0f, min.y + 3.0f), ImVec2(max.x + 2.0f, max.y + 3.0f), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Shadow, 0.25f)), height * 0.5f);
+            draw->AddRectFilled(min, max, ImGui::GetColorU32(over ? ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.18f) : ManifoldTheme::Card), height * 0.5f);
+            if (present)
+                draw->AddRect(min, max, ImGui::GetColorU32(active ? ManifoldTheme::Accent : ManifoldTheme::WithAlpha(family, over ? 0.9f : 0.5f)), height * 0.5f, 0, active ? Px(2.0f) : 1.0f);
+            else
+                DashedRect(draw, min, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.8f)), 1.0f, Px(4.0f), Px(3.0f));
+            const float textY = min.y + (height - ImGui::GetTextLineHeight()) * 0.5f;
+            const float boltWidth = ImGui::CalcTextSize(ICON_FA_BOLT "  ").x;
+            draw->AddText(ImVec2(min.x + Px(12.0f), textY), ImGui::GetColorU32(present ? ManifoldTheme::Accent : ManifoldTheme::Muted), ICON_FA_BOLT);
+            const std::string call = name + "(" + params + ")";
+            draw->AddText(ImVec2(min.x + Px(12.0f) + boltWidth, textY), ImGui::GetColorU32(present ? ManifoldTheme::Text : ManifoldTheme::Muted), call.c_str());
+            if (!present)
+                draw->AddText(ImVec2(max.x - Px(12.0f) - ImGui::CalcTextSize(ICON_FA_PLUS).x, textY), ImGui::GetColorU32(ManifoldTheme::Muted), ICON_FA_PLUS);
+        }
+        m_hoveredChip = hovered;
+
+        // ∑ Links run from each widget's right edge to the chip of the function
+        // it names; the window's own handlers start at its title bar.
+        ImDrawList* links = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
+        links->PushClipRect(areaMin, areaMax, true);
+        for (const auto& [id, meta] : m_form.Meta)
+        {
+            for (const auto& [key, name] : meta.Handlers)
+            {
+                const auto chip = rects.find(name);
+                if (chip == rects.end())
+                    continue;
+                ImVec2 from;
+                if (id == m_form.Window)
+                    from = ImVec2(frameMax.x, frameMin.y + titleHeight * 0.5f);
+                else if (const UiDesign::Rect* rect = m_trying ? nullptr : RectOf(id))
+                    from = ImVec2(rect->Max.x, (rect->Min.y + rect->Max.y) * 0.5f);
+                else
+                    continue;
+                const ImVec2 to(chip->second.first.x, (chip->second.first.y + chip->second.second.y) * 0.5f);
+                const bool strong = name == hovered || name == m_activeChip || id == m_selected || id == m_hovered;
+                const ImU32 color = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, strong ? 0.95f : 0.35f));
+                const float bend = std::max(Px(30.0f), std::abs(to.x - from.x) * 0.45f);
+                links->AddBezierCubic(from, ImVec2(from.x + bend, from.y), ImVec2(to.x - bend, to.y), to, color, strong ? Px(2.0f) : Px(1.2f));
+                links->AddCircleFilled(from, strong ? Px(3.5f) : Px(2.5f), color);
+                links->AddCircleFilled(to, strong ? Px(3.5f) : Px(2.5f), color);
+            }
+        }
+        links->PopClipRect();
+        if (!hovered.empty())
+        {
+            for (const auto& [id, meta] : m_form.Meta)
+            {
+                for (const auto& [key, name] : meta.Handlers)
+                {
+                    if (name == hovered && id != m_form.Window)
+                        m_hovered = id;
+                }
+            }
+        }
     }
 
     void FormEditorWindow::ImportFile()
@@ -2635,7 +3056,7 @@ namespace Manifold::UI
         const std::string title = Title();
         if (!BeginWindow(title.c_str(), ImVec2(1240.0f, 760.0f), ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse, ImVec2(820.0f, 460.0f)))
             return;
-        if (!m_open && m_dirty)
+        if (!m_open && Dirty())
         {
             m_open = true;
             AskThen(Pending::Close);
