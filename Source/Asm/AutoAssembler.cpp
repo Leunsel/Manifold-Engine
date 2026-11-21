@@ -189,6 +189,8 @@ namespace Manifold::Asm
 
         std::string ReplaceWord(const std::string& text, const std::string& word, const std::string& replacement)
         {
+            if (word.empty())
+                return text;
             std::string out;
             std::size_t at = 0;
             while (at < text.size())
@@ -281,6 +283,66 @@ namespace Manifold::Asm
                 out += c;
             }
             return out;
+        }
+
+        // ∑ The first {$lua} at or after from that is code: one inside //, /* */, { } or a string is commented out and must not run.
+        //   Walks the same states as StripComments; from is outside a comment (the start, or just after {$asm}).
+        std::size_t FindLuaBlock(std::string_view lower, std::size_t from)
+        {
+            bool inBlock = false;
+            bool inBraceComment = false;
+            char quote = 0;
+            for (std::size_t i = from; i < lower.size(); ++i)
+            {
+                const char c = lower[i];
+                const char next = i + 1 < lower.size() ? lower[i + 1] : '\0';
+                if (inBlock)
+                {
+                    if (c == '*' && next == '/')
+                    {
+                        inBlock = false;
+                        ++i;
+                    }
+                    continue;
+                }
+                if (inBraceComment)
+                {
+                    if (c == '}')
+                        inBraceComment = false;
+                    continue;
+                }
+                if (quote)
+                {
+                    if (c == quote || c == '\n')
+                        quote = 0;
+                    continue;
+                }
+                if (c == '\'' || c == '"')
+                    quote = c;
+                else if (c == '/' && next == '/')
+                {
+                    while (i + 1 < lower.size() && lower[i + 1] != '\n')
+                        ++i;
+                }
+                else if (c == '/' && next == '*')
+                {
+                    inBlock = true;
+                    ++i;
+                }
+                else if (c == '{')
+                {
+                    if (lower.substr(i, 6) == "{$lua}")
+                        return i;
+                    if (next == '$')
+                    {
+                        const std::size_t close = lower.find('}', i);
+                        i = close == std::string_view::npos ? lower.size() : close;
+                    }
+                    else
+                        inBraceComment = true;
+                }
+            }
+            return std::string_view::npos;
         }
 
         std::optional<Command> ParseCommand(const std::string& line)
@@ -436,7 +498,7 @@ namespace Manifold::Asm
                 std::size_t at = 0;
                 while (at < sectioned.size())
                 {
-                    const std::size_t luaStart = lower.find("{$lua}", at);
+                    const std::size_t luaStart = FindLuaBlock(lower, at);
                     if (luaStart == std::string::npos)
                     {
                         text += StripComments(std::string_view(sectioned).substr(at));
@@ -497,6 +559,8 @@ namespace Manifold::Asm
                     {
                         if (command->Arguments.size() < 2)
                             return Fail(ErrorCode::AaBadArguments, line.Line, "define(name, text) needs two arguments", line.Text);
+                        if (command->Arguments[0].empty())
+                            return Fail(ErrorCode::AaBadArguments, line.Line, "define(name, text) needs a name", line.Text);
                         std::string value = command->Arguments[1];
                         for (std::size_t extra = 2; extra < command->Arguments.size(); ++extra)
                             value += "," + command->Arguments[extra];
@@ -532,7 +596,7 @@ namespace Manifold::Asm
                     const std::string name = open == std::string::npos ? "" : Trim(line.Text.substr(0, open));
                     if (EqualsNoCase(name, "define"))
                     {
-                        if (const auto command = ParseCommand(line.Text); command && command->Arguments.size() >= 2)
+                        if (const auto command = ParseCommand(line.Text); command && command->Arguments.size() >= 2 && !command->Arguments[0].empty())
                         {
                             std::string value = command->Arguments[1];
                             for (std::size_t extra = 2; extra < command->Arguments.size(); ++extra)

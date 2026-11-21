@@ -524,6 +524,7 @@ namespace Manifold
             m_table.Files = std::move(loaded.Files);
             m_table.ExtraXml = std::move(loaded.ExtraXml);
             m_table.LoadedVersion = loaded.Version;
+            m_table.LoadedFileNaming = loaded.Naming;
             m_tableSymbols = loaded.Symbols;
             m_scriptsTrusted = m_engine.Options().TableScripts == TableScriptPolicy::Always;
         }
@@ -607,7 +608,7 @@ namespace Manifold
     Status TableRuntime::SaveTable(const std::filesystem::path& path)
     {
         std::vector<Table::TableSymbol> symbols = m_tableSymbols;
-        const Status status = Table::SaveTable(path, m_table, m_structures, symbols);
+        const Status status = Table::SaveTable(path, m_table, m_structures, symbols, m_engine.TableFileNaming());
         if (!status)
         {
             LOG_ERROR("Table", status.Text);

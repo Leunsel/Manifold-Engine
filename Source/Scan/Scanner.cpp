@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -180,6 +181,15 @@ namespace Manifold::Scan
             T value;
             std::memcpy(&value, data, sizeof(T));
             return value;
+        }
+
+        // ∑ Changed, Unchanged and Same as first ask whether the memory changed, so a NaN equals a NaN with the same bits. By float rules
+        //   a NaN never equals itself: 0xFFFFFFFF (int -1) showed in every Changed scan and never in Unchanged.
+        template <class T>
+        bool SameFloat(T now, T previous)
+        {
+            using Bits = std::conditional_t<sizeof(T) == 4, std::uint32_t, std::uint64_t>;
+            return now == previous || (now != now && std::bit_cast<Bits>(now) == std::bit_cast<Bits>(previous));
         }
 
         class Matcher
@@ -425,7 +435,16 @@ namespace Manifold::Scan
             {
                 const T now = Load<T>(nowBytes);
                 if (std::isnan(now))
-                    return m_mode == Compare::Unknown || m_mode == Compare::Changed;
+                {
+                    switch (m_mode)
+                    {
+                    case Compare::Unknown: return true;
+                    case Compare::Changed: return !SameFloat(now, Load<T>(previousBytes));
+                    case Compare::Unchanged: return SameFloat(now, Load<T>(previousBytes));
+                    case Compare::SameAsFirst: return SameFloat(now, Load<T>(firstBytes));
+                    default: return false;
+                    }
+                }
                 const double value = static_cast<double>(now);
                 switch (m_mode)
                 {
@@ -585,9 +604,9 @@ namespace Manifold::Scan
                     return EachPair<T>(now, previous, begin, end, stride, visit, [a, equal](T v, T p) { return equal(static_cast<double>(v), static_cast<double>(p) + a); });
                 case Compare::DecreasedBy:
                     return EachPair<T>(now, previous, begin, end, stride, visit, [a, equal](T v, T p) { return equal(static_cast<double>(v), static_cast<double>(p) - a); });
-                case Compare::Changed: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return v != p; });
-                case Compare::Unchanged: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return v == p; });
-                case Compare::SameAsFirst: return EachPair<T>(now, first, begin, end, stride, visit, [](T v, T p) { return v == p; });
+                case Compare::Changed: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return !SameFloat(v, p); });
+                case Compare::Unchanged: return EachPair<T>(now, previous, begin, end, stride, visit, [](T v, T p) { return SameFloat(v, p); });
+                case Compare::SameAsFirst: return EachPair<T>(now, first, begin, end, stride, visit, [](T v, T p) { return SameFloat(v, p); });
                 }
                 return true;
             }

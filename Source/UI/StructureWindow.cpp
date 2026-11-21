@@ -1732,7 +1732,7 @@ namespace Manifold::UI
                 ImGui::Separator();
                 ImGui::SetNextItemWidth(Px(80.0f));
                 if (ImGui::InputInt("Length", &field.Size))
-                    field.Size = std::clamp(field.Size, 1, 4096);
+                    field.Size = std::clamp(field.Size, 1, Table::kMaxFieldBytes);
                 if (field.Type == Scan::ValueType::String)
                     ImGui::MenuItem("UTF-16", nullptr, &field.Unicode);
             }

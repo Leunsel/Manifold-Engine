@@ -277,9 +277,14 @@ namespace Manifold::Scan
                 const bool fractional = text.find_first_of(".,") != std::string_view::npos;
                 if (const auto floating = fractional ? ParseDouble(text) : std::nullopt; floating && !format.Hex)
                 {
+                    // ∑ The same range as a whole number: 300.5 into a Byte is refused like 300 (it stored 0x2C).
                     const double rounded = std::round(*floating);
+                    const double lowest = -std::ldexp(1.0, size * 8 - 1);
+                    const double limit = std::ldexp(1.0, size * 8);
+                    if (!std::isfinite(rounded) || rounded < lowest || rounded >= limit)
+                        return std::nullopt;
+                    const std::uint64_t whole = rounded < 0.0 ? static_cast<std::uint64_t>(static_cast<std::int64_t>(rounded)) : static_cast<std::uint64_t>(rounded);
                     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
-                    const auto whole = static_cast<std::int64_t>(rounded);
                     std::memcpy(bytes.data(), &whole, bytes.size());
                     return bytes;
                 }

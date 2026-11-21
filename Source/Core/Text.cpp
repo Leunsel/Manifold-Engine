@@ -246,6 +246,8 @@ namespace Manifold
             text.remove_prefix(2);
         else if (!text.empty() && text.front() == '$')
             text.remove_prefix(1);
+        while (text.size() > 1 && text.front() == '0')
+            text.remove_prefix(1);
         if (text.empty() || text.size() > 16)
             return std::nullopt;
         std::uint64_t value = 0;
@@ -285,6 +287,9 @@ namespace Manifold
     {
         std::string copy = Trim(text);
         std::replace(copy.begin(), copy.end(), ',', '.');
+        // ∑ from_chars takes no leading '+'; one is allowed as for integers, a second sign is not.
+        if (copy.size() > 1 && copy.front() == '+' && copy[1] != '+' && copy[1] != '-')
+            copy.erase(0, 1);
         if (copy.empty())
             return std::nullopt;
         double value = 0.0;

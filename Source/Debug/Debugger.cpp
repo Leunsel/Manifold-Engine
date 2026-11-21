@@ -756,6 +756,8 @@ namespace Manifold::Debug
             dr7 |= (breakpoint.Type == BreakpointType::Execute ? 0 : LengthBits(breakpoint.Size)) << (18 + slot * 4);
         }
         Status result;
+        int armed = 0;
+        int failed = 0;
         for (auto& [id, thread] : m_threads)
         {
             if (onlyThread && id != onlyThread)
@@ -773,9 +775,20 @@ namespace Manifold::Debug
             {
                 context.SetDebugRegisters(addresses, dr7);
                 if (context.Write())
+                {
                     thread->Armed = dr7 != 0;
+                    ++armed;
+                }
                 else
+                {
                     result = Status::Fail(ErrorCode::DebugContextFailed, std::to_string(id));
+                    ++failed;
+                }
+            }
+            else
+            {
+                result = Status::Fail(ErrorCode::DebugContextFailed, std::to_string(id));
+                ++failed;
             }
             if (suspended)
                 ResumeThreadDirect(thread->Handle);
@@ -783,8 +796,17 @@ namespace Manifold::Debug
                 LeaveOut(*thread);
         }
         CountHidden();
-        if (!result)
+        // ∑ A breakpoint no thread carries must not show as running: no thread set at all is an error for the caller, some threads
+        //   left out are a warning (those threads' accesses are not seen).
+        if (failed == 0)
+            return Status::Success();
+        if (armed == 0)
+        {
             LOG_DEBUG("Debugger", result.Text);
+            return result;
+        }
+        LOG_WARN("Debugger", Format("The debug registers of %d of %d threads could not be set; hardware breakpoints miss what those threads do. Last: %s",
+            failed, failed + armed, result.Text.c_str()));
         return Status::Success();
     }
 
@@ -880,7 +902,13 @@ namespace Manifold::Debug
             if (breakpoint.Slot < 0)
                 return Status::Fail(ErrorCode::DebugNoFreeSlot);
             m_breakpoints[breakpoint.Address] = breakpoint;
-            ApplyHardware();
+            const Status applied = ApplyHardware();
+            if (!applied)
+            {
+                m_breakpoints.erase(breakpoint.Address);
+                ApplyHardware();
+                return applied;
+            }
         }
         else
         {

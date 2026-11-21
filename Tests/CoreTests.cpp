@@ -59,6 +59,20 @@ namespace Manifold::Tests
             CHECK(hex && (*hex)[0] == 0xF4 && (*hex)[1] == 0x01);
             format = {};
             CHECK(!Scan::ParseValue(Scan::ValueType::Byte, "300", format));
+            CHECK(!Scan::ParseValue(Scan::ValueType::Byte, "300.5", format));
+            CHECK(!Scan::ParseValue(Scan::ValueType::TwoBytes, "-40000.5", format));
+            const auto roundedByte = Scan::ParseValue(Scan::ValueType::Byte, "254.6", format);
+            CHECK(roundedByte && (*roundedByte)[0] == 0xFF);
+            const auto negativeByte = Scan::ParseValue(Scan::ValueType::Byte, "-1.2", format);
+            CHECK(negativeByte && (*negativeByte)[0] == 0xFF);
+            CHECK(!Scan::ParseValue(Scan::ValueType::FourBytes, "1e30", format));
+            const auto plus = Scan::ParseValue(Scan::ValueType::Double, "+1.5", format);
+            CHECK(plus && Scan::FormatValue(Scan::ValueType::Double, *plus, format) == "1.5");
+            CHECK(!Scan::ParseValue(Scan::ValueType::Float, "+-1.5", format));
+            CHECK(ParseDouble("+2,5").value_or(0.0) == 2.5 && !ParseDouble("++2") && !ParseDouble("+"));
+            CHECK(ParseHex("0000000000000000001F").value_or(0) == 0x1F);
+            CHECK(ParseHex("0x00000000000000000000FFFFFFFFFFFFFFFF").value_or(0) == 0xFFFFFFFFFFFFFFFFull);
+            CHECK(!ParseHex("1FFFFFFFFFFFFFFFF") && ParseHex("0").value_or(1) == 0 && ParseHex("0000").value_or(1) == 0);
             CHECK(Scan::ParseValue(Scan::ValueType::Byte, "-1", format));
             const auto floating = Scan::ParseValue(Scan::ValueType::Float, "1,5", format);
             CHECK(floating && Scan::FormatValue(Scan::ValueType::Float, *floating, format) == "1.5");
@@ -161,6 +175,15 @@ namespace Manifold::Tests
             CHECK(parsed.Root->HasChild("D"));
             const auto broken = Xml::Parse("<A><B></A>");
             CHECK(!broken.Root && !broken.Error.empty());
+
+            // Numeric entities: only characters XML allows; NUL, surrogates, values past U+10FFFF and bad digits stay as written.
+            const auto entities = Xml::Parse("<A>&#65;&#x42;&#x1F600;|&#0;|&#;|&#x;|&#xD800;|&#x110000;|&#-5;|&#12a;|&#x0000000041;</A>");
+            CHECK(entities.Root);
+            if (entities.Root)
+            {
+                CHECK_EQ(entities.Root->Text, std::string("AB\xF0\x9F\x98\x80|&#0;|&#;|&#x;|&#xD800;|&#x110000;|&#-5;|&#12a;|&#x0000000041;"));
+                CHECK(entities.Root->Text.find('\0') == std::string::npos);
+            }
         }
 
         void TableRoundTrip()
@@ -354,6 +377,22 @@ data:
                 };
             result = Asm::RunAutoAssembler("{$lua}\nreturn 'magic'\n{$asm}\n", host, memory, options);
             CHECK_MSG(result.Ok(), result.Error.Text);
+            int luaRuns = 0;
+            host.RunLua = [&luaRuns](std::string_view, bool, std::string& output) -> Status
+                {
+                    ++luaRuns;
+                    output.clear();
+                    return Status::Success();
+                };
+            for (const char* commented : { "// {$lua}\nnop\n", "/* {$lua}\nreturn 1\n{$asm} */\nnop\n", "{ {$lua} }\nnop\n", "db '{$lua}'\n" })
+            {
+                luaRuns = 0;
+                result = Asm::RunAutoAssembler(commented, host, memory, options);
+                CHECK_MSG(luaRuns == 0, commented);
+            }
+            luaRuns = 0;
+            result = Asm::RunAutoAssembler("// note\n{$LUA}\nreturn 1\n{$asm}\n/* {$lua} */\n", host, memory, options);
+            CHECK_MSG(result.Ok() && luaRuns == 1, result.Error.Text);
             host.RunLua = nullptr;
             const char* ceStyle = "alloc(m,$100)\nlabel(a b)\nm:\n  cmp eax,1\n  jne @f\n  mov [rax],(int)5\n@@:\n  jmp @b\na:\n  dd 0\nb:\n  dd 0\nregistersymbol(a b)\n";
             result = Asm::RunAutoAssembler(ceStyle, host, memory, options);
@@ -374,6 +413,10 @@ data:
             CHECK_EQ(seen, "1234");
             result = Asm::RunAutoAssembler("define(target,game.exe+10)\nUseDefine(target, 2)\n", host, memory, options);
             CHECK_EQ(seen, "game.exe+10, 2");
+            result = Asm::RunAutoAssembler("define(,5)\nUseDefine(x)\nnop\n", host, memory, options);
+            CHECK(!result.Ok() && result.Error.Code == ErrorCode::AaBadArguments);
+            result = Asm::RunAutoAssembler("define( ,5)\nnop\n", host, memory, options);
+            CHECK(!result.Ok() && result.Error.Code == ErrorCode::AaBadArguments);
             host.IsCustomCommand = nullptr;
             host.RunCustomCommand = nullptr;
 

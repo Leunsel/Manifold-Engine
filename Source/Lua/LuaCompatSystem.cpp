@@ -1261,7 +1261,7 @@ namespace Manifold::Lua
             if (!StreamData(state, 1))
                 return luaL_argerror(state, 1, "a file name or a stream");
             const std::filesystem::path path = StreamFile("saved-table");
-            const Status status = Table::SaveTable(path, engine.Table(), engine.Structures(), engine.TableSymbols());
+            const Status status = Table::SaveTable(path, engine.Table(), engine.Structures(), engine.TableSymbols(), engine.TableFileNaming());
             if (!status)
                 return PushStatus(state, status);
             std::ifstream file(path, std::ios::binary);

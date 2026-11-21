@@ -364,7 +364,7 @@ namespace Manifold
         if (!table.Dirty() || (table.Count() == 0 && structures.Items.empty() && table.TableLuaScript.empty()))
             return Status::Success();
         const auto started = std::chrono::steady_clock::now();
-        const std::string text = Table::WriteTable(table, structures, m_engine.TableSymbols());
+        const std::string text = Table::WriteTable(table, structures, m_engine.TableSymbols(), m_engine.TableFileNaming());
         const std::size_t hash = std::hash<std::string>{}(text);
         if (m_hasLast && hash == m_lastHash && text.size() == m_lastSize)
             return Status::Success();
@@ -409,7 +409,7 @@ namespace Manifold
     void SessionBackup::Restored(const std::filesystem::path& file)
     {
         m_restored = Backups::IsVersion(file) ? Backups::SafeName(WideToUtf8(file.parent_path().filename().wstring())) : std::string();
-        const std::string text = Table::WriteTable(m_engine.Table(), m_engine.Structures(), m_engine.TableSymbols());
+        const std::string text = Table::WriteTable(m_engine.Table(), m_engine.Structures(), m_engine.TableSymbols(), m_engine.TableFileNaming());
         m_hasLast = true;
         m_lastHash = std::hash<std::string>{}(text);
         m_lastSize = text.size();

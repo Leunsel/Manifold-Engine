@@ -31,6 +31,9 @@ namespace Manifold
         const SettingChoice kQuitPolicy{ { "ask", "disable", "leave" },
             [](const Settings& s) { return static_cast<int>(s.ActiveScriptsOnQuit); },
             [](Settings& s, int value) { s.ActiveScriptsOnQuit = static_cast<QuitPolicy>(value); } };
+        const SettingChoice kTableFileNames{ { "asloaded", "ce75", "ce76" },
+            [](const Settings& s) { return s.TableFileNames; },
+            [](Settings& s, int value) { s.TableFileNames = value; } };
         const SettingChoice kCorners{ { "round", "small", "square" },
             [](const Settings& s) { return s.Theme.Corners; },
             [](Settings& s, int value) { s.Theme.Corners = value; } };
@@ -75,6 +78,7 @@ namespace Manifold
             { "Scanner", "ResultRefresh", &Settings::ResultValueRefreshMs, 50, 10000 },
             { "Table", "AddressColumn", &kAddressColumn },
             { "Table", "AddressDigits", &kAddressDigits },
+            { "Table", "FileNames", &kTableFileNames },
             { "Scripts", "Autorun", &Settings::AutorunEnabled },
             { "Scripts", "HoldNewModules", &Settings::HoldNewModules },
             { "Scripts", "AutoAttach", &Settings::AutoAttach },

@@ -1286,7 +1286,20 @@ namespace Manifold::UI
             }
             list.EndRow();
         }
-        if (list.Row("Active scripts on quit", "What happens when the program closes while scripts are still active in the game.", choice))
+        if (list.Row("Files in a saved table",
+                "How the files of a table (Table files window) are written. CE 7.5: each file is named by its tag, <name.lua>, which Cheat Engine 7.5 and older read; "
+                "a name that can't be a tag, such as one with a space, is still written as <File0 Name=...>. CE 7.6: every file as <File0 Name=...>, which only "
+                "Cheat Engine 7.6 and newer read with the right names. As loaded: the way the open table had them, CE 7.5 for a new table. Both kinds are always read.", choice))
+        {
+            int naming = std::clamp(settings.TableFileNames, 0, 2);
+            if (Segmented("##filenames", &naming, { "As loaded", "CE 7.5", "CE 7.6" }, choice))
+            {
+                settings.TableFileNames = naming;
+                changed = true;
+            }
+            list.EndRow();
+        }
+        if (list.Row("Active scripts on quit","What happens when the program closes while scripts are still active in the game.", choice))
         {
             int quit = static_cast<int>(settings.ActiveScriptsOnQuit);
             if (Segmented("##quitpolicy", &quit, { "Ask", "Turn off", "Leave" }, choice))

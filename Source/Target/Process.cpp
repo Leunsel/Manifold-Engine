@@ -819,16 +819,23 @@ namespace Manifold::Target
             return Status::Success();
         }
 
-        std::vector<std::pair<std::uint64_t, DWORD>> changed;
+        // ∑ Every page is checked before any protection changes: a range running past the end of its region used to return with
+        //   the earlier pages left writable (a read-only or execute-only page stayed read-write).
+        std::vector<std::pair<std::uint64_t, DWORD>> pages;
         for (std::uint64_t page = address & ~0xFFFull; page < address + size; page += 0x1000)
         {
             MEMORY_BASIC_INFORMATION info{};
             if (!QueryVm(m_handle.Get(), page, info) || info.State != MEM_COMMIT)
                 return Status::Fail(ErrorCode::WriteFailed, Hex(address));
-            if (!WritableProtect(info.Protect) || (info.Protect & PAGE_GUARD))
+            pages.emplace_back(page, info.Protect);
+        }
+        std::vector<std::pair<std::uint64_t, DWORD>> changed;
+        for (const auto& [page, protect] : pages)
+        {
+            if (!WritableProtect(protect) || (protect & PAGE_GUARD))
             {
                 DWORD old = 0;
-                if (ProtectVm(m_handle.Get(), page, 0x1000, WritableFor(info.Protect), old))
+                if (ProtectVm(m_handle.Get(), page, 0x1000, WritableFor(protect), old))
                     changed.emplace_back(page, old);
             }
         }

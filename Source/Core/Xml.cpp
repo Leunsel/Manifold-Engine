@@ -57,9 +57,27 @@ namespace Manifold::Xml
                 else if (entity == "apos") out += '\'';
                 else if (!entity.empty() && entity[0] == '#')
                 {
+                    // ∑ Only a character XML allows becomes text: no NUL, no surrogate half, nothing past U+10FFFF, and only
+                    //   digits (strtoul took "&#;" as 0 and skipped signs and spaces). Anything else stays as written.
                     const bool hex = entity.size() > 1 && (entity[1] == 'x' || entity[1] == 'X');
-                    const std::string digits(entity.substr(hex ? 2 : 1));
-                    AppendCodePoint(out, std::strtoul(digits.c_str(), nullptr, hex ? 16 : 10));
+                    const std::string_view digits = entity.substr(hex ? 2 : 1);
+                    unsigned long code = 0;
+                    bool valid = !digits.empty() && digits.size() <= 8;
+                    for (const char c : digits)
+                    {
+                        const int digit = c >= '0' && c <= '9' ? c - '0' : hex && c >= 'a' && c <= 'f' ? c - 'a' + 10 : hex && c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+                        if (digit < 0)
+                        {
+                            valid = false;
+                            break;
+                        }
+                        code = code * (hex ? 16 : 10) + static_cast<unsigned long>(digit);
+                    }
+                    valid = valid && code != 0 && code <= 0x10FFFF && (code < 0xD800 || code > 0xDFFF);
+                    if (valid)
+                        AppendCodePoint(out, code);
+                    else
+                        out.append(text.substr(i, end - i + 1));
                 }
                 else
                 {

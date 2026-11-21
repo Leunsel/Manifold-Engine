@@ -142,6 +142,16 @@ namespace Manifold::Table
         std::shared_ptr<std::uint64_t> Version = std::make_shared<std::uint64_t>(0);
     };
 
+    // ∑ Two spellings of <Files> exist. CE 7.5 and older name each element after the file (<name Encoding="Ascii85">) and read only the tag,
+    //   so names that are no XML name can't be stored. CE 7.6 writes <File0 Name="name" Encoding="Ascii85">, <File1 ...> and reads the
+    //   Name attribute with the tag as fallback. Both are read; the values match Settings::TableFileNames.
+    enum class FileNaming
+    {
+        AsLoaded,
+        Tag,
+        Attribute
+    };
+
     class AddressList
     {
     public:
@@ -194,6 +204,7 @@ namespace Manifold::Table
         std::vector<TableFile> Files;
         std::vector<std::string> ExtraXml;
         int LoadedVersion = 0;
+        FileNaming LoadedFileNaming = FileNaming::Tag;
 
         TableFile* FindFile(std::string_view name);
         TableFile& AddFile(std::string name);

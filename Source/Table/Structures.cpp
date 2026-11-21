@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <map>
 
 namespace Manifold::Table
@@ -130,10 +131,10 @@ namespace Manifold::Table
 
     int StructDefinition::Size() const
     {
-        int size = 0;
+        std::int64_t size = 0;
         for (const StructField& field : Fields)
-            size = std::max(size, field.Offset + field.Size);
-        return size;
+            size = std::max(size, static_cast<std::int64_t>(field.Offset) + field.Size);
+        return static_cast<int>(std::min<std::int64_t>(size, std::numeric_limits<int>::max()));
     }
 
     StructField* StructDefinition::FieldAt(int offset)

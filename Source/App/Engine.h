@@ -31,6 +31,7 @@
 #include "Target/Mono.h"
 #include "Target/Symbols.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -182,6 +183,7 @@ namespace Manifold
         Status LoadTable(const std::filesystem::path& path, bool merge) { return m_tables.LoadTable(path, merge); }
         Status RestoreTable(const std::filesystem::path& path) { return m_tables.RestoreTable(path); }
         Status SaveTable(const std::filesystem::path& path) { return m_tables.SaveTable(path); }
+        Table::FileNaming TableFileNaming() const { return static_cast<Table::FileNaming>(std::clamp(m_settings.TableFileNames, 0, 2)); }
         void NewTable() { m_tables.NewTable(); }
         std::vector<Table::TableSymbol> TableSymbols() const { return m_tables.TableSymbols(); }
         bool TableScriptWaiting() const { return m_tables.TableScriptWaiting(); }

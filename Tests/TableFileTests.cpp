@@ -232,7 +232,8 @@ namespace Manifold::Tests
             const Table::StructureStore structures;
             const std::string xml = Table::WriteTable(list, structures, {});
             CHECK(xml.find("<Manifold.Bootstrap.lua Encoding=\"Ascii85\">") != std::string::npos);
-            CHECK(xml.find("<File Name=\"new file (2).txt\" Encoding=\"Ascii85\">") != std::string::npos);
+            CHECK(xml.find("<File2 Name=\"new file (2).txt\" Encoding=\"Ascii85\">") != std::string::npos);
+            CHECK(xml.find("<File Encoding=\"Ascii85\">") != std::string::npos);
             CHECK(xml.find("<new file") == std::string::npos && xml.find("<9lives") == std::string::npos);
             Table::LoadedTable loaded;
             CHECK(Table::ParseTable(xml, loaded).Ok());
@@ -249,6 +250,37 @@ namespace Manifold::Tests
             Table::LoadedTable old;
             CHECK(Table::ParseTable("<CheatTable><Files><Old.lua Encoding=\"Ascii85\">" + Table::EncodeTableFile(Bytes("x")) + "</Old.lua></Files></CheatTable>", old).Ok());
             CHECK(old.Files.size() == 1 && old.Files[0].Name == "Old.lua" && *old.Files[0].Data == Bytes("x"));
+            CHECK(old.Naming == Table::FileNaming::Tag);
+
+            // Structure fields from a table keep the editor's limits (2 GB per row was allocated every frame).
+            Table::LoadedTable huge;
+            CHECK(Table::ParseTable("<CheatTable><Structures><Structure Name=\"S\"><Elements>"
+                "<Element Offset=\"2147483000\" Vartype=\"String\" Bytesize=\"2000000000\"/>"
+                "<Element Offset=\"-99999999999\" Vartype=\"Array of byte\" Bytesize=\"-5\"/>"
+                "</Elements></Structure></Structures></CheatTable>", huge).Ok());
+            CHECK(huge.Structures.size() == 1 && huge.Structures[0]->Fields.size() == 2);
+            if (huge.Structures.size() == 1 && huge.Structures[0]->Fields.size() == 2)
+            {
+                const Table::StructDefinition& shape = *huge.Structures[0];
+                CHECK(shape.Fields[0].Size == 1 && shape.Fields[0].Offset == -Table::kMaxFieldOffset);
+                CHECK(shape.Fields[1].Size == Table::kMaxFieldBytes && shape.Fields[1].Offset == Table::kMaxFieldOffset);
+                CHECK_EQ(shape.Size(), Table::kMaxFieldOffset + Table::kMaxFieldBytes);
+            }
+            CHECK(loaded.Naming == Table::FileNaming::Attribute);
+
+            // CE 7.6 spelling: every file as <FileN Name=...>, read back with the names; the tag spelling forced back.
+            const std::string modern = Table::WriteTable(list, structures, {}, Table::FileNaming::Attribute);
+            CHECK(modern.find("<File0 Name=\"Manifold.Bootstrap.lua\" Encoding=\"Ascii85\">") != std::string::npos);
+            CHECK(modern.find("<File6 Name=\"File\" Encoding=\"Ascii85\">") != std::string::npos);
+            CHECK(modern.find("<Manifold.Bootstrap.lua") == std::string::npos);
+            Table::LoadedTable reread;
+            CHECK(Table::ParseTable(modern, reread).Ok());
+            CHECK(reread.Naming == Table::FileNaming::Attribute && reread.Files.size() == list.Files.size());
+            for (std::size_t i = 0; i < list.Files.size() && i < reread.Files.size(); ++i)
+                CHECK_MSG(reread.Files[i].Name == list.Files[i].Name && *reread.Files[i].Data == *list.Files[i].Data, list.Files[i].Name);
+            list.LoadedFileNaming = Table::FileNaming::Attribute;
+            CHECK(Table::WriteTable(list, structures, {}).find("<File0 Name=\"Manifold.Bootstrap.lua\"") != std::string::npos);
+            CHECK(Table::WriteTable(list, structures, {}, Table::FileNaming::Tag).find("<Manifold.Bootstrap.lua Encoding=\"Ascii85\">") != std::string::npos);
         }
 
         void LuaCheck(Engine& engine, const char* name, const std::string& code)

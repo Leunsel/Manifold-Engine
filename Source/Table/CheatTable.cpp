@@ -357,12 +357,12 @@ namespace Manifold::Table
             for (const Xml::Node* element : elements->ChildrenNamed("Element"))
             {
                 StructField field;
-                field.Offset = static_cast<int>(ParseDecimal(element->Attribute("Offset").value_or("0")).value_or(0));
+                field.Offset = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element->Attribute("Offset").value_or("0")).value_or(0), -kMaxFieldOffset, kMaxFieldOffset));
                 field.Name = element->Attribute("Description").value_or("");
                 const std::string type = element->Attribute("Vartype").value_or("4 Bytes");
                 field.Type = Scan::TypeFromTableName(type).value_or(Scan::ValueType::FourBytes);
                 field.Unicode = EqualsNoCase(type, "Unicode String");
-                field.Size = static_cast<int>(ParseDecimal(element->Attribute("Bytesize").value_or("4")).value_or(4));
+                field.Size = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element->Attribute("Bytesize").value_or("4")).value_or(4), 1, kMaxFieldBytes));
                 const std::string display = element->Attribute("DisplayMethod").value_or("");
                 field.Display = EqualsNoCase(display, "hexadecimal") ? FieldDisplay::Hex : EqualsNoCase(display, "signed integer") ? FieldDisplay::Signed :
                     EqualsNoCase(display, "binary") ? FieldDisplay::Binary : FieldDisplay::Unsigned;
@@ -437,13 +437,16 @@ namespace Manifold::Table
             for (const auto& file : files->Children)
             {
                 TableFile entry;
-                entry.Name = file->Attribute("Name").value_or(file->Name);
+                const auto named = file->Attribute("Name");
+                if (named)
+                    table.Naming = FileNaming::Attribute;
+                entry.Name = named.value_or(file->Name);
                 if (file->Attribute("Encoding").value_or("") == "Ascii85")
                 {
                     auto data = DecodeTableFile(file->Text, room);
                     if (!data)
                     {
-                        table.Warnings.push_back(ErrorMessage(ErrorCode::TableEntryDamaged, "file " + file->Name));
+                        table.Warnings.push_back(ErrorMessage(ErrorCode::TableEntryDamaged, "file " + entry.Name));
                         continue;
                     }
                     room -= data->size();
@@ -492,7 +495,7 @@ namespace Manifold::Table
         return ParseTable(content.str(), table);
     }
 
-    std::string WriteTable(const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols)
+    std::string WriteTable(const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols, FileNaming naming)
     {
         Xml::Node root;
         root.Name = "CheatTable";
@@ -553,11 +556,14 @@ namespace Manifold::Table
         if (!list.Files.empty())
         {
             Xml::Node& node = root.Add("Files");
+            const FileNaming style = naming == FileNaming::AsLoaded ? list.LoadedFileNaming : naming;
             for (const TableFile& file : list.Files)
             {
-                const bool plain = IsXmlName(file.Name);
-                Xml::Node& entry = node.Add(plain ? file.Name : std::string("File"), EncodeTableFile(*file.Data));
-                if (!plain)
+                // ∑ The CE 7.5 spelling falls back to the CE 7.6 one for a name that is no XML tag: CE 7.5 then shows "FileN" instead of the
+                //   name, but the table still opens everywhere. As a tag such a name made the whole table unreadable.
+                const bool tag = style != FileNaming::Attribute && IsXmlName(file.Name);
+                Xml::Node& entry = node.Add(tag ? file.Name : "File" + std::to_string(node.Children.size()), EncodeTableFile(*file.Data));
+                if (!tag)
                     entry.SetAttribute("Name", file.Name);
                 entry.SetAttribute("Encoding", "Ascii85");
             }
@@ -588,9 +594,9 @@ namespace Manifold::Table
         return Xml::Write(root);
     }
 
-    Status SaveTable(const std::filesystem::path& path, const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols)
+    Status SaveTable(const std::filesystem::path& path, const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols, FileNaming naming)
     {
-        const std::string text = WriteTable(list, structures, symbols);
+        const std::string text = WriteTable(list, structures, symbols, naming);
         std::filesystem::path temporary = path;
         temporary += L".tmp";
         {

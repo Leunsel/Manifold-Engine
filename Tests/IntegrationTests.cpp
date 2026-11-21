@@ -265,6 +265,36 @@ namespace Manifold::Tests
             engine.Scanner().Reset();
             CHECK(!engine.Scanner().HasSaved("start"));
 
+            // A NaN that stays (0xFFFFFFFF, int -1) is unchanged memory: in Unchanged and Same as first, never in Changed.
+            const std::uint64_t nan = PlaceStill(engine, -1);
+            for (const Scan::ValueType type : { Scan::ValueType::Float, Scan::ValueType::Double })
+            {
+                options = {};
+                options.Type = type;
+                options.Mode = Scan::Compare::Unknown;
+                options.Start = nan & ~0xFFFull;
+                options.Stop = options.Start + 0x1000;
+                if (type == Scan::ValueType::Double)
+                    CHECK(engine.Process()->Write(nan + 4, "\xFF\xFF\xFF\xFF", 4).Ok());
+                CHECK(RunScan(engine, options, true));
+                CHECK(Contains(engine, nan));
+                options.Mode = Scan::Compare::Changed;
+                CHECK(RunScan(engine, options, false));
+                CHECK_MSG(!Contains(engine, nan), Scan::TypeName(type));
+                engine.Scanner().Reset();
+                options.Mode = Scan::Compare::Unknown;
+                CHECK(RunScan(engine, options, true));
+                options.Mode = Scan::Compare::Unchanged;
+                CHECK(RunScan(engine, options, false));
+                CHECK_MSG(Contains(engine, nan), Scan::TypeName(type));
+                options.Mode = Scan::Compare::Unchanged;
+                options.Against = Scan::CompareTo::First;
+                CHECK(RunScan(engine, options, false));
+                CHECK_MSG(Contains(engine, nan), Scan::TypeName(type));
+                engine.Scanner().Reset();
+            }
+            engine.Process()->Free(nan & ~0xFFFull);
+
             options = {};
             options.Kind = Scan::ScanKind::Grouped;
             options.Value = "4:0..2000 f:3.5 d:1234.5";

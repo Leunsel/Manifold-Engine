@@ -36,6 +36,10 @@ namespace Manifold::Table
         int BitLength = 1;
     };
 
+    // ∑ Limits for fields read from a table: the editor allows the same length, and offsets this far apart keep Offset + Size inside int.
+    inline constexpr int kMaxFieldBytes = 4096;
+    inline constexpr int kMaxFieldOffset = 0x10000000;
+
     int BitFieldSize(int bitStart, int bitLength);
 
     struct StructDefinition

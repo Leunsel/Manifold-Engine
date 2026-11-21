@@ -3226,13 +3226,13 @@ namespace Manifold::Lua
             Table::StructField& field = CheckElement(state, 1);
             const std::string key = Key(state, 2);
             if (key == "offset")
-                field.Offset = static_cast<int>(luaL_checkinteger(state, 3));
+                field.Offset = static_cast<int>(std::clamp<lua_Integer>(luaL_checkinteger(state, 3), -Table::kMaxFieldOffset, Table::kMaxFieldOffset));
             else if (key == "name")
                 field.Name = luaL_checkstring(state, 3);
             else if (key == "vartype")
                 ApplyElementVarType(field, luaL_checkinteger(state, 3));
             else if (key == "bytesize")
-                field.Size = static_cast<int>(luaL_checkinteger(state, 3));
+                field.Size = static_cast<int>(std::clamp<lua_Integer>(luaL_checkinteger(state, 3), 1, Table::kMaxFieldBytes));
             else if (key == "displaymethod")
             {
                 const std::string method = Lower(luaL_checkstring(state, 3));

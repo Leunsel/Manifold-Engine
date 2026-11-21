@@ -97,6 +97,7 @@ namespace Manifold
         bool AutoAttachEnabled = false;
         TableScriptPolicy TableScripts = TableScriptPolicy::Ask;
         QuitPolicy ActiveScriptsOnQuit = QuitPolicy::Ask;
+        int TableFileNames = 0;
 
         bool BackupsEnabled = true;
         int BackupIntervalMinutes = 5;

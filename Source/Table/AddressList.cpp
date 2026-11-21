@@ -275,6 +275,7 @@ namespace Manifold::Table
         ExtraXml.clear();
         DisasmNotes.clear();
         LoadedVersion = 0;
+        LoadedFileNaming = FileNaming::Tag;
         m_nextId = 0;
         Touch();
         m_dirty = false;

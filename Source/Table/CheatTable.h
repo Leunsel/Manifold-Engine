@@ -31,6 +31,7 @@ namespace Manifold::Table
         std::vector<std::string> ExtraXml;
         std::vector<std::string> Warnings;
         int Version = 0;
+        FileNaming Naming = FileNaming::Tag;
     };
 
     inline constexpr int kTableVersion = 45;
@@ -39,8 +40,10 @@ namespace Manifold::Table
 
     Status LoadTable(const std::filesystem::path& path, LoadedTable& table);
     Status ParseTable(std::string_view text, LoadedTable& table);
-    Status SaveTable(const std::filesystem::path& path, const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols);
-    std::string WriteTable(const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols);
+    Status SaveTable(const std::filesystem::path& path, const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols,
+        FileNaming naming = FileNaming::AsLoaded);
+    std::string WriteTable(const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols,
+        FileNaming naming = FileNaming::AsLoaded);
 
     std::string RecordsToXml(const std::vector<const MemoryRecord*>& records);
     std::optional<std::vector<std::uint8_t>> DecodeTableFile(std::string_view text, std::size_t limit = kMaxTableFileBytes);
