@@ -180,6 +180,9 @@
     <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Disasm\OpcodeConvert.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
@@ -478,6 +481,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\MonoTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\OpcodeTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\PointerScanTests.cpp">

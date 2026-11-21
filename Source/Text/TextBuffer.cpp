@@ -75,6 +75,59 @@ namespace Manifold::Text
         return column;
     }
 
+    std::vector<std::size_t> FindAll(std::string_view text, std::string_view needle, SearchOptions options)
+    {
+        std::vector<std::size_t> found;
+        if (needle.empty() || needle.size() > text.size())
+            return found;
+        const auto fold = [&](char c)
+        {
+            return options.MatchCase || c < 'A' || c > 'Z' ? c : static_cast<char>(c - 'A' + 'a');
+        };
+        const char first = fold(needle.front());
+        const std::size_t last = text.size() - needle.size();
+        for (std::size_t at = 0; at <= last;)
+        {
+            if (fold(text[at]) != first)
+            {
+                ++at;
+                continue;
+            }
+            bool same = true;
+            for (std::size_t i = 1; i < needle.size() && same; ++i)
+                same = fold(text[at + i]) == fold(needle[i]);
+            if (same && options.WholeWord)
+            {
+                const bool before = at > 0 && IsWordByte(static_cast<unsigned char>(text[at - 1]));
+                const bool after = at + needle.size() < text.size() && IsWordByte(static_cast<unsigned char>(text[at + needle.size()]));
+                same = !before && !after;
+            }
+            if (same)
+            {
+                found.push_back(at);
+                at += needle.size();
+            }
+            else
+            {
+                ++at;
+            }
+        }
+        return found;
+    }
+
+    int NextMatch(const std::vector<std::size_t>& matches, std::size_t from, bool forward)
+    {
+        if (matches.empty())
+            return -1;
+        if (forward)
+        {
+            const auto it = std::lower_bound(matches.begin(), matches.end(), from);
+            return it == matches.end() ? 0 : static_cast<int>(it - matches.begin());
+        }
+        const auto it = std::lower_bound(matches.begin(), matches.end(), from);
+        return it == matches.begin() ? static_cast<int>(matches.size()) - 1 : static_cast<int>(it - matches.begin()) - 1;
+    }
+
     TextBuffer::TextBuffer(std::string text) : m_text(std::move(text)) {}
 
     void TextBuffer::SetText(std::string text)
@@ -679,6 +732,26 @@ namespace Manifold::Text
         Apply(group, start, end - start, text);
         m_caret = m_anchor = start + text.size();
         End(group);
+    }
+
+    std::size_t TextBuffer::ReplaceAll(std::string_view needle, std::string_view replacement, SearchOptions options)
+    {
+        const std::vector<std::size_t> matches = FindAll(m_text, needle, options);
+        if (matches.empty())
+            return 0;
+        // Back to front, so the earlier offsets stay valid; Undo reverts the
+        // edits in reverse order, which is front to back again.
+        Group& group = Begin(EditKind::Other);
+        std::size_t caret = m_caret;
+        for (auto at = matches.rbegin(); at != matches.rend(); ++at)
+        {
+            Apply(group, *at, needle.size(), replacement);
+            if (*at < caret)
+                caret = caret >= *at + needle.size() ? caret - needle.size() + replacement.size() : *at;
+        }
+        m_caret = m_anchor = std::min(caret, m_text.size());
+        End(group);
+        return matches.size();
     }
 
     void TextBuffer::Indent()

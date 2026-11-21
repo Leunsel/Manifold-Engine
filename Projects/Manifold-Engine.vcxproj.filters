@@ -192,6 +192,9 @@
     <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Disasm\OpcodeConvert.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
@@ -513,6 +516,9 @@
     <ClCompile Include="..\Source\UI\NopSled.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\OpcodeWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\PatchScanWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -730,6 +736,9 @@
       <Filter>Source\Disasm</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Disasm\FunctionBounds.h">
+      <Filter>Source\Disasm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Disasm\OpcodeConvert.h">
       <Filter>Source\Disasm</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Disasm\UniqueAob.h">
@@ -1024,6 +1033,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\NopSled.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\OpcodeWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\PatchScanWindow.h">

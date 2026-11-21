@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -89,6 +90,7 @@ namespace Manifold::UI
     class CommentListWindow;
     class ModulesWindow;
     class FlowGraphWindow;
+    class OpcodeWindow;
 
     struct FileFilter
     {
@@ -155,6 +157,7 @@ namespace Manifold::UI
         void OpenCommentList();
         void OpenModules();
         void OpenFlowGraph(std::uint64_t address = 0);
+        void OpenOpcodeConverter(std::uint64_t address = 0, std::span<const std::uint8_t> bytes = {});
         bool Animating() const;
         bool OnlySpinnersAnimating() const;
         void AddAddress(std::uint64_t address, Scan::ValueType type, std::string description = {});
@@ -239,6 +242,7 @@ namespace Manifold::UI
         std::unique_ptr<CommentListWindow> m_commentList;
         std::unique_ptr<ModulesWindow> m_modules;
         std::unique_ptr<FlowGraphWindow> m_flowGraph;
+        std::unique_ptr<OpcodeWindow> m_opcodes;
         std::vector<std::unique_ptr<TraceWindow>> m_traces;
         int m_nextTrace = 1;
         MemoryViewer& ActiveMemoryViewer();

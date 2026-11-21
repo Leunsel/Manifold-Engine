@@ -28,6 +28,7 @@ Works in every window, unless the focused window uses the same keys for somethin
 | `Ctrl+Shift+F12` | Profiler and Diagnostics | `OpenProfiler` | Manifold |
 | `Ctrl+Alt+P` | Pointer Scan | `OpenPointerScan` | Manifold |
 | `Ctrl+Alt+K` | Find Static Pointers | `OpenStaticPointers` | Manifold |
+| `Ctrl+Alt+O` | Opcode Converter | `OpenOpcodeConverter` | Manifold |
 
 ## Main Window
 
@@ -195,6 +196,7 @@ While a Structure Dissect window has the focus. Field keys act on the selected f
 | `Ctrl+N` | Define New Structure | `DefineStructure` | CE |
 | `Ctrl+A` | Add Address to Compare | `AddStructureColumn` | CE |
 | `Ctrl+Alt+C` | Collapse All Pointers | `CollapseStructure` | CE |
+| `Ctrl+G` | Go to Address | `StructureGotoAddress` | Manifold |
 | `Enter` | Change Value | `ChangeFieldValue` | CE |
 | `Ctrl+Enter` or `F2` | Rename Field | `RenameField` | CE |
 | `Ins` | Insert 4 Bytes | `InsertField` | CE |
@@ -243,7 +245,7 @@ While the Lua Engine window has the focus.
 
 ## Code Editors
 
-While the cursor is in a code editor: the Lua engine, Auto Assembler and script windows, the Templates window and Table Files.
+While the cursor is in a code editor: the Lua engine, Auto Assembler and script windows, the Templates window and Table Files. Find Next and Find Previous also work while typing.
 
 | Keys | Command | Name in the settings | Origin |
 |---|---|---|---|
@@ -254,6 +256,10 @@ While the cursor is in a code editor: the Lua engine, Auto Assembler and script 
 | `Alt+Down` | Move Lines Down | `EditorMoveLinesDown` | Manifold |
 | `Ctrl+Shift+K` | Delete Lines | `EditorDeleteLines` | Manifold |
 | `Ctrl+G` | Go to Line | `EditorGotoLine` | Manifold |
+| `Ctrl+F` | Find | `EditorFind` | CE |
+| `Ctrl+H` | Replace | `EditorReplace` | Manifold |
+| `F3` | Find Next | `EditorFindNext` | CE |
+| `Shift+F3` | Find Previous | `EditorFindPrevious` | Manifold |
 
 ## Flow Graph
 

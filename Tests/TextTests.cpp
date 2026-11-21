@@ -750,6 +750,56 @@ namespace Manifold::Tests
         }
     }
 
+    namespace
+    {
+        void BufferSearch()
+        {
+            using Offsets = std::vector<std::size_t>;
+            const std::string text = "mov eax,Value\nmov [value],eax\nValues: value_2 VALUE";
+            CHECK(Text::FindAll(text, "value", {}) == (Offsets{ 8, 19, 30, 38, 46 }));
+            CHECK(Text::FindAll(text, "value", { true, false }) == (Offsets{ 19, 38 }));
+            CHECK(Text::FindAll(text, "value", { false, true }) == (Offsets{ 8, 19, 46 }));
+            CHECK(Text::FindAll(text, "Value", { true, true }) == (Offsets{ 8 }));
+            CHECK(Text::FindAll(text, "", {}).empty());
+            CHECK(Text::FindAll("ab", "abc", {}).empty());
+            CHECK(Text::FindAll("aaaa", "aa", {}) == (Offsets{ 0, 2 }));
+            // Bytes above 0x7F count as word bytes and are compared exactly.
+            CHECK(Text::FindAll("\xC3\xBC" "x x", "x", { false, true }) == (Offsets{ 4 }));
+
+            const Offsets matches{ 4, 10, 20 };
+            CHECK_EQ(Text::NextMatch(matches, 0, true), 0);
+            CHECK_EQ(Text::NextMatch(matches, 4, true), 0);
+            CHECK_EQ(Text::NextMatch(matches, 5, true), 1);
+            CHECK_EQ(Text::NextMatch(matches, 21, true), 0);
+            CHECK_EQ(Text::NextMatch(matches, 10, false), 0);
+            CHECK_EQ(Text::NextMatch(matches, 4, false), 2);
+            CHECK_EQ(Text::NextMatch(matches, 100, false), 2);
+            CHECK_EQ(Text::NextMatch({}, 0, true), -1);
+
+            const std::string original = "a = foo(foo) -- foo\nfoobar = foo";
+            const std::string replaced = "a = value(value) -- value\nfoobar = value";
+            Text::TextBuffer buffer(original);
+            buffer.SetCaret(buffer.Size(), false);
+            CHECK_EQ(buffer.ReplaceAll("foo", "value", { false, true }), static_cast<std::size_t>(4));
+            CHECK_EQ(buffer.Text(), replaced);
+            CHECK_EQ(buffer.Caret(), buffer.Size());
+            CHECK(buffer.Undo());
+            CHECK_EQ(buffer.Text(), original);
+            CHECK(!buffer.Undo());
+            CHECK(buffer.Redo());
+            CHECK_EQ(buffer.Text(), replaced);
+            CHECK_EQ(buffer.ReplaceAll("missing", "x", {}), static_cast<std::size_t>(0));
+            CHECK(buffer.Undo() && buffer.Text() == original);
+
+            // A caret inside or after a match moves with the shorter text.
+            Text::TextBuffer shrink("xxAxxAxx");
+            shrink.SetCaret(4, false);
+            CHECK_EQ(shrink.ReplaceAll("xx", "y", {}), static_cast<std::size_t>(3));
+            CHECK_EQ(shrink.Text(), std::string("yAyAy"));
+            CHECK_EQ(shrink.Caret(), static_cast<std::size_t>(2));
+        }
+    }
+
     int RunTextTests()
     {
         const int before = Totals().Failures;
@@ -769,6 +819,7 @@ namespace Manifold::Tests
         BufferUndo();
         BufferIndent();
         BufferLineEdits();
+        BufferSearch();
         return Totals().Failures - before;
     }
 }

@@ -25,6 +25,19 @@ namespace Manifold::Text
         DocumentEnd
     };
 
+    struct SearchOptions
+    {
+        bool MatchCase = false;
+        bool WholeWord = false;
+    };
+
+    // Start offsets of every match of `needle`, in order and without overlaps.
+    // Case folding is ASCII only; a whole word has no word byte on either side.
+    std::vector<std::size_t> FindAll(std::string_view text, std::string_view needle, SearchOptions options);
+    // Index of the first match at or after `from` (or the last one before it,
+    // going back), wrapping around the end; -1 without matches.
+    int NextMatch(const std::vector<std::size_t>& matches, std::size_t from, bool forward);
+
     class TextBuffer
     {
     public:
@@ -67,6 +80,8 @@ namespace Manifold::Text
         void Backspace(bool word);
         void Delete(bool word);
         void Replace(std::size_t start, std::size_t end, std::string_view text);
+        // Replaces every match in one undo step and returns how many there were.
+        std::size_t ReplaceAll(std::string_view needle, std::string_view replacement, SearchOptions options);
         void Indent();
         void Outdent();
         void ToggleComment(std::string_view prefix);

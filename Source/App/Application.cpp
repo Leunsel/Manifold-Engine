@@ -257,6 +257,8 @@ namespace Manifold
                 m_workspace->OpenCommentList();
             else if (window == "flowgraph")
                 m_workspace->OpenFlowGraph();
+            else if (window == "opcodes")
+                m_workspace->OpenOpcodeConverter();
             else if (window == "templates")
                 m_workspace->OpenTemplateManager();
             else if (window.rfind("templates:", 0) == 0)

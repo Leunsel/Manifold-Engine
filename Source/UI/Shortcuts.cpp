@@ -20,14 +20,14 @@ namespace Manifold::UI
             return ImGui::GetIO().WantTextInput && !(chord & (ImGuiMod_Ctrl | ImGuiMod_Alt));
         }
 
-        bool Route(ImGuiKeyChord chord, CommandScope scope)
+        bool Route(ImGuiKeyChord chord, CommandScope scope, bool whileTyping = false)
         {
             if (!chord || g_captureFrame >= ImGui::GetFrameCount() - 1)
                 return false;
             const bool global = scope == CommandScope::Global;
             if (!ImGui::Shortcut(chord, global ? ImGuiInputFlags_RouteGlobal : ImGuiInputFlags_RouteFocused))
                 return false;
-            if (TypingBlocks(chord))
+            if (!whileTyping && TypingBlocks(chord))
                 return false;
             return !global || !ImGui::GetTopMostPopupModal();
         }
@@ -59,6 +59,15 @@ namespace Manifold::UI
         const Binding binding = CurrentBinding(command);
         const bool first = Route(binding.Chord, info.Scope);
         const bool second = Route(binding.Alternate, info.Scope);
+        return first || second;
+    }
+
+    bool PressedWhileTyping(Command command)
+    {
+        const CommandInfo& info = Describe(command);
+        const Binding binding = CurrentBinding(command);
+        const bool first = Route(binding.Chord, info.Scope, true);
+        const bool second = Route(binding.Alternate, info.Scope, true);
         return first || second;
     }
 

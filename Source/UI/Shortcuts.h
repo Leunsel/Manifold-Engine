@@ -9,6 +9,8 @@
 namespace Manifold::UI
 {
     bool Pressed(Command command);
+    // For a text field's own keys: plain keys such as F3 count while typing.
+    bool PressedWhileTyping(Command command);
     bool ChordPressed(ImGuiKeyChord chord, CommandScope scope);
     int PressedDigit(Command command);
     bool CommandItem(const char* label, Command command, bool selected = false, bool enabled = true);

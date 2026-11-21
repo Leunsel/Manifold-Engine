@@ -4,7 +4,9 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Manifold::Target
@@ -64,4 +66,20 @@ namespace Manifold::Table
     };
 
     void GuessFields(const Target::Process& process, StructDefinition& definition, std::uint64_t address, int offset, int size);
+
+    // A field as shown in a dissect view: where it lies and how deep it hangs.
+    struct FieldSpan
+    {
+        std::uint64_t Address = 0;
+        std::uint64_t Size = 1;
+        int Depth = 0;
+    };
+
+    // The span that holds `address`: the smallest one, and of equal ones the
+    // deepest (a field inside an embedded structure beats the structure); -1
+    // when none does.
+    int ContainingField(const std::vector<FieldSpan>& spans, std::uint64_t address);
+    // A field filter that is an address rather than an offset: hex digits
+    // (0x allowed, no + in front) of at least 0x10000.
+    std::optional<std::uint64_t> FilterAddress(std::string_view text);
 }
