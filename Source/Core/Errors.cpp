@@ -247,13 +247,19 @@ namespace Manifold
             { ErrorCode::DebugTraceFailed, "The trace could not be started: {}.",
                 "A trace runs from a breakpoint and needs the debugger and a free breakpoint.",
                 "Attach the debugger, free a debug register or remove the breakpoint at that address first." },
-            { ErrorCode::MonoNotFound, "No Mono or IL2CPP runtime was found in this process{}.",
-                "The .NET features need a 64-bit Unity game: a Mono build (with mono-2.0-bdwgc.dll or mono.dll) or an IL2CPP build (with GameAssembly.dll). "
-                "An IL2CPP build without il2cpp_image_get_class (before Unity 2018.3) or with renamed exports is not supported.",
-                "Open the game's process once it has finished loading, or check that it is a Unity game at all." },
+            { ErrorCode::MonoNotFound, "No Mono, IL2CPP or .NET runtime was found in this process{}.",
+                "The managed features need a Unity game, a Mono build (with mono-2.0-bdwgc.dll or mono.dll) or an IL2CPP build (with GameAssembly.dll), "
+                "or a .NET game (with coreclr.dll or the .NET Framework's clr.dll). "
+                "An IL2CPP build without il2cpp_image_get_class (before Unity 2018.3) or with renamed exports is not supported, and neither is a .NET game "
+                "compiled ahead of time (Native AOT) or published as a single file.",
+                "Open the game's process once it has finished loading, or check that it is a Unity or .NET game at all." },
             { ErrorCode::MonoCallFailed, "A Mono call into the process failed: {}.",
                 "The in-process helper could not call a mono function, or the call did not return.",
                 "The process may have closed, or the Mono runtime may be an unexpected version." },
+            { ErrorCode::ClrHelperFailed, "The .NET helper failed: {}.",
+                "Manifold Engine reads .NET games from outside the game, with ManifoldClr.exe (ManifoldClr32.exe for a 32-bit game) and the data access library "
+                "that ships with the game's runtime (mscordaccore.dll or mscordacwks.dll). Nothing is run inside the game.",
+                "Check that both helpers are next to Manifold-Engine.exe. If the game's runtime folder has no data access library, the game cannot be read this way." },
             { ErrorCode::UnrealNotResolved, "Unreal Engine is not resolved: {}.",
                 "The game's name table, object array or reflection layout was not found, it is still being read, or the Unreal tool is shut down.",
                 "Start it in Extensions > Unreal Engine once the game shows its menu. For a game the search does not find, manifold.unreal.configure takes the addresses, layout offsets or search patterns." },

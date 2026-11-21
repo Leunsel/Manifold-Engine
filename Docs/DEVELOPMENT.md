@@ -25,7 +25,7 @@ msbuild Manifold-Engine.sln /p:Configuration=Release /p:Platform=x64 /m
 
 Everything lands in `Build\<Platform>\<Configuration>`, e.g. `Build\x64\Release`. All dependencies are in `Dependencies` and build with the solution: Dear ImGui 1.92 (docking), Zydis 5 (amalgamated), Lua 5.4. New source files are picked up by running `python Tools/gen_projects.py`, which writes the projects in `Projects` and the solution.
 
-The program is x64-only. Every x64 build also builds the in-process debugger agent and the test target a second time as 32-bit, as `ManifoldAgent32.dll` and `TestTarget32.exe` next to the program: the program injects the 32-bit agent into 32-bit games, and the tests use the 32-bit target. The solution also lists a `Win32` platform, which that second build uses; building the whole solution as `Win32` is not something CI or the tests do.
+The program is x64-only. Every x64 build also builds the in-process debugger agent, the .NET helper and the test target a second time as 32-bit, as `ManifoldAgent32.dll`, `ManifoldClr32.exe` and `TestTarget32.exe` next to the program: the program injects the 32-bit agent into 32-bit games, reads 32-bit .NET games with the 32-bit helper, and the tests use the 32-bit target. The solution also lists a `Win32` platform, which that second build uses; building the whole solution as `Win32` is not something CI or the tests do.
 
 The MSVC compiler (`v143`) cannot build the program: the direct system call stubs in `Source/Syscalls/Syscall.h` are naked functions with inline assembly, which only clang-cl compiles. `Tools/gen_projects.py --msvc` writes such projects all the same, for trying parts of the code with MSVC.
 
@@ -54,6 +54,7 @@ The run goes through these suites in order; `--list` names them and `--filter=co
 | `commands`, `docs`, `console`, `templates` | commands and shortcuts, the generated documentation, the Lua console, script templates |
 | `compat`, `manifold-api`, `modules`, `autorun` | the Cheat Engine Lua API, the `manifold` API, the autorun module loader, the modules in `Autorun` |
 | `managed` | the managed dumper: its data format, the embedded assembly, and a run on the .NET Framework |
+| `clr` | the .NET reader: the metadata parser, the helper's protocol, and the whole path through `ManifoldClr.exe` against `TestTarget.exe --clr` (the .NET Framework, also as 32-bit) and `TestTarget.exe --coreclr` (.NET 8 and the newest installed .NET); `--clr-check` runs only this |
 | `integration` | a run against `TestTarget.exe` (built with the solution): scanning, pointers, freezing, a code injection script, the sample table `Tests/Target/TestTarget.CT`, Lua (records, timers, threads), the write history, all four "find out what" watches, breakpoints and stepping with the Windows debugger, the fake Mono, IL2CPP and managed dumper runtimes of the target, the direct system calls |
 | `inprocess` | the in-process debugger in a 64-bit target: breakpoints with conditions and register changes, watches on one instruction, and the agent letting the target go when the program falls silent |
 | `wow64` | the same as `integration` for a 32-bit game against `TestTarget32.exe`, with both debuggers and the fake Mono, IL2CPP and managed dumper runtimes (`--wow64-managed-check` runs only those) |
@@ -85,12 +86,13 @@ Some checks need a real game, a long run or a special situation and are not part
 | `Source/App` | program, window host, settings, the engine and its parts (target session, managed session, table runtime, script activation), crash handler |
 | `Source/Core` | error codes, log, text helpers, ini and XML, paths, background work, the frame profiler |
 | `Source/Text` | JSON and other text formats |
-| `Source/Target` | process access, process list, symbols and address expressions, Mono, IL2CPP, Unreal Engine and C++ RTTI |
+| `Source/Target` | process access, process list, symbols and address expressions, Mono, IL2CPP, .NET, Unreal Engine and C++ RTTI |
 | `Source/Disasm`, `Source/Asm` | Zydis disassembler, assembler and Auto Assembler |
 | `Source/Syscalls` | direct system calls |
 | `Source/Generated` | files written by the scripts in `Tools` (embedded Lua, built-in templates, icon names, Cheat Engine API docs) |
 | `Agent` | the in-process debugger DLL |
-| `Managed` | the .NET dumper and scene agent loaded into Mono games |
+| `ClrHelper` | `ManifoldClr.exe` / `ManifoldClr32.exe`, which read a .NET game from outside through the runtime's data access library |
+| `Managed` | the .NET dumper and scene agent loaded into Mono games, and the fake .NET game the tests read |
 | `Autorun`, `Examples` | Lua modules that run at start, example scripts |
 | `Tools` | project generator, embedding scripts, formatting, install |
 | `Source/Templates`, `Templates` | template engine, its values and the built-in template files (`Tools/embed_templates.py` puts them into `Source/Generated/BuiltinTemplates.cpp`) |

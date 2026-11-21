@@ -57,6 +57,7 @@ set MSBuildExtensionsPath=
 set MSBUILD_EXE_PATH=
 dotnet build "$(ProjectDir)..\Managed\ManifoldDumper\ManifoldDumper.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
 dotnet build "$(ProjectDir)..\Managed\FakeUnity\FakeUnity.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
+dotnet build "$(ProjectDir)..\Managed\FakeGame\FakeGame.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
 :embed
 where python &gt;nul 2&gt;nul &amp;&amp; goto generate
 if exist "$(ProjectDir)..\Source\Generated\ManagedDumperImage.cpp" exit /b 0
@@ -66,11 +67,13 @@ exit /b 0
 :generate
 python "$(ProjectDir)..\Tools\embed_managed.py" --touch</Command>
       <Message>Building the managed dumper and embedding it into the program</Message>
-      <Inputs>$(ProjectDir)..\Managed\FakeUnity\FakeUnity.cs;$(ProjectDir)..\Managed\FakeUnity\FakeUnity.csproj;$(ProjectDir)..\Managed\ManifoldDumper\Agent.cs;$(ProjectDir)..\Managed\ManifoldDumper\Dumper.cs;$(ProjectDir)..\Managed\ManifoldDumper\ManifoldDumper.csproj;$(ProjectDir)..\Managed\ManifoldDumper\Ops.cs;$(ProjectDir)..\Tools\embed_managed.py</Inputs>
-      <Outputs>$(ProjectDir)..\Build\Managed\ManifoldDumper3.dll;$(ProjectDir)..\Build\Managed\UnityEngine.CoreModule.dll;$(ProjectDir)..\Source\Generated\ManagedDumperImage.cpp</Outputs>
+      <Inputs>$(ProjectDir)..\Managed\FakeGame\FakeGame.cs;$(ProjectDir)..\Managed\FakeGame\FakeGame.csproj;$(ProjectDir)..\Managed\FakeUnity\FakeUnity.cs;$(ProjectDir)..\Managed\FakeUnity\FakeUnity.csproj;$(ProjectDir)..\Managed\ManifoldDumper\Agent.cs;$(ProjectDir)..\Managed\ManifoldDumper\Dumper.cs;$(ProjectDir)..\Managed\ManifoldDumper\ManifoldDumper.csproj;$(ProjectDir)..\Managed\ManifoldDumper\Ops.cs;$(ProjectDir)..\Tools\embed_managed.py</Inputs>
+      <Outputs>$(ProjectDir)..\Build\Managed\ManifoldDumper3.dll;$(ProjectDir)..\Build\Managed\UnityEngine.CoreModule.dll;$(ProjectDir)..\Build\Managed\ManifoldFakeGame.dll;$(ProjectDir)..\Source\Generated\ManagedDumperImage.cpp</Outputs>
     </CustomBuildStep>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <None Include="..\Managed\FakeGame\FakeGame.cs" />
+    <None Include="..\Managed\FakeGame\FakeGame.csproj" />
     <None Include="..\Managed\FakeUnity\FakeUnity.cs" />
     <None Include="..\Managed\FakeUnity\FakeUnity.csproj" />
     <None Include="..\Managed\ManifoldDumper\Agent.cs" />

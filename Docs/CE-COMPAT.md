@@ -25,7 +25,7 @@ These are real global functions, so scripts that call them run on.
 | `getSettingsForm` | a stand-in | it returns a stand-in form; Manifold Engine's settings are not on it |
 | `getUpdateTimer` | a stand-in | it returns a stand-in timer whose Interval shows the setting; changing it does not change Manifold Engine's settings |
 | `hideAllCEWindows` | nothing | the main window stays as it is |
-| `reinitializeDotNetSymbolhandler` | nothing | Mono names are looked up when they are used |
+| `reinitializeDotNetSymbolhandler` | nothing | Mono, IL2CPP and .NET names are looked up when they are used |
 | `reinitializeSelfSymbolhandler` | nothing | names inside Manifold Engine are looked up on every call |
 | `setGlobalDelayBetweenHotkeyActivation` | nothing | hotkeys use Manifold Engine's own timing |
 | `setGlobalKeyPollInterval` | nothing | hotkeys use Manifold Engine's own timing |
@@ -62,7 +62,7 @@ Manifold Engine has no built-in C or C# compiler.
 
 ### .NET
 
-Manifold Engine has no .NET data collector and does not inject .NET code; the Mono tool covers Mono games.
+Manifold Engine reads .NET games from outside (the Mono / .NET window, Class:Method and Class:StaticField addresses, Structure Dissect) but has no data collector object and does not inject .NET code.
 
 `dotNetExecuteClassMethod`, `getDotNetDataCollector`, `injectDotNetDLL`
 

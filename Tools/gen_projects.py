@@ -14,6 +14,7 @@ GUIDS = {
     "ManifoldAgent": "{2D3C4B5A-6978-4A1B-9C8D-0E1F2A3B4C5D}",
     "SyscallTest": "{4A5B6C7D-8E9F-40A1-B2C3-D4E5F6071829}",
     "ManagedDumper": "{5B6C7D8E-9FA0-41B2-83C4-E5F607182930}",
+    "ManifoldClr": "{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}",
 }
 
 TEST_EXCLUDED_DIRS = ("UI",)
@@ -251,6 +252,7 @@ set MSBuildExtensionsPath=
 set MSBUILD_EXE_PATH=
 dotnet build "$(ProjectDir)..\\Managed\\ManifoldDumper\\ManifoldDumper.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
 dotnet build "$(ProjectDir)..\\Managed\\FakeUnity\\FakeUnity.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
+dotnet build "$(ProjectDir)..\\Managed\\FakeGame\\FakeGame.csproj" -c Release -nologo -v:q --disable-build-servers || exit /b 1
 :embed
 where python &gt;nul 2&gt;nul &amp;&amp; goto generate
 if exist "$(ProjectDir)..\\Source\\Generated\\ManagedDumperImage.cpp" exit /b 0
@@ -272,7 +274,7 @@ def managed_project():
       <Command>{MANAGED_BUILD}</Command>
       <Message>Building the managed dumper and embedding it into the program</Message>
       <Inputs>{inputs}</Inputs>
-      <Outputs>$(ProjectDir)..\\Build\\Managed\\{embed_managed.assembly_name()}.dll;$(ProjectDir)..\\Build\\Managed\\UnityEngine.CoreModule.dll;$(ProjectDir)..\\Source\\Generated\\ManagedDumperImage.cpp</Outputs>
+      <Outputs>$(ProjectDir)..\\Build\\Managed\\{embed_managed.assembly_name()}.dll;$(ProjectDir)..\\Build\\Managed\\UnityEngine.CoreModule.dll;$(ProjectDir)..\\Build\\Managed\\ManifoldFakeGame.dll;$(ProjectDir)..\\Source\\Generated\\ManagedDumperImage.cpp</Outputs>
     </CustomBuildStep>
   </ItemDefinitionGroup>
 """
@@ -352,6 +354,7 @@ def main():
     app += reference("Dependencies")
     app += build_only_reference("ManifoldAgent")
     app += build_only_reference("ManagedDumper")
+    app += build_only_reference("ManifoldClr")
     app += tail()
     app = disable_jmc_for(app, "Source/Syscalls/Syscall.cpp")
     app = with_prebuild(app)
@@ -381,6 +384,7 @@ def main():
     tests += reference("Dependencies")
     tests += build_only_reference("ManifoldAgent")
     tests += build_only_reference("ManagedDumper")
+    tests += build_only_reference("ManifoldClr")
     tests += tail()
     tests = disable_jmc_for(tests, "Source/Syscalls/Syscall.cpp")
     tests = with_prebuild(tests)
@@ -459,8 +463,53 @@ def main():
 
     write("ManagedDumper.vcxproj", managed_project())
 
+    # The .NET helper reads a .NET game through the runtime's data access
+    # library, which must match the game's bitness: ManifoldClr.exe for 64-bit
+    # games and its twin ManifoldClr32.exe for 32-bit ones.
+    clr_sources = ["ClrHelper/DacSession.cpp", "ClrHelper/Main.cpp", "Source/Target/ClrMetadata.cpp"]
+    clr_headers = ["ClrHelper/Dac.h", "ClrHelper/DacSession.h", "Source/Target/ClrMetadata.h", "Source/Target/ClrProtocol.h"]
+    clr = common_head("ManifoldClr", "Application", "ManifoldClr")
+    clr += """  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..;$(ProjectDir)..\\Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_CONSOLE;WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>kernel32.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+""" + CLANG_OPTIONS
+    clr += items("ClCompile", clr_sources)
+    clr += items("ClInclude", clr_headers)
+    clr += tail()
+    clr = with_x86_twin(clr, "ManifoldClr")
+    write("ManifoldClr.vcxproj", clr)
+
     sln = "\r\nMicrosoft Visual Studio Solution File, Format Version 12.00\r\n# Visual Studio Version 17\r\nVisualStudioVersion = 17.0.31903.59\r\nMinimumVisualStudioVersion = 10.0.40219.1\r\n"
-    names = ("Manifold-Engine", "Dependencies", "Manifold-Engine.Tests", "TestTarget", "ManifoldAgent", "SyscallTest", "ManagedDumper")
+    names = ("Manifold-Engine", "Dependencies", "Manifold-Engine.Tests", "TestTarget", "ManifoldAgent", "SyscallTest", "ManagedDumper", "ManifoldClr")
     for name in names:
         sln += f'Project("{{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}}") = "{name}", "Projects\\{name}.vcxproj", "{GUIDS[name]}"\r\nEndProject\r\n'
     sln += "Global\r\n\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\r\n"

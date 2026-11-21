@@ -7,8 +7,8 @@ A memory scanner, debugger and scripting tool for Windows games and programs, in
 - **Scanner**: all the usual value types, many threads, results on disk instead of in memory, an *All* scan over every number type at once, and grouped scans for values that sit next to each other.
 - **Address list**: groups, pointers, freezing, hotkeys, drop-down values, and Cheat Engine's group options.
 - **Memory viewer and debugger**: disassembler with symbols and jump arrows, a flow graph per function, write history with undo, conditional breakpoints that run inside the target, tracing, and "find out what accesses / writes".
-- **Structure dissect** that names objects by their class in Mono, IL2CPP and Unreal Engine games, and C++ objects by their RTTI.
-- **Game engines built in**: Mono and IL2CPP (Unity) with classes, methods and a scene explorer, and Unreal Engine 4 and 5 without an SDK or game offsets.
+- **Structure dissect** that names objects by their class in Mono, IL2CPP, .NET and Unreal Engine games, and C++ objects by their RTTI.
+- **Game engines built in**: Mono and IL2CPP (Unity) with classes, methods and a scene explorer, .NET Framework and .NET games (such as Terraria) read from outside the game with classes, static fields and compiled methods, and Unreal Engine 4 and 5 without an SDK or game offsets.
 - **Scripting**: Cheat Engine's Auto Assembler, templates, and Lua 5.4 with the Cheat Engine API, plus the program's own `manifold` API with script windows drawn in the program's look.
 - **Made for long sessions**: error codes that explain themselves, a log window for debugging, a profiler, and the keyboard shortcuts of Cheat Engine 7.5.
 

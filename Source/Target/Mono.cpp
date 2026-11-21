@@ -3,6 +3,7 @@
 #include "Core/BackgroundWork.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
+#include "Target/ClrRuntime.h"
 #include "Target/Il2CppRuntime.h"
 #include "Target/MonoRuntime.h"
 #include "Target/Process.h"
@@ -16,6 +17,8 @@ namespace Manifold::Target
     {
         const char* const kModuleCandidates[] = { "mono-2.0-bdwgc.dll", "mono.dll", "mono-2.0.dll", "monobdwgc-2.0.dll" };
         constexpr const char* kIl2CppModule = "GameAssembly.dll";
+        // .NET (CoreCLR), the .NET Framework 4 and 2.
+        const char* const kClrModules[] = { "coreclr.dll", "clr.dll", "mscorwks.dll" };
 
         std::string_view WithoutDll(std::string_view name)
         {
@@ -31,6 +34,7 @@ namespace Manifold::Target
         {
             case ManagedRuntime::Mono: return "Mono";
             case ManagedRuntime::Il2Cpp: return "IL2CPP";
+            case ManagedRuntime::Clr: return ".NET";
             default: return "no runtime";
         }
     }
@@ -42,7 +46,10 @@ namespace Manifold::Target
             return ManagedRuntime::None;
         // GameAssembly.dll wins: an IL2CPP game with a mod loader that brings
         // its own Mono (MelonLoader) keeps the game's classes in IL2CPP.
+        // A .NET runtime counts only without Mono: a Unity tool or mod
+        // loader may bring one along.
         ManagedRuntime found = ManagedRuntime::None;
+        bool clr = false;
         for (const ModuleInfo& module : *modules)
         {
             if (EqualsNoCase(module.Name, kIl2CppModule))
@@ -52,8 +59,10 @@ namespace Manifold::Target
                 if (EqualsNoCase(module.Name, candidate))
                     found = ManagedRuntime::Mono;
             }
+            for (const char* candidate : kClrModules)
+                clr = clr || EqualsNoCase(module.Name, candidate);
         }
-        return found;
+        return found == ManagedRuntime::None && clr ? ManagedRuntime::Clr : found;
     }
 
     bool MonoBridge::HasRuntime(const Process& process)
@@ -71,6 +80,14 @@ namespace Manifold::Target
             if (process.FindModule(candidate) && process.FindExport(candidate, "mono_get_root_domain"))
             {
                 found.push_back({ candidate, ManagedRuntime::Mono });
+                break;
+            }
+        }
+        for (const char* candidate : kClrModules)
+        {
+            if (process.FindModule(candidate))
+            {
+                found.push_back({ candidate, ManagedRuntime::Clr });
                 break;
             }
         }
@@ -98,12 +115,26 @@ namespace Manifold::Target
         std::unique_ptr<RuntimeBackend> backend;
         if (candidate.Runtime == ManagedRuntime::Il2Cpp)
             backend = std::make_unique<Il2CppRuntime>(*this);
+        else if (candidate.Runtime == ManagedRuntime::Clr)
+            backend = std::make_unique<ClrRuntime>(*this);
         else
             backend = std::make_unique<MonoRuntime>(*this);
         const Status attached = backend->Attach(candidate.Module);
         if (attached)
             m_backend = std::move(backend);
         return attached;
+    }
+
+    std::string MonoBridge::RuntimeDescription() const
+    {
+        std::lock_guard lock(m_lock);
+        if (m_backend)
+        {
+            std::string text = m_backend->Description();
+            if (!text.empty())
+                return text;
+        }
+        return RuntimeName(m_runtime.load());
     }
 
     std::uint64_t MonoBridge::ManagedClass(std::string_view space, std::string_view name)
@@ -153,18 +184,24 @@ namespace Manifold::Target
         if (candidates.empty())
             return Status::Fail(ErrorCode::MonoNotFound);
 
+        // .NET is read from outside the game; the worker in the game is
+        // started only for a Mono or IL2CPP candidate.
+        const bool needsWorker = std::any_of(candidates.begin(), candidates.end(), [](const Candidate& c) { return c.Runtime != ManagedRuntime::Clr; });
         if (progress)
-            progress->SetText("Starting the helper in the game");
+            progress->SetText(needsWorker ? "Starting the helper in the game" : "Starting the .NET helper");
         std::string module;
         ManagedRuntime runtime = ManagedRuntime::None;
         {
             std::lock_guard lock(m_lock);
             m_process = process;
             m_call.SetGuard(&m_lock);
-        if (Status started = m_call.Start(process); !started)
+            if (needsWorker)
             {
-                m_process.reset();
-                return started;
+                if (Status started = m_call.Start(process); !started)
+                {
+                    m_process.reset();
+                    return started;
+                }
             }
             // The first candidate whose runtime answers with a domain wins; a
             // runtime that is not set up yet leaves the next one its turn.
@@ -363,7 +400,14 @@ namespace Manifold::Target
 
     int MonoBridge::ParentIndex(int classIndex)
     {
-        if (classIndex < 0 || classIndex >= static_cast<int>(m_classes.size()) || m_classes[static_cast<std::size_t>(classIndex)].Discovered)
+        if (classIndex < 0 || classIndex >= static_cast<int>(m_classes.size()))
+            return -1;
+        if (m_backend)
+        {
+            if (const auto known = m_backend->ParentIndex(classIndex))
+                return *known;
+        }
+        if (m_classes[static_cast<std::size_t>(classIndex)].Discovered)
             return -1;
         const std::string prefix = IsIl2Cpp() ? "il2cpp_" : "mono_";
         const std::uint64_t parent = CallFn((prefix + "class_get_parent").c_str(), m_classes[static_cast<std::size_t>(classIndex)].Handle).value_or(0);
@@ -539,11 +583,18 @@ namespace Manifold::Target
             if (!m_backend || !m_backend->CompilesOnDemand())
                 continue;
             const auto address = m_backend->Compile(method.Handle);
+            // .NET: this overload has no code yet, another one may. Mono: a
+            // failed compile means the worker is in trouble, so stop asking.
+            if (!address && m_runtime.load() == ManagedRuntime::Clr)
+                continue;
             if (!address)
                 return std::nullopt;
             method.Address = *address;
             return method.Address;
         }
+        // "Class:Field" names a static field where the runtime reports them.
+        if (m_backend)
+            return m_backend->StaticAddress(index, methodName);
         return std::nullopt;
     }
 

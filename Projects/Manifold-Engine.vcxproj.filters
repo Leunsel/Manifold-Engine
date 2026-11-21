@@ -333,6 +333,15 @@
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\ClrLink.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\ClrMetadata.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\ClrRuntime.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\CodeCall.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -818,6 +827,18 @@
     </ClInclude>
     <ClInclude Include="..\Source\Table\UnrealStructures.h">
       <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\ClrLink.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\ClrMetadata.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\ClrProtocol.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\ClrRuntime.h">
+      <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\CodeCall.h">
       <Filter>Source\Target</Filter>

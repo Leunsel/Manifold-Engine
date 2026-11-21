@@ -1,3 +1,4 @@
+#include "FakeClr.h"
 #include "FakeRtti.h"
 #include "FakeUnreal.h"
 
@@ -1018,6 +1019,10 @@ extern "C" __declspec(dllexport) UnrealMarker g_unrealObjects = { { 'M', 'F', 'U
 
 int main(int argc, char** argv)
 {
+    // A .NET host runs on its own: no workers, no fault skipping (the
+    // runtime handles its own exceptions).
+    if (const int hosted = FakeClr::Run(argc, argv); hosted >= 0)
+        return hosted;
     for (int i = 1; i < argc; ++i)
     {
         if (std::strcmp(argv[i], "--il2cpp") == 0)

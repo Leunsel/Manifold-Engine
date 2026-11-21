@@ -321,6 +321,15 @@
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\ClrLink.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\ClrMetadata.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\ClrRuntime.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\CodeCall.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -414,6 +423,9 @@
     <ClCompile Include="..\Tests\AutorunTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
+    <ClCompile Include="..\Tests\ClrTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
     <ClCompile Include="..\Tests\CommandTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
@@ -500,6 +512,9 @@
     </ClCompile>
     <ClInclude Include="..\Tests\TestKit.h">
       <Filter>Tests</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Tests\Target\FakeClr.h">
+      <Filter>Tests\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Tests\Target\FakeIl2CppScene.h">
       <Filter>Tests\Target</Filter>

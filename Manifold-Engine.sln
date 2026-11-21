@@ -17,6 +17,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SyscallTest", "Projects\Sys
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ManagedDumper", "Projects\ManagedDumper.vcxproj", "{5B6C7D8E-9FA0-41B2-83C4-E5F607182930}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ManifoldClr", "Projects\ManifoldClr.vcxproj", "{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -81,6 +83,14 @@ Global
 		{5B6C7D8E-9FA0-41B2-83C4-E5F607182930}.Release|x64.Build.0 = Release|x64
 		{5B6C7D8E-9FA0-41B2-83C4-E5F607182930}.Release|Win32.ActiveCfg = Release|Win32
 		{5B6C7D8E-9FA0-41B2-83C4-E5F607182930}.Release|Win32.Build.0 = Release|Win32
+		{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}.Debug|x64.ActiveCfg = Debug|x64
+		{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}.Debug|x64.Build.0 = Debug|x64
+		{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}.Debug|Win32.ActiveCfg = Debug|Win32
+		{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}.Debug|Win32.Build.0 = Debug|Win32
+		{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}.Release|x64.ActiveCfg = Release|x64
+		{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}.Release|x64.Build.0 = Release|x64
+		{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}.Release|Win32.ActiveCfg = Release|Win32
+		{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}.Release|Win32.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

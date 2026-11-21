@@ -2463,31 +2463,40 @@ namespace Manifold::UI
 
     void MainWindow::UnityMenu()
     {
-        if (!ImGui::BeginMenu(ICON_FA_DICE_D6 "  Unity (Mono / IL2CPP)"))
-            return;
         Target::MonoBridge& mono = m_engine.Mono();
+        const Target::ManagedRuntime detected = m_engine.MonoPresent() ? mono.Runtime()
+            : m_engine.Process()                                     ? Target::MonoBridge::DetectRuntime(*m_engine.Process())
+                                                                     : Target::ManagedRuntime::None;
+        const bool dotnet = detected == Target::ManagedRuntime::Clr;
+        if (!ImGui::BeginMenu(dotnet ? ICON_FA_DICE_D6 "  .NET###ManagedRuntimeMenu" : ICON_FA_DICE_D6 "  Unity (Mono / IL2CPP)###ManagedRuntimeMenu"))
+            return;
         if (!m_engine.MonoPresent() && !m_monoDetected)
         {
-            SectionLabel(m_engine.HasProcess() ? "No Mono or IL2CPP runtime in this process" : "No process is open");
+            SectionLabel(m_engine.HasProcess() ? "No Mono, IL2CPP or .NET runtime in this process" : "No process is open");
         }
         else if (!m_engine.MonoPresent())
         {
-            const bool il2cpp = m_engine.Process() && Target::MonoBridge::DetectRuntime(*m_engine.Process()) == Target::ManagedRuntime::Il2Cpp;
-            const char* load = il2cpp ? ICON_FA_PLUG "  Load IL2CPP Runtime" : ICON_FA_PLUG "  Load Mono Runtime";
+            const char* load = detected == Target::ManagedRuntime::Il2Cpp ? ICON_FA_PLUG "  Load IL2CPP Runtime"
+                : dotnet                                                    ? ICON_FA_PLUG "  Load .NET Runtime"
+                                                                            : ICON_FA_PLUG "  Load Mono Runtime";
             if (ImGui::MenuItem(m_engine.Managed().Loading() ? ICON_FA_PLUG "  Loading the Runtime..." : load, nullptr, false, !m_engine.Managed().Loading()))
                 m_engine.Managed().Load();
-            ItemTooltip("Reads the classes and methods of the game's Mono or IL2CPP runtime, so method names show in the memory viewer, resolve in addresses and Structure Dissect finds the class of an object.");
+            ItemTooltip(dotnet ? "Reads the classes, fields and methods of the game's .NET runtime from outside the game, so method names show in the memory viewer, "
+                                 "Class:Method and Class:StaticField resolve in addresses and Structure Dissect finds the class of an object."
+                               : "Reads the classes and methods of the game's Mono or IL2CPP runtime, so method names show in the memory viewer, resolve in addresses and Structure Dissect finds the class of an object.");
         }
         else
         {
-            const std::string loaded = mono.Module() + "  ·  " + Target::MonoBridge::RuntimeName(mono.Runtime()) + "  ·  " + std::to_string(mono.ClassCount()) + " classes";
+            const std::string loaded = mono.Module() + "  ·  " + mono.RuntimeDescription() + "  ·  " + std::to_string(mono.ClassCount()) + " classes";
             SectionLabel(loaded.c_str());
             if (ImGui::MenuItem(ICON_FA_SYNC "  Reload Classes", nullptr, false, !m_engine.Managed().Loading()))
                 m_engine.Managed().Reload();
             ItemTooltip("Reads the class list again, for assemblies the game loaded later");
-            if (ImGui::MenuItem(mono.IsIl2Cpp() ? ICON_FA_POWER_OFF "  Shut Down IL2CPP" : ICON_FA_POWER_OFF "  Shut Down Mono", nullptr, false, !m_engine.Managed().Loading()))
+            const char* stop = mono.IsIl2Cpp() ? ICON_FA_POWER_OFF "  Shut Down IL2CPP" : dotnet ? ICON_FA_POWER_OFF "  Shut Down .NET" : ICON_FA_POWER_OFF "  Shut Down Mono";
+            if (ImGui::MenuItem(stop, nullptr, false, !m_engine.Managed().Loading()))
                 m_engine.Managed().Stop();
-            ItemTooltip("Ends the helper thread in the game and takes the Unity explorer's callback out. Managed method names and lookups stop until it is loaded again.");
+            ItemTooltip(dotnet ? "Ends the .NET helper (ManifoldClr.exe), which reads the game from outside. Managed method names and lookups stop until it is loaded again."
+                               : "Ends the helper thread in the game and takes the Unity explorer's callback out. Managed method names and lookups stop until it is loaded again.");
         }
         ImGui::Separator();
         Item(ICON_FA_DICE_D6 "  Mono / .NET Dissector", Command::OpenMono);

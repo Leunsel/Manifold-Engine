@@ -22,7 +22,8 @@ namespace Manifold::Target
     {
         None,
         Mono,
-        Il2Cpp
+        Il2Cpp,
+        Clr  // .NET Framework or .NET (CoreCLR), read from outside the game
     };
 
     struct MonoObjectLayout
@@ -64,6 +65,13 @@ namespace Manifold::Target
         virtual bool CompilesOnDemand() const = 0;
         virtual std::optional<std::uint64_t> Compile(std::uint64_t method) = 0;
         virtual std::uint64_t ManagedClass(std::string_view, std::string_view) { return 0; }
+        // The class index of a class's parent when the backend knows it
+        // without the runtime's C API (nullopt: ask mono_/il2cpp_class_get_parent).
+        virtual std::optional<int> ParentIndex(int) { return std::nullopt; }
+        // The address of a static field, for runtimes that report statics.
+        virtual std::optional<std::uint64_t> StaticAddress(int, std::string_view) { return std::nullopt; }
+        // The runtime's flavour and version, when the backend knows it.
+        virtual std::string Description() const { return {}; }
 
     protected:
         MonoBridge& m_bridge;

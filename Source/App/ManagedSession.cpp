@@ -43,8 +43,11 @@ namespace Manifold
         }
         const std::shared_ptr<Target::Process> process = m_target.Process();
         const std::uint64_t generation = m_target.Generation();
-        const bool il2cpp = Target::MonoBridge::DetectRuntime(*process) == Target::ManagedRuntime::Il2Cpp;
-        m_work.Start({ .Title = il2cpp ? "Loading the IL2CPP runtime" : "Loading the Mono runtime", .Group = kWorkGroup }, [this, process, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
+        const Target::ManagedRuntime detected = Target::MonoBridge::DetectRuntime(*process);
+        const char* title = detected == Target::ManagedRuntime::Il2Cpp ? "Loading the IL2CPP runtime"
+            : detected == Target::ManagedRuntime::Clr                  ? "Loading the .NET runtime"
+                                                                       : "Loading the Mono runtime";
+        m_work.Start({ .Title = title, .Group = kWorkGroup }, [this, process, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
             {
                 const Status status = m_target.Mono().Start(process, &progress);
                 const bool cancelled = progress.Cancelled();
@@ -62,7 +65,8 @@ namespace Manifold
             return;
         }
         const std::uint64_t generation = m_target.Generation();
-        m_work.Start({ .Title = m_target.Mono().IsIl2Cpp() ? "Reloading the IL2CPP classes" : "Reloading the Mono classes", .Group = kWorkGroup }, [this, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
+        const char* title = m_target.Mono().IsIl2Cpp() ? "Reloading the IL2CPP classes" : m_target.Mono().IsClr() ? "Reloading the .NET classes" : "Reloading the Mono classes";
+        m_work.Start({ .Title = title, .Group = kWorkGroup }, [this, generation, fromScript](WorkProgress& progress) -> BackgroundWork::Finish
             {
                 const Status status = m_target.Mono().Refresh(&progress);
                 const bool cancelled = progress.Cancelled();
@@ -76,12 +80,13 @@ namespace Manifold
         if (!m_target.Mono().Present())
             return;
         const std::string runtime = Target::MonoBridge::RuntimeName(m_target.Mono().Runtime());
+        const bool outside = m_target.Mono().IsClr();
         NoteExplorer(false);
         m_target.Mono().Stop();
         m_target.RefreshSymbolProvider();
-        LOG_INFO("Mono", "Shut down the " + runtime + " helper in the game");
+        LOG_INFO("Mono", outside ? "Shut down the .NET helper" : "Shut down the " + runtime + " helper in the game");
         if (!fromScript)
-            m_notify(LogLevel::Success, "Shut down " + runtime + ": the helper in the game has ended");
+            m_notify(LogLevel::Success, outside ? std::string("Shut down .NET: the helper has ended") : "Shut down " + runtime + ": the helper in the game has ended");
     }
 
     void ManagedSession::CancelWork()
@@ -98,7 +103,7 @@ namespace Manifold
         {
             if (starting)
                 m_target.RefreshSymbolProvider();
-            if (starting && m_settings.AutoExplorer && !m_target.Mono().IsIl2Cpp() && !m_target.Mono().Unity().Enabled())
+            if (starting && m_settings.AutoExplorer && m_target.Mono().Runtime() == Target::ManagedRuntime::Mono && !m_target.Mono().Unity().Enabled())
             {
                 m_target.Mono().Unity().SetEnabled(true);
                 LOG_INFO("Unity", "Turned the scene explorer on by itself (Settings > Debugger > Start Scene Explorer Automatically)");
