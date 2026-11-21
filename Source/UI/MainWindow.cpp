@@ -556,6 +556,7 @@ namespace Manifold::UI
             if (ImGui::MenuItem(ICON_FA_CLONE "  New memory viewer window"))
                 workspace.OpenMemoryViewer(0, false, true);
             Item(ICON_FA_SITEMAP "  Structure dissect", Command::OpenStructureDissect);
+            Item(ICON_FA_ROUTE "  Pointer scan", Command::OpenPointerScan);
             Item(ICON_FA_CODE "  Auto Assembler", Command::OpenAutoAssembler);
             Item(ICON_FA_MOON "  Lua engine", Command::OpenLuaEngine);
             Item(ICON_FA_STREAM "  Log", Command::OpenLog);
@@ -3287,6 +3288,8 @@ namespace Manifold::UI
                 RunRecordCommand(Command::DisassembleRecord, &record);
             if (CommandItem(ICON_FA_SITEMAP "  Dissect data at this address", Command::DissectRecord))
                 RunRecordCommand(Command::DissectRecord, &record);
+            if (ImGui::MenuItem(ICON_FA_ROUTE "  Pointer scan for this address"))
+                m_workspace.OpenPointerScan(record.ResolvedAddress);
             if (CommandItem(ICON_FA_EYE "  Find out what accesses this address", Command::RecordAccesses))
                 RunRecordCommand(Command::RecordAccesses, &record);
             if (CommandItem(ICON_FA_PEN "  Find out what writes to this address", Command::RecordWrites))

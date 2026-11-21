@@ -42,6 +42,10 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-2011 | There are no saved results named "…". | Saved results belong to the current scan and are gone after New scan. | Save the results under that name first, or pick another one. |
 | ME-2012 | The saved results "…" have a different value type. | A next scan can compare only with results of the same value type and size. | Pick saved results of the same scan. |
 | ME-2013 | The custom type "…" is not registered. | A script registers custom types, and this one is not known (any more). | Run the script that registers it, or pick another value type. |
+| ME-2014 | The pointer scan covers too much memory: …. | A pointer scan handles up to 32 GB of memory and four billion pointers at once. | Leave read-only and mapped memory and the system modules out in the Memory menu. |
+| ME-2015 | There is not enough memory for the pointer scan (…). | The pointer map needs eight bytes for every pointer the process holds, plus four while it searches. | Close other programs, or leave read-only and mapped memory out in the Memory menu. |
+| ME-2016 | "…" is not a pointer scan file. | The file is missing, cut off, or was not written by Save results of the pointer scan. | Pick a .mptr file that the pointer scan saved. |
+| ME-2017 | The pointer paths could not be written to "…". | The folder is not writable or the drive is full. | Save to another folder. |
 
 ## Assembler
 

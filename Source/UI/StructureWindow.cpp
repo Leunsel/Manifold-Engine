@@ -925,6 +925,8 @@ namespace Manifold::UI
                 m_workspace.OpenStructure(!m_columns.empty() && m_columns.front().Valid ? m_columns.front().Value : 0, m_structure, true);
             if (ImGui::MenuItem(ICON_FA_SEARCH_LOCATION "  Find static pointers to the address", nullptr, false, !m_columns.empty() && m_columns.front().Valid && m_engine.HasProcess()))
                 m_workspace.FindStaticPointers(m_columns.front().Value);
+            if (ImGui::MenuItem(ICON_FA_ROUTE "  Pointer scan for the address", nullptr, false, !m_columns.empty() && m_columns.front().Valid && m_engine.HasProcess()))
+                m_workspace.OpenPointerScan(m_columns.front().Value);
             ImGui::Separator();
             item(ICON_FA_PLUS "  Add an address to compare", Command::AddStructureColumn);
             ImGui::BeginDisabled(m_columns.size() < 2);

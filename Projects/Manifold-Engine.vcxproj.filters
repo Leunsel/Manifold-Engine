@@ -294,6 +294,9 @@
     <ClCompile Include="..\Source\Lua\UiModel.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Scan\PointerScan.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Scan\Scanner.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
@@ -301,6 +304,9 @@
       <Filter>Source\Scan</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Scan\ValueType.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Scan\Workers.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Syscalls\Syscall.cpp">
@@ -481,6 +487,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\PatchScanWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\PointerScanWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\ProcessIcon.cpp">
@@ -765,6 +774,9 @@
     <ClInclude Include="..\Source\Lua\UiModel.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Scan\PointerScan.h">
+      <Filter>Source\Scan</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Scan\Scanner.h">
       <Filter>Source\Scan</Filter>
     </ClInclude>
@@ -772,6 +784,9 @@
       <Filter>Source\Scan</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Scan\ValueType.h">
+      <Filter>Source\Scan</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Scan\Workers.h">
       <Filter>Source\Scan</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Syscalls\Syscall.h">
@@ -952,6 +967,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\PatchScanWindow.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\PointerScanWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\ProcessIcon.h">

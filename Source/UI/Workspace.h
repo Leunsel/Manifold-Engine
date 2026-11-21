@@ -73,6 +73,7 @@ namespace Manifold::UI
     class AsmSearchWindow;
     class ByteSearchWindow;
     class StaticPointersWindow;
+    class PointerScanWindow;
     class ShortcutsWindow;
     class TemplateManager;
     class ScriptForms;
@@ -115,6 +116,7 @@ namespace Manifold::UI
         void OpenStructure(std::uint64_t address, const std::string& structure = {}, bool newWindow = false);
         std::uint32_t StructureDock(const StructureWindow& opening);
         void FindStaticPointers(std::uint64_t address);
+        void OpenPointerScan(std::uint64_t address = 0);
         void OpenScript(std::string script, int recordId = kNoRecord, bool lua = false);
         std::uint32_t ScriptEditorDock(const ScriptWindow& opening);
         void OpenLua();
@@ -219,6 +221,7 @@ namespace Manifold::UI
         std::unique_ptr<AsmSearchWindow> m_asmSearch;
         std::unique_ptr<ByteSearchWindow> m_byteSearch;
         std::unique_ptr<StaticPointersWindow> m_staticPointers;
+        std::unique_ptr<PointerScanWindow> m_pointerScan;
         std::unique_ptr<ShortcutsWindow> m_shortcuts;
         std::unique_ptr<TemplateManager> m_templateManager;
         std::unique_ptr<ScriptForms> m_scriptForms;

@@ -183,9 +183,11 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUnreal.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
+    <ClCompile Include="..\Source\Scan\PointerScan.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\StaticPointers.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
+    <ClCompile Include="..\Source\Scan\Workers.cpp" />
     <ClCompile Include="..\Source\Syscalls\Syscall.cpp">
       <SupportJustMyCode>false</SupportJustMyCode>
     </ClCompile>
@@ -241,6 +243,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\ManifoldApiTests.cpp" />
     <ClCompile Include="..\Tests\ModuleTests.cpp" />
     <ClCompile Include="..\Tests\MonoTests.cpp" />
+    <ClCompile Include="..\Tests\PointerScanTests.cpp" />
     <ClCompile Include="..\Tests\RelayTests.cpp" />
     <ClCompile Include="..\Tests\RttiTests.cpp" />
     <ClCompile Include="..\Tests\StructureTests.cpp" />

@@ -27,6 +27,7 @@
 #include "UI/MonoWindow.h"
 #include "UI/UnrealWindow.h"
 #include "UI/PatchScanWindow.h"
+#include "UI/PointerScanWindow.h"
 #include "UI/RecordEditor.h"
 #include "UI/ScriptWindow.h"
 #include "UI/SettingsWindow.h"
@@ -153,6 +154,7 @@ namespace Manifold::UI
         drawOne("Assembly search", m_asmSearch);
         drawOne("Byte search", m_byteSearch);
         drawOne("Static pointers", m_staticPointers);
+        drawOne("Pointer scan", m_pointerScan);
         drawOne("Breakpoints", m_breakpoints);
         drawOne("Thread list", m_threadList);
         drawOne("Mono / .NET", m_mono);
@@ -218,6 +220,7 @@ namespace Manifold::UI
         case Command::OpenLuaEngine:
         case Command::OpenMono:
         case Command::OpenUnreal:
+        case Command::OpenPointerScan:
         case Command::OpenLog:
             return !m_engine.Options().ReleaseMode;
         default:
@@ -243,6 +246,7 @@ namespace Manifold::UI
         case Command::OpenLuaEngine: OpenLua(); break;
         case Command::OpenMono: OpenMono(); break;
         case Command::OpenUnreal: OpenUnreal(); break;
+        case Command::OpenPointerScan: OpenPointerScan(); break;
         case Command::OpenLog: OpenLog(); break;
         case Command::OpenProfiler: OpenProfiler(); break;
         default: break;
@@ -568,6 +572,13 @@ namespace Manifold::UI
         if (!m_staticPointers)
             m_staticPointers = std::make_unique<StaticPointersWindow>(*this);
         m_staticPointers->Search(address);
+    }
+
+    void Workspace::OpenPointerScan(std::uint64_t address)
+    {
+        if (!m_pointerScan)
+            m_pointerScan = std::make_unique<PointerScanWindow>(*this);
+        m_pointerScan->Prepare(address);
     }
 
     void Workspace::RevealInMemoryViewer(std::uint64_t address, std::uint64_t length, bool code, bool raise)

@@ -4,6 +4,7 @@
 #include "Core/Paths.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
+#include "Scan/Workers.h"
 #include "Target/Process.h"
 
 #include <algorithm>
@@ -29,15 +30,6 @@ namespace Manifold::Scan
         double Now()
         {
             return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-        }
-
-        void PreferFastCores()
-        {
-            THREAD_POWER_THROTTLING_STATE state{};
-            state.Version = THREAD_POWER_THROTTLING_CURRENT_VERSION;
-            state.ControlMask = THREAD_POWER_THROTTLING_EXECUTION_SPEED;
-            state.StateMask = 0;
-            ::SetThreadInformation(::GetCurrentThread(), ThreadPowerThrottling, &state, sizeof(state));
         }
 
         class TempFile
@@ -664,14 +656,6 @@ namespace Manifold::Scan
             std::vector<std::uint8_t> m_patternB;
             std::vector<std::uint8_t> m_mask;
         };
-
-        int ThreadCount(int wanted)
-        {
-            if (wanted > 0)
-                return std::clamp(wanted, 1, 64);
-            const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
-            return static_cast<int>(std::clamp(cores / 2u, 2u, 8u));
-        }
 
         constexpr std::size_t kTypeSlots = 16;
 
@@ -1302,7 +1286,7 @@ namespace Manifold::Scan
         Status status = mixed ? BuildAll(options, process->PointerSize(), previous ? previous->AllList : MaskTypes(options.AllTypes), typed)
                               : matcher.Build(options, process->PointerSize());
         auto result = std::make_shared<ResultSet>();
-        const int threads = ThreadCount(options.Threads);
+        const int threads = WorkerCount(options.Threads);
 
         if (options.PauseProcess)
             process->Suspend();
@@ -2177,7 +2161,7 @@ namespace Manifold::Scan
                     }
                 }
             };
-        const int threads = chunks.size() > 8 ? ThreadCount(0) : 1;
+        const int threads = chunks.size() > 8 ? WorkerCount(0) : 1;
         std::vector<std::thread> pool;
         for (int i = 0; i < threads; ++i)
             pool.emplace_back(worker);

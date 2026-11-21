@@ -532,6 +532,8 @@ namespace Manifold::UI
             item(ICON_FA_PROJECT_DIAGRAM "  Dissect code", Command::DissectCode);
             item(ICON_FA_SITEMAP "  Dissect data", Command::DissectData);
             item(ICON_FA_BAND_AID "  Scan for patches", Command::ScanForPatches);
+            if (CommandItem(ICON_FA_ROUTE "  Pointer scan", Command::OpenPointerScan))
+                m_workspace.OpenPointerScan();
             ImGui::Separator();
             item(ICON_FA_CODE "  Auto Assembler", Command::ViewerAutoAssemble);
             item(ICON_FA_MOON "  Lua engine", Command::ViewerLuaEngine);

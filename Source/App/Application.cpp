@@ -224,6 +224,8 @@ namespace Manifold
                 m_workspace->OpenAsmSearch();
             else if (window == "bytes")
                 m_workspace->OpenByteSearch();
+            else if (window == "pointerscan")
+                m_workspace->OpenPointerScan();
             else if (window == "shortcuts")
                 m_workspace->OpenShortcuts();
             else if (window == "keyboard")

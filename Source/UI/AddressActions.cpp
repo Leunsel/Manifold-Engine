@@ -48,6 +48,8 @@ namespace Manifold::UI
             workspace.OpenStructure(address, {}, true);
         if (item(DissectHere, ICON_FA_THUMBTACK "  Find static pointers to this address"))
             workspace.FindStaticPointers(address);
+        if (item(DissectHere, ICON_FA_ROUTE "  Pointer scan for this address"))
+            workspace.OpenPointerScan(address);
         if ((actions & (WatchAccesses | WatchWrites)) && (actions & (ShowCode | ShowHex | DissectHere)))
             ImGui::Separator();
         if (item(WatchAccesses, ICON_FA_EYE "  Find out what accesses this address"))

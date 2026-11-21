@@ -37,6 +37,10 @@
     X(ScanSavedMissing, 2011) \
     X(ScanSavedDifferent, 2012) \
     X(ScanCustomMissing, 2013) \
+    X(PointerScanTooLarge, 2014) \
+    X(PointerScanNoMemory, 2015) \
+    X(PointerFileUnreadable, 2016) \
+    X(PointerFileUnwritable, 2017) \
     X(AsmSyntax, 3001) \
     X(AsmUnknownInstruction, 3002) \
     X(AsmBadOperand, 3003) \

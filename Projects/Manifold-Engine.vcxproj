@@ -197,9 +197,11 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUnreal.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
+    <ClCompile Include="..\Source\Scan\PointerScan.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\StaticPointers.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
+    <ClCompile Include="..\Source\Scan\Workers.cpp" />
     <ClCompile Include="..\Source\Syscalls\Syscall.cpp">
       <SupportJustMyCode>false</SupportJustMyCode>
     </ClCompile>
@@ -262,6 +264,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\MonoWindow.cpp" />
     <ClCompile Include="..\Source\UI\NopSled.cpp" />
     <ClCompile Include="..\Source\UI\PatchScanWindow.cpp" />
+    <ClCompile Include="..\Source\UI\PointerScanWindow.cpp" />
     <ClCompile Include="..\Source\UI\ProcessIcon.cpp" />
     <ClCompile Include="..\Source\UI\ProfilerWindow.cpp" />
     <ClCompile Include="..\Source\UI\RecordEditor.cpp" />
@@ -358,9 +361,11 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Lua\LuaUi.h" />
     <ClInclude Include="..\Source\Lua\LuaUnreal.h" />
     <ClInclude Include="..\Source\Lua\UiModel.h" />
+    <ClInclude Include="..\Source\Scan\PointerScan.h" />
     <ClInclude Include="..\Source\Scan\Scanner.h" />
     <ClInclude Include="..\Source\Scan\StaticPointers.h" />
     <ClInclude Include="..\Source\Scan\ValueType.h" />
+    <ClInclude Include="..\Source\Scan\Workers.h" />
     <ClInclude Include="..\Source\Syscalls\Syscall.h" />
     <ClInclude Include="..\Source\Table\AddressList.h" />
     <ClInclude Include="..\Source\Table\CheatTable.h" />
@@ -421,6 +426,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\MonoWindow.h" />
     <ClInclude Include="..\Source\UI\NopSled.h" />
     <ClInclude Include="..\Source\UI\PatchScanWindow.h" />
+    <ClInclude Include="..\Source\UI\PointerScanWindow.h" />
     <ClInclude Include="..\Source\UI\ProcessIcon.h" />
     <ClInclude Include="..\Source\UI\ProfilerWindow.h" />
     <ClInclude Include="..\Source\UI\RecordEditor.h" />

@@ -45,6 +45,7 @@ namespace Manifold
         OpenMono,
         OpenUnreal,
         OpenProfiler,
+        OpenPointerScan,
 
         NewTable,
         OpenLastProcess,

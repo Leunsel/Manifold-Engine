@@ -282,6 +282,9 @@
     <ClCompile Include="..\Source\Lua\UiModel.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Scan\PointerScan.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Scan\Scanner.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
@@ -289,6 +292,9 @@
       <Filter>Source\Scan</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Scan\ValueType.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Scan\Workers.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Syscalls\Syscall.cpp">
@@ -448,6 +454,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\MonoTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\PointerScanTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\RelayTests.cpp">
