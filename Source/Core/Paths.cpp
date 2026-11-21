@@ -16,6 +16,7 @@ namespace Manifold
         constexpr wchar_t kSettingsName[] = L"Manifold-Engine.ini";
         constexpr wchar_t kLayoutName[] = L"Manifold-Engine.layout.ini";
         constexpr wchar_t kScriptSettingsName[] = L"Manifold-Engine.scripts.ini";
+        constexpr wchar_t kModulesStateName[] = L"Manifold-Engine.modules.ini";
         constexpr wchar_t kTablesFolder[] = L"tables";
         constexpr wchar_t kSoundsFolder[] = L"sounds";
         constexpr wchar_t kLogFolder[] = L"logs";
@@ -142,6 +143,11 @@ namespace Manifold
         std::filesystem::path ScriptSettingsFile()
         {
             return ConfigFolder() / kScriptSettingsName;
+        }
+
+        std::filesystem::path ModulesStateFile()
+        {
+            return ConfigFolder() / kModulesStateName;
         }
 
         std::filesystem::path LogFolder()

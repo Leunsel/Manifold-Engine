@@ -5020,11 +5020,11 @@ end
 setmetatable(_G, globalMeta)
 )MLUA"),
         };
-        constexpr std::array<std::string_view, 10> kManifold0 = {
+        constexpr std::array<std::string_view, 11> kManifold0 = {
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 9
+local API_VERSION = 10
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -6001,15 +6001,46 @@ local function protect(kind, fn)
   end
 end
 
+local moduleOwned = {}
+
+local function callerModule()
+  local info = callerFrame()
+  return info and native.moduleOfSource(info.source) or nil
+end
+
+local function own(owner, remove)
+  local list = moduleOwned[owner]
+  if not list then
+    list = {}
+    moduleOwned[owner] = list
+  end
+  local token = {}
+  list[token] = remove
+  return token
+end
+
+local function disown(owner, token)
+  local list = moduleOwned[owner]
+  if list then
+    list[token] = nil
+  end
+end
+
 local function keyedRegistry(add, remove)
   local byKey = {}
   local keyOf = {}
+  local ownerOf = {}
   local function drop(id)
     local removed = remove(id) and true or false
     local key = keyOf[id]
     if key ~= nil then
       byKey[key] = nil
       keyOf[id] = nil
+    end
+    local owned = ownerOf[id]
+    if owned then
+      ownerOf[id] = nil
+      disown(owned[1], owned[2])
     end
     return removed
   end
@@ -6022,6 +6053,10 @@ local function keyedRegistry(add, remove)
     if key ~= nil then
       byKey[key] = id
       keyOf[id] = key
+    end
+    local owner = callerModule()
+    if owner then
+      ownerOf[id] = { owner, own(owner, function() drop(id) end) }
     end
     return id
   end
@@ -6043,7 +6078,8 @@ local symbol = area("symbol", "Symbols that address expressions, the disassemble
 define(symbol, "register", {
   params = {
     { name = "name", type = "string" },
-    { name = "address", type = "address" },
+)MLUA"),
+            std::string_view(R"MLUA(    { name = "address", type = "address" },
   },
   returns = "true, or nil, error",
   doc = "Registers `name` for `address`, replacing an earlier symbol of that name.",
@@ -6063,8 +6099,7 @@ define(symbol, "unregister", {
 end)
 
 local addSymbolResolver, removeSymbolResolver = keyedRegistry(function(resolver)
-)MLUA"),
-            std::string_view(R"MLUA(  local guarded = protect("symbol", resolver)
+  local guarded = protect("symbol", resolver)
   return ceSymbolLookup(function(name)
     local value = guarded(name)
     if math.type(value) == "integer" then
@@ -6311,7 +6346,8 @@ define(unreal, "configure", {
     } },
   },
   returns = "true, or nil, error",
-  doc = "Changes how the tool works; keys that are left out keep their value, and the settings last until the program closes, so an autorun script sets them once. `autoStart` (true): resolve when an Unreal game is opened. `dissect`, `names`, `symbols`, `types` (all true): Structure Dissect fields, structure names, the `<Type>_<Property>` and `GObjects` symbols, the custom types. For a game the search does not find: `namePool` (the FNamePool, or with `legacyNames = true` the TNameEntryArray of UE 4.22 and older) and `objectArray` (FUObjectArray or its ObjObjects) as addresses or expressions, `layout` as a table of offsets that replace what the probes find (`index`, `class`, `name`, `outer`, `super`, `childProperties`, `structSize`, `children`, `childNext`, `functionFlags`, `fField`, `fieldClass`, `fieldName`, `next`, `offset`, `size`, `extra`, `itemSize`, `itemOffset`), and `patterns = { names = {...}, objects = {...} }` searched before the built-in search. " .. PATTERN_TEXT .. " `false` clears an address, the layout or the patterns. A change to the addresses, layout or patterns applies at the next `start`.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Changes how the tool works; keys that are left out keep their value, and the settings last until the program closes, so an autorun script sets them once. `autoStart` (true): resolve when an Unreal game is opened. `dissect`, `names`, `symbols`, `types` (all true): Structure Dissect fields, structure names, the `<Type>_<Property>` and `GObjects` symbols, the custom types. For a game the search does not find: `namePool` (the FNamePool, or with `legacyNames = true` the TNameEntryArray of UE 4.22 and older) and `objectArray` (FUObjectArray or its ObjObjects) as addresses or expressions, `layout` as a table of offsets that replace what the probes find (`index`, `class`, `name`, `outer`, `super`, `childProperties`, `structSize`, `children`, `childNext`, `functionFlags`, `fField`, `fieldClass`, `fieldName`, `next`, `offset`, `size`, `extra`, `itemSize`, `itemOffset`), and `patterns = { names = {...}, objects = {...} }` searched before the built-in search. " .. PATTERN_TEXT .. " `false` clears an address, the layout or the patterns. A change to the addresses, layout or patterns applies at the next `start`.",
 }, function(options)
   return result(native.unrealConfigure(options))
 end)
@@ -6323,8 +6359,7 @@ define(unreal, "config", {
   return native.unrealConfig()
 end)
 
-)MLUA"),
-            std::string_view(R"MLUA(define(unreal, "layout", {
+define(unreal, "layout", {
   returns = "table of offsets, or nil, error",
   doc = "The layout the tool found: the object array items (`itemSize`, `itemOffset`, `chunked`), UObject (`index`, `class`, `name`, `outer`), UStruct (`super`, `childProperties`, `structSize`, `children`, `childNext`, `functionFlags`) and the properties (`fField`, `fieldClass`, `fieldName`, `next`, `offset`, `size`, `extra`, `component` 4 or 8 for float or double vectors). The keys are the ones `configure{ layout = ... }` takes.",
 }, function()
@@ -6581,7 +6616,8 @@ end)
 define(unreal, "claims", {
   params = { { name = "address", type = "any" } },
   returns = "boolean",
-  doc = "Whether the tool names the address itself (a live object or a remembered array), for other dissect scripts that step aside for Unreal objects. Never raises, false before it is ready.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Whether the tool names the address itself (a live object or a remembered array), for other dissect scripts that step aside for Unreal objects. Never raises, false before it is ready.",
 }, function(address)
   return native.unrealClaims(address) == true
 end)
@@ -6598,8 +6634,7 @@ end)
 
 define(rtti, "object", {
   params = { { name = "address", type = "address" } },
-)MLUA"),
-            std::string_view(R"MLUA(  returns = "`{ address, start, offset, class, decorated, vtable, module, viaVirtualBase }` or nil, or nil, error",
+  returns = "`{ address, start, offset, class, decorated, vtable, module, viaVirtualBase }` or nil, or nil, error",
   doc = "The object whose virtual function table pointer is stored at the address. `start` is where the complete object starts, which is below the address when it holds a base class's table pointer; `viaVirtualBase` says the object starts with a virtual base table and was found through it.",
 }, function(address)
   return many(native.rttiObject(address))
@@ -6796,7 +6831,8 @@ end)
 define(doc, "annotations", {
   params = { { name = "fn", type = "function" } },
   returns = "`{ … }` like `entry`, or nil, error",
-  doc = "Reads the LuaLS annotations above a function's definition without registering anything.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Reads the LuaLS annotations above a function's definition without registering anything.",
 }, function(fn)
   return docResult(native.docAnnotations(fn))
 end)
@@ -6833,8 +6869,7 @@ do
   end)
 end
 
-)MLUA"),
-            std::string_view(R"MLUA(local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
+local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
 
 local function subarea(parent, name, summary)
   local path = parent.path .. "." .. name
@@ -7095,7 +7130,8 @@ widgetObject = function(entry)
   local function method(name, spec, body)
     bind(proxy, prefix .. "." .. name, members, name, spec, body, WIDGET_DOC .. name)
   end
-  method("add", { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } } }, function(kind, options)
+)MLUA"),
+            std::string_view(R"MLUA(  method("add", { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } } }, function(kind, options)
     return addTo(prefix .. ".add", entry, kind, options)
   end)
   method("clear", {}, function()
@@ -7130,8 +7166,7 @@ widgetObject = function(entry)
     end
     return result(native.uiSet(entry.id, value))
   end)
-)MLUA"),
-            std::string_view(R"MLUA(  method("draw", { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } } }, function(drawings, options)
+  method("draw", { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } } }, function(drawings, options)
     if entry.kind ~= "canvas" then
       misuse(prefix .. ".draw: only a canvas draws")
     end
@@ -7346,7 +7381,8 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
     "- `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`.",
     "- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `onSubmit(text, widget)` on Enter), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
-    "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
+)MLUA"),
+            std::string_view(R"MLUA(    "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
     "- `canvas`: draws what `draw` gave it on the GPU. `background` is a colour, `zoom = true` lets the user zoom with the wheel and pan by dragging; `onClick(x, y, button, widget)`, `onHover(x, y, widget)`, `onView(x, y, scale, widget)` and `menu` with `onMenu(choice, text, x, y, widget)` get canvas coordinates; `onKey(key, widget)` gets every key pressed (and repeated while held) while the canvas's window has the focus, by name: `LeftArrow`, `W`, `Space`, `Enter`, `F1`… (Escape also closes the window).",
   }, "\n"),
@@ -7355,8 +7391,7 @@ local WIDGET_METHOD_DOCS = {
   add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget to a container (`row`, `column`, `section`, `tab`, `split`; `tabs` take `tab` widgets only)." },
   clear = { returns = "boolean", doc = "Removes a container's widgets, or a canvas's drawings." },
   remove = { returns = "boolean", doc = "Removes the widget and everything in it." },
-)MLUA"),
-            std::string_view(R"MLUA(  update = { params = { { name = "options", type = "table" } }, returns = "boolean", doc = "Changes options of the widget: the same keys `add` takes for its kind, handlers included." },
+  update = { params = { { name = "options", type = "table" } }, returns = "boolean", doc = "Changes options of the widget: the same keys `add` takes for its kind, handlers included." },
   get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a number, the chosen combo item's or table row's number, the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
   set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
   draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
@@ -7571,7 +7606,8 @@ end)
 native.docDefine(nil, "manifold.ui.notice.Notice", { kind = "class", title = "Notice objects", doc = "`manifold.ui.notice.show` returns a notice object." })
 native.docDefine(nil, "manifold.ui.notice.Notice.update", { params = { { name = "options", type = "table", keys = { text = "string", level = "string", progress = "number", sticky = "boolean" } } }, returns = "boolean", doc = "Changes the text, level, progress or stickiness, and shows the notice for its full time again." })
 native.docDefine(nil, "manifold.ui.notice.Notice.remove", { returns = "boolean", doc = "Takes the notice down." })
-native.docDefine(nil, "manifold.ui.notice.Notice.isShown", { returns = "boolean", doc = "Whether the notice is still up." })
+)MLUA"),
+            std::string_view(R"MLUA(native.docDefine(nil, "manifold.ui.notice.Notice.isShown", { returns = "boolean", doc = "Whether the notice is still up." })
 native.docDefine(nil, "manifold.ui.notice.Notice.id", { kind = "field", type = "integer", doc = "The notice's number." })
 
 local ENTRY_DOC = "manifold.ui.Entry."
@@ -7612,8 +7648,7 @@ end
 
 local function addEntry(kind, keys, values, options)
   options = checkOptions("manifold.ui." .. kind .. ".add", keys, options)
-)MLUA"),
-            std::string_view(R"MLUA(  local owner = ownerSource()
+  local owner = ownerSource()
   local copy = {}
   for key, value in pairs(values) do
     copy[key] = value
@@ -7769,6 +7804,198 @@ local function forgetSource(source)
 end
 
 debug.getregistry()["Manifold.ChunkStarting"] = forgetSource
+
+local moduleValues = {}
+local modulePrivate = {}
+local moduleUnloaders = {}
+local moduleWarned = {}
+local MODULE_LOADING = {}
+local baseRequire = require
+
+local function unloadModule(key)
+  local handlers = moduleUnloaders[key]
+  moduleUnloaders[key] = nil
+  local handled = handlers ~= nil and #handlers > 0
+  if handlers then
+    for index = #handlers, 1, -1 do
+      local ok, problem = xpcall(handlers[index], raisedHandler)
+      if not ok then
+        emit("error", "manifold.module", problem)
+      end
+    end
+  end
+  local owned = moduleOwned[key]
+  moduleOwned[key] = nil
+  if owned then
+    for _, remove in pairs(owned) do
+      pcall(remove)
+    end
+  end
+  local sources = {}
+  for source in pairs(uiOwned) do
+    if native.moduleOfSource(source) == key then
+      sources[#sources + 1] = source
+    end
+  end
+  for _, source in ipairs(sources) do
+    forgetSource(source)
+  end
+  moduleValues[key] = nil
+  modulePrivate[key] = nil
+  return handled
+end
+
+debug.getregistry()["Manifold.ModuleUnload"] = unloadModule
+
+debug.getregistry()["Manifold.ModuleLoaded"] = function(key, value)
+  if value == nil then
+    value = true
+  end
+  moduleValues[key] = value
+end
+
+local function moduleRequire(name, ...)
+  if type(name) ~= "string" then
+    return baseRequire(name, ...)
+  end
+  local info = callerFrame()
+  local key = info and native.moduleOfSource(info.source) or nil
+  if key then
+    local cache = modulePrivate[key]
+    local cached = cache and cache[name]
+    if cached == MODULE_LOADING then
+      error("loop or previous error loading module '" .. name .. "'", 2)
+    end
+    if cached ~= nil then
+      return cached
+    end
+    local path = native.moduleResolve(key, name)
+    if path then
+      local chunk, problem = native.moduleLoadFile(path)
+      if not chunk then
+        error("error loading module '" .. name .. "' from file '" .. path .. "':\n\t" .. tostring(problem), 2)
+      end
+      if not cache then
+        cache = {}
+        modulePrivate[key] = cache
+      end
+      cache[name] = MODULE_LOADING
+      local ok, value = pcall(chunk, name, path)
+      if not ok then
+        cache[name] = nil
+        error(value, 0)
+      end
+      if value == nil then
+        value = true
+      end
+      if modulePrivate[key] == cache then
+        cache[name] = value
+      end
+      return value, path
+    end
+  end
+  if package.loaded[name] == nil then
+    local other, loaded, declared, state = native.moduleLookup(name, key)
+    if other then
+      if not loaded then
+        error("module '" .. name .. "' is an autorun module that is not loaded (" .. state .. ")", 2)
+      end
+      if key and not declared and not moduleWarned[key .. "\0" .. other] then
+        moduleWarned[key .. "\0" .. other] = true
+        emit("warning", "manifold.module", key .. " loads " .. name .. " with require, but does not name it in REQUIRES, so the load order is not guaranteed")
+      end
+      return moduleValues[other]
+    end
+  end
+  return baseRequire(name, ...)
+end
+
+rawset(_G, "require", moduleRequire)
+pcall(native.docBind, moduleRequire, "require")
+
+local moduleArea = area("module", "The autorun modules: the scripts in the `autorun` folder and the modules in `autorun\\modules`. A module is named by the `NAME` line of its header, or by its file or folder name. Extensions > Modules shows the same list. [AUTORUN.md](AUTORUN.md) describes the folder layout, the header and what `require` finds.")
+
+)MLUA"),
+            std::string_view(R"MLUA(local MODULE_INFO = "a table with `name`, `version`, `author`, `description`, `category`, `kind` (`loose`, `file` or `folder`), `origin` (`shipped` or `user`), `state` (`loaded`, `disabled`, `failed`, `blocked`, `held`, `superseded`, `builtIn` or `pending`), `reason`, `enabled`, `changed`, `path` (the module's folder), `entry` (its entry file), `dataPath` (its folder under `autorun\\data`), `loadTime` in milliseconds and `requires` (a list of `{ name, version }`)"
+
+define(moduleArea, "current", {
+  returns = "table, or nil, error",
+  doc = "The module the calling script belongs to, as " .. MODULE_INFO .. ". `ME-7011` when the caller is not an autorun module, such as a table script or the console.",
+}, function()
+  local key = callerModule()
+  if not key then
+    return result(nil, native.fail("LuaModuleUnknown", "(the calling script)"))
+  end
+  return result(native.moduleInfo(key))
+end)
+
+define(moduleArea, "ensureData", {
+  returns = "string, or nil, error",
+  doc = "Creates the calling module's data folder, `autorun\\data\\<name>\\`, when it is not there yet, and returns its path with a trailing backslash. A module keeps its settings and other files there: writing them does not count as a change to its code, and the module's own folder can be replaced as a whole. `ME-7011` when the caller is not an autorun module.",
+}, function()
+  local key = callerModule()
+  if not key then
+    return result(nil, native.fail("LuaModuleUnknown", "(the calling script)"))
+  end
+  return native.moduleEnsureData(key)
+end)
+
+define(moduleArea, "list", {
+  returns = "table",
+  doc = "Every script and module the autorun folder holds, in the order of the list in Extensions > Modules, each as the table `current` returns.",
+}, function()
+  return native.moduleList()
+end)
+
+define(moduleArea, "info", {
+  params = { { name = "name", type = "string" } },
+  returns = "table, or nil, error",
+  doc = "One module by name, as the table `current` returns. `ME-7011` when there is none of that name.",
+}, function(name)
+  return result(native.moduleInfo(name))
+end)
+
+define(moduleArea, "reload", {
+  params = { { name = "name", type = "string" } },
+  returns = "true, or nil, error",
+  doc = "Unloads a module and runs it again from disk, and after it the loaded modules that require it. The error is the reason the module did not load: `ME-7003` with the script error, `ME-7012` when it is blocked or disabled, `ME-7013` when it is held.",
+}, function(name)
+  return result(native.moduleReload(name))
+end)
+
+define(moduleArea, "enable", {
+  params = { { name = "name", type = "string" } },
+  returns = "true, or nil, error",
+  doc = "Switches a module on, loads it now and remembers it for the next start. The error is the reason it did not load, as for `reload`.",
+}, function(name)
+  return result(native.moduleSetEnabled(name, true))
+end)
+
+define(moduleArea, "disable", {
+  params = { { name = "name", type = "string" } },
+  returns = "true, or nil, error",
+  doc = "Switches a module off and remembers it for the next start. The module is unloaded, and so are the modules that require it. `info(name).enabled` tells which way the switch is.",
+}, function(name)
+  return result(native.moduleSetEnabled(name, false))
+end)
+
+define(moduleArea, "onUnload", {
+  params = { { name = "handler", type = "function" } },
+  returns = "true, or nil, error",
+  doc = "Calls `handler()` when the calling module is unloaded: before it is reloaded, when it is switched off, and before all modules run again. The program removes what the module registered through `manifold` on its own; the handler takes down the rest, such as Cheat Engine menu items, forms and timers. Handlers run in reverse order. `ME-7011` when the caller is not an autorun module.",
+}, function(handler)
+  local key = callerModule()
+  if not key then
+    return result(nil, native.fail("LuaModuleUnknown", "(the calling script)"))
+  end
+  local handlers = moduleUnloaders[key]
+  if not handlers then
+    handlers = {}
+    moduleUnloaders[key] = handlers
+  end
+  handlers[#handlers + 1] = handler
+  return true
+end)
 
 local function callHandler(handler, ...)
   local ok, problem = xpcall(handler, raisedHandler, ...)

@@ -76,8 +76,9 @@
       <Command>where python &gt;nul 2&gt;nul || (echo Manifold : warning ME0001 : Python was not found, so the generated sources in Source\Generated were not refreshed &amp; exit /b 0)
 python "$(ProjectDir)..\Tools\embed_lua.py" || exit /b 1
 python "$(ProjectDir)..\Tools\embed_templates.py" || exit /b 1
+python "$(ProjectDir)..\Tools\embed_modules.py" || exit /b 1
 python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"</Command>
-      <Message>Embedding the Lua compatibility scripts and the built-in templates, writing the build info</Message>
+      <Message>Embedding the Lua compatibility scripts, the built-in templates and the hashes of the shipped autorun modules, writing the build info</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
@@ -154,6 +155,8 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp" />
     <ClCompile Include="..\Source\Generated\ManagedDumperImage.cpp" />
+    <ClCompile Include="..\Source\Generated\ShippedModules.cpp" />
+    <ClCompile Include="..\Source\Lua\AutorunModules.cpp" />
     <ClCompile Include="..\Source\Lua\ConsoleHistory.cpp" />
     <ClCompile Include="..\Source\Lua\DocAnnotations.cpp" />
     <ClCompile Include="..\Source\Lua\DocRegistry.cpp" />
@@ -169,6 +172,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp" />
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp" />
     <ClCompile Include="..\Source\Lua\LuaManifold.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaModules.cpp" />
     <ClCompile Include="..\Source\Lua\LuaMono.cpp" />
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp" />
@@ -235,6 +239,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\Main.cpp" />
     <ClCompile Include="..\Tests\ManagedDumperTests.cpp" />
     <ClCompile Include="..\Tests\ManifoldApiTests.cpp" />
+    <ClCompile Include="..\Tests\ModuleTests.cpp" />
     <ClCompile Include="..\Tests\MonoTests.cpp" />
     <ClCompile Include="..\Tests\RelayTests.cpp" />
     <ClCompile Include="..\Tests\RttiTests.cpp" />

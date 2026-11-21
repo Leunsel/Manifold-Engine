@@ -6,6 +6,7 @@
 #include "Lua/LuaApi.h"
 #include "Lua/LuaArgs.h"
 #include "Lua/LuaDocBinding.h"
+#include "Lua/LuaModules.h"
 #include "Table/AddressList.h"
 #include "Table/Structures.h"
 
@@ -29,19 +30,6 @@ namespace Manifold::Lua
         double CallClock()
         {
             return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
-        }
-
-        const char* BuiltInScript(const std::filesystem::path& path)
-        {
-            std::ifstream file(path, std::ios::binary);
-            std::string head(16384, '\0');
-            file.read(head.data(), static_cast<std::streamsize>(head.size()));
-            head.resize(static_cast<std::size_t>(file.gcount()));
-            if (head.find("__MANIFOLD_UE_RUNTIME__") != std::string::npos)
-                return "Unreal Engine support is built into the program now (Extensions > Unreal Engine, manifold.unreal)";
-            if (head.find("__MANIFOLD_RTTI_RUNTIME__") != std::string::npos)
-                return "C++ run-time type information is built into the program now (Extensions > C++ RTTI, manifold.rtti; ManifoldRTTI still works)";
-            return nullptr;
         }
 
         int Traceback(lua_State* state)
@@ -224,6 +212,7 @@ namespace Manifold::Lua
         RegisterCompat(*this, m_state);
         RegisterManifoldApi(*this, m_state);
         RunCompatScripts(*this);
+        TraceAutorunWrites(m_state);
     }
 
     std::uint64_t LuaEngine::AddEntry(ConsoleEntry entry)
@@ -336,45 +325,6 @@ namespace Manifold::Lua
         std::error_code error;
         const std::filesystem::path full = std::filesystem::absolute(path, error);
         return Run(text, "@" + WideToUtf8((error ? path : full).wstring()));
-    }
-
-    Status LuaEngine::RunAutorun(const std::filesystem::path& folder)
-    {
-        std::error_code error;
-        if (!std::filesystem::is_directory(folder, error))
-        {
-            std::filesystem::create_directories(folder, error);
-            return Status::Success();
-        }
-        std::vector<std::filesystem::path> scripts;
-        for (const auto& entry : std::filesystem::directory_iterator(folder, error))
-        {
-            if (entry.is_regular_file() && EqualsNoCase(WideToUtf8(entry.path().extension().wstring()), ".lua"))
-                scripts.push_back(entry.path());
-        }
-        std::sort(scripts.begin(), scripts.end());
-        Status first;
-        for (const auto& script : scripts)
-        {
-            if (const char* builtIn = BuiltInScript(script))
-            {
-                LOG_INFO("Autorun", "Skipped " + WideToUtf8(script.filename().wstring()) + ": " + builtIn + ". The file stays in the autorun folder and can be deleted.");
-                continue;
-            }
-            const Status status = RunFile(script);
-            if (!status)
-            {
-                const Status failed = Status::Fail(ErrorCode::LuaAutorunFailed, WideToUtf8(script.filename().wstring()) + ": " + status.Text);
-                LOG_ERROR("Autorun", failed.Text);
-                if (first.Ok())
-                    first = failed;
-            }
-            else
-            {
-                LOG_INFO("Autorun", "Ran " + WideToUtf8(script.filename().wstring()));
-            }
-        }
-        return first;
     }
 
     bool LuaEngine::CallReference(int reference, int arguments, int results, std::string& error)

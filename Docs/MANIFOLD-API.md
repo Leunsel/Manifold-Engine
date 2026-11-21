@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 9 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 10 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -400,3 +400,18 @@ The names `manifold.ui` takes for colours and icons.
 | `manifold.ui.theme.colors()` | table | The theme colour names, which follow the theme and light or dark mode. |
 | `manifold.ui.theme.icons(filter?)` | table | The Font Awesome icon names, all of them or those that contain `filter`. |
 | `manifold.ui.theme.isIcon(name)` | boolean | Whether `name` is a Font Awesome icon name. |
+
+## manifold.module
+
+The autorun modules: the scripts in the `autorun` folder and the modules in `autorun\modules`. A module is named by the `NAME` line of its header, or by its file or folder name. Extensions > Modules shows the same list. [AUTORUN.md](AUTORUN.md) describes the folder layout, the header and what `require` finds.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.module.current()` | table, or nil, error | The module the calling script belongs to, as a table with `name`, `version`, `author`, `description`, `category`, `kind` (`loose`, `file` or `folder`), `origin` (`shipped` or `user`), `state` (`loaded`, `disabled`, `failed`, `blocked`, `held`, `superseded`, `builtIn` or `pending`), `reason`, `enabled`, `changed`, `path` (the module's folder), `entry` (its entry file), `dataPath` (its folder under `autorun\data`), `loadTime` in milliseconds and `requires` (a list of `{ name, version }`). `ME-7011` when the caller is not an autorun module, such as a table script or the console. |
+| `manifold.module.ensureData()` | string, or nil, error | Creates the calling module's data folder, `autorun\data\<name>\`, when it is not there yet, and returns its path with a trailing backslash. A module keeps its settings and other files there: writing them does not count as a change to its code, and the module's own folder can be replaced as a whole. `ME-7011` when the caller is not an autorun module. |
+| `manifold.module.list()` | table | Every script and module the autorun folder holds, in the order of the list in Extensions > Modules, each as the table `current` returns. |
+| `manifold.module.info(name)` | table, or nil, error | One module by name, as the table `current` returns. `ME-7011` when there is none of that name. |
+| `manifold.module.reload(name)` | true, or nil, error | Unloads a module and runs it again from disk, and after it the loaded modules that require it. The error is the reason the module did not load: `ME-7003` with the script error, `ME-7012` when it is blocked or disabled, `ME-7013` when it is held. |
+| `manifold.module.enable(name)` | true, or nil, error | Switches a module on, loads it now and remembers it for the next start. The error is the reason it did not load, as for `reload`. |
+| `manifold.module.disable(name)` | true, or nil, error | Switches a module off and remembers it for the next start. The module is unloaded, and so are the modules that require it. `info(name).enabled` tells which way the switch is. |
+| `manifold.module.onUnload(handler)` | true, or nil, error | Calls `handler()` when the calling module is unloaded: before it is reloaded, when it is switched off, and before all modules run again. The program removes what the module registered through `manifold` on its own; the handler takes down the rest, such as Cheat Engine menu items, forms and timers. Handlers run in reverse order. `ME-7011` when the caller is not an autorun module. |

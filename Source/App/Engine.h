@@ -98,6 +98,7 @@ namespace Manifold
 
         Status OpenProcess(ProcessId id);
         Status OpenProcessByName(std::string_view name);
+        Status RunAutorun();
         void CloseProcess();
         const std::shared_ptr<Target::Process>& Process() const { return m_target.Process(); }
         bool HasProcess() const { return m_target.Attached(); }

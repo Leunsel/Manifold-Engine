@@ -81,6 +81,7 @@ namespace Manifold
         int AddressDigits = 0;
 
         bool AutorunEnabled = true;
+        bool HoldNewModules = true;
         bool ScriptWindowsAppLook = true;
         bool ScriptEditorTabs = true;
         bool StructureTabs = true;

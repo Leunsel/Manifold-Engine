@@ -76,6 +76,7 @@ namespace Manifold
             { "Table", "AddressColumn", &kAddressColumn },
             { "Table", "AddressDigits", &kAddressDigits },
             { "Scripts", "Autorun", &Settings::AutorunEnabled },
+            { "Scripts", "HoldNewModules", &Settings::HoldNewModules },
             { "Scripts", "AutoAttach", &Settings::AutoAttach },
             { "Scripts", "AutoAttachEnabled", &Settings::AutoAttachEnabled },
             { "Scripts", "ScriptWindowsAppLook", &Settings::ScriptWindowsAppLook },

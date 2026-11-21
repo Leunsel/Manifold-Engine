@@ -67,7 +67,7 @@ Outside the program: `Agent` is the in-process debugger DLL (VEH) that is inject
 
 ## Generated files
 
-- `Source/Generated` holds the embedded Lua scripts, the built-in templates and the Font Awesome names. The pre-build step refreshes them with `Tools/embed_lua.py` and `Tools/embed_templates.py`, and they are committed.
+- `Source/Generated` holds the embedded Lua scripts, the built-in templates, the Font Awesome names and the names and hashes of the modules in `Autorun`. The pre-build step refreshes them with `Tools/embed_lua.py`, `Tools/embed_templates.py` and `Tools/embed_modules.py`, and they are committed.
 - The managed dumper is embedded by `Tools/embed_managed.py`; that file is not committed.
 - `Projects/*.vcxproj` and `Manifold-Engine.sln` come from `Tools/gen_projects.py`, which takes every file on disk. Run it after adding or removing a source file.
 - CI fails when a generated file differs from what is committed.

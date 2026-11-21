@@ -29,7 +29,7 @@ The program is x64-only. Every x64 build also builds the in-process debugger age
 
 The MSVC compiler (`v143`) cannot build the program: the direct system call stubs in `Source/Syscalls/Syscall.h` are naked functions with inline assembly, which only clang-cl compiles. `Tools/gen_projects.py --msvc` writes such projects all the same, for trying parts of the code with MSVC.
 
-Before compiling, the projects run `Tools/embed_lua.py`, `Tools/embed_templates.py` and `Tools/gen_buildinfo.py` with the Python on PATH; a script that fails stops the build. The last one writes the commit into the build, so the log, Help → About and the diagnostics report show the version with it, like `0.1.0 (3e90571)`; a `+` after the commit means the working tree had uncommitted changes. The `ManagedDumper` project builds `Managed` with `dotnet` and writes `Source/Generated/ManagedDumperImage.cpp`, the one generated source that is not committed, because it holds the built assembly. The build warns when a tool is missing:
+Before compiling, the projects run `Tools/embed_lua.py`, `Tools/embed_templates.py`, `Tools/embed_modules.py` and `Tools/gen_buildinfo.py` with the Python on PATH; a script that fails stops the build. The last one writes the commit into the build, so the log, Help → About and the diagnostics report show the version with it, like `0.1.0 (3e90571)`; a `+` after the commit means the working tree had uncommitted changes. The `ManagedDumper` project builds `Managed` with `dotnet` and writes `Source/Generated/ManagedDumperImage.cpp`, the one generated source that is not committed, because it holds the built assembly. The build warns when a tool is missing:
 
 | Warning | Meaning |
 | --- | --- |
@@ -52,7 +52,7 @@ The run goes through these suites in order; `--list` names them and `--filter=co
 | `unreal` | the Unreal Engine reader against a made-up name table, object array and reflection: in the tests' own process, and with the 64-bit and the 32-bit layout inside `TestTarget.exe --unreal` and `TestTarget32.exe --unreal` |
 | `rtti` | the C++ run-time type information reader: the name demangler, hand-built RTTI (single, multiple and virtual inheritance, an embedded member, locators that must be rejected) and classes the compiler made, the Structure Dissect labels, the symbols, `manifold.rtti` and `ManifoldRTTI`: in the tests' own process and inside `TestTarget.exe --rtti` and `TestTarget32.exe --rtti` |
 | `commands`, `docs`, `console`, `templates` | commands and shortcuts, the generated documentation, the Lua console, script templates |
-| `compat`, `manifold-api`, `autorun` | the Cheat Engine Lua API, the `manifold` API, the Autorun modules |
+| `compat`, `manifold-api`, `modules`, `autorun` | the Cheat Engine Lua API, the `manifold` API, the autorun module loader, the modules in `Autorun` |
 | `managed` | the managed dumper: its data format, the embedded assembly, and a run on the .NET Framework |
 | `integration` | a run against `TestTarget.exe` (built with the solution): scanning, pointers, freezing, a code injection script, the sample table `Tests/Target/TestTarget.CT`, Lua (records, timers, threads), the write history, all four "find out what" watches, breakpoints and stepping with the Windows debugger, the fake Mono, IL2CPP and managed dumper runtimes of the target, the direct system calls |
 | `inprocess` | the in-process debugger in a 64-bit target: breakpoints with conditions and register changes, watches on one instruction, and the agent letting the target go when the program falls silent |

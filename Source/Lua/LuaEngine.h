@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Errors.h"
+#include "Lua/AutorunModules.h"
 #include "Lua/LuaConsole.h"
 #include "Lua/UiModel.h"
 
@@ -278,6 +279,12 @@ namespace Manifold::Lua
     using TextMeasurer = bool (*)(std::string_view text, float points, bool bold, bool mono, float& width, float& height);
     void SetTextMeasurer(TextMeasurer measurer);
 
+    struct AutorunOptions
+    {
+        std::filesystem::path StateFile;
+        bool HoldNew = false;
+    };
+
     class LuaEngine
     {
     public:
@@ -291,7 +298,18 @@ namespace Manifold::Lua
         Status RunWithResult(std::string_view code, std::string_view chunkName, std::string& result);
         Status Compile(std::string_view code, std::string_view chunkName = "check");
         Status RunFile(const std::filesystem::path& path);
-        Status RunAutorun(const std::filesystem::path& folder);
+        Status RunAutorun(const std::filesystem::path& folder, const AutorunOptions& options = {});
+        const std::vector<Autorun::Module>& Modules() const { return m_modules; }
+        std::uint64_t ModulesRevision() const { return m_modulesRevision; }
+        const std::filesystem::path& AutorunFolder() const { return m_autorunFolder; }
+        const AutorunOptions& AutorunSettings() const { return m_autorunOptions; }
+        Status ReloadModule(std::string_view name);
+        Status SetModuleEnabled(std::string_view name, bool enabled);
+        Status AllowModule(std::string_view name);
+        const Autorun::Module* ModuleOfSource(std::string_view source) const;
+        std::filesystem::path ModuleDataFolder(const Autorun::Module& module) const;
+        int ModulesNeedingAttention() const;
+        void NoteScriptWrite(lua_State* state, std::string_view function, std::string_view path);
         bool CallReference(int reference, int arguments, int results, std::string& error);
         bool CallStack(int arguments, int results, std::string& error);
         void Release(int reference);
@@ -484,6 +502,20 @@ namespace Manifold::Lua
         UiModel m_ui;
         void TickUi(double now);
         void ChunkStarting(const std::string& name);
+        bool RunModuleEntry(Autorun::Module& module);
+        bool UnloadModule(Autorun::Module& module);
+        void LoadPendingModules(bool announce, Status& first);
+        void DropDependents();
+        Status ModuleStatus(std::string_view name) const;
+        int ManifoldApiVersion();
+        void AddLibraryPath();
+        std::vector<Autorun::Module> m_modules;
+        std::vector<std::string> m_loadedModules;
+        Autorun::StateStore m_moduleStore;
+        std::filesystem::path m_autorunFolder;
+        AutorunOptions m_autorunOptions;
+        std::string m_loadingModule;
+        std::uint64_t m_modulesRevision = 0;
         double m_callDeadline = 0.0;
         int m_callLimit = 0;
         std::vector<std::unique_ptr<Task>> m_tasks;

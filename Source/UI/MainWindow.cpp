@@ -560,8 +560,10 @@ namespace Manifold::UI
             Item(ICON_FA_MOON "  Lua engine", Command::OpenLuaEngine);
             Item(ICON_FA_STREAM "  Log", Command::OpenLog);
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_PLAY "  Run autorun scripts again"))
-                workspace.Report(engine.Lua().RunAutorun(Paths::AutorunFolder()));
+            if (ImGui::MenuItem(ICON_FA_PUZZLE_PIECE "  Autorun modules"))
+                workspace.OpenModules();
+            if (ImGui::MenuItem(ICON_FA_SYNC "  Reload all modules"))
+                workspace.Report(engine.RunAutorun());
             if (ImGui::MenuItem(ICON_FA_FOLDER "  Open autorun folder"))
             {
                 std::error_code ignored;
@@ -579,6 +581,9 @@ namespace Manifold::UI
                 UnrealMenu();
                 UnityMenu();
                 RttiMenu();
+                ImGui::Separator();
+                if (ImGui::MenuItem(ICON_FA_PUZZLE_PIECE "  Modules"))
+                    workspace.OpenModules();
                 if (scriptRoots || workspace.Ui().HasMenu())
                     ImGui::Separator();
             }

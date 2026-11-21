@@ -198,6 +198,12 @@
     <ClCompile Include="..\Source\Generated\ManagedDumperImage.cpp">
       <Filter>Source\Generated</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Generated\ShippedModules.cpp">
+      <Filter>Source\Generated</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\AutorunModules.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\ConsoleHistory.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -241,6 +247,9 @@
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaManifold.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaModules.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaMono.cpp">
@@ -433,6 +442,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\ManifoldApiTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\ModuleTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\MonoTests.cpp">

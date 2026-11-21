@@ -53,7 +53,6 @@ local Icons = {}
 Icons.__index = Icons
 
 Icons.Folder = "Manifold-Icons"
-Icons.ModulesFolder = "Manifold-SigMaker-Modules"
 Icons.IconSize = 16
 
 --- The pictures, by the entry that wears them.
@@ -79,13 +78,7 @@ end
 --- @return string
 --
 function Icons:Path(fileName)
-    local root = self.Root
-    if not root then
-        local getPath = rawget(_G, "getAutorunPath")
-        root = type(getPath) == "function" and getPath() or ""
-        root = root .. Icons.ModulesFolder .. sep
-    end
-    return root .. Icons.Folder .. sep .. (fileName or Icons.Files.Copy)
+    return (self.Root or "") .. Icons.Folder .. sep .. (fileName or Icons.Files.Copy)
 end
 
 --

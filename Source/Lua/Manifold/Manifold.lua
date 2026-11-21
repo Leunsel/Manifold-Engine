@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 9
+local API_VERSION = 10
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -976,15 +976,46 @@ local function protect(kind, fn)
   end
 end
 
+local moduleOwned = {}
+
+local function callerModule()
+  local info = callerFrame()
+  return info and native.moduleOfSource(info.source) or nil
+end
+
+local function own(owner, remove)
+  local list = moduleOwned[owner]
+  if not list then
+    list = {}
+    moduleOwned[owner] = list
+  end
+  local token = {}
+  list[token] = remove
+  return token
+end
+
+local function disown(owner, token)
+  local list = moduleOwned[owner]
+  if list then
+    list[token] = nil
+  end
+end
+
 local function keyedRegistry(add, remove)
   local byKey = {}
   local keyOf = {}
+  local ownerOf = {}
   local function drop(id)
     local removed = remove(id) and true or false
     local key = keyOf[id]
     if key ~= nil then
       byKey[key] = nil
       keyOf[id] = nil
+    end
+    local owned = ownerOf[id]
+    if owned then
+      ownerOf[id] = nil
+      disown(owned[1], owned[2])
     end
     return removed
   end
@@ -997,6 +1028,10 @@ local function keyedRegistry(add, remove)
     if key ~= nil then
       byKey[key] = id
       keyOf[id] = key
+    end
+    local owner = callerModule()
+    if owner then
+      ownerOf[id] = { owner, own(owner, function() drop(id) end) }
     end
     return id
   end
@@ -2737,6 +2772,197 @@ local function forgetSource(source)
 end
 
 debug.getregistry()["Manifold.ChunkStarting"] = forgetSource
+
+local moduleValues = {}
+local modulePrivate = {}
+local moduleUnloaders = {}
+local moduleWarned = {}
+local MODULE_LOADING = {}
+local baseRequire = require
+
+local function unloadModule(key)
+  local handlers = moduleUnloaders[key]
+  moduleUnloaders[key] = nil
+  local handled = handlers ~= nil and #handlers > 0
+  if handlers then
+    for index = #handlers, 1, -1 do
+      local ok, problem = xpcall(handlers[index], raisedHandler)
+      if not ok then
+        emit("error", "manifold.module", problem)
+      end
+    end
+  end
+  local owned = moduleOwned[key]
+  moduleOwned[key] = nil
+  if owned then
+    for _, remove in pairs(owned) do
+      pcall(remove)
+    end
+  end
+  local sources = {}
+  for source in pairs(uiOwned) do
+    if native.moduleOfSource(source) == key then
+      sources[#sources + 1] = source
+    end
+  end
+  for _, source in ipairs(sources) do
+    forgetSource(source)
+  end
+  moduleValues[key] = nil
+  modulePrivate[key] = nil
+  return handled
+end
+
+debug.getregistry()["Manifold.ModuleUnload"] = unloadModule
+
+debug.getregistry()["Manifold.ModuleLoaded"] = function(key, value)
+  if value == nil then
+    value = true
+  end
+  moduleValues[key] = value
+end
+
+local function moduleRequire(name, ...)
+  if type(name) ~= "string" then
+    return baseRequire(name, ...)
+  end
+  local info = callerFrame()
+  local key = info and native.moduleOfSource(info.source) or nil
+  if key then
+    local cache = modulePrivate[key]
+    local cached = cache and cache[name]
+    if cached == MODULE_LOADING then
+      error("loop or previous error loading module '" .. name .. "'", 2)
+    end
+    if cached ~= nil then
+      return cached
+    end
+    local path = native.moduleResolve(key, name)
+    if path then
+      local chunk, problem = native.moduleLoadFile(path)
+      if not chunk then
+        error("error loading module '" .. name .. "' from file '" .. path .. "':\n\t" .. tostring(problem), 2)
+      end
+      if not cache then
+        cache = {}
+        modulePrivate[key] = cache
+      end
+      cache[name] = MODULE_LOADING
+      local ok, value = pcall(chunk, name, path)
+      if not ok then
+        cache[name] = nil
+        error(value, 0)
+      end
+      if value == nil then
+        value = true
+      end
+      if modulePrivate[key] == cache then
+        cache[name] = value
+      end
+      return value, path
+    end
+  end
+  if package.loaded[name] == nil then
+    local other, loaded, declared, state = native.moduleLookup(name, key)
+    if other then
+      if not loaded then
+        error("module '" .. name .. "' is an autorun module that is not loaded (" .. state .. ")", 2)
+      end
+      if key and not declared and not moduleWarned[key .. "\0" .. other] then
+        moduleWarned[key .. "\0" .. other] = true
+        emit("warning", "manifold.module", key .. " loads " .. name .. " with require, but does not name it in REQUIRES, so the load order is not guaranteed")
+      end
+      return moduleValues[other]
+    end
+  end
+  return baseRequire(name, ...)
+end
+
+rawset(_G, "require", moduleRequire)
+pcall(native.docBind, moduleRequire, "require")
+
+local moduleArea = area("module", "The autorun modules: the scripts in the `autorun` folder and the modules in `autorun\\modules`. A module is named by the `NAME` line of its header, or by its file or folder name. Extensions > Modules shows the same list. [AUTORUN.md](AUTORUN.md) describes the folder layout, the header and what `require` finds.")
+
+local MODULE_INFO = "a table with `name`, `version`, `author`, `description`, `category`, `kind` (`loose`, `file` or `folder`), `origin` (`shipped` or `user`), `state` (`loaded`, `disabled`, `failed`, `blocked`, `held`, `superseded`, `builtIn` or `pending`), `reason`, `enabled`, `changed`, `path` (the module's folder), `entry` (its entry file), `dataPath` (its folder under `autorun\\data`), `loadTime` in milliseconds and `requires` (a list of `{ name, version }`)"
+
+define(moduleArea, "current", {
+  returns = "table, or nil, error",
+  doc = "The module the calling script belongs to, as " .. MODULE_INFO .. ". `ME-7011` when the caller is not an autorun module, such as a table script or the console.",
+}, function()
+  local key = callerModule()
+  if not key then
+    return result(nil, native.fail("LuaModuleUnknown", "(the calling script)"))
+  end
+  return result(native.moduleInfo(key))
+end)
+
+define(moduleArea, "ensureData", {
+  returns = "string, or nil, error",
+  doc = "Creates the calling module's data folder, `autorun\\data\\<name>\\`, when it is not there yet, and returns its path with a trailing backslash. A module keeps its settings and other files there: writing them does not count as a change to its code, and the module's own folder can be replaced as a whole. `ME-7011` when the caller is not an autorun module.",
+}, function()
+  local key = callerModule()
+  if not key then
+    return result(nil, native.fail("LuaModuleUnknown", "(the calling script)"))
+  end
+  return native.moduleEnsureData(key)
+end)
+
+define(moduleArea, "list", {
+  returns = "table",
+  doc = "Every script and module the autorun folder holds, in the order of the list in Extensions > Modules, each as the table `current` returns.",
+}, function()
+  return native.moduleList()
+end)
+
+define(moduleArea, "info", {
+  params = { { name = "name", type = "string" } },
+  returns = "table, or nil, error",
+  doc = "One module by name, as the table `current` returns. `ME-7011` when there is none of that name.",
+}, function(name)
+  return result(native.moduleInfo(name))
+end)
+
+define(moduleArea, "reload", {
+  params = { { name = "name", type = "string" } },
+  returns = "true, or nil, error",
+  doc = "Unloads a module and runs it again from disk, and after it the loaded modules that require it. The error is the reason the module did not load: `ME-7003` with the script error, `ME-7012` when it is blocked or disabled, `ME-7013` when it is held.",
+}, function(name)
+  return result(native.moduleReload(name))
+end)
+
+define(moduleArea, "enable", {
+  params = { { name = "name", type = "string" } },
+  returns = "true, or nil, error",
+  doc = "Switches a module on, loads it now and remembers it for the next start. The error is the reason it did not load, as for `reload`.",
+}, function(name)
+  return result(native.moduleSetEnabled(name, true))
+end)
+
+define(moduleArea, "disable", {
+  params = { { name = "name", type = "string" } },
+  returns = "true, or nil, error",
+  doc = "Switches a module off and remembers it for the next start. The module is unloaded, and so are the modules that require it. `info(name).enabled` tells which way the switch is.",
+}, function(name)
+  return result(native.moduleSetEnabled(name, false))
+end)
+
+define(moduleArea, "onUnload", {
+  params = { { name = "handler", type = "function" } },
+  returns = "true, or nil, error",
+  doc = "Calls `handler()` when the calling module is unloaded: before it is reloaded, when it is switched off, and before all modules run again. The program removes what the module registered through `manifold` on its own; the handler takes down the rest, such as Cheat Engine menu items, forms and timers. Handlers run in reverse order. `ME-7011` when the caller is not an autorun module.",
+}, function(handler)
+  local key = callerModule()
+  if not key then
+    return result(nil, native.fail("LuaModuleUnknown", "(the calling script)"))
+  end
+  local handlers = moduleUnloaders[key]
+  if not handlers then
+    handlers = {}
+    moduleUnloaders[key] = handlers
+  end
+  handlers[#handlers + 1] = handler
+  return true
+end)
 
 local function callHandler(handler, ...)
   local ok, problem = xpcall(handler, raisedHandler, ...)

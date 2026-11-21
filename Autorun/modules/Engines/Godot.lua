@@ -2,11 +2,14 @@
     Manifold-Godot.lua
     --------------------------------
 
-    AUTHOR  : Leunsel
-    VERSION : 2.0.0
-    LICENSE : MIT
-    CREATED : 2026-11-17
-    UPDATED : 2026-11-17
+    NAME        : Manifold-Godot
+    VERSION     : 2.1.0
+    AUTHOR      : Leunsel
+    DESCRIPTION : Godot 4 engine data: object and class names in Structure Dissect, custom types, symbols and a Godot Engine menu.
+    API         : 2
+    LICENSE     : MIT
+    CREATED     : 2026-11-17
+    UPDATED     : 2026-11-21
 
     MIT License:
         Copyright (c) 2026 Leunsel
@@ -32,6 +35,11 @@
     This file is part of Manifold Engine.
 
     CHANGELOG:
+        ∂ v2.1.0 (2026-11-21)
+            - an autorun module now (autorun\modules\Engines\Godot.lua):
+              the header names it for the module list, and the menu is taken
+              down when the module is unloaded or switched off. An old
+              Manifold-Godot.lua in the autorun folder's root is skipped.
         ∂ v2.0.0 (2026-11-17)
             - ported to Manifold Engine's manifold API 2; stock Cheat Engine
               is no longer supported. Logging goes through manifold.log
@@ -101,7 +109,7 @@ end
 ----------------------------------------
 local RUNTIME_STATE_KEY = "__MANIFOLD_GODOT_RUNTIME__"
 local REGISTRATION_KEY  = "Manifold-Godot"
-local VERSION           = "2.0.0"
+local VERSION           = "2.1.0"
 local MENU_CAPTION      = "Godot Engine"
 
 local POINTER_MIN, POINTER_MAX = 0x10000, 0x7FFFFFFFFFFF
@@ -2581,6 +2589,17 @@ local function Main()
     manifold.event.subscribe("processOpened", EndSession, { key = REGISTRATION_KEY .. ".opened" })
     manifold.event.subscribe("processClosed", EndSession, { key = REGISTRATION_KEY .. ".closed" })
     InstallMenu()
+    -- ∑ The keyed registrations above are removed by the program when the
+    -- module is unloaded. The menu is a Cheat Engine object the program does
+    -- not track, so it is taken down here.
+    if manifold.has("module.onUnload") then
+        manifold.module.onUnload(function()
+            if State.MenuRoot then
+                pcall(function() State.MenuRoot.destroy() end)
+                State.MenuRoot = nil
+            end
+        end)
+    end
     log.debug("Version " .. VERSION .. " ready. Open a Godot 4 game and use Structure Dissect or the " .. MENU_CAPTION .. " menu.")
 end
 

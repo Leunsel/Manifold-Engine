@@ -210,6 +210,12 @@
     <ClCompile Include="..\Source\Generated\ManagedDumperImage.cpp">
       <Filter>Source\Generated</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Generated\ShippedModules.cpp">
+      <Filter>Source\Generated</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\AutorunModules.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\ConsoleHistory.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -253,6 +259,9 @@
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaManifold.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaModules.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaMono.cpp">
@@ -457,6 +466,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\MemoryViewerRegisters.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\ModulesWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\MonoInspector.cpp">
@@ -690,6 +702,9 @@
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h">
       <Filter>Source\Generated</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Lua\AutorunModules.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Lua\ConsoleHistory.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
@@ -730,6 +745,9 @@
       <Filter>Source\Lua</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Lua\LuaEngine.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaModules.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Lua\LuaRtti.h">
@@ -922,6 +940,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\MemoryViewer.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\ModulesWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\MonoWindow.h">

@@ -1,10 +1,14 @@
 --[[
-    Manifold.SigMaker.lua
+    Manifold-SigMaker
     --------------------------------
 
-    AUTHOR  : Leunsel
-    LICENSE : MIT
-    CREATED : 2026-09-03
+    NAME        : Manifold-SigMaker
+    VERSION     : 2.1.0
+    AUTHOR      : Leunsel
+    DESCRIPTION : Byte signatures for the selected instruction, checked for uniqueness in their module, and a search that finds them again.
+    API         : 10
+    LICENSE     : MIT
+    CREATED     : 2026-09-03
 
     MIT License:
         Copyright (c) 2026 Leunsel
@@ -27,18 +31,20 @@
         OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
         SOFTWARE.
 
-    This is the entry point. Copy this file and the Manifold-SigMaker-Modules
-    folder side by side into Manifold Engine's autorun folder, the one named
-    autorun next to Manifold-Engine.exe. The next time Manifold Engine
+    This is the entry point of an autorun module. Copy the whole SigMaker
+    folder into autorun\modules next to Manifold-Engine.exe (a category
+    folder in between, such as Tools, is fine). The next time Manifold Engine
     starts, the context menu in the disassembler carries two new entries,
     "Manifold: Copy Signature" and "Manifold: Find Signature", and the memory
     view's menu bar carries a small "Manifold" entry that holds the keyboard
     shortcut for the second one.
 
     Since 2.0.0 this runs on Manifold Engine only. Process, module, memory and
-    scan calls go through its manifold API (version 2 or newer), and the log
-    is the manifold.log channel "SigMaker". Stock Cheat Engine is no longer
-    supported.
+    scan calls go through its manifold API, and the log is the manifold.log
+    channel "SigMaker". Stock Cheat Engine is no longer supported. Since
+    2.1.0 it is an autorun module: the API line above is checked by the
+    program before this file runs, and require finds the other files of this
+    folder without a package.path entry.
 
     Everything those entries do is also available as a method.
 
@@ -66,9 +72,10 @@
         ManifoldSigMaker:Status()
             Reports what is loaded and how it is currently configured.
 
-    Executing this file a second time is safe and is the normal way to pick up
+    Reloading the module (Extensions > Modules, or
+    manifold.module.reload("Manifold-SigMaker")) is the normal way to pick up
     an edit. The menu entries and any open list of hits from the previous run
-    are taken down before the new ones are built, and the modules are read
+    are taken down before the new ones are built, and the files are read
     from disk again, so nothing accumulates and no old code stays behind.
 
     The masking policy and the search keep their defaults in
@@ -77,42 +84,13 @@
 ]]
 
 --
---- ∑ The gate comes before anything else. Every module below reads manifold
----   at load time, so without the API the first require would fail with a
----   traceback that names a module instead of the reason. One line that says
----   what is missing is the whole answer on any other host.
+--- ∑ The program has checked the API line of the header before this file
+---   runs, and it resolves require inside this folder and reads the files
+---   from disk again on every reload. So there is no gate, no package.path
+---   entry and no list of names to purge here any more. What is left is
+---   asking where the folder is, because the icons are opened by path.
 --
-local api = rawget(_G, "manifold")
-if type(api) ~= "table" or type(api.apiVersion) ~= "number" or api.apiVersion < 2 then
-    print("[SigMaker] Manifold SigMaker needs Manifold Engine's manifold API 2 or newer.")
-    return nil
-end
-
-local sep = package.config:sub(1, 1)
-local root = (type(getAutorunPath) == "function" and getAutorunPath() or "")
-local modules = root .. "Manifold-SigMaker-Modules" .. sep
-package.path = modules .. "?.lua;" .. package.path
-
---
---- ∑ The names of the modules this tree owns. Manifold Engine's require is
----   the ordinary Lua require, so package.loaded survives a second execution of
----   this file. Every name listed here is dropped from it first. Without
----   that step an edited module would quietly keep running its old code.
---
-local MODULES = {
-    "Manifold-SigMaker-Version",
-    "Manifold-SigMaker-CE",
-    "Manifold-SigMaker-Log",
-    "Manifold-SigMaker-Settings",
-    "Manifold-SigMaker-Decoder",
-    "Manifold-SigMaker-Signature",
-    "Manifold-SigMaker-Format",
-    "Manifold-SigMaker-Pattern",
-    "Manifold-SigMaker-Find",
-    "Manifold-SigMaker-Icons",
-    "Manifold-SigMaker-Menu",
-    "Manifold-SigMaker-Host"
-}
+local here = manifold.error.check(manifold.module.current())
 
 -- This has to stay the same as Manifold-SigMaker-Host.GlobalKey.
 local HOST_KEY = "ManifoldSigMakerHost"
@@ -132,25 +110,33 @@ if type(previous) == "table" and type(previous.Uninstall) == "function" then
     local removed, problem = manifold.error.try(previous.Uninstall, previous)
     if not removed then log.warning(problem) end
 end
-for _, name in ipairs(MODULES) do package.loaded[name] = nil end
 
--- Someone who copied this file on its own and left the folder behind gets one
+-- Someone who copied this file on its own and left the rest behind gets one
 -- readable line here. The alternative is a require traceback on every single
 -- Manifold Engine start. The error is handed over as text and cut to its first
 -- line, because require lists every path it tried below it, and an error
 -- object would bring the traceback along as well.
 local okHost, Host = manifold.error.try(require, "Manifold-SigMaker-Host")
 if not okHost then
-    log.error(string.format("Manifold-SigMaker-Modules was not found next to this file in %s. " ..
-        "Copy the folder there too. (%s)", root, tostring(Host.message):match("^[^\r\n]*")))
+    log.error(string.format("The other files of the SigMaker were not found next to init.lua in %s. " ..
+        "Copy the whole folder. (%s)", here.path, tostring(Host.message):match("^[^\r\n]*")))
     return nil
 end
 local Version = require("Manifold-SigMaker-Version")
 
 local host = Host:New({
+    Root = here.path,
     -- Anything put here overrides Manifold-SigMaker-Settings.Defaults, so:
     -- Settings = { Scope = "process", Mask = { Immediate = true } }
 })
+
+-- ∑ The menu entries and the hit lists are Cheat Engine objects, which the
+--   program does not track, so the module takes them down itself when it is
+--   unloaded or switched off.
+manifold.module.onUnload(function()
+    local removed, problem = manifold.error.try(host.Uninstall, host)
+    if not removed then log.warning(problem) end
+end)
 
 _G[HOST_KEY] = host
 _G[Host.FacadeKey] = host

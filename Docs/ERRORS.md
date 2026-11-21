@@ -137,6 +137,9 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-7008 | There is no documentation for …. | Nothing documents the function or name: no Manifold, Cheat Engine or Lua entry, no manifold.doc.register call and no LuaLS annotation above its definition. | Check the name, or document it with manifold.doc.register, or with ---@param annotations and manifold.doc.registerModule. |
 | ME-7009 | The image … could not be read. | manifold.ui.image.load reads PNG, JPEG, BMP, TGA and GIF files; the file is missing, unreadable or in another format. | Check the path (relative paths start at the program folder) and that the file opens in an image viewer. |
 | ME-7010 | The … is gone. | The window, widget, menu entry or dialog was removed, closed for good, or its script ran again, which removes everything the script made before. | Keep the new handle the script's next run returns, or test with isOpen before using an old one. |
+| ME-7011 | There is no autorun module named …. | No script or module of that name is in the autorun folder, or the script that asked does not belong to a module. | Extensions > Modules lists the names. A module's name is its NAME header line, or its file or folder name. |
+| ME-7012 | The autorun module …. | A module it requires is missing, switched off, held, failed or too old, its requirements form a circle, it asks for a newer manifold API, or the module cannot be switched in its state. | The message names the reason. Fix the REQUIRES or API line in the module's header, or add or enable the module it names. |
+| ME-7013 | The autorun module … is held until it is allowed. | The module is new in the autorun folder, or a script wrote to its files, so it does not run on its own. | Look at it in Extensions > Modules and choose Allow if it is yours. |
 
 ## Addresses and symbols
 

@@ -20,6 +20,7 @@ namespace Manifold
         std::filesystem::path ConfigFolder();
         std::filesystem::path SettingsFile();
         std::filesystem::path ScriptSettingsFile();
+        std::filesystem::path ModulesStateFile();
         std::filesystem::path LogFolder();
         std::filesystem::path LogFile();
         std::filesystem::path LayoutFile();

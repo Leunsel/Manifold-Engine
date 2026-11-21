@@ -4,7 +4,7 @@ Manifold Engine runs Lua 5.4 with the standard libraries and the functions below
 
 Manifold Engine's own API, with one fixed naming and calling schema that every call is checked against, is the `manifold` namespace in [MANIFOLD-API.md](MANIFOLD-API.md): coloured log levels, process and typed memory helpers that report failures as error objects, and protected calls.
 
-Scripts run on the program's main thread: in the Lua engine window (Ctrl+L), in `{$lua}` blocks of Auto Assembler scripts, from the table's Lua script, and from `.lua` files in the `autorun` folder at start. Errors end in `ME-7xxx`; see [ERRORS.md](ERRORS.md).
+Scripts run on the program's main thread: in the Lua engine window (Ctrl+L), in `{$lua}` blocks of Auto Assembler scripts, from the table's Lua script, and from the scripts and modules in the `autorun` folder at start ([AUTORUN.md](AUTORUN.md)). Errors end in `ME-7xxx`; see [ERRORS.md](ERRORS.md).
 
 ## Process
 
@@ -210,7 +210,7 @@ The test program runs a table the way the program does, without a window, and pr
 Manifold-Engine.Tests.exe --compat "Game.CT" --autorun="C:\path\to\autorun" --check-scripts --seconds=5
 ```
 
-`--autorun` runs the `.lua` files of a folder first. `--process=name.exe` opens a process. `--check-scripts` checks every Auto Assembler script of the table without writing to the process. `--eval` runs Lua code, or a `.lua` file, at the end. Files the scripts write under the user profile go to a separate folder (`--home=`).
+`--autorun` loads a folder as the autorun folder first (loose scripts and `modules\`, without a state file, so nothing is held). `--process=name.exe` opens a process. `--check-scripts` checks every Auto Assembler script of the table without writing to the process. `--eval` runs Lua code, or a `.lua` file, at the end. Files the scripts write under the user profile go to a separate folder (`--home=`).
 
 `--dry-run` lets scripts run for real against the opened process without changing it: scans and reads go to the process, while writes, allocations, protection changes, threads, library loads and pausing only happen in a copy that later reads see. At the end the program prints what it held back. With it, records can be switched on and off from `--eval` to see whether a table works with the running game.
 

@@ -2,6 +2,7 @@
 
 #include "App/Sounds.h"
 
+#include "Core/Paths.h"
 #include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
@@ -224,6 +225,11 @@ namespace Manifold
         m_unreal.ProcessOpened();
         m_tables.RefreshValues(true);
         return Status::Success();
+    }
+
+    Status Engine::RunAutorun()
+    {
+        return m_lua->RunAutorun(Paths::AutorunFolder(), { Paths::ModulesStateFile(), m_settings.HoldNewModules });
     }
 
     Status Engine::OpenProcessByName(std::string_view name)

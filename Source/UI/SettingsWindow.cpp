@@ -1234,9 +1234,15 @@ namespace Manifold::UI
         const float choice = std::round(Px(250.0f));
 
         list.Section("Lua");
-        if (list.Row("Run autorun scripts", "Run the Lua scripts in the autorun folder when the program starts.", toggle))
+        if (list.Row("Run autorun modules", "Run the Lua scripts and modules in the autorun folder when the program starts. Extensions > Modules lists them.", toggle))
         {
             changed |= ToggleSwitch("##autorun", &settings.AutorunEnabled);
+            list.EndRow();
+        }
+        if (list.Row("Hold new autorun modules", "A script or module that appears in the autorun folder does not run until it is allowed in Extensions > Modules. "
+                "A table's script can write files there, and this keeps such a file from running unseen at every start.", toggle))
+        {
+            changed |= ToggleSwitch("##holdmodules", &settings.HoldNewModules);
             list.EndRow();
         }
         if (list.Row("Autorun folder", WideToUtf8(Paths::AutorunFolder().wstring()), folder))

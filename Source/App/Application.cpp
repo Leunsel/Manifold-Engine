@@ -157,10 +157,20 @@ namespace Manifold
             m_engine->Notify(LogLevel::Warning, ErrorMessage(ErrorCode::LastRunCrashed, WideToUtf8(crash->wstring())));
         if (m_settings.AutorunEnabled)
         {
-            SplashStatus("Running the autorun scripts");
-            const Status status = m_engine->Lua().RunAutorun(Paths::AutorunFolder());
+            SplashStatus("Running the autorun modules");
+            const Status status = m_engine->RunAutorun();
             if (!status)
                 m_engine->Notify(status);
+            int held = 0;
+            std::string names;
+            for (const Autorun::Module& module : m_engine->Lua().Modules())
+            {
+                if (module.State != Autorun::State::Held)
+                    continue;
+                names += (held++ ? ", " : "") + module.Name;
+            }
+            if (held > 0)
+                m_engine->Notify(LogLevel::Warning, Format("%d autorun %s held until allowed in Extensions > Modules: ", held, held == 1 ? "module is" : "modules are") + names);
         }
         if (!m_options.Process.empty())
         {

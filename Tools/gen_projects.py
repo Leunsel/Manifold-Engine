@@ -228,8 +228,9 @@ PREBUILD = """    <PreBuildEvent>
       <Command>where python &gt;nul 2&gt;nul || (echo Manifold : warning ME0001 : Python was not found, so the generated sources in Source\\Generated were not refreshed &amp; exit /b 0)
 python "$(ProjectDir)..\\Tools\\embed_lua.py" || exit /b 1
 python "$(ProjectDir)..\\Tools\\embed_templates.py" || exit /b 1
+python "$(ProjectDir)..\\Tools\\embed_modules.py" || exit /b 1
 python "$(ProjectDir)..\\Tools\\gen_buildinfo.py" "$(IntDir)Info\\ManifoldBuild.h"</Command>
-      <Message>Embedding the Lua compatibility scripts and the built-in templates, writing the build info</Message>
+      <Message>Embedding the Lua compatibility scripts, the built-in templates and the hashes of the shipped autorun modules, writing the build info</Message>
     </PreBuildEvent>
 """
 
@@ -318,6 +319,8 @@ def main():
     embed_lua.main()
     import embed_templates
     embed_templates.main()
+    import embed_modules
+    embed_modules.main()
     import embed_managed
     embed_managed.main()
     import gen_icon_names

@@ -31,7 +31,7 @@ The program lands in `Build\x64\Release\Manifold-Engine.exe`. Many games need th
 | [Architecture](Docs/ARCHITECTURE.md) | layers, threads, and where new code goes |
 | [Auto Assembler](Docs/AUTO-ASSEMBLER.md), [Templates](Docs/TEMPLATES.md) | the script language and the script templates |
 | [Lua API](Docs/LUA-API.md), [manifold API](Docs/MANIFOLD-API.md), [Cheat Engine coverage](Docs/CE-COMPAT.md) | scripting |
-| [Autorun modules](Docs/AUTORUN.md) | Godot and signature modules that run at start |
+| [Autorun modules](Docs/AUTORUN.md) | The autorun folder: modules, their header, load order and `require`; the Godot and signature modules |
 | [Shortcuts](Docs/SHORTCUTS.md), [Error codes](Docs/ERRORS.md) | reference |
 
 ## License

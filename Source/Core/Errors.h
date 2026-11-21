@@ -107,6 +107,9 @@
     X(LuaDocMissing, 7008) \
     X(LuaImageUnreadable, 7009) \
     X(LuaUiGone, 7010) \
+    X(LuaModuleUnknown, 7011) \
+    X(LuaModuleBlocked, 7012) \
+    X(LuaModuleHeld, 7013) \
     X(ExprSyntax, 8001) \
     X(ExprUnknownSymbol, 8002) \
     X(ExprPointerUnreadable, 8003) \

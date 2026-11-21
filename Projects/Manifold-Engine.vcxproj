@@ -79,8 +79,9 @@
       <Command>where python &gt;nul 2&gt;nul || (echo Manifold : warning ME0001 : Python was not found, so the generated sources in Source\Generated were not refreshed &amp; exit /b 0)
 python "$(ProjectDir)..\Tools\embed_lua.py" || exit /b 1
 python "$(ProjectDir)..\Tools\embed_templates.py" || exit /b 1
+python "$(ProjectDir)..\Tools\embed_modules.py" || exit /b 1
 python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"</Command>
-      <Message>Embedding the Lua compatibility scripts and the built-in templates, writing the build info</Message>
+      <Message>Embedding the Lua compatibility scripts, the built-in templates and the hashes of the shipped autorun modules, writing the build info</Message>
     </PreBuildEvent>
     <PostBuildEvent>
       <Command>if not exist "$(ProjectDir)..\Autorun\*" exit /b 0
@@ -168,6 +169,8 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Generated\LuaCompatScripts.cpp" />
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp" />
     <ClCompile Include="..\Source\Generated\ManagedDumperImage.cpp" />
+    <ClCompile Include="..\Source\Generated\ShippedModules.cpp" />
+    <ClCompile Include="..\Source\Lua\AutorunModules.cpp" />
     <ClCompile Include="..\Source\Lua\ConsoleHistory.cpp" />
     <ClCompile Include="..\Source\Lua\DocAnnotations.cpp" />
     <ClCompile Include="..\Source\Lua\DocRegistry.cpp" />
@@ -183,6 +186,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp" />
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp" />
     <ClCompile Include="..\Source\Lua\LuaManifold.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaModules.cpp" />
     <ClCompile Include="..\Source\Lua\LuaMono.cpp" />
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp" />
@@ -253,6 +257,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\MainWindow.cpp" />
     <ClCompile Include="..\Source\UI\MemoryViewer.cpp" />
     <ClCompile Include="..\Source\UI\MemoryViewerRegisters.cpp" />
+    <ClCompile Include="..\Source\UI\ModulesWindow.cpp" />
     <ClCompile Include="..\Source\UI\MonoInspector.cpp" />
     <ClCompile Include="..\Source\UI\MonoWindow.cpp" />
     <ClCompile Include="..\Source\UI\NopSled.cpp" />
@@ -332,6 +337,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Disasm\FunctionBounds.h" />
     <ClInclude Include="..\Source\Disasm\UniqueAob.h" />
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h" />
+    <ClInclude Include="..\Source\Lua\AutorunModules.h" />
     <ClInclude Include="..\Source\Lua\ConsoleHistory.h" />
     <ClInclude Include="..\Source\Lua\DocAnnotations.h" />
     <ClInclude Include="..\Source\Lua\DocRecord.h" />
@@ -346,6 +352,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Lua\LuaDocBinding.h" />
     <ClInclude Include="..\Source\Lua\LuaDocs.h" />
     <ClInclude Include="..\Source\Lua\LuaEngine.h" />
+    <ClInclude Include="..\Source\Lua\LuaModules.h" />
     <ClInclude Include="..\Source\Lua\LuaRtti.h" />
     <ClInclude Include="..\Source\Lua\LuaSnapshot.h" />
     <ClInclude Include="..\Source\Lua\LuaUi.h" />
@@ -410,6 +417,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\LuaWindow.h" />
     <ClInclude Include="..\Source\UI\MainWindow.h" />
     <ClInclude Include="..\Source\UI\MemoryViewer.h" />
+    <ClInclude Include="..\Source\UI\ModulesWindow.h" />
     <ClInclude Include="..\Source\UI\MonoWindow.h" />
     <ClInclude Include="..\Source\UI\NopSled.h" />
     <ClInclude Include="..\Source\UI\PatchScanWindow.h" />

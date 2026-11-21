@@ -36,6 +36,7 @@
 #include "UI/ToolWindows.h"
 #include "UI/WatchWindow.h"
 #include "UI/WriteHistoryWindow.h"
+#include "UI/ModulesWindow.h"
 #include "UI/FlowGraphWindow.h"
 
 #include "imgui_internal.h"
@@ -162,6 +163,7 @@ namespace Manifold::UI
         drawOne("Profiler", m_profiler);
         drawOne("NOP Sled", m_nopSled);
         drawOne("Write history", m_writeHistory);
+        drawOne("Modules", m_modules);
         drawOne("Flow graph", m_flowGraph);
         {
             PROFILE_ZONE("Script forms");
@@ -630,6 +632,13 @@ namespace Manifold::UI
         if (!m_nopSled)
             m_nopSled = std::make_unique<NopSledWindow>(*this);
         m_nopSled->Show();
+    }
+
+    void Workspace::OpenModules()
+    {
+        if (!m_modules)
+            m_modules = std::make_unique<ModulesWindow>(*this);
+        m_modules->Show();
     }
 
     void Workspace::OpenWriteHistory()
