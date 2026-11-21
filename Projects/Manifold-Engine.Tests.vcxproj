@@ -199,6 +199,9 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Table\TableFiles.cpp" />
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
+    <ClCompile Include="..\Source\Target\ClrLink.cpp" />
+    <ClCompile Include="..\Source\Target\ClrMetadata.cpp" />
+    <ClCompile Include="..\Source\Target\ClrRuntime.cpp" />
     <ClCompile Include="..\Source\Target\CodeCall.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\FrameCalls.cpp" />
@@ -230,6 +233,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Text\TextBuffer.cpp" />
     <ClCompile Include="..\Tests\AssemblerTests.cpp" />
     <ClCompile Include="..\Tests\AutorunTests.cpp" />
+    <ClCompile Include="..\Tests\ClrTests.cpp" />
     <ClCompile Include="..\Tests\CommandTests.cpp" />
     <ClCompile Include="..\Tests\CompatHarness.cpp" />
     <ClCompile Include="..\Tests\CompatTests.cpp" />
@@ -261,6 +265,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Tests\TestKit.h" />
+    <ClInclude Include="..\Tests\Target\FakeClr.h" />
     <ClInclude Include="..\Tests\Target\FakeIl2CppScene.h" />
     <ClInclude Include="..\Tests\Target\FakeRtti.h" />
     <ClInclude Include="..\Tests\Target\FakeUnreal.h" />
@@ -280,6 +285,13 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
   <ItemGroup>
     <ProjectReference Include="ManagedDumper.vcxproj">
       <Project>{5B6C7D8E-9FA0-41B2-83C4-E5F607182930}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="ManifoldClr.vcxproj">
+      <Project>{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
     </ProjectReference>

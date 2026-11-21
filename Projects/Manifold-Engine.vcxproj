@@ -213,6 +213,9 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Table\TableFiles.cpp" />
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
+    <ClCompile Include="..\Source\Target\ClrLink.cpp" />
+    <ClCompile Include="..\Source\Target\ClrMetadata.cpp" />
+    <ClCompile Include="..\Source\Target\ClrRuntime.cpp" />
     <ClCompile Include="..\Source\Target\CodeCall.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\FrameCalls.cpp" />
@@ -379,6 +382,10 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Table\Structures.h" />
     <ClInclude Include="..\Source\Table\TableFiles.h" />
     <ClInclude Include="..\Source\Table\UnrealStructures.h" />
+    <ClInclude Include="..\Source\Target\ClrLink.h" />
+    <ClInclude Include="..\Source\Target\ClrMetadata.h" />
+    <ClInclude Include="..\Source\Target\ClrProtocol.h" />
+    <ClInclude Include="..\Source\Target\ClrRuntime.h" />
     <ClInclude Include="..\Source\Target\CodeCall.h" />
     <ClInclude Include="..\Source\Target\CodeMap.h" />
     <ClInclude Include="..\Source\Target\FrameCalls.h" />
@@ -484,6 +491,13 @@ exit /b 0</Command>
   <ItemGroup>
     <ProjectReference Include="ManagedDumper.vcxproj">
       <Project>{5B6C7D8E-9FA0-41B2-83C4-E5F607182930}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="ManifoldClr.vcxproj">
+      <Project>{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
     </ProjectReference>

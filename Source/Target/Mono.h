@@ -43,6 +43,7 @@ namespace Manifold::Target
         std::string TypeName;
         int ValueSize = 0;
         int EnumCode = 0;
+        std::uint64_t Address = 0;  // .NET statics: where the value lives (0 when the runtime has not made it yet)
     };
 
     inline bool MayBeValueType(int typeCode)
@@ -84,6 +85,7 @@ namespace Manifold::Target
         bool Generic = false;       // IL2CPP: an open generic definition, which has no field offsets
         bool Discovered = false;    // IL2CPP: named from its shape in memory (a generic instance, an array)
         bool ValueTypesRead = false;
+        std::vector<MonoField> Statics; // .NET: the static fields, read with the members
 
         std::string FullName() const { return Namespace.empty() ? Name : Namespace + "." + Name; }
     };
@@ -112,6 +114,9 @@ namespace Manifold::Target
         // Which runtime Start attached to; None while nothing is attached.
         ManagedRuntime Runtime() const { return m_runtime.load(); }
         bool IsIl2Cpp() const { return m_runtime.load() == ManagedRuntime::Il2Cpp; }
+        bool IsClr() const { return m_runtime.load() == ManagedRuntime::Clr; }
+        // "Mono", "IL2CPP" or the .NET flavour with its version.
+        std::string RuntimeDescription() const;
         static const char* RuntimeName(ManagedRuntime runtime);
 
         // The scene and object explorer and the inspector on top of this
@@ -213,6 +218,7 @@ namespace Manifold::Target
         friend class AgentLink;
         friend class MonoRuntime;
         friend class Il2CppRuntime;
+        friend class ClrRuntime;
         struct Candidate
         {
             std::string Module;

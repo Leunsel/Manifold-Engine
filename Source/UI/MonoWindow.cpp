@@ -2,6 +2,7 @@
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Table/ManagedStructures.h"
 #include "Target/Mono.h"
 #include "Target/UnityExplorer.h"
 #include "UI/AddressActions.h"
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <optional>
 #include <set>
 #include <string_view>
@@ -142,6 +144,7 @@ namespace Manifold::UI
         m_selected = index;
         m_methods.clear();
         m_fields.clear();
+        m_statics.clear();
         m_parent.clear();
         m_generic = false;
         m_resolved.clear();
@@ -155,6 +158,7 @@ namespace Manifold::UI
         {
             m_methods = details->Methods;
             m_fields = details->Fields;
+            m_statics = details->Statics;
             m_parent = details->Parent;
             m_generic = details->Generic;
         }
@@ -204,7 +208,7 @@ namespace Manifold::UI
         }
         if (!m_engine.HasProcess())
         {
-            m_workspace.NoProcessState(ICON_FA_DICE_D6, "Open a Unity game to explore its classes, scenes and objects.");
+            m_workspace.NoProcessState(ICON_FA_DICE_D6, "Open a Unity or .NET game to explore its classes, scenes and objects.");
             EndToolWindow();
             return;
         }
@@ -225,12 +229,18 @@ namespace Manifold::UI
                 EndToolWindow();
                 return;
             }
-            const bool il2cpp = Target::MonoBridge::DetectRuntime(*m_engine.Process()) == Target::ManagedRuntime::Il2Cpp;
-            std::vector<EmptyAction> actions = { { il2cpp ? ICON_FA_PLUG "  Load the IL2CPP Runtime" : ICON_FA_PLUG "  Load the Mono Runtime", nullptr, true } };
-            if (EmptyState(ICON_FA_DICE_D6, "No managed runtime loaded",
-                    "This reads the game's Mono or IL2CPP runtime by running a small helper inside it: the classes, method addresses and "
-                    "field offsets, and with the explorer switched on the scenes, the objects and an inspector.",
-                    actions, true) == 0)
+            const Target::ManagedRuntime detected = Target::MonoBridge::DetectRuntime(*m_engine.Process());
+            const bool dotnet = detected == Target::ManagedRuntime::Clr;
+            std::vector<EmptyAction> actions = { { detected == Target::ManagedRuntime::Il2Cpp ? ICON_FA_PLUG "  Load the IL2CPP Runtime"
+                                                   : dotnet ? ICON_FA_PLUG "  Load the .NET Runtime"
+                                                            : ICON_FA_PLUG "  Load the Mono Runtime",
+                nullptr, true } };
+            const char* about = dotnet
+                ? "This reads the game's .NET runtime from outside the game, through the runtime's own data access library: the classes, "
+                  "field offsets, static fields with their addresses and the code of the methods the game has compiled. Nothing runs inside the game."
+                : "This reads the game's Mono or IL2CPP runtime by running a small helper inside it: the classes, method addresses and "
+                  "field offsets, and with the explorer switched on the scenes, the objects and an inspector.";
+            if (EmptyState(ICON_FA_DICE_D6, "No managed runtime loaded", about, actions, true) == 0)
                 m_engine.Managed().Load();
             EndToolWindow();
             return;
@@ -271,6 +281,13 @@ namespace Manifold::UI
         }
         Target::UnityExplorer& unity = mono.Unity();
         SyncUnity(unity);
+        // A .NET game has no Unity scenes or objects: only the classes.
+        const bool dotnet = mono.IsClr();
+        if (dotnet && m_leftTab != 2)
+        {
+            m_leftTab = 2;
+            m_showClass = m_selected >= 0;
+        }
 
         if (work && LoadingLine(*work))
             m_engine.CancelWork(work->Id);
@@ -307,12 +324,12 @@ namespace Manifold::UI
                     }
                     return true;
                 };
-            if (tab(ICON_FA_SITEMAP "  Scenes", 0))
+            if (!dotnet && tab(ICON_FA_SITEMAP "  Scenes", 0))
             {
                 ScenesTab(unity);
                 ImGui::EndTabItem();
             }
-            if (tab(ICON_FA_SEARCH "  Objects", 1))
+            if (!dotnet && tab(ICON_FA_SEARCH "  Objects", 1))
             {
                 ObjectsTab(unity);
                 ImGui::EndTabItem();
@@ -335,6 +352,11 @@ namespace Manifold::UI
         ImGui::BeginChild("##monoright", ImVec2(0.0f, height), ImGuiChildFlags_Borders);
         if (m_showClass && m_leftTab == 2 && m_selected >= 0)
             ClassPane();
+        else if (dotnet)
+            EmptyState(ICON_FA_CUBES, "Pick a class",
+                "Its fields with their offsets, its static fields with their addresses and its methods show here. Class:Method and Class:StaticField "
+                "work as addresses anywhere, as in Terraria.Main:myPlayer.",
+                {}, false);
         else
             InspectorPane(unity);
         ImGui::EndChild();
@@ -356,7 +378,7 @@ namespace Manifold::UI
             {
                 if (ImGui::MenuItem(ICON_FA_PLUG "  Load the Runtime", nullptr, false, process && !working))
                     m_engine.Managed().Load();
-                ItemTooltip("Reads the game's Mono or IL2CPP runtime through a small helper inside the game");
+                ItemTooltip("Reads the game's Mono or IL2CPP runtime through a small helper inside the game, or a .NET runtime from outside it");
             }
             else
             {
@@ -369,14 +391,15 @@ namespace Manifold::UI
                     m_engine.Managed().Stop();
                     stopped = true;
                 }
-                ItemTooltip("Ends the helper in the game, takes the explorer's frame callback out again and sets runInBackground back");
+                ItemTooltip(mono.IsClr() ? "Ends the .NET helper, which reads the game from outside"
+                                         : "Ends the helper in the game, takes the explorer's frame callback out again and sets runInBackground back");
             }
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_TIMES "  Close"))
                 m_open = false;
             ImGui::EndMenu();
         }
-        if (present && !stopped && ImGui::BeginMenu("Explorer"))
+        if (present && !stopped && !mono.IsClr() && ImGui::BeginMenu("Explorer"))
         {
             Target::UnityExplorer& unity = mono.Unity();
             if (!unity.Enabled())
@@ -402,7 +425,7 @@ namespace Manifold::UI
             }
             ImGui::EndMenu();
         }
-        if (present && !stopped && ImGui::BeginMenu("View"))
+        if (present && !stopped && !mono.IsClr() && ImGui::BeginMenu("View"))
         {
             const auto view = [&](const char* label, int index)
                 {
@@ -433,7 +456,7 @@ namespace Manifold::UI
         const float gap = Px(14.0f);
         const std::string task = m_status.Task.empty() ? std::string("Working") : m_status.Task;
         const char* const explorerOn = ICON_FA_INFO_CIRCLE "  explorer on";
-        const std::string info = mono.Module() + "  ·  " + Target::MonoBridge::RuntimeName(mono.Runtime()) + "  ·  " + std::to_string(m_classes.size()) + " classes" +
+        const std::string info = mono.Module() + "  ·  " + mono.RuntimeDescription() + "  ·  " + std::to_string(m_classes.size()) + " classes" +
             (m_status.UnityVersion.empty() ? std::string() : "  ·  Unity " + m_status.UnityVersion);
         const float busyWidth = showBusy ? ImGui::GetTextLineHeight() + Px(6.0f) + ImGui::CalcTextSize(task.c_str()).x + Px(8.0f) + SmallButtonWidth(ICON_FA_STOP "  Stop") + gap : 0.0f;
         const float explorerWidth = explorer ? ImGui::CalcTextSize(explorerOn).x + gap : 0.0f;
@@ -890,11 +913,12 @@ namespace Manifold::UI
                     if (ImGui::BeginPopupContextItem())
                     {
                         const bool live = m_engine.Mono().Unity().Enabled();
-                        if (ImGui::MenuItem(ICON_FA_EYE "  Static Members", nullptr, false, live))
+                        const bool unityGame = !m_engine.Mono().IsClr();
+                        if (unityGame && ImGui::MenuItem(ICON_FA_EYE "  Static Members", nullptr, false, live))
                             OpenStatics(info.Handle);
-                        if (!live)
+                        if (unityGame && !live)
                             ItemTooltip("Needs the explorer, which is off: turn it on under Scenes or Objects");
-                        if (ImGui::MenuItem(ICON_FA_SEARCH "  Find Objects of This Class", nullptr, false, live))
+                        if (unityGame && ImGui::MenuItem(ICON_FA_SEARCH "  Find Objects of This Class", nullptr, false, live))
                         {
                             m_searchClass = info.FullName();
                             m_requestLeftTab = 1;
@@ -922,7 +946,7 @@ namespace Manifold::UI
         CardTitle(ICON_FA_DICE_D6, m_selectedName.c_str());
         ImGui::SameLine();
         const Target::MonoClass* info = m_selected >= 0 && m_selected < static_cast<int>(m_classes.size()) ? &m_classes[static_cast<std::size_t>(m_selected)] : nullptr;
-        if (info)
+        if (info && !m_engine.Mono().IsClr())
         {
             if (ImGui::SmallButton(ICON_FA_EYE "  Static Members"))
                 OpenStatics(info->Handle);
@@ -939,6 +963,9 @@ namespace Manifold::UI
             if (ImGui::SmallButton(ICON_FA_TIMES "##closeclass"))
                 m_showClass = false;
             ItemTooltip("Back to the inspector");
+        }
+        if (info)
+        {
             std::string about = info->Image;
             if (!m_parent.empty())
                 about += (about.empty() ? "derives from " : "  ·  derives from ") + m_parent;
@@ -949,6 +976,11 @@ namespace Manifold::UI
         }
         MethodsPane();
         ImGui::Spacing();
+        if (!m_statics.empty())
+        {
+            StaticsPane();
+            ImGui::Spacing();
+        }
         FieldsPane();
     }
 
@@ -1069,5 +1101,114 @@ namespace Manifold::UI
             }
             ImGui::EndTable();
         }
+    }
+
+    void MonoWindow::StaticsPane()
+    {
+        SectionLabel((std::to_string(m_statics.size()) + " static fields").c_str());
+        const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp;
+        const float height = std::max(Px(90.0f), std::min(ImGui::GetContentRegionAvail().y * 0.45f, (static_cast<float>(m_statics.size()) + 1.5f) * ImGui::GetFrameHeight()));
+        const std::shared_ptr<Target::Process> process = m_engine.Process();
+        if (!ImGui::BeginTable("##monostatics", 4, flags, ImVec2(0.0f, height)))
+            return;
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthStretch, 1.6f);
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch, 1.2f);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 1.1f);
+        ImGui::TableHeadersRow();
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(m_statics.size()));
+        while (clipper.Step())
+        {
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+            {
+                const Target::MonoField& field = m_statics[static_cast<std::size_t>(i)];
+                const std::string symbol = m_selectedName + ":" + field.Name;
+                ImGui::TableNextRow();
+                ImGui::PushID(i);
+                ImGui::TableNextColumn();
+                PushMono();
+                if (ImGui::Selectable(field.Name.c_str(), false, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick) &&
+                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && field.Address)
+                    m_workspace.OpenMemoryViewer(field.Address, true);
+                PopMono();
+                if (ImGui::BeginPopupContextItem())
+                {
+                    if (field.Address)
+                        AddressMenuItems(m_workspace, field.Address, DataActions);
+                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Address Expression"))
+                        ImGui::SetClipboardText(symbol.c_str());
+                    ItemTooltip(("Copies " + symbol + ", which resolves to this field's address in the address list, scripts and the memory viewer").c_str());
+                    ImGui::EndPopup();
+                }
+                ImGui::TableNextColumn();
+                Muted(field.TypeName.empty() ? std::string("?") : field.TypeName);
+                ImGui::TableNextColumn();
+                // A primitive shows its value; a reference or a boxed struct
+                // holds a pointer to the object.
+                std::string value;
+                if (field.Address && process)
+                {
+                    std::uint8_t bytes[8] = {};
+                    int size = 0;
+                    Table::FieldDisplay display = Table::FieldDisplay::Unsigned;
+                    const Scan::ValueType type = Table::ManagedFieldType(field.EnumCode ? field.EnumCode : field.TypeCode, size, display);
+                    if (process->ReadExact(field.Address, bytes, static_cast<std::size_t>(type == Scan::ValueType::Pointer ? process->PointerSize() : size)))
+                    {
+                        std::int64_t signedValue = 0;
+                        std::uint64_t raw = 0;
+                        std::memcpy(&raw, bytes, sizeof(raw));
+                        if (type == Scan::ValueType::Float)
+                        {
+                            float number = 0.0f;
+                            std::memcpy(&number, bytes, sizeof(number));
+                            value = Format("%g", static_cast<double>(number));
+                        }
+                        else if (type == Scan::ValueType::Double)
+                        {
+                            double number = 0.0;
+                            std::memcpy(&number, bytes, sizeof(number));
+                            value = Format("%g", number);
+                        }
+                        else if (type == Scan::ValueType::Pointer)
+                        {
+                            value = process->PointerSize() == 4 ? Hex(raw & 0xFFFFFFFFu) : Hex(raw);
+                        }
+                        else
+                        {
+                            if (size < 8)
+                                raw &= (1ull << (size * 8)) - 1;
+                            if (display == Table::FieldDisplay::Signed)
+                            {
+                                const int shift = 64 - size * 8;
+                                signedValue = static_cast<std::int64_t>(raw << shift) >> shift;
+                                value = std::to_string(signedValue);
+                            }
+                            else
+                                value = field.TypeCode == 0x02 ? (raw ? "true" : "false") : std::to_string(raw);
+                        }
+                    }
+                }
+                PushMono();
+                if (value.empty())
+                    Muted("--");
+                else
+                    ImGui::TextUnformatted(value.c_str());
+                ImGui::TableNextColumn();
+                if (field.Address)
+                    ImGui::TextColored(ManifoldTheme::AddressText, "%s", Hex(field.Address).c_str());
+                else
+                    Muted("--");
+                PopMono();
+                if (!field.Address)
+                    ItemTooltip("No storage yet: the runtime makes it when the class is first used. Thread statics and generic classes have one per thread "
+                                "or per type argument, which is not read here. Reload the classes later.");
+                else
+                    ItemTooltip(("Double-click the name for the memory viewer. " + symbol + " resolves to this address.").c_str());
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndTable();
     }
 }

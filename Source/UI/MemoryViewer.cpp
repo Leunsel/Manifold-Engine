@@ -420,11 +420,14 @@ namespace Manifold::UI
                 m_engine.LoadSymbols(false);
             if (ImGui::MenuItem(ICON_FA_GLOBE "  Load Windows Symbols", nullptr, false, process))
                 m_engine.LoadSymbols(true);
-            if (ImGui::MenuItem(m_engine.MonoPresent() ? (m_engine.Mono().IsIl2Cpp() ? ICON_FA_DICE_D6 "  IL2CPP Runtime Loaded" : ICON_FA_DICE_D6 "  Mono Runtime Loaded")
-                                : m_engine.Managed().Loading() ? ICON_FA_DICE_D6 "  Loading the Runtime..." : ICON_FA_DICE_D6 "  Load Mono / IL2CPP Runtime",
+            const char* loaded = m_engine.Mono().IsIl2Cpp() ? ICON_FA_DICE_D6 "  IL2CPP Runtime Loaded"
+                : m_engine.Mono().IsClr()                     ? ICON_FA_DICE_D6 "  .NET Runtime Loaded"
+                                                              : ICON_FA_DICE_D6 "  Mono Runtime Loaded";
+            if (ImGui::MenuItem(m_engine.MonoPresent() ? loaded
+                                : m_engine.Managed().Loading() ? ICON_FA_DICE_D6 "  Loading the Runtime..." : ICON_FA_DICE_D6 "  Load Managed Runtime",
                     nullptr, false, process && !m_engine.MonoPresent() && !m_engine.Managed().Loading()))
                 m_engine.Managed().Load();
-            ItemTooltip("Reads the classes and methods of a Unity game (Mono or IL2CPP) so method names show here and resolve in addresses.");
+            ItemTooltip("Reads the classes and methods of a Unity game (Mono or IL2CPP) or a .NET game so method names show here and resolve in addresses.");
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_TIMES "  Close"))
                 m_open = false;

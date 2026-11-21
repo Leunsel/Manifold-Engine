@@ -60,6 +60,7 @@ namespace Manifold::UI
         void ClassPane();
         void MethodsPane();
         void FieldsPane();
+        void StaticsPane();
         void InspectorPane(Target::UnityExplorer& unity);
         void InspectorPage(Target::UnityExplorer& unity, InspectorTab& tab);
         void GameObjectSection(Target::UnityExplorer& unity, const Target::UnityInspection& inspection);
@@ -91,6 +92,7 @@ namespace Manifold::UI
         std::string m_selectedName;
         std::vector<Target::MonoMethod> m_methods;
         std::vector<Target::MonoField> m_fields;
+        std::vector<Target::MonoField> m_statics;
         std::string m_parent;
         bool m_generic = false;
         std::string m_pendingClass;

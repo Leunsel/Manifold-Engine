@@ -229,7 +229,9 @@ namespace Manifold::Target
             return;
         {
             std::lock_guard bridge(m_mono.m_lock);
-            if (!m_mono.m_present || !m_mono.m_process || m_mono.m_runtime.load() == ManagedRuntime::None)
+            // A .NET game has no Unity scenes, and nothing may run in it.
+            const ManagedRuntime runtime = m_mono.m_runtime.load();
+            if (!m_mono.m_present || !m_mono.m_process || (runtime != ManagedRuntime::Mono && runtime != ManagedRuntime::Il2Cpp))
                 return;
             std::lock_guard state(m_stateLock);
             m_process = m_mono.m_process;

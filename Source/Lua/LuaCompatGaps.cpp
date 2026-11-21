@@ -22,7 +22,7 @@ namespace Manifold::Lua
         constexpr GapReason kKernel{ "Kernel driver", "it needs Cheat Engine's kernel driver (DBK)" };
         constexpr GapReason kDbvm{ "Hypervisor", "it needs Cheat Engine's hypervisor (DBVM)" };
         constexpr GapReason kCompiler{ "Compilers", "Manifold Engine has no built-in C or C# compiler" };
-        constexpr GapReason kDotNet{ ".NET", "Manifold Engine has no .NET data collector and does not inject .NET code; the Mono tool covers Mono games" };
+        constexpr GapReason kDotNet{ ".NET", "Manifold Engine reads .NET games from outside (the Mono / .NET window, Class:Method and Class:StaticField addresses, Structure Dissect) but has no data collector object and does not inject .NET code" };
         constexpr GapReason kServer{ "ceserver", "Manifold Engine does not connect to ceserver" };
         constexpr GapReason kDatabase{ "Databases", "Manifold Engine has no SQLite or ODBC classes" };
         constexpr GapReason kXml{ "XML documents", "the XML document classes are not built in" };
@@ -55,7 +55,7 @@ namespace Manifold::Lua
 
         constexpr GapReason kSymbolsReady{ "Symbols", "symbols are ready when a process is opened, so there is nothing to wait for" };
         constexpr GapReason kLocalSymbols{ "Own symbols", "names inside Manifold Engine are looked up on every call" };
-        constexpr GapReason kManagedSymbols{ "Mono symbols", "Mono names are looked up when they are used" };
+        constexpr GapReason kManagedSymbols{ "Managed symbols", "Mono, IL2CPP and .NET names are looked up when they are used" };
         constexpr GapReason kKernelSymbols{ "Kernel symbols", "there are no kernel symbols" };
         constexpr GapReason kNoAds{ "Ad window", "there is no ad window" };
         constexpr GapReason kGarbage{ "Garbage collector", "Lua's own garbage collector runs as usual" };

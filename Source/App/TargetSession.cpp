@@ -87,7 +87,9 @@ namespace Manifold
                 // MethodNameAt caches so repeat lines are free. IL2CPP methods
                 // are GameAssembly.dll's own code and are looked up in the
                 // bridge's sorted table, without a remote call for the range.
-                if (m_mono.Present() && m_process && (m_mono.IsIl2Cpp() || !m_process->ModuleAt(address)))
+                // .NET code can also be precompiled into an assembly's image;
+                // the .NET backend rules out native modules by itself.
+                if (m_mono.Present() && m_process && (m_mono.Runtime() != Target::ManagedRuntime::Mono || !m_process->ModuleAt(address)))
                 {
                     if (const auto name = m_mono.MethodNameAt(address))
                     {

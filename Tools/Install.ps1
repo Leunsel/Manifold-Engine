@@ -48,7 +48,7 @@ if ($first)
     }
 }
 
-foreach ($file in 'Manifold-Engine.exe', 'Manifold-Engine.pdb', 'ManifoldAgent.dll', 'ManifoldAgent.pdb', 'ManifoldAgent32.dll', 'ManifoldAgent32.pdb')
+foreach ($file in 'Manifold-Engine.exe', 'Manifold-Engine.pdb', 'ManifoldAgent.dll', 'ManifoldAgent.pdb', 'ManifoldAgent32.dll', 'ManifoldAgent32.pdb', 'ManifoldClr.exe', 'ManifoldClr.pdb', 'ManifoldClr32.exe', 'ManifoldClr32.pdb')
 {
     $from = Join-Path $build $file
     if (Test-Path $from) { Copy-Item $from (Join-Path $Destination $file) -Force }
