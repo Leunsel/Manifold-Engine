@@ -36,6 +36,8 @@ namespace Manifold
         m_debugger.SetLogDebugStrings(settings.LogDebugStrings);
         m_debugger.SetPreferHardware(settings.UseHardwareExecuteBreakpoints);
         m_target.Mono().SetPauseCheck([this] { return m_debugger.Attached() && m_debugger.Broken(); });
+        m_writes.SetGuard({ [this](const Target::Process& process, std::uint64_t address, std::uint8_t* buffer, std::size_t size) { return m_debugger.ReadAround(process, address, buffer, size); },
+            [this](const Target::Process& process, std::uint64_t address, std::span<const std::uint8_t> bytes) { return m_debugger.WriteAround(process, address, bytes); } });
     }
 
     Engine::~Engine()

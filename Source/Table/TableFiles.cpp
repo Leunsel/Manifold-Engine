@@ -152,6 +152,25 @@ namespace Manifold::Table
             }
         }
 
+        bool ReservedDeviceName(std::string_view name)
+        {
+            std::string_view base = name.substr(0, name.find('.'));
+            while (!base.empty() && base.back() == ' ')
+                base.remove_suffix(1);
+            static constexpr const char* kDevices[] = { "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$" };
+            for (const char* device : kDevices)
+            {
+                if (EqualsNoCase(base, device))
+                    return true;
+            }
+            if (base.size() < 4 || (!EqualsNoCase(base.substr(0, 3), "COM") && !EqualsNoCase(base.substr(0, 3), "LPT")))
+                return false;
+            const std::string_view number = base.substr(3);
+            using namespace std::string_view_literals;
+            // ∑ Windows also maps the superscripts 1, 2 and 3 (COM¹, LPT²) to devices.
+            return (number.size() == 1 && IsDigit(number[0])) || number == "\xC2\xB9"sv || number == "\xC2\xB2"sv || number == "\xC2\xB3"sv;
+        }
+
         std::string LuaQuoted(std::string_view name)
         {
             std::string text = "'";
@@ -320,6 +339,8 @@ namespace Manifold::Table
         }
         if (EqualsNoCase(name, current))
             return {};
+        if (!SafeExportName(name))
+            return "Windows does not allow this as a file name (CON, NUL, COM1 and the like, \".\", \"..\", or a name that ends with a dot).";
         for (const TableFile& file : list.Files)
         {
             if (EqualsNoCase(file.Name, name))
@@ -328,11 +349,29 @@ namespace Manifold::Table
         return {};
     }
 
+    bool SafeExportName(std::string_view name)
+    {
+        if (name.empty() || name == "." || name == ".." || name.back() == '.' || name.back() == ' ')
+            return false;
+        for (const char c : name)
+        {
+            const unsigned char u = static_cast<unsigned char>(c);
+            if (u < 0x20 || u == 0x7F || c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
+                return false;
+        }
+        return !ReservedDeviceName(name);
+    }
+
     std::string UniqueFileName(const AddressList& list, std::string_view wanted)
+    {
+        return UniqueFileName(std::span<const TableFile>(list.Files), wanted);
+    }
+
+    std::string UniqueFileName(std::span<const TableFile> files, std::string_view wanted)
     {
         const auto taken = [&](std::string_view name)
         {
-            return std::any_of(list.Files.begin(), list.Files.end(), [&](const TableFile& file) { return EqualsNoCase(file.Name, name); });
+            return std::any_of(files.begin(), files.end(), [&](const TableFile& file) { return EqualsNoCase(file.Name, name); });
         };
         if (!taken(wanted))
             return std::string(wanted);

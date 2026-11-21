@@ -124,6 +124,7 @@ namespace Manifold::Autorun
     std::span<const ShippedModule> ShippedModules();
 
     std::string KeyOf(std::string_view name);
+    bool ValidName(std::string_view name);
     Header ParseHeader(std::string_view text);
     int CompareVersions(std::string_view left, std::string_view right);
     std::string Sha256Hex(std::string_view bytes);

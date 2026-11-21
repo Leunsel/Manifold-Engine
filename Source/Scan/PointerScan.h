@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Errors.h"
+#include "Scan/ValueType.h"
 
 #include <atomic>
 #include <cstdint>
@@ -249,6 +250,9 @@ namespace Manifold::Scan
     {
         std::optional<std::uint64_t> Address;
         std::vector<std::uint8_t> Value;
+        // ∑ A Float or Double with a Step matches within half a step, like the main scanner's Rounded mode, so the value as shown finds the path. Step 0 compares the bytes.
+        ValueType Type = ValueType::ByteArray;
+        double Step = 0.0;
         int Threads = 0;
         std::uint64_t MemoryLimit = kPointerMemoryLimit;
     };

@@ -94,8 +94,14 @@ namespace Manifold::UI
         {
             std::ofstream out(path, std::ios::binary | std::ios::trunc);
             out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-            out.flush();
-            return static_cast<bool>(out);
+            out.close();
+            return !out.fail();
+        }
+
+        std::string UnsafeNameText(std::size_t count, const std::string& first)
+        {
+            return Count(count, "file was", "files were") + " not exported because Windows does not allow " + (count == 1 ? "its name" : "their names") +
+                   " as a file name (a path, a device name like CON or NUL, or a name that ends with a dot). Rename " + (count == 1 ? "it" : "them") + " first: " + first;
         }
 
         void RightAligned(const std::string& text, const ImVec4& color)
@@ -154,9 +160,39 @@ namespace Manifold::UI
         return m_current.empty() ? nullptr : m_workspace.Core().Table().FindFile(m_current);
     }
 
+    void TableFilesWindow::TableChanged()
+    {
+        const std::size_t drafts = m_drafts.size() + (m_textDirty && !m_drafts.count(m_textKey) ? 1 : 0);
+        if (drafts > 0)
+            m_workspace.Core().Notify(LogLevel::Warning, Count(drafts, "table file had", "table files had") + " changes that were not put into the table. Another table was opened, so they were dropped.");
+        m_drafts.clear();
+        m_textKey.clear();
+        m_text.clear();
+        m_textData = nullptr;
+        m_textVersion = 0;
+        m_textDirty = false;
+        m_textStale = false;
+        m_editor = {};
+        m_info.clear();
+        m_names.clear();
+        m_selected.clear();
+        m_current.clear();
+        m_anchor.clear();
+        m_scrollTo.clear();
+        m_renaming.clear();
+        ReleaseImage();
+        m_rowsDirty = true;
+        m_usesDirty = true;
+    }
+
     void TableFilesWindow::Sync()
     {
         Table::AddressList& list = m_workspace.Core().Table();
+        if (list.Identity() != m_identity)
+        {
+            m_identity = list.Identity();
+            TableChanged();
+        }
         bool changed = list.Files.size() != m_names.size();
         for (auto& [key, info] : m_info)
             info.Seen = false;
@@ -294,6 +330,7 @@ namespace Manifold::UI
         options.Serial = true;
         auto bytes = std::make_shared<const std::vector<std::uint8_t>>(*next->Data);
         FactsResult result;
+        result.Identity = list.Identity();
         result.Key = Table::FileUseKey(next->Name);
         result.Data = next->Data.get();
         result.Version = *next->Version;
@@ -308,11 +345,12 @@ namespace Manifold::UI
 
     void TableFilesWindow::Collect()
     {
+        const std::uint64_t identity = m_workspace.Core().Table().Identity();
         for (FactsResult& result : std::exchange(m_results->Facts, {}))
         {
             m_factsRunning = false;
             const auto found = m_info.find(result.Key);
-            if (found == m_info.end() || found->second.Data != result.Data || found->second.Version != result.Version)
+            if (result.Identity != identity || found == m_info.end() || found->second.Data != result.Data || found->second.Version != result.Version)
                 continue;
             found->second.Stored = static_cast<std::int64_t>(result.Stored);
             found->second.Sha256 = std::move(result.Sha256);
@@ -320,7 +358,7 @@ namespace Manifold::UI
         }
         for (ImageResult& result : std::exchange(m_results->Images, {}))
         {
-            if (result.Key != m_image.Key || result.Data != m_image.Data || result.Version != m_image.Version)
+            if (result.Identity != identity || result.Key != m_image.Key || result.Data != m_image.Data || result.Version != m_image.Version)
                 continue;
             m_image.Loading = false;
             m_image.Failed = true;
@@ -383,6 +421,7 @@ namespace Manifold::UI
         options.Quiet = true;
         auto bytes = std::make_shared<const std::vector<std::uint8_t>>(*file.Data);
         ImageResult result;
+        result.Identity = m_workspace.Core().Table().Identity();
         result.Key = key;
         result.Data = m_image.Data;
         result.Version = m_image.Version;
@@ -408,10 +447,20 @@ namespace Manifold::UI
 
     void TableFilesWindow::SelectAll()
     {
-        for (const Table::FileRow& row : m_rows)
-            m_selected.insert(Table::FileUseKey(row.Name));
-        if (m_current.empty() && !m_rows.empty())
+        m_selected = VisibleKeys();
+        if (!m_rows.empty() && !m_selected.count(m_current))
+        {
             m_current = Table::FileUseKey(m_rows.front().Name);
+            m_anchor = m_current;
+        }
+    }
+
+    std::set<std::string> TableFilesWindow::VisibleKeys() const
+    {
+        std::set<std::string> keys;
+        for (const Table::FileRow& row : m_rows)
+            keys.insert(Table::FileUseKey(row.Name));
+        return keys;
     }
 
     void TableFilesWindow::Click(int index, bool toggle, bool range)
@@ -471,17 +520,20 @@ namespace Manifold::UI
     {
         if (paths.empty())
             return;
+        const Table::AddressList& list = m_workspace.Core().Table();
+        const std::uint64_t identity = list.Identity();
         std::size_t room = Table::kMaxTableFilesBytes;
-        for (const Table::TableFile& file : m_workspace.Core().Table().Files)
+        for (const Table::TableFile& file : list.Files)
             room -= std::min(room, file.Data->size());
         WorkOptions options;
         options.Title = paths.size() == 1 ? "Read " + WideToUtf8(paths.front().filename().wstring()) : "Read " + std::to_string(paths.size()) + " files";
         options.Group = kWorkGroup;
         options.Quiet = true;
         const int id = m_workspace.Core().Work().Start(std::move(options),
-            [results = m_results, paths = std::move(paths), replace = std::move(replace), room](WorkProgress& progress) mutable -> BackgroundWork::Finish
+            [results = m_results, paths = std::move(paths), replace = std::move(replace), room, identity](WorkProgress& progress) mutable -> BackgroundWork::Finish
             {
                 auto result = std::make_shared<AddResult>();
+                result->Identity = identity;
                 result->Replace = std::move(replace);
                 std::vector<std::filesystem::path> files;
                 for (const std::filesystem::path& path : paths)
@@ -528,6 +580,13 @@ namespace Manifold::UI
     {
         Engine& engine = m_workspace.Core();
         Table::AddressList& list = engine.Table();
+        if (result.Identity != list.Identity())
+        {
+            if (!result.Files.empty())
+                engine.Notify(LogLevel::Warning, Count(result.Files.size(), "file that was", "files that were") + " read from disk " + (result.Files.size() == 1 ? "was" : "were") +
+                                                     " not put into the table: another table was opened in the meantime.");
+            return;
+        }
         int added = 0;
         int updated = 0;
         std::string last;
@@ -640,6 +699,11 @@ namespace Manifold::UI
             const Table::TableFile* file = engine.Table().FindFile(names.front());
             if (!file)
                 return;
+            if (!Table::SafeExportName(file->Name))
+            {
+                engine.Notify(LogLevel::Error, UnsafeNameText(1, file->Name));
+                return;
+            }
             const std::wstring extension = Utf8ToWide(Table::FileExtension(file->Name));
             const auto path = m_workspace.SaveFileDialog({ { L"All files", L"*.*" } }, file->Name, extension.empty() ? nullptr : extension.c_str());
             if (!path)
@@ -657,7 +721,7 @@ namespace Manifold::UI
         for (const std::string& name : names)
         {
             std::error_code error;
-            if (std::filesystem::exists(*folder / Utf8ToWide(name), error))
+            if (Table::SafeExportName(name) && std::filesystem::exists(*folder / Utf8ToWide(name), error))
                 ++existing;
         }
         if (existing == 0)
@@ -665,28 +729,49 @@ namespace Manifold::UI
             WriteFiles(names, *folder);
             return;
         }
+        const std::uint64_t identity = engine.Table().Identity();
         m_workspace.Confirm("Export table files",
             Count(existing, "file exists", "files exist") + " already in " + WideToUtf8(folder->wstring()) + ". Overwrite " + (existing == 1 ? "it" : "them") + "?",
-            [this, names, folder = *folder]() { WriteFiles(names, folder); }, "Overwrite");
+            [this, names, folder = *folder, identity]()
+            {
+                if (m_workspace.Core().Table().Identity() == identity)
+                    WriteFiles(names, folder);
+                else
+                    m_workspace.Core().Notify(LogLevel::Warning, "Nothing was exported: another table was opened in the meantime.");
+            }, "Overwrite");
     }
 
     void TableFilesWindow::WriteFiles(const std::vector<std::string>& names, const std::filesystem::path& folder)
     {
         Engine& engine = m_workspace.Core();
         std::size_t written = 0;
+        std::size_t failures = 0;
         std::string failed;
+        std::vector<std::string> unsafe;
         for (const std::string& name : names)
         {
+            // ∑ Names come from the loaded table: ..\..\x.bat, C:\x, a:stream or CON would write outside the folder or to a device.
+            if (!Table::SafeExportName(name))
+            {
+                unsafe.push_back(name);
+                continue;
+            }
             const Table::TableFile* file = engine.Table().FindFile(name);
             if (file && WriteWhole(folder / Utf8ToWide(name), *file->Data))
+            {
                 ++written;
-            else if (failed.empty())
+                continue;
+            }
+            ++failures;
+            if (failed.empty())
                 failed = name;
         }
         if (written)
             engine.Notify(LogLevel::Success, "Saved " + Count(written, "file", "files") + " to " + WideToUtf8(folder.wstring()));
-        if (!failed.empty())
-            engine.Notify(LogLevel::Error, Count(names.size() - written, "file", "files") + " could not be written: " + failed);
+        if (!unsafe.empty())
+            engine.Notify(LogLevel::Error, UnsafeNameText(unsafe.size(), unsafe.front()));
+        if (failures)
+            engine.Notify(LogLevel::Error, Count(failures, "file", "files") + " could not be written: " + failed);
     }
 
     void TableFilesWindow::StartRename()
@@ -760,9 +845,12 @@ namespace Manifold::UI
 
     void TableFilesWindow::Delete()
     {
-        const std::vector<std::string> names = SelectedNames();
+        const std::set<std::string> visible = VisibleKeys();
+        std::vector<std::string> names = SelectedNames();
+        std::erase_if(names, [&](const std::string& name) { return !visible.count(Table::FileUseKey(name)); });
         if (names.empty())
             return;
+        const std::uint64_t identity = m_workspace.Core().Table().Identity();
         std::size_t used = 0;
         for (const std::string& name : names)
         {
@@ -772,9 +860,10 @@ namespace Manifold::UI
         std::string text = names.size() == 1 ? "Delete \"" + names.front() + "\" from the table?" : "Delete " + std::to_string(names.size()) + " files from the table?";
         if (used)
             text += names.size() == 1 ? " A script in the table names it." : " Scripts in the table name " + std::to_string(used) + " of them.";
-        m_workspace.Confirm(names.size() == 1 ? "Delete table file" : "Delete table files", text, [this, names]()
+        m_workspace.Confirm(names.size() == 1 ? "Delete table file" : "Delete table files", text, [this, names, identity]()
             {
-                Table::RemoveFiles(m_workspace.Core().Table(), names);
+                if (m_workspace.Core().Table().Identity() == identity)
+                    Table::RemoveFiles(m_workspace.Core().Table(), names);
             }, "Delete");
     }
 
@@ -842,6 +931,12 @@ namespace Manifold::UI
         Table::TableFile* file = m_textKey.empty() || !m_textDirty ? nullptr : list.FindFile(m_textKey);
         if (!file)
             return;
+        if (m_textStale || file->Data.get() != m_textData || *file->Version != m_textVersion)
+        {
+            m_textStale = true;
+            m_workspace.Core().Notify(LogLevel::Warning, file->Name + " changed in the table while you were editing it. Choose \"Load the table's version\" or \"Keep mine\" above the text first.");
+            return;
+        }
         Table::SetFileData(list, *file, std::vector<std::uint8_t>(m_text.begin(), m_text.end()));
         m_textData = file->Data.get();
         m_textVersion = *file->Version;
@@ -853,12 +948,25 @@ namespace Manifold::UI
     {
         Table::AddressList& list = m_workspace.Core().Table();
         ApplyText();
-        for (auto& [key, draft] : m_drafts)
+        std::size_t stale = 0;
+        std::string first;
+        for (auto it = m_drafts.begin(); it != m_drafts.end();)
         {
-            if (Table::TableFile* file = list.FindFile(key))
-                Table::SetFileData(list, *file, std::vector<std::uint8_t>(draft.Text.begin(), draft.Text.end()));
+            Table::TableFile* file = list.FindFile(it->first);
+            if (file && (file->Data.get() != it->second.Data || *file->Version != it->second.Version))
+            {
+                if (stale++ == 0)
+                    first = file->Name;
+                ++it;
+                continue;
+            }
+            if (file)
+                Table::SetFileData(list, *file, std::vector<std::uint8_t>(it->second.Text.begin(), it->second.Text.end()));
+            it = m_drafts.erase(it);
         }
-        m_drafts.clear();
+        if (stale > 0)
+            m_workspace.Core().Notify(LogLevel::Warning, Count(stale, "file was", "files were") + " left out because " + (stale == 1 ? "it" : "they") +
+                                                             " changed in the table after you edited " + (stale == 1 ? "it" : "them") + ". Open " + first + " to choose which version to keep.");
     }
 
     void TableFilesWindow::RevertText()
@@ -1168,6 +1276,8 @@ namespace Manifold::UI
         {
             m_rowsDirty = true;
             RebuildRows();
+            const std::set<std::string> visible = VisibleKeys();
+            std::erase_if(m_selected, [&](const std::string& key) { return !visible.count(key); });
         }
         ImGui::SameLine();
         if (IconButton(ICON_FA_PLUS, "Add files"))

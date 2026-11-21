@@ -459,7 +459,7 @@ namespace Manifold::Target
         Status Il2Nodes(const std::vector<std::uint64_t>& gameObjects, std::uint64_t parentTransform, std::size_t children, int group, std::vector<Il2Node>& out);
         void Il2Search(const UnitySearch& request, std::uint64_t klass, UnitySearchResult& result);
         void Il2Inspect(UnityInspection& inspection, bool properties, int group);
-        Status Il2Edit(const std::string& what, std::uint64_t method, std::uint64_t self, const std::vector<AgentArg>& arguments);
+        Status Il2Edit(const std::string& what, std::uint64_t method, std::uint64_t self, const std::vector<AgentArg>& arguments, bool valueType = false);
         Status Il2SetRunInBackground(bool enabled);
         bool Il2Fits(const MonoTypeInfo& type, const AgentArg& argument, std::string& error);
         Status Il2SetField(const UnityInspection& inspection, const MonoMember& member, const AgentArg& argument);

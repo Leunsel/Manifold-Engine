@@ -495,6 +495,7 @@ namespace Manifold
                 m_engine.SetActive(*record, false);
         }
         m_table.Clear();
+        m_table.NewIdentity();
         m_engine.Lua().ForgetRecords();
         m_structures.Clear();
         m_tableSymbols.clear();

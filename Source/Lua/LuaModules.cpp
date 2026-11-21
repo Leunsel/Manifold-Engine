@@ -62,6 +62,20 @@ namespace Manifold::Lua
             return module.State != State::Superseded && module.State != State::BuiltIn && !module.Duplicate;
         }
 
+        std::string HeldLine(const Module& module)
+        {
+            return (module.New ? "New module " : "Module ") + module.Name + " (" + module.Where + ") is held until it is allowed in Extensions > Modules";
+        }
+
+        struct DepthGuard
+        {
+            int& Depth;
+            explicit DepthGuard(int& depth) : Depth(depth) { ++Depth; }
+            ~DepthGuard() { --Depth; }
+            DepthGuard(const DepthGuard&) = delete;
+            DepthGuard& operator=(const DepthGuard&) = delete;
+        };
+
         std::optional<std::string> ReadScript(const std::filesystem::path& path)
         {
             std::ifstream file(path, std::ios::binary);
@@ -377,7 +391,18 @@ namespace Manifold::Lua
 
     std::filesystem::path LuaEngine::ModuleDataFolder(const Autorun::Module& module) const
     {
-        return m_autorunFolder / L"data" / Utf8ToWide(module.Name);
+        // ∑ A NAME line cannot give "..", but a file name can ("...lua" has the stem ".."); dots and spaces at the ends become '_' so the folder stays inside data\.
+        std::string name = module.Name;
+        if (!Autorun::ValidName(name))
+        {
+            for (std::size_t i = 0; i < name.size() && (name[i] == '.' || name[i] == ' '); ++i)
+                name[i] = '_';
+            for (std::size_t i = name.size(); i > 0 && (name[i - 1] == '.' || name[i - 1] == ' '); --i)
+                name[i - 1] = '_';
+            if (name.empty())
+                name = "_";
+        }
+        return m_autorunFolder / L"data" / Utf8ToWide(name);
     }
 
     int LuaEngine::ModulesNeedingAttention() const
@@ -426,6 +451,8 @@ namespace Manifold::Lua
         bool handled = false;
         if (lua_getfield(m_state, LUA_REGISTRYINDEX, "Manifold.ModuleUnload") == LUA_TFUNCTION)
         {
+            // ∑ The onUnload handlers run Lua that may call manifold.module.*; while they run, ModulesBusy refuses those calls so nobody replaces m_modules under the caller's Module*.
+            const DepthGuard unloading(m_unloadingModules);
             lua_pushlstring(m_state, module.Key.data(), module.Key.size());
             std::string error;
             if (CallStack(1, 1, error))
@@ -494,6 +521,57 @@ namespace Manifold::Lua
         return true;
     }
 
+    bool LuaEngine::ReadModuleAgain(Autorun::Module& module)
+    {
+        const std::string key = module.Key;
+        const bool held = module.State == State::Held;
+        Autorun::Refresh(module);
+        if (module.Key != key)
+            return false;
+        if (module.State != State::Held && module.State != State::BuiltIn)
+            module.State = State::Pending;
+        Autorun::ApplyState(module, m_moduleStore, { m_autorunOptions.HoldNew, Autorun::ShippedModules() });
+        if (module.State == State::Held)
+        {
+            module.HeldNext = false;
+            if (!held)
+                LOG_WARN("Autorun", HeldLine(module));
+        }
+        return true;
+    }
+
+    // ∑ The last check before a module runs, whoever made it pending: code a script wrote this session, or a stored state that is not
+    // allowed (the same rules as Autorun::ApplyState), holds it even when the caller did not read the module again.
+    bool LuaEngine::HoldUnlessAllowed(Autorun::Module& module)
+    {
+        const Autorun::Stored* stored = m_moduleStore.Find(module.Key);
+        if (module.HeldNext || (!module.Unmodified && stored && !stored->Allowed))
+        {
+            module.Reason = "A script wrote to its files; it runs again once it is allowed";
+        }
+        else if (!module.Unmodified && !stored && m_moduleStore.Existed() && m_autorunOptions.HoldNew)
+        {
+            module.New = true;
+            module.Reason = "It is new in the autorun folder and runs once it is allowed";
+        }
+        else
+        {
+            return false;
+        }
+        module.State = State::Held;
+        module.HeldNext = false;
+        return true;
+    }
+
+    const char* LuaEngine::ModulesBusy() const
+    {
+        if (m_unloadingModules > 0)
+            return "unloads";
+        if (!m_loadingModule.empty())
+            return "loads";
+        return nullptr;
+    }
+
     void LuaEngine::LoadPendingModules(bool announce, Status& first)
     {
         const auto fail = [&](ErrorCode code, const Module& module)
@@ -506,10 +584,19 @@ namespace Manifold::Lua
         std::map<std::string, std::string> blockedBefore;
         for (Module& module : m_modules)
         {
-            if (module.State == State::Blocked)
+            if (module.State != State::Blocked)
+                continue;
+            blockedBefore[module.Key] = module.Reason;
+            // ∑ A blocked module was read when the folder was scanned; it is read again so edits and script writes since then count before it runs.
+            const Module before = module;
+            if (ReadModuleAgain(module))
             {
-                blockedBefore[module.Key] = module.Reason;
-                module.State = State::Pending;
+                module.Changed = module.Changed || before.Changed;
+            }
+            else
+            {
+                module = before;
+                module.Reason = "its NAME changed since the folder was read; reload all modules to read it again";
             }
         }
         const std::vector<std::size_t> order = Autorun::Order(m_modules, ManifoldApiVersion());
@@ -528,7 +615,9 @@ namespace Manifold::Lua
             switch (module.State)
             {
             case State::Pending:
-                if (RunModuleEntry(module))
+                if (HoldUnlessAllowed(module))
+                    LOG_WARN("Autorun", HeldLine(module));
+                else if (RunModuleEntry(module))
                 {
                     std::string line = "Loaded " + module.Name;
                     if (!module.Header.Version.empty())
@@ -554,7 +643,7 @@ namespace Manifold::Lua
                 break;
             case State::Held:
                 if (announce)
-                    LOG_WARN("Autorun", (module.New ? "New module " : "Module ") + module.Name + " (" + module.Where + ") is held until it is allowed in Extensions > Modules");
+                    LOG_WARN("Autorun", HeldLine(module));
                 break;
             case State::Superseded:
             case State::BuiltIn:
@@ -569,14 +658,10 @@ namespace Manifold::Lua
 
     Status LuaEngine::RunAutorun(const std::filesystem::path& folder, const AutorunOptions& options)
     {
+        if (const char* busy = ModulesBusy())
+            return Status::Fail(ErrorCode::LuaModuleBlocked, std::string("the modules cannot be reloaded while one of them ") + busy);
         std::error_code error;
-        if (!std::filesystem::is_directory(folder, error))
-        {
-            std::filesystem::create_directories(folder, error);
-            return Status::Success();
-        }
-        if (!m_loadingModule.empty())
-            return Status::Fail(ErrorCode::LuaModuleBlocked, "the modules cannot be reloaded while one of them loads");
+        const bool missing = !std::filesystem::is_directory(folder, error);
         std::vector<std::string> lingering;
         for (const Module& module : m_modules)
         {
@@ -593,6 +678,14 @@ namespace Manifold::Lua
         const std::filesystem::path full = std::filesystem::absolute(folder, error);
         m_autorunFolder = error ? folder : full;
         m_autorunOptions = options;
+        if (missing)
+        {
+            // ∑ What was loaded is unloaded above so the list is not stale; the state file is left alone, so the first start with a real folder still adopts what is in it.
+            std::filesystem::create_directories(folder, error);
+            m_modules.clear();
+            ++m_modulesRevision;
+            return Status::Success();
+        }
         m_modules = Autorun::Scan(m_autorunFolder);
         m_moduleStore.Load(options.StateFile);
         Autorun::ApplyState(m_modules, m_moduleStore, { options.HoldNew, Autorun::ShippedModules() });
@@ -660,8 +753,8 @@ namespace Manifold::Lua
             return Status::Fail(ErrorCode::LuaModuleUnknown, name);
         if (!Selectable(*module))
             return Status::Fail(ErrorCode::LuaModuleBlocked, module->Name + ": " + module->Reason);
-        if (!m_loadingModule.empty())
-            return Status::Fail(ErrorCode::LuaModuleBlocked, module->Name + ": modules cannot be switched while one of them loads");
+        if (const char* busy = ModulesBusy())
+            return Status::Fail(ErrorCode::LuaModuleBlocked, module->Name + ": modules cannot be switched while one of them " + busy);
         Autorun::Stored* stored = m_moduleStore.Find(module->Key);
         if (!stored)
         {
@@ -689,9 +782,11 @@ namespace Manifold::Lua
         }
         else if (module->State == State::Disabled)
         {
-            module->State = State::Pending;
-            Autorun::Refresh(*module);
-            Autorun::ApplyState(*module, m_moduleStore, { m_autorunOptions.HoldNew, Autorun::ShippedModules() });
+            if (!ReadModuleAgain(*module))
+            {
+                m_moduleStore.Save();
+                return RunAutorun(std::filesystem::path(m_autorunFolder), AutorunOptions(m_autorunOptions));
+            }
             LoadPendingModules(false, first);
         }
         m_moduleStore.Save();
@@ -704,15 +799,19 @@ namespace Manifold::Lua
         Module* module = Autorun::Find(m_modules, name);
         if (!module)
             return Status::Fail(ErrorCode::LuaModuleUnknown, name);
-        if (!m_loadingModule.empty())
-            return Status::Fail(ErrorCode::LuaModuleBlocked, module->Name + ": modules cannot be allowed while one of them loads");
+        if (const char* busy = ModulesBusy())
+            return Status::Fail(ErrorCode::LuaModuleBlocked, module->Name + ": modules cannot be allowed while one of them " + busy);
+        // ∑ Read before the allow: when NAME now gives another key the user allowed a module that no longer exists under that name, so the folder is read again and the renamed one is judged on its own.
+        const std::string before = module->Key;
+        Autorun::Refresh(*module);
+        if (module->Key != before)
+            return RunAutorun(std::filesystem::path(m_autorunFolder), AutorunOptions(m_autorunOptions));
         Autorun::Stored* stored = m_moduleStore.Find(module->Key);
         if (!stored)
         {
             stored = &m_moduleStore.Put(module->Key, module->Name);
             stored->FirstSeen = Autorun::Today();
         }
-        Autorun::Refresh(*module);
         stored->Allowed = true;
         stored->Hash = module->Hash;
         m_moduleStore.Touch();
@@ -740,8 +839,8 @@ namespace Manifold::Lua
             return Status::Fail(ErrorCode::LuaModuleUnknown, name);
         if (!Selectable(*module) || module->State == State::Disabled)
             return Status::Fail(ErrorCode::LuaModuleBlocked, module->Name + ": " + (module->State == State::Disabled ? std::string("it is disabled") : module->Reason));
-        if (!m_loadingModule.empty())
-            return Status::Fail(ErrorCode::LuaModuleBlocked, module->Name + ": modules cannot be reloaded while one of them loads");
+        if (const char* busy = ModulesBusy())
+            return Status::Fail(ErrorCode::LuaModuleBlocked, module->Name + ": modules cannot be reloaded while one of them " + busy);
         const std::string key = module->Key;
         std::vector<std::string> again{ key };
         for (std::size_t i = 0; i < again.size(); ++i)
@@ -771,14 +870,13 @@ namespace Manifold::Lua
                 other->State = State::Pending;
             }
         }
-        Autorun::Refresh(*module);
-        if (module->Key != key)
-            return RunAutorun(std::filesystem::path(m_autorunFolder), AutorunOptions(m_autorunOptions));
-        if (module->State != State::Held)
-            module->State = State::Pending;
-        Autorun::ApplyState(*module, m_moduleStore, { m_autorunOptions.HoldNew, Autorun::ShippedModules() });
-        if (module->State == State::Held)
-            module->HeldNext = false;
+        // ∑ The dependents are read again like the module itself: a script may have written one of them, and a renamed one needs a new scan.
+        for (const std::string& rerun : again)
+        {
+            Module* other = Autorun::Find(m_modules, rerun);
+            if (other && !ReadModuleAgain(*other))
+                return RunAutorun(std::filesystem::path(m_autorunFolder), AutorunOptions(m_autorunOptions));
+        }
         Status first;
         LoadPendingModules(false, first);
         m_moduleStore.Save();

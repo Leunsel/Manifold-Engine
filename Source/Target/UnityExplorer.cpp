@@ -2830,7 +2830,7 @@ namespace Manifold::Target
                 return Fail(member.Name + ": " + error);
             const Status done = member.Kind == MonoMemberKind::Field
                 ? Il2SetField(*inspection, member, *arg)
-                : Il2Edit("Setting " + member.Name + " failed", member.Setter, member.Static ? 0 : inspection->Object, { *arg });
+                : Il2Edit("Setting " + member.Name + " failed", member.Setter, member.Static ? 0 : inspection->Object, { *arg }, inspection->Layout && inspection->Layout->ValueType);
             if (!done)
                 return Fail(done.Text);
             DoInspect(id, member.Kind == MonoMemberKind::Property);

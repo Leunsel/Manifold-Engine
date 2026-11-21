@@ -28,7 +28,8 @@ namespace Manifold::UI
             Scan,
             Rescan,
             Order,
-            Load
+            Load,
+            Save
         };
 
         struct Outcome

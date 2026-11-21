@@ -2,6 +2,7 @@
 
 #include "App/Engine.h"
 #include "App/Settings.h"
+#include "App/WriteHistory.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Debug/BreakAction.h"
@@ -494,6 +495,50 @@ namespace Manifold::Tests
         CHECK_MSG(SharedMoves(engine, 300), std::string(backend) + ": the target stopped running after the exception checks");
     }
 
+    // A memory-viewer edit over an inserted int3 keeps the breakpoint armed and records the real
+    // bytes; removing the breakpoint afterwards leaves the edited bytes, not the old ones.
+    void CheckWritesKeepBreakpoints(Engine& engine)
+    {
+        Debug::Debugger& debugger = engine.Debugger();
+        const Target::Process& process = *engine.Process();
+        const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);
+        CHECK(work != 0);
+        if (!work)
+            return;
+        std::uint8_t clean[4]{};
+        CHECK(process.ReadExact(work, clean, sizeof(clean)));
+        const Status set = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false, Action(engine, "1 == 1", {}, false));
+        CHECK_MSG(set.Ok(), set.Text);
+        if (!set)
+            return;
+        const Status written = engine.Writes().Write(process, engine.ProcessGeneration(), work, clean, "test");
+        CHECK_MSG(written.Ok(), written.Text);
+        const MemoryWrite* entry = engine.Writes().Find(engine.Writes().LastId());
+        CHECK(entry && entry->Original.size() == sizeof(clean) && std::equal(entry->Original.begin(), entry->Original.end(), clean));
+        Wait(engine, 100);
+        // The breakpoint keeps firing; while a hit is stepped over the old byte is in place for a moment.
+        bool armed = false;
+        for (int i = 0; i < 200 && !armed; ++i)
+        {
+            std::uint8_t raw = 0;
+            armed = process.ReadExact(work, &raw, 1) && raw == 0xCC;
+        }
+        CHECK_MSG(armed, "the int3 is gone after the write");
+        CHECK_MSG(HitsAt(engine, work) > 0, "the breakpoint stopped counting after the write");
+        if (entry)
+        {
+            std::uint8_t seen[4]{};
+            debugger.ReadAround(process, work, seen, sizeof(seen));
+            const WriteState state = engine.Writes().StateOf(process, *entry);
+            CHECK_MSG(state == WriteState::InMemory, "state " + std::to_string(static_cast<int>(state)) + ", memory without int3 " + HexBytes(seen) + ", written " + HexBytes(entry->Written));
+        }
+        CHECK(debugger.RemoveBreakpoint(work).Ok());
+        Wait(engine, 50);
+        std::uint8_t after[4]{};
+        CHECK(process.ReadExact(work, after, sizeof(after)) && std::equal(std::begin(after), std::end(after), clean));
+        CHECK(process.Alive());
+    }
+
     void CheckStepOut(Engine& engine, bool veh)
     {
         Debug::Debugger& debugger = engine.Debugger();
@@ -892,6 +937,8 @@ namespace Manifold::Tests
                 CheckStepOut(engine, veh);
                 if (veh)
                     CheckHostSilence(engine);
+                else
+                    CheckWritesKeepBreakpoints(engine);
                 engine.Debugger().Detach();
                 Wait(engine, 400);
                 CHECK(engine.Process()->Alive());

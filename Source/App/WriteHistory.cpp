@@ -17,15 +17,25 @@ namespace Manifold
         }
     }
 
+    Status WriteHistory::Put(const Target::Process& process, std::uint64_t address, std::span<const std::uint8_t> bytes) const
+    {
+        return m_guard.Write ? m_guard.Write(process, address, bytes) : process.Write(address, bytes);
+    }
+
+    bool WriteHistory::ReadClean(const Target::Process& process, std::uint64_t address, std::uint8_t* data, std::size_t size) const
+    {
+        return m_guard.Read ? m_guard.Read(process, address, data, size) : process.ReadExact(address, data, size);
+    }
+
     Status WriteHistory::Write(const Target::Process& process, std::uint64_t generation, std::uint64_t address, std::span<const std::uint8_t> bytes, std::string source)
     {
         MemoryWrite write;
         write.Generation = generation;
         write.Address = address;
         write.Original.resize(bytes.size());
-        if (!process.ReadExact(address, write.Original.data(), write.Original.size()))
+        if (!ReadClean(process, address, write.Original.data(), write.Original.size()))
             return Status::Fail(ErrorCode::ReadFailed, Hex(address));
-        const Status status = process.Write(address, bytes);
+        const Status status = Put(process, address, bytes);
         if (!status)
             return status;
         if (m_droppedGeneration != generation)
@@ -71,7 +81,7 @@ namespace Manifold
         MemoryWrite* write = Entry(id);
         if (!write || write->Generation != generation || write->Undone || write->Address != address || write->Written.size() != bytes.size() || BlockedBy(*write))
             return Write(process, generation, address, bytes, std::move(source));
-        const Status status = process.Write(address, bytes);
+        const Status status = Put(process, address, bytes);
         if (status)
         {
             write->Written.assign(bytes.begin(), bytes.end());
@@ -110,7 +120,7 @@ namespace Manifold
             return Status::Fail(ErrorCode::WriteFailed, Hex(write->Address) + " (the edit belongs to a process that is no longer open)");
         if (BlockedBy(*write))
             return Status::Fail(ErrorCode::WriteFailed, Hex(write->Address) + " (a later edit overlaps these bytes and has to be undone first)");
-        const Status status = process.Write(write->Address, write->Original);
+        const Status status = Put(process, write->Address, write->Original);
         if (status)
         {
             write->Undone = true;
@@ -128,7 +138,7 @@ namespace Manifold
             return Status::Fail(ErrorCode::WriteFailed, Hex(write->Address) + " (the edit belongs to a process that is no longer open)");
         if (BlockedBy(*write))
             return Status::Fail(ErrorCode::WriteFailed, Hex(write->Address) + " (another edit overlaps these bytes: redo the earlier one or undo the later one first)");
-        const Status status = process.Write(write->Address, write->Written);
+        const Status status = Put(process, write->Address, write->Written);
         if (status)
         {
             write->Undone = false;
@@ -165,7 +175,7 @@ namespace Manifold
         for (std::size_t at = 0; at < write.Written.size(); at += kCompareBlock)
         {
             const std::size_t count = std::min(kCompareBlock, write.Written.size() - at);
-            if (!process.ReadExact(write.Address + at, now.data(), count))
+            if (!ReadClean(process, write.Address + at, now.data(), count))
                 return WriteState::Unreadable;
             if (!std::equal(now.begin(), now.begin() + static_cast<std::ptrdiff_t>(count), write.Written.begin() + static_cast<std::ptrdiff_t>(at)))
                 return WriteState::ChangedSince;

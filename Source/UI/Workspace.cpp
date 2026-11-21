@@ -858,7 +858,7 @@ namespace Manifold::UI
                 else
                     m_engine.Notify(LogLevel::Success, "Loaded " + WideToUtf8(path.filename().wstring()));
             };
-        if (!merge && m_engine.Table().Dirty() && m_engine.Table().Count() > 0)
+        if (!merge && UnsavedTable())
         {
             Confirm("Open table", "The current table has changes that are not saved. Open the other table anyway?", load, "Open");
             return true;
@@ -947,7 +947,7 @@ namespace Manifold::UI
                 const std::string when = Backups::When(path);
                 m_engine.Notify(LogLevel::Success, "Opened the backup " + (when.empty() ? WideToUtf8(path.filename().wstring()) : "from " + when) + ". Save it under a name to keep it.");
             };
-        if (m_engine.Table().Dirty() && m_engine.Table().Count() > 0)
+        if (UnsavedTable())
         {
             Confirm("Open backup", "The current table has changes that are not saved. Open the backup anyway?", load, "Open");
             return;
@@ -958,7 +958,7 @@ namespace Manifold::UI
     void Workspace::OfferBackup(const std::filesystem::path& path, const std::string& name)
     {
         LOG_WARN("Backup", "The last run did not close properly. Its last backup is " + WideToUtf8(path.wstring()));
-        if (m_engine.Table().Count() > 0)
+        if (Table::TableHasContent(m_engine.Table(), m_engine.Structures(), m_engine.TableSymbols()))
         {
             m_engine.Notify(LogLevel::Warning, "The last run did not close properly. Its last backup of " + name + " from " + Backups::When(path) + " can be opened with File, Backups, Open a backup.");
             return;
@@ -987,18 +987,23 @@ namespace Manifold::UI
         ::ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     }
 
+    bool Workspace::UnsavedTable()
+    {
+        return m_engine.Table().Dirty() && Table::TableHasContent(m_engine.Table(), m_engine.Structures(), m_engine.TableSymbols());
+    }
+
     void Workspace::NewTable()
     {
         const auto clear = [this]() { m_engine.NewTable(); };
-        if (m_engine.Table().Dirty() && m_engine.Table().Count() > 0)
-            Confirm("New table", "Throw away the records of the current table?", clear, "Clear");
+        if (UnsavedTable())
+            Confirm("New table", "The current table has changes that are not saved. Throw it away?", clear, "Clear");
         else
             clear();
     }
 
     void Workspace::RequestQuit()
     {
-        if (m_engine.Table().Dirty() && m_engine.Table().Count() > 0)
+        if (UnsavedTable())
         {
             Confirm("Quit", "The table has changes that are not saved. Quit anyway?", [this]() { QuitAfterTable(); }, "Quit");
             return;

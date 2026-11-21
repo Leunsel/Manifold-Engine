@@ -8,6 +8,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -44,6 +45,9 @@ namespace Manifold::Table
         FileNaming naming = FileNaming::AsLoaded);
     std::string WriteTable(const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols,
         FileNaming naming = FileNaming::AsLoaded);
+    bool TableHasContent(const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols);
+    // Writes path.tmp, flushes it to the disk and renames it over path; on failure only path.tmp is removed.
+    bool WriteFileSafely(const std::filesystem::path& path, std::string_view bytes, bool replace = true);
 
     std::string RecordsToXml(const std::vector<const MemoryRecord*>& records);
     std::optional<std::vector<std::uint8_t>> DecodeTableFile(std::string_view text, std::size_t limit = kMaxTableFileBytes);

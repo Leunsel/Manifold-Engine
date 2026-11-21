@@ -682,7 +682,11 @@ namespace Manifold::Target
             const auto grace = std::chrono::steady_clock::now() + kAbortWait;
             while (!Done() && std::chrono::steady_clock::now() < grace && m_process->Alive())
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
-            m_executed = std::min<std::size_t>(batch.m_calls.size(), static_cast<std::size_t>(m_process->ReadValue<std::uint32_t>(m_control + kNext).value_or(0)) + 1);
+            // The stub checks Abort before every call, so once it is outside (Busy 0) no call starts
+            // any more and Next is exact. While it is inside, the call at Next may be running: count it.
+            const bool inside = !Done() && m_process->ReadValue<std::uint32_t>(m_control + kBusy).value_or(1) != 0;
+            const std::optional<std::uint32_t> next = m_process->ReadValue<std::uint32_t>(m_control + kNext);
+            m_executed = next ? std::min<std::size_t>(batch.m_calls.size(), *next + (inside ? 1u : 0u)) : batch.m_calls.size();
             Collect(batch);
             return Status::Fail(ErrorCode::MonoCallFailed, failure);
         }

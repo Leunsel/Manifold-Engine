@@ -26,13 +26,19 @@
 
 namespace Manifold
 {
-    std::optional<DecodedImage> DecodeImage(std::span<const std::uint8_t> bytes)
+    std::optional<DecodedImage> DecodeImage(std::span<const std::uint8_t> bytes, std::uint64_t maxPixels)
     {
         if (bytes.empty() || bytes.size() > static_cast<std::size_t>(INT_MAX))
             return std::nullopt;
         int width = 0;
         int height = 0;
         int channels = 0;
+        // ∑ The header alone decides the allocation: a few hundred bytes of PNG can claim 23000 x 23000 pixels (2 GB, held twice).
+        if (!stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &width, &height, &channels))
+            return std::nullopt;
+        if (width <= 0 || height <= 0 || width > kMaxImageSide || height > kMaxImageSide ||
+            static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) > maxPixels)
+            return std::nullopt;
         stbi_uc* pixels = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()), &width, &height, &channels, 4);
         if (!pixels)
             return std::nullopt;

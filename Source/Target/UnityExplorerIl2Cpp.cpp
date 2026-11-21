@@ -684,11 +684,20 @@ namespace Manifold::Target
                 const std::uint8_t value = *state.OriginalRunInBackground ? 1 : 0;
                 recipe.Invoke(Il2Method(kApplicationClass, "set_runInBackground", { "System.Boolean" }), Il2Recipe::Arg::Null(), { recipe.Bytes(&value, 1) });
             }
+            const std::size_t before = recipe.Batch.Calls();
             std::size_t planned = next;
             while (planned < handles.size() && recipe.Batch.Fits(1, 0))
                 recipe.Batch.Call(state.HandleFree, handles[planned++]);
             if (!Il2Run(recipe, kShutdownWait, false))
             {
+                // The main thread may have run part of the batch before it stopped answering;
+                // those handles are free already and must not be freed again below.
+                const std::size_t executed = state.Frame.Executed();
+                if (executed >= before)
+                {
+                    restored = true;
+                    next += std::min(executed - before, planned - next);
+                }
                 onFrame = false;
                 break;
             }
@@ -1670,7 +1679,7 @@ namespace Manifold::Target
         inspection.GameObject = std::move(info);
     }
 
-    Status UnityExplorer::Il2Edit(const std::string& what, std::uint64_t method, std::uint64_t self, const std::vector<AgentArg>& arguments)
+    Status UnityExplorer::Il2Edit(const std::string& what, std::uint64_t method, std::uint64_t self, const std::vector<AgentArg>& arguments, bool valueType)
     {
         using Arg = Il2Recipe::Arg;
         if (!method)
@@ -1679,7 +1688,9 @@ namespace Manifold::Target
         std::vector<Arg> parameters;
         for (const AgentArg& argument : arguments)
             parameters.push_back(recipe.Argument(argument));
-        const Il2Recipe::Invoked invoked = recipe.Invoke(method, self ? Arg::Object(self) : Arg::Null(), parameters);
+        // A method of a value type takes the unboxed struct as this, like the getters in Il2Inspect.
+        const Arg target = !self ? Arg::Null() : valueType ? recipe.This(Arg::Object(self)) : Arg::Object(self);
+        const Il2Recipe::Invoked invoked = recipe.Invoke(method, target, parameters);
         if (invoked.Call < 0)
             return Status::Fail(ErrorCode::MonoCallFailed, what + ": the call could not be put together");
         if (const Status ran = Il2Run(recipe, kCallWait); !ran)

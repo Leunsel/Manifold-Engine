@@ -888,8 +888,67 @@ namespace Manifold::Debug
     {
         if (!breakpoint.Inserted)
             return;
-        m_process->Write(breakpoint.Address, &breakpoint.Original, 1);
         breakpoint.Inserted = false;
+        // Something else may have written over the int3 since (a script, a patch). Putting the old
+        // byte back would then break the new code, e.g. turn a NOP run into E8 90 90 90 90.
+        std::uint8_t current = 0;
+        if (!m_process->ReadExact(breakpoint.Address, &current, 1) || current != 0xCC)
+        {
+            LOG_DEBUG("Debugger", "The int3 at " + Hex(breakpoint.Address) + " was overwritten; its old byte is not put back");
+            return;
+        }
+        m_process->Write(breakpoint.Address, &breakpoint.Original, 1);
+    }
+
+    void Debugger::DropTemporaries()
+    {
+        for (auto it = m_breakpoints.begin(); it != m_breakpoints.end();)
+        {
+            if (!it->second.Temporary)
+            {
+                ++it;
+                continue;
+            }
+            RemoveSoftware(it->second);
+            it = m_breakpoints.erase(it);
+        }
+    }
+
+    bool Debugger::ReadAround(const Target::Process& process, std::uint64_t address, std::uint8_t* buffer, std::size_t size) const
+    {
+        std::lock_guard lock(m_lock);
+        if (!process.ReadExact(address, buffer, size))
+            return false;
+        if (m_process && m_process->Id() == process.Id())
+            UnpatchLocked(address, buffer, size);
+        return true;
+    }
+
+    Status Debugger::WriteAround(const Target::Process& process, std::uint64_t address, std::span<const std::uint8_t> bytes)
+    {
+        std::lock_guard lock(m_lock);
+        std::vector<Breakpoint*> covered;
+        if (m_process && m_process->Id() == process.Id())
+        {
+            for (auto& [at, breakpoint] : m_breakpoints)
+            {
+                if (breakpoint.Inserted && !breakpoint.Hardware && at >= address && at - address < bytes.size())
+                    covered.push_back(&breakpoint);
+            }
+        }
+        if (covered.empty())
+            return process.Write(address, bytes);
+        std::vector<std::uint8_t> armed(bytes.begin(), bytes.end());
+        for (const Breakpoint* breakpoint : covered)
+            armed[breakpoint->Address - address] = 0xCC;
+        const Status status = process.Write(address, armed);
+        if (status)
+        {
+            for (Breakpoint* breakpoint : covered)
+                breakpoint->Original = bytes[breakpoint->Address - address];
+            ++m_generation;
+        }
+        return status;
     }
 
     Status Debugger::AddBreakpointInternal(Breakpoint breakpoint)
@@ -1349,6 +1408,14 @@ namespace Manifold::Debug
         }
     }
 
+    Disasm::Instruction Debugger::DecodeUnpatched(std::uint64_t address) const
+    {
+        std::uint8_t bytes[16]{};
+        const std::size_t got = m_process->Read(address, bytes, sizeof(bytes));
+        UnpatchLocked(address, bytes, got);
+        return m_disassembler->Decode(address, bytes, got, nullptr);
+    }
+
     std::optional<std::uint64_t> Debugger::PreviousInstruction(std::uint64_t address) const
     {
         constexpr std::uint64_t kLookBack = 48;
@@ -1417,6 +1484,9 @@ namespace Manifold::Debug
         ContextHolder context(m_is64Bit);
         if (!context.Read(thread.Handle))
             return;
+        // A step over or step out that another stop interrupted must not fire later on its own
+        // (the next pass through that return address) or block a breakpoint there.
+        DropTemporaries();
         m_stepping = false;
         m_break.Broken = true;
         m_break.ThreadId = threadId;
@@ -1913,7 +1983,7 @@ namespace Manifold::Debug
                         ResumeMode mode = m_stop ? ResumeMode::Continue : m_resumeMode;
                         if (mode == ResumeMode::RunToReturn)
                         {
-                            const Disasm::Instruction current = m_disassembler->Read(*m_process, context.Ip(), nullptr);
+                            const Disasm::Instruction current = DecodeUnpatched(context.Ip());
                             if (current.Valid && current.Kind == Disasm::Flow::Return)
                                 mode = ResumeMode::StepInto;
                             else if (const auto slot = ReturnSlot(context.Values()))
@@ -1932,7 +2002,7 @@ namespace Manifold::Debug
                         }
                         if (mode == ResumeMode::StepOver)
                         {
-                            const Disasm::Instruction current = m_disassembler->Read(*m_process, context.Ip(), nullptr);
+                            const Disasm::Instruction current = DecodeUnpatched(context.Ip());
                             if (current.Kind == Disasm::Flow::Call && current.Valid)
                             {
                                 Breakpoint temporary;

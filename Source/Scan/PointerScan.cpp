@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <bit>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <numeric>
@@ -1218,7 +1219,18 @@ namespace Manifold::Scan
     {
         const int pointerSize = from.PointerSize();
         out.Begin(pointerSize, from.Levels(), from.Modules(), rescan.MemoryLimit);
-        out.SetTarget(rescan.Address.value_or(from.Target()));
+        // ∑ A rescan by value leaves the paths at many addresses, so the old target would flag every row as leading elsewhere.
+        out.SetTarget(rescan.Address ? *rescan.Address : rescan.Value.empty() ? from.Target() : 0);
+        const bool rounded = rescan.Step > 0.0 && ((rescan.Type == ValueType::Float && rescan.Value.size() == 4) || (rescan.Type == ValueType::Double && rescan.Value.size() == 8));
+        const double wanted = rounded ? AsDouble(rescan.Type, rescan.Value, true).value_or(0.0) : 0.0;
+        const double slack = rescan.Step * 0.5 + std::fabs(wanted) * 1e-12;
+        const auto matches = [&](const std::vector<std::uint8_t>& value)
+            {
+                if (!rounded)
+                    return value == rescan.Value;
+                const std::optional<double> found = AsDouble(rescan.Type, value, true);
+                return found && !std::isnan(*found) && (*found == wanted || std::fabs(*found - wanted) <= slack);
+            };
         const std::vector<PointerModule> loaded = source.Modules();
         std::vector<std::uint64_t> bases(from.Modules().size(), 0);
         for (std::size_t index = 0; index < bases.size(); ++index)
@@ -1262,7 +1274,7 @@ namespace Manifold::Scan
                         const std::optional<std::uint64_t> address = ResolvePointerPath(bases[path.Module], path, read);
                         if (!address || (rescan.Address && *address != *rescan.Address))
                             continue;
-                        if (!value.empty() && (!cache.Read(*address, value.data(), value.size()) || value != rescan.Value))
+                        if (!value.empty() && (!cache.Read(*address, value.data(), value.size()) || !matches(value)))
                             continue;
                         std::memcpy(kept.data() + held * recordSize, record, recordSize);
                         ++held;

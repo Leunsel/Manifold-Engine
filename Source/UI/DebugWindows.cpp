@@ -261,6 +261,19 @@ namespace Manifold::UI
                     m_list.push_back(breakpoint);
             }
             std::sort(m_list.begin(), m_list.end(), [](const Debug::Breakpoint& a, const Debug::Breakpoint& b) { return a.Address < b.Address; });
+            // Read once per change instead of every frame, and without the debugger's own int3.
+            m_instructions.clear();
+            for (const Debug::Breakpoint& breakpoint : m_list)
+            {
+                if (breakpoint.Type != Debug::BreakpointType::Execute || !m_engine.HasProcess())
+                    continue;
+                std::uint8_t bytes[16]{};
+                const std::size_t got = m_engine.Process()->Read(breakpoint.Address, bytes, sizeof(bytes));
+                debugger.Unpatch(breakpoint.Address, bytes, got);
+                const Disasm::Instruction instruction = m_engine.Disassembler().Decode(breakpoint.Address, bytes, got, &m_engine.Symbols());
+                if (got && instruction.Valid)
+                    m_instructions[breakpoint.Address] = instruction.Text();
+            }
         }
         MenuBar();
 
@@ -292,7 +305,7 @@ namespace Manifold::UI
             for (const Debug::Breakpoint& breakpoint : m_list)
             {
                 ImGui::TableNextRow();
-                ImGui::PushID(static_cast<int>(breakpoint.Address));
+                ImGui::PushID(reinterpret_cast<const void*>(static_cast<std::uintptr_t>(breakpoint.Address)));
                 ImGui::TableNextColumn();
                 const bool stoppedHere = info.Broken && (info.BreakpointAddress == breakpoint.Address || info.Address == breakpoint.Address);
                 PushMono();
@@ -326,9 +339,8 @@ namespace Manifold::UI
                 PushMono();
                 if (breakpoint.Type == Debug::BreakpointType::Execute && m_engine.HasProcess())
                 {
-                    const Disasm::Instruction instruction = m_engine.Disassembler().Read(*m_engine.Process(), breakpoint.Address, &m_engine.Symbols());
-                    if (instruction.Valid)
-                        ImGui::TextUnformatted(instruction.Text().c_str());
+                    if (const auto found = m_instructions.find(breakpoint.Address); found != m_instructions.end())
+                        ImGui::TextUnformatted(found->second.c_str());
                     else
                         Muted("??");
                 }

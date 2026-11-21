@@ -121,6 +121,12 @@ namespace Manifold::Tests
             CHECK(Autorun::ParseHeader("--[[\nNAME : a\\b\n]]").Name.empty());
 
             CHECK(Autorun::CompareVersions("1.2", "1.2.0") == 0 && Autorun::CompareVersions("1.10", "1.9") > 0 && Autorun::CompareVersions("2.0.0", "2.0.1") < 0 && Autorun::CompareVersions("3", "2.9.9") > 0);
+            CHECK(Autorun::CompareVersions("1.99999999999999999999999", "1.99999999999999999999998") > 0 && Autorun::CompareVersions("100000000000000000000000", "99999999999999999999999") > 0);
+            CHECK(Autorun::CompareVersions("1.000000000000000000000002", "1.2") == 0 && Autorun::CompareVersions("0.0", "") == 0 && Autorun::CompareVersions("9999999999999999999999.1", "9999999999999999999999.10") < 0);
+
+            for (const char* bad : { "..", ".", "...", ".hidden", "trailing.", "a\x01" "b", "tab\tinside" })
+                CHECK_MSG(Autorun::ParseHeader("--[[\nNAME : " + std::string(bad) + "\n]]").Name.empty(), bad);
+            CHECK(!Autorun::ValidName("") && !Autorun::ValidName(" lead") && !Autorun::ValidName("trail ") && Autorun::ValidName("a.b") && Autorun::ValidName("Manifold-SigMaker"));
             CHECK_EQ(Autorun::Sha256Hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
         }
 
@@ -420,6 +426,25 @@ namespace Manifold::Tests
                 CHECK(Get(lua.Modules(), "Json").State == State::Loaded && Get(lua.Modules(), "App").State == State::Loaded);
                 CHECK_EQ(Eval(lua, "return tostring(JSON_TAMPERED) .. '|' .. APP_RUNS"), "true|2");
 
+                lua.Run("local f = io.open(" + tree.LuaPath("modules/App.lua") + ", 'a') f:write('\\nAPP_PLANTED = true\\n') f:close()", "table");
+                CHECK(Get(lua.Modules(), "App").HeldNext && Get(lua.Modules(), "App").State == State::Loaded);
+                CHECK_EQ(Eval(lua, "return tostring(manifold.module.reload('Json'))"), "true");
+                CHECK(Get(lua.Modules(), "Json").State == State::Loaded && Get(lua.Modules(), "App").State == State::Held && !Get(lua.Modules(), "App").HeldNext);
+                CHECK_EQ(Eval(lua, "return tostring(APP_PLANTED) .. '|' .. APP_RUNS .. '|' .. JSON"), "nil|2|3");
+                CHECK(lua.ModulesNeedingAttention() == 2);
+                CHECK(lua.AllowModule("App").Ok());
+                CHECK(Get(lua.Modules(), "App").State == State::Loaded);
+                CHECK_EQ(Eval(lua, "return tostring(APP_PLANTED) .. '|' .. APP_RUNS"), "true|3");
+
+                lua.Run("local f = io.open(" + tree.LuaPath("modules/App.lua") + ", 'a') f:write('\\nAPP_PLANTED_AGAIN = true\\n') f:close()", "table");
+                CHECK(lua.SetModuleEnabled("Json", false).Ok());
+                CHECK(Get(lua.Modules(), "App").State == State::Blocked);
+                CHECK(lua.SetModuleEnabled("Json", true).Ok());
+                CHECK(Get(lua.Modules(), "Json").State == State::Loaded && Get(lua.Modules(), "App").State == State::Held);
+                CHECK_EQ(Eval(lua, "return tostring(APP_PLANTED_AGAIN) .. '|' .. APP_RUNS .. '|' .. JSON"), "nil|3|4");
+                CHECK(lua.AllowModule("App").Ok());
+                CHECK_EQ(Eval(lua, "return tostring(APP_PLANTED_AGAIN) .. '|' .. APP_RUNS"), "true|4");
+
                 tree.Put("loose.lua", "\nLOOSE_EDITED = true", true);
                 CHECK(lua.RunAutorun(tree.Autorun(), options).Ok());
                 CHECK(Get(lua.Modules(), "loose").State == State::Loaded && Get(lua.Modules(), "loose").Changed && !Get(lua.Modules(), "Json").Changed);
@@ -427,6 +452,41 @@ namespace Manifold::Tests
                 CHECK(lua.RunAutorun(tree.Autorun(), options).Ok());
                 CHECK(!Get(lua.Modules(), "loose").Changed);
             }
+        }
+
+        void GuardChecks()
+        {
+            Tree tree("guard");
+            tree.Put("modules/Dots.lua", "-- NAME : ..\nDOTS_DATA = manifold.module.ensureData()");
+            tree.Put("modules/Loop.lua",
+                "LOOP_RUNS = (LOOP_RUNS or 0) + 1\n"
+                "manifold.module.onUnload(function()\n"
+                "  local ok, e = manifold.module.reload('Loop')\n  local ok2, e2 = manifold.module.disable('Dots')\n"
+                "  LOOP_REFUSED = tostring(ok) .. '|' .. e.code .. '|' .. tostring(ok2) .. '|' .. e2.code\n"
+                "end)");
+            Settings settings;
+            Engine engine(settings);
+            Lua::LuaEngine& lua = engine.Lua();
+            lua.Run("__manifoldHeadless = true", "headless");
+            CHECK(lua.RunAutorun(tree.Autorun()).Ok());
+            CHECK(Get(lua.Modules(), "Dots").State == State::Loaded && Get(lua.Modules(), "Loop").State == State::Loaded);
+            CHECK(Eval(lua, "return DOTS_DATA") == WideToUtf8((tree.Autorun() / "data" / "Dots").wstring()) + "\\");
+            Module dots;
+            dots.Name = "..";
+            CHECK(lua.ModuleDataFolder(dots) == tree.Autorun() / "data" / "__");
+
+            CHECK(lua.ReloadModule("Loop").Ok());
+            CHECK_EQ(Eval(lua, "return LOOP_REFUSED .. '|' .. LOOP_RUNS"), "nil|ME-7012|nil|ME-7012|2");
+            CHECK(Get(lua.Modules(), "Dots").State == State::Loaded && Get(lua.Modules(), "Dots").Enabled);
+            CHECK(lua.RunAutorun(tree.Autorun()).Ok());
+            CHECK_EQ(Eval(lua, "return tostring(LOOP_RUNS)"), "3");
+            CHECK(Get(lua.Modules(), "Loop").State == State::Loaded && Get(lua.Modules(), "Dots").State == State::Loaded);
+
+            std::error_code ignored;
+            std::filesystem::remove_all(tree.Autorun(), ignored);
+            CHECK(lua.RunAutorun(tree.Autorun()).Ok());
+            CHECK(lua.Modules().empty() && std::filesystem::is_directory(tree.Autorun()));
+            CHECK_EQ(Eval(lua, "return tostring(LOOP_RUNS) .. '|' .. tostring(#manifold.module.list())"), "3|0");
         }
 
         void ShippedChecks()
@@ -461,6 +521,7 @@ namespace Manifold::Tests
         StoreChecks();
         LoaderChecks();
         TrustChecks();
+        GuardChecks();
         ShippedChecks();
         return Totals().Failures - before;
     }

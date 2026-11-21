@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -342,6 +343,7 @@ namespace Manifold::Tests
             CHECK(Scan::RescanPointers(*after.Memory, results, byValue, valued).Ok());
             const std::multiset<std::string> valuedPaths = Paths(valued);
             CHECK_MSG(valuedPaths == survivors, label + " by value: " + Listed(valuedPaths));
+            CHECK_EQ(valued.Target(), 0u);
 
             Scan::PointerRescan same;
             same.Address = before.Target;
@@ -360,6 +362,57 @@ namespace Manifold::Tests
             Scan::PointerResults partial;
             CHECK(Scan::RescanPointers(unloaded, results, same, partial).Ok());
             CHECK_EQ(partial.Count(), 0u);
+        }
+
+        void RescanByRoundedValue(int pointerSize)
+        {
+            const std::string label = pointerSize == 8 ? "64-bit rounded rescan" : "32-bit rounded rescan";
+            const World before = BuildWorld(pointerSize, false);
+            World after = BuildWorld(pointerSize, true);
+            Scan::PointerResults results;
+            CHECK(Scan::ScanPointers(*before.Memory, Options(before, 5), results).Ok());
+            const std::multiset<std::string> survivors = { Path("engine.dll", 0x2008, { 0x34 }), Path("engine.dll", 0x2020, { 0x10, 0x34 }), Path("game.exe", 0x1010, { 0x18, 0x40, 0x34 }) };
+            const auto rescanFor = [&](Scan::ValueType type, double typed, double step)
+                {
+                    Scan::PointerRescan rescan;
+                    rescan.Type = type;
+                    rescan.Step = step;
+                    if (type == Scan::ValueType::Float)
+                    {
+                        const float value = static_cast<float>(typed);
+                        rescan.Value.assign(reinterpret_cast<const std::uint8_t*>(&value), reinterpret_cast<const std::uint8_t*>(&value) + sizeof(value));
+                    }
+                    else
+                    {
+                        rescan.Value.assign(reinterpret_cast<const std::uint8_t*>(&typed), reinterpret_cast<const std::uint8_t*>(&typed) + sizeof(typed));
+                    }
+                    Scan::PointerResults kept;
+                    CHECK(Scan::RescanPointers(*after.Memory, results, rescan, kept).Ok());
+                    CHECK_EQ(kept.Target(), 0u);
+                    return Paths(kept);
+                };
+
+            // The window shows this Float as 123.457 (%.6g).
+            const float health = 123.456789f;
+            after.Memory->Raw(after.Target, &health, sizeof(health));
+            const std::multiset<std::string> shown = rescanFor(Scan::ValueType::Float, 123.457, 0.001);
+            CHECK_MSG(shown == survivors, label + ", Float as shown: " + Listed(shown));
+            CHECK_MSG(rescanFor(Scan::ValueType::Float, 123.0, 1.0) == survivors, label + ", Float typed without decimals");
+            CHECK_EQ(rescanFor(Scan::ValueType::Float, 123.457, 0.0).size(), 0u);
+            CHECK_EQ(rescanFor(Scan::ValueType::Float, 123.4, 0.1).size(), 0u);
+            CHECK_EQ(rescanFor(Scan::ValueType::Float, 124.0, 0.001).size(), 0u);
+
+            const double distance = 98765.4321098765;
+            after.Memory->Raw(after.Target, &distance, sizeof(distance));
+            const std::multiset<std::string> wide = rescanFor(Scan::ValueType::Double, 98765.43211, 0.00001);
+            CHECK_MSG(wide == survivors, label + ", Double as shown: " + Listed(wide));
+            CHECK_EQ(rescanFor(Scan::ValueType::Double, 98765.5, 0.1).size(), 0u);
+
+            const float broken = std::numeric_limits<float>::quiet_NaN();
+            after.Memory->Raw(after.Target, &broken, sizeof(broken));
+            CHECK_EQ(rescanFor(Scan::ValueType::Float, std::numeric_limits<double>::quiet_NaN(), 1.0).size(), 0u);
+            // 123 matched the three paths above while the target held a number; a NaN there matches nothing.
+            CHECK_EQ(rescanFor(Scan::ValueType::Float, 123.0, 1.0).size(), 0u);
         }
 
         World BuildWide(int pointerSize, int slots)
@@ -923,6 +976,7 @@ namespace Manifold::Tests
         {
             KnownChains(pointerSize);
             RescanAfterRestart(pointerSize);
+            RescanByRoundedValue(pointerSize);
         }
         SpillSaveSort();
         Cancelled();

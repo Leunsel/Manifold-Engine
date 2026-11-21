@@ -185,6 +185,10 @@ namespace Manifold::Table
         void Refresh() { ++m_generation; }
         bool Dirty() const { return m_dirty; }
         void SetClean() { m_dirty = false; }
+        // ∑ Changes only when the whole table is replaced (new table, open, restore), not on edits like Generation. Work that started
+        //   on one table checks it before it lands. SessionBackup::TableReplaced bumps it, which TableRuntime::NewTable calls after Clear.
+        std::uint64_t Identity() const { return m_identity; }
+        void NewIdentity() { ++m_identity; }
 
         std::vector<int>& Selection() { return m_selection; }
         bool Selected(int id) const;
@@ -223,6 +227,7 @@ namespace Manifold::Table
         std::vector<int> m_selection;
         int m_nextId = 0;
         std::uint64_t m_generation = 1;
+        std::uint64_t m_identity = 1;
         bool m_dirty = false;
     };
 

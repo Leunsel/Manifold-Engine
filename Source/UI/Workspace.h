@@ -256,6 +256,7 @@ namespace Manifold::UI
         std::vector<ConfirmRequest> m_confirms;
         bool m_quitPrompt = false;
         bool m_quitRemember = false;
+        bool UnsavedTable();
         void QuitAfterTable();
         void TurnOffAndQuit();
         void FinishQuit();

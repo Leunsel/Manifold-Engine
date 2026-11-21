@@ -16,6 +16,7 @@ namespace Manifold::Target
         constexpr std::size_t kCodeBytes = 0x800;
         constexpr std::size_t kResultOffset = kCodeBytes;
         constexpr std::size_t kTextOffset = kCodeBytes + 0x20;
+        constexpr std::size_t kSavedStack = 0x10;
 
         constexpr const char* kRegisters64[16] = { "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15" };
         constexpr const char* kRegisters32[8] = { "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi" };
@@ -130,25 +131,24 @@ namespace Manifold::Target
         {
             const int carrier = request.HasInstance ? (namedRegister ? request.InstanceRegister : 1) : -1;
             const char* target = carrier == 0 ? "edx" : "eax";
-            std::size_t slots = 0;
             if (keep)
                 e.Line(std::string("push ") + kRegisters32[carrier]);
+            // esp is saved and put back after the call, so a function with the other calling
+            // convention than the script said (cdecl vs stdcall) cannot unbalance the stack.
+            e.Line(Format("mov [0x%X],esp", static_cast<std::uint32_t>(resultAddress + kSavedStack)));
             for (std::size_t i = values.size(); i-- > 0;)
             {
                 if (request.Arguments[i].Kind == CodeCallKind::Double)
                 {
                     e.Line(Format("push 0x%X", static_cast<std::uint32_t>(values[i] >> 32)));
-                    ++slots;
                 }
                 e.Line(Format("push 0x%X", static_cast<std::uint32_t>(values[i])));
-                ++slots;
             }
             if (carrier >= 0)
                 e.Line(Format("mov %s,0x%X", kRegisters32[carrier], static_cast<std::uint32_t>(request.Instance)));
             e.Line(Format("mov %s,0x%X", target, static_cast<std::uint32_t>(request.Function)));
             e.Line(std::string("call ") + target);
-            if (request.Cdecl && slots > 0)
-                e.Line(Format("add esp,0x%zX", slots * 4));
+            e.Line(Format("mov esp,[0x%X]", static_cast<std::uint32_t>(resultAddress + kSavedStack)));
             e.Line(Format("mov [0x%X],eax", static_cast<std::uint32_t>(resultAddress)));
             e.Line(Format("mov [0x%X],edx", static_cast<std::uint32_t>(resultAddress + 4)));
             if (keep)

@@ -505,6 +505,9 @@ namespace Manifold::Lua
         bool RunModuleEntry(Autorun::Module& module);
         bool UnloadModule(Autorun::Module& module);
         void LoadPendingModules(bool announce, Status& first);
+        bool ReadModuleAgain(Autorun::Module& module);
+        bool HoldUnlessAllowed(Autorun::Module& module);
+        const char* ModulesBusy() const;
         void DropDependents();
         Status ModuleStatus(std::string_view name) const;
         int ManifoldApiVersion();
@@ -515,6 +518,7 @@ namespace Manifold::Lua
         std::filesystem::path m_autorunFolder;
         AutorunOptions m_autorunOptions;
         std::string m_loadingModule;
+        int m_unloadingModules = 0;
         std::uint64_t m_modulesRevision = 0;
         double m_callDeadline = 0.0;
         int m_callLimit = 0;

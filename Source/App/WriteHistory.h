@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -37,6 +38,14 @@ namespace Manifold
         Unreadable
     };
 
+    // How the history reads and writes around a debugger's software breakpoints. Without it the
+    // history would record an int3 as the original byte and wipe inserted int3s with its writes.
+    struct WriteGuard
+    {
+        std::function<bool(const Target::Process&, std::uint64_t, std::uint8_t*, std::size_t)> Read;
+        std::function<Status(const Target::Process&, std::uint64_t, std::span<const std::uint8_t>)> Write;
+    };
+
     class WriteHistory
     {
     public:
@@ -58,8 +67,11 @@ namespace Manifold
         int LastId() const { return m_nextId - 1; }
         std::uint64_t Revision() const { return m_revision; }
         void Clear(std::uint64_t generation);
+        void SetGuard(WriteGuard guard) { m_guard = std::move(guard); }
 
     private:
+        Status Put(const Target::Process& process, std::uint64_t address, std::span<const std::uint8_t> bytes) const;
+        bool ReadClean(const Target::Process& process, std::uint64_t address, std::uint8_t* data, std::size_t size) const;
         MemoryWrite* Entry(int id);
         void Trim();
 
@@ -68,5 +80,6 @@ namespace Manifold
         std::uint64_t m_revision = 0;
         std::uint64_t m_droppedGeneration = 0;
         std::size_t m_dropped = 0;
+        WriteGuard m_guard;
     };
 }

@@ -2,6 +2,7 @@
 
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
+#include "Debug/Debugger.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "UI/AddressActions.h"
 #include "UI/Fonts.h"
@@ -9,11 +10,42 @@
 #include "UI/Widgets.h"
 
 #include <algorithm>
+#include <map>
 
 namespace Manifold::UI
 {
     namespace
     {
+        // The debugger's own int3s differ from the file too, but they are not patches: shown as one,
+        // "Restore" would disarm the breakpoint. Bytes are compared as they are without them.
+        void LeaveOutBreakpoints(Target::PatchScanResult& result, const Debug::Debugger& debugger)
+        {
+            std::map<std::string, std::pair<std::uint64_t, std::size_t>> dropped;
+            std::erase_if(result.Patches, [&](Target::CodePatch& patch)
+                {
+                    if (patch.Current.empty())
+                        return false;
+                    const std::vector<std::uint8_t> before = patch.Current;
+                    debugger.Unpatch(patch.Address, patch.Current.data(), patch.Current.size());
+                    std::uint64_t same = 0;
+                    for (std::size_t i = 0; i < patch.Current.size() && i < patch.Original.size(); ++i)
+                        same += before[i] != patch.Current[i] && patch.Current[i] == patch.Original[i];
+                    auto& [bytes, patches] = dropped[patch.Module];
+                    bytes += same;
+                    const bool gone = patch.Current == patch.Original;
+                    patches += gone;
+                    return gone;
+                });
+            for (Target::ModulePatchSummary& summary : result.Modules)
+            {
+                const auto found = dropped.find(summary.Module);
+                if (found == dropped.end())
+                    continue;
+                summary.ChangedBytes -= std::min(summary.ChangedBytes, found->second.first);
+                summary.Patches -= std::min(summary.Patches, found->second.second);
+            }
+        }
+
         bool StillOpen(Engine& engine, const std::shared_ptr<Target::Process>& scanned)
         {
             return scanned && engine.Process() == scanned && scanned->Alive();
@@ -65,9 +97,12 @@ namespace Manifold::UI
         m_result.reset();
         m_restore = -1;
         std::shared_ptr<Target::Process> process = m_scanned;
-        m_task.Start(engine.Work(), "Looking for patched code", [process, modules = std::move(modules)](Target::PatchScanProgress& progress)
+        const Debug::Debugger& debugger = engine.Debugger();
+        m_task.Start(engine.Work(), "Looking for patched code", [process, modules = std::move(modules), &debugger](Target::PatchScanProgress& progress)
             {
-                return Target::ScanForPatches(*process, modules, &progress);
+                Target::PatchScanResult result = Target::ScanForPatches(*process, modules, &progress);
+                LeaveOutBreakpoints(result, debugger);
+                return result;
             });
     }
 

@@ -28,6 +28,7 @@ namespace Manifold::UI
         Engine& m_engine;
         std::uint64_t m_generation = 0;
         std::vector<Debug::Breakpoint> m_list;
+        std::map<std::uint64_t, std::string> m_instructions;
         std::uint64_t m_selected = 0;
 
         bool m_editOpen = false;

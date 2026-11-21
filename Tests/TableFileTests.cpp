@@ -2,12 +2,18 @@
 
 #include "App/Engine.h"
 #include "App/Settings.h"
+#include "Core/ImageDecode.h"
+#include "Core/Paths.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
 #include "Table/CheatTable.h"
 #include "Table/Structures.h"
 #include "Table/TableFiles.h"
 
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -283,6 +289,159 @@ namespace Manifold::Tests
             CHECK(Table::WriteTable(list, structures, {}, Table::FileNaming::Tag).find("<Manifold.Bootstrap.lua Encoding=\"Ascii85\">") != std::string::npos);
         }
 
+        void ExportNames()
+        {
+            CHECK(Table::SafeExportName("Bootstrap.lua") && Table::SafeExportName("new file (2).txt") && Table::SafeExportName("Gr\xC3\xBC\xC3\x9F" "e.txt"));
+            CHECK(Table::SafeExportName(".hidden") && Table::SafeExportName("console.lua") && Table::SafeExportName("COM10") && Table::SafeExportName("nul_and_more.txt"));
+            CHECK(!Table::SafeExportName("") && !Table::SafeExportName(".") && !Table::SafeExportName(".."));
+            CHECK(!Table::SafeExportName("..\\..\\Startup\\x.bat") && !Table::SafeExportName("../x.lua") && !Table::SafeExportName("C:\\Windows\\x.dll"));
+            CHECK(!Table::SafeExportName("\\\\server\\share\\x") && !Table::SafeExportName("a:stream") && !Table::SafeExportName("C:"));
+            CHECK(!Table::SafeExportName("tab\there") && !Table::SafeExportName(std::string_view("nul\0byte", 8)) && !Table::SafeExportName("a<b") && !Table::SafeExportName("a?b"));
+            CHECK(!Table::SafeExportName("CON") && !Table::SafeExportName("con.txt") && !Table::SafeExportName("Nul.tar.gz") && !Table::SafeExportName("aux"));
+            CHECK(!Table::SafeExportName("COM1") && !Table::SafeExportName("lpt9.log") && !Table::SafeExportName("COM0") && !Table::SafeExportName("CONIN$"));
+            CHECK(!Table::SafeExportName("COM\xC2\xB9") && !Table::SafeExportName("NUL .txt"));
+            CHECK(!Table::SafeExportName("trailing.") && !Table::SafeExportName("trailing "));
+
+            // A loaded name stays (loading never checks it), only a new name is refused.
+            Table::AddressList list;
+            Put(list, "CON.lua", "x");
+            CHECK(!Table::FileNameProblem(list, "nul.txt").empty() && !Table::FileNameProblem(list, "name.").empty() && !Table::FileNameProblem(list, "..").empty());
+            CHECK(Table::FileNameProblem(list, "CON.lua", "CON.lua").empty());
+            CHECK(!Table::RenameFile(list, "CON.lua", "PRN") && list.FindFile("CON.lua"));
+            CHECK(Table::RenameFile(list, "CON.lua", "console.lua") && list.FindFile("console.lua"));
+        }
+
+        void DuplicateNames()
+        {
+            const std::string one = Table::EncodeTableFile(Bytes("one"));
+            const std::string two = Table::EncodeTableFile(Bytes("two"));
+            const std::string three = Table::EncodeTableFile(Bytes("three"));
+            Table::LoadedTable loaded;
+            CHECK(Table::ParseTable("<CheatTable><Files>"
+                                    "<File0 Name=\"a.lua\" Encoding=\"Ascii85\">" + one + "</File0>"
+                                    "<File1 Name=\"A.LUA\" Encoding=\"Ascii85\">" + two + "</File1>"
+                                    "<File2 Name=\"A_2.lua\" Encoding=\"Ascii85\">" + three + "</File2>"
+                                    "<File3 Name=\"a.lua\" Encoding=\"Ascii85\">" + one + "</File3>"
+                                    "<b.txt Encoding=\"Ascii85\">" + one + "</b.txt>"
+                                    "</Files></CheatTable>", loaded).Ok());
+            CHECK_EQ(loaded.Files.size(), 5u);
+            if (loaded.Files.size() != 5)
+                return;
+            CHECK_EQ(loaded.Files[0].Name, std::string("a.lua"));
+            CHECK_EQ(loaded.Files[1].Name, std::string("A_3.LUA"));
+            CHECK_EQ(loaded.Files[2].Name, std::string("A_2.lua"));
+            CHECK_EQ(loaded.Files[3].Name, std::string("a_4.lua"));
+            CHECK_EQ(loaded.Files[4].Name, std::string("b.txt"));
+            CHECK(*loaded.Files[1].Data == Bytes("two") && *loaded.Files[2].Data == Bytes("three"));
+            CHECK(loaded.Warnings.size() == 1 && loaded.Warnings[0].find("2 table files") != std::string::npos && loaded.Warnings[0].find("A.LUA is now A_3.LUA") != std::string::npos);
+            std::set<std::string> keys;
+            for (const Table::TableFile& file : loaded.Files)
+                keys.insert(Table::FileUseKey(file.Name));
+            CHECK_EQ(keys.size(), loaded.Files.size());
+        }
+
+        void Content()
+        {
+            Table::AddressList list;
+            Table::StructureStore structures;
+            CHECK(!Table::TableHasContent(list, structures, {}));
+            list.DisasmNotes["game.exe+10"] = {};
+            CHECK(!Table::TableHasContent(list, structures, {}));
+            list.DisasmNotes["game.exe+10"].Comment = "hook";
+            CHECK(Table::TableHasContent(list, structures, {}));
+            list.DisasmNotes.clear();
+            list.TableComment = "notes";
+            CHECK(Table::TableHasContent(list, structures, {}));
+            list.TableComment.clear();
+            CHECK(Table::TableHasContent(list, structures, { { "player", "game.exe+20" } }));
+            Put(list, "only.txt", "x");
+            CHECK(Table::TableHasContent(list, structures, {}));
+            list.Files.clear();
+            Table::MemoryRecord& record = list.AddValue("Scratch", "game.exe+10", Scan::ValueType::FourBytes);
+            record.DontSave = true;
+            CHECK(!Table::TableHasContent(list, structures, {}));
+            record.DontSave = false;
+            CHECK(Table::TableHasContent(list, structures, {}));
+        }
+
+        void SafeWrites()
+        {
+            std::error_code ignored;
+            const std::filesystem::path folder = Paths::DataFolder() / L"safe-writes";
+            std::filesystem::create_directories(folder, ignored);
+            const auto content = [](const std::filesystem::path& file) {
+                std::ifstream in(file, std::ios::binary);
+                return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            };
+            const std::filesystem::path file = folder / L"table.CT";
+            std::filesystem::path temporary = file;
+            temporary += L".tmp";
+            CHECK(Table::WriteFileSafely(file, "first"));
+            CHECK(content(file) == "first" && !std::filesystem::exists(temporary, ignored));
+            CHECK(Table::WriteFileSafely(file, "second", true) && content(file) == "second");
+            CHECK(!Table::WriteFileSafely(file, "third", false));
+            CHECK(content(file) == "second" && !std::filesystem::exists(temporary, ignored));
+            CHECK(Table::WriteFileSafely(file, "") && content(file).empty());
+            CHECK(!Table::WriteFileSafely(folder / L"missing" / L"x.CT", "lost"));
+            CHECK(!std::filesystem::exists(folder / L"missing", ignored));
+
+            Table::AddressList list;
+            Put(list, "only.txt", "kept");
+            const Table::StructureStore structures;
+            CHECK(Table::SaveTable(file, list, structures, {}).Ok());
+            Table::LoadedTable loaded;
+            CHECK(Table::LoadTable(file, loaded).Ok() && loaded.Files.size() == 1 && *loaded.Files[0].Data == Bytes("kept"));
+            std::filesystem::remove_all(folder, ignored);
+        }
+
+        std::vector<std::uint8_t> Bitmap(int width, int height)
+        {
+            const int row = (width * 3 + 3) / 4 * 4;
+            const std::uint32_t pixels = static_cast<std::uint32_t>(row) * static_cast<std::uint32_t>(height);
+            std::vector<std::uint8_t> bytes(54, 0);
+            const auto put = [&](std::size_t at, std::uint32_t value, int size) {
+                for (int i = 0; i < size; ++i)
+                    bytes[at + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(value >> (8 * i));
+            };
+            bytes[0] = 'B';
+            bytes[1] = 'M';
+            put(2, 54 + pixels, 4);
+            put(10, 54, 4);
+            put(14, 40, 4);
+            put(18, static_cast<std::uint32_t>(width), 4);
+            put(22, static_cast<std::uint32_t>(height), 4);
+            put(26, 1, 2);
+            put(28, 24, 2);
+            put(34, pixels, 4);
+            // ∑ Only the pixels of small bitmaps are stored; a large one is just a header that claims its size.
+            if (pixels <= 4096)
+                bytes.resize(bytes.size() + pixels, 0x7F);
+            return bytes;
+        }
+
+        void ImageLimits()
+        {
+            const auto small = DecodeImage(Bitmap(2, 2));
+            CHECK(small && small->Width == 2 && small->Height == 2 && small->Rgba.size() == 16);
+            CHECK(!DecodeImage(Bitmap(2, 2), 3));
+            CHECK(DecodeImage(Bitmap(2, 2), 4).has_value());
+            CHECK(!DecodeImage(Bitmap(kMaxImageSide + 1, 1)));
+            CHECK(!DecodeImage(Bytes("not an image")));
+        }
+
+        void TableIdentity()
+        {
+            Settings settings;
+            Engine engine(settings);
+            Table::AddressList& list = engine.Table();
+            const std::uint64_t first = list.Identity();
+            Put(list, "a.txt", "x");
+            list.AddValue("Health", "game.exe+10", Scan::ValueType::FourBytes);
+            CHECK_EQ(list.Identity(), first);
+            engine.NewTable();
+            CHECK(list.Identity() != first && list.Files.empty());
+        }
+
         void LuaCheck(Engine& engine, const char* name, const std::string& code)
         {
             std::string result;
@@ -344,6 +503,12 @@ namespace Manifold::Tests
         NamesAndEdits();
         Uses();
         RoundTrip();
+        ExportNames();
+        DuplicateNames();
+        Content();
+        SafeWrites();
+        ImageLimits();
+        TableIdentity();
         LuaEdits();
         return Totals().Failures - before;
     }

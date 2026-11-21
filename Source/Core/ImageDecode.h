@@ -14,5 +14,9 @@ namespace Manifold
         std::vector<std::uint8_t> Rgba;
     };
 
-    std::optional<DecodedImage> DecodeImage(std::span<const std::uint8_t> bytes);
+    inline constexpr int kMaxImageSide = 16384;
+    inline constexpr std::uint64_t kMaxImagePixels = 64ull * 1024ull * 1024ull;
+
+    // Refuses images wider or higher than kMaxImageSide or with more than maxPixels pixels before anything is allocated.
+    std::optional<DecodedImage> DecodeImage(std::span<const std::uint8_t> bytes, std::uint64_t maxPixels = kMaxImagePixels);
 }

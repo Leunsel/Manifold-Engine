@@ -106,6 +106,14 @@ namespace Manifold::Tests
             for (int i = 0; i < 1500; ++i)
                 deep += "?$T@PEAV";
             CHECK_EQ(MsvcDemangle(deep), deep);
+            // Each level repeats the inner template three times through back-references: 3^25 characters
+            // if nothing stopped it.
+            std::string inner = "?$a@H@";
+            for (int i = 0; i < 25; ++i)
+                inner = "?$a@V" + inner + "@V1@V1@@";
+            const std::string bomb = ".?AV" + inner + "@";
+            CHECK_EQ(MsvcDemangle(bomb), bomb);
+            CHECK_EQ(MsvcDemangle(".?AV?$a@V?$a@H@@V1@V1@@@"), "a<a<int>, a<int>, a<int>>");
             CHECK(Target::IsMsvcTypeName(".?AVPlayer@Game@@") && !Target::IsMsvcTypeName("?AVPlayer@@") && !Target::IsMsvcTypeName(".?AV Player@@"));
 
             const auto both = MsvcMangle("Game::Player");

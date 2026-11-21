@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -219,6 +220,12 @@ namespace Manifold::Debug
         ExceptionBreak ExceptionBreakMode() const { return m_exceptionMode.load(); }
         Status BreakNow();
         void Unpatch(std::uint64_t address, std::uint8_t* buffer, std::size_t size) const;
+        // Writes into the debugged process without disarming the software breakpoints in the range:
+        // their int3 stays, and the written byte is the one put back when the breakpoint goes.
+        Status WriteAround(const Target::Process& process, std::uint64_t address, std::span<const std::uint8_t> bytes);
+        // Reads as the code is without the debugger's int3s, in one step with the breakpoint list, so a
+        // breakpoint hit in between cannot leave an int3 in the buffer.
+        bool ReadAround(const Target::Process& process, std::uint64_t address, std::uint8_t* buffer, std::size_t size) const;
 
     private:
         struct ThreadState;
@@ -248,6 +255,8 @@ namespace Manifold::Debug
         Status AddBreakpointInternal(Breakpoint breakpoint);
         void RemoveBreakpointInternal(std::uint64_t address);
         void UnpatchLocked(std::uint64_t address, std::uint8_t* buffer, std::size_t size) const;
+        Disasm::Instruction DecodeUnpatched(std::uint64_t address) const;
+        void DropTemporaries();
         std::optional<std::uint64_t> PreviousInstruction(std::uint64_t address) const;
         void RecordHit(Watch& watch, std::uint64_t instruction, std::uint64_t accessed, std::uint32_t threadId, const Disasm::RegisterValues& registers);
         struct HitPlace

@@ -1501,6 +1501,37 @@ hostileRan = true
         CHECK_EQ(ran, "nil");
     }
 
+    void SessionBackupContent()
+    {
+        // A table with only table files, a comment or symbols is worth a backup too (it was skipped without records).
+        Settings settings;
+        settings.BackupFolder = WideToUtf8((Paths::DataFolder() / L"backup-content").wstring());
+        Engine engine(settings);
+        SessionBackup& backup = engine.Backups();
+        Table::AddressList& table = engine.Table();
+        bool written = true;
+        table.Touch();
+        CHECK(table.Dirty() && !Table::TableHasContent(table, engine.Structures(), engine.TableSymbols()));
+        CHECK(backup.BackUpNow(&written).Ok() && !written);
+
+        *table.AddFile("notes.txt").Data = { 'h', 'i' };
+        CHECK(table.Dirty() && Table::TableHasContent(table, engine.Structures(), engine.TableSymbols()));
+        CHECK(backup.BackUpNow(&written).Ok() && written);
+        Table::LoadedTable loaded;
+        CHECK(Table::LoadTable(backup.LastFile(), loaded).Ok() && loaded.Records.empty() && loaded.Files.size() == 1);
+        CHECK(loaded.Files.size() == 1 && loaded.Files[0].Name == "notes.txt" && loaded.Files[0].Data->size() == 2);
+
+        const std::uint64_t identity = table.Identity();
+        engine.NewTable();
+        CHECK(table.Identity() != identity);
+        table.TableComment = "only a comment";
+        table.Touch();
+        CHECK(backup.BackUpNow(&written).Ok() && written);
+        engine.NewTable();
+        std::error_code ignored;
+        CHECK(!std::filesystem::exists(Backups::MarkerFile(Paths::ConfigFolder(), ::GetCurrentProcessId()), ignored));
+    }
+
     void SessionBackups()
     {
         CHECK_EQ(Backups::SafeName("Crab: Champions?"), "Crab_ Champions_");
@@ -1794,6 +1825,7 @@ hostileRan = true
         HostileFiles();
         HostileExpressions();
         SessionBackups();
+        SessionBackupContent();
         DiagnosticsInfo();
         return Totals().Failures - before;
     }

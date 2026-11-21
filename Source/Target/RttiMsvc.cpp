@@ -10,6 +10,9 @@ namespace Manifold::Target
     {
         constexpr int kMaxDepth = 200;
         constexpr std::size_t kMaxParts = 64;
+        // Back-references copy whole remembered names, so nested templates can grow the text
+        // exponentially from a few hundred input bytes; no real type name comes near this.
+        constexpr std::size_t kMaxText = 4096;
 
         struct Parser
         {
@@ -54,9 +57,17 @@ namespace Manifold::Target
                 return true;
             }
 
+            // Fails the parse when a piece grew past kMaxText; returns whether it may be used.
+            bool Fits(const std::string& text)
+            {
+                if (text.size() > kMaxText)
+                    Failed = true;
+                return !Failed;
+            }
+
             void Memorize(std::string key, std::string text)
             {
-                if (Names.size() >= 10)
+                if (!Fits(text) || Names.size() >= 10)
                     return;
                 for (const Entry& entry : Names)
                 {
@@ -274,6 +285,8 @@ namespace Manifold::Target
                 if (p.Failed)
                     return {};
                 std::string text = name + "<" + arguments + ">";
+                if (!p.Fits(text))
+                    return {};
                 p.Memorize(text, text);
                 return text;
             }
@@ -332,6 +345,8 @@ namespace Manifold::Target
                     text += "::";
                 text += *part;
             }
+            if (!p.Fits(text))
+                return {};
             return text;
         }
 
@@ -373,6 +388,8 @@ namespace Manifold::Target
                     text += ", ";
                 text += item;
             }
+            if (!p.Fits(text))
+                return {};
             return text;
         }
 
@@ -508,7 +525,7 @@ namespace Manifold::Target
                     }
                     const std::size_t from = p.At;
                     std::string text = Type(p);
-                    if (p.At - from > 1 && p.Params.size() < 10)
+                    if (p.At - from > 1 && p.Params.size() < 10 && p.Fits(text))
                         p.Params.push_back(text);
                     parameters.push_back(std::move(text));
                 }

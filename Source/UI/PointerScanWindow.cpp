@@ -17,6 +17,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <string_view>
 
 namespace Manifold::UI
 {
@@ -38,6 +40,21 @@ namespace Manifold::UI
         double Since(std::chrono::steady_clock::time_point started)
         {
             return std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        }
+
+        // ∑ The main scanner's Rounded mode: a value typed with n decimals matches within half of 10^-n, so the value as the window shows it is found again.
+        double RoundingStep(Scan::ValueType type, std::string_view text)
+        {
+            text = TrimView(text);
+            if (!Scan::IsFloating(type) || text.empty() || StartsWithNoCase(text, "0x") || text.front() == '$')
+                return 0.0;
+            int decimals = 0;
+            if (const std::size_t dot = text.find_first_of(".,"); dot != std::string_view::npos)
+            {
+                for (std::size_t index = dot + 1; index < text.size() && text[index] >= '0' && text[index] <= '9'; ++index)
+                    ++decimals;
+            }
+            return std::pow(10.0, -decimals);
         }
 
         const char* OrderName(Scan::PointerOrder order)
@@ -130,6 +147,8 @@ namespace Manifold::UI
                 return;
             }
             rescan.Value = *bytes;
+            rescan.Type = m_rescanType;
+            rescan.Step = RoundingStep(m_rescanType, m_rescanValue);
         }
         else
         {
@@ -222,11 +241,18 @@ namespace Manifold::UI
         const auto path = m_workspace.SaveFileDialog(kPathFilters, WideToUtf8((Paths::TablesFolder() / Utf8ToWide(name + ".mptr")).wstring()), L"mptr");
         if (!path)
             return;
-        const Manifold::Status status = m_results->Save(*path);
-        if (!status)
-            m_workspace.Report(status);
-        else
-            engine.Notify(LogLevel::Success, "Saved " + Grouped(m_results->Count()) + " pointer paths to " + WideToUtf8(path->filename().wstring()));
+        const std::shared_ptr<Scan::PointerResults> results = m_results;
+        m_running = Job::Save;
+        m_task.Start(engine.Work(), "Saving pointer paths", [results, file = *path](Scan::PointerProgress&)
+            {
+                Outcome outcome;
+                outcome.Kind = Job::Save;
+                outcome.File = WideToUtf8(file.filename().wstring());
+                outcome.Results = results;
+                outcome.Error = results->Save(file);
+                outcome.Stats.Results = results->Count();
+                return outcome;
+            });
     }
 
     void PointerScanWindow::Collect()
@@ -253,6 +279,20 @@ namespace Manifold::UI
             }
             return;
         }
+        if (outcome->Kind == Job::Save)
+        {
+            engine.Notify(LogLevel::Success, "Saved " + Grouped(outcome->Stats.Results) + " pointer paths to " + outcome->File);
+            return;
+        }
+        if (outcome->Kind == Job::Rescan && m_results && (outcome->Stats.Cancelled || outcome->Stats.Results == 0))
+        {
+            // ∑ An empty or partial set would replace the only copy of the old paths, and with no paths Rescan and Save are off, so nothing could bring them back.
+            const std::uint64_t kept = m_results->Count();
+            m_summary = (outcome->Stats.Cancelled ? std::string("Rescan cancelled") : "No path of " + Grouped(outcome->Before) + " leads there now") + ", the previous " + Grouped(kept) +
+                        (kept == 1 ? " path is" : " paths are") + " kept  ·  " + Format("%.2f s", outcome->Seconds);
+            engine.Notify(outcome->Stats.Cancelled ? LogLevel::Info : LogLevel::Warning, m_summary);
+            return;
+        }
         m_results = std::move(outcome->Results);
         m_order.clear();
         m_orderKind = Scan::PointerOrder::Found;
@@ -272,8 +312,7 @@ namespace Manifold::UI
         else if (outcome->Kind == Job::Rescan)
         {
             m_stats = {};
-            m_summary = paths + " of " + Grouped(outcome->Before) + (outcome->Stats.Cancelled ? " checked before the cancel still lead there" : " still lead there") + "  ·  " +
-                        Format("%.2f s", outcome->Seconds);
+            m_summary = paths + " of " + Grouped(outcome->Before) + " still lead there  ·  " + Format("%.2f s", outcome->Seconds);
             LOG_INFO("Scan", "Pointer rescan: " + m_summary);
         }
         else
@@ -365,7 +404,7 @@ namespace Manifold::UI
         case Scan::PointerStage::Searching: return "Searching level " + std::to_string(progress.Level.load()) + "  ·  " + Grouped(progress.Results.load()) + " paths";
         case Scan::PointerStage::Rescanning: return "Checking paths" + Format("  %d%%", percent) + "  ·  " + Grouped(progress.Results.load()) + " still lead there";
         case Scan::PointerStage::Ordering: return "Sorting paths";
-        default: return m_running == Job::Load ? "Loading paths" : "Starting";
+        default: return m_running == Job::Load ? "Loading paths" : m_running == Job::Save ? "Saving paths" : "Starting";
         }
     }
 
@@ -557,7 +596,7 @@ namespace Manifold::UI
     {
         if (m_task.Running())
         {
-            if (TaskStatus(ProgressText(), m_running != Job::Load && m_running != Job::Order))
+            if (TaskStatus(ProgressText(), m_running != Job::Load && m_running != Job::Order && m_running != Job::Save))
                 m_task.Cancel();
             return;
         }
@@ -686,7 +725,7 @@ namespace Manifold::UI
         ImGui::Spacing();
         if (m_results && m_scanned && !m_task.Running())
             Results();
-        else if (m_results && m_task.Running() && m_running == Job::Order)
+        else if (m_results && m_task.Running() && (m_running == Job::Order || m_running == Job::Save))
             Results();
         else if (!m_scanned && !m_task.Running())
             WrappedMuted("Finds chains of pointers that lead from a module to an address, so the value can be found again after the game starts anew: static address, then one offset per pointer. "

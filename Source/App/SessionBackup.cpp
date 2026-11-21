@@ -216,25 +216,8 @@ namespace Manifold
             if (taken >= 9999)
                 return {};
             const std::filesystem::path file = folder / (taken == 0 ? stamp + L".CT" : stamp + L"_" + std::to_wstring(taken + 1) + L".CT");
-            std::filesystem::path temporary = file;
-            temporary += L".tmp";
-            {
-                std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-                if (!out)
-                    return {};
-                out.write(text.data(), static_cast<std::streamsize>(text.size()));
-                if (!out)
-                {
-                    out.close();
-                    std::filesystem::remove(temporary, error);
-                    return {};
-                }
-            }
-            if (!::MoveFileExW(temporary.c_str(), file.c_str(), MOVEFILE_WRITE_THROUGH))
-            {
-                std::filesystem::remove(temporary, error);
+            if (!Table::WriteFileSafely(file, text, false))
                 return {};
-            }
             return file;
         }
 
@@ -361,10 +344,13 @@ namespace Manifold
         NoteProcess();
         Table::AddressList& table = m_engine.Table();
         Table::StructureStore& structures = m_engine.Structures();
-        if (!table.Dirty() || (table.Count() == 0 && structures.Items.empty() && table.TableLuaScript.empty()))
+        if (!table.Dirty())
+            return Status::Success();
+        const std::vector<Table::TableSymbol> symbols = m_engine.TableSymbols();
+        if (!Table::TableHasContent(table, structures, symbols))
             return Status::Success();
         const auto started = std::chrono::steady_clock::now();
-        const std::string text = Table::WriteTable(table, structures, m_engine.TableSymbols(), m_engine.TableFileNaming());
+        const std::string text = Table::WriteTable(table, structures, symbols, m_engine.TableFileNaming());
         const std::size_t hash = std::hash<std::string>{}(text);
         if (m_hasLast && hash == m_lastHash && text.size() == m_lastSize)
             return Status::Success();

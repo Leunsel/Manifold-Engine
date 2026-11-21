@@ -57,6 +57,7 @@ namespace Manifold::UI
 
         struct FactsResult
         {
+            std::uint64_t Identity = 0;
             std::string Key;
             const void* Data = nullptr;
             std::uint64_t Version = 0;
@@ -66,6 +67,7 @@ namespace Manifold::UI
 
         struct ImageResult
         {
+            std::uint64_t Identity = 0;
             std::string Key;
             const void* Data = nullptr;
             std::uint64_t Version = 0;
@@ -80,6 +82,7 @@ namespace Manifold::UI
 
         struct AddResult
         {
+            std::uint64_t Identity = 0;
             std::vector<LoadedFile> Files;
             std::vector<std::string> Failed;
             std::vector<std::string> TooLarge;
@@ -109,6 +112,7 @@ namespace Manifold::UI
         bool EscapeCloses() const override { return !m_editorActive && m_renaming.empty(); }
 
         void Sync();
+        void TableChanged();
         void Collect();
         void RebuildRows();
         void StartFacts();
@@ -133,6 +137,7 @@ namespace Manifold::UI
         void SelectOnly(const std::string& key);
         void SelectAll();
         std::vector<std::string> SelectedNames() const;
+        std::set<std::string> VisibleKeys() const;
         Table::TableFile* Current();
         const Info* InfoOf(const std::string& key) const;
         bool HasDraft(const std::string& key) const;
@@ -169,6 +174,7 @@ namespace Manifold::UI
 
         Workspace& m_workspace;
         std::shared_ptr<Results> m_results = std::make_shared<Results>();
+        std::uint64_t m_identity = 0;
         std::map<std::string, Info> m_info;
         std::vector<std::string> m_names;
         std::vector<Table::FileRow> m_rows;

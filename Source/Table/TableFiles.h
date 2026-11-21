@@ -76,6 +76,8 @@ namespace Manifold::Table
     std::vector<FileRow> ArrangeFiles(std::vector<FileRow> rows, std::string_view filter, FileColumn sort, bool descending);
 
     std::string FileNameProblem(const AddressList& list, std::string_view wanted, std::string_view current = {});
+    bool SafeExportName(std::string_view name);
+    std::string UniqueFileName(std::span<const TableFile> files, std::string_view wanted);
     std::string UniqueFileName(const AddressList& list, std::string_view wanted);
     bool RenameFile(AddressList& list, std::string_view from, std::string_view to);
     TableFile* DuplicateFile(AddressList& list, std::string_view name);

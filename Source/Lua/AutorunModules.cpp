@@ -200,6 +200,18 @@ namespace Manifold::Autorun
         return Lower(TrimView(name));
     }
 
+    // ∑ The name becomes the folder autorun\data\<Name>: "..", "." or a name Windows trims at its ends would point at another folder.
+    bool ValidName(std::string_view name)
+    {
+        if (name.empty() || name.front() == '.' || name.front() == ' ' || name.back() == '.' || name.back() == ' ')
+            return false;
+        return std::none_of(name.begin(), name.end(), [](char c)
+            {
+                const unsigned char byte = static_cast<unsigned char>(c);
+                return byte < 0x20 || byte == 0x7F || std::string_view("\\/:*?\"<>|").find(c) != std::string_view::npos;
+            });
+    }
+
     const char* BuiltInReplacement(std::string_view head)
     {
         head = head.substr(0, kHeadBytes);
@@ -234,7 +246,7 @@ namespace Manifold::Autorun
                 continue;
             if (key == "NAME")
             {
-                if (header.Name.empty() && value.find_first_of("\\/:*?\"<>|") == std::string::npos)
+                if (header.Name.empty() && ValidName(value))
                     header.Name = value;
             }
             else if (key == "VERSION")
@@ -288,25 +300,27 @@ namespace Manifold::Autorun
 
     int CompareVersions(std::string_view left, std::string_view right)
     {
-        const auto next = [](std::string_view& text) -> long
+        // ∑ Digit runs compare as text without leading zeros (longer is larger), so a run of any length cannot overflow.
+        const auto next = [](std::string_view& text) -> std::string_view
         {
             std::size_t digits = 0;
-            long value = 0;
             while (digits < text.size() && text[digits] >= '0' && text[digits] <= '9')
-            {
-                value = value * 10 + (text[digits] - '0');
                 ++digits;
-            }
+            std::string_view run = text.substr(0, digits);
+            while (!run.empty() && run.front() == '0')
+                run.remove_prefix(1);
             const std::size_t dot = text.find('.', digits);
             text = dot == std::string_view::npos || digits == 0 ? std::string_view() : text.substr(dot + 1);
-            return value;
+            return run;
         };
         while (!left.empty() || !right.empty())
         {
-            const long a = next(left);
-            const long b = next(right);
-            if (a != b)
-                return a < b ? -1 : 1;
+            const std::string_view a = next(left);
+            const std::string_view b = next(right);
+            if (a.size() != b.size())
+                return a.size() < b.size() ? -1 : 1;
+            if (const int order = a.compare(b); order != 0)
+                return order < 0 ? -1 : 1;
         }
         return 0;
     }

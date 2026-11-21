@@ -462,6 +462,24 @@ namespace Manifold::Table
                 }
                 table.Files.push_back(std::move(entry));
             }
+            // ∑ Names are keys everywhere (findTableFile, the files window, delete by name) and compare without case, so a second
+            //   file of the same name could never be reached and was deleted together with the first. It gets a free name instead.
+            std::set<std::string> names;
+            std::size_t renamed = 0;
+            std::string example;
+            for (TableFile& file : table.Files)
+            {
+                if (names.insert(FileUseKey(file.Name)).second)
+                    continue;
+                const std::string original = file.Name;
+                file.Name = UniqueFileName(std::span<const TableFile>(table.Files), original);
+                names.insert(FileUseKey(file.Name));
+                if (renamed++ == 0)
+                    example = original + " is now " + file.Name;
+            }
+            if (renamed > 0)
+                table.Warnings.push_back(std::to_string(renamed) + (renamed == 1 ? " table file has" : " table files have") +
+                    " the name of another file in the table and got a new one (" + example + "). The table is saved with the new names.");
         }
         if (const Xml::Node* comments = root.Child("DisassemblerComments"))
         {
@@ -594,20 +612,45 @@ namespace Manifold::Table
         return Xml::Write(root);
     }
 
+    bool TableHasContent(const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols)
+    {
+        const bool records = std::any_of(list.Roots().begin(), list.Roots().end(), [](const auto& record) { return !record->DontSave; });
+        const bool notes = std::any_of(list.DisasmNotes.begin(), list.DisasmNotes.end(), [](const auto& entry) { return !entry.second.Comment.empty() || !entry.second.Header.empty(); });
+        return records || notes || !symbols.empty() || !structures.Items.empty() || !list.Files.empty() || !list.ExtraXml.empty() || !list.TableLuaScript.empty() ||
+               !list.TableComment.empty();
+    }
+
+    bool WriteFileSafely(const std::filesystem::path& path, std::string_view bytes, bool replace)
+    {
+        std::filesystem::path temporary = path;
+        temporary += L".tmp";
+        const HANDLE file = ::CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+            return false;
+        bool ok = true;
+        std::size_t at = 0;
+        while (ok && at < bytes.size())
+        {
+            const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(bytes.size() - at, 16u * 1024u * 1024u));
+            DWORD written = 0;
+            ok = ::WriteFile(file, bytes.data() + at, chunk, &written, nullptr) && written == chunk;
+            at += written;
+        }
+        // ∑ Without the flush the rename can reach the disk before the data: after a crash or power loss the old good file is
+        //   gone and the new one is empty or cut short.
+        ok = ok && ::FlushFileBuffers(file);
+        ok = ::CloseHandle(file) && ok;
+        if (ok)
+            ok = ::MoveFileExW(temporary.c_str(), path.c_str(), (replace ? MOVEFILE_REPLACE_EXISTING : 0) | MOVEFILE_WRITE_THROUGH) != FALSE;
+        if (!ok)
+            ::DeleteFileW(temporary.c_str());
+        return ok;
+    }
+
     Status SaveTable(const std::filesystem::path& path, const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols, FileNaming naming)
     {
         const std::string text = WriteTable(list, structures, symbols, naming);
-        std::filesystem::path temporary = path;
-        temporary += L".tmp";
-        {
-            std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
-            if (!file)
-                return Status::Fail(ErrorCode::TableNotSaved, WideToUtf8(path.wstring()));
-            file.write(text.data(), static_cast<std::streamsize>(text.size()));
-            if (!file)
-                return Status::Fail(ErrorCode::TableNotSaved, WideToUtf8(path.wstring()));
-        }
-        if (!::MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        if (!WriteFileSafely(path, text, true))
             return Status::Fail(ErrorCode::TableNotSaved, WideToUtf8(path.wstring()));
         return Status::Success();
     }
