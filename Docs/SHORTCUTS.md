@@ -152,7 +152,7 @@ While the disassembler pane has the focus. The keys act on the selected instruct
 | `End` | Go to the last instruction of the function | `GotoFunctionEnd` | Manifold |
 | `Ctrl+Shift+A` | Select the whole function | `SelectFunction` | Manifold |
 | `Ctrl+Num +` | Add this address to the address list | `AddInstructionToList` | CE |
-| `Ctrl+Alt+0-9` | Set a bookmark | `SetBookmark` | CE |
+| `Ctrl+Alt+0-9` | Set or remove a bookmark | `SetBookmark` | CE |
 | `Ctrl+0-9` | Go to a bookmark | `GotoBookmark` | CE |
 | `Ctrl+Shift+C` | Add or change the comment | `CommentInstruction` | Manifold |
 

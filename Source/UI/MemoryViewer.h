@@ -111,6 +111,7 @@ namespace Manifold::UI
         void PublishSelection();
         void RunCommand(Command command);
         void Bookmark(bool set, int slot);
+        void RemoveBookmark(int slot);
         Status WriteBytes(std::uint64_t address, std::span<const std::uint8_t> bytes, std::string source);
         std::size_t UndoableEdits() const;
         void UndoEdit();

@@ -720,9 +720,35 @@ namespace Manifold::UI
             if (ImGui::MenuItem(label.c_str(), keys.c_str(), false, bookmark != 0))
                 Bookmark(false, slot);
         }
+        const bool any = std::any_of(m_bookmarks.begin(), m_bookmarks.end(), [](std::uint64_t bookmark) { return bookmark != 0; });
+        if (ImGui::BeginMenu(ICON_FA_TRASH "  Remove", any))
+        {
+            for (int slot = 0; slot < 10; ++slot)
+            {
+                const std::uint64_t bookmark = m_bookmarks[static_cast<std::size_t>(slot)];
+                if (bookmark && ImGui::MenuItem((std::to_string(slot) + "  " + m_engine.Describe(bookmark) + "##remove").c_str()))
+                    RemoveBookmark(slot);
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Remove all bookmarks"))
+                RemoveBookmark(-1);
+            ImGui::EndMenu();
+        }
         ImGui::Separator();
-        const std::string set = "Set a bookmark here with " + ChordText(CurrentBinding(Command::SetBookmark).Chord, true);
+        const std::string set = "Set a bookmark here with " + ChordText(CurrentBinding(Command::SetBookmark).Chord, true) + "; the same keys on its line remove it";
         SectionLabel(set.c_str());
+    }
+
+    void MemoryViewer::RemoveBookmark(int slot)
+    {
+        if (slot < 0)
+        {
+            m_bookmarks.fill(0);
+            m_engine.Notify(LogLevel::Info, "All bookmarks removed");
+            return;
+        }
+        m_bookmarks[static_cast<std::size_t>(slot)] = 0;
+        m_engine.Notify(LogLevel::Info, "Bookmark " + std::to_string(slot) + " removed");
     }
 
     void MemoryViewer::Toolbar()
@@ -1381,7 +1407,11 @@ namespace Manifold::UI
     void MemoryViewer::Bookmark(bool set, int slot)
     {
         std::uint64_t& bookmark = m_bookmarks[static_cast<std::size_t>(slot)];
-        if (set)
+        if (set && bookmark && bookmark == m_selected)
+        {
+            RemoveBookmark(slot);
+        }
+        else if (set)
         {
             bookmark = m_selected;
             m_engine.Notify(LogLevel::Info, "Bookmark " + std::to_string(slot) + ": " + m_engine.Describe(m_selected));
@@ -1868,7 +1898,8 @@ namespace Manifold::UI
         {
             for (int slot = 0; slot < 10; ++slot)
             {
-                const std::string label = "Set bookmark " + std::to_string(slot);
+                const bool here = m_bookmarks[static_cast<std::size_t>(slot)] != 0 && m_bookmarks[static_cast<std::size_t>(slot)] == m_selected;
+                const std::string label = (here ? "Remove bookmark " : "Set bookmark ") + std::to_string(slot);
                 const std::string keys = ChordText((CurrentBinding(Command::SetBookmark).Chord & ImGuiMod_Mask_) | (ImGuiKey_0 + slot));
                 if (ImGui::MenuItem(label.c_str(), keys.c_str()))
                     Bookmark(true, slot);

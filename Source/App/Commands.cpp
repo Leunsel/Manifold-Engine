@@ -133,7 +133,7 @@ namespace Manifold
             { GotoFunctionEnd, "GotoFunctionEnd", Scope::Disassembler, "Go to the last instruction of the function", ImGuiKey_End, 0, Own },
             { SelectFunction, "SelectFunction", Scope::Disassembler, "Select the whole function", Ctrl | Shift | ImGuiKey_A, 0, Own },
             { AddInstructionToList, "AddInstructionToList", Scope::Disassembler, "Add this address to the address list", Ctrl | ImGuiKey_KeypadAdd, 0, CE },
-            { SetBookmark, "SetBookmark", Scope::Disassembler, "Set a bookmark", Ctrl | Alt | ImGuiKey_0, 0, CE, true },
+            { SetBookmark, "SetBookmark", Scope::Disassembler, "Set or remove a bookmark", Ctrl | Alt | ImGuiKey_0, 0, CE, true },
             { GotoBookmark, "GotoBookmark", Scope::Disassembler, "Go to a bookmark", Ctrl | ImGuiKey_0, 0, CE, true },
             { CommentInstruction, "CommentInstruction", Scope::Disassembler, "Add or change the comment", Ctrl | Shift | ImGuiKey_C, 0, Own },
 
