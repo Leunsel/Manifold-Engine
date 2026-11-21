@@ -101,7 +101,7 @@ namespace Manifold
             if (starting && m_settings.AutoExplorer && !m_target.Mono().IsIl2Cpp() && !m_target.Mono().Unity().Enabled())
             {
                 m_target.Mono().Unity().SetEnabled(true);
-                LOG_INFO("Unity", "Turned the scene explorer on by itself (Settings > Debugger > Start scene explorer automatically)");
+                LOG_INFO("Unity", "Turned the scene explorer on by itself (Settings > Debugger > Start Scene Explorer Automatically)");
             }
             if (!fromScript)
                 m_notify(LogLevel::Success, Format("%s %zu %s classes", starting ? "Loaded" : "Reloaded", m_target.Mono().ClassCount(), Target::MonoBridge::RuntimeName(m_target.Mono().Runtime())));

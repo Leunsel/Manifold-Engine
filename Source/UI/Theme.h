@@ -13,39 +13,39 @@
 
 #define MANIFOLD_THEME_PALETTE(X) \
     X(Accent, "Accent") \
-    X(AccentHovered, "Accent, hovered") \
+    X(AccentHovered, "Accent, Hovered") \
     X(Success, "Success") \
     X(Sidebar, "Sidebar") \
-    X(Page, "Window background") \
-    X(Card, "Cards and notices") \
-    X(CardBorder, "Card border") \
-    X(RowSeparator, "Row separator") \
+    X(Page, "Window Background") \
+    X(Card, "Cards and Notices") \
+    X(CardBorder, "Card Border") \
+    X(RowSeparator, "Row Separator") \
     X(Border, "Border") \
     X(Text, "Text") \
     X(Label, "Labels") \
-    X(Muted, "Muted text") \
+    X(Muted, "Muted Text") \
     X(Warning, "Warning") \
     X(Error, "Error") \
-    X(Changed, "Changed value") \
+    X(Changed, "Changed Value") \
     X(AddressText, "Addresses") \
     X(BytesText, "Bytes") \
-    X(CodeKeyword, "Code: keywords") \
-    X(CodeRegister, "Code: registers") \
-    X(CodeNumber, "Code: numbers") \
-    X(CodeString, "Code: strings") \
-    X(CodeComment, "Code: comments") \
-    X(CodeSection, "Code: sections") \
-    X(CodeLabel, "Code: labels") \
-    X(FlowJump, "Disassembler: jumps") \
-    X(FlowCall, "Disassembler: calls") \
-    X(FlowReturn, "Disassembler: returns") \
+    X(CodeKeyword, "Code: Keywords") \
+    X(CodeRegister, "Code: Registers") \
+    X(CodeNumber, "Code: Numbers") \
+    X(CodeString, "Code: Strings") \
+    X(CodeComment, "Code: Comments") \
+    X(CodeSection, "Code: Sections") \
+    X(CodeLabel, "Code: Labels") \
+    X(FlowJump, "Disassembler: Jumps") \
+    X(FlowCall, "Disassembler: Calls") \
+    X(FlowReturn, "Disassembler: Returns") \
     X(Breakpoint, "Breakpoint") \
-    X(CurrentLine, "Current line") \
-    X(Surface, "Child areas") \
-    X(Frame, "Input fields") \
+    X(CurrentLine, "Current Line") \
+    X(Surface, "Child Areas") \
+    X(Frame, "Input Fields") \
     X(Button, "Buttons") \
-    X(Popup, "Popups and menus") \
-    X(TitleBar, "Title bars") \
+    X(Popup, "Popups and Menus") \
+    X(TitleBar, "Title Bars") \
     X(Shadow, "Shadows")
 
 namespace ManifoldTheme
@@ -248,30 +248,30 @@ namespace ManifoldTheme
     };
 
     inline const StyleSize kSizes[] = {
-        { "FrameRounding", "Frame rounding", &ImGuiStyle::FrameRounding, nullptr, 0, 3.0f, 0.0f, 12.0f },
-        { "ChildRounding", "Child rounding", &ImGuiStyle::ChildRounding, nullptr, 0, 4.0f, 0.0f, 12.0f },
-        { "PopupRounding", "Popup rounding", &ImGuiStyle::PopupRounding, nullptr, 0, 4.0f, 0.0f, 12.0f },
-        { "GrabRounding", "Slider rounding", &ImGuiStyle::GrabRounding, nullptr, 0, 3.0f, 0.0f, 12.0f },
-        { "TabRounding", "Tab rounding", &ImGuiStyle::TabRounding, nullptr, 0, 3.0f, 0.0f, 12.0f },
-        { "ScrollbarRounding", "Scrollbar rounding", &ImGuiStyle::ScrollbarRounding, nullptr, 0, 6.0f, 0.0f, 12.0f },
-        { "ScrollbarSize", "Scrollbar width", &ImGuiStyle::ScrollbarSize, nullptr, 0, 11.0f, 6.0f, 24.0f },
-        { "GrabMinSize", "Slider grab size", &ImGuiStyle::GrabMinSize, nullptr, 0, 9.0f, 4.0f, 24.0f },
-        { "FramePadding.x", "Frame padding, horizontal", nullptr, &ImGuiStyle::FramePadding, 0, 8.0f, 0.0f, 20.0f },
-        { "FramePadding.y", "Frame padding, vertical", nullptr, &ImGuiStyle::FramePadding, 1, 5.0f, 0.0f, 20.0f },
-        { "ItemSpacing.x", "Item spacing, horizontal", nullptr, &ImGuiStyle::ItemSpacing, 0, 8.0f, 0.0f, 20.0f },
-        { "ItemSpacing.y", "Item spacing, vertical", nullptr, &ImGuiStyle::ItemSpacing, 1, 7.0f, 0.0f, 20.0f },
-        { "ItemInnerSpacing.x", "Inner spacing, horizontal", nullptr, &ImGuiStyle::ItemInnerSpacing, 0, 6.0f, 0.0f, 20.0f },
-        { "ItemInnerSpacing.y", "Inner spacing, vertical", nullptr, &ImGuiStyle::ItemInnerSpacing, 1, 4.0f, 0.0f, 20.0f },
-        { "CellPadding.x", "Table cell padding, horizontal", nullptr, &ImGuiStyle::CellPadding, 0, 6.0f, 0.0f, 20.0f },
-        { "CellPadding.y", "Table cell padding, vertical", nullptr, &ImGuiStyle::CellPadding, 1, 4.0f, 0.0f, 20.0f },
-        { "WindowPadding.x", "Window padding, horizontal", nullptr, &ImGuiStyle::WindowPadding, 0, 8.0f, 0.0f, 24.0f },
-        { "WindowPadding.y", "Window padding, vertical", nullptr, &ImGuiStyle::WindowPadding, 1, 8.0f, 0.0f, 24.0f },
+        { "FrameRounding", "Frame Rounding", &ImGuiStyle::FrameRounding, nullptr, 0, 3.0f, 0.0f, 12.0f },
+        { "ChildRounding", "Child Rounding", &ImGuiStyle::ChildRounding, nullptr, 0, 4.0f, 0.0f, 12.0f },
+        { "PopupRounding", "Popup Rounding", &ImGuiStyle::PopupRounding, nullptr, 0, 4.0f, 0.0f, 12.0f },
+        { "GrabRounding", "Slider Rounding", &ImGuiStyle::GrabRounding, nullptr, 0, 3.0f, 0.0f, 12.0f },
+        { "TabRounding", "Tab Rounding", &ImGuiStyle::TabRounding, nullptr, 0, 3.0f, 0.0f, 12.0f },
+        { "ScrollbarRounding", "Scrollbar Rounding", &ImGuiStyle::ScrollbarRounding, nullptr, 0, 6.0f, 0.0f, 12.0f },
+        { "ScrollbarSize", "Scrollbar Width", &ImGuiStyle::ScrollbarSize, nullptr, 0, 11.0f, 6.0f, 24.0f },
+        { "GrabMinSize", "Slider Grab Size", &ImGuiStyle::GrabMinSize, nullptr, 0, 9.0f, 4.0f, 24.0f },
+        { "FramePadding.x", "Frame Padding, Horizontal", nullptr, &ImGuiStyle::FramePadding, 0, 8.0f, 0.0f, 20.0f },
+        { "FramePadding.y", "Frame Padding, Vertical", nullptr, &ImGuiStyle::FramePadding, 1, 5.0f, 0.0f, 20.0f },
+        { "ItemSpacing.x", "Item Spacing, Horizontal", nullptr, &ImGuiStyle::ItemSpacing, 0, 8.0f, 0.0f, 20.0f },
+        { "ItemSpacing.y", "Item Spacing, Vertical", nullptr, &ImGuiStyle::ItemSpacing, 1, 7.0f, 0.0f, 20.0f },
+        { "ItemInnerSpacing.x", "Inner Spacing, Horizontal", nullptr, &ImGuiStyle::ItemInnerSpacing, 0, 6.0f, 0.0f, 20.0f },
+        { "ItemInnerSpacing.y", "Inner Spacing, Vertical", nullptr, &ImGuiStyle::ItemInnerSpacing, 1, 4.0f, 0.0f, 20.0f },
+        { "CellPadding.x", "Table Cell Padding, Horizontal", nullptr, &ImGuiStyle::CellPadding, 0, 6.0f, 0.0f, 20.0f },
+        { "CellPadding.y", "Table Cell Padding, Vertical", nullptr, &ImGuiStyle::CellPadding, 1, 4.0f, 0.0f, 20.0f },
+        { "WindowPadding.x", "Window Padding, Horizontal", nullptr, &ImGuiStyle::WindowPadding, 0, 8.0f, 0.0f, 24.0f },
+        { "WindowPadding.y", "Window Padding, Vertical", nullptr, &ImGuiStyle::WindowPadding, 1, 8.0f, 0.0f, 24.0f },
         { "IndentSpacing", "Indent", &ImGuiStyle::IndentSpacing, nullptr, 0, 21.0f, 0.0f, 40.0f },
-        { "WindowBorderSize", "Window border", &ImGuiStyle::WindowBorderSize, nullptr, 0, 1.0f, 0.0f, 2.0f },
-        { "ChildBorderSize", "Child border", &ImGuiStyle::ChildBorderSize, nullptr, 0, 1.0f, 0.0f, 2.0f },
-        { "PopupBorderSize", "Popup border", &ImGuiStyle::PopupBorderSize, nullptr, 0, 1.0f, 0.0f, 2.0f },
-        { "FrameBorderSize", "Frame border", &ImGuiStyle::FrameBorderSize, nullptr, 0, 0.0f, 0.0f, 2.0f },
-        { "DisabledAlpha", "Disabled items opacity", &ImGuiStyle::DisabledAlpha, nullptr, 0, 0.6f, 0.1f, 1.0f },
+        { "WindowBorderSize", "Window Border", &ImGuiStyle::WindowBorderSize, nullptr, 0, 1.0f, 0.0f, 2.0f },
+        { "ChildBorderSize", "Child Border", &ImGuiStyle::ChildBorderSize, nullptr, 0, 1.0f, 0.0f, 2.0f },
+        { "PopupBorderSize", "Popup Border", &ImGuiStyle::PopupBorderSize, nullptr, 0, 1.0f, 0.0f, 2.0f },
+        { "FrameBorderSize", "Frame Border", &ImGuiStyle::FrameBorderSize, nullptr, 0, 0.0f, 0.0f, 2.0f },
+        { "DisabledAlpha", "Disabled Items Opacity", &ImGuiStyle::DisabledAlpha, nullptr, 0, 0.6f, 0.1f, 1.0f },
     };
 
     inline float& SizeOf(ImGuiStyle& style, const StyleSize& size)

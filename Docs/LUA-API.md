@@ -168,7 +168,7 @@ Drawn are labels (colour, `Font` name, size, colour and bold, `Alignment`, `Layo
 
 Other controls (page controls, track bars) keep their place as a marked empty box, and the log names them once.
 
-By default these windows take the look of the rest of the program: the colours, fonts and font sizes that scripts set are left out (what they paint on a canvas keeps its colours), and panels and group boxes are drawn as cards. Settings → Scripts → "Script windows in the app's look" turns this off and draws them with the script's own colours and fonts. `showModal()` does not open a window yet.
+By default these windows take the look of the rest of the program: the colours, fonts and font sizes that scripts set are left out (what they paint on a canvas keeps its colours), and panels and group boxes are drawn as cards. Settings → Scripts → "Script Windows in App Style" turns this off and draws them with the script's own colours and fonts. `showModal()` does not open a window yet.
 
 The memory viewer is `getMemoryViewForm()`:
 

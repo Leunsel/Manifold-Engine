@@ -52,7 +52,7 @@ namespace Manifold::UI
             { "Finished background jobs", "Results of work that ran in the background, such as symbol loading and searches." },
             { "Scanner", "Picks up progress and results of a running scan." },
             { "Process check", "Checks once in a while whether the opened process still runs." },
-            { "Open processes automatically", "Looks for the processes from Settings > Scripts > Open processes automatically." },
+            { "Open processes automatically", "Looks for the processes from Settings > Scripts > Open Processes Automatically." },
             { "Frozen values", "Writes frozen values back into the process." },
             { "Hotkeys", "Checks the hotkeys of the records." },
             { "Address list values", "Reads the values of the records that are visible in the address list." },

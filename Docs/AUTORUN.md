@@ -1,6 +1,6 @@
 # Autorun modules
 
-Manifold Engine runs the Lua scripts in the `autorun` folder next to the program at start (Settings → Scripts → *Run autorun modules*). **Extensions → Modules** lists them with their state, version, load time and errors, and switches, reloads and allows them. Scripts reach the same list through [`manifold.module`](MANIFOLD-API.md).
+Manifold Engine runs the Lua scripts in the `autorun` folder next to the program at start (Settings → Scripts → *Run Autorun Modules*). **Extensions → Modules** lists them with their state, version, load time and errors, and switches, reloads and allows them. Scripts reach the same list through [`manifold.module`](MANIFOLD-API.md).
 
 ## The folder
 
@@ -87,7 +87,7 @@ Unloading removes what the module registered through `manifold` (event handlers,
 
 Scripts of a table can write files, also into the `autorun` folder. So that such a file cannot run unseen at every start:
 
-- A script or module the program has not seen before is **held**: it is listed, a notice appears at start, and it runs once *Allow* is chosen in the list. Settings → Scripts → *Hold new autorun modules* turns this off. At the first start with this version everything already in the folder counts as seen. The modules that come with the program are never held while their files are unchanged.
+- A script or module the program has not seen before is **held**: it is listed, a notice appears at start, and it runs once *Allow* is chosen in the list. Settings → Scripts → *Hold New Modules* turns this off. At the first start with this version everything already in the folder counts as seen. The modules that come with the program are never held while their files are unchanged.
 - When a script writes into the `autorun` folder (`io.open` for writing, `os.rename`, `os.remove`), the log gets a Warning on the channel `Autorun` that names the file and the script line. Writing to another module's `.lua` files holds that module from its next load until it is allowed again. Writes into `autorun\data` and a module writing its own files are not reported.
 - A module whose code differs from the last run without such a write (edited in an editor, most likely) runs, with a Warning in the log and *Loaded, changed* in the list for that session.
 
