@@ -316,3 +316,6 @@ While the Form Editor has the focus. Widget keys act on the selected widget and 
 | `Alt+Down` | Move Widget Down | `FormMoveDown` | Manifold |
 | `Ctrl+T` | Design or Try | `FormTry` | Manifold |
 | `F5` | Run Script | `FormRun` | Manifold |
+| `Ctrl+C` | Copy Widget | `FormCopy` | Manifold |
+| `Ctrl+X` | Cut Widget | `FormCut` | Manifold |
+| `Ctrl+V` | Paste Widgets | `FormPaste` | Manifold |

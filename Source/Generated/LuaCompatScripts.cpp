@@ -7825,8 +7825,9 @@ native.docDefine(nil, WIDGET_DOC .. "kind", { kind = "field", type = "string", d
 
 local form = subarea(ui, "form", "Windows described by a table, as the Form Editor (Tools > Form Editor) saves them in a `.form.lua` file. The table holds the layout and the names of the handlers; the script keeps the code and passes its handler functions in.")
 local FORM_NODE_KEYS = { kind = true, name = true, children = true }
+local formImageLoad
 
-local function buildForm(path, spec, handlers)
+local function buildForm(path, spec, handlers, folder)
   if math.type(spec.form) ~= "integer" then
     misuse(path .. ": the table has no form = 1, so it is no form")
   end
@@ -7897,6 +7898,13 @@ local function buildForm(path, spec, handlers)
           end
         end
       end
+      if child.kind == "image" and type(child.image) == "string" then
+        local file = child.image
+        if folder and not file:match("^%a:[\\/]") and not file:match("^[\\/]") then
+          file = folder .. file
+        end
+        copy.image = formImageLoad(file)
+      end
       local handle = parent.add(child.kind, copy)
       if child.name then
         if rawget(members, child.name) ~= nil then
@@ -7923,9 +7931,12 @@ define(form, "build", {
     { name = "handlers", type = "table", optional = true },
   },
   returns = "window",
-  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like.",
+  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty.",
 }, function(spec, handlers)
-  return buildForm("manifold.ui.form.build", spec, handlers)
+  local info = callerFrame()
+  local source = info and info.source or ""
+  local folder = source:sub(1, 1) == "@" and source:sub(2):match("^(.*[\\/])") or nil
+  return buildForm("manifold.ui.form.build", spec, handlers, folder)
 end)
 
 define(form, "load", {
@@ -7934,7 +7945,7 @@ define(form, "load", {
     { name = "handlers", type = "table", optional = true },
   },
   returns = "window",
-  doc = "Reads a `.form.lua` file and builds its window like `build`; returns " .. FORM_RETURNS .. " A relative path starts at the folder of the calling script (at the program folder for code without a file). Returns nil and an `ME-7014` error when the file cannot be read or does not return a table; a wrong form raises like `build`.",
+  doc = "Reads a `.form.lua` file and builds its window like `build`; returns " .. FORM_RETURNS .. " A relative path starts at the folder of the calling script (at the program folder for code without a file). Returns nil and an `ME-7014` error when the file cannot be read or does not return a table; a wrong form raises like `build`. Picture files of `image` widgets are relative to the form file's folder.",
 }, function(path, handlers)
   local info = callerFrame()
   local source = info and info.source or ""
@@ -7951,7 +7962,8 @@ define(form, "load", {
   if not ok or type(spec) ~= "table" then
     return result(nil, "ME-7014", ok and (shown .. " does not return a table") or tostring(spec))
   end
-  return buildForm("manifold.ui.form.load", spec, handlers)
+)MLUA"),
+            std::string_view(R"MLUA(  return buildForm("manifold.ui.form.load", spec, handlers, shown:match("^(.*[\\/])"))
 end)
 
 local function plainObject(entry, prefix, docPrefix, methods, fields)
@@ -7974,8 +7986,7 @@ local function dialogObject(entry)
           return false
         end
         uiEntries[entry.id] = nil
-)MLUA"),
-            std::string_view(R"MLUA(        forget(entry.owner, entry.id)
+        forget(entry.owner, entry.id)
         return native.uiDialogClose(entry.id)
       end,
     },
@@ -8236,7 +8247,8 @@ define(menu, "add", {
   return addEntry("menu", MENU_KEYS, { path = path, text = text }, options)
 end)
 
-local TOOLBAR_KEYS = { text = "string", tooltip = "string", enabled = "boolean", onClick = "function", icon = "string" }
+)MLUA"),
+            std::string_view(R"MLUA(local TOOLBAR_KEYS = { text = "string", tooltip = "string", enabled = "boolean", onClick = "function", icon = "string" }
 local toolbar = subarea(ui, "toolbar", "Buttons in the main window's title bar, between the process and the Memory view button.")
 
 define(toolbar, "add", {
@@ -8251,8 +8263,7 @@ define(toolbar, "add", {
   return addEntry("toolbar", TOOLBAR_KEYS, { icon = icon }, options)
 end)
 
-)MLUA"),
-            std::string_view(R"MLUA(local STATUS_KEYS = { icon = "string", tooltip = "string", color = "string", onClick = "function", text = "string" }
+local STATUS_KEYS = { icon = "string", tooltip = "string", color = "string", onClick = "function", text = "string" }
 local status = subarea(ui, "status", "Entries in the main window's status bar, after the administrator note.")
 
 define(status, "add", {
@@ -8291,6 +8302,10 @@ define(image, "load", {
   remember(owner, "image" .. id, handle.remove)
   return handle
 end)
+
+formImageLoad = function(file)
+  return (rawget(image.members, "load")(file))
+end
 
 native.docDefine(nil, "manifold.ui.image.Image", { kind = "class", title = "Image objects", doc = "`manifold.ui.image.load` returns an image object." })
 native.docDefine(nil, "manifold.ui.image.Image.remove", { returns = "boolean", doc = "Frees the picture; widgets and drawings that show it go blank." })
@@ -8532,7 +8547,8 @@ end)
 define(moduleArea, "onUnload", {
   params = { { name = "handler", type = "function" } },
   returns = "true, or nil, error",
-  doc = "Calls `handler()` when the calling module is unloaded: before it is reloaded, when it is switched off, and before all modules run again. The program removes what the module registered through `manifold` on its own; the handler takes down the rest, such as Cheat Engine menu items, forms and timers. Handlers run in reverse order. `ME-7011` when the caller is not an autorun module.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Calls `handler()` when the calling module is unloaded: before it is reloaded, when it is switched off, and before all modules run again. The program removes what the module registered through `manifold` on its own; the handler takes down the rest, such as Cheat Engine menu items, forms and timers. Handlers run in reverse order. `ME-7011` when the caller is not an autorun module.",
 }, function(handler)
   local key = callerModule()
   if not key then
@@ -8556,8 +8572,7 @@ local function callHandler(handler, ...)
 end
 
 debug.getregistry()["Manifold.UiTick"] = function(now)
-)MLUA"),
-            std::string_view(R"MLUA(  for _, id in ipairs(native.uiDue(now)) do
+  for _, id in ipairs(native.uiDue(now)) do
     local entry = uiEntries[id]
     if entry and entry.onUpdate and not callHandler(entry.onUpdate, entry.handle) then
       native.uiUpdate(id, { updates = false })

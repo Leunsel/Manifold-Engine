@@ -24,6 +24,7 @@ namespace Manifold::Lua
         Columns,
         Rows,
         Tree,
+        File,
     };
 
     struct FormProp
@@ -53,6 +54,23 @@ namespace Manifold::Lua
         int Window = 0;
         std::string Key;
         std::map<int, FormMeta> Meta;
+        bool Fragment = false;
+    };
+
+    struct FormTemplate
+    {
+        std::string_view Id;
+        std::string_view Title;
+        std::string_view Help;
+        bool Snippet = false;
+        std::string_view Text;
+    };
+
+    struct FormMerge
+    {
+        std::string Text;
+        std::vector<std::string> Added;
+        bool Anchored = false;
     };
 
     enum class FormScriptStyle : std::uint8_t
@@ -80,6 +98,12 @@ namespace Manifold::Lua
     bool FormMove(FormDocument& form, int node, int parent, int index);
     bool FormRemove(FormDocument& form, int node);
     int FormDuplicate(FormDocument& form, int node);
+    int FormGraft(FormDocument& form, const FormDocument& from, int node, int parent, int index);
+    std::string FormFragment(const FormDocument& form, const std::vector<int>& nodes);
+    std::vector<int> FormPaste(FormDocument& form, std::string_view text, int parent, int index, std::string& error);
+    std::span<const FormTemplate> FormTemplates();
+    std::vector<std::pair<std::string, std::string>> FormHandlerList(const FormDocument& form);
+    FormMerge FormMergeScript(std::string_view script, const FormDocument& form);
     int FormIndexOf(const FormDocument& form, int node);
     std::string FormUniqueName(const FormDocument& form, std::string_view base, int except = 0);
     bool FormIsIdentifier(std::string_view name);

@@ -19,6 +19,7 @@
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1185,6 +1186,105 @@ return M
             CHECK(!FindWindow(model, "Player Tools"));
         }
 
+        void UiFormsStage2(Engine& engine)
+        {
+            using Lua::UiKind;
+            Lua::FormDocument form = SampleForm();
+            const Lua::UiNode* window = form.Model.Find(form.Window);
+            const int tabs = window->Children[1];
+            const int tab = form.Model.Find(tabs)->Children[0];
+
+            const std::string whole = Lua::FormFragment(form, { tabs });
+            CHECK(whole.find("fragment = true") != std::string::npos);
+            Lua::FormDocument other = Lua::NewForm("Other");
+            std::string error;
+            std::vector<int> made = Lua::FormPaste(other, whole, other.Window, -1, error);
+            CHECK_MSG(made.size() == 1 && error.empty(), error);
+            made = Lua::FormPaste(other, whole, other.Window, 0, error);
+            CHECK(made.size() == 1 && other.Model.Find(other.Window)->Children.front() == made.front());
+            std::set<std::string> names;
+            for (const auto& [id, meta] : other.Meta)
+                if (!meta.Name.empty())
+                    CHECK_MSG(names.insert(meta.Name).second, "duplicate name " + meta.Name);
+            CHECK(names.count("items") && names.count("items1"));
+            CHECK(Lua::FormProblems(other).empty());
+
+            const std::string onlyTab = Lua::FormFragment(form, { tab, form.Model.Find(tab)->Children[0] });
+            Lua::FormDocument tabsForm = Lua::NewForm("Tabs");
+            const int holder = Lua::FormAdd(tabsForm, UiKind::Tabs, tabsForm.Window);
+            error.clear();
+            made = Lua::FormPaste(tabsForm, onlyTab, tabsForm.Window, -1, error);
+            CHECK(made.empty() && error.find("cannot hold") != std::string::npos);
+            error.clear();
+            made = Lua::FormPaste(tabsForm, onlyTab, holder, -1, error);
+            CHECK_MSG(made.size() == 1 && tabsForm.Model.Find(made[0])->Kind == UiKind::Tab && tabsForm.Model.Find(made[0])->Children.size() == 2, error);
+            error.clear();
+            CHECK(Lua::FormPaste(tabsForm, "return 1", holder, -1, error).empty() && !error.empty());
+
+            for (const Lua::FormTemplate& entry : Lua::FormTemplates())
+            {
+                Lua::FormDocument loaded;
+                std::vector<std::string> notes;
+                const bool ok = Lua::FormLoad(entry.Text, loaded, error, &notes);
+                CHECK_MSG(ok && notes.empty() && loaded.Fragment == entry.Snippet, std::string(entry.Id) + ": " + error);
+                if (!entry.Snippet)
+                    CHECK_MSG(Lua::FormProblems(loaded).empty(), std::string(entry.Id) + " has problems");
+                CHECK_MSG(engine.Lua().Run(Lua::FormScript(loaded, Lua::FormScriptStyle::Standalone), "form template").Ok(), std::string(entry.Id) + " script");
+            }
+            CHECK(engine.Lua().Run("", "form template").Ok());
+
+            const std::string script = Lua::FormScript(form, Lua::FormScriptStyle::FormFile, "Player.form.lua");
+            Lua::FormMerge same = Lua::FormMergeScript(script, form);
+            CHECK(same.Anchored && same.Added.empty() && same.Text == script);
+            std::string trimmed = script;
+            const std::string stub = "function handlers.itemMenu(choice, text, row, widget)\nend\n\n";
+            CHECK(trimmed.find(stub) != std::string::npos);
+            trimmed.erase(trimmed.find(stub), stub.size());
+            trimmed += "\nhandlers[\"godChanged\"] = handlers[\"godChanged\"]\n";
+            trimmed = "-- my own comment\n" + trimmed;
+            Lua::FormMerge merged = Lua::FormMergeScript(trimmed, form);
+            CHECK(merged.Anchored && merged.Added == std::vector<std::string>({ "itemMenu" }));
+            CHECK(merged.Text.find("-- my own comment") == 0 && merged.Text.find(stub + "window, w = ui.form.load") != std::string::npos);
+            CHECK(!Lua::FormMergeScript("print('no form here')", form).Anchored);
+
+            Lua::FormDocument pictured;
+            CHECK(Lua::FormLoad("return { form = 1, title = 'Pictures', children = { { kind = 'image', image = 'dot.png', width = 32 }, { kind = 'image', image = 'missing.png' } } }", pictured, error));
+            const Lua::UiNode* picture = pictured.Model.Find(pictured.Model.Find(pictured.Window)->Children[0]);
+            CHECK(picture && picture->Source == "dot.png" && picture->ImageId == 0);
+            const std::string pictureText = Lua::FormSave(pictured);
+            CHECK(pictureText.find("image = \"dot.png\"") != std::string::npos);
+            CHECK(Lua::FormScript(pictured, Lua::FormScriptStyle::Standalone).find("image = ui.image.load(\"dot.png\")") != std::string::npos);
+
+            static const unsigned char kDot[] = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x64, 0x60, 0xF8, 0x5F, 0x0F, 0x00, 0x02, 0x87, 0x01, 0x80, 0xEB, 0x47, 0xBA, 0x92, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82 };
+            const std::filesystem::path folder = std::filesystem::temp_directory_path() / ("manifold-form-images-" + std::to_string(::GetCurrentProcessId()));
+            std::error_code ignored;
+            std::filesystem::create_directories(folder, ignored);
+            const std::filesystem::path dot = folder / "dot.png";
+            const std::filesystem::path formFile = folder / "Pictures.form.lua";
+            const std::filesystem::path scriptFile = folder / "Pictures.lua";
+            std::ofstream(dot, std::ios::binary).write(reinterpret_cast<const char*>(kDot), sizeof(kDot));
+            std::ofstream(formFile, std::ios::binary) << pictureText;
+            std::ofstream(scriptFile, std::ios::binary) << "local window, w = manifold.ui.form.load('Pictures.form.lua')\n";
+            const Status ran = engine.Lua().RunFile(scriptFile);
+            CHECK_MSG(ran.Ok(), ran.Text);
+            Lua::UiModel& model = engine.Lua().Ui();
+            const Lua::UiNode* shown = FindWindow(model, "Pictures");
+            CHECK(shown && shown->Children.size() == 2);
+            if (shown && shown->Children.size() == 2)
+            {
+                const Lua::UiNode* first = model.Find(shown->Children[0]);
+                const Lua::UiNode* second = model.Find(shown->Children[1]);
+                CHECK(first && first->ImageId > 0 && model.FindImage(first->ImageId) && model.FindImage(first->ImageId)->Width == 1);
+                CHECK(second && second->ImageId == 0);
+            }
+            CHECK(engine.Lua().Run("", "@" + WideToUtf8(std::filesystem::absolute(scriptFile).wstring())).Ok());
+            CHECK(!FindWindow(model, "Pictures"));
+            std::filesystem::remove(dot, ignored);
+            std::filesystem::remove(formFile, ignored);
+            std::filesystem::remove(scriptFile, ignored);
+            std::filesystem::remove(folder, ignored);
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -1326,6 +1426,7 @@ return M
         UiOpacity(engine);
         UiNewWidgets(engine);
         UiForms(engine);
+        UiFormsStage2(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

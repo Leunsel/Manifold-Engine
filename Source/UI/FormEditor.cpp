@@ -2,6 +2,7 @@
 
 #include "App/Engine.h"
 #include "Core/IconNames.h"
+#include "Core/ImageDecode.h"
 #include "Core/Paths.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
@@ -20,6 +21,9 @@
 #include <fstream>
 #include <functional>
 #include <sstream>
+
+#include <windows.h>
+#include <shellapi.h>
 
 namespace Manifold::UI
 {
@@ -507,6 +511,20 @@ namespace Manifold::UI
             m_dirty = false;
             m_open = false;
             break;
+        case Pending::Template:
+        {
+            Lua::FormDocument form;
+            std::string error;
+            if (Lua::FormLoad(m_pendingTemplate, form, error))
+            {
+                form.Fragment = false;
+                Reset(std::move(form), {});
+            }
+            else
+                m_engine.Notify(LogLevel::Error, "The template could not be read: " + error);
+            m_pendingTemplate.clear();
+            break;
+        }
         case Pending::None:
             break;
         }
@@ -524,7 +542,8 @@ namespace Manifold::UI
         std::filesystem::path path = m_path;
         if (as || path.empty())
         {
-            const auto chosen = m_workspace.SaveFileDialog({ { L"Manifold forms (*.form.lua)", L"*.form.lua" } }, FormStem(ScriptFileName()) + ".form.lua", L"lua");
+            const std::filesystem::path folder = m_path.empty() ? Paths::AutorunFolder() : m_path.parent_path();
+            const auto chosen = m_workspace.SaveFileDialog({ { L"Manifold forms (*.form.lua)", L"*.form.lua" } }, WideToUtf8((folder / Utf8ToWide(FormStem(ScriptFileName()) + ".form.lua")).wstring()), L"lua");
             if (!chosen)
                 return false;
             path = *chosen;
@@ -552,9 +571,33 @@ namespace Manifold::UI
         std::error_code ignored;
         if (m_path.empty())
             std::filesystem::create_directories(Paths::AutorunFolder(), ignored);
-        const auto chosen = m_workspace.SaveFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" } }, ScriptFileName(), L"lua");
+        const std::filesystem::path folder = m_path.empty() ? Paths::AutorunFolder() : m_path.parent_path();
+        const auto chosen = m_workspace.SaveFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" } }, WideToUtf8((folder / Utf8ToWide(ScriptFileName())).wstring()), L"lua");
         if (!chosen)
             return;
+        std::string existing;
+        if (withFile && std::filesystem::exists(*chosen) && ReadFile(*chosen, existing))
+        {
+            const Lua::FormMerge merge = Lua::FormMergeScript(existing, m_form);
+            if (merge.Anchored)
+            {
+                if (merge.Added.empty())
+                {
+                    m_engine.Notify(LogLevel::Info, WideToUtf8(chosen->filename().wstring()) + " already has every handler; it was left as it is.");
+                    return;
+                }
+                if (!WriteFile(*chosen, merge.Text))
+                {
+                    m_engine.Notify(LogLevel::Error, "Could not write " + WideToUtf8(chosen->wstring()));
+                    return;
+                }
+                std::string names;
+                for (const std::string& name : merge.Added)
+                    names += (names.empty() ? "" : ", ") + name;
+                m_engine.Notify(LogLevel::Success, "Added " + names + " to " + WideToUtf8(chosen->filename().wstring()) + "; the rest of the script was kept.");
+                return;
+            }
+        }
         std::string code;
         if (withFile)
         {
@@ -591,6 +634,9 @@ namespace Manifold::UI
         case Command::FormMoveDown: Move(1); break;
         case Command::FormTry: ToggleTry(); break;
         case Command::FormRun: RunScript(); break;
+        case Command::FormCopy: Copy(); break;
+        case Command::FormCut: Cut(); break;
+        case Command::FormPaste: Paste(); break;
         default: break;
         }
     }
@@ -603,7 +649,7 @@ namespace Manifold::UI
             if (Pressed(command))
                 RunCommand(command);
         }
-        for (const Command command : { Command::FormUndo, Command::FormRedo, Command::FormDuplicate, Command::FormDelete, Command::FormMoveUp, Command::FormMoveDown })
+        for (const Command command : { Command::FormUndo, Command::FormRedo, Command::FormDuplicate, Command::FormDelete, Command::FormMoveUp, Command::FormMoveDown, Command::FormCopy, Command::FormCut, Command::FormPaste })
         {
             if (Pressed(command) && !typing && !m_trying)
                 RunCommand(command);
@@ -618,6 +664,7 @@ namespace Manifold::UI
         {
             if (CommandItem(ICON_FA_FILE "  New Form", Command::FormNew))
                 RunCommand(Command::FormNew);
+            TemplateMenu();
             if (CommandItem(ICON_FA_FOLDER_OPEN "  Open Form...", Command::FormOpen))
                 RunCommand(Command::FormOpen);
             ImGui::Separator();
@@ -627,6 +674,9 @@ namespace Manifold::UI
                 RunCommand(Command::FormSaveAs);
             if (CommandItem(ICON_FA_FILE_EXPORT "  Export Script...", Command::FormExport))
                 RunCommand(Command::FormExport);
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_SHAPES "  Save as Template..."))
+                SaveAsTemplate();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Edit"))
@@ -637,6 +687,13 @@ namespace Manifold::UI
                 Redo();
             ImGui::Separator();
             const bool widget = m_selected != m_form.Window;
+            if (CommandItem(ICON_FA_CUT "  Cut", Command::FormCut, false, widget))
+                Cut();
+            if (CommandItem(ICON_FA_COPY "  Copy", Command::FormCopy))
+                Copy();
+            if (CommandItem(ICON_FA_PASTE "  Paste", Command::FormPaste))
+                Paste();
+            ImGui::Separator();
             if (CommandItem(ICON_FA_CLONE "  Duplicate", Command::FormDuplicate, false, widget))
                 Duplicate();
             if (CommandItem(ICON_FA_ARROW_UP "  Move Up", Command::FormMoveUp, false, widget))
@@ -648,6 +705,7 @@ namespace Manifold::UI
                 Delete();
             ImGui::EndMenu();
         }
+        SnippetMenu();
         if (ImGui::BeginMenu("View"))
         {
             if (CommandItem(ICON_FA_MOUSE_POINTER "  Try the Form", Command::FormTry, m_trying))
@@ -813,7 +871,11 @@ namespace Manifold::UI
             ImGui::EndMenu();
         }
         if (node->Kind == UiKind::Window)
+        {
+            if (CommandItem(ICON_FA_PASTE "  Paste", Command::FormPaste))
+                Paste();
             return;
+        }
         if (node->Kind != UiKind::Tab && ImGui::BeginMenu(ICON_FA_LAYER_GROUP "  Wrap In"))
         {
             for (const UiKind kind : { UiKind::Row, UiKind::Column, UiKind::Grid, UiKind::Section })
@@ -824,6 +886,12 @@ namespace Manifold::UI
             }
             ImGui::EndMenu();
         }
+        if (CommandItem(ICON_FA_CUT "  Cut", Command::FormCut))
+            Cut();
+        if (CommandItem(ICON_FA_COPY "  Copy", Command::FormCopy))
+            Copy();
+        if (CommandItem(ICON_FA_PASTE "  Paste", Command::FormPaste))
+            Paste();
         if (CommandItem(ICON_FA_CLONE "  Duplicate", Command::FormDuplicate))
             Duplicate();
         if (CommandItem(ICON_FA_ARROW_UP "  Move Up", Command::FormMoveUp))
@@ -888,6 +956,7 @@ namespace Manifold::UI
         ImGui::PopStyleColor(2);
         const ImVec2 bodyMin = ImGui::GetWindowPos();
         const ImVec2 bodyMax(bodyMin.x + ImGui::GetWindowWidth(), bodyMin.y + ImGui::GetWindowHeight());
+        SyncImages(form);
         if (m_trying)
         {
             m_tryHost->DrawContents(m_try.Window, nullptr);
@@ -905,36 +974,171 @@ namespace Manifold::UI
         ImGui::EndChild();
     }
 
+    const UiDesign::Rect* FormEditorWindow::RectOf(int id) const
+    {
+        for (const UiDesign::Rect& rect : m_design.Rects)
+        {
+            if (rect.Node == id)
+                return &rect;
+        }
+        return nullptr;
+    }
+
+    bool FormEditorWindow::Within(int node, int ancestor) const
+    {
+        for (const UiNode* up = m_form.Model.Find(node); up; up = m_form.Model.Find(up->Parent))
+        {
+            if (up->Id == ancestor)
+                return true;
+        }
+        return false;
+    }
+
+    FormEditorWindow::DropSpot FormEditorWindow::SpotAt(ImVec2 mouse, int moving) const
+    {
+        const UiDesign::Rect* best = nullptr;
+        for (const UiDesign::Rect& rect : m_design.Rects)
+        {
+            if (mouse.x < rect.Min.x || mouse.y < rect.Min.y || mouse.x >= rect.Max.x || mouse.y >= rect.Max.y)
+                continue;
+            if (moving && Within(rect.Node, moving))
+                continue;
+            if (!best || rect.Depth > best->Depth || (rect.Depth == best->Depth && (rect.Max.x - rect.Min.x) * (rect.Max.y - rect.Min.y) < (best->Max.x - best->Min.x) * (best->Max.y - best->Min.y)))
+                best = &rect;
+        }
+        DropSpot spot{ m_form.Window, Drop::Inside };
+        if (!best)
+            return spot;
+        const UiNode* node = m_form.Model.Find(best->Node);
+        const UiNode* parent = node ? m_form.Model.Find(node->Parent) : nullptr;
+        if (!node || !parent)
+            return spot;
+        spot.Target = node->Id;
+        const bool across = parent->Kind == UiKind::Row || parent->Kind == UiKind::Grid;
+        const float low = across ? best->Min.x : best->Min.y;
+        const float high = across ? best->Max.x : best->Max.y;
+        const float at = across ? mouse.x : mouse.y;
+        if (Lua::UiIsContainer(node->Kind) && node->Kind != UiKind::Tab)
+        {
+            const float edge = std::min(Px(10.0f), (high - low) * 0.25f);
+            spot.Where = at < low + edge ? Drop::Before : at > high - edge ? Drop::After : Drop::Inside;
+        }
+        else if (node->Kind == UiKind::Tab)
+            spot.Where = Drop::Inside;
+        else
+            spot.Where = at < (low + high) * 0.5f ? Drop::Before : Drop::After;
+        return spot;
+    }
+
+    void FormEditorWindow::DrawSpot(ImDrawList* draw, const DropSpot& spot) const
+    {
+        const ImU32 accent = ImGui::GetColorU32(ManifoldTheme::Accent);
+        const UiDesign::Rect* rect = RectOf(spot.Target);
+        if (!rect)
+            return;
+        if (spot.Where == Drop::Inside)
+        {
+            draw->AddRectFilled(rect->Min, rect->Max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.12f)), Px(3.0f));
+            draw->AddRect(rect->Min, rect->Max, accent, Px(3.0f), 0, Px(2.0f));
+            return;
+        }
+        const UiNode* node = m_form.Model.Find(spot.Target);
+        const UiNode* parent = node ? m_form.Model.Find(node->Parent) : nullptr;
+        const bool across = parent && (parent->Kind == UiKind::Row || parent->Kind == UiKind::Grid);
+        const float thick = Px(3.0f);
+        if (across)
+        {
+            const float x = spot.Where == Drop::Before ? rect->Min.x - thick : rect->Max.x + thick;
+            draw->AddLine(ImVec2(x, rect->Min.y), ImVec2(x, rect->Max.y), accent, thick);
+        }
+        else
+        {
+            const float y = spot.Where == Drop::Before ? rect->Min.y - thick : rect->Max.y + thick;
+            draw->AddLine(ImVec2(rect->Min.x, y), ImVec2(rect->Max.x, y), accent, thick);
+        }
+    }
+
+    void FormEditorWindow::DropPayload(const ImGuiPayload* payload, const DropSpot& spot)
+    {
+        int parent = 0;
+        int index = -1;
+        if (!DropAt(spot.Target, spot.Where, parent, index))
+            return;
+        if (payload->IsDataType(kKindPayload))
+        {
+            AddInto(static_cast<UiKind>(*static_cast<const int*>(payload->Data)), parent, index);
+            return;
+        }
+        const int moving = *static_cast<const int*>(payload->Data);
+        if (moving == spot.Target || Within(parent, moving))
+            return;
+        FormDocument before = m_form;
+        if (Lua::FormMove(m_form, moving, parent, index))
+        {
+            m_undo.push_back(std::move(before));
+            if (m_undo.size() > kUndoLimit)
+                m_undo.pop_front();
+            m_redo.clear();
+            m_lastSource = 0;
+            Changed();
+            Select(moving);
+        }
+    }
+
     void FormEditorWindow::PreviewOverlay(ImVec2 min, ImVec2 max)
     {
         const ImGuiIO& io = ImGui::GetIO();
+        const ImGuiID pick = ImGui::GetID("##previewpick");
         const bool inside = ImGui::IsMouseHoveringRect(min, max) && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-        int under = 0;
-        int depth = -1;
-        float area = 0.0f;
+        int pointed = 0;
         if (inside)
         {
+            int depth = -1;
             for (const UiDesign::Rect& rect : m_design.Rects)
             {
-                if (io.MousePos.x < rect.Min.x || io.MousePos.y < rect.Min.y || io.MousePos.x >= rect.Max.x || io.MousePos.y >= rect.Max.y)
-                    continue;
-                const float size = (rect.Max.x - rect.Min.x) * (rect.Max.y - rect.Min.y);
-                if (rect.Depth > depth || (rect.Depth == depth && size < area))
+                if (io.MousePos.x >= rect.Min.x && io.MousePos.y >= rect.Min.y && io.MousePos.x < rect.Max.x && io.MousePos.y < rect.Max.y && rect.Depth > depth)
                 {
-                    under = rect.Node;
+                    pointed = rect.Node;
                     depth = rect.Depth;
-                    area = size;
                 }
             }
-            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-                Select(under ? under : m_form.Window);
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload())
+            {
+                Select(pointed ? pointed : m_form.Window);
+                m_pressNode = pointed;
+                m_pressing = true;
+                ImGui::SetActiveID(pick, ImGui::GetCurrentWindow());
+            }
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
             {
-                Select(under ? under : m_form.Window);
+                Select(pointed ? pointed : m_form.Window);
                 ImGui::OpenPopup("##previewmenu");
             }
-            if (under)
-                m_hovered = under;
+            if (pointed)
+                m_hovered = pointed;
+        }
+        if (m_pressing)
+        {
+            if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                ImGui::KeepAliveID(pick);
+            else
+            {
+                m_pressing = false;
+                m_pressNode = 0;
+                if (ImGui::GetActiveID() == pick)
+                    ImGui::ClearActiveID();
+            }
+        }
+        if (m_pressing && m_pressNode && m_pressNode != m_form.Window && ImGui::IsMouseDragging(ImGuiMouseButton_Left, Px(6.0f)))
+        {
+            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceExtern))
+            {
+                const int node = m_pressNode;
+                ImGui::SetDragDropPayload(kNodePayload, &node, sizeof(node));
+                if (const UiNode* item = m_form.Model.Find(node))
+                    ImGui::Text("%s  %s", KindIcon(item->Kind), Caption(m_form, *item).c_str());
+                ImGui::EndDragDropSource();
+            }
         }
         if (ImGui::BeginPopup("##previewmenu"))
         {
@@ -946,52 +1150,34 @@ namespace Manifold::UI
         const ImU32 accent = ImGui::GetColorU32(ManifoldTheme::Accent);
         const ImU32 soft = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.45f));
         const auto outline = [&](int id, ImU32 color, float thickness) {
-            for (const UiDesign::Rect& rect : m_design.Rects)
-            {
-                if (rect.Node == id)
-                {
-                    draw->AddRect(ImVec2(rect.Min.x - 2.0f, rect.Min.y - 2.0f), ImVec2(rect.Max.x + 2.0f, rect.Max.y + 2.0f), color, Px(3.0f), 0, thickness);
-                    return true;
-                }
-            }
-            return false;
+            if (const UiDesign::Rect* rect = RectOf(id))
+                draw->AddRect(ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), ImVec2(rect->Max.x + 2.0f, rect->Max.y + 2.0f), color, Px(3.0f), 0, thickness);
         };
-        if (m_hovered && m_hovered != m_selected)
-            outline(m_hovered, soft, Px(1.0f));
-        if (m_selected != m_form.Window)
-            outline(m_selected, accent, Px(2.0f));
-
         const ImGuiPayload* payload = ImGui::GetDragDropPayload();
         const bool dragging = payload && (payload->IsDataType(kKindPayload) || payload->IsDataType(kNodePayload));
-        if (dragging && ImGui::IsMouseHoveringRect(min, max))
+        if (!dragging)
         {
-            int target = under ? under : m_form.Window;
-            const UiNode* node = m_form.Model.Find(target);
-            const Drop where = node && Lua::UiIsContainer(node->Kind) ? Drop::Inside : Drop::After;
-            if (!outline(target, accent, Px(2.0f)))
+            if (m_hovered && m_hovered != m_selected)
+                outline(m_hovered, soft, Px(1.0f));
+            if (m_selected != m_form.Window)
+                outline(m_selected, accent, Px(2.0f));
+        }
+        else if (ImGui::IsMouseHoveringRect(min, max))
+        {
+            const int moving = payload->IsDataType(kNodePayload) ? *static_cast<const int*>(payload->Data) : 0;
+            const DropSpot spot = SpotAt(io.MousePos, moving);
+            if (moving)
+                outline(moving, soft, Px(1.0f));
+            if (spot.Target == m_form.Window)
                 draw->AddRect(min, max, accent, 0.0f, 0, Px(2.0f));
+            else
+                DrawSpot(draw, spot);
             if (ImGui::BeginDragDropTargetCustom(ImRect(min, max), ImGui::GetID("##previewdrop")))
             {
-                int parent = 0;
-                int index = -1;
                 if (const ImGuiPayload* kind = ImGui::AcceptDragDropPayload(kKindPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
-                {
-                    if (DropAt(target, where, parent, index))
-                        AddInto(static_cast<UiKind>(*static_cast<const int*>(kind->Data)), parent, index);
-                }
+                    DropPayload(kind, spot);
                 if (const ImGuiPayload* moved = ImGui::AcceptDragDropPayload(kNodePayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
-                {
-                    const int moving = *static_cast<const int*>(moved->Data);
-                    FormDocument before = m_form;
-                    if (moving != target && DropAt(target, where, parent, index) && Lua::FormMove(m_form, moving, parent, index))
-                    {
-                        m_undo.push_back(std::move(before));
-                        m_redo.clear();
-                        m_lastSource = 0;
-                        Changed();
-                        Select(moving);
-                    }
-                }
+                    DropPayload(moved, spot);
                 ImGui::EndDragDropTarget();
             }
         }
@@ -1214,6 +1400,28 @@ namespace Manifold::UI
         case FormPropType::Number:
             edited = InputTextWithHint("##v", prop.Key == "min" || prop.Key == "max" ? "none" : "0", value, ImGuiInputTextFlags_CharsScientific);
             break;
+        case FormPropType::File:
+        {
+            const float button = ImGui::GetFrameHeight();
+            ImGui::SetNextItemWidth(-(button + ImGui::GetStyle().ItemInnerSpacing.x));
+            edited = InputTextWithHint("##v", "picture file", value);
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+            if (IconButton(ICON_FA_FOLDER_OPEN, "Choose a picture", false, button))
+            {
+                const std::filesystem::path folder = m_path.empty() ? Paths::ProgramFolder() : m_path.parent_path();
+                if (const auto chosen = m_workspace.OpenFileDialog({ { L"Pictures (*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.gif)", L"*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.gif" }, { L"All files", L"*.*" } }, folder))
+                {
+                    std::error_code ignored;
+                    std::filesystem::path relative = std::filesystem::relative(*chosen, folder, ignored);
+                    const std::wstring text = relative.wstring();
+                    value = WideToUtf8(!ignored && !relative.empty() && text.rfind(L"..", 0) != 0 ? relative.generic_wstring() : chosen->wstring());
+                    edited = true;
+                }
+            }
+            if (!value.empty() && !std::filesystem::exists(ResolveImage(value)))
+                TextWithError("Not found next to the form file or the program", ManifoldTheme::Warning);
+            break;
+        }
         case FormPropType::String:
             edited = InputText("##v", value);
             break;
@@ -1222,6 +1430,8 @@ namespace Manifold::UI
         {
             Remember(ImGui::GetID("##v"));
             Lua::FormSetProp(node, prop.Key, value);
+            if (prop.Type == FormPropType::File)
+                m_badImages.clear();
             Changed();
         }
         ImGui::PopID();
@@ -1399,6 +1609,203 @@ namespace Manifold::UI
                 m_problemsDialog.Close();
             m_problemsDialog.End();
         }
+    }
+
+    std::filesystem::path FormEditorWindow::ResolveImage(const std::string& source) const
+    {
+        std::filesystem::path file(Utf8ToWide(source));
+        if (file.is_relative())
+            file = (m_path.empty() ? Paths::ProgramFolder() : m_path.parent_path()) / file;
+        return file;
+    }
+
+    void FormEditorWindow::SyncImages(Lua::FormDocument& form)
+    {
+        std::function<void(int)> visit = [&](int id) {
+            UiNode* node = form.Model.Find(id);
+            if (!node)
+                return;
+            if (node->Kind == UiKind::Image)
+            {
+                const std::string resolved = node->Source.empty() ? std::string() : WideToUtf8(ResolveImage(node->Source).wstring());
+                const Lua::UiImage* have = form.Model.FindImage(node->ImageId);
+                if (resolved.empty())
+                    node->ImageId = 0;
+                else if (!have || have->Path != resolved)
+                {
+                    node->ImageId = 0;
+                    if (!m_badImages.count(resolved))
+                    {
+                        std::ifstream file(ResolveImage(node->Source), std::ios::binary);
+                        const std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                        std::optional<DecodedImage> decoded = file ? DecodeImage(bytes) : std::nullopt;
+                        if (decoded && decoded->Width > 0 && decoded->Height > 0)
+                        {
+                            Lua::UiImage image;
+                            image.Width = decoded->Width;
+                            image.Height = decoded->Height;
+                            image.Rgba = std::move(decoded->Rgba);
+                            image.Path = resolved;
+                            node->ImageId = form.Model.AddImage(std::move(image));
+                        }
+                        else
+                            m_badImages.insert(resolved);
+                    }
+                }
+            }
+            for (const int child : std::vector<int>(node->Children))
+                visit(child);
+        };
+        visit(form.Window);
+    }
+
+    void FormEditorWindow::Copy()
+    {
+        const std::string text = m_selected == m_form.Window ? Lua::FormSave(m_form) : Lua::FormFragment(m_form, { m_selected });
+        ImGui::SetClipboardText(text.c_str());
+    }
+
+    void FormEditorWindow::Cut()
+    {
+        if (m_selected == m_form.Window)
+            return;
+        Copy();
+        Delete();
+    }
+
+    void FormEditorWindow::Paste()
+    {
+        const char* text = ImGui::GetClipboardText();
+        PasteText(text ? std::string(text) : std::string());
+    }
+
+    void FormEditorWindow::PasteText(const std::string& text)
+    {
+        const UiNode* selected = m_form.Model.Find(m_selected);
+        if (!selected)
+            selected = m_form.Model.Find(m_form.Window);
+        if (!selected)
+            return;
+        Remember();
+        std::string error;
+        std::vector<int> made;
+        if (Lua::UiIsContainer(selected->Kind))
+            made = Lua::FormPaste(m_form, text, selected->Id, -1, error);
+        if (made.empty() && selected->Id != m_form.Window)
+        {
+            std::string again;
+            made = Lua::FormPaste(m_form, text, selected->Parent, Lua::FormIndexOf(m_form, selected->Id) + 1, again);
+            if (!made.empty() || error.empty())
+                error = again;
+        }
+        if (made.empty())
+        {
+            m_undo.pop_back();
+            m_engine.Notify(LogLevel::Warning, error.empty() ? std::string("The clipboard holds no form widgets.") : "Nothing pasted: " + error);
+            return;
+        }
+        m_lastSource = 0;
+        Changed();
+        Select(made.front());
+        if (!error.empty())
+            m_engine.Notify(LogLevel::Warning, "Some widgets were left out: " + error);
+    }
+
+    std::filesystem::path FormEditorWindow::TemplateFolder() const
+    {
+        return Paths::ProgramFolder() / L"forms" / L"templates";
+    }
+
+    void FormEditorWindow::TemplateMenu()
+    {
+        if (!ImGui::BeginMenu(ICON_FA_SHAPES "  New from Template"))
+            return;
+        for (const Lua::FormTemplate& entry : Lua::FormTemplates())
+        {
+            if (entry.Snippet)
+                continue;
+            if (ImGui::MenuItem(std::string(entry.Title).c_str()))
+            {
+                m_pendingTemplate = std::string(entry.Text);
+                AskThen(Pending::Template);
+            }
+            ItemTooltip(std::string(entry.Help).c_str());
+        }
+        std::vector<std::filesystem::path> own;
+        std::error_code ignored;
+        for (std::filesystem::directory_iterator it(TemplateFolder(), ignored), end; !ignored && it != end; it.increment(ignored))
+        {
+            if (it->is_regular_file(ignored) && FormStem(it->path()) + ".form.lua" == WideToUtf8(it->path().filename().wstring()))
+                own.push_back(it->path());
+        }
+        std::sort(own.begin(), own.end());
+        if (!own.empty())
+            ImGui::Separator();
+        for (const std::filesystem::path& path : own)
+        {
+            if (ImGui::MenuItem(FormStem(path).c_str()))
+            {
+                std::string text;
+                if (ReadFile(path, text))
+                {
+                    m_pendingTemplate = text;
+                    AskThen(Pending::Template);
+                }
+            }
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem(ICON_FA_FOLDER "  Open Templates Folder"))
+        {
+            std::filesystem::create_directories(TemplateFolder(), ignored);
+            ::ShellExecuteW(nullptr, L"open", TemplateFolder().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        ImGui::EndMenu();
+    }
+
+    void FormEditorWindow::SnippetMenu()
+    {
+        if (!ImGui::BeginMenu("Insert"))
+            return;
+        for (const Lua::FormTemplate& entry : Lua::FormTemplates())
+        {
+            if (!entry.Snippet)
+                continue;
+            if (ImGui::MenuItem(std::string(entry.Title).c_str()))
+                PasteText(std::string(entry.Text));
+            ItemTooltip(std::string(entry.Help).append("\nIt goes into the selected container, or after the selected widget.").c_str());
+        }
+        ImGui::Separator();
+        if (ImGui::BeginMenu("Widget"))
+        {
+            for (const UiKind kind : Lua::FormKinds())
+            {
+                const std::string label = std::string(KindIcon(kind)) + "  " + std::string(Lua::FormKindTitle(kind));
+                if (ImGui::MenuItem(label.c_str()))
+                    Add(kind);
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenu();
+    }
+
+    void FormEditorWindow::SaveAsTemplate()
+    {
+        std::error_code ignored;
+        std::filesystem::create_directories(TemplateFolder(), ignored);
+        const UiNode* window = m_form.Model.Find(m_form.Window);
+        const std::string name = SafeFileName(window ? window->Title : std::string()) + ".form.lua";
+        const auto chosen = m_workspace.SaveFileDialog({ { L"Manifold forms (*.form.lua)", L"*.form.lua" } }, WideToUtf8((TemplateFolder() / Utf8ToWide(name)).wstring()), L"lua");
+        if (!chosen)
+            return;
+        std::filesystem::path path = *chosen;
+        if (FormStem(path) + ".form.lua" != WideToUtf8(path.filename().wstring()))
+            path.replace_filename(Utf8ToWide(FormStem(path) + ".form.lua"));
+        if (!WriteFile(path, Lua::FormSave(m_form)))
+        {
+            m_engine.Notify(LogLevel::Error, "Could not write " + WideToUtf8(path.wstring()));
+            return;
+        }
+        m_engine.Notify(LogLevel::Success, "Saved the template " + FormStem(path) + "; File > New from Template lists it.");
     }
 
     void FormEditorWindow::Draw()

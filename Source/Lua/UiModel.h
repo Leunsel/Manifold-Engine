@@ -147,6 +147,7 @@ namespace Manifold::Lua
         float Scale = 1.0f;
         bool ViewChanged = false;
         int ImageId = 0;
+        std::string Source;
         float Fraction = 0.0f;
 
         std::string Title;

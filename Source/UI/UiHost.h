@@ -59,6 +59,7 @@ namespace Manifold::UI
             void* View = nullptr;
             int Width = 0;
             int Height = 0;
+            std::string Path;
         };
 
         struct CanvasState

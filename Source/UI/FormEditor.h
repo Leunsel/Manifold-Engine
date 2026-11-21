@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 
 namespace Manifold
@@ -37,6 +38,7 @@ namespace Manifold::UI
             New,
             Open,
             Close,
+            Template,
         };
 
         enum class Drop
@@ -58,6 +60,26 @@ namespace Manifold::UI
         void NodeMenu(int id);
         void Preview();
         void PreviewOverlay(ImVec2 min, ImVec2 max);
+        struct DropSpot
+        {
+            int Target = 0;
+            Drop Where = Drop::Inside;
+        };
+        DropSpot SpotAt(ImVec2 mouse, int moving) const;
+        void DrawSpot(ImDrawList* draw, const DropSpot& spot) const;
+        const UiDesign::Rect* RectOf(int id) const;
+        bool Within(int node, int ancestor) const;
+        void DropPayload(const ImGuiPayload* payload, const DropSpot& spot);
+        void SyncImages(Lua::FormDocument& form);
+        std::filesystem::path ResolveImage(const std::string& source) const;
+        void Copy();
+        void Cut();
+        void Paste();
+        void PasteText(const std::string& text);
+        void TemplateMenu();
+        void SnippetMenu();
+        void SaveAsTemplate();
+        std::filesystem::path TemplateFolder() const;
         void Properties();
         void PropertyRow(Lua::UiNode& node, const Lua::FormProp& prop);
         void HandlerRow(Lua::UiNode& node, const Lua::FormHandler& handler);
@@ -103,6 +125,9 @@ namespace Manifold::UI
         int m_selected = 0;
         int m_hovered = 0;
         int m_lastTab = 0;
+        int m_pressNode = 0;
+        bool m_pressing = false;
+        std::set<std::string> m_badImages;
         bool m_scrollOutline = false;
 
         std::deque<Lua::FormDocument> m_undo;
@@ -112,6 +137,7 @@ namespace Manifold::UI
         std::filesystem::path m_path;
         bool m_dirty = false;
         Pending m_pending = Pending::None;
+        std::string m_pendingTemplate;
         Dialog m_unsavedDialog;
         Dialog m_problemsDialog;
 

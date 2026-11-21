@@ -243,6 +243,9 @@ namespace Manifold
             { FormMoveDown, "FormMoveDown", Scope::FormEditor, "Move Widget Down", Alt | ImGuiKey_DownArrow, 0, Own },
             { FormTry, "FormTry", Scope::FormEditor, "Design or Try", Ctrl | ImGuiKey_T, 0, Own },
             { FormRun, "FormRun", Scope::FormEditor, "Run Script", ImGuiKey_F5, 0, Own },
+            { FormCopy, "FormCopy", Scope::FormEditor, "Copy Widget", Ctrl | ImGuiKey_C, 0, Own },
+            { FormCut, "FormCut", Scope::FormEditor, "Cut Widget", Ctrl | ImGuiKey_X, 0, Own },
+            { FormPaste, "FormPaste", Scope::FormEditor, "Paste Widgets", Ctrl | ImGuiKey_V, 0, Own },
         };
 
         static_assert(std::size(kCommands) == static_cast<std::size_t>(Command::Count));

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <regex>
 #include <set>
 
 namespace Manifold::Lua
@@ -136,6 +137,9 @@ namespace Manifold::Lua
             { "value", T::Number, "Fraction 0 to 1." },
             { "text", T::String, "Text on the bar." },
         };
+        constexpr FormProp kImage[] = {
+            { "image", T::File, "Picture file: PNG, JPEG, BMP, TGA or GIF. A relative path starts at the form file's folder with manifold.ui.form, at the program folder in a standalone script." },
+        };
         constexpr FormProp kCanvas[] = {
             { "background", T::Color, "Theme colour name or #RRGGBB behind the drawings." },
             { "zoom", T::Bool, "The user can zoom with the wheel and pan by dragging." },
@@ -173,6 +177,7 @@ namespace Manifold::Lua
         constexpr auto kTreeAll = WithCommon(kTree);
         constexpr auto kProgressAll = WithCommon(kProgress);
         constexpr auto kCanvasAll = WithCommon(kCanvas);
+        constexpr auto kImageAll = WithCommon(kImage);
 
         constexpr FormHandler kWindowHandlers[] = {
             { "onClose", "window", "The user closed the window (it is hidden, show brings it back)." },
@@ -206,8 +211,265 @@ namespace Manifold::Lua
             UiKind::Row, UiKind::Column, UiKind::Grid, UiKind::Section, UiKind::Tabs, UiKind::Tab, UiKind::Split,
             UiKind::Text, UiKind::Heading, UiKind::Separator, UiKind::Spacer,
             UiKind::Button, UiKind::Checkbox, UiKind::Input, UiKind::Number, UiKind::Slider, UiKind::Combo, UiKind::Radio, UiKind::Color,
-            UiKind::Table, UiKind::Tree, UiKind::Progress, UiKind::Canvas,
+            UiKind::Table, UiKind::Tree, UiKind::Progress, UiKind::Image, UiKind::Canvas,
         };
+
+        constexpr std::string_view kToolWindow = R"FORM(return {
+  form = 1,
+  title = "My Tool",
+  icon = "tools",
+  width = 420,
+  height = 330,
+  key = "my tool",
+  children = {
+    {
+      kind = "section",
+      title = "Options",
+      icon = "sliders-h",
+      children = {
+        {
+          kind = "grid",
+          children = {
+            { kind = "text", text = "Enabled" },
+            { kind = "checkbox", name = "enabled", onChange = "enabledChanged" },
+            { kind = "text", text = "Amount" },
+            { kind = "slider", name = "amount", value = 50, max = 100, integer = true, onChange = "amountChanged" },
+            { kind = "text", text = "Name" },
+            { kind = "input", name = "name", hint = "Name" },
+          },
+        },
+      },
+    },
+    {
+      kind = "row",
+      align = "right",
+      children = {
+        { kind = "button", name = "reset", text = "Reset", icon = "undo", onClick = "resetClicked" },
+        { kind = "button", name = "apply", text = "Apply", icon = "check", style = "accent", onClick = "applyClicked" },
+      },
+    },
+  },
+})FORM";
+
+        constexpr std::string_view kSettingsDialog = R"FORM(return {
+  form = 1,
+  title = "Settings",
+  icon = "cog",
+  width = 460,
+  height = 360,
+  key = "settings",
+  children = {
+    {
+      kind = "tabs",
+      children = {
+        {
+          kind = "tab",
+          title = "General",
+          icon = "sliders-h",
+          children = {
+            {
+              kind = "grid",
+              children = {
+                { kind = "text", text = "Language" },
+                { kind = "combo", name = "language", items = { "English", "Deutsch" }, value = 1 },
+                { kind = "text", text = "Refresh (ms)" },
+                { kind = "number", name = "refresh", value = 250, min = 50, max = 5000, step = 50, integer = true },
+                { kind = "text", text = "Start Hidden" },
+                { kind = "checkbox", name = "hidden" },
+              },
+            },
+          },
+        },
+        {
+          kind = "tab",
+          title = "Look",
+          icon = "palette",
+          children = {
+            {
+              kind = "grid",
+              children = {
+                { kind = "text", text = "Accent" },
+                { kind = "color", name = "accent", value = "#4C9AFF" },
+                { kind = "text", text = "Density" },
+                { kind = "radio", name = "density", items = { "Compact", "Normal", "Roomy" }, value = 2, horizontal = true },
+              },
+            },
+          },
+        },
+      },
+    },
+    { kind = "separator" },
+    {
+      kind = "row",
+      align = "right",
+      children = {
+        { kind = "button", name = "cancel", text = "Cancel", onClick = "cancelClicked" },
+        { kind = "button", name = "save", text = "Save", icon = "save", style = "accent", onClick = "saveClicked" },
+      },
+    },
+  },
+})FORM";
+
+        constexpr std::string_view kListDetails = R"FORM(return {
+  form = 1,
+  title = "Browser",
+  icon = "list",
+  width = 640,
+  height = 420,
+  key = "browser",
+  children = {
+    {
+      kind = "row",
+      children = {
+        { kind = "input", name = "search", hint = "Search", width = 260, onChange = "searchChanged" },
+        { kind = "button", name = "refresh", text = "Refresh", icon = "undo", onClick = "refreshClicked" },
+      },
+    },
+    {
+      kind = "split",
+      ratio = 0.45,
+      children = {
+        {
+          kind = "column",
+          children = {
+            { kind = "table", name = "list", columns = { "Name", "Value" }, rows = { { "First", "1" }, { "Second", "2" } }, height = 320, onSelect = "listSelected" },
+          },
+        },
+        {
+          kind = "column",
+          children = {
+            { kind = "heading", text = "Details", icon = "info-circle" },
+            { kind = "text", name = "details", text = "Select an entry on the left.", color = "muted", wrap = true },
+          },
+        },
+      },
+    },
+  },
+})FORM";
+
+        constexpr std::string_view kCheatList = R"FORM(return {
+  form = 1,
+  title = "Cheats",
+  icon = "gamepad",
+  width = 380,
+  height = 380,
+  key = "cheats",
+  children = {
+    {
+      kind = "section",
+      title = "Player",
+      icon = "user",
+      collapsible = true,
+      children = {
+        { kind = "checkbox", name = "godMode", label = "God Mode", onChange = "godModeChanged" },
+        { kind = "checkbox", name = "infiniteAmmo", label = "Infinite Ammo", onChange = "infiniteAmmoChanged" },
+        { kind = "slider", name = "speed", label = "Speed", value = 1, min = 0.5, max = 5, format = "%.1f x", onChange = "speedChanged" },
+      },
+    },
+    {
+      kind = "section",
+      title = "World",
+      icon = "globe",
+      collapsible = true,
+      children = {
+        { kind = "checkbox", name = "freezeTime", label = "Freeze Time", onChange = "freezeTimeChanged" },
+        { kind = "button", name = "teleport", text = "Teleport to Waypoint", icon = "map-marker-alt", width = -1, onClick = "teleportClicked" },
+      },
+    },
+  },
+})FORM";
+
+        constexpr std::string_view kLabelField = R"FORM(return {
+  form = 1,
+  fragment = true,
+  title = "",
+  children = {
+    { kind = "text", text = "Label" },
+    { kind = "input", name = "field", hint = "Value" },
+  },
+})FORM";
+
+        constexpr std::string_view kOkCancel = R"FORM(return {
+  form = 1,
+  fragment = true,
+  title = "",
+  children = {
+    {
+      kind = "row",
+      align = "right",
+      children = {
+        { kind = "button", name = "cancel", text = "Cancel", onClick = "cancelClicked" },
+        { kind = "button", name = "ok", text = "OK", style = "accent", onClick = "okClicked" },
+      },
+    },
+  },
+})FORM";
+
+        constexpr std::string_view kSearchBar = R"FORM(return {
+  form = 1,
+  fragment = true,
+  title = "",
+  children = {
+    {
+      kind = "row",
+      children = {
+        { kind = "input", name = "search", hint = "Search", width = 240, onSubmit = "searchSubmitted" },
+        { kind = "button", name = "find", text = "Find", icon = "search", onClick = "findClicked" },
+      },
+    },
+  },
+})FORM";
+
+        constexpr std::string_view kSectionGrid = R"FORM(return {
+  form = 1,
+  fragment = true,
+  title = "",
+  children = {
+    {
+      kind = "section",
+      title = "Section",
+      children = {
+        {
+          kind = "grid",
+          children = {
+            { kind = "text", text = "First" },
+            { kind = "input", name = "first" },
+            { kind = "text", text = "Second" },
+            { kind = "number", name = "second" },
+          },
+        },
+      },
+    },
+  },
+})FORM";
+
+        constexpr std::string_view kStatusLine = R"FORM(return {
+  form = 1,
+  fragment = true,
+  title = "",
+  children = {
+    {
+      kind = "row",
+      children = {
+        { kind = "progress", name = "progress", value = 0.4, width = 160 },
+        { kind = "text", name = "status", text = "Working...", color = "muted" },
+      },
+    },
+  },
+})FORM";
+
+        constexpr FormTemplate kTemplates[] = {
+            { "tool", "Tool Window", "A section with labelled fields and Reset and Apply buttons.", false, kToolWindow },
+            { "settings", "Settings Dialog", "Tabs with fields, Cancel and Save.", false, kSettingsDialog },
+            { "browser", "List and Details", "A search field, a table and a details pane side by side.", false, kListDetails },
+            { "cheats", "Cheat List", "Foldable sections of switches, a slider and a button.", false, kCheatList },
+            { "labelfield", "Label and Field", "A text and a field: one row of a grid.", true, kLabelField },
+            { "okcancel", "OK and Cancel", "Two buttons at the right of a row.", true, kOkCancel },
+            { "search", "Search Bar", "A search field with a Find button.", true, kSearchBar },
+            { "sectiongrid", "Section with Fields", "A card with a grid of two labelled fields.", true, kSectionGrid },
+            { "status", "Status Line", "A progress bar and a status text.", true, kStatusLine },
+        };
+
 
         constexpr std::string_view kKeywords[] = {
             "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in",
@@ -487,6 +749,7 @@ namespace Manifold::Lua
             case UiKind::Column:
             case UiKind::Grid:
             case UiKind::Section:
+            case UiKind::Image:
             case UiKind::Tabs:
             case UiKind::Tab:
             case UiKind::Split:
@@ -629,7 +892,7 @@ namespace Manifold::Lua
                         continue;
                     }
                     const std::string key = lua_tostring(State, -2);
-                    if (key == "name" || key == "kind" || key == "children" || key == "form" || (node.Kind == UiKind::Window && key == "key"))
+                    if (key == "name" || key == "kind" || key == "children" || key == "form" || (node.Kind == UiKind::Window && (key == "key" || key == "fragment")))
                     {
                         lua_pop(State, 1);
                         continue;
@@ -668,12 +931,13 @@ namespace Manifold::Lua
                 lua_pop(State, 1);
                 const std::optional<UiKind> kind = UiKindFromName(kindName);
                 const UiNode* above = Form.Model.Find(parent);
-                if (!kind || *kind == UiKind::Window || *kind == UiKind::Image)
+                if (!kind || *kind == UiKind::Window)
                 {
                     Error = "unknown widget kind \"" + kindName + "\"";
                     return false;
                 }
-                if (!above || !FormCanHold(above->Kind, *kind))
+                const bool loose = Form.Fragment && parent == Form.Window;
+                if (!above || !(loose || FormCanHold(above->Kind, *kind)))
                 {
                     Error = "a " + std::string(UiKindName(above ? above->Kind : UiKind::Window)) + " cannot hold a " + kindName;
                     return false;
@@ -692,6 +956,14 @@ namespace Manifold::Lua
                 }
                 ApplyUiProps(State, table, node);
                 node.Handlers = 0;
+                if (node.Kind == UiKind::Image)
+                {
+                    node.ImageId = 0;
+                    lua_getfield(State, table, "image");
+                    if (lua_type(State, -1) == LUA_TSTRING)
+                        node.Source = lua_tostring(State, -1);
+                    lua_pop(State, 1);
+                }
                 if (!ReadMeta(table, node, meta))
                     return false;
                 if (!meta.Name.empty() || !meta.Handlers.empty())
@@ -751,6 +1023,9 @@ namespace Manifold::Lua
                     Error = "the form file is from a newer Manifold (form = " + std::to_string(version) + ")";
                     return false;
                 }
+                lua_getfield(State, table, "fragment");
+                Form.Fragment = lua_toboolean(State, -1) != 0;
+                lua_pop(State, 1);
                 UiNode& window = *Form.Model.Find(Form.Window);
                 ApplyUiProps(State, table, window);
                 window.Handlers = 0;
@@ -814,7 +1089,10 @@ namespace Manifold::Lua
                 {
                     if (node.Kind == UiKind::Window && key == "title")
                         continue;
-                    parts.push_back(key + " = " + literal);
+                    if (node.Kind == UiKind::Image && key == "image")
+                        parts.push_back("image = ui.image.load(" + literal + ")");
+                    else
+                        parts.push_back(key + " = " + literal);
                 }
                 if (node.Kind == UiKind::Window && !Form.Key.empty())
                     parts.push_back("key = " + Quote(Form.Key));
@@ -900,6 +1178,7 @@ namespace Manifold::Lua
         case UiKind::Tree: return kTreeAll;
         case UiKind::Progress: return kProgressAll;
         case UiKind::Canvas: return kCanvasAll;
+        case UiKind::Image: return kImageAll;
         default: return {};
         }
     }
@@ -1090,39 +1369,150 @@ namespace Manifold::Lua
         return form.Model.Remove(node);
     }
 
+    int FormGraft(FormDocument& form, const FormDocument& from, int node, int parent, int index)
+    {
+        const UiNode* source = from.Model.Find(node);
+        const UiNode* holder = form.Model.Find(parent);
+        const bool loose = form.Fragment && parent == form.Window;
+        if (!source || !holder || source->Kind == UiKind::Window || !(loose || FormCanHold(holder->Kind, source->Kind)))
+            return 0;
+        const UiNode original = *source;
+        const std::optional<FormMeta> meta = MetaOf(from, node) ? std::optional<FormMeta>(*MetaOf(from, node)) : std::nullopt;
+        const int id = form.Model.Create(original.Kind, parent, {});
+        if (!id)
+            return 0;
+        UiNode& made = *form.Model.Find(id);
+        made = original;
+        made.Id = id;
+        made.Parent = parent;
+        made.Children.clear();
+        made.Revision = 1;
+        if (&from != &form)
+            made.ImageId = 0;
+        if (index >= 0)
+        {
+            UiNode& into = *form.Model.Find(parent);
+            into.Children.pop_back();
+            into.Children.insert(into.Children.begin() + std::min<std::size_t>(static_cast<std::size_t>(index), into.Children.size()), id);
+        }
+        if (meta)
+        {
+            FormMeta fresh = *meta;
+            if (!fresh.Name.empty())
+                fresh.Name = FormUniqueName(form, fresh.Name);
+            form.Meta[id] = std::move(fresh);
+        }
+        for (const int child : original.Children)
+            FormGraft(form, from, child, id, -1);
+        return id;
+    }
+
     int FormDuplicate(FormDocument& form, int node)
     {
         const UiNode* source = form.Model.Find(node);
         if (!source || node == form.Window)
             return 0;
-        const int parent = source->Parent;
-        std::function<int(int, int, int)> copy = [&](int from, int into, int index) -> int {
-            const UiNode original = *form.Model.Find(from);
-            const int id = form.Model.Create(original.Kind, into, {});
-            UiNode& made = *form.Model.Find(id);
-            const int keepParent = made.Parent;
-            made = original;
-            made.Id = id;
-            made.Parent = keepParent;
-            made.Children.clear();
+        return FormGraft(form, form, node, source->Parent, FormIndexOf(form, node) + 1);
+    }
+
+    std::string FormFragment(const FormDocument& form, const std::vector<int>& nodes)
+    {
+        FormDocument piece = NewForm({});
+        piece.Fragment = true;
+        const std::set<int> chosen(nodes.begin(), nodes.end());
+        for (const int id : nodes)
+        {
+            bool inside = false;
+            for (const UiNode* up = form.Model.Find(id); up && !inside; up = form.Model.Find(up->Parent))
+                inside = up->Id != id && chosen.count(up->Id) != 0;
+            const UiNode* node = form.Model.Find(id);
+            if (inside || !node || node->Kind == UiKind::Window)
+                continue;
+            FormGraft(piece, form, id, piece.Window, -1);
+        }
+        return FormSave(piece);
+    }
+
+    std::vector<int> FormPaste(FormDocument& form, std::string_view text, int parent, int index, std::string& error)
+    {
+        std::vector<int> made;
+        FormDocument piece;
+        if (!FormLoad(text, piece, error))
+            return made;
+        const UiNode* window = piece.Model.Find(piece.Window);
+        const UiNode* holder = form.Model.Find(parent);
+        if (!window || !holder)
+        {
+            error = "nothing to paste into";
+            return made;
+        }
+        std::vector<std::string> refused;
+        for (const int child : window->Children)
+        {
+            const UiNode* node = piece.Model.Find(child);
+            if (!node)
+                continue;
+            const int id = FormGraft(form, piece, child, parent, index);
+            if (!id)
+            {
+                refused.push_back(std::string(FormKindTitle(node->Kind)));
+                continue;
+            }
+            made.push_back(id);
             if (index >= 0)
-            {
-                UiNode& holder = *form.Model.Find(into);
-                holder.Children.pop_back();
-                holder.Children.insert(holder.Children.begin() + std::min<std::size_t>(static_cast<std::size_t>(index), holder.Children.size()), id);
-            }
-            if (const FormMeta* meta = MetaOf(form, from))
-            {
-                FormMeta fresh = *meta;
-                if (!fresh.Name.empty())
-                    fresh.Name = FormUniqueName(form, fresh.Name);
-                form.Meta[id] = std::move(fresh);
-            }
-            for (const int child : original.Children)
-                copy(child, id, -1);
-            return id;
-        };
-        return copy(node, parent, FormIndexOf(form, node) + 1);
+                ++index;
+        }
+        if (!refused.empty())
+        {
+            error = "a " + std::string(FormKindTitle(holder->Kind)) + " cannot hold ";
+            for (std::size_t i = 0; i < refused.size(); ++i)
+                error += (i ? ", " : "") + refused[i];
+        }
+        return made;
+    }
+
+    std::span<const FormTemplate> FormTemplates()
+    {
+        return kTemplates;
+    }
+
+    std::vector<std::pair<std::string, std::string>> FormHandlerList(const FormDocument& form)
+    {
+        ScriptWriter writer{ form };
+        if (const UiNode* window = form.Model.Find(form.Window))
+            writer.Collect(*window);
+        std::vector<std::pair<std::string, std::string>> list;
+        for (const auto& [name, params] : writer.Functions)
+            list.push_back({ name, std::string(params) });
+        return list;
+    }
+
+    FormMerge FormMergeScript(std::string_view script, const FormDocument& form)
+    {
+        FormMerge merge;
+        merge.Text = std::string(script);
+        static const std::regex kDefined(R"(handlers\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\]))");
+        static const std::regex kAnchor(R"((^|\n)[^\n]*\bform\s*\.\s*(load|build)\s*\()");
+        std::set<std::string> defined;
+        for (auto it = std::sregex_iterator(merge.Text.begin(), merge.Text.end(), kDefined); it != std::sregex_iterator(); ++it)
+            defined.insert((*it)[1].matched ? (*it)[1].str() : (*it)[2].str());
+        std::smatch anchor;
+        if (!std::regex_search(merge.Text, anchor, kAnchor))
+            return merge;
+        merge.Anchored = true;
+        std::string stubs;
+        for (const auto& [name, params] : FormHandlerList(form))
+        {
+            if (defined.count(name))
+                continue;
+            stubs += "function handlers." + name + "(" + params + ")\nend\n\n";
+            merge.Added.push_back(name);
+        }
+        if (stubs.empty())
+            return merge;
+        const std::size_t at = static_cast<std::size_t>(anchor.position(0)) + static_cast<std::size_t>(anchor.length(1));
+        merge.Text.insert(at, stubs);
+        return merge;
     }
 
     int FormIndexOf(const FormDocument& form, int node)
@@ -1212,6 +1602,7 @@ namespace Manifold::Lua
         if (key == "alpha") return flag(node.Alpha);
         if (key == "background") return node.Background;
         if (key == "zoom") return flag(node.Zoom);
+        if (key == "image") return node.Source;
         if (key == "items")
         {
             if (node.Kind == UiKind::Tree)
@@ -1325,6 +1716,7 @@ namespace Manifold::Lua
         else if (key == "alpha") node.Alpha = yes;
         else if (key == "background") node.Background = Trim(text);
         else if (key == "zoom") node.Zoom = yes;
+        else if (key == "image") node.Source = Trim(text);
         else if (key == "items")
         {
             if (node.Kind == UiKind::Tree)
@@ -1499,6 +1891,8 @@ namespace Manifold::Lua
         writer.Line(0, "-- Manifold form: made with the Form Editor. manifold.ui.form.load builds the window from it.");
         writer.Line(0, "return {");
         writer.Line(1, "form = 1,");
+        if (form.Fragment)
+            writer.Line(1, "fragment = true,");
         const UiNode* window = form.Model.Find(form.Window);
         if (window)
         {

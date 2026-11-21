@@ -2602,8 +2602,9 @@ native.docDefine(nil, WIDGET_DOC .. "kind", { kind = "field", type = "string", d
 
 local form = subarea(ui, "form", "Windows described by a table, as the Form Editor (Tools > Form Editor) saves them in a `.form.lua` file. The table holds the layout and the names of the handlers; the script keeps the code and passes its handler functions in.")
 local FORM_NODE_KEYS = { kind = true, name = true, children = true }
+local formImageLoad
 
-local function buildForm(path, spec, handlers)
+local function buildForm(path, spec, handlers, folder)
   if math.type(spec.form) ~= "integer" then
     misuse(path .. ": the table has no form = 1, so it is no form")
   end
@@ -2674,6 +2675,13 @@ local function buildForm(path, spec, handlers)
           end
         end
       end
+      if child.kind == "image" and type(child.image) == "string" then
+        local file = child.image
+        if folder and not file:match("^%a:[\\/]") and not file:match("^[\\/]") then
+          file = folder .. file
+        end
+        copy.image = formImageLoad(file)
+      end
       local handle = parent.add(child.kind, copy)
       if child.name then
         if rawget(members, child.name) ~= nil then
@@ -2700,9 +2708,12 @@ define(form, "build", {
     { name = "handlers", type = "table", optional = true },
   },
   returns = "window",
-  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like.",
+  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty.",
 }, function(spec, handlers)
-  return buildForm("manifold.ui.form.build", spec, handlers)
+  local info = callerFrame()
+  local source = info and info.source or ""
+  local folder = source:sub(1, 1) == "@" and source:sub(2):match("^(.*[\\/])") or nil
+  return buildForm("manifold.ui.form.build", spec, handlers, folder)
 end)
 
 define(form, "load", {
@@ -2711,7 +2722,7 @@ define(form, "load", {
     { name = "handlers", type = "table", optional = true },
   },
   returns = "window",
-  doc = "Reads a `.form.lua` file and builds its window like `build`; returns " .. FORM_RETURNS .. " A relative path starts at the folder of the calling script (at the program folder for code without a file). Returns nil and an `ME-7014` error when the file cannot be read or does not return a table; a wrong form raises like `build`.",
+  doc = "Reads a `.form.lua` file and builds its window like `build`; returns " .. FORM_RETURNS .. " A relative path starts at the folder of the calling script (at the program folder for code without a file). Returns nil and an `ME-7014` error when the file cannot be read or does not return a table; a wrong form raises like `build`. Picture files of `image` widgets are relative to the form file's folder.",
 }, function(path, handlers)
   local info = callerFrame()
   local source = info and info.source or ""
@@ -2728,7 +2739,7 @@ define(form, "load", {
   if not ok or type(spec) ~= "table" then
     return result(nil, "ME-7014", ok and (shown .. " does not return a table") or tostring(spec))
   end
-  return buildForm("manifold.ui.form.load", spec, handlers)
+  return buildForm("manifold.ui.form.load", spec, handlers, shown:match("^(.*[\\/])"))
 end)
 
 local function plainObject(entry, prefix, docPrefix, methods, fields)
@@ -3066,6 +3077,10 @@ define(image, "load", {
   remember(owner, "image" .. id, handle.remove)
   return handle
 end)
+
+formImageLoad = function(file)
+  return (rawget(image.members, "load")(file))
+end
 
 native.docDefine(nil, "manifold.ui.image.Image", { kind = "class", title = "Image objects", doc = "`manifold.ui.image.load` returns an image object." })
 native.docDefine(nil, "manifold.ui.image.Image.remove", { returns = "boolean", doc = "Frees the picture; widgets and drawings that show it go blank." })

@@ -253,6 +253,9 @@ namespace Manifold
         FormMoveDown,
         FormTry,
         FormRun,
+        FormCopy,
+        FormCut,
+        FormPaste,
 
         Count
     };

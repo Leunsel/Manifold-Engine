@@ -242,6 +242,7 @@ namespace Manifold::UI
             ImGui::PopStyleVar();
         }
         m_design = outer;
+        PruneTextures();
     }
 
     void UiHost::DrawChildren(const Lua::UiNode& node, bool row)
@@ -1011,13 +1012,19 @@ namespace Manifold::UI
 
     void* UiHost::TextureOf(int image, int& width, int& height)
     {
+        const Lua::UiImage* source = Model().FindImage(image);
         if (const auto found = m_textures.find(image); found != m_textures.end())
         {
-            width = found->second.Width;
-            height = found->second.Height;
-            return found->second.View;
+            if (source && source->Path == found->second.Path && source->Width == found->second.Width && source->Height == found->second.Height)
+            {
+                width = found->second.Width;
+                height = found->second.Height;
+                return found->second.View;
+            }
+            if (found->second.View)
+                static_cast<ID3D11ShaderResourceView*>(found->second.View)->Release();
+            m_textures.erase(found);
         }
-        const Lua::UiImage* source = Model().FindImage(image);
         ID3D11Device* device = static_cast<ID3D11Device*>(m_shell.Device());
         if (!source || !device || source->Rgba.empty())
             return nullptr;
@@ -1045,7 +1052,7 @@ namespace Manifold::UI
         texture->Release();
         if (FAILED(made) || !resource)
             return nullptr;
-        m_textures[image] = { resource, source->Width, source->Height };
+        m_textures[image] = { resource, source->Width, source->Height, source->Path };
         width = source->Width;
         height = source->Height;
         return resource;
