@@ -335,6 +335,31 @@ namespace Manifold::Lua
             ReadString(state, props, "title", node.Title);
             ReadString(state, props, "background", node.Background);
             ReadString(state, props, "align", node.Align);
+            ReadString(state, props, "position", node.Position);
+            ReadString(state, props, "key", node.Key);
+            ReadString(state, props, "shortcut", node.Shortcut);
+            ReadString(state, props, "confirm", node.Confirm);
+            ReadFloat(state, props, "minWidth", node.MinWidth);
+            ReadFloat(state, props, "minHeight", node.MinHeight);
+            ReadFloat(state, props, "maxWidth", node.MaxWidth);
+            ReadFloat(state, props, "maxHeight", node.MaxHeight);
+            ReadBool(state, props, "resizable", node.Resizable);
+            ReadBool(state, props, "autoSize", node.AutoSize);
+            ReadBool(state, props, "scrollbar", node.Scrollbar);
+            ReadBool(state, props, "topmost", node.Topmost);
+            ReadBool(state, props, "readOnly", node.ReadOnly);
+            ReadBool(state, props, "scroll", node.Scroll);
+            if (ReadBool(state, props, "focus", node.Focus))
+                node.Focused = false;
+            if (ReadFloat(state, props, "x", node.PosX))
+                node.HasPos = true;
+            if (ReadFloat(state, props, "y", node.PosY))
+                node.HasPos = true;
+            if (ReadFloat(state, props, "gap", node.Gap))
+                node.Gap = std::max(0.0f, node.Gap);
+            double maxLength = 0.0;
+            if (ReadNumber(state, props, "maxLength", maxLength))
+                node.MaxLength = static_cast<int>(std::clamp(maxLength, 0.0, 1048576.0));
             ReadBool(state, props, "enabled", node.Enabled);
             ReadBool(state, props, "visible", node.Visible);
             ReadBool(state, props, "wrap", node.Wrap);
@@ -685,6 +710,25 @@ namespace Manifold::Lua
             return 2;
         }
 
+        int UiWatchFile(lua_State* state)
+        {
+            const int window = static_cast<int>(luaL_checkinteger(state, 1));
+            const std::string path = luaL_checkstring(state, 2);
+            UiModel& model = Model(state);
+            const UiNode* node = model.Find(window);
+            if (!node || node->Kind != UiKind::Window)
+                return Gone(state, "window");
+            model.Watch(window, path);
+            lua_pushboolean(state, 1);
+            return 1;
+        }
+
+        int UiUnwatchFile(lua_State* state)
+        {
+            Model(state).Unwatch(static_cast<int>(luaL_checkinteger(state, 1)));
+            return 0;
+        }
+
         int UiImageLoad(lua_State* state)
         {
             const std::string path = luaL_checkstring(state, 1);
@@ -892,6 +936,8 @@ namespace Manifold::Lua
             { "uiForgetOwner", &UiForgetOwner },
             { "uiImageLoad", &UiImageLoad },
             { "uiFormRead", &UiFormRead },
+            { "uiWatch", &UiWatchFile },
+            { "uiUnwatch", &UiUnwatchFile },
             { "uiImageRemove", &UiImageRemove },
             { "uiSlotAdd", &UiSlotAdd },
             { "uiSlotUpdate", &UiSlotUpdate },

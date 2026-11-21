@@ -135,6 +135,9 @@ namespace Manifold::UI
         int m_lastTab = 0;
         int m_pressNode = 0;
         bool m_pressing = false;
+        ImVec2 m_gripMin = ImVec2(0.0f, 0.0f);
+        ImVec2 m_gripMax = ImVec2(0.0f, 0.0f);
+        bool m_gripping = false;
         std::set<std::string> m_badImages;
         std::string m_paletteFilter;
         float m_paletteHeight = 0.0f;

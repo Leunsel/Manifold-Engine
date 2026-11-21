@@ -1,5 +1,6 @@
 #include "UI/UiHost.h"
 
+#include "App/Commands.h"
 #include "App/Engine.h"
 #include "Core/IconNames.h"
 #include "Core/Text.h"
@@ -166,7 +167,10 @@ namespace Manifold::UI
     void UiHost::DrawWindow(Lua::UiNode& window)
     {
         const int id = window.Id;
-        const std::string title = IconText(window.Icon, window.Title.empty() ? std::string("Script") : window.Title) + "###manifold.ui." + std::to_string(id);
+        // ∑ A window with a key keeps the same ImGui name across runs, so ImGui
+        // remembers where it was, how big and where it was docked.
+        const std::string title = IconText(window.Icon, window.Title.empty() ? std::string("Script") : window.Title) +
+                                  (window.Key.empty() ? "###manifold.ui." + std::to_string(id) : "###manifold.ui.key." + window.Key);
         if (window.FocusRequest)
         {
             ImGui::SetNextWindowFocus();
@@ -186,10 +190,22 @@ namespace Manifold::UI
                 }
                 return false;
             };
-        ImGuiWindowFlags flags = window.Dock ? 0 : ImGuiWindowFlags_NoDocking;
+        ImGuiWindowFlags flags = window.Dock && !window.Topmost ? 0 : ImGuiWindowFlags_NoDocking;
         if (wantsKeys(window))
             flags |= ImGuiWindowFlags_NoNavInputs;
-        const bool visible = BeginToolWindow(title.c_str(), &open, size, flags, ImVec2(160.0f, 100.0f), false);
+        if (!window.Resizable)
+            flags |= ImGuiWindowFlags_NoResize;
+        if (window.AutoSize)
+            flags |= ImGuiWindowFlags_AlwaysAutoResize;
+        if (!window.Scrollbar)
+            flags |= ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+        ToolWindowExtras extras;
+        extras.Maximum = ImVec2(window.MaxWidth, window.MaxHeight);
+        extras.Topmost = window.Topmost;
+        extras.Placement = window.HasPos ? 3 : window.Position == "center" ? 1 : window.Position == "mouse" ? 2 : 0;
+        extras.Position = ImVec2(window.PosX, window.PosY);
+        const ImVec2 minimum(window.MinWidth > 0.0f ? window.MinWidth : 160.0f, window.MinHeight > 0.0f ? window.MinHeight : 100.0f);
+        const bool visible = BeginToolWindow(title.c_str(), &open, size, flags, minimum, false, &extras);
         if (window.Opacity >= 0.0f || window.InactiveOpacity >= 0.0f)
         {
             const Settings& settings = m_engine.Options();
@@ -248,6 +264,9 @@ namespace Manifold::UI
     void UiHost::DrawChildren(const Lua::UiNode& node, bool row)
     {
         bool first = true;
+        const bool gap = node.Gap >= 0.0f;
+        if (gap && !row)
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, Px(node.Gap)));
         const std::vector<int> children = node.Children;
         for (const int child : children)
         {
@@ -255,10 +274,12 @@ namespace Manifold::UI
             if (!item || (!item->Visible && !m_design))
                 continue;
             if (row && !first)
-                ImGui::SameLine();
+                ImGui::SameLine(0.0f, gap ? Px(node.Gap) : -1.0f);
             first = false;
             DrawNode(*item);
         }
+        if (gap && !row)
+            ImGui::PopStyleVar();
         if (first && m_design && node.Kind != UiKind::Window)
             DropZone(row);
     }
@@ -349,6 +370,14 @@ namespace Manifold::UI
             break;
         case UiKind::Column:
         case UiKind::Tab:
+            if (node.Scroll)
+            {
+                const ImVec2 size(node.Width > 0.0f ? Px(node.Width) : 0.0f, node.Height > 0.0f ? Px(node.Height) : Px(200.0f));
+                ImGui::BeginChild("##scroll", size, ImGuiChildFlags_None);
+                DrawChildren(node, false);
+                ImGui::EndChild();
+                break;
+            }
             ImGui::BeginGroup();
             DrawChildren(node, false);
             ImGui::EndGroup();
@@ -370,7 +399,13 @@ namespace Manifold::UI
             if (node.Mono)
                 PushMono();
             ImGui::PushStyleColor(ImGuiCol_Text, color);
-            if (node.Wrap)
+            if (node.MaxWidth > 0.0f)
+            {
+                ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + Px(node.MaxWidth));
+                ImGui::TextUnformatted(node.Text.c_str());
+                ImGui::PopTextWrapPos();
+            }
+            else if (node.Wrap)
                 ImGui::TextWrapped("%s", node.Text.c_str());
             else
                 ImGui::TextUnformatted(node.Text.c_str());
@@ -398,7 +433,17 @@ namespace Manifold::UI
         case UiKind::Button:
         {
             const std::string label = Label(node, IconText(node.Icon, node.Text.empty() ? std::string("Button") : node.Text));
-            const ImVec2 size(node.Width > 0.0f ? Px(node.Width) : (node.Width < 0.0f || m_cell ? -FLT_MIN : 0.0f), node.Height > 0.0f ? Px(node.Height) : 0.0f);
+            ImVec2 size(node.Width > 0.0f ? Px(node.Width) : (node.Width < 0.0f || m_cell ? -FLT_MIN : 0.0f), node.Height > 0.0f ? Px(node.Height) : 0.0f);
+            if (node.MinWidth > 0.0f || node.MaxWidth > 0.0f)
+            {
+                const ImGuiStyle& style = ImGui::GetStyle();
+                float width = size.x > 0.0f ? size.x : size.x < 0.0f ? ImGui::GetContentRegionAvail().x : ImGui::CalcTextSize(label.c_str(), nullptr, true).x + style.FramePadding.x * 2.0f;
+                if (node.MinWidth > 0.0f)
+                    width = std::max(width, Px(node.MinWidth));
+                if (node.MaxWidth > 0.0f)
+                    width = std::min(width, Px(node.MaxWidth));
+                size.x = width;
+            }
             bool clicked = false;
             if (node.Style == "accent")
                 clicked = AccentButton(label.c_str(), size);
@@ -406,6 +451,39 @@ namespace Manifold::UI
                 clicked = DangerButton(label.c_str(), size);
             else
                 clicked = ImGui::Button(label.c_str(), size);
+            if (!node.Shortcut.empty() && !m_design)
+            {
+                const ImGuiKeyChord chord = ParseChord(node.Shortcut);
+                if (chord != 0)
+                {
+                    if (node.Enabled && ImGui::Shortcut(chord, ImGuiInputFlags_RouteFocused))
+                        clicked = true;
+                    if (node.Tooltip.empty())
+                        ItemTooltip(node.Shortcut.c_str());
+                }
+            }
+            if (clicked && !node.Confirm.empty())
+            {
+                ImGui::OpenPopup("##confirm");
+                clicked = false;
+            }
+            if (ImGui::BeginPopup("##confirm"))
+            {
+                ImGui::PushTextWrapPos(Px(320.0f));
+                ImGui::TextUnformatted(node.Confirm.c_str());
+                ImGui::PopTextWrapPos();
+                ImGui::Spacing();
+                const std::string yes = IconText(node.Icon, node.Text.empty() ? std::string("OK") : node.Text) + "##yes";
+                if (node.Style == "danger" ? DangerButton(yes.c_str()) : AccentButton(yes.c_str()))
+                {
+                    clicked = true;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel##no") || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+                    ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
+            }
             if (clicked && (node.Handlers & H::Click))
                 Post(node.Id, "click");
             break;
@@ -555,10 +633,24 @@ namespace Manifold::UI
 
     void UiHost::DrawValue(Lua::UiNode& node)
     {
-        if (node.Width > 0.0f)
+        if (node.MinWidth > 0.0f || node.MaxWidth > 0.0f)
+        {
+            float width = node.Width > 0.0f ? Px(node.Width) : (node.Width < 0.0f || (m_cell && node.Label.empty())) ? ImGui::GetContentRegionAvail().x : ImGui::CalcItemWidth();
+            if (node.MinWidth > 0.0f)
+                width = std::max(width, Px(node.MinWidth));
+            if (node.MaxWidth > 0.0f)
+                width = std::min(width, Px(node.MaxWidth));
+            ImGui::SetNextItemWidth(width);
+        }
+        else if (node.Width > 0.0f)
             ImGui::SetNextItemWidth(Px(node.Width));
         else if (node.Width < 0.0f || (m_cell && node.Label.empty()))
             ImGui::SetNextItemWidth(-FLT_MIN);
+        if (node.Focus && !node.Focused && !m_design)
+        {
+            ImGui::SetKeyboardFocusHere();
+            node.Focused = true;
+        }
         const std::string label = Label(node, node.Label);
         switch (node.Kind)
         {
@@ -578,6 +670,8 @@ namespace Manifold::UI
         {
             const std::string before = node.String;
             ImGuiInputTextFlags flags = node.Password ? ImGuiInputTextFlags_Password : 0;
+            if (node.ReadOnly)
+                flags |= ImGuiInputTextFlags_ReadOnly;
             bool entered = false;
             if (node.Multiline)
                 InputMultiline(label.c_str(), node.String, ImVec2(node.Width > 0.0f ? Px(node.Width) : -FLT_MIN, node.Height > 0.0f ? Px(node.Height) : Px(80.0f)), flags);
@@ -585,6 +679,19 @@ namespace Manifold::UI
             {
                 flags |= ImGuiInputTextFlags_EnterReturnsTrue;
                 entered = node.Hint.empty() ? InputText(label.c_str(), node.String, flags) : InputTextWithHint(label.c_str(), node.Hint.c_str(), node.String, flags);
+            }
+            if (node.MaxLength > 0 && node.String != before)
+            {
+                std::size_t at = 0;
+                int count = 0;
+                while (at < node.String.size() && count < node.MaxLength)
+                {
+                    const unsigned char lead = static_cast<unsigned char>(node.String[at]);
+                    at += lead < 0x80 ? 1 : lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+                    ++count;
+                }
+                if (at < node.String.size())
+                    node.String.resize(at);
             }
             if (node.String != before)
             {

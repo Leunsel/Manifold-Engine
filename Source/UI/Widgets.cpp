@@ -1321,11 +1321,13 @@ namespace Manifold::UI
         }
     }
 
-    bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags, ImVec2 minimum, bool escapeCloses)
+    bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags, ImVec2 minimum, bool escapeCloses, const ToolWindowExtras* extras)
     {
         const bool raise = FocusRequested();
         ImGuiWindowClass windowClass;
         windowClass.ViewportFlagsOverrideSet = ImGuiViewportFlags_NoAutoMerge;
+        if (extras && extras->Topmost)
+            windowClass.ViewportFlagsOverrideSet |= ImGuiViewportFlags_TopMost;
         windowClass.ViewportFlagsOverrideClear = ImGuiViewportFlags_NoTaskBarIcon;
         ImGui::SetNextWindowClass(&windowClass);
         const ImGuiViewport* main = ImGui::GetMainViewport();
@@ -1333,10 +1335,20 @@ namespace Manifold::UI
         if (!ImGui::FindWindowByName(title) || undocked)
         {
             const float step = Px(28.0f) * static_cast<float>(g_toolWindowCount++ % 8);
-            ImGui::SetNextWindowPos(ImVec2(main->Pos.x + Px(80.0f) + step, main->Pos.y + Px(70.0f) + step), undocked ? ImGuiCond_Always : ImGuiCond_FirstUseEver);
+            const ImGuiCond when = undocked ? ImGuiCond_Always : ImGuiCond_FirstUseEver;
+            if (extras && extras->Placement == 1)
+                ImGui::SetNextWindowPos(main->GetCenter(), when, ImVec2(0.5f, 0.5f));
+            else if (extras && extras->Placement == 2)
+                ImGui::SetNextWindowPos(ImGui::GetIO().MousePos, when, ImVec2(0.5f, 0.0f));
+            else if (extras && extras->Placement == 3)
+                ImGui::SetNextWindowPos(ImVec2(main->Pos.x + Px(extras->Position.x), main->Pos.y + Px(extras->Position.y)), when);
+            else
+                ImGui::SetNextWindowPos(ImVec2(main->Pos.x + Px(80.0f) + step, main->Pos.y + Px(70.0f) + step), when);
         }
         ImGui::SetNextWindowSize(ImVec2(Px(size.x), Px(size.y)), undocked ? ImGuiCond_Always : ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSizeConstraints(Px(minimum.x, minimum.y), ImVec2(FLT_MAX, FLT_MAX));
+        const ImVec2 maximum(extras && extras->Maximum.x > 0.0f ? std::max(Px(extras->Maximum.x), Px(minimum.x)) : FLT_MAX,
+            extras && extras->Maximum.y > 0.0f ? std::max(Px(extras->Maximum.y), Px(minimum.y)) : FLT_MAX);
+        ImGui::SetNextWindowSizeConstraints(Px(minimum.x, minimum.y), maximum);
         // ∑ Docking drops size constraints ("Docking currently override
         // constraints" in imgui.cpp) and its splitters only keep the style's
         // tiny WindowMinSize, so a docked tool window could be dragged down to

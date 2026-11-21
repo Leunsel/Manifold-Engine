@@ -154,6 +154,27 @@ namespace Manifold::Lua
         bool Open = true;
         bool FocusRequest = false;
         bool Dock = true;
+        float MinWidth = 0.0f;
+        float MinHeight = 0.0f;
+        float MaxWidth = 0.0f;
+        float MaxHeight = 0.0f;
+        bool Resizable = true;
+        bool AutoSize = false;
+        bool Scrollbar = true;
+        bool Topmost = false;
+        std::string Position;
+        float PosX = 0.0f;
+        float PosY = 0.0f;
+        bool HasPos = false;
+        std::string Key;
+        std::string Shortcut;
+        std::string Confirm;
+        bool ReadOnly = false;
+        int MaxLength = 0;
+        bool Focus = false;
+        bool Focused = false;
+        float Gap = -1.0f;
+        bool Scroll = false;
         float Opacity = -1.0f;          // below 0: the user's setting
         float InactiveOpacity = -1.0f;  // below 0: Opacity, else the user's setting
         double Interval = 0.0;
@@ -233,6 +254,13 @@ namespace Manifold::Lua
 
     using UiValue = std::variant<std::monostate, bool, double, std::string>;
 
+    struct UiWatch
+    {
+        int Window = 0;
+        std::string Path;
+        std::uint64_t Stamp = 0;
+    };
+
     struct UiEvent
     {
         int Target = 0;
@@ -274,6 +302,12 @@ namespace Manifold::Lua
 
         void ForgetOwner(std::string_view owner);
         void Reset();
+
+        void Watch(int window, std::string path);
+        void Unwatch(int window);
+        int Watching(std::string_view path) const;
+        void PollWatches(double now);
+        static std::uint64_t FileStamp(std::string_view path);
         std::uint64_t Generation() const { return m_generation; }
 
     private:
@@ -285,6 +319,8 @@ namespace Manifold::Lua
         std::map<int, UiSlot> m_slots;
         std::vector<UiDialog> m_dialogs;
         std::vector<UiEvent> m_events;
+        std::vector<UiWatch> m_watches;
+        double m_nextPoll = 0.0;
         int m_next = 1;
         std::uint64_t m_order = 0;
         std::uint64_t m_generation = 1;

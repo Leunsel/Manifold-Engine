@@ -85,7 +85,16 @@ namespace Manifold::UI
     float SmallButtonWidth(const char* label);
     bool FlowNext(float width, float indent = -1.0f);
     void TextFitted(std::string_view text, float maxWidth, const ImVec4& color);
-    bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags = 0, ImVec2 minimum = ImVec2(260.0f, 160.0f), bool escapeCloses = true);
+    struct ToolWindowExtras
+    {
+        ImVec2 Maximum = ImVec2(0.0f, 0.0f);
+        bool Topmost = false;
+        int Placement = 0;
+        ImVec2 Position = ImVec2(0.0f, 0.0f);
+    };
+
+    bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags = 0, ImVec2 minimum = ImVec2(260.0f, 160.0f), bool escapeCloses = true,
+        const ToolWindowExtras* extras = nullptr);
     void EndToolWindow();
     // Opacity of the current window's own platform window this frame, 1 = opaque; inside its Begin/End. A docked window
     // has none of its own and stays opaque.

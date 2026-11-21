@@ -1,6 +1,9 @@
 #include "Lua/UiModel.h"
 
+#include "Core/Text.h"
+
 #include <algorithm>
+#include <filesystem>
 #include <limits>
 
 namespace Manifold::Lua
@@ -130,6 +133,7 @@ namespace Manifold::Lua
         for (const int child : children)
             RemoveTree(child);
         m_nodes.erase(id);
+        m_watches.erase(std::remove_if(m_watches.begin(), m_watches.end(), [&](const UiWatch& watch) { return watch.Window == id; }), m_watches.end());
         m_events.erase(std::remove_if(m_events.begin(), m_events.end(), [&](const UiEvent& event) { return event.Target == id; }), m_events.end());
     }
 
@@ -318,8 +322,64 @@ namespace Manifold::Lua
         ++m_generation;
     }
 
+    std::uint64_t UiModel::FileStamp(std::string_view path)
+    {
+        std::error_code error;
+        const std::filesystem::path file(Utf8ToWide(path));
+        const auto written = std::filesystem::last_write_time(file, error);
+        if (error)
+            return 0;
+        const auto size = std::filesystem::file_size(file, error);
+        const std::uint64_t ticks = static_cast<std::uint64_t>(written.time_since_epoch().count());
+        return (ticks ^ (static_cast<std::uint64_t>(error ? 0 : size) * 0x9E3779B97F4A7C15ull)) | 1u;
+    }
+
+    void UiModel::Watch(int window, std::string path)
+    {
+        Unwatch(window);
+        UiWatch watch;
+        watch.Window = window;
+        watch.Stamp = FileStamp(path);
+        watch.Path = std::move(path);
+        m_watches.push_back(std::move(watch));
+    }
+
+    void UiModel::Unwatch(int window)
+    {
+        m_watches.erase(std::remove_if(m_watches.begin(), m_watches.end(), [&](const UiWatch& watch) { return watch.Window == window; }), m_watches.end());
+    }
+
+    int UiModel::Watching(std::string_view path) const
+    {
+        const auto normal = [](std::string_view text) { return Lower(WideToUtf8(std::filesystem::path(Utf8ToWide(text)).lexically_normal().generic_wstring())); };
+        const std::string wanted = normal(path);
+        int count = 0;
+        for (const UiWatch& watch : m_watches)
+        {
+            if (normal(watch.Path) == wanted)
+                ++count;
+        }
+        return count;
+    }
+
+    void UiModel::PollWatches(double now)
+    {
+        if (m_watches.empty() || now < m_nextPoll)
+            return;
+        m_nextPoll = now + 0.25;
+        for (UiWatch& watch : m_watches)
+        {
+            const std::uint64_t stamp = FileStamp(watch.Path);
+            if (stamp == 0 || stamp == watch.Stamp)
+                continue;
+            watch.Stamp = stamp;
+            Post({ watch.Window, "reload", {} });
+        }
+    }
+
     void UiModel::Reset()
     {
+        m_watches.clear();
         m_nodes.clear();
         m_windows.clear();
         m_images.clear();

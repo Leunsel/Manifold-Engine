@@ -253,11 +253,17 @@ namespace Manifold::UI
             return Lower(text).find(Lower(filter)) != std::string::npos;
         }
 
-        int GroupOf(std::string_view key)
+        int GroupOf(std::string_view key, UiKind kind)
         {
+            static constexpr std::string_view kWindowKeys[] = { "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "resizable", "autoSize", "scrollbar",
+                "topmost", "position", "dock", "opacity", "inactiveOpacity", "interval" };
+            if (kind == UiKind::Window)
+                for (std::string_view entry : kWindowKeys)
+                    if (entry == key)
+                        return 4;
             static constexpr std::string_view kContent[] = { "text", "title", "label", "icon", "badge", "hint", "items", "menu", "rows", "image" };
             static constexpr std::string_view kValue[] = { "value", "min", "max", "step", "integer", "hex", "format", "alpha" };
-            static constexpr std::string_view kBehaviour[] = { "visible", "enabled", "tooltip" };
+            static constexpr std::string_view kBehaviour[] = { "visible", "enabled", "tooltip", "shortcut", "confirm", "readOnly", "maxLength", "focus" };
             for (std::string_view entry : kContent)
                 if (entry == key)
                     return 0;
@@ -270,7 +276,7 @@ namespace Manifold::UI
             return 2;
         }
 
-        constexpr const char* kGroupTitles[] = { "Content", "Value", "Look and Layout", "Behaviour" };
+        constexpr const char* kGroupTitles[] = { "Content", "Value", "Look and Layout", "Behaviour", "Window" };
 
         bool ReadFile(const std::filesystem::path& path, std::string& text)
         {
@@ -1180,6 +1186,17 @@ namespace Manifold::UI
         if (ImGui::Button(ICON_FA_PLAY "  Run Script"))
             RunScript();
         ItemTooltip("Runs the script in Manifold's Lua engine, so the real window opens. Running it again replaces that window.");
+        if (!m_path.empty())
+        {
+            if (const int live = m_engine.Lua().Ui().Watching(WideToUtf8(m_path.wstring())); live > 0)
+            {
+                ImGui::SameLine();
+                ImGui::AlignTextToFramePadding();
+                const std::string text = std::string(ICON_FA_SYNC "  Live in ") + std::to_string(live) + (live == 1 ? " Window" : " Windows") + (m_dirty ? " (save to update)" : "");
+                ImGui::TextColored(m_dirty ? ManifoldTheme::Warning : ManifoldTheme::Success, "%s", text.c_str());
+                ItemTooltip("A running script loaded this file with manifold.ui.form.load. Saving it rebuilds that window right away, with the script's handlers; widgets that keep their name keep their value.");
+            }
+        }
         const std::vector<Lua::FormProblem>& problems = m_problems;
         if (!problems.empty())
         {
@@ -1248,7 +1265,14 @@ namespace Manifold::UI
                 for (float x = startX; x < areaMax.x; x += step)
                     draw->AddRectFilled(ImVec2(x - radius * 0.5f, y - radius * 0.5f), ImVec2(x + radius * 0.5f, y + radius * 0.5f), dot);
         }
-        const ImVec2 size(Px(window->Width > 0.0f ? window->Width : 420.0f), Px(window->Height > 0.0f ? window->Height : 320.0f));
+        const auto limit = [](float value, float low, float high) {
+            if (high > 0.0f)
+                value = std::min(value, high);
+            return std::max(value, low);
+        };
+        const float pointsWidth = limit(window->Width > 0.0f ? window->Width : 420.0f, window->MinWidth > 0.0f ? window->MinWidth : 160.0f, window->MaxWidth);
+        const float pointsHeight = limit(window->Height > 0.0f ? window->Height : 320.0f, window->MinHeight > 0.0f ? window->MinHeight : 100.0f, window->MaxHeight);
+        const ImVec2 size(Px(pointsWidth), Px(pointsHeight));
         const ImVec2 avail = ImGui::GetContentRegionAvail();
         ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + std::max(Px(12.0f), (avail.x - size.x) * 0.5f), ImGui::GetCursorPosY() + Px(14.0f)));
         const ImVec2 frameMin = ImGui::GetCursorScreenPos();
@@ -1269,7 +1293,7 @@ namespace Manifold::UI
             const float closeX = frameMin.x + size.x - Px(12.0f) - closeSize.x;
             draw->AddText(ImVec2(closeX, textY), ImGui::GetColorU32(ManifoldTheme::Muted), ICON_FA_TIMES);
             char dimensions[48];
-            std::snprintf(dimensions, sizeof(dimensions), "%d x %d", static_cast<int>(window->Width > 0.0f ? window->Width : 420.0f), static_cast<int>(window->Height > 0.0f ? window->Height : 320.0f));
+            std::snprintf(dimensions, sizeof(dimensions), "%d x %d%s", static_cast<int>(pointsWidth), static_cast<int>(pointsHeight), window->Resizable ? "" : "  fixed");
             const float dimensionsWidth = ImGui::CalcTextSize(dimensions).x;
             draw->AddText(ImVec2(closeX - Px(14.0f) - dimensionsWidth, textY), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.8f)), dimensions);
         }
@@ -1292,9 +1316,78 @@ namespace Manifold::UI
             m_design.Picking = true;
             m_host->DrawContents(m_form.Window, &m_design);
         }
+        const ImVec2 frameMax(frameMin.x + size.x, frameMin.y + titleHeight + bodyHeight);
+        const bool grippable = !m_trying && window->Resizable && !window->AutoSize;
+        const float grip = Px(16.0f);
+        m_gripMin = grippable ? ImVec2(frameMax.x - grip, frameMax.y - grip) : ImVec2(0.0f, 0.0f);
+        m_gripMax = grippable ? frameMax : ImVec2(0.0f, 0.0f);
         ImGui::EndChild();
+        if (grippable || m_gripping)
+        {
+            // ∑ No item: an item at the body's corner would grow the body's
+            // content and give it a scroll bar right under the grip. The grip
+            // tests the mouse itself and holds an active id while it drags, so
+            // the tool window does not move along.
+            const ImGuiID gripId = ImGui::GetID("##sizegrip");
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool over = grippable && ImGui::IsMouseHoveringRect(m_gripMin, m_gripMax) &&
+                              ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+            if (over && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload())
+            {
+                m_gripping = true;
+                Remember();
+                ImGui::SetActiveID(gripId, ImGui::GetCurrentWindow());
+            }
+            if (m_gripping)
+            {
+                if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                {
+                    ImGui::KeepAliveID(gripId);
+                    if (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)
+                    {
+                        UiNode* edited = m_form.Model.Find(m_form.Window);
+                        const float scale = Px(1.0f);
+                        edited->Width = limit(std::round(pointsWidth + io.MouseDelta.x / scale), edited->MinWidth > 0.0f ? edited->MinWidth : 160.0f, edited->MaxWidth);
+                        edited->Height = limit(std::round(pointsHeight + io.MouseDelta.y / scale), edited->MinHeight > 0.0f ? edited->MinHeight : 100.0f, edited->MaxHeight);
+                        Changed();
+                    }
+                }
+                else
+                {
+                    m_gripping = false;
+                    if (ImGui::GetActiveID() == gripId)
+                        ImGui::ClearActiveID();
+                }
+            }
+            if (over || m_gripping)
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+            if (over && !m_gripping)
+                ImGui::SetTooltip("Drag to try other sizes; the window keeps to its minimum and maximum.");
+            if (grippable)
+            {
+                const ImU32 color = ImGui::GetColorU32(m_gripping ? ManifoldTheme::Accent : over ? ManifoldTheme::Text : ManifoldTheme::Muted);
+                ImDrawList* foreground = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
+                for (int i = 1; i <= 3; ++i)
+                {
+                    const float inset = Px(4.0f) * static_cast<float>(i);
+                    foreground->AddLine(ImVec2(frameMax.x - inset, frameMax.y - 2.0f), ImVec2(frameMax.x - 2.0f, frameMax.y - inset), color, 1.5f);
+                }
+            }
+        }
         if (!m_trying)
+        {
             PreviewOverlay(bodyMin, bodyMax);
+            if (window->MinWidth > 0.0f || window->MinHeight > 0.0f)
+            {
+                const ImVec2 least(frameMin.x + Px(window->MinWidth > 0.0f ? window->MinWidth : 160.0f), frameMin.y + Px(window->MinHeight > 0.0f ? window->MinHeight : 100.0f));
+                if (least.x < frameMax.x - 1.0f || least.y < frameMax.y - 1.0f)
+                {
+                    DashedRect(ImGui::GetWindowDrawList(), frameMin, least, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.55f)), 1.0f, Px(5.0f), Px(4.0f));
+                    ImGui::GetWindowDrawList()->AddText(ImVec2(least.x - ImGui::CalcTextSize("min").x - Px(3.0f), least.y - ImGui::GetTextLineHeight() - Px(1.0f)),
+                        ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.8f)), "min");
+                }
+            }
+        }
         ImGui::Dummy(ImVec2(0.0f, Px(18.0f)));
         ImGui::EndChild();
     }
@@ -1434,7 +1527,8 @@ namespace Manifold::UI
                     depth = rect.Depth;
                 }
             }
-            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload())
+            const bool onGrip = io.MousePos.x >= m_gripMin.x && io.MousePos.y >= m_gripMin.y && io.MousePos.x < m_gripMax.x && io.MousePos.y < m_gripMax.y;
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload() && !onGrip)
             {
                 Select(pointed ? pointed : m_form.Window);
                 m_pressNode = pointed;
@@ -1916,13 +2010,13 @@ namespace Manifold::UI
             NameRow(*node);
             ImGui::EndTable();
         }
-        for (int group = 0; group < 4; ++group)
+        for (const int group : { 0, 4, 1, 2, 3 })
         {
             std::vector<const Lua::FormProp*> props;
             int changed = 0;
             for (const Lua::FormProp& prop : Lua::FormProps(node->Kind))
             {
-                if (GroupOf(prop.Key) != group)
+                if (GroupOf(prop.Key, node->Kind) != group)
                     continue;
                 props.push_back(&prop);
                 if (!Lua::FormPropIsDefault(*node, prop.Key))

@@ -31,6 +31,8 @@ namespace Manifold::Lua
             { "tooltip", T::String, "Text shown while the mouse rests on the widget." },
             { "width", T::Number, "Width in points. 0 is automatic, a negative width fills the rest of the line." },
             { "height", T::Number, "Height in points. 0 is automatic." },
+            { "minWidth", T::Number, "Fields, buttons and lists are never narrower than this; 0 for no limit." },
+            { "maxWidth", T::Number, "Fields, buttons and lists are never wider than this, and a text wraps here; 0 for no limit." },
         };
 
         constexpr FormProp kWindow[] = {
@@ -42,9 +44,25 @@ namespace Manifold::Lua
             { "opacity", T::Number, "0.1 to 1 while the window has the focus; 0 keeps the user's setting." },
             { "inactiveOpacity", T::Number, "0.1 to 1 while another window has the focus; 0 keeps the user's setting." },
             { "interval", T::Number, "Seconds between onUpdate calls; 0 is every frame." },
+            { "minWidth", T::Number, "The user cannot make the window narrower; 0 for the program's minimum." },
+            { "minHeight", T::Number, "The user cannot make the window lower; 0 for the program's minimum." },
+            { "maxWidth", T::Number, "The user cannot make the window wider; 0 for no limit." },
+            { "maxHeight", T::Number, "The user cannot make the window higher; 0 for no limit." },
+            { "resizable", T::Bool, "The user can change the size." },
+            { "autoSize", T::Bool, "The window fits itself to its widgets." },
+            { "scrollbar", T::Bool, "Shows a scroll bar when the widgets do not fit." },
+            { "topmost", T::Bool, "Stays above other windows while floating; it does not dock." },
+            { "position", T::Choice, "Where the window opens the first time.", "default|center|mouse" },
         };
 
-        constexpr FormProp kRow[] = { { "align", T::Choice, "Where the row's widgets sit in the line.", "left|center|right" } };
+        constexpr FormProp kRow[] = {
+            { "align", T::Choice, "Where the row's widgets sit in the line.", "left|center|right" },
+            { "gap", T::Number, "Space between the widgets in points; empty for the usual space." },
+        };
+        constexpr FormProp kColumn[] = {
+            { "gap", T::Number, "Space between the widgets in points; empty for the usual space." },
+            { "scroll", T::Bool, "Scrolls inside its height (200 when the height is 0)." },
+        };
         constexpr FormProp kGrid[] = { { "columns", T::Integer, "Number of columns. Widgets fill the cells row by row; the first column fits its content, the others share the rest." } };
         constexpr FormProp kSection[] = {
             { "title", T::String, "Title of the card." },
@@ -52,10 +70,13 @@ namespace Manifold::Lua
             { "badge", T::String, "Short text at the right of the title." },
             { "collapsible", T::Bool, "The user can fold the section." },
             { "open", T::Bool, "A collapsible section starts unfolded." },
+            { "gap", T::Number, "Space between the widgets in points; empty for the usual space." },
         };
         constexpr FormProp kTab[] = {
             { "title", T::String, "Text on the tab." },
             { "icon", T::Icon, "Font Awesome icon on the tab." },
+            { "gap", T::Number, "Space between the widgets in points; empty for the usual space." },
+            { "scroll", T::Bool, "Scrolls inside its height (200 when the height is 0)." },
         };
         constexpr FormProp kSplit[] = {
             { "vertical", T::Bool, "Stacks the two parts instead of placing them side by side." },
@@ -76,6 +97,8 @@ namespace Manifold::Lua
             { "text", T::String, "Text on the button." },
             { "icon", T::Icon, "Font Awesome icon in front of the text." },
             { "style", T::Choice, "Look of the button.", "default|accent|danger" },
+            { "shortcut", T::String, "Keys that click it while its window has the focus, like Ctrl+S or F5." },
+            { "confirm", T::String, "Asks this before the click goes through; empty for no question." },
         };
         constexpr FormProp kCheckbox[] = {
             { "label", T::String, "Text beside the box." },
@@ -87,6 +110,9 @@ namespace Manifold::Lua
             { "hint", T::String, "Grey text while the field is empty." },
             { "multiline", T::Bool, "Several lines." },
             { "password", T::Bool, "Shows dots instead of the text." },
+            { "readOnly", T::Bool, "The text can be selected and copied, not changed." },
+            { "maxLength", T::Integer, "Most characters; 0 for no limit." },
+            { "focus", T::Bool, "The cursor is in this field when the window opens." },
         };
         constexpr FormProp kNumber[] = {
             { "label", T::String, "Text beside the field." },
@@ -97,6 +123,7 @@ namespace Manifold::Lua
             { "integer", T::Bool, "Whole numbers only." },
             { "hex", T::Bool, "Shown and typed as hexadecimal (whole numbers)." },
             { "format", T::String, "printf format for decimals, like %.2f." },
+            { "focus", T::Bool, "The cursor is in this field when the window opens." },
         };
         constexpr FormProp kSlider[] = {
             { "label", T::String, "Text beside the slider." },
@@ -158,6 +185,7 @@ namespace Manifold::Lua
         }
 
         constexpr auto kRowAll = WithCommon(kRow);
+        constexpr auto kColumnAll = WithCommon(kColumn);
         constexpr auto kGridAll = WithCommon(kGrid);
         constexpr auto kSectionAll = WithCommon(kSection);
         constexpr auto kTabAll = WithCommon(kTab);
@@ -1155,7 +1183,7 @@ namespace Manifold::Lua
         {
         case UiKind::Window: return kWindow;
         case UiKind::Row: return kRowAll;
-        case UiKind::Column:
+        case UiKind::Column: return kColumnAll;
         case UiKind::Tabs:
         case UiKind::Spacer:
             return kCommon;
@@ -1603,6 +1631,22 @@ namespace Manifold::Lua
         if (key == "background") return node.Background;
         if (key == "zoom") return flag(node.Zoom);
         if (key == "image") return node.Source;
+        if (key == "minWidth") return NumberText(node.MinWidth);
+        if (key == "minHeight") return NumberText(node.MinHeight);
+        if (key == "maxWidth") return NumberText(node.MaxWidth);
+        if (key == "maxHeight") return NumberText(node.MaxHeight);
+        if (key == "resizable") return flag(node.Resizable);
+        if (key == "autoSize") return flag(node.AutoSize);
+        if (key == "scrollbar") return flag(node.Scrollbar);
+        if (key == "topmost") return flag(node.Topmost);
+        if (key == "position") return node.Position.empty() ? std::string("default") : node.Position;
+        if (key == "gap") return node.Gap < 0.0f ? std::string() : NumberText(node.Gap);
+        if (key == "scroll") return flag(node.Scroll);
+        if (key == "shortcut") return node.Shortcut;
+        if (key == "confirm") return node.Confirm;
+        if (key == "readOnly") return flag(node.ReadOnly);
+        if (key == "maxLength") return std::to_string(node.MaxLength);
+        if (key == "focus") return flag(node.Focus);
         if (key == "items")
         {
             if (node.Kind == UiKind::Tree)
@@ -1717,6 +1761,22 @@ namespace Manifold::Lua
         else if (key == "background") node.Background = Trim(text);
         else if (key == "zoom") node.Zoom = yes;
         else if (key == "image") node.Source = Trim(text);
+        else if (key == "minWidth") node.MinWidth = std::max(0.0f, real);
+        else if (key == "minHeight") node.MinHeight = std::max(0.0f, real);
+        else if (key == "maxWidth") node.MaxWidth = std::max(0.0f, real);
+        else if (key == "maxHeight") node.MaxHeight = std::max(0.0f, real);
+        else if (key == "resizable") node.Resizable = yes;
+        else if (key == "autoSize") node.AutoSize = yes;
+        else if (key == "scrollbar") node.Scrollbar = yes;
+        else if (key == "topmost") node.Topmost = yes;
+        else if (key == "position") node.Position = value == "default" ? std::string() : text;
+        else if (key == "gap") node.Gap = numeric ? std::max(0.0f, real) : -1.0f;
+        else if (key == "scroll") node.Scroll = yes;
+        else if (key == "shortcut") node.Shortcut = Trim(text);
+        else if (key == "confirm") node.Confirm = text;
+        else if (key == "readOnly") node.ReadOnly = yes;
+        else if (key == "maxLength") node.MaxLength = numeric ? std::clamp(static_cast<int>(number), 0, 1048576) : 0;
+        else if (key == "focus") node.Focus = yes;
         else if (key == "items")
         {
             if (node.Kind == UiKind::Tree)

@@ -1,5 +1,6 @@
 #include "TestKit.h"
 
+#include "App/Commands.h"
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/RuntimeLog.h"
@@ -67,7 +68,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 14 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 15 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -1566,6 +1567,146 @@ return M
             CHECK(engine.Lua().Run("", "form import").Ok());
         }
 
+        void UiFormReload(Engine& engine)
+        {
+            Lua::UiModel& model = engine.Lua().Ui();
+            const std::filesystem::path folder = std::filesystem::temp_directory_path() / ("manifold-form-reload-" + std::to_string(::GetCurrentProcessId()));
+            std::error_code ignored;
+            std::filesystem::create_directories(folder, ignored);
+            const std::filesystem::path formFile = folder / "Live.form.lua";
+            const std::filesystem::path otherFile = folder / "Fixed.form.lua";
+            const std::filesystem::path scriptFile = folder / "Live.lua";
+            const auto write = [](const std::filesystem::path& file, std::string_view text) { std::ofstream(file, std::ios::binary | std::ios::trunc) << text; };
+            write(formFile, R"LUA(return { form = 1, title = "Live", key = "live form", children = {
+              { kind = "checkbox", name = "god", label = "God", onChange = "godChanged" },
+              { kind = "input", name = "name", value = "Hero" },
+            } })LUA");
+            write(otherFile, R"LUA(return { form = 1, title = "Fixed", children = { { kind = "text", text = "one" } } })LUA");
+            write(scriptFile, R"LUA(
+              liveReloads = 0
+              local handlers = { godChanged = function() end, saveClicked = function() end }
+              liveWindow, liveWidgets = manifold.ui.form.load("Live.form.lua", handlers, { onReload = function(window, widgets) liveReloads = liveReloads + 1; liveSeen = widgets.save.kind end })
+              fixedWindow = manifold.ui.form.load("Fixed.form.lua", nil, { reload = false })
+              liveWidgets.god.set(true)
+              liveFirstId = liveWindow.id
+            )LUA");
+            const Status ran = engine.Lua().RunFile(scriptFile);
+            CHECK_MSG(ran.Ok(), ran.Text);
+            const std::string shown = WideToUtf8(std::filesystem::absolute(formFile).wstring());
+            CHECK_EQ(model.Watching(shown), 1);
+            CHECK_EQ(model.Watching(WideToUtf8(std::filesystem::absolute(otherFile).wstring())), 0);
+            const Lua::UiNode* live = FindWindow(model, "Live");
+            CHECK(live && live->Children.size() == 2);
+
+            write(formFile, R"LUA(return { form = 1, title = "Live Two", key = "live form", children = {
+              { kind = "checkbox", name = "god", label = "God Mode", onChange = "godChanged" },
+              { kind = "row", children = { { kind = "button", name = "save", text = "Save", onClick = "saveClicked" } } },
+            } })LUA");
+            write(otherFile, R"LUA(return { form = 1, title = "Fixed", children = { { kind = "text", text = "one" }, { kind = "text", text = "two" } } })LUA");
+            engine.Lua().Tick(5000.0);
+            live = FindWindow(model, "Live Two");
+            CHECK(live && live->Children.size() == 2);
+            if (live && live->Children.size() == 2)
+            {
+                const Lua::UiNode* god = model.Find(live->Children[0]);
+                CHECK(god && god->Kind == Lua::UiKind::Checkbox && god->Label == "God Mode" && god->Bool);
+            }
+            const Lua::UiNode* fixed = FindWindow(model, "Fixed");
+            CHECK(fixed && fixed->Children.size() == 1);
+            LuaCheck(engine, "form reload", R"LUA(
+                if liveReloads ~= 1 or liveSeen ~= "button" then return "onReload " .. tostring(liveReloads) end
+                if liveWindow.id ~= liveFirstId or not liveWindow.isOpen() then return "window changed" end
+                if liveWidgets.save.kind ~= "button" or liveWidgets.god.get() ~= true then return "widgets table" end
+                local ok = pcall(function() return liveWidgets.name end)
+                if ok then return "a removed widget is still there" end
+                return "ok")LUA");
+
+            const std::size_t warnings = CountEntries(engine, LogLevel::Warning, "keeps its layout");
+            write(formFile, R"LUA(return { form = 1, title = "Broken", children = { { kind = "button", name = "x", onClick = "nope" } } })LUA");
+            engine.Lua().Tick(6000.0);
+            CHECK(FindWindow(model, "Live Two") && !FindWindow(model, "Broken"));
+            CHECK_EQ(CountEntries(engine, LogLevel::Warning, "keeps its layout"), warnings + 1);
+
+            CHECK(engine.Lua().Run("", "@" + WideToUtf8(std::filesystem::absolute(scriptFile).wstring())).Ok());
+            CHECK(!FindWindow(model, "Live Two") && !FindWindow(model, "Fixed"));
+            CHECK_EQ(model.Watching(shown), 0);
+            std::filesystem::remove(formFile, ignored);
+            std::filesystem::remove(otherFile, ignored);
+            std::filesystem::remove(scriptFile, ignored);
+            std::filesystem::remove(folder, ignored);
+        }
+
+        void UiWindowOptions(Engine& engine)
+        {
+            Lua::UiModel& model = engine.Lua().Ui();
+            LuaCheck(engine, "ui window options", R"LUA(
+                local w = manifold.ui.window.create("Options", { key = "options probe", minWidth = 300, minHeight = 200, maxWidth = 900, maxHeight = 700,
+                  resizable = false, scrollbar = false, topmost = true, position = "center" })
+                local list = w.add("column", { gap = 2, scroll = true, height = 120 })
+                list.add("button", { text = "Save", shortcut = "Ctrl+S", confirm = "Save now?", minWidth = 120, maxWidth = 240 })
+                list.add("input", { value = "abc", readOnly = true, maxLength = 5, focus = true })
+                list.add("text", { text = "long", maxWidth = 80 })
+                local function raises(fn, needle)
+                  local ok, problem = pcall(fn)
+                  if ok then return "no error for " .. needle end
+                  if not problem.message:find(needle, 1, true) then return "message lacks '" .. needle .. "': " .. problem.message end
+                end
+                local failure = raises(function() manifold.ui.window.create("Bad", { position = "top" }) end, 'options.position must be "center" or "mouse"')
+                  or raises(function() list.add("input", { maxLength = 2.5 }) end, "options.maxLength must be")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", position = "left" }) end, "form.position must be")
+                if failure then return failure end
+                if not w.update({ maxWidth = 1000, topmost = false, resizable = true }) then return "update" end
+                return "ok")LUA");
+            const Lua::UiNode* window = FindWindow(model, "Options");
+            CHECK(window && window->Key == "options probe" && window->MinWidth == 300.0f && window->MinHeight == 200.0f && window->MaxWidth == 1000.0f &&
+                  window->MaxHeight == 700.0f && window->Resizable && !window->Scrollbar && !window->Topmost && window->Position == "center");
+            CHECK(!FindWindow(model, "Bad"));
+            const Lua::UiNode* list = window && !window->Children.empty() ? model.Find(window->Children[0]) : nullptr;
+            CHECK(list && list->Gap == 2.0f && list->Scroll && list->Height == 120.0f && list->Children.size() == 3);
+            if (list && list->Children.size() == 3)
+            {
+                const Lua::UiNode* button = model.Find(list->Children[0]);
+                CHECK(button && button->Shortcut == "Ctrl+S" && button->Confirm == "Save now?" && button->MinWidth == 120.0f && button->MaxWidth == 240.0f);
+                const Lua::UiNode* input = model.Find(list->Children[1]);
+                CHECK(input && input->ReadOnly && input->MaxLength == 5 && input->Focus);
+                const Lua::UiNode* text = model.Find(list->Children[2]);
+                CHECK(text && text->MaxWidth == 80.0f);
+            }
+            CHECK(ParseChord("Ctrl+S") != 0);
+            LuaCheck(engine, "ui window options cleanup", R"LUA(
+                manifold.ui.window.create("x", { key = "options probe" }).remove()
+                return "ok")LUA");
+
+            const std::string text = R"LUA(return {
+  form = 1,
+  title = "Options",
+  minWidth = 300,
+  maxHeight = 600,
+  resizable = false,
+  topmost = true,
+  position = "mouse",
+  children = {
+    { kind = "column", gap = 4, scroll = true, children = { { kind = "button", text = "Go", shortcut = "F5", confirm = "Sure?" } } },
+    { kind = "input", readOnly = true, maxLength = 8, focus = true, minWidth = 100 },
+  },
+})LUA";
+            Lua::FormDocument form;
+            std::string error;
+            std::vector<std::string> notes;
+            CHECK_MSG(Lua::FormLoad(text, form, error, &notes) && notes.empty(), error);
+            const Lua::UiNode* root = form.Model.Find(form.Window);
+            CHECK(root && root->MinWidth == 300.0f && root->MaxHeight == 600.0f && !root->Resizable && root->Topmost && root->Position == "mouse");
+            const std::string saved = Lua::FormSave(form);
+            for (const char* needle : { "minWidth = 300", "maxHeight = 600", "resizable = false", "topmost = true", "position = \"mouse\"", "gap = 4", "scroll = true",
+                     "shortcut = \"F5\"", "confirm = \"Sure?\"", "readOnly = true", "maxLength = 8", "focus = true", "minWidth = 100" })
+                CHECK_MSG(saved.find(needle) != std::string::npos, std::string("saved form lacks ") + needle);
+            Lua::FormDocument again;
+            CHECK(Lua::FormLoad(saved, again, error) && Lua::FormSave(again) == saved);
+            CHECK(engine.Lua().Run(Lua::FormScript(form, Lua::FormScriptStyle::Standalone), "form options").Ok());
+            CHECK(FindWindow(model, "Options"));
+            CHECK(engine.Lua().Run("", "form options").Ok());
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -1709,6 +1850,8 @@ return M
         UiForms(engine);
         UiFormsStage2(engine);
         UiFormImport(engine);
+        UiFormReload(engine);
+        UiWindowOptions(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

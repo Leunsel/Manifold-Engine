@@ -1147,6 +1147,7 @@ namespace Manifold::Lua
 
     void LuaEngine::TickUi(double now)
     {
+        m_ui.PollWatches(now);
         if (!m_state || (!m_ui.HasEvents() && now < m_ui.NextUpdate()))
             return;
         if (lua_getfield(m_state, LUA_REGISTRYINDEX, "Manifold.UiTick") != LUA_TFUNCTION)

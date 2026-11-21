@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 14
+local API_VERSION = 15
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -2074,9 +2074,9 @@ for _, name in ipairs(UI_COLORS) do
 end
 
 local UI_HANDLER_BITS = { onClick = 1, onChange = 2, onSelect = 4, onActivate = 8, onMenu = 16, onHover = 32, onSubmit = 64, onClose = 128, onView = 256, onKey = 512 }
-local UI_EVENTS = { click = "onClick", change = "onChange", select = "onSelect", activate = "onActivate", menu = "onMenu", hover = "onHover", submit = "onSubmit", close = "onClose", view = "onView", key = "onKey" }
+local UI_EVENTS = { click = "onClick", change = "onChange", select = "onSelect", activate = "onActivate", menu = "onMenu", hover = "onHover", submit = "onSubmit", close = "onClose", view = "onView", key = "onKey", reload = "onFormReload" }
 
-local COMMON_KEYS = { visible = "boolean", enabled = "boolean", tooltip = "string", width = "number", height = "number" }
+local COMMON_KEYS = { visible = "boolean", enabled = "boolean", tooltip = "string", width = "number", height = "number", minWidth = "number", maxWidth = "number" }
 
 local function withCommon(keys)
   local all = {}
@@ -2090,21 +2090,21 @@ local function withCommon(keys)
 end
 
 local WIDGET_KEYS = {
-  row = withCommon({ align = "string" }),
-  column = withCommon({}),
+  row = withCommon({ align = "string", gap = "number" }),
+  column = withCommon({ gap = "number", scroll = "boolean" }),
   grid = withCommon({ columns = "integer" }),
-  section = withCommon({ title = "string", icon = "string", badge = "string", collapsible = "boolean", open = "boolean" }),
+  section = withCommon({ title = "string", icon = "string", badge = "string", collapsible = "boolean", open = "boolean", gap = "number" }),
   tabs = withCommon({}),
-  tab = withCommon({ title = "string", icon = "string" }),
+  tab = withCommon({ title = "string", icon = "string", gap = "number", scroll = "boolean" }),
   split = withCommon({ vertical = "boolean", ratio = "number" }),
   text = withCommon({ text = "string", color = "string", wrap = "boolean", mono = "boolean" }),
   heading = withCommon({ text = "string", icon = "string" }),
   separator = withCommon({ text = "string" }),
   spacer = withCommon({}),
-  button = withCommon({ text = "string", icon = "string", style = "string", onClick = "function" }),
+  button = withCommon({ text = "string", icon = "string", style = "string", shortcut = "string", confirm = "string", onClick = "function" }),
   checkbox = withCommon({ label = "string", value = "boolean", onChange = "function" }),
-  input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", onChange = "function", onSubmit = "function" }),
-  number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", onChange = "function" }),
+  input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", readOnly = "boolean", maxLength = "integer", focus = "boolean", onChange = "function", onSubmit = "function" }),
+  number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", focus = "boolean", onChange = "function" }),
   slider = withCommon({ label = "string", value = "number", min = "number", max = "number", integer = "boolean", format = "string", onChange = "function" }),
   combo = withCommon({ label = "string", items = "table", value = "integer", onChange = "function" }),
   radio = withCommon({ label = "string", items = "table", value = "integer", horizontal = "boolean", onChange = "function" }),
@@ -2422,8 +2422,14 @@ widgetObject = function(entry)
   return proxy
 end
 
-local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open = "boolean", dock = "boolean", interval = "number", key = "string", opacity = "number", inactiveOpacity = "number", onClose = "function", onUpdate = "function" }
-local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", opacity = "number", inactiveOpacity = "number", onClose = "function", onUpdate = "function" }
+local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open = "boolean", dock = "boolean", interval = "number", key = "string", opacity = "number", inactiveOpacity = "number",
+  minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean",
+  position = "string", x = "number", y = "number", onClose = "function", onUpdate = "function" }
+local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", opacity = "number", inactiveOpacity = "number",
+  minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean",
+  onClose = "function", onUpdate = "function" }
+local WINDOW_FLAG_KEYS = { "minWidth", "minHeight", "maxWidth", "maxHeight", "resizable", "autoSize", "scrollbar", "topmost" }
+local WINDOW_POSITIONS = { center = true, mouse = true }
 local WINDOW_DOC = "manifold.ui.window.Window."
 local windowKeys = {}
 
@@ -2469,6 +2475,9 @@ local function windowObject(entry)
       entry.onUpdate = options.onUpdate
     end
     local copy = { title = options.title, icon = options.icon, interval = options.interval, opacity = options.opacity, inactiveOpacity = options.inactiveOpacity, handlers = entry.onClose and UI_HANDLER_BITS.onClose or 0 }
+    for _, key in ipairs(WINDOW_FLAG_KEYS) do
+      copy[key] = options[key]
+    end
     if options.onUpdate ~= nil then
       copy.updates = true
     end
@@ -2508,7 +2517,7 @@ define(window, "create", {
     { name = "options", type = "table", optional = true, keys = WINDOW_KEYS },
   },
   returns = "window",
-  doc = "Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `opacity` (0.1 to 1, while the window has the focus) and `inactiveOpacity` (while another window has it; default `opacity`): without them the user's window opacity settings apply, and only a floating window can be see-through, a docked one stays opaque; `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one.",
+  doc = "Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `opacity` (0.1 to 1, while the window has the focus) and `inactiveOpacity` (while another window has it; default `opacity`): without them the user's window opacity settings apply, and only a floating window can be see-through, a docked one stays opaque; `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one, and it keeps its place, size and dock spot from one run to the next. Size and behaviour: `minWidth`, `minHeight`, `maxWidth`, `maxHeight` (points) limit what the user can drag it to, `resizable = false` fixes the size, `autoSize = true` fits the window to its widgets, `scrollbar = false` hides the scroll bar, `topmost = true` keeps a floating window above other windows (it does not dock). `position` places it the first time: `\"center\"` (of the main window) or `\"mouse\"`; `x` and `y` (points from the main window's corner) place it exactly.",
 }, function(title, options)
   options = options or {}
   checkIcon("manifold.ui.window.create", options.icon)
@@ -2519,7 +2528,10 @@ define(window, "create", {
       earlier.handle.remove()
     end
   end
-  local id = native.uiCreate("window", 0, owner, {
+  if options.position ~= nil and not WINDOW_POSITIONS[options.position] then
+    misuse(('manifold.ui.window.create: options.position must be "center" or "mouse", got %q'):format(options.position))
+  end
+  local props = {
     title = title,
     icon = options.icon,
     width = options.width,
@@ -2530,7 +2542,15 @@ define(window, "create", {
     inactiveOpacity = options.inactiveOpacity,
     updates = options.onUpdate ~= nil,
     handlers = options.onClose and UI_HANDLER_BITS.onClose or 0,
-  })
+    key = options.key,
+    position = options.position,
+    x = options.x,
+    y = options.y,
+  }
+  for _, key in ipairs(WINDOW_FLAG_KEYS) do
+    props[key] = options[key]
+  end
+  local id = native.uiCreate("window", 0, owner, props)
   if options.open == false then
     native.uiShow(id, false, false)
   end
@@ -2553,7 +2573,7 @@ local WINDOW_METHOD_DOCS = {
   add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `grid`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `radio`, `color`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object)." },
   clear = { returns = "boolean", doc = "Removes every widget of the window." },
   remove = { returns = "boolean", doc = "Removes the window and its widgets for good." },
-  update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, opacity (`opacity`, `inactiveOpacity`), update interval or handlers." },
+  update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, opacity (`opacity`, `inactiveOpacity`), size limits and behaviour (`minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `resizable`, `autoSize`, `scrollbar`, `topmost`), update interval or handlers." },
   show = { returns = "boolean", doc = "Shows the window again after the user or `hide` closed it." },
   hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
   focus = { returns = "boolean", doc = "Shows the window and brings it to the front." },
@@ -2569,14 +2589,14 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
   kind = "class",
   title = "Widget objects",
   doc = table.concat({
-    "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line). Handlers get the widget as their last argument.",
-    "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line.",
+    "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line); `minWidth` and `maxWidth` keep fields, buttons and lists within that range, and a text wraps at `maxWidth`. Handlers get the widget as their last argument.",
+    "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line. `gap` (points) sets the space between the widgets of a row, column, section or tab; a column or tab with `scroll = true` scrolls inside its `height` (200).",
     "- `grid`: places its widgets in `columns` (2) cells per row, row by row. The first column fits its content and the others share the rest, so `text` then a field per row lines labels up; a field without a `label` fills its cell.",
     "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it, `open = false` starts it folded.",
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
     "- `text` (`text`, `color`, `wrap`, `mono`), `heading` (`text`, `icon`), `separator` (`text` puts a caption into the line), `spacer`.",
-    "- `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`.",
-    "- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `onSubmit(text, widget)` on Enter), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
+    "- `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through.",
+    "- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
@@ -2603,8 +2623,11 @@ native.docDefine(nil, WIDGET_DOC .. "kind", { kind = "field", type = "string", d
 local form = subarea(ui, "form", "Windows described by a table, as the Form Editor (Tools > Form Editor) saves them in a `.form.lua` file. The table holds the layout and the names of the handlers; the script keeps the code and passes its handler functions in.")
 local FORM_NODE_KEYS = { kind = true, name = true, children = true }
 local formImageLoad
+local callFormHandler
 
-local function buildForm(path, spec, handlers, folder)
+local FORM_VALUE_KINDS = { checkbox = true, input = true, number = true, slider = true, combo = true, radio = true, color = true, table = true, tree = true, progress = true }
+
+local function formHeader(path, spec, handlers)
   if math.type(spec.form) ~= "integer" then
     misuse(path .. ": the table has no form = 1, so it is no form")
   end
@@ -2640,9 +2663,44 @@ local function buildForm(path, spec, handlers, folder)
       end
     end
   end
-  local made = rawget(window.members, "create")(spec.title, options)
-  local widgets, members = strict(("form(%q).widgets"):format(spec.title))
-  local function add(parent, list, where, depth)
+  if options.position ~= nil and not WINDOW_POSITIONS[options.position] then
+    misuse(('%s: form.position must be "center" or "mouse", got %s'):format(path, tostring(options.position)))
+  end
+  return options, resolve
+end
+
+local function formWidget(path, child, at, resolve)
+  if type(child) ~= "table" then
+    misuse(("%s: %s must be a table, got %s"):format(path, at, kindOf(child)))
+  end
+  if type(child.kind) ~= "string" then
+    misuse(("%s: %s has no kind"):format(path, at))
+  end
+  if child.name ~= nil and (type(child.name) ~= "string" or not child.name:match("^[%a_][%w_]*$")) then
+    misuse(("%s: %s.name must be a Lua name, got %s"):format(path, at, tostring(child.name)))
+  end
+  local label = child.name and ("%s %q"):format(child.kind, child.name) or at
+  local keys = WIDGET_KEYS[child.kind]
+  local copy = {}
+  for key, value in pairs(child) do
+    if not FORM_NODE_KEYS[key] then
+      if keys and UI_HANDLER_BITS[key] and keys[key] then
+        copy[key] = resolve(label, key, value)
+      else
+        copy[key] = value
+      end
+    end
+  end
+  return copy, label
+end
+
+-- ∑ The whole form is checked before a window is made or emptied, so a wrong
+-- form raises without leaving half a window behind, and a live reload of a
+-- wrong file keeps the window as it was.
+local function checkForm(path, spec, handlers)
+  local options, resolve = formHeader(path, spec, handlers)
+  local names = {}
+  local function walk(parentKind, list, where, depth)
     if list == nil then
       return
     end
@@ -2653,28 +2711,42 @@ local function buildForm(path, spec, handlers, folder)
       misuse(path .. ": the form nests deeper than 32 levels")
     end
     for index, child in ipairs(list) do
-      local at = ("%s.children[%d]"):format(where, index)
-      if type(child) ~= "table" then
-        misuse(("%s: %s must be a table, got %s"):format(path, at, kindOf(child)))
-      end
-      if type(child.kind) ~= "string" then
-        misuse(("%s: %s has no kind"):format(path, at))
-      end
-      if child.name ~= nil and (type(child.name) ~= "string" or not child.name:match("^[%a_][%w_]*$")) then
-        misuse(("%s: %s.name must be a Lua name, got %s"):format(path, at, tostring(child.name)))
-      end
-      local label = child.name and ("%s %q"):format(child.kind, child.name) or at
+      local copy, label = formWidget(path, child, ("%s.children[%d]"):format(where, index), resolve)
       local keys = WIDGET_KEYS[child.kind]
-      local copy = {}
-      for key, value in pairs(child) do
-        if not FORM_NODE_KEYS[key] then
-          if keys and UI_HANDLER_BITS[key] and keys[key] then
-            copy[key] = resolve(label, key, value)
-          else
-            copy[key] = value
-          end
-        end
+      if not keys then
+        misuse(('%s: %s: kind must be one of "%s", got %q'):format(path, label, table.concat(WIDGET_KINDS, '", "'), child.kind))
       end
+      if parentKind ~= "window" and not CONTAINERS[parentKind] then
+        misuse(("%s: %s: a %s holds no widgets"):format(path, label, parentKind))
+      end
+      if parentKind == "tabs" and child.kind ~= "tab" then
+        misuse(("%s: %s: tabs hold tab widgets only"):format(path, label))
+      end
+      if child.kind == "tab" and parentKind ~= "tabs" then
+        misuse(("%s: %s: a tab goes into a tabs widget"):format(path, label))
+      end
+      if child.name then
+        if names[child.name] then
+          misuse(("%s: two widgets are named %q"):format(path, child.name))
+        end
+        names[child.name] = true
+      end
+      if child.kind == "image" and type(copy.image) == "string" then
+        copy.image = nil
+      end
+      checkOptions(path .. "(" .. child.kind .. ")", keys, copy)
+      walk(child.kind, child.children, label, depth + 1)
+    end
+  end
+  walk("window", spec.children, "form", 1)
+  return options
+end
+
+local function fillForm(path, made, members, spec, handlers, folder)
+  local _, resolve = formHeader(path, spec, handlers)
+  local function add(parent, list, where)
+    for index, child in ipairs(list or {}) do
+      local copy, label = formWidget(path, child, ("%s.children[%d]"):format(where, index), resolve)
       if child.kind == "image" and type(child.image) == "string" then
         local file = child.image
         if folder and not file:match("^%a:[\\/]") and not file:match("^[\\/]") then
@@ -2684,20 +2756,101 @@ local function buildForm(path, spec, handlers, folder)
       end
       local handle = parent.add(child.kind, copy)
       if child.name then
-        if rawget(members, child.name) ~= nil then
-          misuse(("%s: two widgets are named %q"):format(path, child.name))
-        end
         rawset(members, child.name, handle)
       end
-      add(handle, child.children, label, depth + 1)
+      add(handle, child.children, label)
     end
   end
-  local ok, problem = pcall(add, made, spec.children, "form", 1)
+  add(made, spec.children, "form")
+end
+
+local function buildForm(path, spec, handlers, folder)
+  local options = checkForm(path, spec, handlers)
+  local made = rawget(window.members, "create")(spec.title, options)
+  local widgets, members = strict(("form(%q).widgets"):format(spec.title))
+  local ok, problem = pcall(fillForm, path, made, members, spec, handlers, folder)
   if not ok then
     made.remove()
     error(problem, 0)
   end
-  return made, widgets
+  return made, widgets, members
+end
+
+local function readFormFile(file, folder)
+  local text, shown, message = native.uiFormRead(file, folder)
+  if not text then
+    return nil, shown, message
+  end
+  local chunk, problem = load(text, "@" .. shown, "t", {})
+  if not chunk then
+    return nil, "ME-7014", problem
+  end
+  local ok, spec = pcall(chunk)
+  if not ok or type(spec) ~= "table" then
+    return nil, "ME-7014", ok and (shown .. " does not return a table") or tostring(spec)
+  end
+  return spec, shown
+end
+
+local function reloadForm(watch)
+  if uiEntries[watch.window.id] ~= watch.entry then
+    return
+  end
+  local spec, shown, message = readFormFile(watch.file)
+  local options
+  if spec then
+    local ok, checked = pcall(checkForm, "manifold.ui.form.load", spec, watch.handlers)
+    if ok then
+      options = checked
+    else
+      message = isError(checked) and rawget(checked, "message") or tostring(checked)
+    end
+  else
+    message = message or shown
+  end
+  if not options then
+    emit("warning", "manifold.ui", ("%s changed, but the window keeps its layout: %s"):format(watch.file, tostring(message)))
+    return
+  end
+  local values = {}
+  for name, handle in pairs(watch.members) do
+    if FORM_VALUE_KINDS[handle.kind] then
+      local ok, value = pcall(handle.get)
+      if ok and value ~= nil then
+        values[name] = { kind = handle.kind, value = value }
+      end
+    end
+  end
+  local names = {}
+  for name in pairs(watch.members) do
+    names[#names + 1] = name
+  end
+  for _, name in ipairs(names) do
+    rawset(watch.members, name, nil)
+  end
+  watch.window.clear()
+  local update = { title = spec.title }
+  for key in pairs(WINDOW_UPDATE_KEYS) do
+    if key ~= "title" and options[key] ~= nil then
+      update[key] = options[key]
+    end
+  end
+  watch.window.update(update)
+  local ok, failure = pcall(fillForm, "manifold.ui.form.load", watch.window, watch.members, spec, watch.handlers, watch.folder)
+  for name, saved in pairs(values) do
+    local handle = rawget(watch.members, name)
+    if handle and handle.kind == saved.kind then
+      pcall(handle.set, saved.value)
+    end
+  end
+  if not ok then
+    emit("error", "manifold.ui", failure)
+    return
+  end
+  emit("info", "manifold.ui", "Reloaded " .. watch.file)
+  if watch.onReload then
+    callFormHandler(watch.onReload, watch.window, watch.widgets)
+  end
 end
 
 local FORM_RETURNS = "`window, widgets`: the window object, and a read-only table of the widgets that have a `name`, by name (an unknown name raises)."
@@ -2708,38 +2861,43 @@ define(form, "build", {
     { name = "handlers", type = "table", optional = true },
   },
   returns = "window",
-  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty.",
+  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like. The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty.",
 }, function(spec, handlers)
   local info = callerFrame()
   local source = info and info.source or ""
   local folder = source:sub(1, 1) == "@" and source:sub(2):match("^(.*[\\/])") or nil
-  return buildForm("manifold.ui.form.build", spec, handlers, folder)
+  local made, widgets = buildForm("manifold.ui.form.build", spec, handlers, folder)
+  return made, widgets
 end)
 
 define(form, "load", {
   params = {
     { name = "path", type = "string" },
     { name = "handlers", type = "table", optional = true },
+    { name = "options", type = "table", optional = true, keys = { reload = "boolean", onReload = "function" } },
   },
   returns = "window",
-  doc = "Reads a `.form.lua` file and builds its window like `build`; returns " .. FORM_RETURNS .. " A relative path starts at the folder of the calling script (at the program folder for code without a file). Returns nil and an `ME-7014` error when the file cannot be read or does not return a table; a wrong form raises like `build`. Picture files of `image` widgets are relative to the form file's folder.",
-}, function(path, handlers)
+  doc = "Reads a `.form.lua` file and builds its window like `build`; returns " .. FORM_RETURNS .. " A relative path starts at the folder of the calling script (at the program folder for code without a file). Returns nil and an `ME-7014` error when the file cannot be read or does not return a table; a wrong form raises like `build`. Picture files of `image` widgets are relative to the form file's folder. Live reload: while the window is open, saving the file (in the Form Editor or elsewhere) rebuilds its widgets in the same window, with the same handlers; the window and the `widgets` table stay the same objects, widgets that keep their name and kind keep their value, and a wrong file only logs a warning. `options.reload = false` switches that off; `options.onReload(window, widgets)` runs after each rebuild, to fill what the script put in (table rows, tree items, drawings).",
+}, function(path, handlers, options)
+  options = options or {}
   local info = callerFrame()
   local source = info and info.source or ""
   local folder = source:sub(1, 1) == "@" and source:sub(2):match("^(.*[\\/])") or nil
-  local text, shown, message = native.uiFormRead(path, folder)
-  if not text then
+  local spec, shown, message = readFormFile(path, folder)
+  if not spec then
     return result(nil, shown, message)
   end
-  local chunk, problem = load(text, "@" .. shown, "t", {})
-  if not chunk then
-    return result(nil, "ME-7014", problem)
+  local formFolder = shown:match("^(.*[\\/])")
+  local made, widgets, members = buildForm("manifold.ui.form.load", spec, handlers, formFolder)
+  if options.reload ~= false then
+    local entry = uiEntries[made.id]
+    local watch = { window = made, entry = entry, widgets = widgets, members = members, file = shown, handlers = handlers, folder = formFolder, onReload = options.onReload }
+    entry.onFormReload = function()
+      reloadForm(watch)
+    end
+    native.uiWatch(made.id, shown)
   end
-  local ok, spec = pcall(chunk)
-  if not ok or type(spec) ~= "table" then
-    return result(nil, "ME-7014", ok and (shown .. " does not return a table") or tostring(spec))
-  end
-  return buildForm("manifold.ui.form.load", spec, handlers, shown:match("^(.*[\\/])"))
+  return made, widgets
 end)
 
 local function plainObject(entry, prefix, docPrefix, methods, fields)
@@ -3344,6 +3502,8 @@ local function callHandler(handler, ...)
   end
   return ok
 end
+
+callFormHandler = callHandler
 
 debug.getregistry()["Manifold.UiTick"] = function(now)
   for _, id in ipairs(native.uiDue(now)) do
