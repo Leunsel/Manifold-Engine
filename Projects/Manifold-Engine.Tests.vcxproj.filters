@@ -279,6 +279,9 @@
     <ClCompile Include="..\Source\Lua\LuaUnreal.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\UiForm.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\UiModel.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>

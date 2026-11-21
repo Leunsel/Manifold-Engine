@@ -146,6 +146,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-7011 | There is no autorun module named …. | No script or module of that name is in the autorun folder, or the script that asked does not belong to a module. | Extensions > Modules lists the names. A module's name is its NAME header line, or its file or folder name. |
 | ME-7012 | The autorun module …. | A module it requires is missing, switched off, held, failed or too old, its requirements form a circle, it asks for a newer manifold API, or the module cannot be switched in its state. | The message names the reason. Fix the REQUIRES or API line in the module's header, or add or enable the module it names. |
 | ME-7013 | The autorun module … is held until it is allowed. | The module is new in the autorun folder, or a script wrote to its files, so it does not run on its own. | Look at it in Extensions > Modules and choose Allow if it is yours. |
+| ME-7014 | The form file … could not be read. | manifold.ui.form.load reads a .form.lua file as the Form Editor saves it; the file is missing, unreadable, not plain Lua or does not return a table. | Check the path (a relative path starts at the folder of the calling script) and open the file in Tools > Form Editor. |
 
 ## Addresses and symbols
 

@@ -27,6 +27,7 @@ namespace Manifold
         FlowGraph,
         Log,
         TableFiles,
+        FormEditor,
         Count
     };
 
@@ -48,6 +49,7 @@ namespace Manifold
         OpenProfiler,
         OpenPointerScan,
         OpenStaticPointers,
+        OpenFormEditor,
 
         NewTable,
         OpenLastProcess,
@@ -231,6 +233,20 @@ namespace Manifold
         TableFilesSelectAll,
         TableFilesCopyName,
         TableFilesFind,
+
+        FormNew,
+        FormOpen,
+        FormSave,
+        FormSaveAs,
+        FormExport,
+        FormUndo,
+        FormRedo,
+        FormDuplicate,
+        FormDelete,
+        FormMoveUp,
+        FormMoveDown,
+        FormTry,
+        FormRun,
 
         Count
     };

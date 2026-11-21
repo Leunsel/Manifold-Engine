@@ -39,6 +39,7 @@ namespace Manifold
             { OpenProfiler, "OpenProfiler", Scope::Global, "Profiler and Diagnostics", Ctrl | Shift | ImGuiKey_F12, 0, Own },
             { OpenPointerScan, "OpenPointerScan", Scope::Global, "Pointer Scan", Ctrl | Alt | ImGuiKey_P, 0, Own },
             { OpenStaticPointers, "OpenStaticPointers", Scope::Global, "Find Static Pointers", Ctrl | Alt | ImGuiKey_K, 0, Own },
+            { OpenFormEditor, "OpenFormEditor", Scope::Global, "Form Editor", Ctrl | Alt | ImGuiKey_G, 0, Own },
 
             { NewTable, "NewTable", Scope::Main, "New Table", Ctrl | ImGuiKey_N, 0, Own },
             { OpenLastProcess, "OpenLastProcess", Scope::Main, "Open Last Process", Ctrl | Shift | ImGuiKey_P, 0, Own },
@@ -222,6 +223,20 @@ namespace Manifold
             { TableFilesSelectAll, "TableFilesSelectAll", Scope::TableFiles, "Select All", Ctrl | ImGuiKey_A, 0, Own },
             { TableFilesCopyName, "TableFilesCopyName", Scope::TableFiles, "Copy Names", Ctrl | Shift | ImGuiKey_C, 0, Own },
             { TableFilesFind, "TableFilesFind", Scope::TableFiles, "Find", Ctrl | ImGuiKey_F, 0, Own },
+
+            { FormNew, "FormNew", Scope::FormEditor, "New Form", Ctrl | ImGuiKey_N, 0, Own },
+            { FormOpen, "FormOpen", Scope::FormEditor, "Open Form", Ctrl | ImGuiKey_O, 0, Own },
+            { FormSave, "FormSave", Scope::FormEditor, "Save Form", Ctrl | ImGuiKey_S, 0, Own },
+            { FormSaveAs, "FormSaveAs", Scope::FormEditor, "Save Form As", Ctrl | Shift | ImGuiKey_S, 0, Own },
+            { FormExport, "FormExport", Scope::FormEditor, "Export Script", Ctrl | ImGuiKey_E, 0, Own },
+            { FormUndo, "FormUndo", Scope::FormEditor, "Undo", Ctrl | ImGuiKey_Z, 0, Own },
+            { FormRedo, "FormRedo", Scope::FormEditor, "Redo", Ctrl | ImGuiKey_Y, Ctrl | Shift | ImGuiKey_Z, Own },
+            { FormDuplicate, "FormDuplicate", Scope::FormEditor, "Duplicate Widget", Ctrl | ImGuiKey_D, 0, Own },
+            { FormDelete, "FormDelete", Scope::FormEditor, "Delete Widget", ImGuiKey_Delete, 0, Own },
+            { FormMoveUp, "FormMoveUp", Scope::FormEditor, "Move Widget Up", Alt | ImGuiKey_UpArrow, 0, Own },
+            { FormMoveDown, "FormMoveDown", Scope::FormEditor, "Move Widget Down", Alt | ImGuiKey_DownArrow, 0, Own },
+            { FormTry, "FormTry", Scope::FormEditor, "Design or Try", Ctrl | ImGuiKey_T, 0, Own },
+            { FormRun, "FormRun", Scope::FormEditor, "Run Script", ImGuiKey_F5, 0, Own },
         };
 
         static_assert(std::size(kCommands) == static_cast<std::size_t>(Command::Count));
@@ -490,6 +505,7 @@ namespace Manifold
         case CommandScope::FlowGraph: return "Flow Graph";
         case CommandScope::Log: return "Log";
         case CommandScope::TableFiles: return "Table Files";
+        case CommandScope::FormEditor: return "Form Editor";
         case CommandScope::Count: break;
         }
         return "";
@@ -513,6 +529,7 @@ namespace Manifold
         case CommandScope::FlowGraph: return "While the flow graph window has the focus.";
         case CommandScope::Log: return "While the log window has the focus.";
         case CommandScope::TableFiles: return "While the Table Files window has the focus. List keys act on the selected files and rest while the cursor is in a text.";
+        case CommandScope::FormEditor: return "While the Form Editor has the focus. Widget keys act on the selected widget and rest while the cursor is in a text.";
         case CommandScope::Count: break;
         }
         return "";

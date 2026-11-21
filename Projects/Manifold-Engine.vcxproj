@@ -196,6 +196,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUnreal.cpp" />
+    <ClCompile Include="..\Source\Lua\UiForm.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\PointerScan.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
@@ -260,6 +261,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\EditorView.cpp" />
     <ClCompile Include="..\Source\UI\FlowGraphWindow.cpp" />
     <ClCompile Include="..\Source\UI\Fonts.cpp" />
+    <ClCompile Include="..\Source\UI\FormEditor.cpp" />
     <ClCompile Include="..\Source\UI\Loading.cpp" />
     <ClCompile Include="..\Source\UI\LogWindow.cpp" />
     <ClCompile Include="..\Source\UI\LuaDialogs.cpp" />
@@ -368,6 +370,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Lua\LuaSnapshot.h" />
     <ClInclude Include="..\Source\Lua\LuaUi.h" />
     <ClInclude Include="..\Source\Lua\LuaUnreal.h" />
+    <ClInclude Include="..\Source\Lua\UiForm.h" />
     <ClInclude Include="..\Source\Lua\UiModel.h" />
     <ClInclude Include="..\Source\Scan\PointerScan.h" />
     <ClInclude Include="..\Source\Scan\Scanner.h" />
@@ -434,6 +437,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\EditorView.h" />
     <ClInclude Include="..\Source\UI\FlowGraphWindow.h" />
     <ClInclude Include="..\Source\UI\Fonts.h" />
+    <ClInclude Include="..\Source\UI\FormEditor.h" />
     <ClInclude Include="..\Source\UI\Loading.h" />
     <ClInclude Include="..\Source\UI\LogWindow.h" />
     <ClInclude Include="..\Source\UI\LuaDialogs.h" />

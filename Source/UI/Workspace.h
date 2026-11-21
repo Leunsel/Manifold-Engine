@@ -87,6 +87,7 @@ namespace Manifold::UI
     class NopSledWindow;
     class WriteHistoryWindow;
     class CommentListWindow;
+    class FormEditorWindow;
     class ModulesWindow;
     class FlowGraphWindow;
 
@@ -153,6 +154,7 @@ namespace Manifold::UI
         void OpenNopSled();
         void OpenWriteHistory();
         void OpenCommentList();
+        void OpenFormEditor(const std::filesystem::path& path = {});
         void OpenModules();
         void OpenFlowGraph(std::uint64_t address = 0);
         bool Animating() const;
@@ -237,6 +239,7 @@ namespace Manifold::UI
         std::unique_ptr<NopSledWindow> m_nopSled;
         std::unique_ptr<WriteHistoryWindow> m_writeHistory;
         std::unique_ptr<CommentListWindow> m_commentList;
+        std::unique_ptr<FormEditorWindow> m_formEditor;
         std::unique_ptr<ModulesWindow> m_modules;
         std::unique_ptr<FlowGraphWindow> m_flowGraph;
         std::vector<std::unique_ptr<TraceWindow>> m_traces;

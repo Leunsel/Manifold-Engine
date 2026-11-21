@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 12 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 13 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -270,7 +270,7 @@ Windows, dialogs, notices, menu entries, toolbar buttons and status entries that
 
 ## manifold.ui.window
 
-Tool windows that dock into the workspace like Manifold's own. A window holds widgets; containers (`row`, `column`, `section`, `tabs` with `tab`, `split`) hold more widgets.
+Tool windows that dock into the workspace like Manifold's own. A window holds widgets; containers (`row`, `column`, `grid`, `section`, `tabs` with `tab`, `split`) hold more widgets.
 
 | Function | Returns | |
 | --- | --- | --- |
@@ -282,7 +282,7 @@ Tool windows that dock into the workspace like Manifold's own. A window holds wi
 
 | Name | Returns | |
 | --- | --- | --- |
-| `window.add(kind, options?)` | widget | Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object). |
+| `window.add(kind, options?)` | widget | Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `grid`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `radio`, `color`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object). |
 | `window.clear()` | boolean | Removes every widget of the window. |
 | `window.remove()` | boolean | Removes the window and its widgets for good. |
 | `window.update(options)` | boolean | Changes the title, icon, opacity (`opacity`, `inactiveOpacity`), update interval or handlers. |
@@ -295,13 +295,14 @@ Tool windows that dock into the workspace like Manifold's own. A window holds wi
 
 ### Widget objects
 
-`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic). Handlers get the widget as their last argument.
-- `row`, `column`: lay out their widgets side by side or one below the other.
-- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it.
+`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line). Handlers get the widget as their last argument.
+- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line.
+- `grid`: places its widgets in `columns` (2) cells per row, row by row. The first column fits its content and the others share the rest, so `text` then a field per row lines labels up; a field without a `label` fills its cell.
+- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it, `open = false` starts it folded.
 - `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).
-- `text` (`text`, `color`, `wrap`, `mono`), `heading` (`text`, `icon`), `separator`, `spacer`.
+- `text` (`text`, `color`, `wrap`, `mono`), `heading` (`text`, `icon`), `separator` (`text` puts a caption into the line), `spacer`.
 - `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`.
-- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `onSubmit(text, widget)` on Enter), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number): all call `onChange(value, widget)`.
+- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `onSubmit(text, widget)` on Enter), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.
 - `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.
 - `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.
 - `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).
@@ -313,13 +314,22 @@ Tool windows that dock into the workspace like Manifold's own. A window holds wi
 | `widget.clear()` | boolean | Removes a container's widgets, or a canvas's drawings. |
 | `widget.remove()` | boolean | Removes the widget and everything in it. |
 | `widget.update(options)` | boolean | Changes options of the widget: the same keys `add` takes for its kind, handlers included. |
-| `widget.get()` | value | The widget's value: a checkbox's boolean, an input's text, a number, the chosen combo item's or table row's number, the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected. |
+| `widget.get()` | value | The widget's value: a checkbox's boolean, an input's text, a colour's `#RRGGBB`, a number, the chosen combo, radio or table row's number, the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected. |
 | `widget.set(value?)` | boolean | Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`. |
 | `widget.draw(drawings, options?)` | boolean | Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`). |
 | `widget.getView()` | table | A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom. |
 | `widget.setView(view)` | boolean | Moves or zooms a canvas's view. |
 | `widget.id` | integer | The widget's number. |
 | `widget.kind` | string | The kind it was added as. |
+
+## manifold.ui.form
+
+Windows described by a table, as the Form Editor (Tools > Form Editor) saves them in a `.form.lua` file. The table holds the layout and the names of the handlers; the script keeps the code and passes its handler functions in.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.ui.form.build(form, handlers?)` | window | Builds a window from a form table and returns `window, widgets`: the window object, and a read-only table of the widgets that have a `name`, by name (an unknown name raises). The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = "save"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like. |
+| `manifold.ui.form.load(path, handlers?)` | window | Reads a `.form.lua` file and builds its window like `build`; returns `window, widgets`: the window object, and a read-only table of the widgets that have a `name`, by name (an unknown name raises). A relative path starts at the folder of the calling script (at the program folder for code without a file). Returns nil and an `ME-7014` error when the file cannot be read or does not return a table; a wrong form raises like `build`. |
 
 ## manifold.ui.dialog
 

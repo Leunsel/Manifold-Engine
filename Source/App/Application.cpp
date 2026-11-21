@@ -259,6 +259,10 @@ namespace Manifold
                 m_workspace->OpenFlowGraph();
             else if (window == "templates")
                 m_workspace->OpenTemplateManager();
+            else if (window == "forms")
+                m_workspace->OpenFormEditor();
+            else if (window.rfind("forms:", 0) == 0)
+                m_workspace->OpenFormEditor(Utf8ToWide(window.substr(6)));
             else if (window.rfind("templates:", 0) == 0)
                 m_workspace->OpenTemplateManager(window.substr(10));
         }

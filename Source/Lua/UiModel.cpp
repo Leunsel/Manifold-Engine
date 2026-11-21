@@ -15,6 +15,7 @@ namespace Manifold::Lua
             { "tabs", UiKind::Tabs },
             { "tab", UiKind::Tab },
             { "split", UiKind::Split },
+            { "grid", UiKind::Grid },
             { "text", UiKind::Text },
             { "heading", UiKind::Heading },
             { "separator", UiKind::Separator },
@@ -25,6 +26,8 @@ namespace Manifold::Lua
             { "number", UiKind::Number },
             { "slider", UiKind::Slider },
             { "combo", UiKind::Combo },
+            { "radio", UiKind::Radio },
+            { "color", UiKind::Color },
             { "table", UiKind::Table },
             { "tree", UiKind::Tree },
             { "progress", UiKind::Progress },
@@ -65,6 +68,7 @@ namespace Manifold::Lua
         case UiKind::Tabs:
         case UiKind::Tab:
         case UiKind::Split:
+        case UiKind::Grid:
             return true;
         default:
             return false;

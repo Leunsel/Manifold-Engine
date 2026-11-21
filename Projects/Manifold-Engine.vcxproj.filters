@@ -291,6 +291,9 @@
     <ClCompile Include="..\Source\Lua\LuaUnreal.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\UiForm.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\UiModel.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -475,6 +478,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\Fonts.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\FormEditor.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\Loading.cpp">
@@ -795,6 +801,9 @@
     <ClInclude Include="..\Source\Lua\LuaUnreal.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Lua\UiForm.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Lua\UiModel.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
@@ -991,6 +1000,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Fonts.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\FormEditor.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Loading.h">

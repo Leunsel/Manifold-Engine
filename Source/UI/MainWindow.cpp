@@ -573,6 +573,7 @@ namespace Manifold::UI
             Item(ICON_FA_THUMBTACK "  Find Static Pointers", Command::OpenStaticPointers);
             Item(ICON_FA_CODE "  Auto Assembler", Command::OpenAutoAssembler);
             Item(ICON_FA_MOON "  Lua Engine", Command::OpenLuaEngine);
+            Item(ICON_FA_PENCIL_RULER "  Form Editor", Command::OpenFormEditor);
             Item(ICON_FA_STREAM "  Log", Command::OpenLog);
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_PUZZLE_PIECE "  Autorun Modules"))

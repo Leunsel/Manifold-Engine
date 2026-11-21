@@ -381,6 +381,9 @@ namespace Manifold
             { ErrorCode::LuaModuleHeld, "The autorun module {} is held until it is allowed.",
                 "The module is new in the autorun folder, or a script wrote to its files, so it does not run on its own.",
                 "Look at it in Extensions > Modules and choose Allow if it is yours." },
+            { ErrorCode::LuaFormUnreadable, "The form file {} could not be read.",
+                "manifold.ui.form.load reads a .form.lua file as the Form Editor saves it; the file is missing, unreadable, not plain Lua or does not return a table.",
+                "Check the path (a relative path starts at the folder of the calling script) and open the file in Tools > Form Editor." },
 
             { ErrorCode::ExprSyntax, "\"{}\" is not a valid address.",
                 "The address expression could not be read.",

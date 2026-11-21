@@ -28,6 +28,7 @@ Works in every window, unless the focused window uses the same keys for somethin
 | `Ctrl+Shift+F12` | Profiler and Diagnostics | `OpenProfiler` | Manifold |
 | `Ctrl+Alt+P` | Pointer Scan | `OpenPointerScan` | Manifold |
 | `Ctrl+Alt+K` | Find Static Pointers | `OpenStaticPointers` | Manifold |
+| `Ctrl+Alt+G` | Form Editor | `OpenFormEditor` | Manifold |
 
 ## Main Window
 
@@ -289,3 +290,23 @@ While the Table Files window has the focus. List keys act on the selected files 
 | `Ctrl+A` | Select All | `TableFilesSelectAll` | Manifold |
 | `Ctrl+Shift+C` | Copy Names | `TableFilesCopyName` | Manifold |
 | `Ctrl+F` | Find | `TableFilesFind` | Manifold |
+
+## Form Editor
+
+While the Form Editor has the focus. Widget keys act on the selected widget and rest while the cursor is in a text.
+
+| Keys | Command | Name in the settings | Origin |
+|---|---|---|---|
+| `Ctrl+N` | New Form | `FormNew` | Manifold |
+| `Ctrl+O` | Open Form | `FormOpen` | Manifold |
+| `Ctrl+S` | Save Form | `FormSave` | Manifold |
+| `Ctrl+Shift+S` | Save Form As | `FormSaveAs` | Manifold |
+| `Ctrl+E` | Export Script | `FormExport` | Manifold |
+| `Ctrl+Z` | Undo | `FormUndo` | Manifold |
+| `Ctrl+Y` or `Ctrl+Shift+Z` | Redo | `FormRedo` | Manifold |
+| `Ctrl+D` | Duplicate Widget | `FormDuplicate` | Manifold |
+| `Del` | Delete Widget | `FormDelete` | Manifold |
+| `Alt+Up` | Move Widget Up | `FormMoveUp` | Manifold |
+| `Alt+Down` | Move Widget Down | `FormMoveDown` | Manifold |
+| `Ctrl+T` | Design or Try | `FormTry` | Manifold |
+| `F5` | Run Script | `FormRun` | Manifold |

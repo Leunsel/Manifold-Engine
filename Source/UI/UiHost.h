@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace Manifold
 {
@@ -17,15 +18,31 @@ namespace Manifold::UI
 {
     class Shell;
 
+    struct UiDesign
+    {
+        struct Rect
+        {
+            int Node = 0;
+            int Depth = 0;
+            ImVec2 Min;
+            ImVec2 Max;
+        };
+
+        bool Picking = false;
+        int ForceTab = 0;
+        std::vector<Rect> Rects;
+    };
+
     class UiHost
     {
     public:
-        UiHost(Engine& engine, Shell& shell);
+        UiHost(Engine& engine, Shell& shell, Lua::UiModel* model = nullptr);
         ~UiHost();
         UiHost(const UiHost&) = delete;
         UiHost& operator=(const UiHost&) = delete;
 
         void Draw();
+        void DrawContents(int window, UiDesign* design);
         bool HasMenu();
         void DrawMenuItems();
         float ToolbarWidth();
@@ -59,7 +76,10 @@ namespace Manifold::UI
         void DrawSection(Lua::UiNode& node);
         void DrawTabs(Lua::UiNode& node);
         void DrawSplit(Lua::UiNode& node);
+        void DrawGrid(Lua::UiNode& node);
+        void DrawRow(Lua::UiNode& node);
         void DrawValue(Lua::UiNode& node);
+        void DrawNodeBody(Lua::UiNode& node);
         void DrawTable(Lua::UiNode& node);
         void DrawTree(Lua::UiNode& node, const std::vector<Lua::UiTreeItem>& items);
         void DrawCanvas(Lua::UiNode& node);
@@ -73,6 +93,12 @@ namespace Manifold::UI
 
         Engine& m_engine;
         Shell& m_shell;
+        Lua::UiModel* m_model = nullptr;
+        UiDesign* m_design = nullptr;
+        int m_depth = 0;
+        bool m_inGrid = false;
+        bool m_cell = false;
+        std::map<int, float> m_rowWidths;
         std::map<int, Texture> m_textures;
         std::map<int, CanvasState> m_canvases;
         std::uint64_t m_textureGeneration = 0;

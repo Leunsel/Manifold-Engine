@@ -182,6 +182,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUnreal.cpp" />
+    <ClCompile Include="..\Source\Lua\UiForm.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\PointerScan.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />

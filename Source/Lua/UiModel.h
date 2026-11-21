@@ -19,6 +19,7 @@ namespace Manifold::Lua
         Tabs,
         Tab,
         Split,
+        Grid,
         Text,
         Heading,
         Separator,
@@ -29,6 +30,8 @@ namespace Manifold::Lua
         Number,
         Slider,
         Combo,
+        Radio,
+        Color,
         Table,
         Tree,
         Progress,
@@ -129,8 +132,12 @@ namespace Manifold::Lua
         std::string SelectedId;
         std::vector<std::string> Menu;
         bool Vertical = false;
+        bool Horizontal = false;
         float Ratio = 0.5f;
         bool Collapsible = false;
+        int GridColumns = 2;
+        std::string Align;
+        bool Alpha = false;
 
         std::vector<UiDraw> Draws;
         std::string Background;

@@ -253,6 +253,7 @@ namespace Manifold::Lua
                 node.Bool = lua_toboolean(state, index) != 0;
                 break;
             case UiKind::Input:
+            case UiKind::Color:
                 node.String = CellText(state, index);
                 break;
             case UiKind::Number:
@@ -260,6 +261,7 @@ namespace Manifold::Lua
                 node.Number = lua_tonumber(state, index);
                 break;
             case UiKind::Combo:
+            case UiKind::Radio:
             case UiKind::Table:
                 node.Selected = lua_isnumber(state, index) ? static_cast<int>(lua_tointeger(state, index)) : 0;
                 break;
@@ -283,6 +285,7 @@ namespace Manifold::Lua
                 lua_pushboolean(state, node.Bool ? 1 : 0);
                 break;
             case UiKind::Input:
+            case UiKind::Color:
                 lua_pushlstring(state, node.String.data(), node.String.size());
                 break;
             case UiKind::Number:
@@ -293,6 +296,7 @@ namespace Manifold::Lua
                     lua_pushnumber(state, node.Number);
                 break;
             case UiKind::Combo:
+            case UiKind::Radio:
             case UiKind::Table:
                 if (node.Selected > 0)
                     lua_pushinteger(state, node.Selected);
@@ -330,6 +334,7 @@ namespace Manifold::Lua
             ReadString(state, props, "style", node.Style);
             ReadString(state, props, "title", node.Title);
             ReadString(state, props, "background", node.Background);
+            ReadString(state, props, "align", node.Align);
             ReadBool(state, props, "enabled", node.Enabled);
             ReadBool(state, props, "visible", node.Visible);
             ReadBool(state, props, "wrap", node.Wrap);
@@ -342,6 +347,10 @@ namespace Manifold::Lua
             ReadBool(state, props, "collapsible", node.Collapsible);
             ReadBool(state, props, "zoom", node.Zoom);
             ReadBool(state, props, "dock", node.Dock);
+            ReadBool(state, props, "horizontal", node.Horizontal);
+            ReadBool(state, props, "alpha", node.Alpha);
+            if (node.Kind == UiKind::Section)
+                ReadBool(state, props, "open", node.Open);
             ReadFloat(state, props, "width", node.Width);
             ReadFloat(state, props, "height", node.Height);
             ReadFloat(state, props, "ratio", node.Ratio);
@@ -378,8 +387,11 @@ namespace Manifold::Lua
                     node.Items = ReadStrings(state, lua_gettop(state));
             }
             lua_pop(state, 1);
-            if (lua_getfield(state, props, "columns") == LUA_TTABLE)
+            const int columns = lua_getfield(state, props, "columns");
+            if (columns == LUA_TTABLE)
                 ReadColumns(state, lua_gettop(state), node.Columns);
+            else if (columns == LUA_TNUMBER && node.Kind == UiKind::Grid)
+                node.GridColumns = static_cast<int>(std::clamp<lua_Integer>(static_cast<lua_Integer>(lua_tonumber(state, -1)), 1, 16));
             lua_pop(state, 1);
             if (lua_getfield(state, props, "rows") == LUA_TTABLE)
                 ReadRows(state, lua_gettop(state), node.Rows);
@@ -392,7 +404,7 @@ namespace Manifold::Lua
             lua_pop(state, 1);
             if (node.Kind == UiKind::Table && node.Selected > static_cast<int>(node.Rows.size()))
                 node.Selected = 0;
-            if (node.Kind == UiKind::Combo && node.Selected > static_cast<int>(node.Items.size()))
+            if ((node.Kind == UiKind::Combo || node.Kind == UiKind::Radio) && node.Selected > static_cast<int>(node.Items.size()))
                 node.Selected = 0;
         }
 
@@ -654,6 +666,25 @@ namespace Manifold::Lua
             return 0;
         }
 
+        int UiFormRead(lua_State* state)
+        {
+            const std::string path = luaL_checkstring(state, 1);
+            const std::string folder = luaL_optstring(state, 2, "");
+            std::filesystem::path file(Utf8ToWide(path));
+            if (file.is_relative())
+                file = (folder.empty() ? Paths::ProgramFolder() : std::filesystem::path(Utf8ToWide(folder))) / file;
+            std::ifstream stream(file, std::ios::binary);
+            if (!stream)
+                return PushFailure(state, ErrorCode::LuaFormUnreadable, path);
+            const std::string text((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+            if (text.size() > 16u * 1024u * 1024u)
+                return PushFailure(state, ErrorCode::LuaFormUnreadable, path);
+            lua_pushlstring(state, text.data(), text.size());
+            const std::string shown = WideToUtf8(file.wstring());
+            lua_pushlstring(state, shown.data(), shown.size());
+            return 2;
+        }
+
         int UiImageLoad(lua_State* state)
         {
             const std::string path = luaL_checkstring(state, 1);
@@ -835,6 +866,11 @@ namespace Manifold::Lua
         }
     }
 
+    void ApplyUiProps(lua_State* state, int props, UiNode& node)
+    {
+        ApplyProps(state, lua_absindex(state, props), node);
+    }
+
     void RegisterUiNatives(lua_State* state, int natives)
     {
         const luaL_Reg functions[] = {
@@ -855,6 +891,7 @@ namespace Manifold::Lua
             { "uiPost", &UiPost },
             { "uiForgetOwner", &UiForgetOwner },
             { "uiImageLoad", &UiImageLoad },
+            { "uiFormRead", &UiFormRead },
             { "uiImageRemove", &UiImageRemove },
             { "uiSlotAdd", &UiSlotAdd },
             { "uiSlotUpdate", &UiSlotUpdate },

@@ -7,6 +7,7 @@
 #include "Lua/DocRegistry.h"
 #include "Lua/LuaApi.h"
 #include "Lua/LuaEngine.h"
+#include "Lua/UiForm.h"
 #include "Lua/UiModel.h"
 
 #include "lua.hpp"
@@ -60,7 +61,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 12 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 13 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -894,6 +895,296 @@ return M
                 return "ok")LUA");
         }
 
+        const Lua::UiNode* FindWindow(Lua::UiModel& model, std::string_view title)
+        {
+            for (const int id : model.Windows())
+            {
+                if (const Lua::UiNode* node = model.Find(id); node && node->Title == title)
+                    return node;
+            }
+            return nullptr;
+        }
+
+        void UiNewWidgets(Engine& engine)
+        {
+            Lua::UiModel& model = engine.Lua().Ui();
+            LuaCheck(engine, "ui new widgets", R"LUA(
+                local w = manifold.ui.window.create("New widgets", { key = "new widgets" })
+                local grid = w.add("grid", { columns = 3 })
+                grid.add("text", { text = "Name" })
+                local radio = grid.add("radio", { items = { "Low", "High" }, value = 2, horizontal = true })
+                local color = grid.add("color", { label = "Tint", value = "#336699", alpha = true })
+                w.add("separator", { text = "More" })
+                w.add("row", { align = "right" }).add("button", { text = "OK", width = -1 })
+                w.add("section", { title = "Folded", collapsible = true, open = false })
+                if radio.get() ~= 2 or color.get() ~= "#336699" then return "initial values" end
+                radio.set(1); color.set("#FF0000")
+                if radio.get() ~= 1 or color.get() ~= "#FF0000" then return "set values" end
+                local function raises(fn, needle)
+                  local ok, problem = pcall(fn)
+                  if ok then return "no error for " .. needle end
+                  if not problem.message:find(needle, 1, true) then return "message lacks '" .. needle .. "': " .. problem.message end
+                end
+                local failure = raises(function() w.add("row", { align = "top" }) end, "options.align must be one of")
+                  or raises(function() w.add("grid", { columns = 0 }) end, "options.columns must be 1 to 16")
+                  or raises(function() w.add("color", { value = "purple-ish" }) end, "is no theme colour")
+                  or raises(function() w.add("radio", { items = { "a" }, value = "a" }) end, "options.value must be")
+                if failure then return failure end
+                return "ok")LUA");
+            const Lua::UiNode* window = FindWindow(model, "New widgets");
+            CHECK(window && window->Children.size() == 4);
+            if (window && window->Children.size() == 4)
+            {
+                const Lua::UiNode* grid = model.Find(window->Children[0]);
+                CHECK(grid && grid->Kind == Lua::UiKind::Grid && grid->GridColumns == 3 && grid->Children.size() == 3);
+                const Lua::UiNode* separator = model.Find(window->Children[1]);
+                CHECK(separator && separator->Text == "More");
+                const Lua::UiNode* row = model.Find(window->Children[2]);
+                CHECK(row && row->Align == "right");
+                const Lua::UiNode* button = row && !row->Children.empty() ? model.Find(row->Children[0]) : nullptr;
+                CHECK(button && button->Width == -1.0f);
+                const Lua::UiNode* section = model.Find(window->Children[3]);
+                CHECK(section && section->Collapsible && !section->Open);
+                if (grid && grid->Children.size() == 3)
+                {
+                    const Lua::UiNode* radio = model.Find(grid->Children[1]);
+                    const Lua::UiNode* color = model.Find(grid->Children[2]);
+                    CHECK(radio && radio->Horizontal && radio->Items.size() == 2);
+                    CHECK(color && color->Alpha && color->Label == "Tint");
+                }
+            }
+            LuaCheck(engine, "ui new widgets cleanup", R"LUA(
+                manifold.ui.window.create("x", { key = "new widgets" }).remove()
+                return "ok")LUA");
+        }
+
+        Lua::FormDocument SampleForm()
+        {
+            using Lua::UiKind;
+            Lua::FormDocument form = Lua::NewForm("Player \"Tools\"");
+            form.Key = "player tools";
+            Lua::UiNode& window = *form.Model.Find(form.Window);
+            window.Icon = "user";
+            form.Meta[form.Window].Handlers["onClose"] = "closed";
+            const int section = Lua::FormAdd(form, UiKind::Section, form.Window);
+            Lua::FormSetProp(*form.Model.Find(section), "title", "Player");
+            Lua::FormSetProp(*form.Model.Find(section), "collapsible", "true");
+            const int grid = Lua::FormAdd(form, UiKind::Grid, section);
+            Lua::FormAdd(form, UiKind::Text, grid);
+            const int speed = Lua::FormAdd(form, UiKind::Slider, grid);
+            form.Meta[speed].Name = "speed";
+            form.Meta[speed].Handlers["onChange"] = "speedChanged";
+            Lua::FormSetProp(*form.Model.Find(speed), "label", "");
+            Lua::FormSetProp(*form.Model.Find(speed), "max", "5");
+            Lua::FormSetProp(*form.Model.Find(speed), "value", "1.5");
+            Lua::FormSetProp(*form.Model.Find(speed), "format", "%.1f x");
+            const int god = Lua::FormAdd(form, UiKind::Checkbox, section);
+            form.Meta[god].Name = "god";
+            form.Meta[god].Handlers["onChange"] = "godChanged";
+            Lua::FormSetProp(*form.Model.Find(god), "tooltip", "Line one\nline \\two\\");
+            const int tabs = Lua::FormAdd(form, UiKind::Tabs, form.Window);
+            Lua::FormSetProp(*form.Model.Find(form.Model.Find(tabs)->Children[0]), "title", "Items");
+            const int list = Lua::FormAdd(form, UiKind::Table, form.Model.Find(tabs)->Children[0]);
+            form.Meta[list].Name = "items";
+            Lua::FormSetProp(*form.Model.Find(list), "columns", "Name\nCount | 60 | right");
+            Lua::FormSetProp(*form.Model.Find(list), "rows", "Potion | 3\nKey | 1");
+            Lua::FormSetProp(*form.Model.Find(list), "menu", "Give\n-\nRemove");
+            form.Meta[list].Handlers["onMenu"] = "itemMenu";
+            const int tree = Lua::FormAdd(form, UiKind::Tree, form.Model.Find(tabs)->Children[0]);
+            Lua::FormSetProp(*form.Model.Find(tree), "items", "World | w | globe | open\n  Town\n  Cave | cave");
+            const int row = Lua::FormAdd(form, UiKind::Row, form.Window);
+            Lua::FormSetProp(*form.Model.Find(row), "align", "right");
+            const int save = Lua::FormAdd(form, UiKind::Button, row);
+            form.Meta[save].Name = "save";
+            form.Meta[save].Handlers["onClick"] = "saveClicked";
+            Lua::FormSetProp(*form.Model.Find(save), "style", "accent");
+            Lua::FormSetProp(*form.Model.Find(save), "icon", "save");
+            const int pick = Lua::FormAdd(form, UiKind::Radio, row);
+            form.Meta[pick].Name = "mode";
+            Lua::FormAdd(form, UiKind::Color, row);
+            return form;
+        }
+
+        void UiForms(Engine& engine)
+        {
+            using Lua::UiKind;
+            Lua::FormDocument form = SampleForm();
+            CHECK(Lua::FormProblems(form).empty());
+            const std::string saved = Lua::FormSave(form);
+            Lua::FormDocument loaded;
+            std::string error;
+            std::vector<std::string> warnings;
+            CHECK_MSG(Lua::FormLoad(saved, loaded, error, &warnings), error);
+            CHECK(warnings.empty());
+            CHECK_MSG(Lua::FormSave(loaded) == saved, "a saved form loads back to the same text");
+            CHECK_EQ(loaded.Key, std::string("player tools"));
+            CHECK(loaded.Model.Find(loaded.Window) && loaded.Model.Find(loaded.Window)->Title == "Player \"Tools\"");
+
+            const auto fails = [](std::string_view text, std::string_view needle) {
+                Lua::FormDocument out;
+                std::string why;
+                const bool ok = Lua::FormLoad(text, out, why);
+                CHECK_MSG(!ok && why.find(needle) != std::string::npos, std::string(needle) + " <- " + why);
+            };
+            fails("return { title = 'x' }", "no form = 1");
+            fails("return { form = 2, title = 'x' }", "newer Manifold");
+            fails("return { form = 1, title = 'x', children = { { kind = 'knob' } } }", "unknown widget kind");
+            fails("return { form = 1, title = 'x', children = { { kind = 'tab' } } }", "cannot hold a tab");
+            fails("return { form = 1, title = 'x', children = { { kind = 'tabs', children = { { kind = 'text' } } } } }", "cannot hold a text");
+            fails("return { form = 1, title = 'x', children = { { kind = 'button', name = 'two words' } } }", "must be a Lua name");
+            fails("return { form = 1, title = 'x', children = { { kind = 'button', onClick = 12 } } }", "must name a function");
+            fails("while true do end", "too much work");
+            fails("return os.exit()", "os");
+            fails("return 5", "must return a table");
+            {
+                Lua::FormDocument out;
+                std::string why;
+                std::vector<std::string> notes;
+                CHECK(Lua::FormLoad("return { form = 1, title = 'x', children = { { kind = 'button', colour = 'red' } } }", out, why, &notes));
+                CHECK(notes.size() == 1 && notes[0].find("colour") != std::string::npos);
+            }
+
+            Lua::FormDocument edits = Lua::NewForm("Edits");
+            const int first = Lua::FormAdd(edits, UiKind::Button, edits.Window);
+            const int second = Lua::FormAdd(edits, UiKind::Button, edits.Window);
+            CHECK(edits.Meta[first].Name == "button1" && edits.Meta[second].Name == "button2");
+            CHECK(Lua::FormMove(edits, second, edits.Window, 0));
+            CHECK(edits.Model.Find(edits.Window)->Children == std::vector<int>({ second, first }));
+            const int column = Lua::FormAdd(edits, UiKind::Column, edits.Window);
+            CHECK(Lua::FormMove(edits, first, column, -1));
+            CHECK(!Lua::FormMove(edits, column, column, -1));
+            const int copy = Lua::FormDuplicate(edits, column);
+            CHECK(copy && edits.Model.Find(copy)->Children.size() == 1 && edits.Meta[edits.Model.Find(copy)->Children[0]].Name == "button3");
+            edits.Meta[second].Name = "button3";
+            CHECK(!Lua::FormProblems(edits).empty());
+            CHECK(Lua::FormRemove(edits, copy) && !edits.Model.Find(copy));
+            CHECK(Lua::FormAdd(edits, UiKind::Tab, edits.Window) == 0);
+
+            Lua::UiModel& model = engine.Lua().Ui();
+            const std::string standalone = Lua::FormScript(form, Lua::FormScriptStyle::Standalone);
+            CHECK(standalone.find("local function saveClicked(widget)") != std::string::npos);
+            CHECK(standalone.find("local function itemMenu(choice, text, row, widget)") != std::string::npos);
+            CHECK(engine.Lua().Run(standalone, "form standalone").Ok());
+            const Lua::UiNode* window = FindWindow(model, "Player \"Tools\"");
+            CHECK(window && window->Children.size() == 3 && window->Icon == "user" && (window->Handlers & Lua::UiHandler::Close));
+            if (window && window->Children.size() == 3)
+            {
+                const Lua::UiNode* section = model.Find(window->Children[0]);
+                CHECK(section && section->Kind == UiKind::Section && section->Title == "Player" && section->Collapsible);
+                const Lua::UiNode* grid = section && !section->Children.empty() ? model.Find(section->Children[0]) : nullptr;
+                const Lua::UiNode* speed = grid && grid->Children.size() == 2 ? model.Find(grid->Children[1]) : nullptr;
+                CHECK(speed && speed->Kind == UiKind::Slider && speed->Number == 1.5 && speed->HasMax && speed->Max == 5.0 && speed->Format == "%.1f x" && (speed->Handlers & Lua::UiHandler::Change));
+                const Lua::UiNode* god = section && section->Children.size() == 2 ? model.Find(section->Children[1]) : nullptr;
+                CHECK(god && god->Tooltip == "Line one\nline \\two\\");
+                const Lua::UiNode* tabs = model.Find(window->Children[1]);
+                const Lua::UiNode* tab = tabs && !tabs->Children.empty() ? model.Find(tabs->Children[0]) : nullptr;
+                const Lua::UiNode* table = tab && tab->Children.size() == 2 ? model.Find(tab->Children[0]) : nullptr;
+                CHECK(table && table->Columns.size() == 2 && table->Columns[1].Width == 60.0f && table->Columns[1].Align == "right" && table->Rows.size() == 2 && table->Menu.size() == 3);
+                const Lua::UiNode* tree = tab && tab->Children.size() == 2 ? model.Find(tab->Children[1]) : nullptr;
+                CHECK(tree && tree->Tree.size() == 1 && tree->Tree[0].Id == "w" && tree->Tree[0].Open && tree->Tree[0].Children.size() == 2 && tree->Tree[0].Children[1].Id == "cave");
+            }
+            CHECK(engine.Lua().Run("", "form standalone").Ok());
+            CHECK(!FindWindow(model, "Player \"Tools\""));
+
+            const std::filesystem::path folder = std::filesystem::temp_directory_path() / ("manifold-form-test-" + std::to_string(::GetCurrentProcessId()));
+            std::error_code ignored;
+            std::filesystem::create_directories(folder / "forms", ignored);
+            const std::filesystem::path formFile = folder / "forms" / "Player.form.lua";
+            const std::filesystem::path scriptFile = folder / "Player.lua";
+            {
+                std::ofstream(formFile, std::ios::binary) << saved;
+                std::string script = Lua::FormScript(form, Lua::FormScriptStyle::FormFile, "forms/Player.form.lua");
+                CHECK(script.find("function handlers.saveClicked(widget)") != std::string::npos);
+                CHECK(script.find("ui.form.load(\"forms/Player.form.lua\", handlers)") != std::string::npos);
+                script += "\nformProbe = { window = window, save = w.save, speed = w.speed }\n";
+                std::ofstream(scriptFile, std::ios::binary) << script;
+            }
+            const Status ran = engine.Lua().RunFile(scriptFile);
+            CHECK_MSG(ran.Ok(), ran.Text);
+            CHECK(FindWindow(model, "Player \"Tools\""));
+            LuaCheck(engine, "form load", R"LUA(
+                if not formProbe or formProbe.save.kind ~= "button" or formProbe.speed.get() ~= 1.5 then return "widgets by name" end
+                local value, problem = manifold.ui.form.load("missing.form.lua")
+                if value ~= nil or problem.code ~= "ME-7014" then return "missing file" end
+                local handlers = { saveClicked = function(widget) formClicks = (formClicks or 0) + 1 end }
+                local made, w = manifold.ui.form.build({ form = 1, title = "Built", key = "built form", children = {
+                  { kind = "row", children = { { kind = "button", name = "go", text = "Go", onClick = "saveClicked" } } },
+                } }, handlers)
+                formBuiltGo = w.go.id
+                local ok, err = pcall(function() return w.nope end)
+                if ok or not err.message:find("does not exist", 1, true) then return "unknown widget name" end
+                local function raises(fn, needle)
+                  local ok, problem = pcall(fn)
+                  if ok then return "no error for " .. needle end
+                  if not problem.message:find(needle, 1, true) then return "message lacks '" .. needle .. "': " .. problem.message end
+                end
+                local failure = raises(function() manifold.ui.form.build({ title = "x" }) end, "no form = 1")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", children = { { kind = "button", onClick = "missing" } } }, {}) end, "handlers.missing is missing")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", children = { { kind = "text", name = "a" }, { kind = "text", name = "a" } } }) end, "two widgets are named")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", colour = "red" }) end, "form.colour is not a window option")
+                if failure then return failure end
+                local plain = manifold.ui.form.build({ form = 1, title = "No handlers", children = { { kind = "button", onClick = "whatever" } } })
+                plain.remove()
+                return "ok")LUA");
+            CHECK(!FindWindow(model, "Bad"));
+            int go = 0;
+            {
+                std::string result;
+                engine.Lua().RunWithResult("return tostring(formBuiltGo)", "form probe", result);
+                go = static_cast<int>(ParseDecimal(result).value_or(0));
+            }
+            CHECK(go > 0);
+            model.Post({ go, "click", {} });
+            engine.Lua().Tick(1000.0);
+            LuaCheck(engine, "form handler", R"LUA(
+                if formClicks ~= 1 then return "clicks " .. tostring(formClicks) end
+                manifold.ui.window.create("x", { key = "built form" }).remove()
+                return "ok")LUA");
+            CHECK(engine.Lua().Run("", "@" + WideToUtf8(scriptFile.wstring())).Ok());
+            std::filesystem::remove(formFile, ignored);
+            std::filesystem::remove(scriptFile, ignored);
+            std::filesystem::remove(folder / "forms", ignored);
+            std::filesystem::remove(folder, ignored);
+
+            std::filesystem::path at = std::filesystem::current_path();
+            for (int i = 0; i < 8 && !std::filesystem::exists(at / "Examples" / "Form-Demo.lua"); ++i)
+                at = at.parent_path();
+            const std::filesystem::path demo = at / "Examples" / "Form-Demo.lua";
+            if (!std::filesystem::exists(demo))
+            {
+                Skip("Examples/Form-Demo.lua not found above " + std::filesystem::current_path().string());
+                return;
+            }
+            {
+                std::ifstream file(at / "Examples" / "Form-Demo.form.lua", std::ios::binary);
+                std::stringstream content;
+                content << file.rdbuf();
+                Lua::FormDocument example;
+                std::string why;
+                std::vector<std::string> notes;
+                CHECK_MSG(Lua::FormLoad(content.str(), example, why, &notes) && notes.empty(), why);
+                CHECK(Lua::FormProblems(example).empty());
+            }
+            const Status demoRan = engine.Lua().RunFile(demo);
+            CHECK_MSG(demoRan.Ok(), demoRan.Text);
+            const Lua::UiNode* demoWindow = FindWindow(model, "Player Tools");
+            CHECK(demoWindow && demoWindow->Children.size() == 5);
+            const Lua::UiNode* section = demoWindow && !demoWindow->Children.empty() ? model.Find(demoWindow->Children[0]) : nullptr;
+            const Lua::UiNode* god = section && section->Children.size() == 2 ? model.Find(section->Children[1]) : nullptr;
+            const Lua::UiNode* grid = section && !section->Children.empty() ? model.Find(section->Children[0]) : nullptr;
+            const int health = grid && grid->Children.size() == 6 ? grid->Children[1] : 0;
+            CHECK(god && god->Kind == UiKind::Checkbox && health);
+            if (god && health)
+            {
+                model.Post({ god->Id, "change", { true } });
+                engine.Lua().Tick(3000.0);
+                const Lua::UiNode* slider = model.Find(health);
+                CHECK(slider && !slider->Enabled);
+            }
+            CHECK(engine.Lua().Run("", "@" + WideToUtf8(demo.wstring())).Ok());
+            CHECK(!FindWindow(model, "Player Tools"));
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -1033,6 +1324,8 @@ return M
         Documentation(engine);
         UiApi(engine);
         UiOpacity(engine);
+        UiNewWidgets(engine);
+        UiForms(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

@@ -91,7 +91,7 @@ namespace Manifold::UI
         }
     }
 
-    UiHost::UiHost(Engine& engine, Shell& shell) : m_engine(engine), m_shell(shell) {}
+    UiHost::UiHost(Engine& engine, Shell& shell, Lua::UiModel* model) : m_engine(engine), m_shell(shell), m_model(model) {}
 
     UiHost::~UiHost()
     {
@@ -104,7 +104,7 @@ namespace Manifold::UI
 
     Lua::UiModel& UiHost::Model()
     {
-        return m_engine.Lua().Ui();
+        return m_model ? *m_model : m_engine.Lua().Ui();
     }
 
     ImVec4 UiHost::Color(std::string_view name, ImVec4 fallback)
@@ -217,6 +217,33 @@ namespace Manifold::UI
         }
     }
 
+    void UiHost::DrawContents(int window, UiDesign* design)
+    {
+        Lua::UiNode* node = Model().Find(window);
+        if (!node)
+            return;
+        UiDesign* const outer = m_design;
+        m_design = design;
+        m_depth = 0;
+        if (design)
+            design->Rects.clear();
+        const bool picking = design && design->Picking;
+        if (picking)
+        {
+            ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha, 1.0f);
+            ImGui::BeginDisabled();
+        }
+        ImGui::PushID(window);
+        DrawChildren(*node, false);
+        ImGui::PopID();
+        if (picking)
+        {
+            ImGui::EndDisabled();
+            ImGui::PopStyleVar();
+        }
+        m_design = outer;
+    }
+
     void UiHost::DrawChildren(const Lua::UiNode& node, bool row)
     {
         bool first = true;
@@ -224,7 +251,7 @@ namespace Manifold::UI
         for (const int child : children)
         {
             Lua::UiNode* item = Model().Find(child);
-            if (!item || !item->Visible)
+            if (!item || (!item->Visible && !m_design))
                 continue;
             if (row && !first)
                 ImGui::SameLine();
@@ -233,16 +260,78 @@ namespace Manifold::UI
         }
     }
 
+    void UiHost::DrawRow(Lua::UiNode& node)
+    {
+        if (node.Align == "right" || node.Align == "center")
+        {
+            const auto known = m_rowWidths.find(node.Id);
+            const float free = ImGui::GetContentRegionAvail().x - (known == m_rowWidths.end() ? 0.0f : known->second);
+            if (free > 0.0f)
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (node.Align == "right" ? free : free * 0.5f));
+        }
+        ImGui::BeginGroup();
+        DrawChildren(node, true);
+        ImGui::EndGroup();
+        m_rowWidths[node.Id] = ImGui::GetItemRectSize().x;
+    }
+
+    void UiHost::DrawGrid(Lua::UiNode& node)
+    {
+        const int columns = std::clamp(node.GridColumns, 1, 16);
+        const ImVec2 size(node.Width > 0.0f ? Px(node.Width) : 0.0f, 0.0f);
+        if (!ImGui::BeginTable("##grid", columns, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX, size))
+            return;
+        for (int c = 0; c < columns; ++c)
+            ImGui::TableSetupColumn(nullptr, c == 0 && columns > 1 ? ImGuiTableColumnFlags_WidthFixed : ImGuiTableColumnFlags_WidthStretch);
+        const bool outer = m_inGrid;
+        const std::vector<int> children = node.Children;
+        for (const int child : children)
+        {
+            Lua::UiNode* item = Model().Find(child);
+            if (!item || (!item->Visible && !m_design))
+                continue;
+            ImGui::TableNextColumn();
+            m_inGrid = true;
+            DrawNode(*item);
+        }
+        m_inGrid = outer;
+        ImGui::EndTable();
+    }
+
     void UiHost::DrawNode(Lua::UiNode& node)
+    {
+        if (!m_design)
+        {
+            DrawNodeBody(node);
+            return;
+        }
+        const bool dim = !node.Visible || (!node.Enabled && m_design->Picking);
+        if (dim)
+            ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * (node.Visible ? 0.5f : 0.35f));
+        ++m_depth;
+        ImGui::BeginGroup();
+        DrawNodeBody(node);
+        ImGui::EndGroup();
+        --m_depth;
+        if (dim)
+            ImGui::PopStyleVar();
+        m_design->Rects.push_back({ node.Id, m_depth, ImGui::GetItemRectMin(), ImGui::GetItemRectMax() });
+    }
+
+    void UiHost::DrawNodeBody(Lua::UiNode& node)
     {
         ImGui::PushID(node.Id);
         ImGui::BeginDisabled(!node.Enabled);
+        const bool inGrid = m_inGrid;
+        m_cell = inGrid;
+        m_inGrid = false;
         switch (node.Kind)
         {
         case UiKind::Row:
-            ImGui::BeginGroup();
-            DrawChildren(node, true);
-            ImGui::EndGroup();
+            DrawRow(node);
+            break;
+        case UiKind::Grid:
+            DrawGrid(node);
             break;
         case UiKind::Column:
         case UiKind::Tab:
@@ -262,6 +351,8 @@ namespace Manifold::UI
         case UiKind::Text:
         {
             const ImVec4 color = Color(node.Color, ManifoldTheme::Text);
+            if (m_cell)
+                ImGui::AlignTextToFramePadding();
             if (node.Mono)
                 PushMono();
             ImGui::PushStyleColor(ImGuiCol_Text, color);
@@ -275,12 +366,17 @@ namespace Manifold::UI
             break;
         }
         case UiKind::Heading:
+            if (m_cell)
+                ImGui::AlignTextToFramePadding();
             ImGui::PushFont(Fonts::Bold(), 0.0f);
             ImGui::TextUnformatted(IconText(node.Icon, node.Text).c_str());
             ImGui::PopFont();
             break;
         case UiKind::Separator:
-            ImGui::Separator();
+            if (node.Text.empty())
+                ImGui::Separator();
+            else
+                ImGui::SeparatorText(node.Text.c_str());
             break;
         case UiKind::Spacer:
             ImGui::Dummy(ImVec2(Px(node.Width > 0.0f ? node.Width : 1.0f), Px(node.Height > 0.0f ? node.Height : 8.0f)));
@@ -288,7 +384,7 @@ namespace Manifold::UI
         case UiKind::Button:
         {
             const std::string label = Label(node, IconText(node.Icon, node.Text.empty() ? std::string("Button") : node.Text));
-            const ImVec2 size(node.Width > 0.0f ? Px(node.Width) : 0.0f, node.Height > 0.0f ? Px(node.Height) : 0.0f);
+            const ImVec2 size(node.Width > 0.0f ? Px(node.Width) : (node.Width < 0.0f || m_cell ? -FLT_MIN : 0.0f), node.Height > 0.0f ? Px(node.Height) : 0.0f);
             bool clicked = false;
             if (node.Style == "accent")
                 clicked = AccentButton(label.c_str(), size);
@@ -327,6 +423,7 @@ namespace Manifold::UI
             DrawValue(node);
             break;
         }
+        m_inGrid = inGrid;
         ImGui::EndDisabled();
         if (!node.Tooltip.empty())
             ItemTooltip(node.Tooltip.c_str());
@@ -339,7 +436,7 @@ namespace Manifold::UI
         if (node.Collapsible)
         {
             const std::string header = IconText(node.Icon, title.empty() ? std::string("Section") : title) + (node.Badge.empty() ? std::string() : "  ·  " + node.Badge) + "###section";
-            if (ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+            if (ImGui::CollapsingHeader(header.c_str(), node.Open ? ImGuiTreeNodeFlags_DefaultOpen : 0))
             {
                 ImGui::Indent(Px(6.0f));
                 DrawChildren(node, false);
@@ -378,7 +475,10 @@ namespace Manifold::UI
             if (!tab || tab->Kind != UiKind::Tab || !tab->Visible)
                 continue;
             const std::string label = IconText(tab->Icon, tab->Title.empty() ? tab->Text : tab->Title) + "###tab" + std::to_string(tab->Id);
-            if (ImGui::BeginTabItem(label.c_str()))
+            const ImGuiTabItemFlags tabFlags = m_design && m_design->ForceTab == tab->Id ? ImGuiTabItemFlags_SetSelected : 0;
+            if (m_design && m_design->ForceTab == tab->Id)
+                m_design->ForceTab = 0;
+            if (ImGui::BeginTabItem(label.c_str(), nullptr, tabFlags))
             {
                 ImGui::PushID(tab->Id);
                 DrawChildren(*tab, false);
@@ -438,6 +538,8 @@ namespace Manifold::UI
     {
         if (node.Width > 0.0f)
             ImGui::SetNextItemWidth(Px(node.Width));
+        else if (node.Width < 0.0f || (m_cell && node.Label.empty()))
+            ImGui::SetNextItemWidth(-FLT_MIN);
         const std::string label = Label(node, node.Label);
         switch (node.Kind)
         {
@@ -554,6 +656,52 @@ namespace Manifold::UI
                     ImGui::PopID();
                 }
                 ImGui::EndCombo();
+            }
+            break;
+        }
+        case UiKind::Radio:
+        {
+            if (!node.Horizontal && !node.Label.empty())
+                ImGui::TextUnformatted(node.Label.c_str());
+            for (int i = 0; i < static_cast<int>(node.Items.size()); ++i)
+            {
+                ImGui::PushID(i);
+                if (node.Horizontal && i > 0)
+                    ImGui::SameLine();
+                if (ImGui::RadioButton(node.Items[static_cast<std::size_t>(i)].c_str(), node.Selected == i + 1) && node.Selected != i + 1)
+                {
+                    node.Selected = i + 1;
+                    Model().Touch(node);
+                    if (node.Handlers & H::Change)
+                        Post(node.Id, "change", { static_cast<double>(i + 1) });
+                }
+                ImGui::PopID();
+            }
+            if (node.Horizontal && !node.Label.empty())
+            {
+                ImGui::SameLine();
+                ImGui::TextUnformatted(node.Label.c_str());
+            }
+            break;
+        }
+        case UiKind::Color:
+        {
+            const ImVec4 current = Color(node.String, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            float channels[4] = { current.x, current.y, current.z, current.w };
+            const ImGuiColorEditFlags flags = node.Alpha ? ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf : 0;
+            const bool changed = node.Alpha ? ImGui::ColorEdit4(label.c_str(), channels, flags) : ImGui::ColorEdit3(label.c_str(), channels, flags);
+            if (changed)
+            {
+                const auto byte = [](float value) { return static_cast<unsigned>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f)); };
+                char text[16];
+                if (node.Alpha)
+                    std::snprintf(text, sizeof(text), "#%02X%02X%02X%02X", byte(channels[0]), byte(channels[1]), byte(channels[2]), byte(channels[3]));
+                else
+                    std::snprintf(text, sizeof(text), "#%02X%02X%02X", byte(channels[0]), byte(channels[1]), byte(channels[2]));
+                node.String = text;
+                Model().Touch(node);
+                if (node.Handlers & H::Change)
+                    Post(node.Id, "change", { node.String });
             }
             break;
         }

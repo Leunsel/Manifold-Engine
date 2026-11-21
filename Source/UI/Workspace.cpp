@@ -38,6 +38,7 @@
 #include "UI/WatchWindow.h"
 #include "UI/WriteHistoryWindow.h"
 #include "UI/CommentListWindow.h"
+#include "UI/FormEditor.h"
 #include "UI/ModulesWindow.h"
 #include "UI/FlowGraphWindow.h"
 
@@ -167,6 +168,7 @@ namespace Manifold::UI
         drawOne("NOP Sled", m_nopSled);
         drawOne("Write history", m_writeHistory);
         drawOne("Comment list", m_commentList);
+        drawOne("Form editor", m_formEditor);
         drawOne("Modules", m_modules);
         drawOne("Flow graph", m_flowGraph);
         {
@@ -224,6 +226,7 @@ namespace Manifold::UI
         case Command::OpenUnreal:
         case Command::OpenPointerScan:
         case Command::OpenStaticPointers:
+        case Command::OpenFormEditor:
         case Command::OpenLog:
             return !m_engine.Options().ReleaseMode;
         default:
@@ -251,6 +254,7 @@ namespace Manifold::UI
         case Command::OpenUnreal: OpenUnreal(); break;
         case Command::OpenPointerScan: OpenPointerScan(); break;
         case Command::OpenStaticPointers: OpenStaticPointers(); break;
+        case Command::OpenFormEditor: OpenFormEditor(); break;
         case Command::OpenLog: OpenLog(); break;
         case Command::OpenProfiler: OpenProfiler(); break;
         default: break;
@@ -668,6 +672,15 @@ namespace Manifold::UI
         if (!m_writeHistory)
             m_writeHistory = std::make_unique<WriteHistoryWindow>(*this);
         m_writeHistory->Show();
+    }
+
+    void Workspace::OpenFormEditor(const std::filesystem::path& path)
+    {
+        if (!m_formEditor)
+            m_formEditor = std::make_unique<FormEditorWindow>(*this);
+        m_formEditor->Show();
+        if (!path.empty())
+            m_formEditor->OpenFile(path);
     }
 
     void Workspace::OpenCommentList()

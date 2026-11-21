@@ -5020,11 +5020,11 @@ end
 setmetatable(_G, globalMeta)
 )MLUA"),
         };
-        constexpr std::array<std::string_view, 11> kManifold0 = {
+        constexpr std::array<std::string_view, 12> kManifold0 = {
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 12
+local API_VERSION = 13
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -6953,15 +6953,16 @@ local function withCommon(keys)
 end
 
 local WIDGET_KEYS = {
-  row = withCommon({}),
+  row = withCommon({ align = "string" }),
   column = withCommon({}),
-  section = withCommon({ title = "string", icon = "string", badge = "string", collapsible = "boolean" }),
+  grid = withCommon({ columns = "integer" }),
+  section = withCommon({ title = "string", icon = "string", badge = "string", collapsible = "boolean", open = "boolean" }),
   tabs = withCommon({}),
   tab = withCommon({ title = "string", icon = "string" }),
   split = withCommon({ vertical = "boolean", ratio = "number" }),
   text = withCommon({ text = "string", color = "string", wrap = "boolean", mono = "boolean" }),
   heading = withCommon({ text = "string", icon = "string" }),
-  separator = withCommon({}),
+  separator = withCommon({ text = "string" }),
   spacer = withCommon({}),
   button = withCommon({ text = "string", icon = "string", style = "string", onClick = "function" }),
   checkbox = withCommon({ label = "string", value = "boolean", onChange = "function" }),
@@ -6969,6 +6970,8 @@ local WIDGET_KEYS = {
   number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", onChange = "function" }),
   slider = withCommon({ label = "string", value = "number", min = "number", max = "number", integer = "boolean", format = "string", onChange = "function" }),
   combo = withCommon({ label = "string", items = "table", value = "integer", onChange = "function" }),
+  radio = withCommon({ label = "string", items = "table", value = "integer", horizontal = "boolean", onChange = "function" }),
+  color = withCommon({ label = "string", value = "string", alpha = "boolean", onChange = "function" }),
   table = withCommon({ columns = "table", rows = "table", value = "integer", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
   tree = withCommon({ items = "table", value = "string", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
   progress = withCommon({ value = "number", text = "string" }),
@@ -6980,8 +6983,9 @@ for kind in pairs(WIDGET_KEYS) do
   WIDGET_KINDS[#WIDGET_KINDS + 1] = kind
 end
 table.sort(WIDGET_KINDS)
-local CONTAINERS = { row = true, column = true, section = true, tabs = true, tab = true, split = true }
+local CONTAINERS = { row = true, column = true, grid = true, section = true, tabs = true, tab = true, split = true }
 local BUTTON_STYLES = { default = true, accent = true, danger = true }
+local ROW_ALIGNS = { left = true, center = true, right = true }
 
 local DRAW_KEYS = {
   line = { kind = true, x = true, y = true, x2 = true, y2 = true, color = true, thickness = true },
@@ -7062,6 +7066,16 @@ local function checkOptions(path, keys, options)
   if options.style ~= nil and not BUTTON_STYLES[options.style] then
     misuse(('%s: options.style must be one of "default", "accent", "danger", got %q'):format(path, options.style))
   end
+  if options.align ~= nil and not ROW_ALIGNS[options.align] then
+    misuse(('%s: options.align must be one of "left", "center", "right", got %q'):format(path, options.align))
+  end
+  if options.columns ~= nil and keys.columns == "integer" and (options.columns < 1 or options.columns > 16) then
+    misuse(("%s: options.columns must be 1 to 16, got %d"):format(path, options.columns))
+  end
+)MLUA"),
+            std::string_view(R"MLUA(  if keys.alpha and options.value ~= nil then
+    checkColor(path, "options.value", options.value)
+  end
   return options
 end
 
@@ -7100,8 +7114,7 @@ local function keepHandlers(entry, options)
   end
 end
 
-)MLUA"),
-            std::string_view(R"MLUA(local function dropEntry(id)
+local function dropEntry(id)
   local entry = uiEntries[id]
   if not entry then
     return
@@ -7123,7 +7136,7 @@ local function addTo(path, parentEntry, kind, options)
     misuse(('%s: argument 1 (kind) must be one of "%s", got %q'):format(path, table.concat(WIDGET_KINDS, '", "'), kind))
   end
   if parentEntry.kind ~= "window" and not CONTAINERS[parentEntry.kind] then
-    misuse(("%s: a %s holds no widgets; add to a window, row, column, section, tab or split"):format(path, parentEntry.kind))
+    misuse(("%s: a %s holds no widgets; add to a window, row, column, grid, section, tab or split"):format(path, parentEntry.kind))
   end
   if parentEntry.kind == "tabs" and kind ~= "tab" then
     misuse(path .. ": tabs hold tab widgets only")
@@ -7351,7 +7364,7 @@ local function windowObject(entry)
   return proxy
 end
 
-local window = subarea(ui, "window", "Tool windows that dock into the workspace like Manifold's own. A window holds widgets; containers (`row`, `column`, `section`, `tabs` with `tab`, `split`) hold more widgets.")
+local window = subarea(ui, "window", "Tool windows that dock into the workspace like Manifold's own. A window holds widgets; containers (`row`, `column`, `grid`, `section`, `tabs` with `tab`, `split`) hold more widgets.")
 
 define(window, "create", {
   params = {
@@ -7388,7 +7401,8 @@ define(window, "create", {
   local entry = { id = id, kind = "window", owner = owner, children = {}, title = title, key = options.key, onClose = options.onClose, onUpdate = options.onUpdate }
   uiEntries[id] = entry
   entry.handle = windowObject(entry)
-  if options.key then
+)MLUA"),
+            std::string_view(R"MLUA(  if options.key then
     windowKeys[options.key] = entry
   end
   remember(owner, id, entry.handle.remove)
@@ -7401,8 +7415,7 @@ native.docDefine(nil, "manifold.ui.window.Window", {
   doc = "`manifold.ui.window.create` returns a window object: dot calls only, read-only, unknown names raise. A call on a window that is gone (removed, or its script ran again) returns `nil, error` with code `ME-7010`.",
 })
 local WINDOW_METHOD_DOCS = {
-)MLUA"),
-            std::string_view(R"MLUA(  add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object)." },
+  add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `grid`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `radio`, `color`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object)." },
   clear = { returns = "boolean", doc = "Removes every widget of the window." },
   remove = { returns = "boolean", doc = "Removes the window and its widgets for good." },
   update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, opacity (`opacity`, `inactiveOpacity`), update interval or handlers." },
@@ -7421,13 +7434,14 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
   kind = "class",
   title = "Widget objects",
   doc = table.concat({
-    "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic). Handlers get the widget as their last argument.",
-    "- `row`, `column`: lay out their widgets side by side or one below the other.",
-    "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it.",
+    "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line). Handlers get the widget as their last argument.",
+    "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line.",
+    "- `grid`: places its widgets in `columns` (2) cells per row, row by row. The first column fits its content and the others share the rest, so `text` then a field per row lines labels up; a field without a `label` fills its cell.",
+    "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it, `open = false` starts it folded.",
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
-    "- `text` (`text`, `color`, `wrap`, `mono`), `heading` (`text`, `icon`), `separator`, `spacer`.",
+    "- `text` (`text`, `color`, `wrap`, `mono`), `heading` (`text`, `icon`), `separator` (`text` puts a caption into the line), `spacer`.",
     "- `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`.",
-    "- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `onSubmit(text, widget)` on Enter), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number): all call `onChange(value, widget)`.",
+    "- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `onSubmit(text, widget)` on Enter), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
@@ -7439,7 +7453,7 @@ local WIDGET_METHOD_DOCS = {
   clear = { returns = "boolean", doc = "Removes a container's widgets, or a canvas's drawings." },
   remove = { returns = "boolean", doc = "Removes the widget and everything in it." },
   update = { params = { { name = "options", type = "table" } }, returns = "boolean", doc = "Changes options of the widget: the same keys `add` takes for its kind, handlers included." },
-  get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a number, the chosen combo item's or table row's number, the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
+  get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a colour's `#RRGGBB`, a number, the chosen combo, radio or table row's number, the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
   set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
   draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
   getView = { returns = "table", doc = "A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom." },
@@ -7450,6 +7464,138 @@ for _, name in ipairs({ "add", "clear", "remove", "update", "get", "set", "draw"
 end
 native.docDefine(nil, WIDGET_DOC .. "id", { kind = "field", type = "integer", doc = "The widget's number." })
 native.docDefine(nil, WIDGET_DOC .. "kind", { kind = "field", type = "string", doc = "The kind it was added as." })
+
+local form = subarea(ui, "form", "Windows described by a table, as the Form Editor (Tools > Form Editor) saves them in a `.form.lua` file. The table holds the layout and the names of the handlers; the script keeps the code and passes its handler functions in.")
+local FORM_NODE_KEYS = { kind = true, name = true, children = true }
+
+local function buildForm(path, spec, handlers)
+  if math.type(spec.form) ~= "integer" then
+    misuse(path .. ": the table has no form = 1, so it is no form")
+  end
+  if spec.form > 1 then
+    misuse(("%s: the form is from a newer Manifold (form = %d)"):format(path, spec.form))
+  end
+  if type(spec.title) ~= "string" then
+    misuse(("%s: form.title must be a string, got %s"):format(path, kindOf(spec.title)))
+  end
+  local function resolve(where, key, value)
+    if type(value) ~= "string" then
+      misuse(("%s: %s.%s must be the name of a handler, got %s"):format(path, where, key, kindOf(value)))
+    end
+    if handlers == nil then
+      return nil
+    end
+    local handler = handlers[value]
+    if type(handler) ~= "function" then
+      misuse(("%s: %s.%s names %q, but handlers.%s is %s"):format(path, where, key, value, value, handler == nil and "missing" or kindOf(handler)))
+    end
+    return handler
+  end
+  local options = {}
+  for key, value in pairs(spec) do
+    if key ~= "form" and key ~= "title" and key ~= "children" then
+      if not WINDOW_KEYS[key] then
+        misuse(("%s: form.%s is not a window option (known options: %s)"):format(path, tostring(key), table.concat(sortedNames(WINDOW_KEYS), ", ")))
+      end
+      if UI_HANDLER_BITS[key] then
+        options[key] = resolve("form", key, value)
+      else
+        options[key] = value
+      end
+    end
+  end
+  local made = rawget(window.members, "create")(spec.title, options)
+  local widgets, members = strict(("form(%q).widgets"):format(spec.title))
+  local function add(parent, list, where, depth)
+    if list == nil then
+      return
+    end
+    if type(list) ~= "table" then
+      misuse(("%s: %s.children must be a list, got %s"):format(path, where, kindOf(list)))
+    end
+    if depth > 32 then
+      misuse(path .. ": the form nests deeper than 32 levels")
+    end
+    for index, child in ipairs(list) do
+      local at = ("%s.children[%d]"):format(where, index)
+      if type(child) ~= "table" then
+        misuse(("%s: %s must be a table, got %s"):format(path, at, kindOf(child)))
+      end
+      if type(child.kind) ~= "string" then
+        misuse(("%s: %s has no kind"):format(path, at))
+      end
+      if child.name ~= nil and (type(child.name) ~= "string" or not child.name:match("^[%a_][%w_]*$")) then
+        misuse(("%s: %s.name must be a Lua name, got %s"):format(path, at, tostring(child.name)))
+      end
+      local label = child.name and ("%s %q"):format(child.kind, child.name) or at
+      local keys = WIDGET_KEYS[child.kind]
+      local copy = {}
+      for key, value in pairs(child) do
+        if not FORM_NODE_KEYS[key] then
+          if keys and UI_HANDLER_BITS[key] and keys[key] then
+            copy[key] = resolve(label, key, value)
+          else
+            copy[key] = value
+          end
+        end
+      end
+      local handle = parent.add(child.kind, copy)
+      if child.name then
+        if rawget(members, child.name) ~= nil then
+          misuse(("%s: two widgets are named %q"):format(path, child.name))
+        end
+        rawset(members, child.name, handle)
+      end
+      add(handle, child.children, label, depth + 1)
+    end
+  end
+  local ok, problem = pcall(add, made, spec.children, "form", 1)
+  if not ok then
+    made.remove()
+    error(problem, 0)
+  end
+  return made, widgets
+end
+
+local FORM_RETURNS = "`window, widgets`: the window object, and a read-only table of the widgets that have a `name`, by name (an unknown name raises)."
+
+define(form, "build", {
+  params = {
+    { name = "form", type = "table" },
+    { name = "handlers", type = "table", optional = true },
+  },
+  returns = "window",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like.",
+}, function(spec, handlers)
+  return buildForm("manifold.ui.form.build", spec, handlers)
+end)
+
+define(form, "load", {
+  params = {
+    { name = "path", type = "string" },
+    { name = "handlers", type = "table", optional = true },
+  },
+  returns = "window",
+  doc = "Reads a `.form.lua` file and builds its window like `build`; returns " .. FORM_RETURNS .. " A relative path starts at the folder of the calling script (at the program folder for code without a file). Returns nil and an `ME-7014` error when the file cannot be read or does not return a table; a wrong form raises like `build`.",
+}, function(path, handlers)
+  local info = callerFrame()
+  local source = info and info.source or ""
+  local folder = source:sub(1, 1) == "@" and source:sub(2):match("^(.*[\\/])") or nil
+  local text, shown, message = native.uiFormRead(path, folder)
+  if not text then
+    return result(nil, shown, message)
+  end
+  local chunk, problem = load(text, "@" .. shown, "t", {})
+  if not chunk then
+    return result(nil, "ME-7014", problem)
+  end
+  local ok, spec = pcall(chunk)
+  if not ok or type(spec) ~= "table" then
+    return result(nil, "ME-7014", ok and (shown .. " does not return a table") or tostring(spec))
+  end
+  return buildForm("manifold.ui.form.load", spec, handlers)
+end)
 
 local function plainObject(entry, prefix, docPrefix, methods, fields)
   local proxy, members = strict(prefix)
@@ -7582,8 +7728,7 @@ local NOTICE_KEYS = { level = "string", progress = "number", sticky = "boolean" 
 
 local notice = subarea(ui, "notice", "Short notices in the lower right corner, the same ones Manifold shows. A notice fades after a few seconds unless it is `sticky` or has a `progress`; a right click dismisses it.")
 
-)MLUA"),
-            std::string_view(R"MLUA(local function checkLevel(path, level)
+local function checkLevel(path, level)
   if level ~= nil then
     local known = false
     for _, name in ipairs(NOTICE_LEVELS) do
@@ -7705,7 +7850,8 @@ local function addEntry(kind, keys, values, options)
       copy[key] = value
     end
   end
-  local id = native.uiSlotAdd(kind, owner, copy)
+)MLUA"),
+            std::string_view(R"MLUA(  local id = native.uiSlotAdd(kind, owner, copy)
   local entry = { id = id, kind = kind, owner = owner, children = {}, onClick = options.onClick }
   uiEntries[id] = entry
   entry.handle = entryObject(entry, keys)
@@ -7873,8 +8019,7 @@ local function unloadModule(key)
   end
   local owned = moduleOwned[key]
   moduleOwned[key] = nil
-)MLUA"),
-            std::string_view(R"MLUA(  if owned then
+  if owned then
     for _, remove in pairs(owned) do
       pcall(remove)
     end
@@ -7997,7 +8142,8 @@ end)
 define(moduleArea, "info", {
   params = { { name = "name", type = "string" } },
   returns = "table, or nil, error",
-  doc = "One module by name, as the table `current` returns. `ME-7011` when there is none of that name.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "One module by name, as the table `current` returns. `ME-7011` when there is none of that name.",
 }, function(name)
   return result(native.moduleInfo(name))
 end)
