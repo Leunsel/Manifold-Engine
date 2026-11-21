@@ -185,6 +185,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUnreal.cpp" />
     <ClCompile Include="..\Source\Lua\UiForm.cpp" />
+    <ClCompile Include="..\Source\Lua\UiFormImport.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\PointerScan.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
@@ -195,6 +196,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
       <SupportJustMyCode>false</SupportJustMyCode>
     </ClCompile>
     <ClCompile Include="..\Source\Table\AddressList.cpp" />
+    <ClCompile Include="..\Source\Table\CeForms.cpp" />
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\CommentList.cpp" />
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />

@@ -199,6 +199,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUnreal.cpp" />
     <ClCompile Include="..\Source\Lua\UiForm.cpp" />
+    <ClCompile Include="..\Source\Lua\UiFormImport.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\PointerScan.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
@@ -209,6 +210,7 @@ exit /b 0</Command>
       <SupportJustMyCode>false</SupportJustMyCode>
     </ClCompile>
     <ClCompile Include="..\Source\Table\AddressList.cpp" />
+    <ClCompile Include="..\Source\Table\CeForms.cpp" />
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\CommentList.cpp" />
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />
@@ -376,6 +378,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Lua\LuaUi.h" />
     <ClInclude Include="..\Source\Lua\LuaUnreal.h" />
     <ClInclude Include="..\Source\Lua\UiForm.h" />
+    <ClInclude Include="..\Source\Lua\UiFormImport.h" />
     <ClInclude Include="..\Source\Lua\UiModel.h" />
     <ClInclude Include="..\Source\Scan\PointerScan.h" />
     <ClInclude Include="..\Source\Scan\Scanner.h" />
@@ -384,6 +387,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Scan\Workers.h" />
     <ClInclude Include="..\Source\Syscalls\Syscall.h" />
     <ClInclude Include="..\Source\Table\AddressList.h" />
+    <ClInclude Include="..\Source\Table\CeForms.h" />
     <ClInclude Include="..\Source\Table\CheatTable.h" />
     <ClInclude Include="..\Source\Table\CommentList.h" />
     <ClInclude Include="..\Source\Table\ManagedStructures.h" />

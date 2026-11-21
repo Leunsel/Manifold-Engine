@@ -300,6 +300,9 @@
     <ClCompile Include="..\Source\Lua\UiForm.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\UiFormImport.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\UiModel.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -322,6 +325,9 @@
       <Filter>Source\Syscalls</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Table\AddressList.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\CeForms.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Table\CheatTable.cpp">
@@ -819,6 +825,9 @@
     <ClInclude Include="..\Source\Lua\UiForm.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Lua\UiFormImport.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Lua\UiModel.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
@@ -841,6 +850,9 @@
       <Filter>Source\Syscalls</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Table\AddressList.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Table\CeForms.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Table\CheatTable.h">

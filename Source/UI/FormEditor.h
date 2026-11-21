@@ -2,6 +2,7 @@
 
 #include "App/Commands.h"
 #include "Lua/UiForm.h"
+#include "Table/CeForms.h"
 #include "UI/CodeEditor.h"
 #include "UI/ToolWindowBase.h"
 #include "UI/UiHost.h"
@@ -39,6 +40,7 @@ namespace Manifold::UI
             Open,
             Close,
             Template,
+            Import,
         };
 
         enum class Drop
@@ -55,6 +57,8 @@ namespace Manifold::UI
         void RunCommand(Command command);
         void Toolbar();
         void Palette();
+        void Breadcrumb();
+        void PaletteTile(Lua::UiKind kind, float width);
         void Outline();
         void OutlineNode(int id, int depth);
         void NodeMenu(int id);
@@ -80,6 +84,10 @@ namespace Manifold::UI
         void SnippetMenu();
         void SaveAsTemplate();
         std::filesystem::path TemplateFolder() const;
+        void ImportFile();
+        void ImportTable();
+        void ImportChoices(std::vector<Table::CeFormEntry> entries, std::string source);
+        void ImportEntry(const Table::CeFormEntry& entry);
         void Properties();
         void PropertyRow(Lua::UiNode& node, const Lua::FormProp& prop);
         void HandlerRow(Lua::UiNode& node, const Lua::FormHandler& handler);
@@ -128,6 +136,10 @@ namespace Manifold::UI
         int m_pressNode = 0;
         bool m_pressing = false;
         std::set<std::string> m_badImages;
+        std::string m_paletteFilter;
+        float m_paletteHeight = 0.0f;
+        std::vector<Lua::FormProblem> m_problems;
+        std::set<int> m_problemNodes;
         bool m_scrollOutline = false;
 
         std::deque<Lua::FormDocument> m_undo;
@@ -138,8 +150,16 @@ namespace Manifold::UI
         bool m_dirty = false;
         Pending m_pending = Pending::None;
         std::string m_pendingTemplate;
+        Lua::FormDocument m_pendingImport;
         Dialog m_unsavedDialog;
         Dialog m_problemsDialog;
+        Dialog m_importDialog;
+        Dialog m_notesDialog;
+        std::vector<Table::CeFormEntry> m_importChoices;
+        std::string m_importSource;
+        int m_importChoice = 0;
+        std::vector<std::string> m_importNotes;
+        int m_importConverted = 0;
 
         int m_style = 0;
         std::string m_code;

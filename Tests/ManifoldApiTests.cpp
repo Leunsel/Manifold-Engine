@@ -7,7 +7,11 @@
 #include "Lua/DocRegistry.h"
 #include "Lua/LuaApi.h"
 #include "Lua/LuaEngine.h"
+#include "Core/Deflate.h"
 #include "Lua/UiForm.h"
+#include "Lua/UiFormImport.h"
+#include "Table/CeForms.h"
+#include "Table/CheatTable.h"
 #include "Lua/UiModel.h"
 
 #include "lua.hpp"
@@ -15,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -1285,6 +1290,282 @@ return M
             std::filesystem::remove(folder, ignored);
         }
 
+        struct LrsWriter
+        {
+            std::vector<std::uint8_t> Bytes;
+
+            void Byte(int value) { Bytes.push_back(static_cast<std::uint8_t>(value)); }
+            void Short(std::string_view text)
+            {
+                Byte(static_cast<int>(text.size()));
+                Bytes.insert(Bytes.end(), text.begin(), text.end());
+            }
+            void Name(std::string_view text) { Short(text); }
+            void Int(std::string_view name, std::int32_t value)
+            {
+                Name(name);
+                Byte(4);
+                for (int i = 0; i < 4; ++i)
+                    Byte(static_cast<int>((static_cast<std::uint32_t>(value) >> (i * 8)) & 0xFF));
+            }
+            void Small(std::string_view name, int value)
+            {
+                Name(name);
+                Byte(2);
+                Byte(value);
+            }
+            void Str(std::string_view name, std::string_view value)
+            {
+                Name(name);
+                Byte(6);
+                Short(value);
+            }
+            void Ident(std::string_view name, std::string_view value)
+            {
+                Name(name);
+                Byte(7);
+                Short(value);
+            }
+            void Bool(std::string_view name, bool value)
+            {
+                Name(name);
+                Byte(value ? 9 : 8);
+            }
+            void Strings(std::string_view name, std::initializer_list<std::string_view> items)
+            {
+                Name(name);
+                Byte(1);
+                for (std::string_view item : items)
+                {
+                    Byte(6);
+                    Short(item);
+                }
+                Byte(0);
+            }
+            void Set(std::string_view name, std::initializer_list<std::string_view> items)
+            {
+                Name(name);
+                Byte(11);
+                for (std::string_view item : items)
+                    Short(item);
+                Byte(0);
+            }
+            void Extended(std::string_view name)
+            {
+                Name(name);
+                Byte(5);
+                const std::uint8_t onePointFive[10] = { 0, 0, 0, 0, 0, 0, 0, 0xC0, 0xFF, 0x3F };
+                Bytes.insert(Bytes.end(), onePointFive, onePointFive + 10);
+            }
+            void Begin(std::string_view type, std::string_view name, bool childPos = false)
+            {
+                if (childPos)
+                {
+                    Byte(0xF2);
+                    Byte(2);
+                    Byte(3);
+                }
+                Short(type);
+                Short(name);
+            }
+            void End() { Byte(0); }
+            void Box(int left, int top, int width, int height)
+            {
+                Int("Left", left);
+                Int("Top", top);
+                Int("Width", width);
+                Int("Height", height);
+            }
+        };
+
+        std::vector<std::uint8_t> TrainerStream()
+        {
+            LrsWriter w;
+            w.Bytes = { 'T', 'P', 'F', '0' };
+            w.Begin("TCEForm", "UDF1");
+            w.Str("Caption", "Trainer");
+            w.Int("ClientWidth", 300);
+            w.Int("ClientHeight", 260);
+            w.Ident("OnClose", "UDF1Close");
+            w.Ident("OnShow", "UDF1Show");
+            w.Extended("DesignTimePPI");
+            w.End();
+            w.Begin("TCELabel", "CELabel1");
+            w.Box(8, 8, 40, 15);
+            w.Str("Caption", "Health");
+            w.End();
+            w.End();
+            w.Begin("TCEEdit", "CEEdit1", true);
+            w.Box(60, 6, 100, 23);
+            w.Str("Text", "100");
+            w.Ident("OnChange", "HealthChange");
+            w.End();
+            w.End();
+            w.Begin("TCELabel", "CELabel2");
+            w.Box(8, 40, 40, 15);
+            w.Str("Caption", "Speed");
+            w.End();
+            w.End();
+            w.Begin("TCETrackBar", "CETrackBar1");
+            w.Box(60, 36, 120, 25);
+            w.Small("Max", 10);
+            w.Small("Position", 3);
+            w.Ident("OnChange", "SpeedChange");
+            w.End();
+            w.End();
+            w.Begin("TCECheckBox", "CECheckBox1");
+            w.Box(8, 80, 100, 19);
+            w.Str("Caption", "God");
+            w.Bool("Checked", true);
+            w.Ident("OnClick", "GodClick");
+            w.Ident("OnMouseDown", "GodDown");
+            w.End();
+            w.End();
+            w.Begin("TCEButton", "CEButton1");
+            w.Box(8, 120, 75, 25);
+            w.Str("Caption", "Apply");
+            w.Ident("OnClick", "ApplyClick");
+            w.End();
+            w.End();
+            w.Begin("TCEButton", "CEButton2");
+            w.Box(100, 120, 75, 25);
+            w.Str("Caption", "Cancel");
+            w.Bool("Enabled", false);
+            w.End();
+            w.End();
+            w.Begin("TCEListView", "CEListView1");
+            w.Box(8, 160, 280, 60);
+            w.Name("Columns");
+            w.Byte(14);
+            w.Byte(1);
+            w.Str("Caption", "Name");
+            w.Int("Width", 80);
+            w.End();
+            w.Byte(2);
+            w.Byte(1);
+            w.Byte(1);
+            w.Str("Caption", "Value");
+            w.End();
+            w.End();
+            w.End();
+            w.End();
+            w.Begin("TCEGroupBox", "CEGroupBox1");
+            w.Ident("Align", "alBottom");
+            w.Int("Height", 60);
+            w.Str("Caption", "More");
+            w.End();
+            w.Begin("TCELabel", "CELabel3");
+            w.Box(8, 4, 60, 15);
+            w.Str("Caption", "Title");
+            w.Set("Font.Style", { "fsBold" });
+            w.End();
+            w.End();
+            w.Begin("TCEComboBox", "CEComboBox1");
+            w.Box(8, 26, 120, 23);
+            w.Strings("Items.Strings", { "A", "B" });
+            w.Small("ItemIndex", 1);
+            w.End();
+            w.End();
+            w.End();
+            w.Begin("TCETimer", "CETimer1");
+            w.Int("Interval", 500);
+            w.Ident("OnTimer", "Tick");
+            w.End();
+            w.End();
+            w.End();
+            return w.Bytes;
+        }
+
+        void UiFormImport(Engine& engine)
+        {
+            using Lua::UiKind;
+            const std::vector<std::uint8_t> stream = TrainerStream();
+            std::string error;
+            std::optional<Table::CeComponent> root = Table::ReadCeComponents(stream, error);
+            CHECK_MSG(root.has_value(), error);
+            if (!root)
+                return;
+            CHECK(root->Class == "TCEForm" && root->Name == "UDF1" && root->Children.size() == 10);
+            const Table::CeValue* ppi = root->Find("DesignTimePPI");
+            CHECK(ppi && ppi->Type == Table::CeValue::Kind::Real && std::abs(ppi->Real - 1.5) < 1e-9);
+            std::vector<std::uint8_t> cut(stream.begin(), stream.begin() + static_cast<std::ptrdiff_t>(stream.size() / 2));
+            CHECK(!Table::ReadCeComponents(cut, error) && error.find("ends early") != std::string::npos);
+            CHECK(!Table::ReadCeComponents(std::vector<std::uint8_t>{ 'X', 'Y', 'Z', 'W' }, error));
+
+            const std::string packed = Table::EncodeTableFile(stream);
+            const std::string frm = "<?xml version=\"1.0\"?>\n<FormData>\n  <UDF1 Encoding=\"Ascii85\" Class=\"TCEForm\">" + packed + "</UDF1>\n</FormData>\n";
+            std::vector<Table::CeFormEntry> forms = Table::ReadCeFormFile(frm, error);
+            CHECK(forms.size() == 1 && forms[0].Root && forms[0].Name == "UDF1");
+
+            std::vector<std::uint8_t> plain(4 + stream.size());
+            for (int i = 0; i < 4; ++i)
+                plain[static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(stream.size() >> (i * 8));
+            std::copy(stream.begin(), stream.end(), plain.begin() + 4);
+            const auto deflated = Deflate::Compress(plain);
+            std::string hex;
+            for (const std::uint8_t byte : *deflated)
+            {
+                char digits[3];
+                std::snprintf(digits, sizeof(digits), "%02X", byte);
+                hex += digits;
+            }
+            const std::string table = "<?xml version=\"1.0\"?>\n<CheatTable CheatEngineTableVersion=\"45\">\n  <Forms>\n    <UDF1 Encoding=\"Ascii85\" Class=\"TCEForm\">" + packed +
+                                      "</UDF1>\n    <UDF2 Class=\"TCEForm\">" + hex + "</UDF2>\n    <UDF3 Encoding=\"Ascii85\" Class=\"TCEForm\">!!!</UDF3>\n  </Forms>\n</CheatTable>\n";
+            forms = Table::ReadCeFormFile(table, error);
+            CHECK(forms.size() == 3 && forms[0].Root && forms[1].Root && !forms[2].Root && !forms[2].Error.empty());
+            CHECK(Table::ReadCeFormFile("<CheatTable><CheatEntries/></CheatTable>", error).empty() && error.find("no Cheat Engine forms") != std::string::npos);
+            CHECK(Table::ReadCeTableForms({ "<Forms><UDF1 Encoding=\"Ascii85\">" + packed + "</UDF1></Forms>", "<LuaScript/>" }).size() == 1);
+
+            Lua::FormImport imported = Lua::FormFromCe(*root);
+            Lua::FormDocument& form = imported.Form;
+            const Lua::UiNode* window = form.Model.Find(form.Window);
+            CHECK(window && window->Title == "Trainer" && form.Key == "UDF1" && std::abs(window->Interval - 0.5) < 1e-9);
+            CHECK(form.Meta[form.Window].Handlers["onClose"] == "UDF1Close" && form.Meta[form.Window].Handlers["onUpdate"] == "Tick");
+            CHECK(imported.Converted == 11);
+            const auto noted = [&](std::string_view needle) {
+                return std::any_of(imported.Notes.begin(), imported.Notes.end(), [&](const std::string& note) { return note.find(needle) != std::string::npos; });
+            };
+            CHECK(noted("OnMouseDown (GodDown)") && noted("OnShow (UDF1Show)") && noted("became the window's onUpdate") && noted("list view"));
+            CHECK(window && window->Children.size() == 5);
+            if (window && window->Children.size() == 5)
+            {
+                const Lua::UiNode* grid = form.Model.Find(window->Children[0]);
+                CHECK(grid && grid->Kind == UiKind::Grid && grid->Children.size() == 4);
+                if (grid && grid->Children.size() == 4)
+                {
+                    const Lua::UiNode* health = form.Model.Find(grid->Children[1]);
+                    CHECK(form.Model.Find(grid->Children[0])->Text == "Health");
+                    CHECK(health && health->Kind == UiKind::Input && health->String == "100" && health->Width == -1.0f);
+                    CHECK(form.Meta[grid->Children[1]].Name == "CEEdit1" && form.Meta[grid->Children[1]].Handlers["onChange"] == "HealthChange");
+                    const Lua::UiNode* speed = form.Model.Find(grid->Children[3]);
+                    CHECK(speed && speed->Kind == UiKind::Slider && speed->Number == 3.0 && speed->Max == 10.0 && speed->Integer);
+                }
+                const Lua::UiNode* god = form.Model.Find(window->Children[1]);
+                CHECK(god && god->Kind == UiKind::Checkbox && god->Bool && god->Label == "God" && form.Meta[god->Id].Handlers["onChange"] == "GodClick");
+                const Lua::UiNode* buttons = form.Model.Find(window->Children[2]);
+                CHECK(buttons && buttons->Kind == UiKind::Row && buttons->Children.size() == 2);
+                if (buttons && buttons->Children.size() == 2)
+                    CHECK(!form.Model.Find(buttons->Children[1])->Enabled && form.Meta[buttons->Children[0]].Handlers["onClick"] == "ApplyClick");
+                const Lua::UiNode* list = form.Model.Find(window->Children[3]);
+                CHECK(list && list->Kind == UiKind::Table && list->Columns.size() == 2 && list->Columns[0].Title == "Name" && list->Columns[0].Width == 80.0f && list->Columns[1].Title == "Value");
+                const Lua::UiNode* more = form.Model.Find(window->Children[4]);
+                CHECK(more && more->Kind == UiKind::Section && more->Title == "More" && more->Children.size() == 2);
+                if (more && more->Children.size() == 2)
+                {
+                    CHECK(form.Model.Find(more->Children[0])->Kind == UiKind::Heading);
+                    const Lua::UiNode* combo = form.Model.Find(more->Children[1]);
+                    CHECK(combo && combo->Kind == UiKind::Combo && combo->Items.size() == 2 && combo->Selected == 2);
+                }
+            }
+            CHECK(Lua::FormProblems(form).empty());
+            const std::string saved = Lua::FormSave(form);
+            Lua::FormDocument again;
+            CHECK_MSG(Lua::FormLoad(saved, again, error), error);
+            CHECK(engine.Lua().Run(Lua::FormScript(form, Lua::FormScriptStyle::Standalone), "form import").Ok());
+            CHECK(FindWindow(engine.Lua().Ui(), "Trainer"));
+            CHECK(engine.Lua().Run("", "form import").Ok());
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -1427,6 +1708,7 @@ return M
         UiNewWidgets(engine);
         UiForms(engine);
         UiFormsStage2(engine);
+        UiFormImport(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

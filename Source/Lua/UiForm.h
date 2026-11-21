@@ -111,6 +111,7 @@ namespace Manifold::Lua
     std::string FormPropValue(const UiNode& node, std::string_view key);
     bool FormSetProp(UiNode& node, std::string_view key, std::string_view value);
     bool FormPropIsDefault(const UiNode& node, std::string_view key);
+    std::string FormPropDefault(UiKind kind, std::string_view key);
     std::string FormPropLiteral(const UiNode& node, std::string_view key);
 
     std::vector<FormProblem> FormProblems(const FormDocument& form);

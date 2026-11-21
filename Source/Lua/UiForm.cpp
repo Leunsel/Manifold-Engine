@@ -1786,6 +1786,11 @@ namespace Manifold::Lua
         return FormPropValue(node, key) == FormPropValue(Defaults(node.Kind), key);
     }
 
+    std::string FormPropDefault(UiKind kind, std::string_view key)
+    {
+        return FormPropValue(Defaults(kind), key);
+    }
+
     std::string FormPropLiteral(const UiNode& node, std::string_view key)
     {
         const FormProp* prop = FindProp(node.Kind, key);

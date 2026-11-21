@@ -259,6 +259,14 @@ namespace Manifold::UI
             first = false;
             DrawNode(*item);
         }
+        if (first && m_design && node.Kind != UiKind::Window)
+            DropZone(row);
+    }
+
+    void UiHost::DropZone(bool row)
+    {
+        const float width = row ? Px(160.0f) : std::max(Px(120.0f), ImGui::GetContentRegionAvail().x);
+        ImGui::Dummy(ImVec2(width, Px(34.0f)));
     }
 
     void UiHost::DrawRow(Lua::UiNode& node)
@@ -285,6 +293,11 @@ namespace Manifold::UI
         for (int c = 0; c < columns; ++c)
             ImGui::TableSetupColumn(nullptr, c == 0 && columns > 1 ? ImGuiTableColumnFlags_WidthFixed : ImGuiTableColumnFlags_WidthStretch);
         const bool outer = m_inGrid;
+        if (m_design && node.Children.empty())
+        {
+            ImGui::TableNextColumn();
+            DropZone(false);
+        }
         const std::vector<int> children = node.Children;
         for (const int child : children)
         {
@@ -467,6 +480,11 @@ namespace Manifold::UI
 
     void UiHost::DrawTabs(Lua::UiNode& node)
     {
+        if (m_design && node.Children.empty())
+        {
+            DropZone(false);
+            return;
+        }
         if (!ImGui::BeginTabBar("##tabs"))
             return;
         const std::vector<int> children = node.Children;

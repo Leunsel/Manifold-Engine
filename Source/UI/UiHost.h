@@ -81,6 +81,7 @@ namespace Manifold::UI
         void DrawRow(Lua::UiNode& node);
         void DrawValue(Lua::UiNode& node);
         void DrawNodeBody(Lua::UiNode& node);
+        void DropZone(bool row);
         void DrawTable(Lua::UiNode& node);
         void DrawTree(Lua::UiNode& node, const std::vector<Lua::UiTreeItem>& items);
         void DrawCanvas(Lua::UiNode& node);
