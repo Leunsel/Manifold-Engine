@@ -211,6 +211,14 @@ namespace Manifold::Target
         // compiles the method on the first call (Mono) and caches the address.
         // Returns nullopt when no runtime is attached or the method is unknown.
         std::optional<std::uint64_t> AddressOf(std::string_view name);
+
+        // .NET: the GC heap counted per type, the objects of one class and
+        // what the runtime says about one object. The heap calls walk the
+        // whole heap in the helper and take a while; they do not hold the
+        // bridge while they run.
+        Result<ManagedHeap> ReadHeap();
+        Result<ManagedInstances> Instances(std::uint64_t klass, std::uint32_t limit);
+        std::optional<ManagedObject> ObjectAt(std::uint64_t address);
         std::optional<int> FieldOffset(std::string_view className, std::string_view fieldName);
 
     private:

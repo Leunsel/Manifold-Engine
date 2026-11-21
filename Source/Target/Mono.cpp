@@ -703,6 +703,40 @@ namespace Manifold::Target
         return std::nullopt;
     }
 
+    Result<ManagedHeap> MonoBridge::ReadHeap()
+    {
+        RuntimeBackend* backend = nullptr;
+        {
+            std::lock_guard lock(m_lock);
+            if (m_present)
+                backend = m_backend.get();
+        }
+        if (!backend)
+            return Status::Fail(ErrorCode::MonoNotFound);
+        return backend->ReadHeap();
+    }
+
+    Result<ManagedInstances> MonoBridge::Instances(std::uint64_t klass, std::uint32_t limit)
+    {
+        RuntimeBackend* backend = nullptr;
+        {
+            std::lock_guard lock(m_lock);
+            if (m_present)
+                backend = m_backend.get();
+        }
+        if (!backend)
+            return Status::Fail(ErrorCode::MonoNotFound);
+        return backend->Instances(klass, limit);
+    }
+
+    std::optional<ManagedObject> MonoBridge::ObjectAt(std::uint64_t address)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_present || !m_backend || !address)
+            return std::nullopt;
+        return m_backend->ObjectAt(address);
+    }
+
     std::optional<int> MonoBridge::FieldOffset(std::string_view className, std::string_view fieldName)
     {
         std::lock_guard lock(m_lock);

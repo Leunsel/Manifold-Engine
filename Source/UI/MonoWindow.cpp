@@ -282,8 +282,9 @@ namespace Manifold::UI
         Target::UnityExplorer& unity = mono.Unity();
         SyncUnity(unity);
         // A .NET game has no Unity scenes or objects: only the classes.
+        // A .NET game has no Unity scenes: its objects come from the GC heap.
         const bool dotnet = mono.IsClr();
-        if (dotnet && m_leftTab != 2)
+        if (dotnet && m_leftTab == 0)
         {
             m_leftTab = 2;
             m_showClass = m_selected >= 0;
@@ -329,9 +330,12 @@ namespace Manifold::UI
                 ScenesTab(unity);
                 ImGui::EndTabItem();
             }
-            if (!dotnet && tab(ICON_FA_SEARCH "  Objects", 1))
+            if (tab(ICON_FA_SEARCH "  Objects", 1))
             {
-                ObjectsTab(unity);
+                if (dotnet)
+                    m_clr.ObjectsTab();
+                else
+                    ObjectsTab(unity);
                 ImGui::EndTabItem();
             }
             if (tab(ICON_FA_CUBES "  Classes", 2))
@@ -352,6 +356,8 @@ namespace Manifold::UI
         ImGui::BeginChild("##monoright", ImVec2(0.0f, height), ImGuiChildFlags_Borders);
         if (m_showClass && m_leftTab == 2 && m_selected >= 0)
             ClassPane();
+        else if (dotnet && m_leftTab == 1)
+            m_clr.Pane();
         else if (dotnet)
             EmptyState(ICON_FA_CUBES, "Pick a class",
                 "Its fields with their offsets, its static fields with their addresses and its methods show here. Class:Method and Class:StaticField "
@@ -918,6 +924,11 @@ namespace Manifold::UI
                             OpenStatics(info.Handle);
                         if (unityGame && !live)
                             ItemTooltip("Needs the explorer, which is off: turn it on under Scenes or Objects");
+                        if (!unityGame && ImGui::MenuItem(ICON_FA_SEARCH "  Find Objects of This Class"))
+                        {
+                            m_clr.FindInstances(info.Handle, info.FullName());
+                            m_requestLeftTab = 1;
+                        }
                         if (unityGame && ImGui::MenuItem(ICON_FA_SEARCH "  Find Objects of This Class", nullptr, false, live))
                         {
                             m_searchClass = info.FullName();
@@ -963,6 +974,15 @@ namespace Manifold::UI
             if (ImGui::SmallButton(ICON_FA_TIMES "##closeclass"))
                 m_showClass = false;
             ItemTooltip("Back to the inspector");
+        }
+        else if (info)
+        {
+            if (ImGui::SmallButton(ICON_FA_SEARCH "  Find Objects"))
+            {
+                m_clr.FindInstances(info->Handle, info->FullName());
+                m_requestLeftTab = 1;
+            }
+            ItemTooltip("Walks the GC heap for the objects of this class");
         }
         if (info)
         {
@@ -1145,56 +1165,37 @@ namespace Manifold::UI
                 ImGui::TableNextColumn();
                 Muted(field.TypeName.empty() ? std::string("?") : field.TypeName);
                 ImGui::TableNextColumn();
-                // A primitive shows its value; a reference or a boxed struct
-                // holds a pointer to the object.
-                std::string value;
-                if (field.Address && process)
-                {
-                    std::uint8_t bytes[8] = {};
-                    int size = 0;
-                    Table::FieldDisplay display = Table::FieldDisplay::Unsigned;
-                    const Scan::ValueType type = Table::ManagedFieldType(field.EnumCode ? field.EnumCode : field.TypeCode, size, display);
-                    if (process->ReadExact(field.Address, bytes, static_cast<std::size_t>(type == Scan::ValueType::Pointer ? process->PointerSize() : size)))
-                    {
-                        std::int64_t signedValue = 0;
-                        std::uint64_t raw = 0;
-                        std::memcpy(&raw, bytes, sizeof(raw));
-                        if (type == Scan::ValueType::Float)
-                        {
-                            float number = 0.0f;
-                            std::memcpy(&number, bytes, sizeof(number));
-                            value = Format("%g", static_cast<double>(number));
-                        }
-                        else if (type == Scan::ValueType::Double)
-                        {
-                            double number = 0.0;
-                            std::memcpy(&number, bytes, sizeof(number));
-                            value = Format("%g", number);
-                        }
-                        else if (type == Scan::ValueType::Pointer)
-                        {
-                            value = process->PointerSize() == 4 ? Hex(raw & 0xFFFFFFFFu) : Hex(raw);
-                        }
-                        else
-                        {
-                            if (size < 8)
-                                raw &= (1ull << (size * 8)) - 1;
-                            if (display == Table::FieldDisplay::Signed)
-                            {
-                                const int shift = 64 - size * 8;
-                                signedValue = static_cast<std::int64_t>(raw << shift) >> shift;
-                                value = std::to_string(signedValue);
-                            }
-                            else
-                                value = field.TypeCode == 0x02 ? (raw ? "true" : "false") : std::to_string(raw);
-                        }
-                    }
-                }
+                // A primitive shows its value; a reference (or a boxed struct)
+                // opens the object it points to in the inspector.
+                const bool reference = field.TypeCode == 0x12 || field.TypeCode == 0x0E || field.TypeCode == 0x1C || field.TypeCode == 0x1D || field.TypeCode == 0x11;
                 PushMono();
-                if (value.empty())
-                    Muted("--");
+                if (reference && field.Address && process)
+                {
+                    const std::uint64_t target = process->ReadPointer(field.Address).value_or(0);
+                    std::string shown = target ? m_engine.Mono().ClassNameAt(target).value_or("?") : std::string("null");
+                    if (shown == "System.String")
+                        shown = "\"" + ClrStringText(*process, target, 80).value_or("") + "\"";
+                    else if (target)
+                        shown = Hex(target);
+                    if (target && ImGui::Selectable((ICON_FA_ARROW_RIGHT "  " + shown + "##open").c_str(), false))
+                    {
+                        m_clr.OpenFromStatic(symbol, field.Address);
+                        m_requestLeftTab = 1;
+                        m_showClass = false;
+                    }
+                    else if (!target)
+                        Muted(shown);
+                    if (target)
+                        ItemTooltip("Opens the object in the inspector; entries added from there follow this static field.");
+                }
                 else
-                    ImGui::TextUnformatted(value.c_str());
+                {
+                    const std::string value = process && field.Address ? ManagedValueText(*process, field.Address, field.TypeCode, field.EnumCode) : std::string();
+                    if (value.empty())
+                        Muted("--");
+                    else
+                        ImGui::TextUnformatted(value.c_str());
+                }
                 ImGui::TableNextColumn();
                 if (field.Address)
                     ImGui::TextColored(ManifoldTheme::AddressText, "%s", Hex(field.Address).c_str());

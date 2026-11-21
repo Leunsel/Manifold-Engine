@@ -486,6 +486,103 @@ namespace Manifold::Tests
             CHECK(!mono.ClassNameAt(0x10000).has_value());
             CHECK(mono.ClassDetails("Manifold.FakeGame.Player+Buff").has_value());
 
+            // The GC heap: counted per type, the objects of a type, one object.
+            const auto heapBegan = std::chrono::steady_clock::now();
+            const Result<Target::ManagedHeap> heap = mono.ReadHeap();
+            CHECK_MSG(heap.Ok(), label + ": " + heap.Error().Text);
+            if (heap)
+            {
+                std::printf("  %s: heap of %llu objects, %.1f MB in %u segments, %llu words skipped, %.2f s\n", label.c_str(),
+                    static_cast<unsigned long long>(heap->Objects), static_cast<double>(heap->Bytes) / (1024.0 * 1024.0), heap->Segments,
+                    static_cast<unsigned long long>(heap->Skipped), std::chrono::duration<double>(std::chrono::steady_clock::now() - heapBegan).count());
+                const auto count = [&](const std::string& name) -> std::uint64_t
+                    {
+                        const auto found = std::find_if(heap->Types.begin(), heap->Types.end(), [&](const Target::ManagedHeapType& type) { return type.Name == name; });
+                        return found == heap->Types.end() ? 0 : found->Count;
+                    };
+                CHECK_EQ(count("Manifold.FakeGame.Player"), 1u);
+                CHECK_EQ(count("Manifold.FakeGame.Item"), 2u);
+                CHECK_EQ(count("Manifold.FakeGame.Player+Buff"), 1u);
+                // The inventory, the array inside the List<Item> and the
+                // list class's shared empty array.
+                CHECK_MSG(count("Manifold.FakeGame.Item[]") >= 2u, std::to_string(count("Manifold.FakeGame.Item[]")));
+                CHECK(count("System.String") > 3);
+                CHECK(heap->Objects > 100);
+            }
+            if (player)
+            {
+                const auto players = mono.Instances(player->Handle, 100);
+                CHECK_MSG(players.Ok(), players.Error().Text);
+                if (players)
+                {
+                    CHECK_EQ(players->Total, 1u);
+                    CHECK(players->Addresses.size() == 1 && players->Addresses[0] == playerAddress);
+                }
+            }
+            const std::uint64_t inventory = target.Addresses["inventory"];
+            const std::uint64_t torch = process.ReadPointer(inventory + 2 * pointer).value_or(0);
+            if (const auto item = mono.ClassDetails("Manifold.FakeGame.Item"))
+            {
+                const auto items = mono.Instances(item->Handle, 100);
+                CHECK(items.Ok());
+                if (items)
+                {
+                    CHECK_EQ(items->Total, 2u);
+                    CHECK(std::find(items->Addresses.begin(), items->Addresses.end(), torch) != items->Addresses.end());
+                }
+                const auto one = mono.Instances(item->Handle, 1);
+                CHECK(one && one->Total == 2 && one->Addresses.size() == 1);
+            }
+            if (const auto array = mono.ObjectAt(inventory))
+            {
+                CHECK(array->Kind == Target::ManagedObjectKind::Array);
+                CHECK_EQ(array->Name, std::string("Manifold.FakeGame.Item[]"));
+                CHECK_EQ(array->Length, 3u);
+                CHECK_EQ(array->ElementType, 0x12);
+                CHECK_EQ(array->ElementName, std::string("Manifold.FakeGame.Item"));
+                CHECK_EQ(array->ElementSize, pointer);
+                CHECK_EQ(array->Data, inventory + 2 * pointer);
+                CHECK_EQ(mono.ClassNameAt(torch).value_or(""), std::string("Manifold.FakeGame.Item"));
+            }
+            else
+                CHECK_MSG(false, label + ": no object at the inventory array");
+            if (const auto text = mono.ObjectAt(target.Addresses["name"]))
+            {
+                CHECK(text->Kind == Target::ManagedObjectKind::String);
+                CHECK_MSG(text->Length == 4u, std::to_string(text->Length));
+                wchar_t chars[4] = {};
+                process.ReadExact(target.Addresses["name"] + pointer + 4, chars, sizeof(chars));
+                CHECK(std::wstring(chars, 4) == L"Hero");
+            }
+            else
+                CHECK_MSG(false, label + ": no object at the name string");
+            if (const auto object = mono.ObjectAt(playerAddress))
+            {
+                CHECK_MSG(object->Kind == Target::ManagedObjectKind::Object, std::to_string(static_cast<int>(object->Kind)));
+                CHECK_EQ(object->Name, std::string("Manifold.FakeGame.Player"));
+                CHECK(object->Size >= 3 * pointer);
+            }
+            else
+                CHECK_MSG(false, label + ": no object at the player");
+            CHECK(!mono.ObjectAt(playerAddress + pointer).has_value());
+            // The fields of an object found by its own class pointer, with the parents'.
+            const std::vector<Target::MonoField> atFields = mono.InstanceFieldsAt(playerAddress);
+            CHECK(Field(atFields, "Health") && Field(atFields, "Id") && Field(atFields, "Position"));
+
+            // A pointer from a static field, the way the inspector adds a
+            // value to the address list: [World:LocalPlayer] + Health.
+            if (player)
+            {
+                if (const Target::MonoField* health = Field(player->Fields, "Health"))
+                {
+                    Table::MemoryRecord& record = engine.Table().AddValue("LocalPlayer.Health", "Manifold.FakeGame.World:LocalPlayer", Scan::ValueType::FourBytes);
+                    record.Offsets = { Hex(static_cast<std::uint64_t>(health->Offset)) };
+                    engine.RefreshValues(true);
+                    CHECK_MSG(record.AddressOk, record.AddressError);
+                    CHECK_EQ(record.ResolvedAddress, playerAddress + static_cast<std::uint64_t>(health->Offset));
+                }
+            }
+
             // Native code is never a managed method, and asking does not
             // reach the helper.
             const std::uint64_t native = process.FindExport("kernel32.dll", "GetTickCount");
@@ -690,6 +787,25 @@ namespace Manifold::Tests
                         mono.MethodNameAt(method.Address + 8).value_or("?").c_str(), engine.Describe(method.Address + 8).c_str());
                     break;
                 }
+            }
+            const auto heapBegan = std::chrono::steady_clock::now();
+            const Result<Target::ManagedHeap> heap = mono.ReadHeap();
+            if (!heap)
+                std::printf("heap: %s\n", heap.Error().Text.c_str());
+            else
+            {
+                std::printf("heap: %llu objects, %.1f MB in %u segments, %llu words skipped, %.2f s\n", static_cast<unsigned long long>(heap->Objects),
+                    static_cast<double>(heap->Bytes) / (1024.0 * 1024.0), heap->Segments, static_cast<unsigned long long>(heap->Skipped),
+                    std::chrono::duration<double>(std::chrono::steady_clock::now() - heapBegan).count());
+                for (std::size_t i = 0; i < heap->Types.size() && i < 12; ++i)
+                    std::printf("  %10llu objects %8.1f MB  %s\n", static_cast<unsigned long long>(heap->Types[i].Count),
+                        static_cast<double>(heap->Types[i].Bytes) / (1024.0 * 1024.0), heap->Types[i].Name.c_str());
+            }
+            if (player)
+            {
+                const auto players = mono.Instances(player->Handle, 1000);
+                if (players)
+                    std::printf("Terraria.Player objects on the heap: %llu\n", static_cast<unsigned long long>(players->Total));
             }
             engine.Managed().Stop(true);
             engine.CloseProcess();

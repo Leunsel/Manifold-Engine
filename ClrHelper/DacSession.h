@@ -37,6 +37,9 @@ namespace Manifold::ClrHelper
         };
         const std::vector<Module>& Modules() const { return m_modules; }
         bool Read(ClrAddress address, void* buffer, std::size_t size);
+        // Straight from the game, past the page cache: as many bytes from the
+        // start as could be read (whole pages), for walking the heap.
+        std::size_t ReadDirect(ClrAddress address, std::uint8_t* buffer, std::size_t size);
 
         HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override;
         ULONG STDMETHODCALLTYPE AddRef() override { return 1; }
@@ -120,6 +123,33 @@ namespace Manifold::ClrHelper
         const std::string& NameOf(ClrAddress mt);
         std::uint32_t TypeFlags(ClrAddress mt, bool withGeneric = true);
         std::string MethodName(ClrAddress md, ClrAddress* typeOut);
+
+        struct HeapSegment
+        {
+            ClrAddress Start = 0;
+            ClrAddress End = 0;
+            bool Large = false;
+        };
+        struct HeapTotals
+        {
+            std::uint64_t Objects = 0;
+            std::uint64_t Bytes = 0;
+            std::uint64_t Skipped = 0;  // pointer-sized steps over words that start no object
+            std::uint32_t Segments = 0;
+        };
+        struct ObjectSize
+        {
+            bool Valid = false;
+            std::uint32_t Base = 0;
+            std::uint32_t Component = 0;
+        };
+        std::string HeapSegments(std::vector<HeapSegment>& out);
+        template <typename Visit>
+        std::string WalkHeap(Visit&& visit, HeapTotals& totals);
+        const ObjectSize& SizeOf(ClrAddress mt);
+        std::string HeapStats(ClrProtocol::Writer& out);
+        std::string Instances(ClrAddress mt, std::uint32_t limit, ClrProtocol::Writer& out);
+        void ObjectInfo(ClrAddress address, ClrProtocol::Writer& out);
         ClrAddress StaticBase(ClrAddress mt, ClrAddress module, bool primitive);
 
         DataTarget m_target;
@@ -135,6 +165,7 @@ namespace Manifold::ClrHelper
         std::vector<ModuleRecord> m_modules;
         bool m_modulesLoaded = false;
         std::unordered_map<ClrAddress, TypeInfo> m_types;
+        std::unordered_map<ClrAddress, ObjectSize> m_sizes;
         std::chrono::steady_clock::time_point m_lastRequest;
     };
 }

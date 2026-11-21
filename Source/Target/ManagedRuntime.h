@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Errors.h"
+#include "Core/Types.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -8,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace Manifold
 {
@@ -42,6 +44,58 @@ namespace Manifold::Target
         return { pointer, 2 * pointer, 2 * pointer, 2 * pointer + 4, 3 * pointer, 4 * pointer };
     }
 
+    // One type on the GC heap: how many objects, how many bytes.
+    struct ManagedHeapType
+    {
+        std::uint64_t Handle = 0;
+        std::string Name;
+        std::uint64_t Count = 0;
+        std::uint64_t Bytes = 0;
+    };
+
+    struct ManagedHeap
+    {
+        std::uint64_t Objects = 0;
+        std::uint64_t Bytes = 0;
+        std::uint64_t Skipped = 0;
+        std::uint32_t Segments = 0;
+        double Seconds = 0.0;
+        std::vector<ManagedHeapType> Types;  // most bytes first
+    };
+
+    struct ManagedInstances
+    {
+        std::uint64_t Total = 0;
+        std::vector<std::uint64_t> Addresses;
+    };
+
+    enum class ManagedObjectKind
+    {
+        String,
+        Free,
+        Object,
+        Array,
+        Other
+    };
+
+    // An object as the runtime describes it: its class, its size and, for an
+    // array or a string, its elements.
+    struct ManagedObject
+    {
+        std::uint64_t Address = 0;
+        std::uint64_t Handle = 0;
+        std::string Name;
+        ManagedObjectKind Kind = ManagedObjectKind::Object;
+        std::uint64_t Size = 0;
+        std::uint64_t ElementHandle = 0;
+        std::string ElementName;
+        int ElementType = 0;   // CorElementType of an array's elements
+        int Rank = 0;
+        std::uint64_t Length = 0;
+        std::uint64_t ElementSize = 0;
+        std::uint64_t Data = 0;  // the first element
+    };
+
     class RuntimeBackend
     {
     public:
@@ -72,6 +126,10 @@ namespace Manifold::Target
         virtual std::optional<std::uint64_t> StaticAddress(int, std::string_view) { return std::nullopt; }
         // The runtime's flavour and version, when the backend knows it.
         virtual std::string Description() const { return {}; }
+        // The GC heap, for runtimes that can walk it from outside.
+        virtual Result<ManagedHeap> ReadHeap() { return Status::Fail(ErrorCode::MonoCallFailed, "this runtime's heap cannot be read"); }
+        virtual Result<ManagedInstances> Instances(std::uint64_t, std::uint32_t) { return Status::Fail(ErrorCode::MonoCallFailed, "this runtime's heap cannot be read"); }
+        virtual std::optional<ManagedObject> ObjectAt(std::uint64_t) { return std::nullopt; }
 
     protected:
         MonoBridge& m_bridge;

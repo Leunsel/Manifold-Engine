@@ -247,6 +247,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Text\TextBuffer.cpp" />
     <ClCompile Include="..\Source\UI\AddressActions.cpp" />
     <ClCompile Include="..\Source\UI\ByteSearch.cpp" />
+    <ClCompile Include="..\Source\UI\ClrInspector.cpp" />
     <ClCompile Include="..\Source\UI\CodeEditor.cpp" />
     <ClCompile Include="..\Source\UI\CodeTools.cpp" />
     <ClCompile Include="..\Source\UI\CommentListWindow.cpp" />
@@ -420,6 +421,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\AddressActions.h" />
     <ClInclude Include="..\Source\UI\BackgroundTask.h" />
     <ClInclude Include="..\Source\UI\ByteSearch.h" />
+    <ClInclude Include="..\Source\UI\ClrInspector.h" />
     <ClInclude Include="..\Source\UI\CodeEditor.h" />
     <ClInclude Include="..\Source\UI\CodeTools.h" />
     <ClInclude Include="..\Source\UI\CommentListWindow.h" />

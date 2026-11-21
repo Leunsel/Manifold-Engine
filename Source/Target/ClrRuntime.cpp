@@ -17,15 +17,18 @@ namespace Manifold::Target
         constexpr unsigned kListMs = 60000;   // one module's types; a big assembly takes a while
         constexpr unsigned kQueryMs = 5000;   // one type's members
         constexpr unsigned kLookupMs = 1500;  // one address, asked while drawing
+        constexpr unsigned kHeapMs = 120000;  // one walk over the whole GC heap
         constexpr std::size_t kMaxMisses = 8192;
         constexpr auto kMissLife = std::chrono::seconds(3);
     }
 
-    std::optional<std::vector<std::uint8_t>> ClrRuntime::Ask(P::Op op, std::uint64_t argument, unsigned timeoutMs, std::string* error)
+    std::optional<std::vector<std::uint8_t>> ClrRuntime::Ask(P::Op op, std::uint64_t argument, unsigned timeoutMs, std::string* error, const std::uint32_t* extra)
     {
         P::Writer request;
         request.U8(static_cast<std::uint8_t>(op));
         request.U64(argument);
+        if (extra)
+            request.U32(*extra);
         std::string reason;
         auto reply = m_link.Call(request, timeoutMs, reason);
         if (!reply && error)
@@ -440,6 +443,87 @@ namespace Manifold::Target
     {
         const auto* entry = FindCode(address);
         return entry && entry->first == address ? 1 : 0;
+    }
+
+    Result<ManagedHeap> ClrRuntime::ReadHeap()
+    {
+        const auto began = std::chrono::steady_clock::now();
+        std::string error;
+        const auto reply = Ask(P::Op::HeapStats, 0, kHeapMs, &error);
+        if (!reply)
+            return Status::Fail(ErrorCode::ClrHelperFailed, error);
+        P::Reader in(*reply);
+        ManagedHeap heap;
+        heap.Objects = in.U64();
+        heap.Bytes = in.U64();
+        heap.Segments = in.U32();
+        heap.Skipped = in.U64();
+        const std::uint32_t count = in.Count(28);
+        heap.Types.reserve(count);
+        for (std::uint32_t i = 0; i < count && in.Ok(); ++i)
+        {
+            ManagedHeapType type;
+            type.Handle = in.U64();
+            type.Name = in.Text();
+            type.Count = in.U64();
+            type.Bytes = in.U64();
+            heap.Types.push_back(std::move(type));
+        }
+        if (!in.Ok())
+            return Status::Fail(ErrorCode::ClrHelperFailed, "its heap summary was cut short");
+        std::sort(heap.Types.begin(), heap.Types.end(), [](const ManagedHeapType& a, const ManagedHeapType& b)
+            { return a.Bytes != b.Bytes ? a.Bytes > b.Bytes : a.Name < b.Name; });
+        heap.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+        return heap;
+    }
+
+    Result<ManagedInstances> ClrRuntime::Instances(std::uint64_t klass, std::uint32_t limit)
+    {
+        std::string error;
+        const auto reply = Ask(P::Op::Instances, klass, kHeapMs, &error, &limit);
+        if (!reply)
+            return Status::Fail(ErrorCode::ClrHelperFailed, error);
+        P::Reader in(*reply);
+        ManagedInstances found;
+        found.Total = in.U64();
+        const std::uint32_t count = in.Count(8);
+        found.Addresses.reserve(count);
+        for (std::uint32_t i = 0; i < count && in.Ok(); ++i)
+            found.Addresses.push_back(in.U64());
+        if (!in.Ok())
+            return Status::Fail(ErrorCode::ClrHelperFailed, "its list of objects was cut short");
+        return found;
+    }
+
+    std::optional<ManagedObject> ClrRuntime::ObjectAt(std::uint64_t address)
+    {
+        const auto reply = Ask(P::Op::ObjectInfo, address, kLookupMs);
+        if (!reply)
+            return std::nullopt;
+        P::Reader in(*reply);
+        if (in.U8() == 0)
+            return std::nullopt;
+        ManagedObject object;
+        object.Address = address;
+        object.Handle = in.U64();
+        object.Name = in.Text();
+        const std::uint32_t kind = in.U32();
+        // ∑ The runtime reports an ordinary object as OBJ_OTHER; OBJ_OBJECT is
+        // only System.Object itself. Both are plain objects here.
+        object.Kind = kind == static_cast<std::uint32_t>(ManagedObjectKind::Other) ? ManagedObjectKind::Object
+            : kind < static_cast<std::uint32_t>(ManagedObjectKind::Other)      ? static_cast<ManagedObjectKind>(kind)
+                                                                               : ManagedObjectKind::Object;
+        object.Size = in.U64();
+        object.ElementHandle = in.U64();
+        object.ElementName = in.Text();
+        object.ElementType = static_cast<int>(in.U32());
+        object.Rank = static_cast<int>(in.U32());
+        object.Length = in.U64();
+        object.ElementSize = in.U64();
+        object.Data = in.U64();
+        if (!in.Ok())
+            return std::nullopt;
+        return object;
     }
 
     std::optional<std::uint64_t> ClrRuntime::Compile(std::uint64_t method)

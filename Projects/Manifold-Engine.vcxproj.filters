@@ -438,6 +438,9 @@
     <ClCompile Include="..\Source\UI\ByteSearch.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\ClrInspector.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\CodeEditor.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -949,6 +952,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\ByteSearch.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\ClrInspector.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\CodeEditor.h">

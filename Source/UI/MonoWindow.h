@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Target/UnityExplorer.h"
+#include "UI/ClrInspector.h"
 #include "UI/ToolWindowBase.h"
 
 #include <cstdint>
@@ -79,6 +80,7 @@ namespace Manifold::UI
 
         Workspace& m_workspace;
         Engine& m_engine;
+        ClrInspector m_clr{ m_workspace };
         std::uint64_t m_generation = ~0ull;
         std::vector<Target::MonoClass> m_classes;
         std::vector<int> m_filtered;      // sorted by assembly, namespace, name
