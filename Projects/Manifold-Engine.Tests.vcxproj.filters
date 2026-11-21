@@ -243,6 +243,9 @@
     <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaDotNet.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>

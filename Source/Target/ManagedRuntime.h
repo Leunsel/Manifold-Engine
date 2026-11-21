@@ -63,6 +63,18 @@ namespace Manifold::Target
         std::vector<ManagedHeapType> Types;  // most bytes first
     };
 
+    // A .NET module (one per assembly as a rule): the runtime's handle for
+    // it, its name without the extension, its file and where its image is.
+    struct ManagedModule
+    {
+        std::uint64_t Address = 0;
+        std::string Name;
+        std::string Path;
+        std::uint64_t Base = 0;
+        std::uint64_t Size = 0;
+        bool Dynamic = false;
+    };
+
     struct ManagedInstances
     {
         std::uint64_t Total = 0;
@@ -130,6 +142,7 @@ namespace Manifold::Target
         virtual Result<ManagedHeap> ReadHeap() { return Status::Fail(ErrorCode::MonoCallFailed, "this runtime's heap cannot be read"); }
         virtual Result<ManagedInstances> Instances(std::uint64_t, std::uint32_t) { return Status::Fail(ErrorCode::MonoCallFailed, "this runtime's heap cannot be read"); }
         virtual std::optional<ManagedObject> ObjectAt(std::uint64_t) { return std::nullopt; }
+        virtual std::vector<ManagedModule> Modules() { return {}; }
 
     protected:
         MonoBridge& m_bridge;

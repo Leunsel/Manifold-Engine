@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 12
+local API_VERSION = 13
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -1776,6 +1776,172 @@ define(speed, "status", {
   doc = "The state of the speedhack: `installed` says whether the hooks are in the process, `clockShifted` whether its clocks differ from the real ones, and `hooks` lists `{ name, address }` for every redirected time function.",
 }, function()
   return native.speedStatus()
+end)
+
+local dotnet = area("dotnet", "The .NET runtime of a .NET game (.NET Framework or .NET 5 and later, 64-bit and 32-bit), read from outside the game by Manifold's .NET helper through the runtime's own data access library: nothing runs inside the game. `load` reads the classes, as Extensions > .NET does; the other functions need that and return `nil` and an `ME-4104` error before it. A class is named `\"Namespace.Class\"`, a nested one `\"Namespace.Outer+Inner\"`, and `\"Class\"` alone works when it is unique. A field or method of a class is written `\"Class:Name\"`, which also resolves as an address everywhere. Objects move when the garbage collector runs, so an object address is good for the moment; a path from a static field (`value`, `address`) finds the object again each time. Only classes the runtime has loaded are listed, and only methods it has compiled have an address.")
+
+define(dotnet, "load", {
+  returns = "true, or nil, error",
+  doc = "Starts the .NET helper and reads the classes of the opened process's .NET runtime, unless that is done already. Takes a moment for a large game. `ME-4101` when the process has no .NET runtime, `ME-4104` when a Mono or IL2CPP runtime is loaded instead, `ME-4103` when the helper fails.",
+}, function()
+  return result(native.dotnetLoad())
+end)
+
+define(dotnet, "unload", {
+  returns = "true",
+  doc = "Ends the .NET helper and forgets the classes. Nothing happens when no .NET runtime is loaded.",
+}, function()
+  return native.dotnetUnload()
+end)
+
+define(dotnet, "isLoaded", {
+  returns = "boolean",
+  doc = "Whether a .NET runtime is loaded for the opened process.",
+}, function()
+  return native.dotnetIsLoaded() == true
+end)
+
+define(dotnet, "status", {
+  returns = "`{ loaded, detected, runtime, module, classes, pointerSize }`",
+  doc = "Where the .NET reader stands: `detected` says the opened process has a .NET runtime at all, `loaded` that its classes are read. `runtime` (such as `\".NET Framework 4.8.9363.0\"`), `module`, `classes` and `pointerSize` are there once it is loaded.",
+}, function()
+  return native.dotnetStatus()
+end)
+
+define(dotnet, "modules", {
+  returns = "list of `{ handle, name, path, base, size, dynamic }`, or nil, error",
+  doc = "The loaded assemblies' modules: the runtime's handle for each, its name without the extension, its file, and where its image is. `dynamic` marks a module made at run time.",
+}, function()
+  return result(native.dotnetModules())
+end)
+
+define(dotnet, "classes", {
+  params = { { name = "filter", type = "string", optional = true } },
+  returns = "list of `{ name, namespace, image, handle, module, token, generic }`, or nil, error",
+  doc = "The loaded classes, or those whose full name contains `filter` (ignoring case). `handle` is the class's method table, the pointer every object of it starts with; `module` and `token` say where it is defined.",
+}, function(filter)
+  return result(native.dotnetClasses(filter))
+end)
+
+define(dotnet, "class", {
+  params = { { name = "name", type = "string" } },
+  returns = "`{ name, namespace, image, parent, handle, module, token, generic, fields, statics, methods }` or nil, or nil, error",
+  doc = "A class with its members. `fields` lists the instance fields declared by the class (not its parents') as `{ name, type, typeCode, offset, valueSize, typeHandle }`, the offset counted from the object's start; `statics` lists the static fields as `{ name, type, typeCode, address }`, without `address` while the runtime has made no storage for it; `methods` lists `{ name, address, handle, token, params, static }`, `address` only for a method the runtime has compiled. nil when no class has the name.",
+}, function(name)
+  return many(native.dotnetClass(name))
+end)
+
+define(dotnet, "classAt", {
+  params = { { name = "address", type = "address" } },
+  returns = "`{ class, address, offset }` or nil, or nil, error",
+  doc = "The object an address is in: its class, where it starts and the address's offset in it. An address within a few KB after an object's start finds it, the way Structure Dissect does. nil when no object is there.",
+}, function(address)
+  return many(native.dotnetClassAt(address))
+end)
+
+define(dotnet, "object", {
+  params = { { name = "address", type = "address" } },
+  returns = "`{ address, class, handle, kind, size, length, elementClass, elementType, elementSize, data, rank }` or nil, or nil, error",
+  doc = "What the runtime says about the object that starts at the address. `kind` is `object`, `string`, `array` or `free` (unused heap space); `length` is there for a string (its characters) and an array (its elements), and an array also has its element class, element type code, element size, `data` (the first element) and `rank`. nil when no object starts there.",
+}, function(address)
+  return many(native.dotnetObject(address))
+end)
+
+define(dotnet, "fields", {
+  params = { { name = "address", type = "address" } },
+  returns = "list of `{ name, type, typeCode, offset, valueSize, typeHandle }`, or nil, error",
+  doc = "The instance fields of the object at the address, its parents' included, sorted by offset. `ME-4105` when no .NET object is there.",
+}, function(address)
+  return result(native.dotnetFields(address))
+end)
+
+define(dotnet, "methodAt", {
+  params = { { name = "address", type = "address" } },
+  returns = "`{ name, start, size }` or nil, or nil, error",
+  doc = "The compiled method whose code holds the address, as `\"Namespace.Class:Method\"`, with its code's start and size. nil for an address in no managed code.",
+}, function(address)
+  return many(native.dotnetMethodAt(address))
+end)
+
+define(dotnet, "methodAddress", {
+  params = {
+    { name = "class", type = "string" },
+    { name = "method", type = "string" },
+  },
+  returns = "address or nil, or nil, error",
+  doc = "The code of a method once the runtime has compiled it, the same address `\"Class:Method\"` resolves to; with overloads, the first one that has code. nil when no such method has run yet.",
+}, function(class, method)
+  return many(native.dotnetMethodAddress(class, method))
+end)
+
+define(dotnet, "staticAddress", {
+  params = {
+    { name = "class", type = "string" },
+    { name = "field", type = "string" },
+  },
+  returns = "address or nil, or nil, error",
+  doc = "Where a static field's value is, the same address `\"Class:Field\"` resolves to. A static field of a reference type holds a reference there, a static struct a reference to a boxed copy. nil when the class has no such field or no storage for it yet.",
+}, function(class, field)
+  return many(native.dotnetStaticAddress(class, field))
+end)
+
+define(dotnet, "fieldOffset", {
+  params = {
+    { name = "class", type = "string" },
+    { name = "field", type = "string" },
+  },
+  returns = "integer or nil, or nil, error",
+  doc = "The offset of an instance field from the start of an object of the class, inherited fields included. An auto-property's backing field is also found by the property's name. nil when there is no such field.",
+}, function(class, field)
+  return many(native.dotnetFieldOffset(class, field))
+end)
+
+define(dotnet, "value", {
+  params = {
+    { name = "base", type = "any" },
+    { name = "path", type = "string", optional = true },
+  },
+  returns = "number, boolean, string, address or nil, or nil, error",
+  doc = "Reads a value by following a path. `base` is an object address or a static field as `\"Class:Field\"`; `path` names fields by name and array elements by index, as in `\"Players[0].statLife\"` or `\".Inventory[2].Name\"`. A number, a bool, a char's code and a string's text come back as Lua values, another object as its address, null as nil, an inline struct as its address. A step that does not exist, or a null on the way, gives `ME-4105`. The path is followed again on every call, so it keeps working while the garbage collector moves objects.",
+}, function(base, path)
+  return many(native.dotnetValue(base, path))
+end)
+
+define(dotnet, "address", {
+  params = {
+    { name = "base", type = "any" },
+    { name = "path", type = "string", optional = true },
+  },
+  returns = "address, or nil, error",
+  doc = "Where the value a path reaches is stored, for `manifold.memory.read` and `write` or the address list; the path works as for `value`. Without a path it is the base itself (the object, or the static field's storage). Good until the garbage collector moves the object; follow the path again for the next use.",
+}, function(base, path)
+  return result(native.dotnetAddress(base, path))
+end)
+
+define(dotnet, "text", {
+  params = { { name = "address", type = "address" } },
+  returns = "string or nil, or nil, error",
+  doc = "The text of the `System.String` object at the address, at most a million characters; nil when no string is there.",
+}, function(address)
+  return many(native.dotnetText(address))
+end)
+
+define(dotnet, "heap", {
+  returns = "`{ objects, bytes, segments, seconds, types }`, or nil, error",
+  doc = "Walks the whole GC heap and counts the objects per type: `types` lists `{ name, handle, count, bytes }`, most bytes first. The game keeps running and the walk takes a few seconds for a large heap, during which the script waits.",
+}, function()
+  return result(native.dotnetHeap())
+end)
+
+define(dotnet, "instances", {
+  params = {
+    { name = "class", type = "string|integer" },
+    { name = "limit", type = "integer", optional = true },
+  },
+  returns = "list of addresses, or nil, error",
+  doc = "The objects of exactly one class on the GC heap (objects of derived classes have another class), at most `limit` (100000 by default, 1000000 at most). The class is given by name or by its handle. Walks the whole heap like `heap`; an object found here may already be dead and not collected yet.",
+}, function(class, limit)
+  return result(native.dotnetInstances(class, limit))
 end)
 
 local doc = area("doc", "The documentation behind completion, signature help, hover tooltips and the docs panel. Manifold, Cheat Engine and Lua functions are documented already. A module documents its own functions with `register`, or writes LuaLS annotations (`---@param name type`) above them and calls `registerModule`. A script never replaces Manifold's own documentation.")

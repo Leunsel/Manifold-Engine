@@ -729,6 +729,14 @@ namespace Manifold::Target
         return backend->Instances(klass, limit);
     }
 
+    std::vector<ManagedModule> MonoBridge::Modules()
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_present || !m_backend)
+            return {};
+        return m_backend->Modules();
+    }
+
     std::optional<ManagedObject> MonoBridge::ObjectAt(std::uint64_t address)
     {
         std::lock_guard lock(m_lock);

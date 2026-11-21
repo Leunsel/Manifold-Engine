@@ -4494,6 +4494,197 @@ end
 )MLUA"),
         };
         constexpr std::array<std::string_view, 1> kScript3 = {
+            std::string_view(R"MLUA(-- Cheat Engine's .NET data collector, on top of manifold.dotnet. Cheat Engine
+-- names a class by its module handle and TypeDef token; here those are the
+-- handles and tokens manifold.dotnet.classes reports. The collector loads the
+-- .NET runtime on first use. Methods take the collector as an optional first
+-- argument, so both dc.enumDomains() and dc:enumDomains() work.
+
+local collector
+local warnedAllObjects = false
+
+local function dotnet()
+  local api = manifold.dotnet
+  if not api.isLoaded() and not api.load() then
+    return nil
+  end
+  return api
+end
+
+local byToken
+local generation
+
+-- The classes by "module:token", rebuilt when the class list changes.
+local function classByToken(api, module, token)
+  local status = api.status()
+  local key = tostring(status.module) .. ":" .. tostring(status.classes)
+  if not byToken or generation ~= key then
+    byToken = {}
+    for _, class in ipairs(api.classes() or {}) do
+      if class.token ~= 0 then
+        byToken[class.module .. ":" .. class.token] = class
+      end
+    end
+    generation = key
+  end
+  return byToken[tostring(module) .. ":" .. tostring(token)]
+end
+
+local function instanceFields(api, name)
+  local fields = {}
+  local seen = 0
+  while name and name ~= "" and seen < 48 do
+    local class = api.class(name)
+    if not class then break end
+    for _, field in ipairs(class.fields) do
+      fields[#fields + 1] = { Offset = field.offset, FieldType = field.typeCode, Name = field.name, FieldTypeClassName = field.type, IsStatic = false }
+    end
+    name = class.parent
+    seen = seen + 1
+  end
+  table.sort(fields, function(a, b) return a.Offset < b.Offset end)
+  return fields
+end
+
+local function layout(api, address, start, className)
+  local pointer = api.status().pointerSize or 8
+  local data = { StartAddress = start, ClassName = className, ObjectType = 0x12, ElementType = 0, ElementSize = 0, CountOffset = 0, FirstElementOffset = 0 }
+  local object = api.object(start)
+  if object and object.kind == "array" then
+    data.ObjectType = 0x1D
+    data.ElementType = object.elementType
+    data.ElementSize = object.elementSize
+    data.CountOffset = pointer
+    data.FirstElementOffset = object.data - start
+  elseif object and object.kind == "string" then
+    data.ObjectType = 0x0E
+    data.ElementType = 0x03
+    data.ElementSize = 2
+    data.CountOffset = pointer
+    data.FirstElementOffset = pointer + 4
+  end
+  data.Fields = instanceFields(api, className)
+  return data
+end
+
+local function method(name, body)
+  return function(first, ...)
+    if first == collector then
+      return body(...)
+    end
+    return body(first, ...)
+  end
+end
+
+collector = {
+  enumDomains = method("enumDomains", function()
+    if not dotnet() then return {} end
+    return { { DomainHandle = 1, Name = "DefaultDomain" } }
+  end),
+
+  enumModuleList = method("enumModuleList", function()
+    local api = dotnet()
+    if not api then return {} end
+    local list = {}
+    for _, module in ipairs(api.modules() or {}) do
+      list[#list + 1] = { ModuleHandle = module.handle, BaseAddress = module.base, Name = module.path ~= "" and module.path or module.name }
+    end
+    return list
+  end),
+
+  enumTypeDefs = method("enumTypeDefs", function(moduleHandle)
+    local api = dotnet()
+    if not api then return {} end
+    local list = {}
+    for _, class in ipairs(api.classes() or {}) do
+      if class.module == moduleHandle and class.token ~= 0 then
+        list[#list + 1] = { TypeDefToken = class.token, Name = class.name, Flags = 0, Extends = 0 }
+      end
+    end
+    return list
+  end),
+
+  getTypeDefMethods = method("getTypeDefMethods", function(moduleHandle, token)
+    local api = dotnet()
+    local class = api and classByToken(api, moduleHandle, token)
+    local details = class and api.class(class.name)
+    if not details then return {} end
+    local list = {}
+    for _, m in ipairs(details.methods) do
+      list[#list + 1] = { Name = m.name, MethodToken = m.token, Attributes = m.static and 0x10 or 0, ImplementationFlags = 0, ILCode = 0,
+        NativeCode = m.address or 0, SecondaryNativeCode = {} }
+    end
+    return list
+  end),
+
+  getMethodParameters = method("getMethodParameters", function(moduleHandle, methodToken)
+    local api = dotnet()
+    if not api then return {} end
+    for _, class in ipairs(api.classes() or {}) do
+      if class.module == moduleHandle then
+        local details = api.class(class.name)
+        for _, m in ipairs(details and details.methods or {}) do
+          if m.token == methodToken then
+            local list = {}
+            for i = 1, m.params do
+              list[i] = { Name = "arg" .. i, CType = 0 }
+            end
+            return list
+          end
+        end
+      end
+    end
+    return {}
+  end),
+
+  getTypeDefParent = method("getTypeDefParent", function(moduleHandle, token)
+    local api = dotnet()
+    local class = api and classByToken(api, moduleHandle, token)
+    local details = class and api.class(class.name)
+    local parent = details and details.parent ~= "" and api.class(details.parent)
+    if not parent then return nil end
+    return { ModuleHandle = parent.module, TypedefToken = parent.token }
+  end),
+
+  getTypeDefData = method("getTypeDefData", function(moduleHandle, token)
+    local api = dotnet()
+    local class = api and classByToken(api, moduleHandle, token)
+    if not class then return nil end
+    return { ClassName = class.name, ObjectType = 0x12, ElementType = 0, ElementSize = 0, CountOffset = 0, FirstElementOffset = 0,
+      Fields = instanceFields(api, class.name) }
+  end),
+
+  getAddressData = method("getAddressData", function(address)
+    local api = dotnet()
+    local found = api and api.classAt(address)
+    if not found then return nil end
+    return layout(api, address, found.address, found.class)
+  end),
+
+  enumAllObjectsOfType = method("enumAllObjectsOfType", function(moduleHandle, token)
+    local api = dotnet()
+    local class = api and classByToken(api, moduleHandle, token)
+    if not class then return {} end
+    return api.instances(class.handle) or {}
+  end),
+
+  enumAllObjects = method("enumAllObjects", function()
+    -- Every object of a game is millions of entries; the counts per type and
+    -- the objects of one type are what manifold.dotnet.heap and instances give.
+    if not warnedAllObjects then
+      warnedAllObjects = true
+      manifold.log.warning("enumAllObjects is not built in: use manifold.dotnet.heap() for the counts per type and enumAllObjectsOfType or manifold.dotnet.instances for the objects of one type")
+    end
+    return nil
+  end),
+}
+
+rawset(_G, "getDotNetDataCollector", function()
+  return collector
+end)
+)MLUA"),
+        };
+        constexpr std::array<std::string_view, 1> kScript4 = {
             std::string_view(R"MLUA(if string.split == nil then
   string.split = function(text, separator)
     text = tostring(text)
@@ -4527,7 +4718,7 @@ if string.endsWith == nil then
 end
 )MLUA"),
         };
-        constexpr std::array<std::string_view, 2> kScript4 = {
+        constexpr std::array<std::string_view, 2> kScript5 = {
             std::string_view(R"MLUA(local lcl = __manifoldLcl
 local D = lcl.data
 local new, construct, classes, Impl = lcl.new, lcl.construct, lcl.classes, lcl.impl
@@ -5020,11 +5211,11 @@ end
 setmetatable(_G, globalMeta)
 )MLUA"),
         };
-        constexpr std::array<std::string_view, 11> kManifold0 = {
+        constexpr std::array<std::string_view, 12> kManifold0 = {
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 12
+local API_VERSION = 13
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -6806,6 +6997,173 @@ define(speed, "status", {
   return native.speedStatus()
 end)
 
+local dotnet = area("dotnet", "The .NET runtime of a .NET game (.NET Framework or .NET 5 and later, 64-bit and 32-bit), read from outside the game by Manifold's .NET helper through the runtime's own data access library: nothing runs inside the game. `load` reads the classes, as Extensions > .NET does; the other functions need that and return `nil` and an `ME-4104` error before it. A class is named `\"Namespace.Class\"`, a nested one `\"Namespace.Outer+Inner\"`, and `\"Class\"` alone works when it is unique. A field or method of a class is written `\"Class:Name\"`, which also resolves as an address everywhere. Objects move when the garbage collector runs, so an object address is good for the moment; a path from a static field (`value`, `address`) finds the object again each time. Only classes the runtime has loaded are listed, and only methods it has compiled have an address.")
+
+define(dotnet, "load", {
+  returns = "true, or nil, error",
+  doc = "Starts the .NET helper and reads the classes of the opened process's .NET runtime, unless that is done already. Takes a moment for a large game. `ME-4101` when the process has no .NET runtime, `ME-4104` when a Mono or IL2CPP runtime is loaded instead, `ME-4103` when the helper fails.",
+}, function()
+)MLUA"),
+            std::string_view(R"MLUA(  return result(native.dotnetLoad())
+end)
+
+define(dotnet, "unload", {
+  returns = "true",
+  doc = "Ends the .NET helper and forgets the classes. Nothing happens when no .NET runtime is loaded.",
+}, function()
+  return native.dotnetUnload()
+end)
+
+define(dotnet, "isLoaded", {
+  returns = "boolean",
+  doc = "Whether a .NET runtime is loaded for the opened process.",
+}, function()
+  return native.dotnetIsLoaded() == true
+end)
+
+define(dotnet, "status", {
+  returns = "`{ loaded, detected, runtime, module, classes, pointerSize }`",
+  doc = "Where the .NET reader stands: `detected` says the opened process has a .NET runtime at all, `loaded` that its classes are read. `runtime` (such as `\".NET Framework 4.8.9363.0\"`), `module`, `classes` and `pointerSize` are there once it is loaded.",
+}, function()
+  return native.dotnetStatus()
+end)
+
+define(dotnet, "modules", {
+  returns = "list of `{ handle, name, path, base, size, dynamic }`, or nil, error",
+  doc = "The loaded assemblies' modules: the runtime's handle for each, its name without the extension, its file, and where its image is. `dynamic` marks a module made at run time.",
+}, function()
+  return result(native.dotnetModules())
+end)
+
+define(dotnet, "classes", {
+  params = { { name = "filter", type = "string", optional = true } },
+  returns = "list of `{ name, namespace, image, handle, module, token, generic }`, or nil, error",
+  doc = "The loaded classes, or those whose full name contains `filter` (ignoring case). `handle` is the class's method table, the pointer every object of it starts with; `module` and `token` say where it is defined.",
+}, function(filter)
+  return result(native.dotnetClasses(filter))
+end)
+
+define(dotnet, "class", {
+  params = { { name = "name", type = "string" } },
+  returns = "`{ name, namespace, image, parent, handle, module, token, generic, fields, statics, methods }` or nil, or nil, error",
+  doc = "A class with its members. `fields` lists the instance fields declared by the class (not its parents') as `{ name, type, typeCode, offset, valueSize, typeHandle }`, the offset counted from the object's start; `statics` lists the static fields as `{ name, type, typeCode, address }`, without `address` while the runtime has made no storage for it; `methods` lists `{ name, address, handle, token, params, static }`, `address` only for a method the runtime has compiled. nil when no class has the name.",
+}, function(name)
+  return many(native.dotnetClass(name))
+end)
+
+define(dotnet, "classAt", {
+  params = { { name = "address", type = "address" } },
+  returns = "`{ class, address, offset }` or nil, or nil, error",
+  doc = "The object an address is in: its class, where it starts and the address's offset in it. An address within a few KB after an object's start finds it, the way Structure Dissect does. nil when no object is there.",
+}, function(address)
+  return many(native.dotnetClassAt(address))
+end)
+
+define(dotnet, "object", {
+  params = { { name = "address", type = "address" } },
+  returns = "`{ address, class, handle, kind, size, length, elementClass, elementType, elementSize, data, rank }` or nil, or nil, error",
+  doc = "What the runtime says about the object that starts at the address. `kind` is `object`, `string`, `array` or `free` (unused heap space); `length` is there for a string (its characters) and an array (its elements), and an array also has its element class, element type code, element size, `data` (the first element) and `rank`. nil when no object starts there.",
+}, function(address)
+  return many(native.dotnetObject(address))
+end)
+
+define(dotnet, "fields", {
+  params = { { name = "address", type = "address" } },
+  returns = "list of `{ name, type, typeCode, offset, valueSize, typeHandle }`, or nil, error",
+  doc = "The instance fields of the object at the address, its parents' included, sorted by offset. `ME-4105` when no .NET object is there.",
+}, function(address)
+  return result(native.dotnetFields(address))
+end)
+
+define(dotnet, "methodAt", {
+  params = { { name = "address", type = "address" } },
+  returns = "`{ name, start, size }` or nil, or nil, error",
+  doc = "The compiled method whose code holds the address, as `\"Namespace.Class:Method\"`, with its code's start and size. nil for an address in no managed code.",
+}, function(address)
+  return many(native.dotnetMethodAt(address))
+end)
+
+define(dotnet, "methodAddress", {
+  params = {
+    { name = "class", type = "string" },
+    { name = "method", type = "string" },
+  },
+  returns = "address or nil, or nil, error",
+  doc = "The code of a method once the runtime has compiled it, the same address `\"Class:Method\"` resolves to; with overloads, the first one that has code. nil when no such method has run yet.",
+}, function(class, method)
+  return many(native.dotnetMethodAddress(class, method))
+end)
+
+define(dotnet, "staticAddress", {
+  params = {
+    { name = "class", type = "string" },
+    { name = "field", type = "string" },
+  },
+  returns = "address or nil, or nil, error",
+  doc = "Where a static field's value is, the same address `\"Class:Field\"` resolves to. A static field of a reference type holds a reference there, a static struct a reference to a boxed copy. nil when the class has no such field or no storage for it yet.",
+}, function(class, field)
+  return many(native.dotnetStaticAddress(class, field))
+end)
+
+define(dotnet, "fieldOffset", {
+  params = {
+    { name = "class", type = "string" },
+    { name = "field", type = "string" },
+  },
+  returns = "integer or nil, or nil, error",
+  doc = "The offset of an instance field from the start of an object of the class, inherited fields included. An auto-property's backing field is also found by the property's name. nil when there is no such field.",
+}, function(class, field)
+  return many(native.dotnetFieldOffset(class, field))
+end)
+
+define(dotnet, "value", {
+  params = {
+    { name = "base", type = "any" },
+    { name = "path", type = "string", optional = true },
+  },
+  returns = "number, boolean, string, address or nil, or nil, error",
+  doc = "Reads a value by following a path. `base` is an object address or a static field as `\"Class:Field\"`; `path` names fields by name and array elements by index, as in `\"Players[0].statLife\"` or `\".Inventory[2].Name\"`. A number, a bool, a char's code and a string's text come back as Lua values, another object as its address, null as nil, an inline struct as its address. A step that does not exist, or a null on the way, gives `ME-4105`. The path is followed again on every call, so it keeps working while the garbage collector moves objects.",
+}, function(base, path)
+  return many(native.dotnetValue(base, path))
+end)
+
+define(dotnet, "address", {
+  params = {
+    { name = "base", type = "any" },
+    { name = "path", type = "string", optional = true },
+  },
+  returns = "address, or nil, error",
+  doc = "Where the value a path reaches is stored, for `manifold.memory.read` and `write` or the address list; the path works as for `value`. Without a path it is the base itself (the object, or the static field's storage). Good until the garbage collector moves the object; follow the path again for the next use.",
+}, function(base, path)
+  return result(native.dotnetAddress(base, path))
+end)
+
+define(dotnet, "text", {
+  params = { { name = "address", type = "address" } },
+  returns = "string or nil, or nil, error",
+  doc = "The text of the `System.String` object at the address, at most a million characters; nil when no string is there.",
+}, function(address)
+  return many(native.dotnetText(address))
+end)
+
+define(dotnet, "heap", {
+  returns = "`{ objects, bytes, segments, seconds, types }`, or nil, error",
+  doc = "Walks the whole GC heap and counts the objects per type: `types` lists `{ name, handle, count, bytes }`, most bytes first. The game keeps running and the walk takes a few seconds for a large heap, during which the script waits.",
+}, function()
+  return result(native.dotnetHeap())
+end)
+
+define(dotnet, "instances", {
+  params = {
+    { name = "class", type = "string|integer" },
+    { name = "limit", type = "integer", optional = true },
+  },
+  returns = "list of addresses, or nil, error",
+  doc = "The objects of exactly one class on the GC heap (objects of derived classes have another class), at most `limit` (100000 by default, 1000000 at most). The class is given by name or by its handle. Walks the whole heap like `heap`; an object found here may already be dead and not collected yet.",
+}, function(class, limit)
+  return result(native.dotnetInstances(class, limit))
+end)
+
 local doc = area("doc", "The documentation behind completion, signature help, hover tooltips and the docs panel. Manifold, Cheat Engine and Lua functions are documented already. A module documents its own functions with `register`, or writes LuaLS annotations (`---@param name type`) above them and calls `registerModule`. A script never replaces Manifold's own documentation.")
 
 define(doc, "register", {
@@ -6826,8 +7184,7 @@ define(doc, "registerModule", {
     { name = "options", type = "table", optional = true, keys = { doc = "string" } },
   },
   returns = "number of registered functions, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Documents every function of a module table under `path` (such as `\"ManifoldGodot\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
+  doc = "Documents every function of a module table under `path` (such as `\"ManifoldGodot\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
 }, function(path, module, options)
   return docResult(native.docRegisterModule(path, module, options))
 end)
@@ -6871,7 +7228,8 @@ define(doc, "find", {
   if options.limit ~= nil and options.limit < 0 then
     misuse("manifold.doc.find: options.limit must be 0 or more")
   end
-  return docResult(native.docFind(query, options.limit or 50, options.kind or ""))
+)MLUA"),
+            std::string_view(R"MLUA(  return docResult(native.docFind(query, options.limit or 50, options.kind or ""))
 end)
 
 define(doc, "annotations", {
@@ -7100,8 +7458,7 @@ local function keepHandlers(entry, options)
   end
 end
 
-)MLUA"),
-            std::string_view(R"MLUA(local function dropEntry(id)
+local function dropEntry(id)
   local entry = uiEntries[id]
   if not entry then
     return
@@ -7171,7 +7528,8 @@ end
 local WIDGET_DOC = "manifold.ui.window.Widget."
 
 widgetObject = function(entry)
-  local prefix = ("widget(%s %d)"):format(entry.kind, entry.id)
+)MLUA"),
+            std::string_view(R"MLUA(  local prefix = ("widget(%s %d)"):format(entry.kind, entry.id)
   local proxy, members = strict(prefix)
   local function method(name, spec, body)
     bind(proxy, prefix .. "." .. name, members, name, spec, body, WIDGET_DOC .. name)
@@ -7401,8 +7759,7 @@ native.docDefine(nil, "manifold.ui.window.Window", {
   doc = "`manifold.ui.window.create` returns a window object: dot calls only, read-only, unknown names raise. A call on a window that is gone (removed, or its script ran again) returns `nil, error` with code `ME-7010`.",
 })
 local WINDOW_METHOD_DOCS = {
-)MLUA"),
-            std::string_view(R"MLUA(  add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object)." },
+  add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object)." },
   clear = { returns = "boolean", doc = "Removes every widget of the window." },
   remove = { returns = "boolean", doc = "Removes the window and its widgets for good." },
   update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, opacity (`opacity`, `inactiveOpacity`), update interval or handlers." },
@@ -7427,7 +7784,8 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
     "- `text` (`text`, `color`, `wrap`, `mono`), `heading` (`text`, `icon`), `separator`, `spacer`.",
     "- `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`.",
-    "- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `onSubmit(text, widget)` on Enter), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number): all call `onChange(value, widget)`.",
+)MLUA"),
+            std::string_view(R"MLUA(    "- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `onSubmit(text, widget)` on Enter), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
@@ -7582,8 +7940,7 @@ local NOTICE_KEYS = { level = "string", progress = "number", sticky = "boolean" 
 
 local notice = subarea(ui, "notice", "Short notices in the lower right corner, the same ones Manifold shows. A notice fades after a few seconds unless it is `sticky` or has a `progress`; a right click dismisses it.")
 
-)MLUA"),
-            std::string_view(R"MLUA(local function checkLevel(path, level)
+local function checkLevel(path, level)
   if level ~= nil then
     local known = false
     for _, name in ipairs(NOTICE_LEVELS) do
@@ -7649,7 +8006,8 @@ define(notice, "show", {
   local handle = noticeObject(entry)
   remember(owner, "notice" .. id, handle.remove)
   return handle
-end)
+)MLUA"),
+            std::string_view(R"MLUA(end)
 
 native.docDefine(nil, "manifold.ui.notice.Notice", { kind = "class", title = "Notice objects", doc = "`manifold.ui.notice.show` returns a notice object." })
 native.docDefine(nil, "manifold.ui.notice.Notice.update", { params = { { name = "options", type = "table", keys = { text = "string", level = "string", progress = "number", sticky = "boolean" } } }, returns = "boolean", doc = "Changes the text, level, progress or stickiness, and shows the notice for its full time again." })
@@ -7873,8 +8231,7 @@ local function unloadModule(key)
   end
   local owned = moduleOwned[key]
   moduleOwned[key] = nil
-)MLUA"),
-            std::string_view(R"MLUA(  if owned then
+  if owned then
     for _, remove in pairs(owned) do
       pcall(remove)
     end
@@ -7961,7 +8318,8 @@ end
 rawset(_G, "require", moduleRequire)
 pcall(native.docBind, moduleRequire, "require")
 
-local moduleArea = area("module", "The autorun modules: the scripts in the `autorun` folder and the modules in `autorun\\modules`. A module is named by the `NAME` line of its header, or by its file or folder name. Extensions > Modules shows the same list. [AUTORUN.md](AUTORUN.md) describes the folder layout, the header and what `require` finds.")
+)MLUA"),
+            std::string_view(R"MLUA(local moduleArea = area("module", "The autorun modules: the scripts in the `autorun` folder and the modules in `autorun\\modules`. A module is named by the `NAME` line of its header, or by its file or folder name. Extensions > Modules shows the same list. [AUTORUN.md](AUTORUN.md) describes the folder layout, the header and what `require` finds.")
 
 local MODULE_INFO = "a table with `name`, `version`, `author`, `description`, `category`, `kind` (`loose`, `file` or `folder`), `origin` (`shipped` or `user`), `state` (`loaded`, `disabled`, `failed`, `blocked`, `held`, `superseded`, `builtIn` or `pending`), `reason`, `enabled`, `changed`, `path` (the module's folder), `entry` (its entry file), `dataPath` (its folder under `autorun\\data`), `loadTime` in milliseconds and `requires` (a list of `{ name, version }`)"
 
@@ -8814,12 +9172,13 @@ function utf8.codepoint(s, i, j) end
 )MLUA"),
         };
 
-        const std::array<CompatScript, 5> kScripts = {
+        const std::array<CompatScript, 6> kScripts = {
             CompatScript{ "Defines.lua", std::span<const std::string_view>(kScript0) },
             CompatScript{ "Classes.lua", std::span<const std::string_view>(kScript1) },
             CompatScript{ "Lcl.lua", std::span<const std::string_view>(kScript2) },
-            CompatScript{ "Extensions.lua", std::span<const std::string_view>(kScript3) },
-            CompatScript{ "Functions.lua", std::span<const std::string_view>(kScript4) },
+            CompatScript{ "DotNet.lua", std::span<const std::string_view>(kScript3) },
+            CompatScript{ "Extensions.lua", std::span<const std::string_view>(kScript4) },
+            CompatScript{ "Functions.lua", std::span<const std::string_view>(kScript5) },
         };
 
         const std::array<CompatScript, 2> kManifoldScripts = {

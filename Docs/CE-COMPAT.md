@@ -62,9 +62,9 @@ Manifold Engine has no built-in C or C# compiler.
 
 ### .NET
 
-Manifold Engine reads .NET games from outside (the Mono / .NET window, Class:Method and Class:StaticField addresses, Structure Dissect) but has no data collector object and does not inject .NET code.
+Manifold Engine reads .NET games from outside (manifold.dotnet, getDotNetDataCollector, the Mono / .NET window) but does not run .NET code in the game or in itself.
 
-`dotNetExecuteClassMethod`, `getDotNetDataCollector`, `injectDotNetDLL`
+`dotNetExecuteClassMethod`, `injectDotNetDLL`
 
 ### ceserver
 

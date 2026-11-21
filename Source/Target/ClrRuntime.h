@@ -45,6 +45,7 @@ namespace Manifold::Target
         Result<ManagedHeap> ReadHeap() override;
         Result<ManagedInstances> Instances(std::uint64_t klass, std::uint32_t limit) override;
         std::optional<ManagedObject> ObjectAt(std::uint64_t address) override;
+        std::vector<ManagedModule> Modules() override { return m_modules; }
 
     private:
         struct CodeEntry
@@ -74,5 +75,6 @@ namespace Manifold::Target
         // The images of managed assemblies: precompiled code (ReadyToRun,
         // NGEN) lives inside them, unlike the JIT's.
         std::vector<std::pair<std::uint64_t, std::uint64_t>> m_images;
+        std::vector<ManagedModule> m_modules;
     };
 }
