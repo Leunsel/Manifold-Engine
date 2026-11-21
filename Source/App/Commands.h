@@ -47,6 +47,7 @@ namespace Manifold
         OpenUnreal,
         OpenProfiler,
         OpenPointerScan,
+        OpenStaticPointers,
 
         NewTable,
         OpenLastProcess,

@@ -567,6 +567,7 @@ namespace Manifold::UI
                 workspace.OpenMemoryViewer(0, false, true);
             Item(ICON_FA_SITEMAP "  Structure Dissect", Command::OpenStructureDissect);
             Item(ICON_FA_ROUTE "  Pointer Scan", Command::OpenPointerScan);
+            Item(ICON_FA_THUMBTACK "  Find Static Pointers", Command::OpenStaticPointers);
             Item(ICON_FA_CODE "  Auto Assembler", Command::OpenAutoAssembler);
             Item(ICON_FA_MOON "  Lua Engine", Command::OpenLuaEngine);
             Item(ICON_FA_STREAM "  Log", Command::OpenLog);
@@ -1154,6 +1155,13 @@ namespace Manifold::UI
             RunResultCommand(Command::DisassembleResult, index);
         if (CommandItem(ICON_FA_SITEMAP "  Dissect Data at This Address", Command::DissectResult))
             RunResultCommand(Command::DissectResult, index);
+        if (Scan::ScanRecord focus; m_engine.Scanner().Record(index, focus))
+        {
+            if (ImGui::MenuItem(ICON_FA_THUMBTACK "  Find Static Pointers to This Address"))
+                m_workspace.FindStaticPointers(focus.Address);
+            if (ImGui::MenuItem(ICON_FA_ROUTE "  Pointer Scan for This Address"))
+                m_workspace.OpenPointerScan(focus.Address);
+        }
         ImGui::Separator();
         if (CommandItem(ICON_FA_EYE "  Find Out What Accesses This Address", Command::ResultAccesses))
             RunResultCommand(Command::ResultAccesses, index);
@@ -3441,6 +3449,8 @@ namespace Manifold::UI
                 RunRecordCommand(Command::DisassembleRecord, &record);
             if (CommandItem(ICON_FA_SITEMAP "  Dissect Data at This Address", Command::DissectRecord))
                 RunRecordCommand(Command::DissectRecord, &record);
+            if (ImGui::MenuItem(ICON_FA_THUMBTACK "  Find Static Pointers to This Address"))
+                m_workspace.FindStaticPointers(record.ResolvedAddress);
             if (ImGui::MenuItem(ICON_FA_ROUTE "  Pointer Scan for This Address"))
                 m_workspace.OpenPointerScan(record.ResolvedAddress);
             if (CommandItem(ICON_FA_EYE "  Find Out What Accesses This Address", Command::RecordAccesses))

@@ -226,6 +226,8 @@ namespace Manifold
                 m_workspace->OpenByteSearch();
             else if (window == "pointerscan")
                 m_workspace->OpenPointerScan();
+            else if (window == "staticpointers")
+                m_workspace->OpenStaticPointers();
             else if (window == "shortcuts")
                 m_workspace->OpenShortcuts();
             else if (window == "keyboard")

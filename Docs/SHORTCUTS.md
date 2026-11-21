@@ -27,6 +27,7 @@ Works in every window, unless the focused window uses the same keys for somethin
 | `Ctrl+Alt+U` | Unreal Engine | `OpenUnreal` | Manifold |
 | `Ctrl+Shift+F12` | Profiler and Diagnostics | `OpenProfiler` | Manifold |
 | `Ctrl+Alt+P` | Pointer Scan | `OpenPointerScan` | Manifold |
+| `Ctrl+Alt+K` | Find Static Pointers | `OpenStaticPointers` | Manifold |
 
 ## Main Window
 

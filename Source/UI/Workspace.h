@@ -116,6 +116,7 @@ namespace Manifold::UI
         void OpenStructure(std::uint64_t address, const std::string& structure = {}, bool newWindow = false);
         std::uint32_t StructureDock(const StructureWindow& opening);
         void FindStaticPointers(std::uint64_t address);
+        void OpenStaticPointers();
         void OpenPointerScan(std::uint64_t address = 0);
         void OpenScript(std::string script, int recordId = kNoRecord, bool lua = false);
         std::uint32_t ScriptEditorDock(const ScriptWindow& opening);

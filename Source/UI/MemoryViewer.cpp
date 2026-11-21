@@ -534,6 +534,8 @@ namespace Manifold::UI
             item(ICON_FA_BAND_AID "  Scan for Patches", Command::ScanForPatches);
             if (CommandItem(ICON_FA_ROUTE "  Pointer Scan", Command::OpenPointerScan))
                 m_workspace.OpenPointerScan();
+            if (CommandItem(ICON_FA_THUMBTACK "  Find Static Pointers", Command::OpenStaticPointers))
+                m_workspace.OpenStaticPointers();
             ImGui::Separator();
             item(ICON_FA_CODE "  Auto Assembler", Command::ViewerAutoAssemble);
             item(ICON_FA_MOON "  Lua Engine", Command::ViewerLuaEngine);
@@ -2413,6 +2415,10 @@ namespace Manifold::UI
         if (ImGui::MenuItem(ICON_FA_CODE "  Disassemble This Address"))
             Navigate(address);
         item(ICON_FA_SITEMAP "  Dissect Data at This Address", Command::DissectData);
+        if (ImGui::MenuItem(ICON_FA_THUMBTACK "  Find Static Pointers to This Address"))
+            m_workspace.FindStaticPointers(address);
+        if (ImGui::MenuItem(ICON_FA_ROUTE "  Pointer Scan for This Address"))
+            m_workspace.OpenPointerScan(address);
         ImGui::Separator();
         item(ICON_FA_EYE "  Find Out What Accesses This Address", Command::HexAccesses);
         item(ICON_FA_PEN "  Find Out What Writes to This Address", Command::HexWrites);

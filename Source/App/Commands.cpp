@@ -38,6 +38,7 @@ namespace Manifold
             { OpenUnreal, "OpenUnreal", Scope::Global, "Unreal Engine", Ctrl | Alt | ImGuiKey_U, 0, Own },
             { OpenProfiler, "OpenProfiler", Scope::Global, "Profiler and Diagnostics", Ctrl | Shift | ImGuiKey_F12, 0, Own },
             { OpenPointerScan, "OpenPointerScan", Scope::Global, "Pointer Scan", Ctrl | Alt | ImGuiKey_P, 0, Own },
+            { OpenStaticPointers, "OpenStaticPointers", Scope::Global, "Find Static Pointers", Ctrl | Alt | ImGuiKey_K, 0, Own },
 
             { NewTable, "NewTable", Scope::Main, "New Table", Ctrl | ImGuiKey_N, 0, Own },
             { OpenLastProcess, "OpenLastProcess", Scope::Main, "Open Last Process", Ctrl | Shift | ImGuiKey_P, 0, Own },

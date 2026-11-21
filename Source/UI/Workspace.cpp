@@ -221,6 +221,7 @@ namespace Manifold::UI
         case Command::OpenMono:
         case Command::OpenUnreal:
         case Command::OpenPointerScan:
+        case Command::OpenStaticPointers:
         case Command::OpenLog:
             return !m_engine.Options().ReleaseMode;
         default:
@@ -247,6 +248,7 @@ namespace Manifold::UI
         case Command::OpenMono: OpenMono(); break;
         case Command::OpenUnreal: OpenUnreal(); break;
         case Command::OpenPointerScan: OpenPointerScan(); break;
+        case Command::OpenStaticPointers: OpenStaticPointers(); break;
         case Command::OpenLog: OpenLog(); break;
         case Command::OpenProfiler: OpenProfiler(); break;
         default: break;
@@ -572,6 +574,13 @@ namespace Manifold::UI
         if (!m_staticPointers)
             m_staticPointers = std::make_unique<StaticPointersWindow>(*this);
         m_staticPointers->Search(address);
+    }
+
+    void Workspace::OpenStaticPointers()
+    {
+        if (!m_staticPointers)
+            m_staticPointers = std::make_unique<StaticPointersWindow>(*this);
+        m_staticPointers->Show();
     }
 
     void Workspace::OpenPointerScan(std::uint64_t address)
