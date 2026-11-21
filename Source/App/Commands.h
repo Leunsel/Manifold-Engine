@@ -50,6 +50,7 @@ namespace Manifold
         OpenPointerScan,
         OpenStaticPointers,
         OpenFormEditor,
+        OpenOpcodeConverter,
 
         NewTable,
         OpenLastProcess,
@@ -175,6 +176,7 @@ namespace Manifold
         DefineStructure,
         AddStructureColumn,
         CollapseStructure,
+        StructureGotoAddress,
         ChangeFieldValue,
         RenameField,
         InsertField,
@@ -216,6 +218,10 @@ namespace Manifold
         EditorMoveLinesDown,
         EditorDeleteLines,
         EditorGotoLine,
+        EditorFind,
+        EditorReplace,
+        EditorFindNext,
+        EditorFindPrevious,
 
         FlowGraphFit,
         FlowGraphActualSize,

@@ -3,6 +3,7 @@
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/Text.h"
+#include "Lua/LuaEngine.h"
 #include "Table/ManagedStructures.h"
 #include "Target/ClrLink.h"
 #include "Target/ClrMetadata.h"
@@ -141,6 +142,126 @@ namespace Manifold::Tests
         {
             const auto found = std::find_if(fields.begin(), fields.end(), [&](const Target::MonoField& field) { return field.Name == name; });
             return found == fields.end() ? nullptr : &*found;
+        }
+
+        void LuaCheck(Engine& engine, const std::string& name, const std::string& code)
+        {
+            std::string result;
+            const Status status = engine.Lua().RunWithResult(code, name, result);
+            CHECK_MSG(status.Ok() && result == "ok", name + ": " + (status.Ok() ? result : status.Text));
+        }
+
+        // manifold.dotnet and Cheat Engine's data collector against the fake
+        // game, while its runtime is loaded.
+        void CheckLua(Engine& engine, const std::string& label, std::uint64_t player, std::uint64_t inventory, std::uint64_t name, std::uint64_t pointer)
+        {
+            const std::string values = Format("local PLAYER, INVENTORY, NAME, P = 0x%llX, 0x%llX, 0x%llX, %llu\n", static_cast<unsigned long long>(player),
+                static_cast<unsigned long long>(inventory), static_cast<unsigned long long>(name), static_cast<unsigned long long>(pointer));
+            LuaCheck(engine, label + " manifold.dotnet", values + R"LUA(
+                local d = manifold.dotnet
+                if not d.isLoaded() then return "not loaded" end
+                local s = d.status()
+                if not s.loaded or not s.detected or s.classes < 200 or s.pointerSize ~= P then return "status" end
+                local W = "Manifold.FakeGame.World:"
+                local function eq(got, want, what) if got ~= want then error(what .. ": " .. tostring(got)) end end
+                eq(d.value(W .. "Seed"), 4242, "seed")
+                if math.abs(d.value(W .. "Gravity") - 9.81) > 1e-9 then return "gravity" end
+                eq(d.value(W .. "Title"), "Fake World", "title")
+                eq(d.value(W .. "LocalPlayer"), PLAYER, "player")
+                eq(d.value(W .. "LocalPlayer", "Health"), 1234, "health")
+                eq(d.value(W .. "LocalPlayer", "Name"), "Hero", "name")
+                eq(d.value(W .. "LocalPlayer", "Alive"), true, "alive")
+                eq(d.value(W .. "LocalPlayer", "Side"), 2, "side")
+                eq(d.value(W .. "LocalPlayer", "Score"), 123456789012, "score")
+                eq(d.value(W .. "LocalPlayer", "Speed"), 2.5, "speed")
+                eq(d.value(W .. "LocalPlayer", "Position.Y"), -2.25, "position")
+                eq(d.value(W .. "LocalPlayer", "Id"), 7, "inherited")
+                eq(d.value(W .. "Players", "[0].Inventory[0].Name"), "Torch", "torch")
+                eq(d.value(W .. "LocalPlayer", ".Bag._items[0].Name"), "Sword", "sword")
+                eq(d.value(W .. "LocalPlayer", "Active.Time"), 600, "nested class")
+                eq(d.value(W .. "Spawn", "X"), 100, "boxed static struct")
+                eq(d.value(W .. "LocalPlayer", "Inventory[1]"), nil, "null element")
+                eq(d.value(PLAYER, "Health"), 1234, "object base")
+                local v, e = d.value(W .. "LocalPlayer", "Inventory[1].Name")
+                if v ~= nil or not e or e.code ~= "ME-4105" then return "null step" end
+                v, e = d.value(W .. "LocalPlayer", "Nope")
+                if v ~= nil or not e or e.code ~= "ME-4105" then return "missing field" end
+                v, e = d.value(W .. "LocalPlayer", "Inventory[9]")
+                if v ~= nil or not e then return "index past the end" end
+                v, e = d.value("Manifold.FakeGame.World:Nope")
+                if v ~= nil or not e or e.code ~= "ME-4105" then return "missing static" end
+                if pcall(d.value) then return "no base accepted" end
+                local offset = d.fieldOffset("Manifold.FakeGame.Player", "Health")
+                eq(d.address(W .. "LocalPlayer", "Health"), PLAYER + offset, "address")
+                eq(d.address(PLAYER), PLAYER, "address of a base")
+                eq(readInteger(d.staticAddress("Manifold.FakeGame.World", "Seed")), 4242, "static address")
+                if d.fieldOffset("Manifold.FakeGame.Player", "Id") == nil then return "inherited offset" end
+                eq(d.fieldOffset("Manifold.FakeGame.Player", "Nope"), nil, "missing offset")
+                local c = d.class("Manifold.FakeGame.Player")
+                if not c or c.parent ~= "Manifold.FakeGame.Entity" or c.token == 0 or c.module == 0 or c.image ~= "ManifoldFakeGame" then return "class" end
+                eq(d.class("Nope.Nothing"), nil, "unknown class")
+                local hurt
+                for _, m in ipairs(c.methods) do if m.name == "Hurt" then hurt = m end end
+                if not hurt or not hurt.address or hurt.params ~= 1 or hurt.static then return "methods" end
+                eq(d.methodAddress("Manifold.FakeGame.Player", "Hurt"), hurt.address, "method address")
+                eq(d.methodAddress("Manifold.FakeGame.Player", "NeverCalled"), nil, "not compiled")
+                eq(d.methodAt(hurt.address + 1).name, "Manifold.FakeGame.Player:Hurt", "method at")
+                local world = d.class("Manifold.FakeGame.World")
+                local seed
+                for _, f in ipairs(world.statics) do if f.name == "Seed" then seed = f end end
+                if not seed or not seed.address or seed.type ~= "int" then return "statics" end
+                local found = false
+                for _, m in ipairs(d.modules()) do if m.handle == c.module and m.name == "ManifoldFakeGame" then found = true end end
+                if not found then return "modules" end
+                if #d.classes("manifold.fakegame") < 7 then return "classes filter" end
+                local at = d.classAt(PLAYER + P)
+                if not at or at.class ~= "Manifold.FakeGame.Player" or at.address ~= PLAYER or at.offset ~= P then return "classAt" end
+                local o = d.object(INVENTORY)
+                if not o or o.kind ~= "array" or o.length ~= 3 or o.elementClass ~= "Manifold.FakeGame.Item" or o.data ~= INVENTORY + 2 * P then return "object" end
+                eq(d.object(PLAYER).kind, "object", "object kind")
+                eq(d.object(PLAYER + P), nil, "no object")
+                eq(d.text(NAME), "Hero", "text")
+                eq(d.text(PLAYER), nil, "not a string")
+                if #d.fields(PLAYER) < 10 then return "fields" end
+                local h = d.heap()
+                local players = 0
+                for _, t in ipairs(h.types) do if t.name == "Manifold.FakeGame.Player" then players = t.count end end
+                if players ~= 1 or h.objects < 100 then return "heap" end
+                eq(#d.instances("Manifold.FakeGame.Item"), 2, "instances")
+                eq(d.instances(c.handle)[1], PLAYER, "instances by handle")
+                eq(#d.instances("Manifold.FakeGame.Item", 1), 1, "instances limit")
+                return "ok")LUA");
+            LuaCheck(engine, label + " getDotNetDataCollector", values + R"LUA(
+                local d = manifold.dotnet
+                local c = d.class("Manifold.FakeGame.Player")
+                local dc = getDotNetDataCollector()
+                local domains = dc.enumDomains()
+                if #domains ~= 1 or domains[1].DomainHandle == nil then return "domains" end
+                local module
+                for _, m in ipairs(dc:enumModuleList(domains[1].DomainHandle)) do if m.ModuleHandle == c.module then module = m end end
+                if not module or not module.Name:find("ManifoldFakeGame") then return "modules" end
+                local typedef
+                for _, t in ipairs(dc.enumTypeDefs(c.module)) do if t.Name == "Manifold.FakeGame.Player" then typedef = t end end
+                if not typedef or typedef.TypeDefToken ~= c.token then return "typedefs" end
+                local hurt
+                for _, m in ipairs(dc.getTypeDefMethods(c.module, c.token)) do if m.Name == "Hurt" then hurt = m end end
+                if not hurt or hurt.NativeCode == 0 then return "methods" end
+                local params = dc.getMethodParameters(c.module, hurt.MethodToken)
+                if #params ~= 1 then return "parameters " .. #params end
+                local data = dc.getTypeDefData(c.module, c.token)
+                local health
+                for _, f in ipairs(data.Fields) do if f.Name == "Health" then health = f end end
+                if not health or health.Offset ~= d.fieldOffset("Manifold.FakeGame.Player", "Health") then return "typedef data" end
+                local at = dc.getAddressData(PLAYER + 4)
+                if not at or at.StartAddress ~= PLAYER or at.ClassName ~= "Manifold.FakeGame.Player" then return "address data" end
+                local array = dc.getAddressData(INVENTORY)
+                if not array or array.ElementSize ~= P or array.FirstElementOffset ~= 2 * P or array.CountOffset ~= P then return "array data" end
+                local parent = dc.getTypeDefParent(c.module, c.token)
+                local entity = d.class("Manifold.FakeGame.Entity")
+                if not parent or parent.TypedefToken ~= entity.token or parent.ModuleHandle ~= entity.module then return "parent" end
+                local objects = dc.enumAllObjectsOfType(c.module, c.token)
+                if #objects ~= 1 or objects[1] ~= PLAYER then return "objects of type" end
+                return "ok")LUA");
         }
 
         const Target::MonoMethod* Method(const Target::MonoClass& info, const std::string& name)
@@ -332,6 +453,13 @@ namespace Manifold::Tests
             const Target::Process& process = *engine.Process();
             const std::uint64_t pointer = static_cast<std::uint64_t>(process.PointerSize());
             CHECK_EQ(Target::MonoBridge::DetectRuntime(process), Target::ManagedRuntime::Clr);
+            LuaCheck(engine, label + " before loading", R"LUA(
+                local v, e = manifold.dotnet.classes()
+                if v ~= nil or not e or e.code ~= "ME-4104" then return "classes before load: " .. tostring(e and e.code) end
+                if manifold.dotnet.isLoaded() then return "loaded" end
+                local s = manifold.dotnet.status()
+                if s.loaded or not s.detected then return "status" end
+                return "ok")LUA");
             const auto began = std::chrono::steady_clock::now();
             const Status loaded = engine.Managed().Ensure();
             const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
@@ -588,6 +716,15 @@ namespace Manifold::Tests
             const std::uint64_t native = process.FindExport("kernel32.dll", "GetTickCount");
             CHECK(native && !mono.MethodNameAt(native).has_value());
 
+            CheckLua(engine, label, playerAddress, target.Addresses["inventory"], target.Addresses["name"], pointer);
+            LuaCheck(engine, label + " unload and load", R"LUA(
+                manifold.dotnet.unload()
+                if manifold.dotnet.isLoaded() then return "still loaded" end
+                local ok, e = manifold.dotnet.load()
+                if not ok then return "load: " .. tostring(e) end
+                if manifold.dotnet.value("Manifold.FakeGame.World:Seed") ~= 4242 then return "after reload" end
+                return "ok")LUA");
+
             engine.Managed().Stop(true);
             CHECK(!mono.Present());
             const auto stopDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -787,6 +924,18 @@ namespace Manifold::Tests
                         mono.MethodNameAt(method.Address + 8).value_or("?").c_str(), engine.Describe(method.Address + 8).c_str());
                     break;
                 }
+            }
+            // --lua=<file>: a script run once the runtime is loaded, for a
+            // look through manifold.dotnet; it returns the text to print.
+            for (const std::string& argument : arguments)
+            {
+                if (argument.rfind("--lua=", 0) != 0)
+                    continue;
+                std::ifstream file(std::filesystem::path(argument.substr(6)), std::ios::binary);
+                const std::string code((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                std::string text;
+                const Status ran = engine.Lua().RunWithResult(code, "clr-dump", text);
+                std::printf("lua: %s\n%s\n", ran.Ok() ? "ok" : ran.Text.c_str(), text.c_str());
             }
             const auto heapBegan = std::chrono::steady_clock::now();
             const Result<Target::ManagedHeap> heap = mono.ReadHeap();

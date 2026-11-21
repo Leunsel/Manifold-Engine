@@ -40,6 +40,7 @@ namespace Manifold
             { OpenPointerScan, "OpenPointerScan", Scope::Global, "Pointer Scan", Ctrl | Alt | ImGuiKey_P, 0, Own },
             { OpenStaticPointers, "OpenStaticPointers", Scope::Global, "Find Static Pointers", Ctrl | Alt | ImGuiKey_K, 0, Own },
             { OpenFormEditor, "OpenFormEditor", Scope::Global, "Form Editor", Ctrl | Alt | ImGuiKey_G, 0, Own },
+            { OpenOpcodeConverter, "OpenOpcodeConverter", Scope::Global, "Opcode Converter", Ctrl | Alt | ImGuiKey_O, 0, Own },
 
             { NewTable, "NewTable", Scope::Main, "New Table", Ctrl | ImGuiKey_N, 0, Own },
             { OpenLastProcess, "OpenLastProcess", Scope::Main, "Open Last Process", Ctrl | Shift | ImGuiKey_P, 0, Own },
@@ -165,6 +166,7 @@ namespace Manifold
             { DefineStructure, "DefineStructure", Scope::Structure, "Define New Structure", Ctrl | ImGuiKey_N, 0, CE },
             { AddStructureColumn, "AddStructureColumn", Scope::Structure, "Add Address to Compare", Ctrl | ImGuiKey_A, 0, CE },
             { CollapseStructure, "CollapseStructure", Scope::Structure, "Collapse All Pointers", Ctrl | Alt | ImGuiKey_C, 0, CE },
+            { StructureGotoAddress, "StructureGotoAddress", Scope::Structure, "Go to Address", Ctrl | ImGuiKey_G, 0, Own },
             { ChangeFieldValue, "ChangeFieldValue", Scope::Structure, "Change Value", ImGuiKey_Enter, 0, CE },
             { RenameField, "RenameField", Scope::Structure, "Rename Field", Ctrl | ImGuiKey_Enter, ImGuiKey_F2, CE },
             { InsertField, "InsertField", Scope::Structure, "Insert 4 Bytes", ImGuiKey_Insert, 0, CE },
@@ -206,6 +208,10 @@ namespace Manifold
             { EditorMoveLinesDown, "EditorMoveLinesDown", Scope::CodeEditor, "Move Lines Down", Alt | ImGuiKey_DownArrow, 0, Own },
             { EditorDeleteLines, "EditorDeleteLines", Scope::CodeEditor, "Delete Lines", Ctrl | Shift | ImGuiKey_K, 0, Own },
             { EditorGotoLine, "EditorGotoLine", Scope::CodeEditor, "Go to Line", Ctrl | ImGuiKey_G, 0, Own },
+            { EditorFind, "EditorFind", Scope::CodeEditor, "Find", Ctrl | ImGuiKey_F, 0, CE },
+            { EditorReplace, "EditorReplace", Scope::CodeEditor, "Replace", Ctrl | ImGuiKey_H, 0, Own },
+            { EditorFindNext, "EditorFindNext", Scope::CodeEditor, "Find Next", ImGuiKey_F3, 0, CE },
+            { EditorFindPrevious, "EditorFindPrevious", Scope::CodeEditor, "Find Previous", Shift | ImGuiKey_F3, 0, Own },
 
             { FlowGraphFit, "FlowGraphFit", Scope::FlowGraph, "Fit to Window", ImGuiKey_F, 0, Own },
             { FlowGraphActualSize, "FlowGraphActualSize", Scope::FlowGraph, "Actual Size", ImGuiKey_0, 0, Own },
@@ -525,7 +531,7 @@ namespace Manifold
         case CommandScope::Structure: return "While a Structure Dissect window has the focus. Field keys act on the selected field. The arrow keys, Page Up, Page Down, Home and End move through the fields (Shift extends the selection); Right opens a pointer or an embedded structure and then steps into it, Left closes it and then steps out.";
         case CommandScope::ScriptEditor: return "While an Auto Assembler or script window has the focus. Template keys come from each template's Shortcut setting; the ones listed are the built-in templates.";
         case CommandScope::LuaEngine: return "While the Lua Engine window has the focus.";
-        case CommandScope::CodeEditor: return "While the cursor is in a code editor: the Lua engine, Auto Assembler and script windows, the Templates window and Table Files.";
+        case CommandScope::CodeEditor: return "While the cursor is in a code editor: the Lua engine, Auto Assembler and script windows, the Templates window and Table Files. Find Next and Find Previous also work while typing.";
         case CommandScope::FlowGraph: return "While the flow graph window has the focus.";
         case CommandScope::Log: return "While the log window has the focus.";
         case CommandScope::TableFiles: return "While the Table Files window has the focus. List keys act on the selected files and rest while the cursor is in a text.";

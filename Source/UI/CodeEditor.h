@@ -103,6 +103,20 @@ namespace Manifold::UI
         std::vector<Text::LineState> States;
         int StatesValid = 0;
         Text::Language StatesLanguage = Text::Language::Plain;
+
+        bool FindOpen = false;
+        bool ReplaceOpen = false;
+        int FindFocus = 0;
+        int ReplaceFocus = 0;
+        bool MatchCase = false;
+        bool WholeWord = false;
+        std::string FindText;
+        std::string ReplaceText;
+        std::string FindNote;
+        std::size_t FindOrigin = 0;
+        std::vector<std::size_t> Matches;
+        std::uint64_t MatchesRevision = 0;
+        std::string MatchesKey;
     };
 
     struct CodeEditorState
@@ -128,6 +142,7 @@ namespace Manifold::UI
         std::string Placeholder;
         bool Submitted = false;
         int HistoryStep = 0;
+        bool OpenFind = false;  // set to open the find bar from outside, as a menu does
     };
 
     bool CodeEditor(const char* id, std::string& text, Language language, ImVec2 size, CodeEditorState& state);

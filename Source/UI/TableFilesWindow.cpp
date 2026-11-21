@@ -907,8 +907,6 @@ namespace Manifold::UI
         m_jsonChecked = false;
         m_jsonChangedAt = 0.0;
         m_jsonProblem.reset();
-        m_findCounted.clear();
-        m_findCount = 0;
         if (auto node = m_drafts.extract(key); !node.empty())
         {
             m_text = std::move(node.mapped().Text);
@@ -977,50 +975,6 @@ namespace Manifold::UI
         m_textStale = false;
     }
 
-    void TableFilesWindow::CountMatches()
-    {
-        const Text::TextBuffer& buffer = m_editor.View.Buffer;
-        if (m_findCounted == m_find && m_findRevision == buffer.Revision())
-            return;
-        m_findCounted = m_find;
-        m_findRevision = buffer.Revision();
-        m_findCount = 0;
-        if (m_find.empty())
-            return;
-        const std::string text = Lower(buffer.Text());
-        const std::string needle = Lower(m_find);
-        for (std::size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + needle.size()))
-            ++m_findCount;
-    }
-
-    void TableFilesWindow::FindNext(bool backwards)
-    {
-        Text::TextBuffer& buffer = m_editor.View.Buffer;
-        if (m_find.empty() || buffer.Size() == 0)
-            return;
-        const std::string text = Lower(buffer.Text());
-        const std::string needle = Lower(m_find);
-        const auto [start, end] = buffer.Selection();
-        std::size_t at = std::string::npos;
-        if (backwards)
-        {
-            if (start > 0)
-                at = text.rfind(needle, start - 1);
-            if (at == std::string::npos)
-                at = text.rfind(needle);
-        }
-        else
-        {
-            at = text.find(needle, end);
-            if (at == std::string::npos)
-                at = text.find(needle);
-        }
-        if (at == std::string::npos)
-            return;
-        buffer.Select(at, at + needle.size());
-        m_editor.View.ScrollToCaret = true;
-    }
-
     void TableFilesWindow::Shortcuts()
     {
         const bool add = Pressed(Command::TableFilesAdd);
@@ -1036,11 +990,10 @@ namespace Manifold::UI
             Import();
         if (find)
         {
-            if (m_editorActive || (m_findOpen && !m_textKey.empty() && m_textKey == m_current))
-            {
-                m_findOpen = true;
-                m_findFocus = true;
-            }
+            // The text has the code editor's own find bar; this opens it
+            // when the cursor is in the text and filters the list otherwise.
+            if (m_editorActive)
+                m_editor.OpenFind = true;
             else
             {
                 m_focusFilter = true;
@@ -1150,10 +1103,7 @@ namespace Manifold::UI
             if (CommandItem(ICON_FA_SEARCH "  Find", Command::TableFilesFind, false, any))
             {
                 if (!m_textKey.empty() && m_textKey == m_current)
-                {
-                    m_findOpen = true;
-                    m_findFocus = true;
-                }
+                    m_editor.OpenFind = true;
                 else
                 {
                     m_focusFilter = true;
@@ -1526,47 +1476,12 @@ namespace Manifold::UI
         ImGui::Spacing();
     }
 
-    void TableFilesWindow::FindBar()
-    {
-        CountMatches();
-        ImGui::SetNextItemWidth(std::min(Px(260.0f), ImGui::GetContentRegionAvail().x * 0.5f));
-        if (m_findFocus)
-        {
-            ImGui::SetKeyboardFocusHere();
-            m_findFocus = false;
-        }
-        const bool entered = InputTextWithHint("##find", ICON_FA_SEARCH " Find in the file", m_find, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
-        const bool left = ImGui::IsItemDeactivated() && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
-        if (entered)
-        {
-            FindNext(ImGui::GetIO().KeyShift);
-            m_findFocus = true;
-        }
-        ImGui::SameLine();
-        if (IconButton(ICON_FA_CHEVRON_UP, "Previous Match (Shift+Enter)"))
-            FindNext(true);
-        ImGui::SameLine();
-        if (IconButton(ICON_FA_CHEVRON_DOWN, "Next Match (Enter)"))
-            FindNext(false);
-        ImGui::SameLine();
-        ImGui::AlignTextToFramePadding();
-        Muted(m_find.empty() ? std::string("Type to search") : m_findCount == 0 ? std::string("No match") : Count(static_cast<std::size_t>(m_findCount), "match", "matches"));
-        ImGui::SameLine();
-        if (IconButton(ICON_FA_TIMES, "Close the Search") || left)
-        {
-            m_findOpen = false;
-            m_editor.Focus = true;
-        }
-    }
-
     void TableFilesWindow::TextView(Table::TableFile& file, const Info& info)
     {
         if (m_textKey != m_current)
             LoadText(file, m_current);
         const bool json = info.Kind == Table::FileKind::Json;
         const float row = ImGui::GetFrameHeightWithSpacing();
-        if (m_findOpen)
-            FindBar();
         if (m_textStale)
         {
             ImGui::AlignTextToFramePadding();

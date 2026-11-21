@@ -5,6 +5,7 @@
 #include "Lua/LuaEngine.h"
 #include "Table/ManagedStructures.h"
 #include "Table/RttiStructures.h"
+#include "Table/Structures.h"
 #include "Table/UnrealStructures.h"
 #include "Target/Mono.h"
 #include "UI/Fonts.h"
@@ -733,7 +734,7 @@ namespace Manifold::UI
         }
         Toolbar();
         ImGui::SetNextItemWidth(-FLT_MIN);
-        InputTextWithHint("##fieldfilter", ICON_FA_FILTER "  Filter the fields: name, offset (+1A0), type or value", m_filter);
+        InputTextWithHint("##fieldfilter", ICON_FA_FILTER "  Filter the fields: name, offset (+1A0), type, value or an address inside a field", m_filter);
         Table::StructDefinition* definition = Current();
         if (m_structure != m_selectionStructure)
         {
@@ -763,8 +764,51 @@ namespace Manifold::UI
             BuildRows(*definition, std::move(bases), "", 0);
             const int pointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8;
             const std::size_t total = m_rows.size();
+            if (m_gotoTarget)
+            {
+                const std::uint64_t target = *m_gotoTarget;
+                m_gotoTarget.reset();
+                const int found = RowAt(target);
+                if (found >= 0)
+                {
+                    m_filter.clear();
+                    const std::string key = RowKey(m_rows[static_cast<std::size_t>(found)]);
+                    m_selected = { key };
+                    m_selectAnchor = key;
+                    m_rangeAnchor = key;
+                    m_scrollToRow = found;
+                    m_gotoClose = true;
+                }
+                else
+                {
+                    m_gotoError = Hex(target) + " is in none of the shown fields. Expand the pointers that lead there first.";
+                }
+            }
+            std::string addressNote;
             if (const std::string needle = Lower(Trim(m_filter)); !needle.empty())
             {
+                // An address keeps the field that holds it, beside the fields
+                // whose value shows it, and selects that field once.
+                std::string holder;
+                if (const std::optional<std::uint64_t> address = Table::FilterAddress(needle))
+                {
+                    const int found = RowAt(*address);
+                    if (found >= 0)
+                    {
+                        holder = RowKey(m_rows[static_cast<std::size_t>(found)]);
+                        addressNote = FieldPlace(found, *address);
+                        if (m_selectedFilter != m_filter)
+                        {
+                            m_selected = { holder };
+                            m_selectAnchor = holder;
+                            m_rangeAnchor = holder;
+                        }
+                    }
+                    else
+                    {
+                        addressNote = Hex(*address) + " is in none of the shown fields";
+                    }
+                }
                 std::string offsetNeedle = needle;
                 if (!offsetNeedle.empty() && offsetNeedle.front() == '+')
                     offsetNeedle.erase(0, 1);
@@ -774,6 +818,8 @@ namespace Manifold::UI
                 std::erase_if(m_rows, [&](const Row& row)
                     {
                         const Table::StructField& field = row.Definition->Fields[static_cast<std::size_t>(row.Field)];
+                        if (!holder.empty() && RowKey(row) == holder)
+                            return false;
                         if (Lower(field.Name).find(needle) != std::string::npos || Lower(TypeLabel(field)).find(needle) != std::string::npos)
                             return false;
                         if (hexNeedle && Lower(Hex(static_cast<std::uint64_t>(field.Offset))).find(offsetNeedle) != std::string::npos)
@@ -789,15 +835,18 @@ namespace Manifold::UI
                         return Lower(FieldText(field, bytes, address, pointerSize)).find(needle) == std::string::npos;
                     });
             }
+            m_selectedFilter = m_filter;
             if (!m_filter.empty())
-                Muted(std::to_string(m_rows.size()) + " of " + std::to_string(total) + " fields match");
-            const int columns = 3 + static_cast<int>(m_columns.size());
+                Muted(std::to_string(m_rows.size()) + " of " + std::to_string(total) + " fields match" + (addressNote.empty() ? std::string() : "  \xC2\xB7  " + addressNote));
+            const int columns = 4 + static_cast<int>(m_columns.size());
             const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp;
             const float footer = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y;
             if (ImGui::BeginTable("##fields", columns, flags, ImVec2(0.0f, -footer)))
             {
                 ImGui::TableSetupScrollFreeze(0, 1);
                 ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthStretch, 0.9f);
+                // Always set up, so the column numbers stay the same while it is hidden.
+                ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch | (m_showAddress ? 0 : ImGuiTableColumnFlags_Disabled), 1.1f);
                 ImGui::TableSetupColumn("Description", ImGuiTableColumnFlags_WidthStretch, 1.6f);
                 ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch, 0.8f);
                 for (std::size_t i = 0; i < m_columns.size(); ++i)
@@ -873,6 +922,7 @@ namespace Manifold::UI
             }
             ImGui::EndPopup();
         }
+        GotoPopup();
         if (m_renameOpen)
         {
             ImGui::OpenPopup("##renamestructure");
@@ -908,7 +958,7 @@ namespace Manifold::UI
 
     bool StructureWindow::IsWindowCommand(Command command)
     {
-        return command == Command::DefineStructure || command == Command::AddStructureColumn || command == Command::CollapseStructure;
+        return command == Command::DefineStructure || command == Command::AddStructureColumn || command == Command::CollapseStructure || command == Command::StructureGotoAddress;
     }
 
     void StructureWindow::RunCommand(Command command)
@@ -921,8 +971,84 @@ namespace Manifold::UI
             break;
         case Command::AddStructureColumn: m_columns.push_back({}); break;
         case Command::CollapseStructure: m_expanded.clear(); break;
+        case Command::StructureGotoAddress: m_gotoOpen = true; break;
         default: break;
         }
+    }
+
+    int StructureWindow::RowAt(std::uint64_t address, std::uint64_t* into) const
+    {
+        std::vector<Table::FieldSpan> spans;
+        std::vector<int> owners;
+        for (std::size_t i = 0; i < m_rows.size(); ++i)
+        {
+            const Row& row = m_rows[i];
+            const Table::StructField& field = row.Definition->Fields[static_cast<std::size_t>(row.Field)];
+            for (std::uint64_t base : m_blocks[static_cast<std::size_t>(row.Block)].Bases)
+            {
+                const std::uint64_t at = FieldAddress(base, field.Offset);
+                if (!at)
+                    continue;
+                spans.push_back({ at, static_cast<std::uint64_t>(std::max(1, field.Size)), row.Depth });
+                owners.push_back(static_cast<int>(i));
+            }
+        }
+        const int found = Table::ContainingField(spans, address);
+        if (found < 0)
+            return -1;
+        if (into)
+            *into = address - spans[static_cast<std::size_t>(found)].Address;
+        return owners[static_cast<std::size_t>(found)];
+    }
+
+    std::string StructureWindow::FieldPlace(int row, std::uint64_t address) const
+    {
+        std::uint64_t into = 0;
+        RowAt(address, &into);
+        const Row& found = m_rows[static_cast<std::size_t>(row)];
+        const Table::StructField& field = found.Definition->Fields[static_cast<std::size_t>(found.Field)];
+        std::string text = Hex(address) + " is in +" + Hex(static_cast<std::uint64_t>(field.Offset), 4) + " " + field.Name;
+        if (into)
+            text += ", " + std::to_string(into) + (into == 1 ? " byte" : " bytes") + " into it";
+        return text;
+    }
+
+    void StructureWindow::GotoPopup()
+    {
+        if (m_gotoOpen)
+        {
+            ImGui::OpenPopup("##gotoaddress");
+            m_gotoOpen = false;
+            m_gotoError.clear();
+            m_gotoClose = false;
+        }
+        if (!ImGui::BeginPopup("##gotoaddress"))
+            return;
+        if (m_gotoClose)
+        {
+            m_gotoClose = false;
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            return;
+        }
+        ImGui::TextUnformatted("Go to the field at an address");
+        Muted("Selects the shown field that holds it, in any address column.");
+        if (ImGui::IsWindowAppearing())
+            ImGui::SetKeyboardFocusHere();
+        if (AddressInput("##gotoinput", m_engine, m_gotoAddress, Px(300.0f), "address or expression"))
+            m_gotoError.clear();
+        const bool enter = ImGui::IsItemFocused() && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
+        const std::optional<std::uint64_t>& value = Resolve(m_engine, m_gotoAddress);
+        if (!m_gotoError.empty())
+            TextWithError(m_gotoError, ManifoldTheme::Error);
+        else if (!m_gotoAddress.Error.empty() && !m_gotoAddress.Text.empty())
+            TextWithError(m_gotoAddress.Error, ManifoldTheme::Error);
+        ImGui::BeginDisabled(!value);
+        const bool go = AccentButton("Go", Px(100.0f, 0.0f));
+        ImGui::EndDisabled();
+        if ((go || enter) && value)
+            m_gotoTarget = *value;
+        ImGui::EndPopup();
     }
 
     void StructureWindow::MenuBar()
@@ -1007,6 +1133,10 @@ namespace Manifold::UI
         if (ImGui::BeginMenu("View"))
         {
             item(ICON_FA_COMPRESS_ALT "  Collapse All Pointers", Command::CollapseStructure, !m_expanded.empty());
+            item(ICON_FA_CROSSHAIRS "  Go to Address...", Command::StructureGotoAddress, current != nullptr);
+            ImGui::Separator();
+            ImGui::MenuItem(ICON_FA_MAP_MARKER_ALT "  Address Column", nullptr, &m_showAddress);
+            ItemTooltip("Shows where each field lies: the first address plus the offset, through the pointers above it.");
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -1767,14 +1897,19 @@ namespace Manifold::UI
         if (clicked && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {
             const int column = ImGui::TableGetHoveredColumn();
-            if (column == 2)
+            if (column == 3)
             {
                 ImGui::OpenPopup("##fieldmenu");
+            }
+            else if (column == 1)
+            {
+                if (!addresses.empty() && addresses.front())
+                    m_workspace.OpenMemoryViewer(addresses.front(), true);
             }
             else
             {
                 m_editPath = fieldPath;
-                m_editName = column == 1;
+                m_editName = column == 2;
                 m_editText = m_editName ? field.Name : "";
                 if (!m_editName && !addresses.empty() && addresses.front() && m_engine.HasProcess())
                 {
@@ -1792,6 +1927,32 @@ namespace Manifold::UI
         }
         if (indent > 0.0f)
             ImGui::Unindent(indent);
+
+        ImGui::TableNextColumn();
+        if (!addresses.empty() && addresses.front())
+        {
+            PushMono();
+            ImGui::TextColored(ManifoldTheme::AddressText, "%s", Hex(addresses.front()).c_str());
+            PopMono();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ShowTooltip([&]()
+                    {
+                        for (std::size_t column = 0; column < addresses.size(); ++column)
+                        {
+                            const std::uint64_t at = addresses[column];
+                            const std::string described = at ? m_engine.Describe(at) : std::string();
+                            const std::string extra = at && described != Hex(at) ? "  " + described : std::string();
+                            ImGui::Text("Address %zu: %s%s", column + 1, at ? Hex(at).c_str() : "??", extra.c_str());
+                        }
+                        Muted("Double-click to browse the memory there.");
+                    });
+            }
+        }
+        else
+        {
+            Muted("??");
+        }
 
         ImGui::TableNextColumn();
         if (m_editPath == fieldPath && m_editName)
@@ -1894,6 +2055,8 @@ namespace Manifold::UI
         ImGui::Separator();
         item(ICON_FA_EDIT "  Change the Value", Command::ChangeFieldValue, first != 0 && m_engine.HasProcess());
         item(ICON_FA_I_CURSOR "  Rename", Command::RenameField);
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Address", nullptr, false, first != 0))
+            ImGui::SetClipboardText(Hex(first).c_str());
         ImGui::Separator();
         if (ImGui::BeginMenu(ICON_FA_EXCHANGE_ALT "  Type"))
         {

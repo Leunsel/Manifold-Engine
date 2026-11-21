@@ -127,7 +127,6 @@ namespace Manifold::UI
         void Preview(float height);
         void PreviewHeader(Table::TableFile& file, const Info& info, View view, const std::vector<View>& views);
         void TextView(Table::TableFile& file, const Info& info);
-        void FindBar();
         void ImageView(Table::TableFile& file, const Info& info);
         void HexView(const Table::TableFile& file);
         void DetailsView(Table::TableFile& file, const Info& info);
@@ -164,8 +163,6 @@ namespace Manifold::UI
         void ApplyText();
         void ApplyAll();
         void RevertText();
-        void FindNext(bool backwards);
-        void CountMatches();
         void ReformatJson(int indent);
         void ShowJsonProblem(const Text::JsonProblem& problem);
         void JsonStatus();
@@ -213,12 +210,6 @@ namespace Manifold::UI
         CodeEditorState m_editor;
         bool m_editorActive = false;
         bool m_editorNow = false;
-        bool m_findOpen = false;
-        bool m_findFocus = false;
-        std::string m_find;
-        std::string m_findCounted;
-        std::uint64_t m_findRevision = 0;
-        int m_findCount = 0;
         bool m_jsonChecked = false;
         double m_jsonChangedAt = 0.0;
         std::optional<Text::JsonProblem> m_jsonProblem;

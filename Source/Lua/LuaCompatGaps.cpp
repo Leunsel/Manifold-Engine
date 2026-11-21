@@ -22,7 +22,7 @@ namespace Manifold::Lua
         constexpr GapReason kKernel{ "Kernel driver", "it needs Cheat Engine's kernel driver (DBK)" };
         constexpr GapReason kDbvm{ "Hypervisor", "it needs Cheat Engine's hypervisor (DBVM)" };
         constexpr GapReason kCompiler{ "Compilers", "Manifold Engine has no built-in C or C# compiler" };
-        constexpr GapReason kDotNet{ ".NET", "Manifold Engine reads .NET games from outside (the Mono / .NET window, Class:Method and Class:StaticField addresses, Structure Dissect) but has no data collector object and does not inject .NET code" };
+        constexpr GapReason kDotNet{ ".NET", "Manifold Engine reads .NET games from outside (manifold.dotnet, getDotNetDataCollector, the Mono / .NET window) but does not run .NET code in the game or in itself" };
         constexpr GapReason kServer{ "ceserver", "Manifold Engine does not connect to ceserver" };
         constexpr GapReason kDatabase{ "Databases", "Manifold Engine has no SQLite or ODBC classes" };
         constexpr GapReason kXml{ "XML documents", "the XML document classes are not built in" };
@@ -174,7 +174,6 @@ namespace Manifold::Lua
 
             { "dotNetExecuteClassMethod", U, GapResult::Nil, &kDotNet },
             { "injectDotNetDLL", U, GapResult::Nil, &kDotNet },
-            { "getDotNetDataCollector", U, GapResult::Nil, &kDotNet },
 
             { "connectToCEServer", U, GapResult::False, &kServer },
             { "getCEServerPath", U, GapResult::Nil, &kServer },

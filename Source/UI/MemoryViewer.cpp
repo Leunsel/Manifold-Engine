@@ -540,6 +540,9 @@ namespace Manifold::UI
                 m_workspace.OpenPointerScan();
             if (CommandItem(ICON_FA_THUMBTACK "  Find Static Pointers", Command::OpenStaticPointers))
                 m_workspace.OpenStaticPointers();
+            if (CommandItem(ICON_FA_EXCHANGE_ALT "  Opcode Converter", Command::OpenOpcodeConverter))
+                m_workspace.OpenOpcodeConverter(m_selected);
+            ItemTooltip("Bytes to instructions and back, at the selected address.");
             ImGui::Separator();
             item(ICON_FA_CODE "  Auto Assembler", Command::ViewerAutoAssemble);
             item(ICON_FA_MOON "  Lua Engine", Command::ViewerLuaEngine);
@@ -1946,6 +1949,8 @@ namespace Manifold::UI
         HighlightItems(&instruction);
         ImGui::Separator();
         item(ICON_FA_EDIT "  Assemble", Command::AssembleInstruction);
+        if (ImGui::MenuItem(ICON_FA_EXCHANGE_ALT "  Open in the Opcode Converter", nullptr, false, instruction.Length > 0))
+            m_workspace.OpenOpcodeConverter(instruction.Address, std::span<const std::uint8_t>(instruction.Bytes.data(), std::min<std::size_t>(instruction.Length, instruction.Bytes.size())));
         item(m_nopped.count(instruction.Address) ? ICON_FA_UNDO "  Restore Original Code" : ICON_FA_BAN "  Replace with Code That Does Nothing", Command::NopInstruction);
         item(ICON_FA_UNDO_ALT "  Undo the Last Memory Edit", Command::UndoMemoryEdit, UndoableEdits() > 0);
         if (ImGui::BeginMenu(ICON_FA_MAGIC "  Create Script"))

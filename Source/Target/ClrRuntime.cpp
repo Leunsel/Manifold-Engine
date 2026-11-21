@@ -55,6 +55,7 @@ namespace Manifold::Target
         m_code.clear();
         m_misses.clear();
         m_images.clear();
+        m_modules.clear();
     }
 
     std::string ClrRuntime::Description() const
@@ -76,26 +77,19 @@ namespace Manifold::Target
         const auto modulesReply = Ask(P::Op::Modules, 0, kListMs, &error);
         if (!modulesReply)
             return Status::Fail(ErrorCode::ClrHelperFailed, error);
-        struct ModuleInfo
-        {
-            std::uint64_t Address = 0;
-            std::string Name;
-            std::uint64_t Base = 0;
-            std::uint32_t Size = 0;
-        };
-        std::vector<ModuleInfo> modules;
+        std::vector<ManagedModule> modules;
         {
             P::Reader in(*modulesReply);
             const std::uint32_t count = in.Count(30);
             for (std::uint32_t i = 0; i < count && in.Ok(); ++i)
             {
-                ModuleInfo info;
+                ManagedModule info;
                 info.Address = in.U64();
                 info.Name = in.Text();
-                in.Text();  // path
+                info.Path = in.Text();
                 info.Base = in.U64();
                 info.Size = in.U32();
-                in.U8();    // dynamic
+                info.Dynamic = in.U8() != 0;
                 modules.push_back(std::move(info));
             }
             if (!in.Ok())
@@ -112,7 +106,7 @@ namespace Manifold::Target
         std::vector<MonoClass> classes;
         std::vector<std::uint64_t> parents;
         std::vector<std::pair<std::uint64_t, std::uint64_t>> images;
-        for (const ModuleInfo& module : modules)
+        for (const ManagedModule& module : modules)
         {
             if (stopped())
                 return cancelled;
@@ -134,7 +128,8 @@ namespace Manifold::Target
             {
                 MonoClass info;
                 info.Handle = in.U64();
-                in.U32();  // token
+                info.Token = in.U32();
+                info.Module = module.Address;
                 info.Namespace = in.Text();
                 info.Name = in.Text();
                 const std::uint64_t parent = in.U64();
@@ -167,6 +162,7 @@ namespace Manifold::Target
             handleMax = std::max(handleMax, info.Handle);
         }
         const std::size_t count = classes.size();
+        const std::size_t moduleCount = modules.size();
         {
             std::lock_guard lock(m_bridge.m_lock);
             m_bridge.m_classes = std::move(classes);
@@ -177,13 +173,14 @@ namespace Manifold::Target
             m_bridge.m_images.clear();
             m_parents = std::move(parents);
             m_images = std::move(images);
+            m_modules = modules;
             m_notTypes.clear();
             m_misses.clear();
             if (starting)
                 m_bridge.m_present = true;
             ++m_bridge.m_generation;
         }
-        LOG_INFO("Mono", Format("Read %zu classes from %zu .NET assemblies", count, modules.size()));
+        LOG_INFO("Mono", Format("Read %zu classes from %zu .NET assemblies", count, moduleCount));
         return Status::Success();
     }
 
@@ -251,8 +248,8 @@ namespace Manifold::Target
         {
             MonoMethod method;
             method.Name = in.Text();
-            in.U32();  // token
-            in.U32();  // flags
+            method.Token = in.U32();
+            method.Static = (in.U32() & P::kMethodStatic) != 0;
             method.ParamCount = in.I32();
             method.Handle = in.U64();
             method.Address = in.U64();
@@ -315,7 +312,7 @@ namespace Manifold::Target
         info.Handle = mt;
         info.Namespace = in.Text();
         info.Name = in.Text();
-        in.U64();  // module
+        info.Module = in.U64();
         const std::uint64_t parent = in.U64();
         const std::uint32_t flags = in.U32();
         if (!in.Ok() || info.Name.empty())

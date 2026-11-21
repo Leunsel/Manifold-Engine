@@ -77,6 +77,8 @@
     X(MonoNotFound, 4101) \
     X(MonoCallFailed, 4102) \
     X(ClrHelperFailed, 4103) \
+    X(ClrNotLoaded, 4104) \
+    X(ClrNoMember, 4105) \
     X(UnrealNotResolved, 4201) \
     X(UnrealUnknownType, 4202) \
     X(UnrealNoProperty, 4203) \

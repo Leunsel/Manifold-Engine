@@ -163,6 +163,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
     <ClCompile Include="..\Source\Disasm\FlowGraph.cpp" />
     <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp" />
+    <ClCompile Include="..\Source\Disasm\OpcodeConvert.cpp" />
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\IconNames.cpp" />
@@ -184,6 +185,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Lua\LuaCompatSystem.cpp" />
     <ClCompile Include="..\Source\Lua\LuaConsole.cpp" />
     <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaDotNet.cpp" />
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp" />
     <ClCompile Include="..\Source\Lua\LuaManifold.cpp" />
     <ClCompile Include="..\Source\Lua\LuaModules.cpp" />
@@ -273,6 +275,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\MonoInspector.cpp" />
     <ClCompile Include="..\Source\UI\MonoWindow.cpp" />
     <ClCompile Include="..\Source\UI\NopSled.cpp" />
+    <ClCompile Include="..\Source\UI\OpcodeWindow.cpp" />
     <ClCompile Include="..\Source\UI\PatchScanWindow.cpp" />
     <ClCompile Include="..\Source\UI\PointerScanWindow.cpp" />
     <ClCompile Include="..\Source\UI\ProcessIcon.cpp" />
@@ -348,6 +351,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Disasm\Disassembler.h" />
     <ClInclude Include="..\Source\Disasm\FlowGraph.h" />
     <ClInclude Include="..\Source\Disasm\FunctionBounds.h" />
+    <ClInclude Include="..\Source\Disasm\OpcodeConvert.h" />
     <ClInclude Include="..\Source\Disasm\UniqueAob.h" />
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h" />
     <ClInclude Include="..\Source\Lua\AutorunModules.h" />
@@ -364,6 +368,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Lua\LuaConsole.h" />
     <ClInclude Include="..\Source\Lua\LuaDocBinding.h" />
     <ClInclude Include="..\Source\Lua\LuaDocs.h" />
+    <ClInclude Include="..\Source\Lua\LuaDotNet.h" />
     <ClInclude Include="..\Source\Lua\LuaEngine.h" />
     <ClInclude Include="..\Source\Lua\LuaModules.h" />
     <ClInclude Include="..\Source\Lua\LuaRtti.h" />
@@ -447,6 +452,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\ModulesWindow.h" />
     <ClInclude Include="..\Source\UI\MonoWindow.h" />
     <ClInclude Include="..\Source\UI\NopSled.h" />
+    <ClInclude Include="..\Source\UI\OpcodeWindow.h" />
     <ClInclude Include="..\Source\UI\PatchScanWindow.h" />
     <ClInclude Include="..\Source\UI\PointerScanWindow.h" />
     <ClInclude Include="..\Source\UI\ProcessIcon.h" />

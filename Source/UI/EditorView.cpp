@@ -174,6 +174,302 @@ namespace Manifold::UI
             const int line = buffer.LineOf(buffer.Caret());
             return std::string(buffer.Line(line)) + "\n";
         }
+
+        Text::SearchOptions FindOptions(const EditorViewState& view)
+        {
+            return { view.MatchCase, view.WholeWord };
+        }
+
+        void RefreshMatches(EditorViewState& view)
+        {
+            std::string key = std::string(view.MatchCase ? "C" : "c") + (view.WholeWord ? "W" : "w") + view.FindText;
+            if (view.MatchesRevision == view.Buffer.Revision() && view.MatchesKey == key)
+                return;
+            view.Matches = Text::FindAll(view.Buffer.Text(), view.FindText, FindOptions(view));
+            view.MatchesRevision = view.Buffer.Revision();
+            view.MatchesKey = std::move(key);
+        }
+
+        int CurrentMatch(EditorViewState& view)
+        {
+            RefreshMatches(view);
+            const auto [start, end] = view.Buffer.Selection();
+            if (end - start != view.FindText.size() || view.FindText.empty())
+                return -1;
+            const auto it = std::lower_bound(view.Matches.begin(), view.Matches.end(), start);
+            return it != view.Matches.end() && *it == start ? static_cast<int>(it - view.Matches.begin()) : -1;
+        }
+
+        void SelectMatch(EditorViewState& view, int index)
+        {
+            const std::size_t at = view.Matches[static_cast<std::size_t>(index)];
+            view.Buffer.Select(at, at + view.FindText.size());
+            view.ScrollToCaret = true;
+        }
+
+        bool StepMatch(EditorViewState& view, bool forward)
+        {
+            RefreshMatches(view);
+            view.FindNote.clear();
+            const auto [start, end] = view.Buffer.Selection();
+            const std::size_t from = forward ? (view.Buffer.HasSelection() ? start + 1 : view.Buffer.Caret()) : start;
+            const int index = Text::NextMatch(view.Matches, from, forward);
+            if (index < 0)
+                return false;
+            SelectMatch(view, index);
+            return true;
+        }
+
+        // A single-line selection is what the user wants to find; a longer one
+        // or a selection over lines keeps the last search text.
+        void SeedFind(EditorViewState& view)
+        {
+            const std::string selected = view.Buffer.SelectedText();
+            if (!selected.empty() && selected.size() <= 200 && selected.find('\n') == std::string::npos)
+                view.FindText = selected;
+        }
+
+        void OpenFind(EditorViewState& view, bool replace)
+        {
+            SeedFind(view);
+            view.FindOpen = true;
+            view.ReplaceOpen = replace;
+            view.FindFocus = replace && !view.FindText.empty() ? 0 : 2;
+            view.ReplaceFocus = replace && !view.FindText.empty() ? 2 : 0;
+            view.FindOrigin = view.Buffer.Selection().first;
+            view.FindNote.clear();
+        }
+
+        void FindStep(EditorViewState& view, bool forward)
+        {
+            if (view.FindText.empty())
+                SeedFind(view);
+            if (view.FindText.empty())
+            {
+                OpenFind(view, false);
+                return;
+            }
+            if (!StepMatch(view, forward))
+                view.FindNote = "No results";
+        }
+
+        bool ReplaceCurrent(EditorViewState& view)
+        {
+            const int current = CurrentMatch(view);
+            if (current < 0)
+            {
+                StepMatch(view, true);
+                return false;
+            }
+            const std::size_t at = view.Matches[static_cast<std::size_t>(current)];
+            view.Buffer.Replace(at, at + view.FindText.size(), view.ReplaceText);
+            RefreshMatches(view);
+            const int next = Text::NextMatch(view.Matches, view.Buffer.Caret(), true);
+            if (next >= 0)
+                SelectMatch(view, next);
+            view.ScrollToCaret = true;
+            return true;
+        }
+
+        void ActivateWhenAsked(int& frames, const char* id)
+        {
+            if (frames <= 0)
+                return;
+            const ImGuiID item = ImGui::GetID(id);
+            if (ImGui::GetActiveID() != item)
+                ImGui::ActivateItemByID(item);
+            --frames;
+        }
+
+        void BarToggle(const char* label, const char* tooltip, bool& value, float side, bool& changed)
+        {
+            // The pop must follow the push of this frame, not the value the
+            // click just flipped, or ImGui reports a style stack mismatch.
+            const bool lit = value;
+            if (lit)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.30f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.42f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::AccentHovered);
+            }
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+            if (ImGui::Button(label, ImVec2(side, side)))
+            {
+                value = !value;
+                changed = true;
+            }
+            ImGui::PopStyleVar();
+            if (lit)
+                ImGui::PopStyleColor(3);
+            ItemTooltip(tooltip);
+        }
+
+        // The find bar sits above the text in its own child window, so its
+        // fields keep the focus apart from the editor and Escape closes only it.
+        void DrawFindBar(CodeEditorState& state, float width, bool editable, bool& edited)
+        {
+            EditorViewState& view = state.View;
+            const ImGuiStyle& style = ImGui::GetStyle();
+            const bool replace = view.ReplaceOpen && editable;
+            const float pad = std::round(Px(4.0f));
+            const int rows = replace ? 2 : 1;
+            const float side = ImGui::GetFrameHeight();
+            const float height = static_cast<float>(rows) * side + static_cast<float>(rows - 1) * style.ItemSpacing.y + pad * 2.0f;
+            if (view.FindFocus > 0 || view.ReplaceFocus > 0)
+                ImGui::SetNextWindowFocus();
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, Px(4.0f));
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ManifoldTheme::WithAlpha(ManifoldTheme::Sidebar, 0.75f));
+            const bool open = ImGui::BeginChild("##findbar", ImVec2(width, height), ImGuiChildFlags_AlwaysUseWindowPadding,
+                ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoMove);
+            ImGui::PopStyleColor();
+            ImGui::PopStyleVar(2);
+            if (!open)
+            {
+                ImGui::EndChild();
+                return;
+            }
+            const bool focused = ImGui::IsWindowFocused();
+            if (focused && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            {
+                // Checked before the fields are drawn: an active field would
+                // otherwise take the Escape and revert its text.
+                view.FindOpen = false;
+                state.Focus = true;
+                KeepEscape();
+                ImGui::EndChild();
+                return;
+            }
+            bool step = false;
+            bool forward = true;
+            if (focused)
+            {
+                if (Pressed(Command::EditorFind))
+                    view.FindFocus = 2;
+                if (editable && Pressed(Command::EditorReplace))
+                {
+                    view.ReplaceOpen = true;
+                    view.ReplaceFocus = 2;
+                }
+                if (PressedWhileTyping(Command::EditorFindNext))
+                    step = true;
+                if (PressedWhileTyping(Command::EditorFindPrevious))
+                {
+                    step = true;
+                    forward = false;
+                }
+            }
+
+            RefreshMatches(view);
+            const int current = CurrentMatch(view);
+            std::string count;
+            if (!view.FindNote.empty())
+                count = view.FindNote;
+            else if (view.FindText.empty())
+                count.clear();
+            else if (view.Matches.empty())
+                count = "No results";
+            else if (current >= 0)
+                count = std::to_string(current + 1) + " of " + std::to_string(view.Matches.size());
+            else
+                count = std::to_string(view.Matches.size()) + (view.Matches.size() == 1 ? " result" : " results");
+            const float countWidth = std::max(ImGui::CalcTextSize(count.c_str()).x, ImGui::CalcTextSize("0000 of 0000").x);
+            const int buttons = editable ? 6 : 5;
+            const float right = static_cast<float>(buttons) * side + countWidth + style.ItemSpacing.x * static_cast<float>(buttons + 1);
+            const float inputWidth = std::max(Px(80.0f), ImGui::GetContentRegionAvail().x - right);
+
+            ActivateWhenAsked(view.FindFocus, "##findtext");
+            const std::string before = view.FindText;
+            ImGui::SetNextItemWidth(inputWidth);
+            ImGuiIO& io = ImGui::GetIO();
+            const bool keepActive = io.ConfigInputTextEnterKeepActive;
+            io.ConfigInputTextEnterKeepActive = true;
+            const bool enter = InputTextWithHint("##findtext", "Find", view.FindText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+            io.ConfigInputTextEnterKeepActive = keepActive;
+            bool options = false;
+            ImGui::SameLine();
+            BarToggle("Aa##case", "Match Case", view.MatchCase, side, options);
+            ImGui::SameLine();
+            BarToggle("W##word", "Whole Word", view.WholeWord, side, options);
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            const float countX = ImGui::GetCursorPosX();
+            ImGui::TextColored(count == "No results" ? ManifoldTheme::Error : ManifoldTheme::Muted, "%s", count.c_str());
+            ImGui::SameLine(countX + countWidth + style.ItemSpacing.x);
+            if (IconButton(ICON_FA_ARROW_UP "##previous", WithKeys("Previous Match", Command::EditorFindPrevious).c_str()))
+            {
+                step = true;
+                forward = false;
+            }
+            ImGui::SameLine();
+            if (IconButton(ICON_FA_ARROW_DOWN "##next", WithKeys("Next Match", Command::EditorFindNext).c_str()))
+                step = true;
+            if (editable)
+            {
+                ImGui::SameLine();
+                bool shown = view.ReplaceOpen;
+                bool toggled = false;
+                BarToggle(ICON_FA_EXCHANGE_ALT "##showreplace", WithKeys("Replace", Command::EditorReplace).c_str(), shown, side, toggled);
+                if (toggled)
+                {
+                    view.ReplaceOpen = shown;
+                    if (shown)
+                        view.ReplaceFocus = 2;
+                }
+            }
+            ImGui::SameLine();
+            if (IconButton(ICON_FA_TIMES "##closefind", "Close (Esc)"))
+            {
+                view.FindOpen = false;
+                state.Focus = true;
+            }
+
+            if (view.FindText != before || options)
+            {
+                view.FindNote.clear();
+                RefreshMatches(view);
+                const int index = Text::NextMatch(view.Matches, view.FindOrigin, true);
+                if (index >= 0)
+                    SelectMatch(view, index);
+            }
+            if (enter)
+            {
+                step = true;
+                forward = !io.KeyShift;
+            }
+            if (step)
+                FindStep(view, forward);
+
+            if (replace)
+            {
+                ActivateWhenAsked(view.ReplaceFocus, "##replacetext");
+                ImGui::SetNextItemWidth(inputWidth);
+                io.ConfigInputTextEnterKeepActive = true;
+                const bool replaceEnter = InputTextWithHint("##replacetext", "Replace", view.ReplaceText, ImGuiInputTextFlags_EnterReturnsTrue);
+                io.ConfigInputTextEnterKeepActive = keepActive;
+                ImGui::SameLine();
+                if ((ImGui::Button("Replace") || replaceEnter) && !view.FindText.empty())
+                {
+                    view.FindNote.clear();
+                    edited |= ReplaceCurrent(view);
+                }
+                ItemTooltip("Replaces the selected match and selects the next one.");
+                ImGui::SameLine();
+                if (ImGui::Button("Replace All") && !view.FindText.empty())
+                {
+                    const std::size_t replaced = view.Buffer.ReplaceAll(view.FindText, view.ReplaceText, FindOptions(view));
+                    view.FindNote = replaced == 0 ? "No results" : "Replaced " + std::to_string(replaced);
+                    view.ScrollToCaret = true;
+                    edited |= replaced > 0;
+                }
+                ItemTooltip("Replaces every match in one step; Undo takes it back.");
+            }
+            else if (view.ReplaceFocus > 0)
+            {
+                view.ReplaceFocus = 0;
+            }
+            ImGui::EndChild();
+        }
     }
 
     bool EditorView(const char* id, std::string& text, Language language, ImVec2 size, CodeEditorState& state)
@@ -188,6 +484,13 @@ namespace Manifold::UI
                 buffer.SetCaret(text.size(), false);
             view.Synced = true;
             view.ScrollToCaret = state.Console;
+        }
+
+        if (state.OpenFind)
+        {
+            state.OpenFind = false;
+            if (!state.Console)
+                OpenFind(view, false);
         }
 
         ImGuiIO& io = ImGui::GetIO();
@@ -224,6 +527,16 @@ namespace Manifold::UI
         size.x = std::max(size.x, metrics.Gutter + Px(60.0f));
         size.y = std::max(size.y, state.Console ? metrics.Row + metrics.PadY * 2.0f : metrics.Row * 3.0f);
 
+        bool barEdited = false;
+        if (view.FindOpen && !state.Console)
+        {
+            ImGui::PopFont();
+            const float top = ImGui::GetCursorPosY();
+            DrawFindBar(state, size.x, !state.ReadOnly, barEdited);
+            size.y = std::max(size.y - (ImGui::GetCursorPosY() - top), metrics.Row * 3.0f);
+            ImGui::PushFont(Fonts::Mono(), 0.0f);
+        }
+
         if (state.Focus)
         {
             ImGui::SetNextWindowFocus();
@@ -241,7 +554,7 @@ namespace Manifold::UI
         ImGui::PopStyleColor();
         ImGui::PopStyleVar(2);
 
-        bool edited = false;
+        bool edited = barEdited;
         bool pasted = false;
         bool moved = false;
         bool forceComplete = false;
@@ -396,7 +709,14 @@ namespace Manifold::UI
             if (Key(ImGuiKey_Escape, false))
             {
                 if (!assist.Open && !assist.Hints.empty())
+                {
                     assist.DismissedParen = assist.HintParen;
+                }
+                else if (!assist.Open && view.FindOpen)
+                {
+                    view.FindOpen = false;
+                    KeepEscape();
+                }
                 else if (!assist.Open && buffer.HasSelection())
                     buffer.SetCaret(buffer.Caret(), false);
                 assist.Open = false;
@@ -599,6 +919,23 @@ namespace Manifold::UI
                 }
                 io.InputQueueCharacters.resize(0);
             }
+            if (!state.Console)
+            {
+                if (Pressed(Command::EditorFind))
+                    OpenFind(view, false);
+                if (editable && Pressed(Command::EditorReplace))
+                    OpenFind(view, true);
+                if (PressedWhileTyping(Command::EditorFindNext))
+                {
+                    FindStep(view, true);
+                    moved = true;
+                }
+                if (PressedWhileTyping(Command::EditorFindPrevious))
+                {
+                    FindStep(view, false);
+                    moved = true;
+                }
+            }
             if (!state.Console && Pressed(Command::EditorGotoLine))
             {
                 view.GotoOpen = true;
@@ -644,6 +981,18 @@ namespace Manifold::UI
             {
                 buffer.DuplicateLines();
                 edited = true;
+            }
+            if (!state.Console)
+            {
+                ImGui::Separator();
+                if (ImGui::MenuItem(ICON_FA_SEARCH "  Find…", ShortcutText(Command::EditorFind)))
+                    OpenFind(view, false);
+                if (ImGui::MenuItem(ICON_FA_EXCHANGE_ALT "  Replace…", ShortcutText(Command::EditorReplace), false, editable))
+                    OpenFind(view, true);
+                if (ImGui::MenuItem(ICON_FA_ARROW_DOWN "  Find Next", ShortcutText(Command::EditorFindNext), false, !view.FindText.empty() || buffer.HasSelection()))
+                    FindStep(view, true);
+                if (ImGui::MenuItem(ICON_FA_ARROW_UP "  Find Previous", ShortcutText(Command::EditorFindPrevious), false, !view.FindText.empty() || buffer.HasSelection()))
+                    FindStep(view, false);
             }
             if (!state.Console && ImGui::MenuItem(ICON_FA_LIST_OL "  Go to Line…", ShortcutText(Command::EditorGotoLine)))
             {
@@ -771,6 +1120,11 @@ namespace Manifold::UI
             const ImU32 plain = ImGui::GetColorU32(ManifoldTheme::Text);
             const ImU32 selectionColor = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, focused ? 0.32f : 0.18f));
             const ImU32 embeddedColor = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.075f));
+            const bool showMatches = view.FindOpen && !view.FindText.empty() && !state.Console;
+            if (showMatches)
+                RefreshMatches(view);
+            const ImU32 matchColor = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.22f));
+            const ImU32 matchBorder = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.70f));
             std::vector<Text::TokenSpan> spans;
             for (int line = first; line <= last; ++line)
             {
@@ -800,6 +1154,17 @@ namespace Manifold::UI
                     const float x2 = textOrigin.x + static_cast<float>(buffer.ColumnOf(spans[last].End)) * metrics.Char;
                     draw->AddRectFilled(ImVec2(x1, y + Px(1.0f)), ImVec2(x2, y + metrics.Row - Px(1.0f)), embeddedColor, Px(2.0f));
                     index = last;
+                }
+                if (showMatches)
+                {
+                    for (auto at = std::lower_bound(view.Matches.begin(), view.Matches.end(), lineStart); at != view.Matches.end() && *at < lineEnd; ++at)
+                    {
+                        const float x1 = textOrigin.x + static_cast<float>(buffer.ColumnOf(*at)) * metrics.Char;
+                        const float x2 = textOrigin.x + static_cast<float>(buffer.ColumnOf(std::min(*at + view.FindText.size(), lineEnd))) * metrics.Char;
+                        draw->AddRectFilled(ImVec2(x1, y + Px(1.0f)), ImVec2(x2, y + metrics.Row - Px(1.0f)), matchColor, Px(2.0f));
+                        if (*at == selStart && selEnd - selStart == view.FindText.size())
+                            draw->AddRect(ImVec2(x1, y + Px(1.0f)), ImVec2(x2, y + metrics.Row - Px(1.0f)), matchBorder, Px(2.0f));
+                    }
                 }
                 if (selStart != selEnd && selStart <= lineEnd && selEnd >= lineStart && !(selEnd == lineStart && line > buffer.LineOf(selStart)))
                 {

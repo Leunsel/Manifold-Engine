@@ -106,9 +106,44 @@ namespace Manifold::Tests
         }
     }
 
+    namespace
+    {
+        void FieldAtAddress()
+        {
+            // Top structure at 0x10000: an int at +0, an embedded 16-byte
+            // structure at +8 with a float at +4 inside it, a pointer at +18.
+            const std::vector<Table::FieldSpan> spans{
+                { 0x10000, 4, 0 }, { 0x10008, 16, 0 }, { 0x1000C, 4, 1 }, { 0x10018, 8, 0 }, { 0, 4, 0 }, { 0x20000, 0, 2 },
+            };
+            CHECK_EQ(Table::ContainingField(spans, 0x10000), 0);
+            CHECK_EQ(Table::ContainingField(spans, 0x10003), 0);
+            CHECK_EQ(Table::ContainingField(spans, 0x10004), -1);
+            CHECK_EQ(Table::ContainingField(spans, 0x10008), 1);
+            CHECK_EQ(Table::ContainingField(spans, 0x1000D), 2);
+            CHECK_EQ(Table::ContainingField(spans, 0x10017), 1);
+            CHECK_EQ(Table::ContainingField(spans, 0x1001F), 3);
+            CHECK_EQ(Table::ContainingField(spans, 0x10020), -1);
+            CHECK_EQ(Table::ContainingField(spans, 0x2), -1);
+            // A size of 0 still holds its first byte.
+            CHECK_EQ(Table::ContainingField(spans, 0x20000), 5);
+            // Of equal spans the deeper one wins.
+            CHECK_EQ(Table::ContainingField({ { 0x500000, 8, 0 }, { 0x500000, 8, 1 } }, 0x500004), 1);
+
+            CHECK(Table::FilterAddress("7FF6A0001000") == std::optional<std::uint64_t>(0x7FF6A0001000ull));
+            CHECK(Table::FilterAddress(" 0x10000 ") == std::optional<std::uint64_t>(0x10000));
+            CHECK(!Table::FilterAddress("FFFF").has_value());
+            CHECK(!Table::FilterAddress("+1A0000").has_value());
+            CHECK(!Table::FilterAddress("health").has_value());
+            CHECK(!Table::FilterAddress("game.exe+10").has_value());
+            CHECK(!Table::FilterAddress("12345678123456789").has_value());
+            CHECK(!Table::FilterAddress("").has_value());
+        }
+    }
+
     int RunStructureTests()
     {
         const int before = Totals().Failures;
+        FieldAtAddress();
         MatchPointerBlocks();
         auto opened = Target::Process::Open(MakeProcessId(::GetCurrentProcessId()));
         CHECK(opened.Ok());

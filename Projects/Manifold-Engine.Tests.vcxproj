@@ -149,6 +149,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
     <ClCompile Include="..\Source\Disasm\FlowGraph.cpp" />
     <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp" />
+    <ClCompile Include="..\Source\Disasm\OpcodeConvert.cpp" />
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\IconNames.cpp" />
@@ -170,6 +171,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaCompatSystem.cpp" />
     <ClCompile Include="..\Source\Lua\LuaConsole.cpp" />
     <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaDotNet.cpp" />
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp" />
     <ClCompile Include="..\Source\Lua\LuaManifold.cpp" />
     <ClCompile Include="..\Source\Lua\LuaModules.cpp" />
@@ -251,6 +253,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\ManifoldApiTests.cpp" />
     <ClCompile Include="..\Tests\ModuleTests.cpp" />
     <ClCompile Include="..\Tests\MonoTests.cpp" />
+    <ClCompile Include="..\Tests\OpcodeTests.cpp" />
     <ClCompile Include="..\Tests\PointerScanTests.cpp" />
     <ClCompile Include="..\Tests\RelayTests.cpp" />
     <ClCompile Include="..\Tests\RttiTests.cpp" />

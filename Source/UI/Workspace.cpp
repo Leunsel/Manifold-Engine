@@ -39,6 +39,7 @@
 #include "UI/WriteHistoryWindow.h"
 #include "UI/CommentListWindow.h"
 #include "UI/FormEditor.h"
+#include "UI/OpcodeWindow.h"
 #include "UI/ModulesWindow.h"
 #include "UI/FlowGraphWindow.h"
 
@@ -171,6 +172,7 @@ namespace Manifold::UI
         drawOne("Form editor", m_formEditor);
         drawOne("Modules", m_modules);
         drawOne("Flow graph", m_flowGraph);
+        drawOne("Opcode converter", m_opcodes);
         {
             PROFILE_ZONE("Script forms");
             m_scriptForms->Draw();
@@ -227,6 +229,7 @@ namespace Manifold::UI
         case Command::OpenPointerScan:
         case Command::OpenStaticPointers:
         case Command::OpenFormEditor:
+        case Command::OpenOpcodeConverter:
         case Command::OpenLog:
             return !m_engine.Options().ReleaseMode;
         default:
@@ -255,6 +258,7 @@ namespace Manifold::UI
         case Command::OpenPointerScan: OpenPointerScan(); break;
         case Command::OpenStaticPointers: OpenStaticPointers(); break;
         case Command::OpenFormEditor: OpenFormEditor(); break;
+        case Command::OpenOpcodeConverter: OpenOpcodeConverter(); break;
         case Command::OpenLog: OpenLog(); break;
         case Command::OpenProfiler: OpenProfiler(); break;
         default: break;
@@ -688,6 +692,16 @@ namespace Manifold::UI
         if (!m_commentList)
             m_commentList = std::make_unique<CommentListWindow>(*this);
         m_commentList->Show();
+    }
+
+    void Workspace::OpenOpcodeConverter(std::uint64_t address, std::span<const std::uint8_t> bytes)
+    {
+        if (!m_opcodes)
+            m_opcodes = std::make_unique<OpcodeWindow>(*this);
+        if (address || !bytes.empty())
+            m_opcodes->Load(address, bytes);
+        else
+            m_opcodes->Show();
     }
 
     void Workspace::OpenFlowGraph(std::uint64_t address)

@@ -106,6 +106,10 @@ namespace Manifold::UI
         std::string FieldText(const Table::StructField& field, std::span<const std::uint8_t> bytes, std::uint64_t address, int pointerSize);
         Status WriteBits(const Table::StructField& field, std::uint64_t address, const std::string& text);
         Table::StructDefinition* Current();
+        int RowAt(std::uint64_t address, std::uint64_t* into = nullptr) const;
+        std::string FieldPlace(int row, std::uint64_t address) const;
+        void GotoAddress(std::uint64_t address);
+        void GotoPopup();
 
         Workspace& m_workspace;
         Engine& m_engine;
@@ -149,5 +153,12 @@ namespace Manifold::UI
         int m_pendingOffset = 0;
         bool m_pendingInsert = false;
         std::vector<PendingDelete> m_pendingDeletes;
+        bool m_showAddress = true;
+        bool m_gotoOpen = false;
+        AddressField m_gotoAddress;
+        std::string m_gotoError;
+        std::string m_selectedFilter;
+        std::optional<std::uint64_t> m_gotoTarget;
+        bool m_gotoClose = false;
     };
 }

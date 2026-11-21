@@ -189,4 +189,50 @@ namespace Manifold::Table
         Items.clear();
         ++Generation;
     }
+
+    int ContainingField(const std::vector<FieldSpan>& spans, std::uint64_t address)
+    {
+        int best = -1;
+        for (std::size_t i = 0; i < spans.size(); ++i)
+        {
+            const FieldSpan& span = spans[i];
+            if (!span.Address || address < span.Address || address - span.Address >= std::max<std::uint64_t>(1, span.Size))
+                continue;
+            if (best < 0)
+            {
+                best = static_cast<int>(i);
+                continue;
+            }
+            const FieldSpan& chosen = spans[static_cast<std::size_t>(best)];
+            if (span.Size < chosen.Size || (span.Size == chosen.Size && span.Depth > chosen.Depth))
+                best = static_cast<int>(i);
+        }
+        return best;
+    }
+
+    std::optional<std::uint64_t> FilterAddress(std::string_view text)
+    {
+        std::string_view digits = TrimView(text);
+        if (digits.size() > 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X'))
+            digits.remove_prefix(2);
+        if (digits.empty() || digits.size() > 16)
+            return std::nullopt;
+        std::uint64_t value = 0;
+        for (const char c : digits)
+        {
+            int digit = 0;
+            if (c >= '0' && c <= '9')
+                digit = c - '0';
+            else if (c >= 'a' && c <= 'f')
+                digit = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F')
+                digit = c - 'A' + 10;
+            else
+                return std::nullopt;
+            value = value << 4 | static_cast<std::uint64_t>(digit);
+        }
+        if (value < 0x10000)
+            return std::nullopt;
+        return value;
+    }
 }

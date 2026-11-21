@@ -260,6 +260,12 @@ namespace Manifold
                 "Manifold Engine reads .NET games from outside the game, with ManifoldClr.exe (ManifoldClr32.exe for a 32-bit game) and the data access library "
                 "that ships with the game's runtime (mscordaccore.dll or mscordacwks.dll). Nothing is run inside the game.",
                 "Check that both helpers are next to Manifold-Engine.exe. If the game's runtime folder has no data access library, the game cannot be read this way." },
+            { ErrorCode::ClrNotLoaded, "The .NET runtime is not loaded{}.",
+                "manifold.dotnet reads the classes and objects the .NET helper has read; that needs a .NET game as the opened process and its runtime loaded.",
+                "Call manifold.dotnet.load() or load it in Extensions > .NET. A Unity game uses the Mono or IL2CPP runtime instead." },
+            { ErrorCode::ClrNoMember, "No .NET field or element {}.",
+                "A path names fields by name, separated by dots, and array elements by index in brackets, as in Players[0].statLife; each step must exist on the object it reaches, and a reference on the way must not be null.",
+                "Check the names in the Mono / .NET window (Classes or the inspector) or with manifold.dotnet.fields." },
             { ErrorCode::UnrealNotResolved, "Unreal Engine is not resolved: {}.",
                 "The game's name table, object array or reflection layout was not found, it is still being read, or the Unreal tool is shut down.",
                 "Start it in Extensions > Unreal Engine once the game shows its menu. For a game the search does not find, manifold.unreal.configure takes the addresses, layout offsets or search patterns." },
