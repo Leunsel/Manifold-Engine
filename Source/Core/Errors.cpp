@@ -94,6 +94,9 @@ namespace Manifold
             { ErrorCode::ThreadTimedOut, "A thread started in the process did not finish in time: {}.",
                 "The code is still running or waits for something the game holds, for example while the game is paused in a debugger.",
                 "The memory the thread uses was kept. Check the code; a library's DllMain has to return quickly." },
+            { ErrorCode::SpeedhackFailed, "The speedhack could not be set up: {}.",
+                "The speedhack loads a small library into the process and redirects its time functions. Protected games block that, and a time function can look different from what the program expects.",
+                "Try again while the process runs normally. If it names a time function, the other time sources still follow the speed." },
 
             { ErrorCode::ScanNoValue, "Enter a value to scan for.",
                 "This scan type compares memory with a value, and the value field is empty.",

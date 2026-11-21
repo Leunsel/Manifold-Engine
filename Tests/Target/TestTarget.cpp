@@ -922,6 +922,96 @@ struct UnrealMarker
 };
 
 extern "C" __declspec(dllexport) FakeUnreal::Image g_unrealFake = {};
+struct SpeedProbe
+{
+    volatile unsigned long long Sequence;
+    volatile long long Counter;
+    volatile long long Frequency;
+    volatile unsigned long long Tick64;
+    volatile unsigned long long Samples;
+    volatile long long Backwards;
+    volatile unsigned long Tick;
+    volatile unsigned long Multimedia;
+    volatile unsigned long Ready;
+    volatile unsigned long Threads;
+};
+
+extern "C" __declspec(dllexport) SpeedProbe g_speedProbe = {};
+
+namespace
+{
+    using TimeCall = DWORD(WINAPI*)();
+
+    TimeCall g_timeGetTime = nullptr;
+
+    struct SpeedSample
+    {
+        long long Counter = 0;
+        unsigned long long Tick64 = 0;
+        unsigned long Tick = 0;
+        unsigned long Multimedia = 0;
+    };
+
+    SpeedSample TakeSpeedSample()
+    {
+        SpeedSample sample;
+        LARGE_INTEGER counter{};
+        ::QueryPerformanceCounter(&counter);
+        sample.Counter = counter.QuadPart;
+        sample.Tick64 = ::GetTickCount64();
+        sample.Tick = ::GetTickCount();
+        sample.Multimedia = g_timeGetTime ? g_timeGetTime() : 0;
+        return sample;
+    }
+
+    bool WentBack(const SpeedSample& before, const SpeedSample& now)
+    {
+        return now.Counter < before.Counter || now.Tick64 < before.Tick64 || static_cast<long>(now.Tick - before.Tick) < 0 || static_cast<long>(now.Multimedia - before.Multimedia) < 0;
+    }
+
+    DWORD WINAPI SpeedWorker(void* parameter)
+    {
+        const bool publish = parameter != nullptr;
+        SpeedSample before = TakeSpeedSample();
+        ::InterlockedIncrement(reinterpret_cast<volatile long*>(&g_speedProbe.Threads));
+        for (unsigned long long round = 0;; ++round)
+        {
+            const SpeedSample now = TakeSpeedSample();
+            if (WentBack(before, now))
+                ::InterlockedIncrement64(&g_speedProbe.Backwards);
+            before = now;
+            if (publish)
+            {
+                g_speedProbe.Sequence = g_speedProbe.Sequence + 1;
+                g_speedProbe.Counter = now.Counter;
+                g_speedProbe.Tick64 = now.Tick64;
+                g_speedProbe.Tick = now.Tick;
+                g_speedProbe.Multimedia = now.Multimedia;
+                g_speedProbe.Samples = g_speedProbe.Samples + 1;
+                g_speedProbe.Sequence = g_speedProbe.Sequence + 1;
+                g_speedProbe.Ready = 1;
+                ::Sleep(0);
+            }
+            else if (round % 64 == 63)
+            {
+                ::Sleep(1);
+            }
+        }
+    }
+
+    void StartSpeedProbe()
+    {
+        if (const HMODULE winmm = ::LoadLibraryW(L"winmm.dll"))
+            g_timeGetTime = reinterpret_cast<TimeCall>(reinterpret_cast<void*>(::GetProcAddress(winmm, "timeGetTime")));
+        LARGE_INTEGER frequency{};
+        ::QueryPerformanceFrequency(&frequency);
+        g_speedProbe.Frequency = frequency.QuadPart;
+        ::CloseHandle(::CreateThread(nullptr, 0, &SpeedWorker, reinterpret_cast<void*>(1), 0, nullptr));
+        for (int i = 0; i < 3; ++i)
+            ::CloseHandle(::CreateThread(nullptr, 0, &SpeedWorker, nullptr, 0, nullptr));
+    }
+}
+
 extern "C" __declspec(dllexport) FakeRtti::Image g_rttiFake = {};
 extern "C" __declspec(dllexport) UnrealMarker g_unrealNames = { { 'M', 'F', 'U', 'E', 'P', 'O', 'O', 'L' }, &FakeUnreal::g_pool };
 extern "C" __declspec(dllexport) UnrealMarker g_unrealObjects = { { 'M', 'F', 'U', 'E', 'O', 'B', 'J', 'S' }, &FakeUnreal::g_objects };
@@ -950,6 +1040,8 @@ int main(int argc, char** argv)
         }
         else if (std::strcmp(argv[i], "--mono-values") == 0)
             g_monoValues = true;
+        else if (std::strcmp(argv[i], "--speed") == 0)
+            StartSpeedProbe();
         else if (std::strcmp(argv[i], "--mono-agent") == 0)
             g_agentMode = AgentMode::Good;
         else if (std::strcmp(argv[i], "--mono-agent=bad-handles") == 0)

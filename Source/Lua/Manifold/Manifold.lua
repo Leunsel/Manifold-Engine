@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 10
+local API_VERSION = 11
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -1731,6 +1731,51 @@ define(rtti, "claims", {
   doc = "Whether Structure Dissect's RTTI stage names the address itself: an object or a virtual function table that neither the Unreal tool nor a Godot script claims. Never raises, false without a process or with the stage turned off.",
 }, function(address)
   return native.rttiClaims(address) == true
+end)
+
+local speed = area("speed", "The speedhack: the opened process's clocks run faster or slower by a factor. Setting a speed loads a small library into the process and redirects its time functions (`QueryPerformanceCounter`, `GetTickCount`, `GetTickCount64`, `timeGetTime`) through it; sleeps and the wall clock stay as they are. A speed change never makes a clock jump or run backwards. `disable` goes back to normal speed and takes the hooks out when the clocks were never shifted; after a shift the hooks stay at normal speed so the game's time does not jump, and `remove` takes them out regardless. Works in 64-bit and 32-bit processes. If Manifold Engine ends while a speed is set, the process goes back to normal speed by itself.")
+
+define(speed, "get", {
+  returns = "number",
+  doc = "The speed factor in use: 1 while the speedhack is off, 2 for double speed, 0.5 for half speed.",
+}, function()
+  return native.speedGet()
+end)
+
+define(speed, "set", {
+  params = { { name = "speed", type = "number" } },
+  returns = "true, or nil, error",
+  doc = "Turns the speedhack on if needed and sets the factor, from 0 (time stands still) to 1000. `ME-1005` without a process, `ME-1019` when the time functions cannot be redirected.",
+}, function(factor)
+  return result(native.speedSet(factor))
+end)
+
+define(speed, "isEnabled", {
+  returns = "boolean",
+  doc = "Whether a speed is set.",
+}, function()
+  return native.speedIsEnabled() == true
+end)
+
+define(speed, "disable", {
+  returns = "true, or nil, error",
+  doc = "Goes back to normal speed. The hooks are taken out when the process's clocks still equal the real ones; otherwise they stay and pass time on at normal speed.",
+}, function()
+  return result(native.speedDisable())
+end)
+
+define(speed, "remove", {
+  returns = "true, or nil, error",
+  doc = "Takes the hooks out and restores the time functions byte for byte. After a speed other than 1 the process's clocks jump to the real time at that moment, backwards if the game ran faster.",
+}, function()
+  return result(native.speedRemove())
+end)
+
+define(speed, "status", {
+  returns = "`{ enabled, speed, installed, clockShifted, hooks }`",
+  doc = "The state of the speedhack: `installed` says whether the hooks are in the process, `clockShifted` whether its clocks differ from the real ones, and `hooks` lists `{ name, address }` for every redirected time function.",
+}, function()
+  return native.speedStatus()
 end)
 
 local doc = area("doc", "The documentation behind completion, signature help, hover tooltips and the docs panel. Manifold, Cheat Engine and Lua functions are documented already. A module documents its own functions with `register`, or writes LuaLS annotations (`---@param name type`) above them and calls `registerModule`. A script never replaces Manifold's own documentation.")

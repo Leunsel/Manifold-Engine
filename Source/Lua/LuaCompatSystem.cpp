@@ -1253,6 +1253,15 @@ namespace Manifold::Lua
             return PushStatus(state, status);
         }
 
+        int SpeedhackSetSpeed(lua_State* state)
+        {
+            const Status status = Owner(state).Speed().SetSpeed(luaL_checknumber(state, 1));
+            if (!status)
+                LOG_WARN("Speedhack", "speedhack_setSpeed: " + status.Text);
+            lua_pushboolean(state, status.Ok() ? 1 : 0);
+            return 1;
+        }
+
         int SaveTableCompat(lua_State* state)
         {
             Engine& engine = Owner(state);
@@ -1468,7 +1477,8 @@ namespace Manifold::Lua
             { "createProcess", &CreateProcessCompat },
             { "runCommand", &RunCommand },
             { "saveTable", &SaveTableCompat },
-            { "speedhack_getSpeed", [](lua_State* s) -> int { lua_pushnumber(s, 1.0); return 1; } },
+            { "speedhack_getSpeed", [](lua_State* s) -> int { lua_pushnumber(s, Owner(s).Speed().Speed()); return 1; } },
+            { "speedhack_setSpeed", &SpeedhackSetSpeed },
             { "debug_getCurrentDebuggerInterface", &DebuggerInterface },
             { "debug_canBreak", &DebuggerCanBreak },
             { "debug_getMaxLastBranchRecord", [](lua_State* s) -> int { lua_pushinteger(s, -1); return 1; } },

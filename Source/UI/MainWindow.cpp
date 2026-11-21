@@ -59,6 +59,9 @@ namespace Manifold::UI
             return size.x > width + 0.5f;
         }
 
+        constexpr double kSpeedPresets[] = { 0.25, 0.5, 1.0, 2.0, 5.0, 10.0 };
+        constexpr double kSpeedSteps[] = { 0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0, 100.0 };
+
         Scan::Tristate ToTristate(int state)
         {
             return state == 1 ? Scan::Tristate::Yes : state == 0 ? Scan::Tristate::No : Scan::Tristate::Any;
@@ -284,6 +287,10 @@ namespace Manifold::UI
         case Command::AddGroup:
         case Command::AddScript:
             return !m_release;
+        case Command::ToggleSpeedhack:
+        case Command::SpeedhackFaster:
+        case Command::SpeedhackSlower:
+            return m_engine.HasProcess();
         case Command::NewTable:
         case Command::DeactivateAll:
         case Command::CompactMode:
@@ -305,6 +312,9 @@ namespace Manifold::UI
         case Command::DeactivateAll: m_workspace.TurnOffEverything(); break;
         case Command::CompactMode: ToggleCompactMode(); break;
         case Command::ReleaseMode: ToggleReleaseMode(); break;
+        case Command::ToggleSpeedhack: ToggleSpeedhack(); break;
+        case Command::SpeedhackFaster: StepSpeed(1); break;
+        case Command::SpeedhackSlower: StepSpeed(-1); break;
         case Command::FocusScanValue: m_focusValue = true; break;
         case Command::FirstScan:
             if (m_engine.Scanner().HasResults())
@@ -914,6 +924,8 @@ namespace Manifold::UI
                 if (engine.Debugger().Broken() && ImGui::MenuItem(ICON_FA_PAUSE_CIRCLE "  Show the Break"))
                     m_workspace.OpenMemoryViewer(engine.Debugger().Break().Address);
             }
+            ImGui::Separator();
+            SpeedhackMenu();
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Name"))
                 ImGui::SetClipboardText(name.c_str());
@@ -1833,7 +1845,148 @@ namespace Manifold::UI
             ImGui::Checkbox("Pause the process while scanning", &m_pause);
         }
         ImGui::EndDisabled();
+        SpeedhackSection();
         EndCard();
+    }
+
+    void MainWindow::ApplySpeed(double speed, bool enable)
+    {
+        Target::Speedhack& speedhack = m_engine.Speed();
+        m_speedValue = std::clamp(speed, 0.0, Target::Speedhack::kMaxSpeed);
+        if (!enable && !speedhack.Enabled())
+            return;
+        if (const Status status = speedhack.SetSpeed(m_speedValue); !status)
+            m_engine.Notify(status);
+    }
+
+    void MainWindow::ToggleSpeedhack()
+    {
+        Target::Speedhack& speedhack = m_engine.Speed();
+        if (!speedhack.Enabled())
+        {
+            ApplySpeed(m_speedValue, true);
+            return;
+        }
+        if (const Status status = speedhack.Disable(); !status)
+            m_engine.Notify(status);
+    }
+
+    void MainWindow::StepSpeed(int direction)
+    {
+        const double current = m_engine.Speed().Enabled() ? m_engine.Speed().Speed() : 1.0;
+        double next = current;
+        if (direction > 0)
+        {
+            const auto above = std::find_if(std::begin(kSpeedSteps), std::end(kSpeedSteps), [&](double step) { return step > current * 1.0001; });
+            next = above != std::end(kSpeedSteps) ? *above : current;
+        }
+        else
+        {
+            for (double step : kSpeedSteps)
+            {
+                if (step < current * 0.9999)
+                    next = step;
+            }
+        }
+        ApplySpeed(next, true);
+    }
+
+    void MainWindow::RemoveSpeedhackHooks()
+    {
+        m_workspace.Confirm("Remove Speedhack Hooks",
+            "The time functions of the process get their original bytes back. Its clocks then jump to the real time, backwards if the game ran faster, and some games freeze or stutter until the "
+            "real time has caught up.",
+            [this]()
+            {
+                if (const Status status = m_engine.Speed().Remove(); !status)
+                    m_engine.Notify(status);
+            },
+            "Remove");
+    }
+
+    void MainWindow::SpeedhackMenu()
+    {
+        Target::Speedhack& speedhack = m_engine.Speed();
+        const bool enabled = speedhack.Enabled();
+        const double speed = speedhack.Speed();
+        if (!ImGui::BeginMenu(ICON_FA_TACHOMETER_ALT "  Speedhack", m_engine.HasProcess()))
+            return;
+        Item(enabled ? ICON_FA_TOGGLE_ON "  Turn Off" : ICON_FA_TOGGLE_OFF "  Turn On", Command::ToggleSpeedhack);
+        Item(ICON_FA_FORWARD "  Faster", Command::SpeedhackFaster);
+        Item(ICON_FA_BACKWARD "  Slower", Command::SpeedhackSlower);
+        ImGui::Separator();
+        for (double preset : kSpeedPresets)
+        {
+            if (ImGui::MenuItem((Target::Speedhack::Text(preset) + "x").c_str(), nullptr, enabled && speed == preset))
+                ApplySpeed(preset, true);
+        }
+        ImGui::Separator();
+        if (DangerMenuItem(ICON_FA_UNDO "  Remove Hooks...", nullptr, speedhack.Installed()))
+            RemoveSpeedhackHooks();
+        ImGui::EndMenu();
+    }
+
+    void MainWindow::SpeedhackSection()
+    {
+        Target::Speedhack& speedhack = m_engine.Speed();
+        const bool hasProcess = m_engine.HasProcess();
+        bool enabled = speedhack.Enabled();
+        const bool installed = speedhack.Installed();
+        if (enabled)
+            m_speedValue = speedhack.Speed();
+        const std::string label = "Speedhack" + (enabled ? "  \xc2\xb7  " + Target::Speedhack::Text(m_speedValue) + "x" : std::string()) + "###speedhack";
+        if ((enabled || installed) && !m_speedShown)
+            ImGui::SetNextItemOpen(true);
+        m_speedShown = enabled || installed;
+        if (!ImGui::CollapsingHeader(label.c_str()))
+            return;
+        const ImGuiStyle& style = ImGui::GetStyle();
+        ImGui::BeginDisabled(!hasProcess);
+        if (ToggleSwitch("##speedhackon", &enabled))
+            ToggleSpeedhack();
+        ItemTooltip(WithKeys("The time functions of the process run faster or slower by the factor", Command::ToggleSpeedhack).c_str());
+        ImGui::SameLine();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Enable Speedhack");
+        ImGui::SameLine();
+        const float fieldWidth = Px(64.0f);
+        const float room = ImGui::GetContentRegionAvail().x;
+        if (room > fieldWidth + ImGui::CalcTextSize("Speed").x + style.ItemSpacing.x * 2.0f)
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + room - fieldWidth);
+        ImGui::SetNextItemWidth(fieldWidth);
+        double typed = m_speedValue;
+        if (ImGui::InputDouble("##speedvalue", &typed, 0.0, 0.0, "%.4g"))
+            m_speedTyped = typed;
+        if (ImGui::IsItemDeactivatedAfterEdit())
+            ApplySpeed(m_speedTyped, false);
+        ItemTooltip("The speed factor: 2 is twice as fast, 0.5 half as fast, 0 stops the time");
+
+        float slider = static_cast<float>(m_speedValue);
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::SliderFloat("##speedslider", &slider, 0.1f, 10.0f, "%.2fx", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_NoInput))
+            ApplySpeed(std::round(static_cast<double>(slider) * 100.0) / 100.0, false);
+        ItemTooltip(WithKeys("Drag to change the speed", Command::SpeedhackFaster).c_str());
+
+        const float presetWidth = std::floor((ImGui::GetContentRegionAvail().x - style.ItemSpacing.x * static_cast<float>(std::size(kSpeedPresets) - 1)) / static_cast<float>(std::size(kSpeedPresets)));
+        for (std::size_t i = 0; i < std::size(kSpeedPresets); ++i)
+        {
+            const double preset = kSpeedPresets[i];
+            const std::string text = Target::Speedhack::Text(preset) + "x##speedpreset";
+            if (i > 0)
+                ImGui::SameLine();
+            const bool current = enabled && m_speedValue == preset;
+            if (current ? AccentButton(text.c_str(), ImVec2(presetWidth, 0.0f)) : ImGui::Button(text.c_str(), ImVec2(presetWidth, 0.0f)))
+                ApplySpeed(preset, true);
+        }
+        ImGui::EndDisabled();
+        if (installed && !enabled)
+        {
+            Muted("Off. The hooks stay, so the game's clocks do not jump.");
+            FlowNext(ImGui::CalcTextSize("Remove Hooks...").x + style.FramePadding.x * 2.0f);
+            if (ImGui::SmallButton("Remove Hooks..."))
+                RemoveSpeedhackHooks();
+            ItemTooltip("Restores the time functions byte for byte. The game's clocks then jump to the real time.");
+        }
     }
 
     std::vector<Table::MemoryRecord*> MainWindow::SelectedRecords()

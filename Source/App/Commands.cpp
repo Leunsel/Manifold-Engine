@@ -53,6 +53,9 @@ namespace Manifold
             { UndoScan, "UndoScan", Scope::Main, "Undo Last Scan", Ctrl | Alt | ImGuiKey_Z, 0, Own },
             { CompactMode, "CompactMode", Scope::Main, "Compact Mode", Ctrl | Shift | ImGuiKey_C, 0, Own },
             { ReleaseMode, "ReleaseMode", Scope::Main, "Release Mode", Ctrl | Shift | ImGuiKey_R, 0, Own },
+            { ToggleSpeedhack, "ToggleSpeedhack", Scope::Main, "Enable / Disable Speedhack", Ctrl | Shift | ImGuiKey_H, 0, Own },
+            { SpeedhackFaster, "SpeedhackFaster", Scope::Main, "Speedhack: Faster", Ctrl | Alt | ImGuiKey_UpArrow, 0, Own },
+            { SpeedhackSlower, "SpeedhackSlower", Scope::Main, "Speedhack: Slower", Ctrl | Alt | ImGuiKey_DownArrow, 0, Own },
 
             { ToggleRecords, "ToggleRecords", Scope::AddressList, "Activate / Deactivate", ImGuiKey_Space, 0, CE },
             { ChangeRecordValue, "ChangeRecordValue", Scope::AddressList, "Change Value", ImGuiKey_Enter, 0, CE },

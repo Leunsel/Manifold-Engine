@@ -48,6 +48,9 @@ While the main window has the focus.
 | `Ctrl+Alt+Z` | Undo Last Scan | `UndoScan` | Manifold |
 | `Ctrl+Shift+C` | Compact Mode | `CompactMode` | Manifold |
 | `Ctrl+Shift+R` | Release Mode | `ReleaseMode` | Manifold |
+| `Ctrl+Shift+H` | Enable / Disable Speedhack | `ToggleSpeedhack` | Manifold |
+| `Ctrl+Alt+Up` | Speedhack: Faster | `SpeedhackFaster` | Manifold |
+| `Ctrl+Alt+Down` | Speedhack: Slower | `SpeedhackSlower` | Manifold |
 
 ## Address List
 

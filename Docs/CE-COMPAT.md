@@ -96,12 +96,6 @@ Sections are not mapped into the target yet; allocateSharedMemoryLocal works ins
 
 `allocateSharedMemory`, `createSection`, `mapViewOfSection`, `unMapViewOfSection` (false)
 
-### Speedhack
-
-Manifold Engine has no speedhack.
-
-`speedhack_setSpeed` (false)
-
 ### Pipes
 
 Lua pipes and the Lua server are not built in.

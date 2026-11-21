@@ -212,6 +212,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Target\RemoteCall.cpp" />
     <ClCompile Include="..\Source\Target\Rtti.cpp" />
     <ClCompile Include="..\Source\Target\RttiMsvc.cpp" />
+    <ClCompile Include="..\Source\Target\Speedhack.cpp" />
     <ClCompile Include="..\Source\Target\Symbols.cpp" />
     <ClCompile Include="..\Source\Target\UnityExplorer.cpp" />
     <ClCompile Include="..\Source\Target\UnityExplorerIl2Cpp.cpp" />
@@ -247,6 +248,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\PointerScanTests.cpp" />
     <ClCompile Include="..\Tests\RelayTests.cpp" />
     <ClCompile Include="..\Tests\RttiTests.cpp" />
+    <ClCompile Include="..\Tests\SpeedhackTests.cpp" />
     <ClCompile Include="..\Tests\StructureTests.cpp" />
     <ClCompile Include="..\Tests\TableFileTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />

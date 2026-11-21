@@ -62,6 +62,9 @@ namespace Manifold
         UndoScan,
         CompactMode,
         ReleaseMode,
+        ToggleSpeedhack,
+        SpeedhackFaster,
+        SpeedhackSlower,
 
         ToggleRecords,
         ChangeRecordValue,

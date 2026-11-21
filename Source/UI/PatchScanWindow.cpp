@@ -46,6 +46,28 @@ namespace Manifold::UI
             }
         }
 
+        void LeaveOutSpeedhack(Target::PatchScanResult& result, const Target::Speedhack& speedhack)
+        {
+            std::map<std::string, std::pair<std::uint64_t, std::size_t>> dropped;
+            std::erase_if(result.Patches, [&](const Target::CodePatch& patch)
+                {
+                    if (!speedhack.Owns(patch.Address, patch.Size))
+                        return false;
+                    auto& [bytes, patches] = dropped[patch.Module];
+                    bytes += patch.Size;
+                    patches += 1;
+                    return true;
+                });
+            for (Target::ModulePatchSummary& summary : result.Modules)
+            {
+                const auto found = dropped.find(summary.Module);
+                if (found == dropped.end())
+                    continue;
+                summary.ChangedBytes -= std::min(summary.ChangedBytes, found->second.first);
+                summary.Patches -= std::min(summary.Patches, found->second.second);
+            }
+        }
+
         bool StillOpen(Engine& engine, const std::shared_ptr<Target::Process>& scanned)
         {
             return scanned && engine.Process() == scanned && scanned->Alive();
@@ -98,10 +120,12 @@ namespace Manifold::UI
         m_restore = -1;
         std::shared_ptr<Target::Process> process = m_scanned;
         const Debug::Debugger& debugger = engine.Debugger();
-        m_task.Start(engine.Work(), "Looking for patched code", [process, modules = std::move(modules), &debugger](Target::PatchScanProgress& progress)
+        const Target::Speedhack& speedhack = engine.Speed();
+        m_task.Start(engine.Work(), "Looking for patched code", [process, modules = std::move(modules), &debugger, &speedhack](Target::PatchScanProgress& progress)
             {
                 Target::PatchScanResult result = Target::ScanForPatches(*process, modules, &progress);
                 LeaveOutBreakpoints(result, debugger);
+                LeaveOutSpeedhack(result, speedhack);
                 return result;
             });
     }

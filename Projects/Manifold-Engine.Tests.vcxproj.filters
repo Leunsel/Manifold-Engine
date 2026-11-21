@@ -363,6 +363,9 @@
     <ClCompile Include="..\Source\Target\RttiMsvc.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\Speedhack.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\Symbols.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -466,6 +469,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\RttiTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\SpeedhackTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\StructureTests.cpp">

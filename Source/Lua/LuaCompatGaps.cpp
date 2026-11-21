@@ -28,7 +28,6 @@ namespace Manifold::Lua
         constexpr GapReason kXml{ "XML documents", "the XML document classes are not built in" };
         constexpr GapReason kRemoteCall{ "Calls into the target", "reusable call stubs and the remote executor are not built in; executeCodeEx and executeMethod make the call directly" };
         constexpr GapReason kSection{ "Shared sections", "sections are not mapped into the target yet; allocateSharedMemoryLocal works inside Manifold Engine" };
-        constexpr GapReason kSpeedhack{ "Speedhack", "Manifold Engine has no speedhack" };
         constexpr GapReason kPipe{ "Pipes", "Lua pipes and the Lua server are not built in" };
         constexpr GapReason kHook{ "Callbacks without a hook point", "Manifold Engine has no hook point for this callback yet, so it is never called" };
         constexpr GapReason kWndProc{ "Window hooks", "window procedure hooks are not built in" };
@@ -199,7 +198,6 @@ namespace Manifold::Lua
             { "mapViewOfSection", U, GapResult::Nil, &kSection },
             { "unMapViewOfSection", U, GapResult::False, &kSection },
 
-            { "speedhack_setSpeed", U, GapResult::False, &kSpeedhack },
 
             { "createPipe", U, GapResult::Nil, &kPipe },
             { "connectToPipe", U, GapResult::Nil, &kPipe },

@@ -24,6 +24,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-1016 | No module named … is loaded in the process. | The name matches none of the modules the process has loaded. | Check the spelling, or wait until the game has loaded the module. manifold.process.modules() lists them. |
 | ME-1017 | No module contains the address …. | The address lies outside every loaded module: on the heap, on a stack, or in code the game allocated itself. | That is normal for objects and JIT code. Check the address in the memory viewer when a module was expected. |
 | ME-1018 | A thread started in the process did not finish in time: …. | The code is still running or waits for something the game holds, for example while the game is paused in a debugger. | The memory the thread uses was kept. Check the code; a library's DllMain has to return quickly. |
+| ME-1019 | The speedhack could not be set up: …. | The speedhack loads a small library into the process and redirects its time functions. Protected games block that, and a time function can look different from what the program expects. | Try again while the process runs normally. If it names a time function, the other time sources still follow the speed. |
 
 ## Scanner
 

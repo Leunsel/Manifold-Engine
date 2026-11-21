@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 10 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 11 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -220,6 +220,19 @@ C++ class names from the run-time type information of the opened process, built 
 | `manifold.rtti.status()` | `{ text, dissect, process, is64Bit, modules, classes, vtables }` | What is known about the opened process: `text` is the line the menu shows, `dissect` whether Structure Dissect uses RTTI, and the counts are what the lookups have seen. Without a process only `text` and `dissect` are there. |
 | `manifold.rtti.reset()` | true | Forgets what was learned about the process and takes back the `::vftable` symbols it registered. The next lookup starts fresh. |
 | `manifold.rtti.claims(address)` | boolean | Whether Structure Dissect's RTTI stage names the address itself: an object or a virtual function table that neither the Unreal tool nor a Godot script claims. Never raises, false without a process or with the stage turned off. |
+
+## manifold.speed
+
+The speedhack: the opened process's clocks run faster or slower by a factor. Setting a speed loads a small library into the process and redirects its time functions (`QueryPerformanceCounter`, `GetTickCount`, `GetTickCount64`, `timeGetTime`) through it; sleeps and the wall clock stay as they are. A speed change never makes a clock jump or run backwards. `disable` goes back to normal speed and takes the hooks out when the clocks were never shifted; after a shift the hooks stay at normal speed so the game's time does not jump, and `remove` takes them out regardless. Works in 64-bit and 32-bit processes. If Manifold Engine ends while a speed is set, the process goes back to normal speed by itself.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.speed.get()` | number | The speed factor in use: 1 while the speedhack is off, 2 for double speed, 0.5 for half speed. |
+| `manifold.speed.set(speed)` | true, or nil, error | Turns the speedhack on if needed and sets the factor, from 0 (time stands still) to 1000. `ME-1005` without a process, `ME-1019` when the time functions cannot be redirected. |
+| `manifold.speed.isEnabled()` | boolean | Whether a speed is set. |
+| `manifold.speed.disable()` | true, or nil, error | Goes back to normal speed. The hooks are taken out when the process's clocks still equal the real ones; otherwise they stay and pass time on at normal speed. |
+| `manifold.speed.remove()` | true, or nil, error | Takes the hooks out and restores the time functions byte for byte. After a speed other than 1 the process's clocks jump to the real time at that moment, backwards if the game ran faster. |
+| `manifold.speed.status()` | `{ enabled, speed, installed, clockShifted, hooks }` | The state of the speedhack: `installed` says whether the hooks are in the process, `clockShifted` whether its clocks differ from the real ones, and `hooks` lists `{ name, address }` for every redirected time function. |
 
 ## manifold.doc
 

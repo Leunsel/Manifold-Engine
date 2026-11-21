@@ -712,6 +712,72 @@ namespace Manifold::Lua
             return 1;
         }
 
+        int SpeedGet(lua_State* state)
+        {
+            lua_pushnumber(state, Owner(state).Speed().Speed());
+            return 1;
+        }
+
+        int SpeedSet(lua_State* state)
+        {
+            const Status status = Owner(state).Speed().SetSpeed(luaL_checknumber(state, 1));
+            if (!status)
+                return PushFailure(state, status);
+            lua_pushboolean(state, 1);
+            return 1;
+        }
+
+        int SpeedIsEnabled(lua_State* state)
+        {
+            lua_pushboolean(state, Owner(state).Speed().Enabled() ? 1 : 0);
+            return 1;
+        }
+
+        int SpeedDisable(lua_State* state)
+        {
+            const Status status = Owner(state).Speed().Disable();
+            if (!status)
+                return PushFailure(state, status);
+            lua_pushboolean(state, 1);
+            return 1;
+        }
+
+        int SpeedRemove(lua_State* state)
+        {
+            const Status status = Owner(state).Speed().Remove();
+            if (!status)
+                return PushFailure(state, status);
+            lua_pushboolean(state, 1);
+            return 1;
+        }
+
+        int SpeedStatus(lua_State* state)
+        {
+            Target::Speedhack& speedhack = Owner(state).Speed();
+            const std::vector<Target::SpeedhackHook> hooks = speedhack.Hooks();
+            lua_createtable(state, 0, 5);
+            lua_pushboolean(state, speedhack.Enabled() ? 1 : 0);
+            lua_setfield(state, -2, "enabled");
+            lua_pushnumber(state, speedhack.Speed());
+            lua_setfield(state, -2, "speed");
+            lua_pushboolean(state, speedhack.Installed() ? 1 : 0);
+            lua_setfield(state, -2, "installed");
+            lua_pushboolean(state, speedhack.ClockShifted() ? 1 : 0);
+            lua_setfield(state, -2, "clockShifted");
+            lua_createtable(state, static_cast<int>(hooks.size()), 0);
+            for (std::size_t i = 0; i < hooks.size(); ++i)
+            {
+                lua_createtable(state, 0, 2);
+                lua_pushlstring(state, hooks[i].Name.data(), hooks[i].Name.size());
+                lua_setfield(state, -2, "name");
+                lua_pushinteger(state, static_cast<lua_Integer>(hooks[i].Address));
+                lua_setfield(state, -2, "address");
+                lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
+            }
+            lua_setfield(state, -2, "hooks");
+            return 1;
+        }
+
         int StructureHooks(lua_State* state)
         {
             const StructureCallback kind = luaL_checkinteger(state, 1) == 0 ? StructureCallback::NameLookup : StructureCallback::DissectOverride;
@@ -760,6 +826,12 @@ namespace Manifold::Lua
             { "registerSymbol", &RegisterSymbol },
             { "unregisterSymbol", &UnregisterSymbol },
             { "structureHooks", &StructureHooks },
+            { "speedGet", &SpeedGet },
+            { "speedSet", &SpeedSet },
+            { "speedIsEnabled", &SpeedIsEnabled },
+            { "speedDisable", &SpeedDisable },
+            { "speedRemove", &SpeedRemove },
+            { "speedStatus", &SpeedStatus },
             { nullptr, nullptr },
         };
         for (const CompatScript& script : ManifoldScripts())

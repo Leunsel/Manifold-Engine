@@ -9,6 +9,8 @@
 
 using namespace Manifold::Debug::Veh;
 
+void SpeedAttach(HINSTANCE instance);
+
 namespace
 {
     constexpr std::uint64_t kResumeFlag = 0x10000;
@@ -1054,6 +1056,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
     {
         g_module = instance;
         ::DisableThreadLibraryCalls(instance);
+        SpeedAttach(instance);
     }
     return TRUE;
 }

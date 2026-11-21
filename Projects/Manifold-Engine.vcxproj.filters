@@ -375,6 +375,9 @@
     <ClCompile Include="..\Source\Target\RttiMsvc.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\Speedhack.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\Symbols.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -859,6 +862,12 @@
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\RttiMsvc.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\Speedhack.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\SpeedhackProtocol.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\Symbols.h">

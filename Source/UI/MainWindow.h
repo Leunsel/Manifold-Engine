@@ -28,6 +28,12 @@ namespace Manifold::UI
         float TitleTools(float left, float right, float height);
         float ProcessChip(float left, float right, float y, float height);
         void ProcessChipMenu();
+        void SpeedhackSection();
+        void SpeedhackMenu();
+        void ApplySpeed(double speed, bool enable);
+        void ToggleSpeedhack();
+        void StepSpeed(int direction);
+        void RemoveSpeedhackHooks();
         void ProcessItems();
         void ScanArea(float height);
         void ResultsCard(float width, float height);
@@ -138,6 +144,9 @@ namespace Manifold::UI
         bool m_fastScan = true;
         int m_alignment = 4;
         bool m_pause = false;
+        double m_speedValue = 2.0;
+        double m_speedTyped = 2.0;
+        bool m_speedShown = false;
         bool m_private = true;
         bool m_image = true;
         bool m_mapped = false;

@@ -5024,7 +5024,7 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 10
+local API_VERSION = 11
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -6761,6 +6761,51 @@ define(rtti, "claims", {
   return native.rttiClaims(address) == true
 end)
 
+local speed = area("speed", "The speedhack: the opened process's clocks run faster or slower by a factor. Setting a speed loads a small library into the process and redirects its time functions (`QueryPerformanceCounter`, `GetTickCount`, `GetTickCount64`, `timeGetTime`) through it; sleeps and the wall clock stay as they are. A speed change never makes a clock jump or run backwards. `disable` goes back to normal speed and takes the hooks out when the clocks were never shifted; after a shift the hooks stay at normal speed so the game's time does not jump, and `remove` takes them out regardless. Works in 64-bit and 32-bit processes. If Manifold Engine ends while a speed is set, the process goes back to normal speed by itself.")
+
+define(speed, "get", {
+  returns = "number",
+  doc = "The speed factor in use: 1 while the speedhack is off, 2 for double speed, 0.5 for half speed.",
+}, function()
+  return native.speedGet()
+end)
+
+define(speed, "set", {
+  params = { { name = "speed", type = "number" } },
+  returns = "true, or nil, error",
+  doc = "Turns the speedhack on if needed and sets the factor, from 0 (time stands still) to 1000. `ME-1005` without a process, `ME-1019` when the time functions cannot be redirected.",
+}, function(factor)
+  return result(native.speedSet(factor))
+end)
+
+define(speed, "isEnabled", {
+  returns = "boolean",
+  doc = "Whether a speed is set.",
+}, function()
+  return native.speedIsEnabled() == true
+end)
+
+define(speed, "disable", {
+  returns = "true, or nil, error",
+  doc = "Goes back to normal speed. The hooks are taken out when the process's clocks still equal the real ones; otherwise they stay and pass time on at normal speed.",
+}, function()
+  return result(native.speedDisable())
+end)
+
+define(speed, "remove", {
+  returns = "true, or nil, error",
+  doc = "Takes the hooks out and restores the time functions byte for byte. After a speed other than 1 the process's clocks jump to the real time at that moment, backwards if the game ran faster.",
+}, function()
+  return result(native.speedRemove())
+end)
+
+define(speed, "status", {
+  returns = "`{ enabled, speed, installed, clockShifted, hooks }`",
+  doc = "The state of the speedhack: `installed` says whether the hooks are in the process, `clockShifted` whether its clocks differ from the real ones, and `hooks` lists `{ name, address }` for every redirected time function.",
+}, function()
+  return native.speedStatus()
+end)
+
 local doc = area("doc", "The documentation behind completion, signature help, hover tooltips and the docs panel. Manifold, Cheat Engine and Lua functions are documented already. A module documents its own functions with `register`, or writes LuaLS annotations (`---@param name type`) above them and calls `registerModule`. A script never replaces Manifold's own documentation.")
 
 define(doc, "register", {
@@ -6781,7 +6826,8 @@ define(doc, "registerModule", {
     { name = "options", type = "table", optional = true, keys = { doc = "string" } },
   },
   returns = "number of registered functions, or nil, error",
-  doc = "Documents every function of a module table under `path` (such as `\"ManifoldGodot\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Documents every function of a module table under `path` (such as `\"ManifoldGodot\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
 }, function(path, module, options)
   return docResult(native.docRegisterModule(path, module, options))
 end)
@@ -6831,8 +6877,7 @@ end)
 define(doc, "annotations", {
   params = { { name = "fn", type = "function" } },
   returns = "`{ … }` like `entry`, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Reads the LuaLS annotations above a function's definition without registering anything.",
+  doc = "Reads the LuaLS annotations above a function's definition without registering anything.",
 }, function(fn)
   return docResult(native.docAnnotations(fn))
 end)
@@ -7055,7 +7100,8 @@ local function keepHandlers(entry, options)
   end
 end
 
-local function dropEntry(id)
+)MLUA"),
+            std::string_view(R"MLUA(local function dropEntry(id)
   local entry = uiEntries[id]
   if not entry then
     return
@@ -7130,8 +7176,7 @@ widgetObject = function(entry)
   local function method(name, spec, body)
     bind(proxy, prefix .. "." .. name, members, name, spec, body, WIDGET_DOC .. name)
   end
-)MLUA"),
-            std::string_view(R"MLUA(  method("add", { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } } }, function(kind, options)
+  method("add", { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } } }, function(kind, options)
     return addTo(prefix .. ".add", entry, kind, options)
   end)
   method("clear", {}, function()
@@ -7359,7 +7404,8 @@ local WINDOW_METHOD_DOCS = {
   remove = { returns = "boolean", doc = "Removes the window and its widgets for good." },
   update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, update interval or handlers." },
   show = { returns = "boolean", doc = "Shows the window again after the user or `hide` closed it." },
-  hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
+)MLUA"),
+            std::string_view(R"MLUA(  hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
   focus = { returns = "boolean", doc = "Shows the window and brings it to the front." },
   isOpen = { returns = "boolean", doc = "Whether the window exists and is shown." },
 }
@@ -7381,8 +7427,7 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
     "- `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`.",
     "- `checkbox` (`label`, boolean `value`), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `onSubmit(text, widget)` on Enter), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
-)MLUA"),
-            std::string_view(R"MLUA(    "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
+    "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
     "- `canvas`: draws what `draw` gave it on the GPU. `background` is a colour, `zoom = true` lets the user zoom with the wheel and pan by dragging; `onClick(x, y, button, widget)`, `onHover(x, y, widget)`, `onView(x, y, scale, widget)` and `menu` with `onMenu(choice, text, x, y, widget)` get canvas coordinates; `onKey(key, widget)` gets every key pressed (and repeated while held) while the canvas's window has the focus, by name: `LeftArrow`, `W`, `Space`, `Enter`, `F1`… (Escape also closes the window).",
   }, "\n"),
@@ -7560,7 +7605,8 @@ local function noticeObject(entry)
           state.progress = options.progress
         end
         if options.sticky ~= nil then
-          state.sticky = options.sticky
+)MLUA"),
+            std::string_view(R"MLUA(          state.sticky = options.sticky
         end
         local sticky = state.sticky or (state.progress >= 0 and state.progress < 1)
         if not native.uiNoticeUpdate(entry.id, state.text, state.level, state.progress, sticky) then
@@ -7606,8 +7652,7 @@ end)
 native.docDefine(nil, "manifold.ui.notice.Notice", { kind = "class", title = "Notice objects", doc = "`manifold.ui.notice.show` returns a notice object." })
 native.docDefine(nil, "manifold.ui.notice.Notice.update", { params = { { name = "options", type = "table", keys = { text = "string", level = "string", progress = "number", sticky = "boolean" } } }, returns = "boolean", doc = "Changes the text, level, progress or stickiness, and shows the notice for its full time again." })
 native.docDefine(nil, "manifold.ui.notice.Notice.remove", { returns = "boolean", doc = "Takes the notice down." })
-)MLUA"),
-            std::string_view(R"MLUA(native.docDefine(nil, "manifold.ui.notice.Notice.isShown", { returns = "boolean", doc = "Whether the notice is still up." })
+native.docDefine(nil, "manifold.ui.notice.Notice.isShown", { returns = "boolean", doc = "Whether the notice is still up." })
 native.docDefine(nil, "manifold.ui.notice.Notice.id", { kind = "field", type = "integer", doc = "The notice's number." })
 
 local ENTRY_DOC = "manifold.ui.Entry."
@@ -7864,7 +7909,8 @@ local function moduleRequire(name, ...)
     local cache = modulePrivate[key]
     local cached = cache and cache[name]
     if cached == MODULE_LOADING then
-      error("loop or previous error loading module '" .. name .. "'", 2)
+)MLUA"),
+            std::string_view(R"MLUA(      error("loop or previous error loading module '" .. name .. "'", 2)
     end
     if cached ~= nil then
       return cached
@@ -7915,8 +7961,7 @@ pcall(native.docBind, moduleRequire, "require")
 
 local moduleArea = area("module", "The autorun modules: the scripts in the `autorun` folder and the modules in `autorun\\modules`. A module is named by the `NAME` line of its header, or by its file or folder name. Extensions > Modules shows the same list. [AUTORUN.md](AUTORUN.md) describes the folder layout, the header and what `require` finds.")
 
-)MLUA"),
-            std::string_view(R"MLUA(local MODULE_INFO = "a table with `name`, `version`, `author`, `description`, `category`, `kind` (`loose`, `file` or `folder`), `origin` (`shipped` or `user`), `state` (`loaded`, `disabled`, `failed`, `blocked`, `held`, `superseded`, `builtIn` or `pending`), `reason`, `enabled`, `changed`, `path` (the module's folder), `entry` (its entry file), `dataPath` (its folder under `autorun\\data`), `loadTime` in milliseconds and `requires` (a list of `{ name, version }`)"
+local MODULE_INFO = "a table with `name`, `version`, `author`, `description`, `category`, `kind` (`loose`, `file` or `folder`), `origin` (`shipped` or `user`), `state` (`loaded`, `disabled`, `failed`, `blocked`, `held`, `superseded`, `builtIn` or `pending`), `reason`, `enabled`, `changed`, `path` (the module's folder), `entry` (its entry file), `dataPath` (its folder under `autorun\\data`), `loadTime` in milliseconds and `requires` (a list of `{ name, version }`)"
 
 define(moduleArea, "current", {
   returns = "table, or nil, error",
