@@ -560,12 +560,14 @@ namespace
             });
         AddMethod(g_gameObjectClass, "GetComponents", TypeOf(g_componentArray), { tType }, { "type" }, false,
             +[](void*, void**, void** exc) -> void* { return SceneThrow(exc, g_invalidOperation); }, true);
-        AddMethod(g_gameObjectClass, "GetComponents", TypeOf(g_componentArray), { tType }, { "type" }, false, +[](void* self, void** params, void** exc) -> void*
+        const FakeImpl listComponents = +[](void* self, void** params, void** exc) -> void*
             {
                 const NativeObject* native = Native(self, exc);
                 const TypeObject* type = static_cast<TypeObject*>(params[0]);
                 if (!native || !type)
                     return nullptr;
+                if (g_sceneAlt && (*static_cast<bool*>(params[1]) || *static_cast<bool*>(params[2]) || !*static_cast<bool*>(params[3]) || *static_cast<bool*>(params[4]) || params[5]))
+                    return SceneThrow(exc, g_invalidOperation);
                 std::vector<void*> found;
                 for (UnityObject* component : native->Components)
                 {
@@ -573,7 +575,12 @@ namespace
                         found.push_back(component);
                 }
                 return SceneList(g_componentArray, found);
-            });
+            };
+        if (g_sceneAlt)
+            AddMethod(g_gameObjectClass, "GetComponentsInternal", TypeOf(g_componentArray), { tType, tBool, tBool, tBool, tBool, TypeOf(&kCorlibClasses[1]) },
+                { "type", "useSearchTypeAsArrayReturnType", "recursive", "includeInactive", "reverse", "resultList" }, false, listComponents);
+        else
+            AddMethod(g_gameObjectClass, "GetComponents", TypeOf(g_componentArray), { tType }, { "type" }, false, listComponents);
 
         const FakeMethodInfo* getGameObject = AddMethod(g_componentClass, "get_gameObject", tGameObject, {}, {}, false, +[](void* self, void**, void** exc) -> void*
             {

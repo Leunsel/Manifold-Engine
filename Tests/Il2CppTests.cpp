@@ -268,6 +268,13 @@ namespace Manifold::Tests
         CHECK_EQ(unity.ClassNameOf(playerNode.Transform), std::string("UnityEngine.Transform"));
         if (alt)
         {
+            // This target has no GameObject.GetComponents(Type), like a
+            // stripped build; GetComponentsInternal lists the components.
+            if (const auto inspection = Inspected(unity, playerNode.Object))
+            {
+                CHECK_MSG(inspection->Error.empty(), inspection->Error);
+                CHECK(inspection->GameObject && inspection->GameObject->Components.size() == 2 && inspection->GameObject->Components[1].Class == "Game.Health");
+            }
             // Shut down while the game's main thread does not come by: the
             // helper thread gives the GC handles back instead.
             CHECK_EQ(counter("g_il2cppOffThread"), 0);

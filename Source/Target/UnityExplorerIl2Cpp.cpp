@@ -1455,11 +1455,19 @@ namespace Manifold::Target
                 const std::uint64_t getComponents = Il2Method(kGameObjectClass, "GetComponents", { "System.Type" });
                 const std::uint64_t componentClass = FindClass(kComponentClass);
                 const std::uint64_t componentType = componentClass ? Worker("il2cpp_class_get_type", componentClass).value_or(0) : 0;
-                if (getComponents && componentType && state.TypeGetObject)
+                const std::uint64_t getComponentsInternal = getComponents ? 0 : Il2Method(kGameObjectClass, "GetComponentsInternal",
+                    { "System.Type", "System.Boolean", "System.Boolean", "System.Boolean", "System.Boolean", "System.Object" });
+                if ((getComponents || getComponentsInternal) && componentType && state.TypeGetObject)
                 {
                     componentsAsked = true;
                     const int typeObject = recipe.Batch.Call(state.TypeGetObject, componentType);
-                    keptComponents = recipe.Hold(Arg::Of(recipe.Invoke(getComponents, self, { Arg::Of(typeObject) }).Call), kScratchGroup);
+                    const std::uint8_t no = 0;
+                    const std::uint8_t yes = 1;
+                    const Il2Recipe::Invoked listed = getComponents
+                        ? recipe.Invoke(getComponents, self, { Arg::Of(typeObject) })
+                        : recipe.Invoke(getComponentsInternal, self, { Arg::Of(typeObject), recipe.Bytes(&no, 1), recipe.Bytes(&no, 1), recipe.Bytes(&yes, 1),
+                              recipe.Bytes(&no, 1), Arg::Value(0) });
+                    keptComponents = recipe.Hold(Arg::Of(listed.Call), kScratchGroup);
                 }
             }
             else
@@ -1580,7 +1588,7 @@ namespace Manifold::Target
         }
         info.ChildCount = std::max(0, recipe.Number<std::int32_t>(childCountCell));
         if (!componentsAsked && inspection.Error.empty())
-            inspection.Error = std::string("The components are not listed: this game's build has no GameObject.GetComponents(Type)") + kStripped;
+            inspection.Error = std::string("The components are not listed: this game's build has neither GameObject.GetComponents(Type) nor GetComponentsInternal") + kStripped;
 
         const std::vector<std::uint64_t> components = ReadArray(recipe.Address(keptComponents), kMaxComponents);
         const std::uint64_t getChild = Il2Method(kTransformClass, "GetChild", { "System.Int32" });
