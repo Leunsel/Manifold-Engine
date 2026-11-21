@@ -140,6 +140,76 @@ namespace Manifold::Tests
             CHECK(Pieces(Language::Plain, "local x = 1").empty());
         }
 
+        void TemplateHighlight()
+        {
+            auto pieces = Pieces(Language::Template, "[ENABLE]\naobScanModule(<< HookName >>,Game.exe,48 8B)\n<< HookNameParsed >><< AoBOffset >>:\n  db << default(NopBytes, \"90\") >>\n");
+            CHECK(Has(pieces, "[ENABLE]", Token::Section));
+            CHECK(Has(pieces, "aobScanModule", Token::Keyword));
+            CHECK(Has(pieces, "<<", Token::Delimiter));
+            CHECK(Has(pieces, ">>", Token::Delimiter));
+            CHECK(Has(pieces, "HookName", Token::Variable));
+            CHECK(Has(pieces, "HookNameParsed", Token::Variable));
+            CHECK(Has(pieces, "AoBOffset", Token::Variable));
+            CHECK(!Covered(pieces, ":"));
+            CHECK(Has(pieces, "db", Token::Keyword));
+            CHECK(Has(pieces, "default", Token::Call));
+            CHECK(Has(pieces, "NopBytes", Token::Variable));
+            CHECK(Has(pieces, "\"90\"", Token::String));
+
+            pieces = Pieces(Language::Template, "<% if Mode == \"Nop\" then %>\nnop\n<% end %>");
+            CHECK(Has(pieces, "<%", Token::Delimiter));
+            CHECK(Has(pieces, "%>", Token::Delimiter));
+            CHECK(Has(pieces, "if", Token::Keyword));
+            CHECK(Has(pieces, "Mode", Token::Variable));
+            CHECK(Has(pieces, "\"Nop\"", Token::String));
+            CHECK(Has(pieces, "then", Token::Keyword));
+            CHECK(Has(pieces, "nop", Token::Mnemonic));
+            CHECK(Has(pieces, "end", Token::Keyword));
+
+            // A tag over several lines keeps its Lua state; the text after it is Auto Assembler again.
+            pieces = Pieces(Language::Template, "<%\nlocal s = [[a\nb]]\n%>\nmov eax,1");
+            CHECK(Has(pieces, "local", Token::Keyword));
+            CHECK(Has(pieces, "[[a", Token::String));
+            CHECK(Has(pieces, "b]]", Token::String));
+            CHECK(Has(pieces, "mov", Token::Mnemonic));
+            CHECK(Has(pieces, "eax", Token::Register));
+
+            // Tags win over Auto Assembler comments, as in Templates::Parse; the comment goes on around them.
+            pieces = Pieces(Language::Template, "{ note << Value >> }\nnop");
+            CHECK(Has(pieces, "{ note ", Token::Comment));
+            CHECK(Has(pieces, "Value", Token::Variable));
+            CHECK(Has(pieces, " }", Token::Comment));
+            CHECK(Has(pieces, "nop", Token::Mnemonic));
+
+            // Members are not values.
+            pieces = Pieces(Language::Template, "<< string.format(\"%X\", Size) >>");
+            CHECK(Has(pieces, "format", Token::Call));
+            CHECK(Has(pieces, "Size", Token::Variable));
+            CHECK(!Has(pieces, "string", Token::Variable));
+
+            // Every span inside a tag is marked embedded, the text around it is not.
+            const std::string_view line = "mov << Register >>,1";
+            bool tagEmbedded = true;
+            bool textPlain = true;
+            for (const Text::TokenSpan& span : Text::Highlight(Language::Template, line))
+            {
+                if (span.Start >= 4 && span.End <= 18)
+                    tagEmbedded = tagEmbedded && span.Embedded;
+                else
+                    textPlain = textPlain && !span.Embedded;
+            }
+            CHECK(tagEmbedded);
+            CHECK(textPlain);
+
+            Text::LineState state = Text::InitialState(Language::Template);
+            std::vector<Text::TokenSpan> spans;
+            Text::HighlightLine(Language::Template, "<% local t = {", 0, state, spans);
+            CHECK(state.Open == Text::Tag::Code);
+            Text::HighlightLine(Language::Template, "} %> { open", 15, state, spans);
+            CHECK(state.Open == Text::Tag::None);
+            CHECK(state.Kind == Text::Block::Brace);
+        }
+
         void JsonHighlight()
         {
             auto pieces = Pieces(Language::Json, "{\n  \"name\": \"Crab\",\n  \"level\": -12.5e3,\n  \"ok\": true, \"none\" : null\n}");
@@ -685,6 +755,7 @@ namespace Manifold::Tests
         const int before = Totals().Failures;
         LuaHighlight();
         AaHighlight();
+        TemplateHighlight();
         JsonHighlight();
         JsonFormat();
         Words();

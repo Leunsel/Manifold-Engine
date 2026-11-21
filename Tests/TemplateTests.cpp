@@ -78,6 +78,20 @@ namespace Manifold::Tests
             CHECK_EQ(QuoteLua("a\"b\\c\n\x01"), std::string("\"a\\\"b\\\\c\\n\\001\""));
             const ParseResult includes = Parse("<< include(\"Header\") >> <% include('Other.CEA') %>");
             CHECK_EQ(IncludedNames(includes.Nodes).size(), std::size_t(2));
+
+            // InTag finds the tags the way Parse does: the cursor right after
+            // an opening delimiter and right before the closing one is inside.
+            const std::string text = "a << B >> c <% d %> e << open";
+            CHECK(!InTag(text, 0));
+            CHECK(!InTag(text, 3));
+            CHECK(InTag(text, 4));
+            CHECK(InTag(text, text.find("B")));
+            CHECK(InTag(text, text.find(">>")));
+            CHECK(!InTag(text, text.find(" c")));
+            CHECK(InTag(text, text.find("d")));
+            CHECK(!InTag(text, text.find(" e")));
+            CHECK(InTag(text, text.size()));
+            CHECK(InTag("<% x = a << 2 %>", 12));
         }
 
         void Rendering(Engine& engine, const std::filesystem::path& folder)

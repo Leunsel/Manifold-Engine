@@ -257,6 +257,10 @@ namespace Manifold
                 m_workspace->OpenCommentList();
             else if (window == "flowgraph")
                 m_workspace->OpenFlowGraph();
+            else if (window == "templates")
+                m_workspace->OpenTemplateManager();
+            else if (window.rfind("templates:", 0) == 0)
+                m_workspace->OpenTemplateManager(window.substr(10));
         }
         if (!m_options.ProfileReport.empty())
         {

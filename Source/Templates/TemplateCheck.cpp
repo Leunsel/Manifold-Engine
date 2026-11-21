@@ -91,9 +91,33 @@ namespace Manifold::Templates
         }
     }
 
+    const std::vector<HelperInfo>& Helpers()
+    {
+        static const std::vector<HelperInfo> helpers = {
+            { "hex", "value", "The number as upper-case hex without a prefix; anything else as text." },
+            { "join", "separator, ...", "The values that are not nil or empty, joined with the separator." },
+            { "default", "value, fallback", "The value, or the fallback when the value is nil or empty." },
+            { "isEmpty", "value", "Whether the value is nil or an empty string." },
+            { "byteCount", "bytes", "How many bytes a byte string like \"48 8B 05\" holds." },
+            { "bytesPrefix", "bytes, count", "The first count bytes of a byte string." },
+            { "trim", "value", "The text without spaces at the start and the end." },
+            { "include", "name", "Renders a template from the Partials folder at this place." },
+        };
+        return helpers;
+    }
+
     std::vector<std::string> HelperNames()
     {
-        return { "hex", "join", "default", "isEmpty", "byteCount", "bytesPrefix", "trim", "include" };
+        std::vector<std::string> names;
+        for (const HelperInfo& helper : Helpers())
+            names.push_back(helper.Name);
+        return names;
+    }
+
+    const std::vector<std::string>& LuaBaseNames()
+    {
+        static const std::vector<std::string> names = { "string", "math", "table", "ipairs", "pairs", "tonumber", "tostring", "select", "TemplateSettings", "FinalCompilation" };
+        return names;
     }
 
     CheckEntry CheckTemplate(lua_State* state, const Library& library, const TemplateInfo& info, const std::string* script)

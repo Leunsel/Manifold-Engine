@@ -42,4 +42,7 @@ namespace Manifold::Templates
     CompiledTemplate Compile(const std::vector<Node>& nodes, const std::string& source);
     std::string QuoteLua(std::string_view text);
     std::vector<std::string> IncludedNames(const std::vector<Node>& nodes);
+    // Whether `cursor` sits inside a <% %> or << >> tag, found the way Parse
+    // finds them; an unclosed tag runs to the end of the text.
+    bool InTag(std::string_view source, std::size_t cursor);
 }

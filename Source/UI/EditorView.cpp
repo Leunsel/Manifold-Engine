@@ -62,7 +62,7 @@ namespace Manifold::UI
 
         const char* CommentPrefix(Language language)
         {
-            return language == Language::AutoAssembler ? "//" : "--";
+            return language == Language::AutoAssembler || language == Language::Template ? "//" : "--";
         }
 
         void EnsureStates(EditorViewState& view, Language language, int upTo)
@@ -248,7 +248,7 @@ namespace Manifold::UI
         ImGuiWindow* window = ImGui::GetCurrentWindow();
         const bool focused = ImGui::IsWindowFocused();
         CodeAssistState& assist = state.Assisting;
-        const bool assistEnabled = (language == Language::Lua || language == Language::AutoAssembler) && state.Assist && !state.ReadOnly;
+        const bool assistEnabled = (language == Language::Lua || language == Language::AutoAssembler || language == Language::Template) && state.Assist && !state.ReadOnly;
         const bool editable = !state.ReadOnly;
         ImVec2 textOrigin(window->Pos.x + metrics.Gutter + metrics.PadX - window->Scroll.x, window->Pos.y + metrics.PadY - window->Scroll.y);
 
@@ -722,7 +722,7 @@ namespace Manifold::UI
         {
             hoverDoc = assist.HoverDoc;
         }
-        else if ((language == Language::Lua || language == Language::AutoAssembler) && state.Assist && overText && !view.Dragging && !ImGui::IsAnyMouseDown())
+        else if ((language == Language::Lua || language == Language::AutoAssembler || language == Language::Template) && state.Assist && overText && !view.Dragging && !ImGui::IsAnyMouseDown())
         {
             const int line = std::clamp(static_cast<int>(std::floor((io.MousePos.y - textOrigin.y) / metrics.Row)), 0, buffer.LineCount() - 1);
             const int column = static_cast<int>(std::floor((io.MousePos.x - textOrigin.x) / metrics.Char));
@@ -770,6 +770,7 @@ namespace Manifold::UI
             const auto [selStart, selEnd] = buffer.Selection();
             const ImU32 plain = ImGui::GetColorU32(ManifoldTheme::Text);
             const ImU32 selectionColor = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, focused ? 0.32f : 0.18f));
+            const ImU32 embeddedColor = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.075f));
             std::vector<Text::TokenSpan> spans;
             for (int line = first; line <= last; ++line)
             {
@@ -781,6 +782,25 @@ namespace Manifold::UI
                     draw->AddRectFilled(ImVec2(textMin.x, y), ImVec2(inner.Max.x, y + metrics.Row), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Error, 0.20f)));
                 else if (line == caretLine && focused && selStart == selEnd && !state.Console)
                     draw->AddRectFilled(ImVec2(textMin.x, y), ImVec2(inner.Max.x, y + metrics.Row), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.04f)));
+                spans.clear();
+                Text::LineState lineState = view.States[static_cast<std::size_t>(line)];
+                const std::string_view content = buffer.Line(line);
+                if (language != Language::Plain)
+                    Text::HighlightLine(language, content, lineStart, lineState, spans);
+                // Template tags get a faint tint, so the Lua stands apart from
+                // the Auto Assembler text around it; one rectangle per run.
+                for (std::size_t index = 0; index < spans.size(); ++index)
+                {
+                    if (!spans[index].Embedded)
+                        continue;
+                    std::size_t last = index;
+                    while (last + 1 < spans.size() && spans[last + 1].Embedded && spans[last + 1].Start == spans[last].End)
+                        ++last;
+                    const float x1 = textOrigin.x + static_cast<float>(buffer.ColumnOf(spans[index].Start)) * metrics.Char;
+                    const float x2 = textOrigin.x + static_cast<float>(buffer.ColumnOf(spans[last].End)) * metrics.Char;
+                    draw->AddRectFilled(ImVec2(x1, y + Px(1.0f)), ImVec2(x2, y + metrics.Row - Px(1.0f)), embeddedColor, Px(2.0f));
+                    index = last;
+                }
                 if (selStart != selEnd && selStart <= lineEnd && selEnd >= lineStart && !(selEnd == lineStart && line > buffer.LineOf(selStart)))
                 {
                     const std::size_t from = std::max(selStart, lineStart);
@@ -791,11 +811,6 @@ namespace Manifold::UI
                         x2 += metrics.Char * 0.6f;
                     draw->AddRectFilled(ImVec2(x1, y), ImVec2(x2, y + metrics.Row), selectionColor);
                 }
-                spans.clear();
-                Text::LineState lineState = view.States[static_cast<std::size_t>(line)];
-                const std::string_view content = buffer.Line(line);
-                if (language != Language::Plain)
-                    Text::HighlightLine(language, content, lineStart, lineState, spans);
                 DrawLine(draw, metrics, textOrigin.x, textY, content, lineStart, spans, buffer.TabWidth, plain);
             }
             if (buffer.Size() == 0 && !state.Placeholder.empty())

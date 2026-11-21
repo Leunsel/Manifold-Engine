@@ -273,6 +273,24 @@ namespace Manifold::Templates
         return compiled;
     }
 
+    bool InTag(std::string_view source, std::size_t cursor)
+    {
+        cursor = std::min(cursor, source.size());
+        std::size_t position = 0;
+        while (position < cursor)
+        {
+            const std::size_t start = std::min(source.find("<<", position), source.find("<%", position));
+            if (start == std::string_view::npos || start + 2 > cursor)
+                return false;
+            const bool expression = source.compare(start, 2, "<<") == 0;
+            const std::size_t end = source.find(expression ? ">>" : "%>", start + 2);
+            if (end == std::string_view::npos || end >= cursor)
+                return true;
+            position = end + 2;
+        }
+        return false;
+    }
+
     std::vector<std::string> IncludedNames(const std::vector<Node>& nodes)
     {
         static const std::regex pattern(R"(include\s*\(\s*["']([^"']+)["'])");

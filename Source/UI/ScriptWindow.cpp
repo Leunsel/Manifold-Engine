@@ -84,6 +84,37 @@ namespace Manifold::UI
         }
     }
 
+    CodeAssist MakeAsmAssist(Engine& engine)
+    {
+        Engine* owner = &engine;
+        CodeAssist assist;
+        assist.CompleteAt = [owner](const std::string& text, std::size_t cursor, std::size_t& start)
+            {
+                Asm::AsmAssistInput input;
+                if (const auto& process = owner->Process())
+                {
+                    input.Is64Bit = process->Is64Bit();
+                    if (const Target::ModuleList modules = process->Modules())
+                    {
+                        for (const Target::ModuleInfo& module : *modules)
+                            input.Modules.push_back(module.Name);
+                    }
+                }
+                for (const Target::UserSymbol& symbol : owner->Symbols().Registered())
+                    input.Symbols.push_back(symbol.Name);
+                start = Asm::AsmWordAt(text, cursor).Start;
+                std::vector<CodeSuggestion> result;
+                for (Asm::AsmCompletion& item : Asm::CompleteAsm(text, cursor, input))
+                {
+                    std::shared_ptr<const Lua::DocRecord> doc = item.Kind == "function" || (item.Kind == "keyword" && !item.Text.empty()) ? AsmCommandRecord(item.Name) : nullptr;
+                    result.push_back({ std::move(item.Name), std::move(item.Kind), std::move(item.Signature), std::move(item.Text), std::move(doc) });
+                }
+                return result;
+            };
+        assist.Describe = [](const std::string& chain, bool) { return AsmCommandRecord(chain); };
+        return assist;
+    }
+
     ScriptWindow::ScriptWindow(Workspace& workspace, int number, std::string script, int recordId, bool lua)
         : m_workspace(workspace), m_engine(workspace.Core()), m_text(std::move(script)), m_recordId(recordId), m_lua(lua), m_templates(workspace)
     {
@@ -102,30 +133,7 @@ namespace Manifold::UI
         m_title = std::string(lua ? ICON_FA_MOON "  " : ICON_FA_CODE "  ") + name + m_windowId;
 
         m_luaAssist = MakeLuaAssist(m_engine);
-        m_asmAssist.CompleteAt = [this](const std::string& text, std::size_t cursor, std::size_t& start)
-            {
-                Asm::AsmAssistInput input;
-                if (const auto& process = m_engine.Process())
-                {
-                    input.Is64Bit = process->Is64Bit();
-                    if (const Target::ModuleList modules = process->Modules())
-                    {
-                        for (const Target::ModuleInfo& module : *modules)
-                            input.Modules.push_back(module.Name);
-                    }
-                }
-                for (const Target::UserSymbol& symbol : m_engine.Symbols().Registered())
-                    input.Symbols.push_back(symbol.Name);
-                start = Asm::AsmWordAt(text, cursor).Start;
-                std::vector<CodeSuggestion> result;
-                for (Asm::AsmCompletion& item : Asm::CompleteAsm(text, cursor, input))
-                {
-                    std::shared_ptr<const Lua::DocRecord> doc = item.Kind == "function" || (item.Kind == "keyword" && !item.Text.empty()) ? AsmCommandRecord(item.Name) : nullptr;
-                    result.push_back({ std::move(item.Name), std::move(item.Kind), std::move(item.Signature), std::move(item.Text), std::move(doc) });
-                }
-                return result;
-            };
-        m_asmAssist.Describe = [](const std::string& chain, bool) { return AsmCommandRecord(chain); };
+        m_asmAssist = MakeAsmAssist(m_engine);
         m_asmAssist.Embedded = &m_luaAssist;
         m_asmAssist.UseEmbedded = [](const std::string& text, std::size_t cursor) { return Asm::InLuaBlock(text, cursor); };
         m_editor.Assist = lua ? &m_luaAssist : &m_asmAssist;

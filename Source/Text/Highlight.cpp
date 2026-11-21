@@ -22,7 +22,7 @@ namespace Manifold::Text
                     return;
                 start += m_offset;
                 end += m_offset;
-                if (!m_out.empty() && m_out.back().End == start && m_out.back().Kind == kind)
+                if (!m_out.empty() && m_out.back().End == start && m_out.back().Kind == kind && !m_out.back().Embedded)
                 {
                     m_out.back().End = end;
                     return;
@@ -145,7 +145,7 @@ namespace Manifold::Text
             return end;
         }
 
-        std::size_t LuaTokens(std::string_view line, std::size_t from, LineState& state, Spans& out, bool insideAa)
+        std::size_t LuaTokens(std::string_view line, std::size_t from, LineState& state, Spans& out, bool insideAa, bool variables = false)
         {
             std::size_t i = from;
             while (i < line.size())
@@ -225,6 +225,10 @@ namespace Manifold::Text
                         out.Add(i, end, Token::Keyword);
                     else if (end < line.size() && line[end] == '(')
                         out.Add(i, end, Token::Call);
+                    // ∑ Template values and inputs are PascalCase by convention
+                    // (HookName, AoBOffset, Mode); a member after . or : is not one.
+                    else if (variables && c >= 'A' && c <= 'Z' && (i == 0 || (line[i - 1] != '.' && line[i - 1] != ':')))
+                        out.Add(i, end, Token::Variable);
                     i = end;
                     continue;
                 }
@@ -395,6 +399,124 @@ namespace Manifold::Text
         }
     }
 
+    namespace
+    {
+        struct Region
+        {
+            std::size_t Start = 0;
+            std::size_t End = 0;
+        };
+
+        void PushEmbedded(std::vector<TokenSpan>& out, std::size_t start, std::size_t end, Token kind)
+        {
+            if (end > start)
+                out.push_back({ start, end, kind, true });
+        }
+
+        // Lua inside one tag, from `from` up to `stop` (the close delimiter or
+        // the line end). Gaps get plain embedded spans so the editor can tint
+        // the whole tag.
+        void TagContent(std::string_view line, std::size_t from, std::size_t stop, LineState& state, std::vector<TokenSpan>& out)
+        {
+            LineState inner{ state.Inner, state.InnerLevel };
+            if (inner.Kind != Block::LuaComment && inner.Kind != Block::LuaString)
+                inner = { Block::Lua, 0 };
+            std::vector<TokenSpan> lua;
+            Spans luaOut(lua, 0);
+            LuaTokens(line.substr(0, stop), from, inner, luaOut, false, true);
+            std::size_t at = from;
+            for (const TokenSpan& span : lua)
+            {
+                PushEmbedded(out, at, span.Start, Token::Text);
+                PushEmbedded(out, span.Start, span.End, span.Kind);
+                at = span.End;
+            }
+            PushEmbedded(out, at, stop, Token::Text);
+            state.Inner = inner.Kind;
+            state.InnerLevel = inner.Level;
+        }
+
+        // ∑ Template scripts are Auto Assembler text with <% Lua %> and
+        // << expression >> tags, processed before the Auto Assembler ever sees
+        // the text, so the tags are found first, exactly like Templates::Parse
+        // finds them: the first <% or << opens, the first matching %> or >>
+        // closes, whatever Lua strings or Auto Assembler comments say. The text
+        // around them is highlighted as Auto Assembler with each tag replaced by
+        // an identifier of the same length, which keeps `<< Hook >>:` a label
+        // and `db << Bytes >>` a db line.
+        void TemplateTokens(std::string_view line, std::size_t offset, LineState& state, std::vector<TokenSpan>& spans)
+        {
+            std::vector<TokenSpan> tags;
+            std::vector<Region> regions;
+            std::size_t i = 0;
+            while (i <= line.size())
+            {
+                std::size_t regionStart = i;
+                if (state.Open == Tag::None)
+                {
+                    const std::size_t code = line.find("<%", i);
+                    const std::size_t expression = line.find("<<", i);
+                    const std::size_t open = std::min(code, expression);
+                    if (open == npos)
+                        break;
+                    state.Open = open == expression ? Tag::Expression : Tag::Code;
+                    state.Inner = Block::Lua;
+                    state.InnerLevel = 0;
+                    PushEmbedded(tags, open, open + 2, Token::Delimiter);
+                    regionStart = open;
+                    i = open + 2;
+                }
+                const std::size_t close = line.find(state.Open == Tag::Expression ? ">>" : "%>", i);
+                const std::size_t stop = close == npos ? line.size() : close;
+                TagContent(line, i, stop, state, tags);
+                if (close == npos)
+                {
+                    regions.push_back({ regionStart, line.size() });
+                    break;
+                }
+                PushEmbedded(tags, close, close + 2, Token::Delimiter);
+                regions.push_back({ regionStart, close + 2 });
+                state.Open = Tag::None;
+                state.Inner = Block::None;
+                state.InnerLevel = 0;
+                i = close + 2;
+            }
+
+            std::string masked(line);
+            for (const Region& region : regions)
+                std::fill(masked.begin() + static_cast<std::ptrdiff_t>(region.Start), masked.begin() + static_cast<std::ptrdiff_t>(region.End), '_');
+            std::vector<TokenSpan> text;
+            Spans textOut(text, 0);
+            LineState outer{ state.Kind, state.Level };
+            AaTokens(masked, outer, textOut);
+            state.Kind = outer.Kind;
+            state.Level = outer.Level;
+
+            std::vector<TokenSpan> merged = std::move(tags);
+            for (const TokenSpan& span : text)
+            {
+                std::size_t start = span.Start;
+                for (const Region& region : regions)
+                {
+                    if (region.End <= start || region.Start >= span.End)
+                        continue;
+                    if (region.Start > start)
+                        merged.push_back({ start, region.Start, span.Kind });
+                    start = std::max(start, region.End);
+                }
+                if (start < span.End)
+                    merged.push_back({ start, span.End, span.Kind });
+            }
+            std::sort(merged.begin(), merged.end(), [](const TokenSpan& a, const TokenSpan& b) { return a.Start < b.Start; });
+            for (TokenSpan& span : merged)
+            {
+                span.Start += offset;
+                span.End += offset;
+                spans.push_back(span);
+            }
+        }
+    }
+
     bool IsLuaKeyword(std::string_view word)
     {
         static const WordSet words(kLuaKeywords);
@@ -434,6 +556,10 @@ namespace Manifold::Text
         else if (language == Language::Json)
         {
             JsonTokens(line, state, out);
+        }
+        else if (language == Language::Template)
+        {
+            TemplateTokens(line, offset, state, spans);
         }
     }
 

@@ -272,6 +272,10 @@ namespace Manifold::UI::EditorShared
             return ImGui::GetColorU32(ManifoldTheme::CodeLabel);
         case Text::Token::Mnemonic:
             return ImGui::GetColorU32(ManifoldTheme::Label);
+        case Text::Token::Delimiter:
+            return ImGui::GetColorU32(ManifoldTheme::Accent);
+        case Text::Token::Variable:
+            return ImGui::GetColorU32(ManifoldTheme::AddressText);
         case Text::Token::Text:
             break;
         }

@@ -9,6 +9,10 @@
 
 namespace Manifold::UI
 {
+    // Auto Assembler completion: commands, mnemonics, registers, the target's
+    // modules and registered symbols.
+    CodeAssist MakeAsmAssist(Engine& engine);
+
     class ScriptWindow : public ToolWindowBase
     {
     public:

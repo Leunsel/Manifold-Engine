@@ -18,7 +18,17 @@ namespace Manifold::Templates
         std::vector<std::string> Warnings;
     };
 
+    struct HelperInfo
+    {
+        const char* Name;
+        const char* Params;
+        const char* Text;
+    };
+
     CheckEntry CheckTemplate(lua_State* state, const Library& library, const TemplateInfo& info, const std::string* script = nullptr);
     std::vector<CheckEntry> CheckAll(lua_State* state, const Library& library);
     std::vector<std::string> HelperNames();
+    const std::vector<HelperInfo>& Helpers();
+    // Names a template's Lua can always use besides the values, inputs and helpers.
+    const std::vector<std::string>& LuaBaseNames();
 }
