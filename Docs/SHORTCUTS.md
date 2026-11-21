@@ -187,7 +187,7 @@ While the hex view pane has the focus. The keys act on the selected byte.
 
 ## Structure Dissect
 
-While a Structure Dissect window has the focus. Field keys act on the selected field.
+While a Structure Dissect window has the focus. Field keys act on the selected field. The arrow keys, Page Up, Page Down, Home and End move through the fields (Shift extends the selection); Right opens a pointer or an embedded structure and then steps into it, Left closes it and then steps out.
 
 | Keys | Command | Name in the settings | Origin |
 |---|---|---|---|

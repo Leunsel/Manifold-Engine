@@ -505,7 +505,7 @@ namespace Manifold
         case CommandScope::MemoryViewer: return "While a memory viewer window has the focus.";
         case CommandScope::Disassembler: return "While the disassembler pane has the focus. The keys act on the selected instruction.";
         case CommandScope::HexView: return "While the hex view pane has the focus. The keys act on the selected byte.";
-        case CommandScope::Structure: return "While a Structure Dissect window has the focus. Field keys act on the selected field.";
+        case CommandScope::Structure: return "While a Structure Dissect window has the focus. Field keys act on the selected field. The arrow keys, Page Up, Page Down, Home and End move through the fields (Shift extends the selection); Right opens a pointer or an embedded structure and then steps into it, Left closes it and then steps out.";
         case CommandScope::ScriptEditor: return "While an Auto Assembler or script window has the focus. Template keys come from each template's Shortcut setting; the ones listed are the built-in templates.";
         case CommandScope::LuaEngine: return "While the Lua Engine window has the focus.";
         case CommandScope::CodeEditor: return "While the cursor is in a code editor: the Lua engine, Auto Assembler and script windows, the Templates window and Table Files.";

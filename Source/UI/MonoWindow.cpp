@@ -13,10 +13,29 @@
 #include "imgui_internal.h"
 
 #include <algorithm>
+#include <cctype>
 #include <optional>
+#include <set>
+#include <string_view>
 
 namespace Manifold::UI
 {
+    namespace
+    {
+        int CompareNoCase(std::string_view a, std::string_view b)
+        {
+            const std::size_t shared = std::min(a.size(), b.size());
+            for (std::size_t i = 0; i < shared; ++i)
+            {
+                const int left = std::tolower(static_cast<unsigned char>(a[i]));
+                const int right = std::tolower(static_cast<unsigned char>(b[i]));
+                if (left != right)
+                    return left - right;
+            }
+            return a.size() == b.size() ? 0 : (a.size() < b.size() ? -1 : 1);
+        }
+    }
+
     MonoWindow::MonoWindow(Workspace& workspace) : m_workspace(workspace), m_engine(workspace.Core()) {}
 
     void MonoWindow::RebuildFilter()
@@ -28,7 +47,94 @@ namespace Manifold::UI
                 ContainsNoCase(m_classes[static_cast<std::size_t>(i)].Image, m_filter))
                 m_filtered.push_back(i);
         }
+        std::stable_sort(m_filtered.begin(), m_filtered.end(), [&](int a, int b)
+            {
+                const Target::MonoClass& left = m_classes[static_cast<std::size_t>(a)];
+                const Target::MonoClass& right = m_classes[static_cast<std::size_t>(b)];
+                if (const int image = CompareNoCase(left.Image, right.Image); image != 0)
+                    return image < 0;
+                if (const int space = CompareNoCase(left.Namespace, right.Namespace); space != 0)
+                    return space < 0;
+                return CompareNoCase(left.Name, right.Name) < 0;
+            });
+        if (m_filter != m_lastFilter)
+            m_closedFiltered.clear();
         m_lastFilter = m_filter;
+        RebuildClassRows();
+    }
+
+    void MonoWindow::RebuildClassRows()
+    {
+        // Assembly > namespace > class. Without a filter only the groups the
+        // user opened show their contents; with one, every group holding a
+        // match is open unless it was closed under that filter.
+        m_classRows.clear();
+        const bool filtering = !m_filter.empty();
+        const auto open = [&](const std::string& key) { return filtering ? !m_closedFiltered.count(key) : m_openGroups.count(key) > 0; };
+        for (std::size_t at = 0; at < m_filtered.size();)
+        {
+            const std::string& image = m_classes[static_cast<std::size_t>(m_filtered[at])].Image;
+            std::size_t imageEnd = at;
+            while (imageEnd < m_filtered.size() && EqualsNoCase(m_classes[static_cast<std::size_t>(m_filtered[imageEnd])].Image, image))
+                ++imageEnd;
+            ClassRow module;
+            module.Kind = 0;
+            module.Key = image;
+            module.Label = image.empty() ? std::string("(no assembly)") : image;
+            module.Count = static_cast<int>(imageEnd - at);
+            m_classRows.push_back(module);
+            if (open(module.Key))
+            {
+                for (std::size_t inner = at; inner < imageEnd;)
+                {
+                    const std::string& space = m_classes[static_cast<std::size_t>(m_filtered[inner])].Namespace;
+                    std::size_t spaceEnd = inner;
+                    while (spaceEnd < imageEnd && EqualsNoCase(m_classes[static_cast<std::size_t>(m_filtered[spaceEnd])].Namespace, space))
+                        ++spaceEnd;
+                    int depth = 1;
+                    bool shown = true;
+                    if (!space.empty())
+                    {
+                        ClassRow group;
+                        group.Kind = 1;
+                        group.Depth = 1;
+                        group.Key = image + "\x1f" + space;
+                        group.Label = space;
+                        group.Count = static_cast<int>(spaceEnd - inner);
+                        m_classRows.push_back(group);
+                        shown = open(group.Key);
+                        depth = 2;
+                    }
+                    for (std::size_t k = inner; shown && k < spaceEnd; ++k)
+                    {
+                        ClassRow row;
+                        row.Kind = 2;
+                        row.Class = m_filtered[k];
+                        row.Depth = depth;
+                        row.Label = m_classes[static_cast<std::size_t>(row.Class)].Name;
+                        m_classRows.push_back(std::move(row));
+                    }
+                    inner = spaceEnd;
+                }
+            }
+            at = imageEnd;
+        }
+    }
+
+    void MonoWindow::RevealClass(int index)
+    {
+        if (index < 0 || index >= static_cast<int>(m_classes.size()))
+            return;
+        const Target::MonoClass& info = m_classes[static_cast<std::size_t>(index)];
+        m_openGroups.insert(info.Image);
+        m_closedFiltered.erase(info.Image);
+        if (!info.Namespace.empty())
+        {
+            m_openGroups.insert(info.Image + "\x1f" + info.Namespace);
+            m_closedFiltered.erase(info.Image + "\x1f" + info.Namespace);
+        }
+        m_scrollClass = index;
+        m_lastFilter = "\x01";
     }
 
     void MonoWindow::SelectClass(int index)
@@ -158,6 +264,7 @@ namespace Manifold::UI
             if (found != m_classes.end())
             {
                 SelectClass(static_cast<int>(found - m_classes.begin()));
+                RevealClass(m_selected);
                 m_showClass = true;
                 m_requestLeftTab = 2;
             }
@@ -718,41 +825,96 @@ namespace Manifold::UI
         if (m_filter != m_lastFilter)
             RebuildFilter();
         ImGui::BeginChild("##monoclasses", ImVec2(0.0f, 0.0f));
+        int scrollRow = -1;
+        if (m_scrollClass >= 0)
+        {
+            for (int row = 0; row < static_cast<int>(m_classRows.size()); ++row)
+            {
+                if (m_classRows[static_cast<std::size_t>(row)].Kind == 2 && m_classRows[static_cast<std::size_t>(row)].Class == m_scrollClass)
+                    scrollRow = row;
+            }
+            m_scrollClass = -1;
+        }
+        bool regroup = false;
         ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(m_filtered.size()));
+        clipper.Begin(static_cast<int>(m_classRows.size()));
+        if (scrollRow >= 0)
+            clipper.IncludeItemByIndex(scrollRow);
         while (clipper.Step())
         {
             for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
             {
-                const int index = m_filtered[static_cast<std::size_t>(row)];
-                const Target::MonoClass& info = m_classes[static_cast<std::size_t>(index)];
-                ImGui::PushID(index);
-                if (ImGui::Selectable(info.FullName().c_str(), m_selected == index && m_showClass))
+                const ClassRow& entry = m_classRows[static_cast<std::size_t>(row)];
+                const float indent = Px(16.0f) * static_cast<float>(entry.Depth);
+                if (indent > 0.0f)
+                    ImGui::Indent(indent);
+                if (entry.Kind != 2)
                 {
-                    SelectClass(index);
-                    m_showClass = true;
-                }
-                if (ImGui::BeginPopupContextItem())
-                {
-                    const bool live = m_engine.Mono().Unity().Enabled();
-                    if (ImGui::MenuItem(ICON_FA_EYE "  Static Members", nullptr, false, live))
-                        OpenStatics(info.Handle);
-                    if (!live)
-                        ItemTooltip("Needs the explorer, which is off: turn it on under Scenes or Objects");
-                    if (ImGui::MenuItem(ICON_FA_SEARCH "  Find Objects of This Class", nullptr, false, live))
+                    // An assembly or a namespace: a click opens or closes it.
+                    ImGui::PushID(entry.Key.c_str());
+                    const bool filtering = !m_filter.empty();
+                    const bool open = filtering ? !m_closedFiltered.count(entry.Key) : m_openGroups.count(entry.Key) > 0;
+                    const char* icon = entry.Kind == 0 ? ICON_FA_CUBE : (open ? ICON_FA_FOLDER_OPEN : ICON_FA_FOLDER);
+                    const std::string label = std::string(open ? ICON_FA_CARET_DOWN : ICON_FA_CARET_RIGHT) + "  " + icon + "  " + entry.Label;
+                    ImGui::PushStyleColor(ImGuiCol_Text, entry.Kind == 0 ? ManifoldTheme::Text : ManifoldTheme::Label);
+                    if (ImGui::Selectable(label.c_str(), false, ImGuiSelectableFlags_AllowOverlap))
                     {
-                        m_searchClass = info.FullName();
-                        m_requestLeftTab = 1;
-                        m_engine.Mono().Unity().Search({ m_searchClass, std::string(), m_searchHidden });
+                        std::set<std::string>& states = filtering ? m_closedFiltered : m_openGroups;
+                        if (states.count(entry.Key))
+                            states.erase(entry.Key);
+                        else
+                            states.insert(entry.Key);
+                        regroup = true;
                     }
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Name"))
-                        ImGui::SetClipboardText(info.FullName().c_str());
-                    ImGui::EndPopup();
+                    ImGui::PopStyleColor();
+                    const std::string count = std::to_string(entry.Count);
+                    const float width = ImGui::CalcTextSize(count.c_str()).x;
+                    ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - width - ImGui::GetStyle().ItemSpacing.x));
+                    Muted(count);
+                    ImGui::PopID();
                 }
-                ImGui::PopID();
+                else
+                {
+                    const int index = entry.Class;
+                    const Target::MonoClass& info = m_classes[static_cast<std::size_t>(index)];
+                    ImGui::PushID(index);
+                    if (ImGui::Selectable(entry.Label.c_str(), m_selected == index && m_showClass))
+                    {
+                        SelectClass(index);
+                        m_showClass = true;
+                    }
+                    if (row == scrollRow)
+                        ImGui::SetScrollHereY(0.35f);
+                    if (ImGui::IsItemHovered() && !info.Namespace.empty())
+                        ImGui::SetTooltip("%s", info.FullName().c_str());
+                    if (ImGui::BeginPopupContextItem())
+                    {
+                        const bool live = m_engine.Mono().Unity().Enabled();
+                        if (ImGui::MenuItem(ICON_FA_EYE "  Static Members", nullptr, false, live))
+                            OpenStatics(info.Handle);
+                        if (!live)
+                            ItemTooltip("Needs the explorer, which is off: turn it on under Scenes or Objects");
+                        if (ImGui::MenuItem(ICON_FA_SEARCH "  Find Objects of This Class", nullptr, false, live))
+                        {
+                            m_searchClass = info.FullName();
+                            m_requestLeftTab = 1;
+                            m_engine.Mono().Unity().Search({ m_searchClass, std::string(), m_searchHidden });
+                        }
+                        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Name"))
+                            ImGui::SetClipboardText(info.FullName().c_str());
+                        ImGui::EndPopup();
+                    }
+                    ImGui::PopID();
+                }
+                if (indent > 0.0f)
+                    ImGui::Unindent(indent);
             }
         }
+        if (m_classRows.empty())
+            Muted(m_filter.empty() ? "No classes." : "No class matches the filter.");
         ImGui::EndChild();
+        if (regroup)
+            RebuildClassRows();
     }
 
     void MonoWindow::ClassPane()

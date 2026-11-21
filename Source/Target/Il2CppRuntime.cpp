@@ -412,10 +412,11 @@ namespace Manifold::Target
         if (info.MembersLoaded)
             return;
         info.MembersLoaded = true;
-        // A class known only from its shape in memory is never handed to the
-        // runtime: a stale or wrong pointer there would crash the game inside it.
-        if (info.Discovered)
-            return;
+        // ∑ A class known from its shape in memory (a generic instance, an
+        // array) is handed to the runtime too, as the inspector does: it passed
+        // the shape check for the exact address of a live object (a known image
+        // and a plausible name where the runtime keeps them), and IL2CPP never
+        // frees class metadata, so the pointer cannot have gone stale.
         const std::uint64_t klass = info.Handle;
         if (const auto parent = m_bridge.CallFn("il2cpp_class_get_parent", klass); parent && *parent)
         {
@@ -519,7 +520,8 @@ namespace Manifold::Target
         discovered.Namespace = ns;
         discovered.Image = imageName->second;
         discovered.Discovered = true;
-        discovered.MembersLoaded = true;
+        if (std::string generic = m_bridge.GenericInstanceName(*klass, ns, name); !generic.empty())
+            discovered.Name = std::move(generic);
         const std::string full = discovered.FullName();
         const int index = static_cast<int>(m_bridge.m_classes.size());
         m_bridge.m_classIndex.emplace(discovered.Name, index);

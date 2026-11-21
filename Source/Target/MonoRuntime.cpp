@@ -749,6 +749,8 @@ namespace Manifold::Target
         dynamic.Handle = *klass;
         dynamic.Name = name;
         dynamic.Namespace = m_bridge.CallString("mono_class_get_namespace", *klass);
+        if (std::string generic = m_bridge.GenericInstanceName(*klass, dynamic.Namespace, dynamic.Name); !generic.empty())
+            dynamic.Name = std::move(generic);
         const std::string full = dynamic.FullName();
         const int index = static_cast<int>(m_bridge.m_classes.size());
         m_bridge.m_classIndex.emplace(dynamic.Name, index);

@@ -784,6 +784,8 @@ extern "C"
             default: name = "System.Object"; break;
             }
         }
+        if (type->Arguments)
+            name = name.substr(0, name.find('`')) + type->Arguments;
         if (type->ByRef)
             name += "&";
         return ::_strdup(name.c_str());

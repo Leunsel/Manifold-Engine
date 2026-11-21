@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -32,7 +33,20 @@ namespace Manifold::UI
             int Current() const { return Position >= 0 && Position < static_cast<int>(History.size()) ? History[static_cast<std::size_t>(Position)] : 0; }
         };
 
+        // A row of the Classes tree: an assembly, a namespace in it, or a class.
+        struct ClassRow
+        {
+            int Kind = 0;        // 0 assembly, 1 namespace, 2 class
+            int Class = -1;      // the class (Kind 2)
+            int Depth = 0;
+            int Count = 0;       // classes under a group that pass the filter
+            std::string Key;     // the group's key for its open state
+            std::string Label;
+        };
+
         void RebuildFilter();
+        void RebuildClassRows();
+        void RevealClass(int index);
         void SelectClass(int index);
         void SyncUnity(Target::UnityExplorer& unity);
         bool ExplorerGate(Target::UnityExplorer& unity, const char* icon, const char* what);
@@ -66,7 +80,11 @@ namespace Manifold::UI
         Engine& m_engine;
         std::uint64_t m_generation = ~0ull;
         std::vector<Target::MonoClass> m_classes;
-        std::vector<int> m_filtered;
+        std::vector<int> m_filtered;      // sorted by assembly, namespace, name
+        std::vector<ClassRow> m_classRows;
+        std::set<std::string> m_openGroups;     // groups opened without a filter
+        std::set<std::string> m_closedFiltered; // groups closed while a filter is set
+        int m_scrollClass = -1;
         std::string m_filter;
         std::string m_lastFilter = "\x01";
         int m_selected = -1;
@@ -105,6 +123,7 @@ namespace Manifold::UI
         bool m_showProperties = true;
         bool m_showMethods = true;
         bool m_showInherited = true;
+        bool m_showStatics = true;
         int m_editInspection = 0;
         int m_editMember = -1;
         std::string m_editText;

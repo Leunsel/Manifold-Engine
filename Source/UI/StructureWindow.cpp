@@ -201,6 +201,7 @@ namespace Manifold::UI
         }
 
         constexpr std::int64_t kMaxSnapshotBytes = 0x10000;
+        constexpr int kMaxArrayElements = 1024;
         constexpr int kMaxDepth = 12;
 
         int SizeOf(Scan::ValueType type, int pointerSize, int current)
@@ -349,11 +350,15 @@ namespace Manifold::UI
                         if (containing)
                         {
                             if (const auto instance = engine.Mono().ClassAt(address))
-                                found = Lua::StructureLookup{ instance->Name, instance->Base };
+                            {
+                                const auto array = engine.Mono().ArrayAt(instance->Base);
+                                found = Lua::StructureLookup{ array ? Table::ManagedArrayName(*array) : instance->Name, instance->Base };
+                            }
                         }
                         else if (const auto name = engine.Mono().ClassNameAt(address))
                         {
-                            found = Lua::StructureLookup{ *name, address };
+                            const auto array = engine.Mono().ArrayAt(address);
+                            found = Lua::StructureLookup{ array ? Table::ManagedArrayName(*array) : *name, address };
                         }
                         return [alive, found, scripts, done]()
                             {
@@ -633,15 +638,19 @@ namespace Manifold::UI
             rtti();
             return;
         }
-        engine.Work().Start(ManagedLookup(), [&engine, definition, address, scripts = rtti, finish](WorkProgress&) -> BackgroundWork::Finish
+        const int pointerSize = engine.HasProcess() ? engine.Process()->PointerSize() : 8;
+        engine.Work().Start(ManagedLookup(), [&engine, definition, address, pointerSize, scripts = rtti, finish](WorkProgress&) -> BackgroundWork::Finish
             {
+                // By the object's own class, not by its name: a generic
+                // instance shares its name with the open definition, which
+                // has no field offsets.
                 std::vector<Target::MonoField> fields;
                 Table::ManagedLayouts nested;
-                if (const auto className = engine.Mono().ClassNameAt(address))
-                {
-                    fields = engine.Mono().InstanceFieldsOf(*className);
-                    Table::CollectManagedLayouts(engine.Mono(), fields, nested);
-                }
+                if (const auto array = engine.Mono().ArrayAt(address))
+                    fields = Table::ManagedArrayFields(*array, pointerSize, kMaxArrayElements);
+                else
+                    fields = engine.Mono().InstanceFieldsAt(address);
+                Table::CollectManagedLayouts(engine.Mono(), fields, nested);
                 return [&engine, definition, fields, nested, scripts, finish]()
                     {
                         if (fields.empty())
@@ -784,7 +793,8 @@ namespace Manifold::UI
                 Muted(std::to_string(m_rows.size()) + " of " + std::to_string(total) + " fields match");
             const int columns = 3 + static_cast<int>(m_columns.size());
             const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp;
-            if (ImGui::BeginTable("##fields", columns, flags))
+            const float footer = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y;
+            if (ImGui::BeginTable("##fields", columns, flags, ImVec2(0.0f, -footer)))
             {
                 ImGui::TableSetupScrollFreeze(0, 1);
                 ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthStretch, 0.9f);
@@ -793,10 +803,15 @@ namespace Manifold::UI
                 for (std::size_t i = 0; i < m_columns.size(); ++i)
                     ImGui::TableSetupColumn(("Value " + std::to_string(i + 1)).c_str(), ImGuiTableColumnFlags_WidthStretch, 1.4f);
                 ImGui::TableHeadersRow();
+                KeyboardNavigation();
                 ImGuiListClipper clipper;
                 clipper.Begin(static_cast<int>(m_rows.size()));
                 if (const int editRow = FindEditRow(); editRow >= 0)
                     clipper.IncludeItemByIndex(editRow);
+                if (m_scrollToRow >= static_cast<int>(m_rows.size()))
+                    m_scrollToRow = -1;
+                if (m_scrollToRow >= 0)
+                    clipper.IncludeItemByIndex(m_scrollToRow);
                 while (clipper.Step())
                 {
                     ReadVisible(clipper.DisplayStart, clipper.DisplayEnd);
@@ -806,6 +821,7 @@ namespace Manifold::UI
                 FieldShortcuts(pointerSize);
                 ImGui::EndTable();
             }
+            Footer();
         }
         for (const CommandInfo& info : AllCommands())
         {
@@ -1268,12 +1284,13 @@ namespace Manifold::UI
         }
     }
 
-    void StructureWindow::BuildRows(Table::StructDefinition& definition, std::vector<std::uint64_t> bases, const std::string& path, int depth)
+    void StructureWindow::BuildRows(Table::StructDefinition& definition, std::vector<std::uint64_t> bases, const std::string& path, int depth, int parentBlock, int parentField,
+        const Table::StructDefinition* parentDefinition)
     {
         if (depth > kMaxDepth)
             return;
         const int block = static_cast<int>(m_blocks.size());
-        m_blocks.push_back({ std::move(bases), path });
+        m_blocks.push_back({ std::move(bases), path, parentBlock, parentDefinition, parentField });
         const bool anyExpanded = !m_expanded.empty();
         const bool ordered = std::is_sorted(definition.Fields.begin(), definition.Fields.end(), [](const Table::StructField& a, const Table::StructField& b) { return a.Offset < b.Offset; });
         std::map<int, int> seen;
@@ -1310,9 +1327,246 @@ namespace Manifold::UI
                 else
                     childBases.push_back(address && m_engine.HasProcess() ? m_engine.Process()->ReadPointer(address).value_or(0) : 0);
             }
-            BuildRows(*child, std::move(childBases), fieldPath, depth + 1);
+            BuildRows(*child, std::move(childBases), fieldPath, depth + 1, block, static_cast<int>(index), &definition);
         }
     }
+
+    std::string StructureWindow::RowKey(const Row& row) const
+    {
+        return FieldKey(m_blocks[static_cast<std::size_t>(row.Block)].Path, row.Definition->Fields[static_cast<std::size_t>(row.Field)].Offset, row.Twin);
+    }
+
+    int StructureWindow::AnchorRow() const
+    {
+        if (m_selectAnchor.empty())
+            return -1;
+        for (std::size_t i = 0; i < m_rows.size(); ++i)
+        {
+            if (RowKey(m_rows[i]) == m_selectAnchor)
+                return static_cast<int>(i);
+        }
+        return -1;
+    }
+
+    void StructureWindow::SetExpanded(const Row& row, bool expand)
+    {
+        Table::StructField& field = row.Definition->Fields[static_cast<std::size_t>(row.Field)];
+        const Block& block = m_blocks[static_cast<std::size_t>(row.Block)];
+        const std::string fieldPath = FieldKey(block.Path, field.Offset, row.Twin);
+        if (!expand)
+        {
+            m_expanded.erase(fieldPath);
+            return;
+        }
+        m_expanded.insert(fieldPath);
+        if (field.Type != Scan::ValueType::Pointer || (!field.ChildStructure.empty() && m_engine.Structures().Find(field.ChildStructure)) || m_childLookups.count(fieldPath))
+            return;
+        std::uint64_t target = 0;
+        const std::uint64_t address = block.Bases.empty() ? 0 : FieldAddress(block.Bases.front(), field.Offset);
+        if (address && m_engine.HasProcess())
+            target = m_engine.Process()->ReadPointer(address).value_or(0);
+        ExpandPointer(*row.Definition, field, target, fieldPath);
+    }
+
+    void StructureWindow::KeyboardNavigation()
+    {
+        // Tree-view keys on the field list: Up/Down (Shift extends the
+        // selection), Page Up/Down, Home/End; Right opens a pointer or an
+        // embedded structure and then steps into it, Left closes it and then
+        // steps out to the field it hangs under.
+        if (!m_editPath.empty() || m_rows.empty() || ImGui::GetIO().WantTextInput || ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId))
+            return;
+        const auto pressed = [](ImGuiKeyChord chord) { return ImGui::Shortcut(chord, ImGuiInputFlags_RouteFocused | ImGuiInputFlags_Repeat); };
+        const int count = static_cast<int>(m_rows.size());
+        const int page = std::max(1, static_cast<int>(ImGui::GetWindowHeight() / std::max(1.0f, ImGui::GetTextLineHeightWithSpacing())) - 2);
+        // Every chord is asked each frame (that keeps its route); the selected
+        // row is looked up only once one of them was pressed.
+        struct Step
+        {
+            ImGuiKey Key;
+            int Delta;
+            int Edge;
+        };
+        const Step steps[] = { { ImGuiKey_DownArrow, 1, -1 }, { ImGuiKey_UpArrow, -1, -1 }, { ImGuiKey_PageDown, page, -1 }, { ImGuiKey_PageUp, -page, -1 },
+            { ImGuiKey_Home, -1, 0 }, { ImGuiKey_End, 1, count - 1 } };
+        const Step* moved = nullptr;
+        bool extend = false;
+        for (const Step& candidate : steps)
+        {
+            for (const bool shift : { false, true })
+            {
+                if (pressed(shift ? (ImGuiMod_Shift | candidate.Key) : static_cast<ImGuiKeyChord>(candidate.Key)))
+                {
+                    moved = &candidate;
+                    extend = shift;
+                }
+            }
+        }
+        const bool right = pressed(ImGuiKey_RightArrow);
+        const bool left = pressed(ImGuiKey_LeftArrow);
+        if (!moved && !right && !left)
+            return;
+        const int current = AnchorRow();
+        int target = -1;
+        if (moved)
+            target = current < 0 ? (moved->Delta > 0 ? 0 : count - 1) : (moved->Edge >= 0 ? moved->Edge : std::clamp(current + moved->Delta, 0, count - 1));
+        if (current >= 0 && target < 0)
+        {
+            const Row row = m_rows[static_cast<std::size_t>(current)];
+            const Table::StructField& field = row.Definition->Fields[static_cast<std::size_t>(row.Field)];
+            const bool opens = field.Type == Scan::ValueType::Pointer || Embedded(field);
+            if (right)
+            {
+                if (opens && !row.Expanded)
+                    SetExpanded(row, true);
+                else if (opens && current + 1 < count && m_rows[static_cast<std::size_t>(current + 1)].Depth > row.Depth)
+                    target = current + 1;
+            }
+            else if (left)
+            {
+                if (opens && row.Expanded)
+                {
+                    SetExpanded(row, false);
+                }
+                else
+                {
+                    for (int i = current - 1; i >= 0; --i)
+                    {
+                        if (m_rows[static_cast<std::size_t>(i)].Depth < row.Depth)
+                        {
+                            target = i;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (target < 0 || target == current)
+            return;
+        const std::string key = RowKey(m_rows[static_cast<std::size_t>(target)]);
+        int from = -1;
+        if (extend && !m_rangeAnchor.empty())
+        {
+            for (int i = 0; i < count && from < 0; ++i)
+            {
+                if (RowKey(m_rows[static_cast<std::size_t>(i)]) == m_rangeAnchor)
+                    from = i;
+            }
+        }
+        if (extend && from < 0)
+        {
+            from = current >= 0 ? current : target;
+            m_rangeAnchor = RowKey(m_rows[static_cast<std::size_t>(from)]);
+        }
+        m_selected.clear();
+        if (extend)
+        {
+            for (int i = std::min(from, target); i <= std::max(from, target); ++i)
+                m_selected.insert(RowKey(m_rows[static_cast<std::size_t>(i)]));
+        }
+        else
+        {
+            m_selected.insert(key);
+            m_rangeAnchor = key;
+        }
+        m_selectAnchor = key;
+        m_scrollToRow = target;
+    }
+
+    StructureWindow::PointerPath StructureWindow::PathOf(const Row& row) const
+    {
+        // One offset per dereference, from the base outwards; an embedded
+        // structure adds its offset to the level it sits in.
+        PointerPath path;
+        const Table::StructField& field = row.Definition->Fields[static_cast<std::size_t>(row.Field)];
+        const Block& own = m_blocks[static_cast<std::size_t>(row.Block)];
+        path.Address = own.Bases.empty() ? 0 : FieldAddress(own.Bases.front(), field.Offset);
+        std::vector<std::int64_t> levels = { field.Offset };
+        std::vector<std::string> names = { field.Name };
+        for (int block = row.Block, guard = 0; guard <= kMaxDepth + 1; ++guard)
+        {
+            const Block& current = m_blocks[static_cast<std::size_t>(block)];
+            if (current.ParentBlock < 0 || !current.ParentDefinition || current.ParentField < 0 ||
+                current.ParentField >= static_cast<int>(current.ParentDefinition->Fields.size()))
+                break;
+            const Table::StructField& parent = current.ParentDefinition->Fields[static_cast<std::size_t>(current.ParentField)];
+            names.push_back(parent.Name);
+            if (Embedded(parent))
+                levels.back() += parent.Offset;
+            else
+                levels.push_back(parent.Offset);
+            block = current.ParentBlock;
+        }
+        std::reverse(levels.begin(), levels.end());
+        std::reverse(names.begin(), names.end());
+        const auto offsetText = [](std::int64_t offset)
+            {
+                return offset < 0 ? "-" + Hex(static_cast<std::uint64_t>(-offset)) : "+" + Hex(static_cast<std::uint64_t>(offset));
+            };
+        std::string expression = m_columns.empty() ? std::string() : Trim(m_columns.front().Address.Text);
+        if (expression.empty())
+        {
+            const Block& top = m_blocks.front();
+            expression = Hex(top.Bases.empty() ? 0 : top.Bases.front());
+        }
+        for (std::size_t i = 0; i + 1 < levels.size(); ++i)
+            expression = "[" + expression + offsetText(levels[i]) + "]";
+        path.Expression = expression + offsetText(levels.back());
+        path.Names = names;
+        return path;
+    }
+
+    void StructureWindow::Footer()
+    {
+        // The pointer path of the selected field, written the way the address
+        // list and Cheat Engine read it; a click copies it.
+        const int anchor = AnchorRow();
+        if (anchor < 0)
+        {
+            ImGui::AlignTextToFramePadding();
+            Muted(ICON_FA_LINK "  Select a field to see its pointer path");
+            return;
+        }
+        const PointerPath path = PathOf(m_rows[static_cast<std::size_t>(anchor)]);
+        const bool copied = ImGui::GetTime() - m_copiedAt < 1.5;
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(copied ? ManifoldTheme::Success : ManifoldTheme::Label, "%s", copied ? ICON_FA_CHECK : ICON_FA_LINK);
+        ImGui::SameLine();
+        PushMono();
+        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::AddressText);
+        const ImVec2 size = ImGui::CalcTextSize(path.Expression.c_str());
+        const bool clicked = ImGui::Selectable(path.Expression.c_str(), false, 0, ImVec2(size.x, 0.0f));
+        ImGui::PopStyleColor();
+        PopMono();
+        if (clicked)
+        {
+            ImGui::SetClipboardText(path.Expression.c_str());
+            m_copiedAt = ImGui::GetTime();
+        }
+        ItemTooltip(copied ? "Copied" : "Click to copy the pointer path; right-click for more");
+        std::string dotted;
+        std::string arrows;
+        for (std::size_t i = 0; i < path.Names.size(); ++i)
+        {
+            dotted += (i ? "." : "") + path.Names[i];
+            arrows += (i ? "  " ICON_FA_ANGLE_RIGHT "  " : "") + path.Names[i];
+        }
+        if (ImGui::BeginPopupContextItem("##pathmenu"))
+        {
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Pointer Path"))
+                ImGui::SetClipboardText(path.Expression.c_str());
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Field Names"))
+                ImGui::SetClipboardText(dotted.c_str());
+            if (path.Address && ImGui::MenuItem(ICON_FA_COPY "  Copy the Address"))
+                ImGui::SetClipboardText(Hex(path.Address).c_str());
+            ImGui::EndPopup();
+        }
+        ImGui::SameLine(0.0f, Px(12.0f));
+        if (path.Address)
+            arrows += "   =  " + Hex(path.Address);
+        TextFitted(arrows, ImGui::GetContentRegionAvail().x, ManifoldTheme::Muted);
+    }
+
 
     int StructureWindow::FindEditRow() const
     {
@@ -1443,23 +1697,7 @@ namespace Manifold::UI
             else
                 ImGui::TextColored(ManifoldTheme::Label, "%s", expanded ? ICON_FA_CARET_DOWN : ICON_FA_CARET_RIGHT);
             if (ImGui::IsItemClicked())
-            {
-                if (expanded)
-                {
-                    m_expanded.erase(fieldPath);
-                }
-                else
-                {
-                    m_expanded.insert(fieldPath);
-                    if (pointer && (field.ChildStructure.empty() || !m_engine.Structures().Find(field.ChildStructure)) && !m_childLookups.count(fieldPath))
-                    {
-                        std::uint64_t target = 0;
-                        if (!addresses.empty() && addresses.front() && m_engine.HasProcess())
-                            target = m_engine.Process()->ReadPointer(addresses.front()).value_or(0);
-                        ExpandPointer(definition, field, target, fieldPath);
-                    }
-                }
-            }
+                SetExpanded(row, !expanded);
             ImGui::SameLine(0.0f, Px(4.0f));
         }
         PushMono();
@@ -1508,6 +1746,7 @@ namespace Manifold::UI
                     m_selected.insert(fieldPath);
                 }
                 m_selectAnchor = fieldPath;
+                m_rangeAnchor = fieldPath;
             }
         }
         else if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !selected)
@@ -1515,6 +1754,15 @@ namespace Manifold::UI
             m_selected.clear();
             m_selected.insert(fieldPath);
             m_selectAnchor = fieldPath;
+            m_rangeAnchor = fieldPath;
+        }
+        if (index == m_scrollToRow)
+        {
+            // Into view below the frozen header row, not under it.
+            ImRect rect = ImGui::GetCurrentContext()->LastItemData.Rect;
+            rect.Min.y -= ImGui::TableGetHeaderRowHeight();
+            ImGui::ScrollToRect(ImGui::GetCurrentWindow(), rect, ImGuiScrollFlags_KeepVisibleEdgeY);
+            m_scrollToRow = -1;
         }
         if (clicked && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {

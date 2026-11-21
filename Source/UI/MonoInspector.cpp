@@ -677,8 +677,18 @@ namespace Manifold::UI
         FlowNext(CheckboxWidth("Inherited"));
         ImGui::Checkbox("Inherited", &m_showInherited);
         ItemTooltip("Also members of the base classes (MonoBehaviour, Component, ...)");
+        if (inspection.Object)
+        {
+            FlowNext(CheckboxWidth("Statics"));
+            ImGui::Checkbox("Statics", &m_showStatics);
+            ItemTooltip("The static members of the class, in a section of their own below the members of this object");
+        }
 
+        // ∑ An object's own members first, then the class's static ones under
+        // a heading of their own (-1 in the row list): they belong to no
+        // object, so mixing them in reads as if they did.
         std::vector<int> rows;
+        std::vector<int> statics;
         for (int i = 0; i < static_cast<int>(layout.Members.size()); ++i)
         {
             const Target::MonoMember& member = layout.Members[static_cast<std::size_t>(i)];
@@ -691,7 +701,18 @@ namespace Manifold::UI
                 continue;
             if (!m_memberFilter.empty() && !ContainsNoCase(member.Name, m_memberFilter))
                 continue;
+            if (member.Static && inspection.Object)
+            {
+                if (m_showStatics)
+                    statics.push_back(i);
+                continue;
+            }
             rows.push_back(i);
+        }
+        if (!statics.empty())
+        {
+            rows.push_back(-1);
+            rows.insert(rows.end(), statics.begin(), statics.end());
         }
         if (rows.empty())
         {
@@ -714,13 +735,21 @@ namespace Manifold::UI
             for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row)
             {
                 const int index = rows[static_cast<std::size_t>(row)];
+                if (index < 0)
+                {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_TableHeaderBg));
+                    ImGui::TableNextColumn();
+                    ImGui::TextColored(ManifoldTheme::Label, ICON_FA_THUMBTACK "  Static Members (%zu)", statics.size());
+                    continue;
+                }
                 const Target::MonoMember& member = layout.Members[static_cast<std::size_t>(index)];
                 ImGui::TableNextRow();
                 ImGui::PushID(index);
                 ImGui::TableNextColumn();
                 const bool inherited = member.Declaring != layout.Name;
                 ImGui::PushStyleColor(ImGuiCol_Text, inherited ? ManifoldTheme::Label : ManifoldTheme::Text);
-                ImGui::TextUnformatted((std::string(MemberIcon(member.Kind)) + "  " + (member.Static ? "static " : "") + member.Name).c_str());
+                ImGui::TextUnformatted((std::string(MemberIcon(member.Kind)) + "  " + member.Name).c_str());
                 ImGui::PopStyleColor();
                 if (ImGui::IsItemHovered())
                 {

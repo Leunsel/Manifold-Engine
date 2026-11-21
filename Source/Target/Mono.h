@@ -50,6 +50,21 @@ namespace Manifold::Target
         return typeCode == 0x11 || typeCode == 0x15;
     }
 
+    // A managed array object as Structure Dissect lays it out: the header
+    // (class, monitor, bounds, max_length) and then Length elements of
+    // ElementSize bytes each, starting at DataOffset. Element describes the
+    // element type the way a field would: its type code, and for a struct its
+    // class handle, size and name.
+    struct MonoArrayLayout
+    {
+        std::string Name;
+        MonoField Element;
+        int ElementSize = 0;
+        int DataOffset = 0;
+        int Rank = 1;
+        std::uint64_t Length = 0;
+    };
+
     struct MonoInstance
     {
         std::uint64_t Base = 0;   // the object header (where the structure starts)
@@ -67,7 +82,7 @@ namespace Manifold::Target
         std::vector<MonoField> Fields;
         std::string Parent;         // IL2CPP: the base class, read with the members
         bool Generic = false;       // IL2CPP: an open generic definition, which has no field offsets
-        bool Discovered = false;    // IL2CPP: named from its shape in memory, never handed to the runtime
+        bool Discovered = false;    // IL2CPP: named from its shape in memory (a generic instance, an array)
         bool ValueTypesRead = false;
 
         std::string FullName() const { return Namespace.empty() ? Name : Namespace + "." + Name; }
@@ -131,6 +146,15 @@ namespace Manifold::Target
         std::vector<MonoField> TypedFieldsOf(std::string_view className);
         std::vector<MonoField> TypedFieldsOf(std::uint64_t klass);
         std::vector<MonoField> InstanceFieldsOf(std::string_view className);
+        // The instance fields of the object whose header is exactly at an
+        // address, found by the object's own class pointer rather than a name.
+        // A generic instance (List<Item>) shares its name with the open
+        // definition (List`1), which has no field offsets, so a lookup by name
+        // would miss them.
+        std::vector<MonoField> InstanceFieldsAt(std::uint64_t address);
+        // The array object whose header is exactly at an address, or nullopt
+        // when the object there is no array.
+        std::optional<MonoArrayLayout> ArrayAt(std::uint64_t address);
         // One class with its members loaded: methods with handles (and for
         // IL2CPP their code addresses and parameter counts), fields, parent.
         std::optional<MonoClass> ClassDetails(std::string_view className);
@@ -205,6 +229,10 @@ namespace Manifold::Target
         void EnsureMembers(int classIndex);
         std::vector<MonoField> TypedFields(int classIndex);
         int ParentIndex(int classIndex);
+        std::vector<MonoField> InstanceFields(int classIndex);
+        std::uint64_t ClassHandleAt(std::uint64_t header) const;
+        int AdoptClass(std::uint64_t klass);
+        std::string GenericInstanceName(std::uint64_t klass, const std::string& space, const std::string& name);
         void DescribeValueType(const std::string& prefix, std::uint64_t klass, MonoField& field);
         std::optional<std::string> ResolveHead(std::uint64_t header, bool allowRuntimeFallback);
 

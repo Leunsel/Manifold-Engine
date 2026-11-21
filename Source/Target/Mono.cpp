@@ -350,38 +350,144 @@ namespace Manifold::Target
     std::vector<MonoField> MonoBridge::InstanceFieldsOf(std::string_view className)
     {
         std::lock_guard lock(m_lock);
+        return InstanceFields(FindClass(className));
+    }
+
+    std::vector<MonoField> MonoBridge::InstanceFieldsAt(std::uint64_t address)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_present || !m_process || !address || !ResolveHead(address, true))
+            return {};
+        const auto found = m_handleIndex.find(ClassHandleAt(address));
+        return found == m_handleIndex.end() ? std::vector<MonoField>{} : InstanceFields(found->second);
+    }
+
+    std::vector<MonoField> MonoBridge::InstanceFields(int classIndex)
+    {
         std::vector<MonoField> all;
-        int index = FindClass(className);
-        for (int depth = 0; index >= 0 && depth < 48; ++depth)
+        for (int depth = 0; classIndex >= 0 && depth < 48; ++depth)
         {
-            const std::vector<MonoField> own = TypedFields(index);
+            const std::vector<MonoField> own = TypedFields(classIndex);
             all.insert(all.end(), own.begin(), own.end());
-            index = ParentIndex(index);
+            classIndex = ParentIndex(classIndex);
         }
         return all;
     }
 
+    std::uint64_t MonoBridge::ClassHandleAt(std::uint64_t header) const
+    {
+        // An Il2CppObject starts with its class; a MonoObject with its vtable,
+        // which starts with the class.
+        const auto first = m_process->ReadPointer(header);
+        if (!first || *first < 0x10000)
+            return 0;
+        if (IsIl2Cpp())
+            return *first;
+        return m_process->ReadPointer(*first).value_or(0);
+    }
+
+    std::string MonoBridge::GenericInstanceName(std::uint64_t klass, const std::string& space, const std::string& name)
+    {
+        // ∑ The runtime's type name tells generic instances apart (List<Item>
+        // and List<Enemy> are both "List`1" to class_get_name, and the nested
+        // Entry of every Dictionary is "Entry"). Only names that carry type
+        // arguments replace the plain one; the result is "Namespace.Rest" when
+        // it starts with the namespace.
+        const std::string prefix = IsIl2Cpp() ? "il2cpp_" : "mono_";
+        if (!klass || (m_paused && m_paused()) || !Fn((prefix + "class_get_type").c_str()) || !Fn((prefix + "type_get_name").c_str()))
+            return {};
+        const std::uint64_t type = CallFn((prefix + "class_get_type").c_str(), klass).value_or(0);
+        const std::uint64_t text = type ? CallFn((prefix + "type_get_name").c_str(), type).value_or(0) : 0;
+        if (!text)
+            return {};
+        std::string full = m_call.ReadCString(text, 512);
+        if (Fn((prefix + "free").c_str()))
+            CallFn((prefix + "free").c_str(), text);
+        const std::string plain = name.substr(0, name.find('`'));
+        if (full.size() > 500 || full.find('<') == std::string::npos || plain.empty() || full.find(plain) == std::string::npos ||
+            !std::all_of(full.begin(), full.end(), [](char c) { return static_cast<unsigned char>(c) >= 0x20 && c != 0x7F; }))
+            return {};
+        if (!space.empty() && full.size() > space.size() + 1 && full.compare(0, space.size(), space) == 0 && full[space.size()] == '.')
+            return full.substr(space.size() + 1);
+        return full;
+    }
+
+    int MonoBridge::AdoptClass(std::uint64_t klass)
+    {
+        // A class the runtime itself handed out (a parent, an array's element
+        // class), so asking the runtime about it is safe.
+        if (!klass)
+            return -1;
+        if (const auto known = m_handleIndex.find(klass); known != m_handleIndex.end())
+            return known->second;
+        const std::string prefix = IsIl2Cpp() ? "il2cpp_" : "mono_";
+        MonoClass info;
+        info.Handle = klass;
+        info.Name = CallString((prefix + "class_get_name").c_str(), klass);
+        info.Namespace = CallString((prefix + "class_get_namespace").c_str(), klass);
+        if (info.Name.empty())
+            return -1;
+        if (std::string generic = GenericInstanceName(klass, info.Namespace, info.Name); !generic.empty())
+            info.Name = std::move(generic);
+        if (const std::uint64_t image = CallFn((prefix + "class_get_image").c_str(), klass).value_or(0))
+            info.Image = std::string(WithoutDll(CallString((prefix + "image_get_name").c_str(), image)));
+        const int index = static_cast<int>(m_classes.size());
+        m_classIndex.emplace(info.Name, index);
+        if (!info.Namespace.empty())
+            m_classIndex.emplace(info.FullName(), index);
+        m_handleIndex.emplace(klass, index);
+        m_classes.push_back(std::move(info));
+        return index;
+    }
+
     int MonoBridge::ParentIndex(int classIndex)
     {
-        if (classIndex < 0 || classIndex >= static_cast<int>(m_classes.size()) || m_classes[static_cast<std::size_t>(classIndex)].Discovered)
+        if (classIndex < 0 || classIndex >= static_cast<int>(m_classes.size()))
             return -1;
         const std::string prefix = IsIl2Cpp() ? "il2cpp_" : "mono_";
         const std::uint64_t parent = CallFn((prefix + "class_get_parent").c_str(), m_classes[static_cast<std::size_t>(classIndex)].Handle).value_or(0);
-        if (!parent)
-            return -1;
-        if (const auto known = m_handleIndex.find(parent); known != m_handleIndex.end())
-            return known->second;
-        MonoClass info;
-        info.Handle = parent;
-        info.Name = CallString((prefix + "class_get_name").c_str(), parent);
-        info.Namespace = CallString((prefix + "class_get_namespace").c_str(), parent);
-        if (info.Name.empty())
-            return -1;
-        const int index = static_cast<int>(m_classes.size());
-        m_classIndex.emplace(info.FullName(), index);
-        m_handleIndex.emplace(parent, index);
-        m_classes.push_back(std::move(info));
-        return index;
+        return AdoptClass(parent);
+    }
+
+    std::optional<MonoArrayLayout> MonoBridge::ArrayAt(std::uint64_t address)
+    {
+        std::lock_guard lock(m_lock);
+        if (!m_present || !m_process || !address)
+            return std::nullopt;
+        const auto name = ResolveHead(address, true);
+        if (!name || name->empty() || name->back() != ']')
+            return std::nullopt;
+        const std::uint64_t klass = ClassHandleAt(address);
+        const std::string prefix = IsIl2Cpp() ? "il2cpp_" : "mono_";
+        const auto call = [&](const char* function, std::uint64_t argument) -> std::uint64_t
+            {
+                const std::string full = prefix + function;
+                return Fn(full.c_str()) ? CallFn(full.c_str(), argument).value_or(0) : 0;
+            };
+        MonoArrayLayout layout;
+        layout.Name = *name;
+        layout.Rank = static_cast<int>(call("class_get_rank", klass) & 0xFFu);
+        if (layout.Rank <= 0)
+            return std::nullopt;
+        const std::uint64_t element = call("class_get_element_class", klass);
+        if (!element)
+            return std::nullopt;
+        const int pointer = m_process->PointerSize();
+        layout.ElementSize = static_cast<int>(call(IsIl2Cpp() ? "class_array_element_size" : "array_element_size", klass) & 0xFFFFu);
+        if (layout.ElementSize <= 0)
+            layout.ElementSize = pointer;
+        const MonoObjectLayout object = MonoLayoutFor(pointer);
+        layout.DataOffset = static_cast<int>(object.ArrayData);
+        layout.Length = m_process->ReadPointer(address + object.ArrayLength).value_or(0);
+        const std::uint64_t type = call("class_get_type", element);
+        layout.Element.TypeCode = type ? static_cast<int>(call("type_get_type", type) & 0xFFu) : 0;
+        if (MayBeValueType(layout.Element.TypeCode))
+        {
+            AdoptClass(element);
+            DescribeValueType(prefix, element, layout.Element);
+        }
+        m_call.ResetScratch();
+        return layout;
     }
 
     std::vector<MonoField> MonoBridge::TypedFields(int classIndex)

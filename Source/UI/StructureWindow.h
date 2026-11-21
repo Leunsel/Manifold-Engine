@@ -37,6 +37,18 @@ namespace Manifold::UI
         {
             std::vector<std::uint64_t> Bases;
             std::string Path;
+            // The field this block hangs under: its block and its place in the
+            // parent structure, -1 for the top structure.
+            int ParentBlock = -1;
+            const Table::StructDefinition* ParentDefinition = nullptr;
+            int ParentField = -1;
+        };
+
+        struct PointerPath
+        {
+            std::string Expression;  // [[base+50]+28]+10
+            std::vector<std::string> Names;  // _inventory, _possessedItems, _items
+            std::uint64_t Address = 0;
         };
 
         struct Row
@@ -71,7 +83,14 @@ namespace Manifold::UI
         void RunCommand(Command command);
         void FieldShortcuts(int pointerSize);
         void RunFieldCommand(Command command, Table::StructDefinition& definition, Table::StructField& field, std::uint64_t address, const std::string& path, int pointerSize);
-        void BuildRows(Table::StructDefinition& definition, std::vector<std::uint64_t> bases, const std::string& path, int depth);
+        void BuildRows(Table::StructDefinition& definition, std::vector<std::uint64_t> bases, const std::string& path, int depth, int parentBlock = -1, int parentField = -1,
+            const Table::StructDefinition* parentDefinition = nullptr);
+        std::string RowKey(const Row& row) const;
+        int AnchorRow() const;
+        void SetExpanded(const Row& row, bool expand);
+        void KeyboardNavigation();
+        PointerPath PathOf(const Row& row) const;
+        void Footer();
         int FindEditRow() const;
         void ReadVisible(int first, int last);
         bool ReadField(int block, std::size_t column, std::uint64_t address, std::uint8_t* out, std::size_t size) const;
@@ -120,6 +139,9 @@ namespace Manifold::UI
         std::string m_editText;
         std::set<std::string> m_selected;
         std::string m_selectAnchor;
+        std::string m_rangeAnchor;
+        int m_scrollToRow = -1;
+        double m_copiedAt = -10.0;
         std::string m_selectionStructure;
         bool m_editName = false;
         std::string m_addOffset;

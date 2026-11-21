@@ -569,7 +569,9 @@ namespace
 {
     struct FakeIl2CppImage;
     struct FakeIl2CppClass;
-    struct FakeIl2CppType { int Type; const FakeIl2CppClass* Klass = nullptr; bool ByRef = false; };
+    // Arguments: the type arguments il2cpp_type_get_name writes after a generic
+    // instance's name ("<System.Int32>").
+    struct FakeIl2CppType { int Type; const FakeIl2CppClass* Klass = nullptr; bool ByRef = false; const char* Arguments = nullptr; };
     struct FakeFieldInfo { const char* Name; const FakeIl2CppType* Type; const FakeIl2CppClass* Parent; int Offset; unsigned Token; int Flags; long long Literal = 0; };
     struct FakeMethodInfo
     {
@@ -674,8 +676,35 @@ namespace
     const FakeIl2CppAssembly kGameAssembly = { &kGameImage };
     const FakeIl2CppAssembly* const kAssemblies[] = { &kCorlibAssembly, &kGameAssembly };
     // A generic instance (List<int>): the runtime makes these on demand, so no
-    // image lists them; the bridge may name one only by its shape.
-    const FakeIl2CppClass kListOfInt = { &kCorlib, nullptr, "List`1", "System.Collections.Generic", &kCorlibClasses[1], nullptr, 0, nullptr, 0, false };
+    // image lists them; the bridge finds one by its shape, and its fields have
+    // offsets (the open List`1 has none).
+    extern const FakeIl2CppClass kListOfInt;
+    const FakeFieldInfo kListOfIntFields[] = {
+        { "_items", &kClassType, &kListOfInt, 0x10, 0, 0 },
+        { "_size", &kI4, &kListOfInt, 0x18, 0, 0 },
+        { "_version", &kI4, &kListOfInt, 0x1C, 0, 0 },
+    };
+    const FakeIl2CppClass kListOfInt = { &kCorlib, nullptr, "List`1", "System.Collections.Generic", &kCorlibClasses[1], nullptr, 0, kListOfIntFields, 3, false,
+        false, false, 0, 0, nullptr, nullptr, nullptr, 0, FakeIl2CppType{ 0x15, &kListOfInt, false, "<System.Int32>" } };
+    // Arrays, which no image lists either: of int, of Player references, and
+    // of a struct with two floats.
+    extern const FakeIl2CppClass kVec2;
+    const FakeFieldInfo kVec2Fields[] = {
+        { "x", &kR4, &kVec2, 0x10, 0, 0 },
+        { "y", &kR4, &kVec2, 0x14, 0, 0 },
+    };
+    const FakeIl2CppClass kInt32 = { &kCorlib, nullptr, "Int32", "System", &kCorlibClasses[1], nullptr, 0, nullptr, 0, false, true, false, 4, 0, nullptr, nullptr, nullptr, 0,
+        FakeIl2CppType{ 0x08 } };
+    const FakeIl2CppClass kVec2 = { &kGameImage, nullptr, "Vec2", "Game", &kCorlibClasses[1], nullptr, 0, kVec2Fields, 2, false, true, false, 8, 0, nullptr, nullptr, nullptr, 0,
+        FakeIl2CppType{ 0x11, &kVec2 } };
+    const FakeIl2CppClass kInt32Array = { &kCorlib, nullptr, "Int32[]", "System", &kCorlibClasses[1], nullptr, 0, nullptr, 0, false, false, false, 0, 1, &kInt32, nullptr, nullptr, 0,
+        FakeIl2CppType{ 0x1D } };
+    const FakeIl2CppClass kPlayerArray = { &kGameImage, nullptr, "Player[]", "Game", &kCorlibClasses[1], nullptr, 0, nullptr, 0, false, false, false, 0, 1, &kGameClasses[2], nullptr,
+        nullptr, 0, FakeIl2CppType{ 0x1D } };
+    const FakeIl2CppClass kVec2Array = { &kGameImage, nullptr, "Vec2[]", "Game", &kCorlibClasses[1], nullptr, 0, nullptr, 0, false, false, false, 0, 1, &kVec2, nullptr, nullptr, 0,
+        FakeIl2CppType{ 0x1D } };
+    template <typename T, std::size_t N>
+    struct FakeIl2CppArray { const FakeIl2CppClass* Klass; void* Monitor; void* Bounds; std::size_t Length; T Items[N]; };
     // Something that looks like a class but whose image is no image.
     const FakeIl2CppImage kStrayImage = { "Stray.dll", nullptr, 0 };
     const FakeIl2CppClass kStrayClass = { &kStrayImage, nullptr, "Stray", "", nullptr, nullptr, 0, nullptr, 0, false };
@@ -688,6 +717,9 @@ namespace
 
 extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppPlayer = { &kGameClasses[2], nullptr, 42, 0, 1000, 30, 3.5f };
 extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppList = { &kListOfInt, nullptr, 0, 0, 0, 0, 0.0f };
+extern "C" __declspec(dllexport) FakeIl2CppArray<int, 3> g_il2cppInts = { &kInt32Array, nullptr, nullptr, 3, { 7, 8, 9 } };
+extern "C" __declspec(dllexport) FakeIl2CppArray<const void*, 2> g_il2cppPlayers = { &kPlayerArray, nullptr, nullptr, 2, { &g_il2cppPlayer, nullptr } };
+extern "C" __declspec(dllexport) FakeIl2CppArray<float, 4> g_il2cppVecs = { &kVec2Array, nullptr, nullptr, 2, { 1.0f, 2.0f, 3.0f, 4.0f } };
 extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppWild = { reinterpret_cast<const FakeIl2CppClass*>(0x01000001A9DE141Dull), nullptr, 0, 0, 0, 0, 0.0f };
 extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppNotClass = { reinterpret_cast<const FakeIl2CppClass*>(kNotAClass), nullptr, 0, 0, 0, 0, 0.0f };
 extern "C" __declspec(dllexport) FakeIl2CppObject g_il2cppStray = { &kStrayClass, nullptr, 0, 0, 0, 0, 0.0f };

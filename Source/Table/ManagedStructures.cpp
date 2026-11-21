@@ -16,8 +16,12 @@ namespace Manifold::Table
         case 0x03: case 0x07: size = 2; return V::TwoBytes;
         case 0x08: size = 4; display = FieldDisplay::Signed; return V::FourBytes;
         case 0x09: size = 4; return V::FourBytes;
-        case 0x0a: case 0x18: size = 8; display = FieldDisplay::Signed; return V::EightBytes;
-        case 0x0b: case 0x19: size = 8; return V::EightBytes;
+        case 0x0a: size = 8; display = FieldDisplay::Signed; return V::EightBytes;
+        case 0x0b: size = 8; return V::EightBytes;
+        // ∑ System.IntPtr / UIntPtr (ELEMENT_TYPE_I / U) hold native pointers,
+        // UnityEngine.Object.m_CachedPtr above all, and are pointer sized in a
+        // 32-bit game too.
+        case 0x18: case 0x19: size = 8; return V::Pointer;
         case 0x0c: size = 4; return V::Float;
         case 0x0d: size = 8; return V::Double;
         default: size = 8; return V::Pointer;
@@ -76,6 +80,46 @@ namespace Manifold::Table
             }
             target.Fields.push_back(std::move(member));
         }
+    }
+
+    std::vector<Target::MonoField> ManagedArrayFields(const Target::MonoArrayLayout& array, int pointerSize, int maxElements)
+    {
+        // The header after the class and monitor words, then one field per
+        // element, named [0], [1], ... like Cheat Engine's array view.
+        std::vector<Target::MonoField> fields;
+        Target::MonoField bounds;
+        bounds.Name = "bounds";
+        bounds.Offset = 2 * pointerSize;
+        bounds.TypeCode = 0x18;
+        fields.push_back(bounds);
+        Target::MonoField length;
+        length.Name = "max_length";
+        length.Offset = 3 * pointerSize;
+        length.TypeCode = pointerSize == 4 ? 0x09 : 0x0b;
+        fields.push_back(length);
+        const std::uint64_t count = std::min<std::uint64_t>(array.Length, static_cast<std::uint64_t>(std::max(0, maxElements)));
+        const int size = std::max(1, array.ElementSize);
+        for (std::uint64_t index = 0; index < count; ++index)
+        {
+            const std::int64_t offset = array.DataOffset + static_cast<std::int64_t>(index) * size;
+            if (offset > kMaxFieldOffset)
+                break;
+            Target::MonoField element = array.Element;
+            element.Name = "[" + std::to_string(index) + "]";
+            element.Offset = static_cast<int>(offset);
+            fields.push_back(std::move(element));
+        }
+        return fields;
+    }
+
+    std::string ManagedArrayName(const Target::MonoArrayLayout& array)
+    {
+        // The element count goes into the name: two arrays of one type but of
+        // different lengths need structures of their own.
+        std::string name = array.Name;
+        if (name.size() >= 2 && name.compare(name.size() - 2, 2, "[]") == 0)
+            name.resize(name.size() - 2);
+        return name + "[" + std::to_string(array.Length) + "]";
     }
 
     void AddManagedLayouts(StructureStore& store, const ManagedLayouts& nested, int shift, const std::string& skip)

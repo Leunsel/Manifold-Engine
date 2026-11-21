@@ -4,6 +4,7 @@
 #include "App/Settings.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
+#include "Table/ManagedStructures.h"
 #include "Target/FrameCalls.h"
 #include "Target/Mono.h"
 #include "Target/Process.h"
@@ -763,9 +764,70 @@ namespace Manifold::Tests
         const std::size_t before = bridge.ClassCount();
         const std::uint64_t list = engine.Evaluate(stem + ".g_il2cppList").value_or(0);
         const auto listName = bridge.ClassNameAt(list);
-        CHECK_MSG(listName && *listName == "System.Collections.Generic.List`1", listName ? *listName : "nil");
+        CHECK_MSG(listName && *listName == "System.Collections.Generic.List<System.Int32>", listName ? *listName : "nil");
         CHECK_EQ(bridge.ClassCount(), before + 1);
+        // The open definition keeps its name and has no offsets; the object's
+        // own class (found by its pointer, not its name) has them.
         CHECK(bridge.FieldsOf("System.Collections.Generic.List`1").empty());
+        const std::vector<Target::MonoField> listFields = bridge.InstanceFieldsAt(list);
+        CHECK_EQ(listFields.size(), 3u);
+        if (listFields.size() == 3)
+        {
+            CHECK(listFields[0].Name == "_items" && listFields[0].Offset == 0x10);
+            CHECK(listFields[1].Name == "_size" && listFields[1].Offset == 0x18 && listFields[1].TypeCode == 0x08);
+        }
+        CHECK(!bridge.ArrayAt(list).has_value());
+        if (player)
+        {
+            CHECK(!bridge.ArrayAt(player).has_value());
+            CHECK_EQ(bridge.InstanceFieldsAt(player).size(), 4u);  // health, ammo, speed + Actor.id
+        }
+
+        // Arrays, as Structure Dissect lays them out: header, then [0], [1], ...
+        const int pointerSize = process.PointerSize();
+        const auto ints = bridge.ArrayAt(engine.Evaluate(stem + ".g_il2cppInts").value_or(0));
+        CHECK(ints.has_value());
+        if (ints)
+        {
+            CHECK_EQ(ints->Length, 3u);
+            CHECK_EQ(ints->ElementSize, 4);
+            CHECK_EQ(ints->DataOffset, 4 * pointerSize);
+            CHECK_EQ(ints->Element.TypeCode, 0x08);
+            CHECK_MSG(Table::ManagedArrayName(*ints) == "System.Int32[3]", Table::ManagedArrayName(*ints));
+            Table::StructDefinition layout;
+            Table::FillFromManaged(layout, Table::ManagedArrayFields(*ints, pointerSize, 1024), 0, {});
+            CHECK_EQ(layout.Fields.size(), 5u);
+            if (layout.Fields.size() == 5)
+            {
+                CHECK(layout.Fields[0].Name == "bounds" && layout.Fields[0].Type == Scan::ValueType::Pointer);
+                CHECK(layout.Fields[1].Name == "max_length" && layout.Fields[1].Offset == 3 * pointerSize);
+                CHECK(layout.Fields[3].Name == "[1]" && layout.Fields[3].Offset == 4 * pointerSize + 4 && layout.Fields[3].Type == Scan::ValueType::FourBytes);
+            }
+            CHECK_EQ(Table::ManagedArrayFields(*ints, pointerSize, 2).size(), 4u);
+        }
+        const auto players = bridge.ArrayAt(engine.Evaluate(stem + ".g_il2cppPlayers").value_or(0));
+        CHECK(players && players->Length == 2 && players->ElementSize == pointerSize && players->Element.TypeCode == 0x12);
+        const auto vecs = bridge.ArrayAt(engine.Evaluate(stem + ".g_il2cppVecs").value_or(0));
+        CHECK(vecs.has_value());
+        if (vecs)
+        {
+            CHECK_EQ(vecs->ElementSize, 8);
+            CHECK_MSG(vecs->Element.TypeName == "Game.Vec2" && vecs->Element.ValueSize == 8, vecs->Element.TypeName);
+            const std::vector<Target::MonoField> elements = Table::ManagedArrayFields(*vecs, pointerSize, 1024);
+            Table::ManagedLayouts nested;
+            Table::CollectManagedLayouts(bridge, elements, nested);
+            const auto vec = nested.find("Game.Vec2");
+            CHECK(vec != nested.end() && vec->second.size() == 2);
+            Table::StructDefinition layout;
+            Table::FillFromManaged(layout, elements, 0, nested);
+            CHECK(layout.Fields.size() == 4 && layout.Fields[3].Name == "[1]" && layout.Fields[3].ChildStructure == "Game.Vec2" && layout.Fields[3].Size == 8);
+        }
+        // IntPtr holds a native pointer (UnityEngine.Object.m_CachedPtr).
+        {
+            int size = 0;
+            Table::FieldDisplay display = Table::FieldDisplay::Unsigned;
+            CHECK(Table::ManagedFieldType(0x18, size, display) == Scan::ValueType::Pointer);
+        }
         CHECK(!bridge.ClassNameAt(engine.Evaluate(stem + ".g_il2cppWild").value_or(0)).has_value());
         CHECK(!bridge.ClassNameAt(engine.Evaluate(stem + ".g_il2cppNotClass").value_or(0)).has_value());
         CHECK(!bridge.ClassNameAt(engine.Evaluate(stem + ".g_il2cppStray").value_or(0)).has_value());
@@ -791,7 +853,7 @@ namespace Manifold::Tests
             "il2cpp lua", luaResult);
         CHECK_MSG(lua.Ok(), lua.Text);
         if (lua && take)
-            CHECK_EQ(luaResult, "true,true,6,4,0," + Hex(take) + ",32," + Hex(take));
+            CHECK_EQ(luaResult, "true,true," + std::to_string(bridge.ClassCount()) + ",4,0," + Hex(take) + ",32," + Hex(take));
 
         // Loading in the background, a reload (which drops classes found only
         // by their shape) and Shutdown, which takes the worker off IL2CPP's
