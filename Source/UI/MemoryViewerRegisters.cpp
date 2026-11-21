@@ -366,7 +366,7 @@ namespace Manifold::UI
     void MemoryViewer::RegisterViewItems()
     {
         Settings& options = m_engine.Options();
-        if (ImGui::MenuItem(ICON_FA_PEN "  Allow changing registers", nullptr, &options.RegisterEditing))
+        if (ImGui::MenuItem(ICON_FA_PEN "  Allow Changing Registers", nullptr, &options.RegisterEditing))
             m_engine.SaveOptionsSoon();
         ItemTooltip("On: double-click a register, flag or FPU/SSE value to change it while the process is stopped. Off: the panel only shows them.");
         ImGui::Separator();
@@ -382,7 +382,7 @@ namespace Manifold::UI
             }
         }
         ImGui::Separator();
-        if (ImGui::BeginMenu("XMM values as"))
+        if (ImGui::BeginMenu("XMM Values As"))
         {
             for (int format = 0; format < static_cast<int>(kVectorFormats.size()); ++format)
             {
@@ -442,7 +442,7 @@ namespace Manifold::UI
             ImGui::PushTextWrapPos(0.0f);
             ImGui::TextColored(ManifoldTheme::Warning, ICON_FA_EXCLAMATION_TRIANGLE "  %s", Debug::DescribeException(info.Exception).c_str());
             ImGui::PopTextWrapPos();
-            ImGui::TextColored(ManifoldTheme::Muted, "Run passes it to the program. Change a register (RIP past the instruction) or use Debug > Continue, exception handled, to go on without it.");
+            ImGui::TextColored(ManifoldTheme::Muted, "Run passes it to the program. Change a register (RIP past the instruction) or use Debug > Continue, Exception Handled, to go on without it.");
             ImGui::Dummy(ImVec2(0.0f, Px(4.0f)));
         }
         PushMono();
@@ -550,20 +550,20 @@ namespace Manifold::UI
             }
             if (ImGui::BeginPopupContextItem("##regmenu"))
             {
-                if (ImGui::MenuItem("Change value", nullptr, false, m_registersEditable))
+                if (ImGui::MenuItem("Change Value", nullptr, false, m_registersEditable))
                 {
                     m_registerEdit = row.Name;
                     m_registerEditText = text;
                     m_registerEditFocus = true;
                 }
-                if (ImGui::MenuItem("Show in hex view"))
+                if (ImGui::MenuItem("Show in Hex View"))
                 {
                     m_hexTop = value & ~0xFull;
                     m_hexSelected = value;
                 }
-                if (ImGui::MenuItem("Show in disassembler"))
+                if (ImGui::MenuItem("Show in Disassembler"))
                     Navigate(value);
-                if (ImGui::MenuItem("Highlight in the disassembler"))
+                if (ImGui::MenuItem("Highlight in the Disassembler"))
                     SetHighlight(Lower(name));
                 if (ImGui::MenuItem("Copy"))
                     ImGui::SetClipboardText(Hex(value).c_str());
@@ -582,7 +582,7 @@ namespace Manifold::UI
         if (m_registersRunning)
             return "The thread is running a step";
         if (!m_engine.Options().RegisterEditing)
-            return "Read only: View > Registers > Allow changing registers";
+            return "Read only: View > Registers > Allow Changing Registers";
         return "Double-click to change it";
     }
 
@@ -783,7 +783,7 @@ namespace Manifold::UI
             }
             if (ImGui::BeginPopupContextItem("##xmmmenu"))
             {
-                if (ImGui::MenuItem("Change value", nullptr, false, m_registersEditable))
+                if (ImGui::MenuItem("Change Value", nullptr, false, m_registersEditable))
                 {
                     m_registerEdit = id;
                     m_registerEditText = editText;
@@ -791,12 +791,12 @@ namespace Manifold::UI
                 }
                 if (ImGui::MenuItem("Copy"))
                     ImGui::SetClipboardText(editText.c_str());
-                if (!mxcsr && ImGui::MenuItem("Set to zero", nullptr, false, m_registersEditable))
+                if (!mxcsr && ImGui::MenuItem("Set to Zero", nullptr, false, m_registersEditable))
                 {
                     newVectors.Xmm[static_cast<std::size_t>(i)] = {};
                     vectorsChanged = true;
                 }
-                if (!mxcsr && ImGui::MenuItem("Highlight in the disassembler"))
+                if (!mxcsr && ImGui::MenuItem("Highlight in the Disassembler"))
                     SetHighlight(Lower(name));
                 ImGui::Separator();
                 RegisterViewItems();
@@ -865,7 +865,7 @@ namespace Manifold::UI
             }
             if (ImGui::BeginPopupContextItem("##fpumenu"))
             {
-                if (ImGui::MenuItem("Change value", nullptr, false, m_registersEditable))
+                if (ImGui::MenuItem("Change Value", nullptr, false, m_registersEditable))
                 {
                     m_registerEdit = id;
                     m_registerEditText = used ? value : "0";
@@ -873,7 +873,7 @@ namespace Manifold::UI
                 }
                 if (ImGui::MenuItem("Copy"))
                     ImGui::SetClipboardText(value.c_str());
-                if (ImGui::MenuItem("Copy the 80 bits"))
+                if (ImGui::MenuItem("Copy the 80 Bits"))
                     ImGui::SetClipboardText(ExtendedHex(raw).c_str());
                 ImGui::Separator();
                 RegisterViewItems();
@@ -963,7 +963,7 @@ namespace Manifold::UI
             }
             if (ImGui::BeginPopupContextItem("##wordmenu"))
             {
-                if (ImGui::MenuItem("Change value", nullptr, false, m_registersEditable))
+                if (ImGui::MenuItem("Change Value", nullptr, false, m_registersEditable))
                 {
                     m_registerEdit = id;
                     m_registerEditText = text;
@@ -1119,19 +1119,19 @@ namespace Manifold::UI
             }
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Describe values", nullptr, &options.StackFollowPointers))
+        if (ImGui::MenuItem("Describe Values", nullptr, &options.StackFollowPointers))
             m_engine.SaveOptionsSoon();
         ItemTooltip("Return addresses, symbol names, strings and small numbers beside the values. The full description is in the tooltip.");
-        if (ImGui::MenuItem("Show where plain pointers point", nullptr, &options.StackPointerTargets, options.StackFollowPointers))
+        if (ImGui::MenuItem("Show Where Plain Pointers Point", nullptr, &options.StackPointerTargets, options.StackFollowPointers))
             m_engine.SaveOptionsSoon();
         ItemTooltip("Also \"-> value\" for pointers into memory without a name. Off keeps those in the tooltip, which makes the stack much quieter.");
-        if (ImGui::MenuItem("Fold runs of zeros", nullptr, &options.StackCollapseZeros))
+        if (ImGui::MenuItem("Fold Runs of Zeros", nullptr, &options.StackCollapseZeros))
         {
             m_engine.SaveOptionsSoon();
             m_stackSerial = 0;
         }
         ItemTooltip("Three or more zero slots in a row show as one line.");
-        if (ImGui::MenuItem("Only return addresses (call stack)", nullptr, &m_stackCallsOnly))
+        if (ImGui::MenuItem("Only Return Addresses (Call Stack)", nullptr, &m_stackCallsOnly))
             m_stackSerial = 0;
         ItemTooltip("Leaves the slots that hold a return address: the functions this thread is in, the innermost first. Found by the call in front of each address, so a stale one can show up.");
     }
@@ -1148,7 +1148,7 @@ namespace Manifold::UI
         const std::string note = offsetMode == 0 ? std::string("from ") + sp + " " + Hex(values.Rsp, pointer * 2)
                                : offsetMode == 1 ? std::string("from ") + bp + " " + Hex(values.Rbp, pointer * 2)
                                                  : std::string(sp) + " " + Hex(values.Rsp, pointer * 2);
-        CardTitle(ICON_FA_LAYER_GROUP, m_stackCallsOnly ? "Call stack" : "Stack", note + (running ? "  ·  stepping..." : ""));
+        CardTitle(ICON_FA_LAYER_GROUP, m_stackCallsOnly ? "Call Stack" : "Stack", note + (running ? "  ·  stepping..." : ""));
         if (ImGui::BeginPopupContextWindow("##stackpanel", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
         {
             StackViewItems();
@@ -1387,34 +1387,34 @@ namespace Manifold::UI
                 if (ImGui::BeginPopupContextItem("##stackmenu"))
                 {
                     const StackNote& full = noteAt(i);
-                    if (full.Kind == StackNote::Return && ImGui::MenuItem("Show the call"))
+                    if (full.Kind == StackNote::Return && ImGui::MenuItem("Show the Call"))
                         Navigate(full.Call);
-                    if (full.Kind == StackNote::Return && full.Target && ImGui::MenuItem("Show the called function"))
+                    if (full.Kind == StackNote::Return && full.Target && ImGui::MenuItem("Show the Called Function"))
                         Navigate(full.Target);
-                    if (ImGui::MenuItem("Show value in disassembler"))
+                    if (ImGui::MenuItem("Show Value in Disassembler"))
                         Navigate(value);
-                    if (ImGui::MenuItem("Show value in hex view"))
+                    if (ImGui::MenuItem("Show Value in Hex View"))
                     {
                         m_hexTop = value & ~0xFull;
                         m_hexSelected = value;
                     }
-                    if (ImGui::MenuItem("Show this slot in hex view"))
+                    if (ImGui::MenuItem("Show This Slot in Hex View"))
                     {
                         m_hexTop = at & ~0xFull;
                         m_hexSelected = at;
                     }
                     ImGui::Separator();
-                    if (ImGui::MenuItem("Change value...", nullptr, false, !running))
+                    if (ImGui::MenuItem("Change Value...", nullptr, false, !running))
                     {
                         m_registerEdit = editId;
                         m_registerEditText = Hex(value);
                         m_registerEditFocus = true;
                     }
-                    if (ImGui::MenuItem("Copy value"))
+                    if (ImGui::MenuItem("Copy Value"))
                         ImGui::SetClipboardText(Hex(value).c_str());
-                    if (ImGui::MenuItem("Copy address"))
+                    if (ImGui::MenuItem("Copy Address"))
                         ImGui::SetClipboardText(Hex(at).c_str());
-                    if (!full.Text.empty() && ImGui::MenuItem("Copy the description"))
+                    if (!full.Text.empty() && ImGui::MenuItem("Copy the Description"))
                         ImGui::SetClipboardText(full.Text.c_str());
                     ImGui::Separator();
                     StackViewItems();

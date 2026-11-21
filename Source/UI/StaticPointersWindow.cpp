@@ -131,16 +131,16 @@ namespace Manifold::UI
                 if (ImGui::BeginPopupContextItem("##statichitmenu"))
                 {
                     m_selected = row;
-                    if (ImGui::MenuItem(ICON_FA_PLUS "  Add the pointer to the address list"))
+                    if (ImGui::MenuItem(ICON_FA_PLUS "  Add the Pointer to the Address List"))
                         AddToList(hit);
-                    if (ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect the structure it points to"))
+                    if (ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect the Structure It Points To"))
                         m_workspace.OpenStructure(hit.Value);
-                    if (ImGui::MenuItem(ICON_FA_CODE "  Show the static address in the memory viewer"))
+                    if (ImGui::MenuItem(ICON_FA_CODE "  Show the Static Address in the Memory Viewer"))
                         m_workspace.RevealInMemoryViewer(hit.Address, static_cast<std::uint64_t>(m_process ? m_process->PointerSize() : 8), false, true);
                     ImGui::Separator();
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the pointer path"))
+                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Pointer Path"))
                         ImGui::SetClipboardText(PathText(hit).c_str());
-                    if (ImGui::MenuItem(ICON_FA_LIST "  Copy all pointer paths"))
+                    if (ImGui::MenuItem(ICON_FA_LIST "  Copy All Pointer Paths"))
                     {
                         std::string text;
                         for (const Scan::StaticPointer& each : m_result->Hits)
@@ -176,7 +176,7 @@ namespace Manifold::UI
     void StaticPointersWindow::Draw()
     {
         Collect();
-        if (!BeginWindow(ICON_FA_THUMBTACK "  Find static pointers###staticpointers", ImVec2(760.0f, 520.0f), 0, ImVec2(460.0f, 280.0f)))
+        if (!BeginWindow(ICON_FA_THUMBTACK "  Find Static Pointers###staticpointers", ImVec2(760.0f, 520.0f), 0, ImVec2(460.0f, 280.0f)))
             return;
         Engine& engine = m_workspace.Core();
         if (!engine.HasProcess() && !m_task.Running() && !m_result)

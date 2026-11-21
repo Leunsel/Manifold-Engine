@@ -75,7 +75,7 @@ namespace Manifold::UI
 
     void WriteHistoryWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_HISTORY "  Write history###writehistory", ImVec2(820.0f, 420.0f), ImGuiWindowFlags_MenuBar, ImVec2(520.0f, 240.0f)))
+        if (!BeginWindow(ICON_FA_HISTORY "  Write History###writehistory", ImVec2(820.0f, 420.0f), ImGuiWindowFlags_MenuBar, ImVec2(520.0f, 240.0f)))
             return;
         Engine& engine = m_workspace.Core();
         const WriteHistory& history = engine.Writes();
@@ -94,11 +94,11 @@ namespace Manifold::UI
         {
             if (ImGui::BeginMenu("Edits"))
             {
-                if (ImGui::MenuItem(ICON_FA_UNDO_ALT "  Undo all", nullptr, false, undoable > 0))
+                if (ImGui::MenuItem(ICON_FA_UNDO_ALT "  Undo All", nullptr, false, undoable > 0))
                     UndoAll();
                 ItemTooltip("Writes back the bytes from before each edit, newest first.");
                 ImGui::Separator();
-                if (ImGui::MenuItem(ICON_FA_TRASH "  Clear the list", nullptr, false, !rows.empty()))
+                if (ImGui::MenuItem(ICON_FA_TRASH "  Clear the List", nullptr, false, !rows.empty()))
                 {
                     engine.Writes().Clear(generation);
                     rows.clear();
@@ -194,16 +194,16 @@ namespace Manifold::UI
         if (ImGui::MenuItem(write.Undone ? ICON_FA_REDO "  Redo" : ICON_FA_UNDO_ALT "  Undo", nullptr, false, !blocked))
             Toggle(write);
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_CODE "  Show in the disassembler"))
+        if (ImGui::MenuItem(ICON_FA_CODE "  Show in the Disassembler"))
             Reveal(write, true);
-        if (ImGui::MenuItem(ICON_FA_TH "  Show in the hex view"))
+        if (ImGui::MenuItem(ICON_FA_TH "  Show in the Hex View"))
             Reveal(write, false);
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the address", engine.Describe(write.Address).c_str()))
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Address", engine.Describe(write.Address).c_str()))
             ImGui::SetClipboardText(engine.Describe(write.Address).c_str());
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the bytes before"))
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Bytes Before"))
             ImGui::SetClipboardText(HexBytes(write.Original).c_str());
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the bytes after"))
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Bytes After"))
             ImGui::SetClipboardText(HexBytes(write.Written).c_str());
     }
 

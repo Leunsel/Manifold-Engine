@@ -140,7 +140,7 @@ namespace Manifold::UI
     {
         if (m_editOpen && !ImGui::IsPopupOpen("Breakpoint##edit"))
             ImGui::OpenPopup("Breakpoint##edit");
-        if (!BeginModal("Breakpoint##edit", ICON_FA_CIRCLE, m_editExisting ? "Edit breakpoint" : "New breakpoint", ImVec2(460.0f, 0.0f), nullptr, m_modalViewport))
+        if (!BeginModal("Breakpoint##edit", ICON_FA_CIRCLE, m_editExisting ? "Edit Breakpoint" : "New Breakpoint", ImVec2(460.0f, 0.0f), nullptr, m_modalViewport))
             return;
         if (!m_editOpen)
         {
@@ -211,10 +211,10 @@ namespace Manifold::UI
             if (ImGui::MenuItem(ICON_FA_TRASH "  Remove", "Del", false, selected != nullptr) && selected)
                 debugger.RemoveBreakpoint(selected->Address);
             ImGui::Separator();
-            if (DangerMenuItem(ICON_FA_TRASH "  Remove all", nullptr, !m_list.empty()))
+            if (DangerMenuItem(ICON_FA_TRASH "  Remove All", nullptr, !m_list.empty()))
             {
                 const std::vector<Debug::Breakpoint> all = m_list;
-                m_workspace.Confirm("Remove breakpoints", "Remove all " + std::to_string(all.size()) + (all.size() == 1 ? " breakpoint?" : " breakpoints?"), [this, all]()
+                m_workspace.Confirm("Remove Breakpoints", "Remove all " + std::to_string(all.size()) + (all.size() == 1 ? " breakpoint?" : " breakpoints?"), [this, all]()
                     {
                         for (const Debug::Breakpoint& breakpoint : all)
                             m_engine.Debugger().RemoveBreakpoint(breakpoint.Address);
@@ -282,7 +282,7 @@ namespace Manifold::UI
         {
             const std::string text = attached ? "Set one with F5 on an instruction in the memory viewer, Shift+F5 for one with a condition, or add one here."
                                               : "The debugger is not attached. Breakpoints are set from the memory viewer (F5 on an instruction) or added here; that attaches it.";
-            if (EmptyState(ICON_FA_CIRCLE, "No breakpoints", text, { { ICON_FA_PLUS "  Add a breakpoint", nullptr, m_engine.HasProcess() } }, false) == 0)
+            if (EmptyState(ICON_FA_CIRCLE, "No breakpoints", text, { { ICON_FA_PLUS "  Add a Breakpoint", nullptr, m_engine.HasProcess() } }, false) == 0)
                 Edit(0, Debug::BreakpointType::Execute, 1);
             EndToolWindow();
             return;
@@ -326,9 +326,9 @@ namespace Manifold::UI
                     m_selected = breakpoint.Address;
                     if (ImGui::MenuItem(ICON_FA_EDIT "  Edit...", "Enter"))
                         Edit(breakpoint.Address, breakpoint.Type, breakpoint.Size);
-                    if (ImGui::MenuItem(ICON_FA_CODE "  Show in the disassembler"))
+                    if (ImGui::MenuItem(ICON_FA_CODE "  Show in the Disassembler"))
                         m_workspace.OpenMemoryViewer(breakpoint.Address);
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the address"))
+                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Address"))
                         ImGui::SetClipboardText(m_engine.Symbols().ModuleOffset(breakpoint.Address).c_str());
                     ImGui::Separator();
                     if (DangerMenuItem(ICON_FA_TRASH "  Remove", "Del"))
@@ -598,7 +598,7 @@ namespace Manifold::UI
     {
         if (m_startOpen && !ImGui::IsPopupOpen("Break and trace##start"))
             ImGui::OpenPopup("Break and trace##start");
-        if (!BeginModal("Break and trace##start", ICON_FA_SHOE_PRINTS, "Break and trace", ImVec2(460.0f, 0.0f), nullptr, m_modalViewport))
+        if (!BeginModal("Break and trace##start", ICON_FA_SHOE_PRINTS, "Break and Trace", ImVec2(460.0f, 0.0f), nullptr, m_modalViewport))
             return;
         if (!m_startOpen)
         {
@@ -697,7 +697,7 @@ namespace Manifold::UI
             if (DangerButton(ICON_FA_STOP "  Stop", Px(90.0f, 0.0f)))
                 Stop();
         }
-        else if (ImGui::Button(ICON_FA_REDO "  Trace again", Px(110.0f, 0.0f)))
+        else if (ImGui::Button(ICON_FA_REDO "  Trace Again", Px(110.0f, 0.0f)))
         {
             m_startOpen = true;
             m_modalViewport = m_selfViewport;

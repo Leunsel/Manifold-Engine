@@ -166,7 +166,7 @@ namespace Manifold::UI
         if (skipped)
             text += " " + std::to_string(skipped) + " could not be restored" + (firstError.empty() ? " (too large)." : ", first: " + firstError);
         LOG_INFO("Patches", text);
-        engine.Notify(skipped ? LogLevel::Warning : LogLevel::Success, text + (restored ? " Tools > Write history can undo them." : ""));
+        engine.Notify(skipped ? LogLevel::Warning : LogLevel::Success, text + (restored ? " Tools > Write History can undo them." : ""));
     }
 
     void PatchScanWindow::MenuBar()
@@ -178,10 +178,10 @@ namespace Manifold::UI
         const bool live = m_result && StillOpen(engine, m_scanned);
         if (ImGui::BeginMenu("Scan"))
         {
-            if (ImGui::MenuItem(ICON_FA_SEARCH "  Scan again", nullptr, false, !running && engine.HasProcess()))
+            if (ImGui::MenuItem(ICON_FA_SEARCH "  Scan Again", nullptr, false, !running && engine.HasProcess()))
                 Start();
             ImGui::Separator();
-            ImGui::MenuItem("Include Windows modules", nullptr, &m_windowsModules);
+            ImGui::MenuItem("Include Windows Modules", nullptr, &m_windowsModules);
             ItemTooltip("Also compare the libraries of Windows itself. Overlays and anti-cheat hook these, so expect results there. Takes effect on the next scan.");
             ImGui::EndMenu();
         }
@@ -195,8 +195,8 @@ namespace Manifold::UI
             {
                 const std::string text = "Writes the original bytes from the files on disk back over " + std::to_string(restorable) + (restorable == 1 ? " patch" : " patches") +
                                          (filtered ? " that match the filter" : "") + ".\n\nChanges made by active scripts should be undone by turning the scripts off instead: "
-                                         "a script that later turns itself off writes over the restored bytes. Each restore can be undone in Tools > Write history.";
-                m_workspace.Confirm("Restore patches", text, [this, rows]() { RestoreAll(rows); }, "Restore");
+                                         "a script that later turns itself off writes over the restored bytes. Each restore can be undone in Tools > Write History.";
+                m_workspace.Confirm("Restore Patches", text, [this, rows]() { RestoreAll(rows); }, "Restore");
             }
             if (restorable < rows.size())
                 ImGui::TextDisabled("%d too large to restore here", static_cast<int>(rows.size() - restorable));
@@ -204,7 +204,7 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenu("Copy", m_result && !rows.empty()))
         {
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the list"))
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the List"))
             {
                 std::string text;
                 for (const std::size_t i : rows)
@@ -324,13 +324,13 @@ namespace Manifold::UI
         if (ImGui::BeginPopupContextItem("##patchmenu"))
         {
             AddressMenuItems(m_workspace, patch.Address, CodeActions);
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy current bytes"))
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy Current Bytes"))
                 ImGui::SetClipboardText(HexBytes(patch.Current).c_str());
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy original bytes"))
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy Original Bytes"))
                 ImGui::SetClipboardText(HexBytes(patch.Original).c_str());
             ImGui::Separator();
             ImGui::BeginDisabled(!patch.Complete() || !live);
-            if (DangerMenuItem(ICON_FA_UNDO "  Restore the original bytes"))
+            if (DangerMenuItem(ICON_FA_UNDO "  Restore the Original Bytes"))
                 m_restore = static_cast<int>(index);
             ImGui::EndDisabled();
             ItemTooltip(!live ? "The scan belongs to a process that is no longer open. Scan again first."
@@ -399,7 +399,7 @@ namespace Manifold::UI
     void PatchScanWindow::Draw()
     {
         Collect();
-        if (!BeginWindow(ICON_FA_BAND_AID "  Scan for patches###patchscan", ImVec2(920.0f, 560.0f), ImGuiWindowFlags_MenuBar, ImVec2(620.0f, 320.0f)))
+        if (!BeginWindow(ICON_FA_BAND_AID "  Scan for Patches###patchscan", ImVec2(920.0f, 560.0f), ImGuiWindowFlags_MenuBar, ImVec2(620.0f, 320.0f)))
             return;
         Engine& engine = m_workspace.Core();
         MenuBar();
@@ -460,7 +460,7 @@ namespace Manifold::UI
             m_workspace.Report(written);
             if (written)
             {
-                engine.Notify(LogLevel::Success, "Restored " + std::to_string(patch.Size) + " bytes at " + engine.Symbols().ModuleOffset(patch.Address) + ". Tools > Write history can undo it.");
+                engine.Notify(LogLevel::Success, "Restored " + std::to_string(patch.Size) + " bytes at " + engine.Symbols().ModuleOffset(patch.Address) + ". Tools > Write History can undo it.");
                 m_result->Patches.erase(m_result->Patches.begin() + m_restore);
             }
         }

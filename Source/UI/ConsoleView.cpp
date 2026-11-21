@@ -507,7 +507,7 @@ namespace Manifold::UI
             }
             ImGui::Separator();
             ImGui::BeginDisabled(!levelsFiltered);
-            if (ImGui::Selectable(ICON_FA_EYE "  Show all levels", false, ImGuiSelectableFlags_NoAutoClosePopups, ImVec2(rowWidth, 0.0f)))
+            if (ImGui::Selectable(ICON_FA_EYE "  Show All Levels", false, ImGuiSelectableFlags_NoAutoClosePopups, ImVec2(rowWidth, 0.0f)))
             {
                 filter.Levels.fill(true);
                 changed = true;
@@ -685,21 +685,21 @@ namespace Manifold::UI
                     {
                         const std::string address = "0x" + Hex(m_menuAddress);
                         ImGui::TextColored(ManifoldTheme::AddressText, "%s", address.c_str());
-                        if (actions.OpenMemory && ImGui::MenuItem(ICON_FA_MEMORY "  Open in the memory viewer"))
+                        if (actions.OpenMemory && ImGui::MenuItem(ICON_FA_MEMORY "  Open in the Memory Viewer"))
                             actions.OpenMemory(m_menuAddress);
-                        if (actions.Dissect && ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect the structure here"))
+                        if (actions.Dissect && ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect the Structure Here"))
                             actions.Dissect(m_menuAddress);
-                        if (actions.AddAddress && ImGui::MenuItem(ICON_FA_PLUS "  Add to the address list"))
+                        if (actions.AddAddress && ImGui::MenuItem(ICON_FA_PLUS "  Add to the Address List"))
                             actions.AddAddress(m_menuAddress);
-                        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the address"))
+                        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Address"))
                             ImGui::SetClipboardText(address.c_str());
                         ImGui::Separator();
                     }
-                    if (!m_menuValue.empty() && ImGui::MenuItem(ICON_FA_COPY "  Copy the value"))
+                    if (!m_menuValue.empty() && ImGui::MenuItem(ICON_FA_COPY "  Copy the Value"))
                         ImGui::SetClipboardText(m_menuValue.c_str());
                     if (m_selection.size() > 1)
                     {
-                        if (ImGui::MenuItem((ICON_FA_COPY "  Copy the " + Grouped(m_selection.size()) + " selected entries").c_str(), "Ctrl+C"))
+                        if (ImGui::MenuItem((ICON_FA_COPY "  Copy the " + Grouped(m_selection.size()) + " Selected Entries").c_str(), "Ctrl+C"))
                         {
                             std::vector<std::uint64_t> ids;
                             for (const std::uint64_t shown : ShownIds())
@@ -710,22 +710,22 @@ namespace Manifold::UI
                             ImGui::SetClipboardText(Copy(log, ids).c_str());
                         }
                     }
-                    else if (ImGui::MenuItem(ICON_FA_COPY "  Copy the entry", "Ctrl+C"))
+                    else if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Entry", "Ctrl+C"))
                         ImGui::SetClipboardText(entry.PlainText().c_str());
-                    if (!entry.Traceback.empty() && ImGui::MenuItem(ICON_FA_LIST "  Copy the traceback"))
+                    if (!entry.Traceback.empty() && ImGui::MenuItem(ICON_FA_LIST "  Copy the Traceback"))
                         ImGui::SetClipboardText(entry.Traceback.c_str());
-                    if (entry.Kind == Lua::EntryKind::Input && actions.Recall && ImGui::MenuItem(ICON_FA_REDO "  Put back into the input"))
+                    if (entry.Kind == Lua::EntryKind::Input && actions.Recall && ImGui::MenuItem(ICON_FA_REDO "  Put Back into the Input"))
                         actions.Recall(entry.Text);
-                    if (!entry.Source.Chunk.empty() && entry.Source.Line > 0 && actions.GotoSource && ImGui::MenuItem(ICON_FA_CODE "  Go to the line"))
+                    if (!entry.Source.Chunk.empty() && entry.Source.Line > 0 && actions.GotoSource && ImGui::MenuItem(ICON_FA_CODE "  Go to the Line"))
                         actions.GotoSource(entry.Source.Chunk, entry.Source.Line);
                 });
             const std::vector<std::uint64_t> shown = ShownIds();
             const bool filtered = shown.size() != log.Count();
-            const std::string copyAll = ICON_FA_COPY "  Copy all " + Grouped(shown.size()) + (filtered ? " entries the filter shows" : " entries");
+            const std::string copyAll = ICON_FA_COPY "  Copy All " + Grouped(shown.size()) + (filtered ? " Entries the Filter Shows" : " Entries");
             if (ImGui::MenuItem(copyAll.c_str()))
                 ImGui::SetClipboardText(Copy(log, shown).c_str());
             ItemTooltip(filtered ? "Every entry that passes the filter, also the ones scrolled out of view" : "Every entry in the console, also the ones scrolled out of view");
-            if (ImGui::MenuItem(ICON_FA_CHECK_SQUARE "  Select all", "Ctrl+A"))
+            if (ImGui::MenuItem(ICON_FA_CHECK_SQUARE "  Select All", "Ctrl+A"))
             {
                 m_selection.insert(shown.begin(), shown.end());
                 m_anchor = shown.empty() ? 0 : shown.front();
@@ -733,7 +733,7 @@ namespace Manifold::UI
             if (actions.Clear)
             {
                 ImGui::Separator();
-                if (ImGui::MenuItem(ICON_FA_ERASER "  Clear the console"))
+                if (ImGui::MenuItem(ICON_FA_ERASER "  Clear the Console"))
                     actions.Clear();
             }
             ImGui::EndPopup();
@@ -760,9 +760,9 @@ namespace Manifold::UI
         if (ImGui::BeginPopup("##consolemenu"))
         {
             const std::vector<std::uint64_t> shown = ShownIds();
-            if (ImGui::MenuItem((ICON_FA_COPY "  Copy all " + Grouped(shown.size()) + " entries").c_str()))
+            if (ImGui::MenuItem((ICON_FA_COPY "  Copy All " + Grouped(shown.size()) + " Entries").c_str()))
                 ImGui::SetClipboardText(Copy(log, shown).c_str());
-            if (ImGui::MenuItem(ICON_FA_ERASER "  Clear the console"))
+            if (ImGui::MenuItem(ICON_FA_ERASER "  Clear the Console"))
                 actions.Clear();
             ImGui::EndPopup();
         }

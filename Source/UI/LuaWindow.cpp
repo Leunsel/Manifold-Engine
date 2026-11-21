@@ -287,9 +287,9 @@ namespace Manifold::UI
         };
         if (ImGui::BeginMenu("File"))
         {
-            item(ICON_FA_FOLDER_OPEN "  Open script...", Command::LuaOpen);
-            item(ICON_FA_SAVE "  Save script", Command::LuaSave);
-            item(ICON_FA_SAVE "  Save script as...", Command::LuaSaveAs);
+            item(ICON_FA_FOLDER_OPEN "  Open Script...", Command::LuaOpen);
+            item(ICON_FA_SAVE "  Save Script", Command::LuaSave);
+            item(ICON_FA_SAVE "  Save Script As...", Command::LuaSaveAs);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View"))
@@ -298,26 +298,26 @@ namespace Manifold::UI
             item(ICON_FA_FILE_CODE "  Script", Command::LuaScriptTab, m_tab == Tab::Script);
             item(ICON_FA_BOOK "  Documentation", Command::LuaFunctions, m_engine.Options().LuaDocsPanel);
             ImGui::Separator();
-            item(ICON_FA_SEARCH "  Search the console", Command::LuaFind);
-            item(ICON_FA_ERASER "  Clear the console", Command::LuaClearOutput);
+            item(ICON_FA_SEARCH "  Search the Console", Command::LuaFind);
+            item(ICON_FA_ERASER "  Clear the Console", Command::LuaClearOutput);
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_EYE "  Show on print", nullptr, m_engine.Lua().ShowOnPrint()))
+            if (ImGui::MenuItem(ICON_FA_EYE "  Show on Print", nullptr, m_engine.Lua().ShowOnPrint()))
                 RememberShowOnPrint(!m_engine.Lua().ShowOnPrint());
             ItemTooltip("Opens this window when a script prints or logs while it is closed. Saved with the settings.");
-            ImGui::MenuItem(ICON_FA_ARROW_DOWN "  Follow new entries", nullptr, &m_view.Following());
+            ImGui::MenuItem(ICON_FA_ARROW_DOWN "  Follow New Entries", nullptr, &m_view.Following());
             ItemTooltip("Scroll the console along with new entries.");
             bool changed = false;
-            if (ImGui::MenuItem(ICON_FA_ALIGN_LEFT "  Wrap lines", nullptr, m_filter.Wrap))
+            if (ImGui::MenuItem(ICON_FA_ALIGN_LEFT "  Wrap Lines", nullptr, m_filter.Wrap))
             {
                 m_filter.Wrap = !m_filter.Wrap;
                 changed = true;
             }
-            if (ImGui::MenuItem(ICON_FA_CLOCK "  Show the time", nullptr, m_filter.Time))
+            if (ImGui::MenuItem(ICON_FA_CLOCK "  Show the Time", nullptr, m_filter.Time))
             {
                 m_filter.Time = !m_filter.Time;
                 changed = true;
             }
-            if (ImGui::MenuItem(ICON_FA_HASHTAG "  Integers in hex", nullptr, m_filter.Hex))
+            if (ImGui::MenuItem(ICON_FA_HASHTAG "  Integers in Hex", nullptr, m_filter.Hex))
             {
                 m_filter.Hex = !m_filter.Hex;
                 changed = true;

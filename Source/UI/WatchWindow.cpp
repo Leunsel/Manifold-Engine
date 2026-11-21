@@ -14,7 +14,8 @@ namespace Manifold::UI
         : m_workspace(workspace), m_engine(workspace.Core()), m_watchId(watchId), m_kind(kind), m_address(address), m_size(size)
     {
         const char* icon = kind == Debug::WatchKind::Writes ? ICON_FA_PEN : kind == Debug::WatchKind::Calls ? ICON_FA_PHONE : kind == Debug::WatchKind::InstructionAccesses ? ICON_FA_LIST_UL : ICON_FA_EYE;
-        m_title = std::string(icon) + "  Find out what " + Debug::WatchKindName(kind) + " " + m_engine.Describe(address) + "###watch" + std::to_string(watchId);
+        const char* action = kind == Debug::WatchKind::Writes ? "Writes To" : kind == Debug::WatchKind::Calls ? "Calls" : kind == Debug::WatchKind::InstructionAccesses ? "Addresses This Instruction Accesses" : "Accesses";
+        m_title = std::string(icon) + "  Find Out What " + action + " " + m_engine.Describe(address) + "###watch" + std::to_string(watchId);
     }
 
     WatchWindow::~WatchWindow()
@@ -44,10 +45,10 @@ namespace Manifold::UI
                 if (ImGui::MenuItem(ICON_FA_STOP "  Stop", nullptr, false, running))
                     debugger.StopWatch(m_watchId);
                 ImGui::Separator();
-                if (ImGui::MenuItem(ICON_FA_COPY "  Copy the list", nullptr, false, !m_copy.Entries.empty()))
+                if (ImGui::MenuItem(ICON_FA_COPY "  Copy the List", nullptr, false, !m_copy.Entries.empty()))
                     CopyList();
                 ItemTooltip(byAddress ? "Count and address of every row, one per line, tab-separated." : "Count, address and instruction of every row, one per line, tab-separated.");
-                if (ImGui::MenuItem(ICON_FA_ERASER "  Clear the list", nullptr, false, !m_copy.Entries.empty()))
+                if (ImGui::MenuItem(ICON_FA_ERASER "  Clear the List", nullptr, false, !m_copy.Entries.empty()))
                 {
                     debugger.ClearWatch(m_watchId);
                     m_selected = -1;
@@ -191,14 +192,14 @@ namespace Manifold::UI
 
     void WatchWindow::EntryMenu(const Debug::WatchEntry& entry)
     {
-        if (ImGui::MenuItem(ICON_FA_CODE "  Show in the disassembler"))
+        if (ImGui::MenuItem(ICON_FA_CODE "  Show in the Disassembler"))
             m_workspace.OpenMemoryViewer(entry.Instruction);
         if (m_kind == Debug::WatchKind::InstructionAccesses)
         {
-            if (ImGui::MenuItem(ICON_FA_TH "  Show the address in the hex view"))
+            if (ImGui::MenuItem(ICON_FA_TH "  Show the Address in the Hex View"))
                 m_workspace.OpenMemoryViewer(entry.Accessed, true);
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_PLUS "  Add the address to the list"))
+            if (ImGui::MenuItem(ICON_FA_PLUS "  Add the Address to the List"))
                 m_workspace.AddAddress(entry.Accessed, Scan::ValueType::FourBytes);
             if (ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect"))
                 m_workspace.OpenStructure(entry.Accessed);
@@ -206,9 +207,9 @@ namespace Manifold::UI
         else
         {
             ImGui::Separator();
-            if (m_kind != Debug::WatchKind::Calls && ImGui::MenuItem(ICON_FA_LIST_UL "  Find out what addresses this instruction accesses"))
+            if (m_kind != Debug::WatchKind::Calls && ImGui::MenuItem(ICON_FA_LIST_UL "  Find Out What Addresses This Instruction Accesses"))
                 m_workspace.StartWatch(Debug::WatchKind::InstructionAccesses, entry.Instruction, 1);
-            if (ImGui::MenuItem(ICON_FA_MAGIC "  AOB injection script"))
+            if (ImGui::MenuItem(ICON_FA_MAGIC "  AOB Injection Script"))
             {
                 m_workspace.LastCodeAddress = entry.Instruction;
                 m_workspace.OpenMemoryViewer(entry.Instruction);
@@ -217,7 +218,7 @@ namespace Manifold::UI
         }
         ImGui::Separator();
         const std::string address = m_engine.Describe(m_kind == Debug::WatchKind::InstructionAccesses ? entry.Accessed : entry.Instruction);
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the address", address.c_str()))
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Address", address.c_str()))
             ImGui::SetClipboardText(address.c_str());
     }
 

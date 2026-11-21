@@ -159,9 +159,9 @@ namespace Manifold::UI
     }
 
     TemplateManager::TemplateManager(Workspace& workspace) : m_workspace(workspace), m_engine(workspace.Core()),
-        m_unsavedDialog("templateunsaved", ICON_FA_SAVE, "Unsaved changes"),
-        m_deleteDialog("templatedelete", ICON_FA_TRASH, "Delete template"),
-        m_reportDialog("templatereport", ICON_FA_CHECK_DOUBLE, "Template check", ImVec2(720.0f, 460.0f)),
+        m_unsavedDialog("templateunsaved", ICON_FA_SAVE, "Unsaved Changes"),
+        m_deleteDialog("templatedelete", ICON_FA_TRASH, "Delete Template"),
+        m_reportDialog("templatereport", ICON_FA_CHECK_DOUBLE, "Template Check", ImVec2(720.0f, 460.0f)),
         m_messageDialog("templatemessage", ICON_FA_SHAPES, "Templates")
     {
     }
@@ -237,7 +237,7 @@ namespace Manifold::UI
             Draft draft;
             draft.IsNew = true;
             draft.Form.SchemaVersion = 2;
-            draft.Form.Caption = "New template";
+            draft.Form.Caption = "New Template";
             draft.Form.Id = Templates::UniqueId(Library(), draft.Form.Caption);
             draft.Form.Category = m_draft && !m_draft->BuiltIn ? m_draft->Form.Category : "Templates";
             draft.Script = m_pendingScript.empty() ? "[ENABLE]\n\n[DISABLE]\n" : m_pendingScript;
@@ -343,12 +343,12 @@ namespace Manifold::UI
 
     void TemplateManager::Toolbar()
     {
-        if (IconButton(ICON_FA_PLUS, "New template"))
+        if (IconButton(ICON_FA_PLUS, "New Template"))
             RequestSelect({}, true);
         ImGui::SameLine();
         const Templates::TemplateInfo* current = m_draft && !m_draft->IsNew ? Library().Find(m_draft->Id) : nullptr;
         ImGui::BeginDisabled(!current);
-        if (IconButton(ICON_FA_COPY, "Duplicate as a new template") && current)
+        if (IconButton(ICON_FA_COPY, "Duplicate as a New Template") && current)
         {
             std::string id;
             const Status status = Templates::DuplicateTemplate(Library(), *current, Root(), false, &id);
@@ -362,25 +362,25 @@ namespace Manifold::UI
         }
         ImGui::SameLine();
         ImGui::BeginDisabled(current && current->BuiltIn);
-        if (IconButton(ICON_FA_TRASH, "Move to the recycle bin", true))
+        if (IconButton(ICON_FA_TRASH, "Move to the Recycle Bin", true))
             m_deleteDialog.Open();
         ImGui::EndDisabled();
         ImGui::EndDisabled();
         ImGui::SameLine();
-        if (IconButton(ICON_FA_CHECK_DOUBLE, "Check all templates"))
+        if (IconButton(ICON_FA_CHECK_DOUBLE, "Check All Templates"))
         {
             m_report = Templates::CheckAll(m_engine.Lua().State(), Library());
             m_reportDialog.Open();
         }
         ImGui::SameLine();
-        if (IconButton(ICON_FA_FOLDER_OPEN, "Open the template folder"))
+        if (IconButton(ICON_FA_FOLDER_OPEN, "Open the Template Folder"))
         {
             std::error_code ignored;
             std::filesystem::create_directories(Root(), ignored);
             ::ShellExecuteW(nullptr, L"open", Root().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         }
         ImGui::SameLine();
-        if (IconButton(ICON_FA_FILE_IMPORT, "Import templates from a folder"))
+        if (IconButton(ICON_FA_FILE_IMPORT, "Import Templates from a Folder"))
         {
             if (const auto folder = m_workspace.FolderDialog())
             {
@@ -806,7 +806,7 @@ namespace Manifold::UI
                 }
                 ImGui::TableNextColumn();
                 ImGui::TableNextColumn();
-                if (IconButton(ICON_FA_TIMES, "Remove this input", true))
+                if (IconButton(ICON_FA_TIMES, "Remove This Input", true))
                     removed = static_cast<int>(index);
                 ImGui::PopID();
             }
@@ -817,7 +817,7 @@ namespace Manifold::UI
             form.Inputs.erase(form.Inputs.begin() + removed);
             changed = true;
         }
-        if (ImGui::Button(ICON_FA_PLUS "  Add input"))
+        if (ImGui::Button(ICON_FA_PLUS "  Add Input"))
         {
             Templates::InputDefinition input;
             input.Name = "Input" + std::to_string(form.Inputs.size() + 1);
@@ -980,7 +980,7 @@ namespace Manifold::UI
         if (draft.BuiltIn)
         {
             ImGui::SameLine();
-            if (AccentButton(ICON_FA_EDIT "  Edit a copy"))
+            if (AccentButton(ICON_FA_EDIT "  Edit a Copy"))
             {
                 if (const Templates::TemplateInfo* info = Library().Find(draft.Id))
                 {
@@ -1034,7 +1034,7 @@ namespace Manifold::UI
                 SettingsTab();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Settings file"))
+            if (ImGui::BeginTabItem("Settings File"))
             {
                 RawTab();
                 ImGui::EndTabItem();

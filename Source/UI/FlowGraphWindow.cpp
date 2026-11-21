@@ -155,7 +155,7 @@ namespace Manifold::UI
 
     void FlowGraphWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_CODE_BRANCH "  Flow graph###flowgraph", ImVec2(900.0f, 640.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_MenuBar,
+        if (!BeginWindow(ICON_FA_CODE_BRANCH "  Flow Graph###flowgraph", ImVec2(900.0f, 640.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_MenuBar,
                 ImVec2(420.0f, 300.0f)))
             return;
         Engine& engine = m_workspace.Core();
@@ -213,7 +213,7 @@ namespace Manifold::UI
         {
             const GhostButtons ghost;
             ImGui::BeginDisabled(m_history.empty());
-            if (IconButton(ICON_FA_ARROW_LEFT "##flowback", WithKeys("Back to the function before", Command::FlowGraphBack).c_str()))
+            if (IconButton(ICON_FA_ARROW_LEFT "##flowback", WithKeys("Back to the Function Before", Command::FlowGraphBack).c_str()))
                 GoBack();
             ImGui::EndDisabled();
         }
@@ -243,9 +243,9 @@ namespace Manifold::UI
         const bool shown = engine.HasProcess() && m_built;
         if (ImGui::BeginMenu("Graph"))
         {
-            if (CommandItem(ICON_FA_ARROW_LEFT "  Back to the function before", Command::FlowGraphBack, false, !m_history.empty()))
+            if (CommandItem(ICON_FA_ARROW_LEFT "  Back to the Function Before", Command::FlowGraphBack, false, !m_history.empty()))
                 GoBack();
-            if (ImGui::MenuItem(ICON_FA_SYNC "  Read the function again", nullptr, false, shown))
+            if (ImGui::MenuItem(ICON_FA_SYNC "  Read the Function Again", nullptr, false, shown))
                 Build(m_entry);
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_COPY "  Copy as Mermaid", nullptr, false, shown))
@@ -258,12 +258,12 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenu("View"))
         {
-            if (CommandItem(ICON_FA_EXPAND "  Fit the graph into the window", Command::FlowGraphFit, false, shown))
+            if (CommandItem(ICON_FA_EXPAND "  Fit the Graph into the Window", Command::FlowGraphFit, false, shown))
                 m_fit = true;
-            if (CommandItem(ICON_FA_SEARCH "  Actual size", Command::FlowGraphActualSize, false, shown))
+            if (CommandItem(ICON_FA_SEARCH "  Actual Size", Command::FlowGraphActualSize, false, shown))
                 m_actualSize = true;
             ImGui::Separator();
-            ImGui::MenuItem(ICON_FA_CROSSHAIRS "  Follow the disassembler", nullptr, &m_follow);
+            ImGui::MenuItem(ICON_FA_CROSSHAIRS "  Follow the Disassembler", nullptr, &m_follow);
             ItemTooltip("Shows the function of the instruction selected in the memory viewer, and moves to it as the selection changes.");
             ImGui::EndMenu();
         }
@@ -552,27 +552,27 @@ namespace Manifold::UI
         Engine& engine = m_workspace.Core();
         ImGui::TextDisabled("%s", engine.Describe(line.Address).c_str());
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_CODE "  Show in the disassembler"))
+        if (ImGui::MenuItem(ICON_FA_CODE "  Show in the Disassembler"))
             m_workspace.RevealInMemoryViewer(line.Address, line.Length, true, true);
-        if (line.Kind == Disasm::Flow::Call && line.Target && ImGui::MenuItem(ICON_FA_CODE_BRANCH "  Open the called function's graph"))
+        if (line.Kind == Disasm::Flow::Call && line.Target && ImGui::MenuItem(ICON_FA_CODE_BRANCH "  Open the Called Function's Graph"))
             ShowFunction(*line.Target);
         if ((line.Kind == Disasm::Flow::Jump || line.Kind == Disasm::Flow::ConditionalJump) && line.Target)
         {
             if (m_graph.BlockAt(*line.Target) >= 0)
             {
-                if (ImGui::MenuItem(ICON_FA_ARROW_DOWN "  Go to the jump target"))
+                if (ImGui::MenuItem(ICON_FA_ARROW_DOWN "  Go to the Jump Target"))
                 {
                     m_selected = *line.Target;
                     m_centerBlock = m_graph.BlockAt(*line.Target);
                 }
             }
-            else if (ImGui::MenuItem(ICON_FA_CODE_BRANCH "  Open the jump target's graph"))
+            else if (ImGui::MenuItem(ICON_FA_CODE_BRANCH "  Open the Jump Target's Graph"))
                 ShowFunction(*line.Target);
         }
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the address", engine.Describe(line.Address).c_str()))
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Address", engine.Describe(line.Address).c_str()))
             ImGui::SetClipboardText(engine.Describe(line.Address).c_str());
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the instruction"))
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Instruction"))
             ImGui::SetClipboardText(line.Text().c_str());
     }
 

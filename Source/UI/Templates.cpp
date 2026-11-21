@@ -67,8 +67,8 @@ namespace Manifold::UI
 
     TemplateRunner::TemplateRunner(Workspace& workspace) : m_workspace(workspace), m_engine(workspace.Core()),
         m_inputs("templateinputs", ICON_FA_MAGIC, "Template inputs"),
-        m_previewDialog("templatepreview", ICON_FA_EYE, "Template preview", ImVec2(760.0f, 540.0f)),
-        m_failureDialog("templatefailure", ICON_FA_EXCLAMATION_TRIANGLE, "Template generation failed")
+        m_previewDialog("templatepreview", ICON_FA_EYE, "Template Preview", ImVec2(760.0f, 540.0f)),
+        m_failureDialog("templatefailure", ICON_FA_EXCLAMATION_TRIANGLE, "Template Generation Failed")
     {
     }
 
@@ -196,20 +196,20 @@ namespace Manifold::UI
         draw(draw, root);
 
         ImGui::Separator();
-        ImGui::MenuItem("Use 14-byte jumps", nullptr, &g_use14ByteJump);
-        ImGui::MenuItem("Preview before inserting", nullptr, &g_previewFirst);
+        ImGui::MenuItem("Use 14-Byte Jumps", nullptr, &g_use14ByteJump);
+        ImGui::MenuItem("Preview Before Inserting", nullptr, &g_previewFirst);
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_SHAPES "  Manage templates..."))
+        if (ImGui::MenuItem(ICON_FA_SHAPES "  Manage Templates..."))
             m_workspace.OpenTemplateManager();
-        if (script && ImGui::MenuItem(ICON_FA_FILE_EXPORT "  Save script as template...", nullptr, false, !Trim(*script).empty()))
+        if (script && ImGui::MenuItem(ICON_FA_FILE_EXPORT "  Save Script as Template...", nullptr, false, !Trim(*script).empty()))
             m_workspace.OpenTemplateManager({}, *script);
-        if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open template folder"))
+        if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open Template Folder"))
         {
             std::error_code ignored;
             std::filesystem::create_directories(Folder(), ignored);
             ::ShellExecuteW(nullptr, L"open", Folder().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         }
-        if (ImGui::MenuItem(ICON_FA_SYNC "  Reload templates"))
+        if (ImGui::MenuItem(ICON_FA_SYNC "  Reload Templates"))
             library.Load(m_engine.Lua().State());
         if (!library.Problems().empty())
         {

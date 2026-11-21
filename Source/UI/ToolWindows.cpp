@@ -103,10 +103,10 @@ namespace Manifold::UI
         {
             if (ImGui::BeginMenu("View"))
             {
-                if (ImGui::MenuItem(ICON_FA_WINDOW_MAXIMIZE "  Apps only", nullptr, m_windowsOnly))
+                if (ImGui::MenuItem(ICON_FA_WINDOW_MAXIMIZE "  Apps Only", nullptr, m_windowsOnly))
                     m_windowsOnly = true;
                 ItemTooltip("Only programs with a window. Other processes of the same name stay folded under them.");
-                if (ImGui::MenuItem(ICON_FA_LIST "  All processes", nullptr, !m_windowsOnly))
+                if (ImGui::MenuItem(ICON_FA_LIST "  All Processes", nullptr, !m_windowsOnly))
                     m_windowsOnly = false;
                 ItemTooltip("Also list the background processes on their own.");
                 ImGui::Separator();
@@ -134,7 +134,7 @@ namespace Manifold::UI
             ImDrawList* draw = ImGui::GetWindowDrawList();
             draw->AddRectFilled(at, ImVec2(at.x + width, at.y + height), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.09f)), Px(6.0f));
             draw->AddRect(at, ImVec2(at.x + width, at.y + height), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.30f)), Px(6.0f));
-            const char* restart = ICON_FA_SHIELD_ALT "  Restart as administrator";
+            const char* restart = ICON_FA_SHIELD_ALT "  Restart as Administrator";
             const float button = ImGui::CalcTextSize(restart).x + style.FramePadding.x * 2.0f;
             ImGui::SetCursorScreenPos(ImVec2(at.x + Px(10.0f), at.y + Px(3.0f)));
             ImGui::AlignTextToFramePadding();
@@ -487,7 +487,7 @@ namespace Manifold::UI
 
     void SymbolsWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_TAGS "  Symbols and modules###symbols", ImVec2(640.0f, 520.0f), ImGuiWindowFlags_MenuBar, ImVec2(480.0f, 320.0f)))
+        if (!BeginWindow(ICON_FA_TAGS "  Symbols and Modules###symbols", ImVec2(640.0f, 520.0f), ImGuiWindowFlags_MenuBar, ImVec2(480.0f, 320.0f)))
             return;
         Engine& engine = m_workspace.Core();
         const bool loading = engine.SymbolsActive() && !engine.SymbolsLoaded();
@@ -496,10 +496,10 @@ namespace Manifold::UI
             const bool hasProcess = engine.HasProcess();
             if (ImGui::BeginMenu("Symbols"))
             {
-                if (ImGui::MenuItem(ICON_FA_DOWNLOAD "  Load symbols", nullptr, false, hasProcess))
+                if (ImGui::MenuItem(ICON_FA_DOWNLOAD "  Load Symbols", nullptr, false, hasProcess))
                     engine.LoadSymbols(false);
                 ItemTooltip("Read the PDB files of the process and its own modules.");
-                if (ImGui::MenuItem(ICON_FA_GLOBE "  Load Windows symbols", nullptr, false, hasProcess))
+                if (ImGui::MenuItem(ICON_FA_GLOBE "  Load Windows Symbols", nullptr, false, hasProcess))
                     engine.LoadSymbols(true);
                 ItemTooltip("Also the modules of Windows itself, downloaded from the Microsoft symbol server the first time.");
                 ImGui::Separator();
@@ -508,7 +508,7 @@ namespace Manifold::UI
             }
             if (ImGui::BeginMenu("Modules", hasProcess))
             {
-                if (ImGui::MenuItem(ICON_FA_SYNC "  Refresh the module list"))
+                if (ImGui::MenuItem(ICON_FA_SYNC "  Refresh the Module List"))
                     engine.Process()->RefreshModules();
                 ImGui::EndMenu();
             }
@@ -521,7 +521,7 @@ namespace Manifold::UI
         }
         if (ImGui::BeginTabBar("##symboltabs"))
         {
-            if (ImGui::BeginTabItem("Registered symbols"))
+            if (ImGui::BeginTabItem("Registered Symbols"))
             {
                 ImGui::SetNextItemWidth(Px(160.0f));
                 InputTextWithHint("##name", "name", m_name);
@@ -682,14 +682,14 @@ namespace Manifold::UI
 
     void RegionsWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_TH_LIST "  Memory regions###regions", ImVec2(760.0f, 540.0f), ImGuiWindowFlags_MenuBar, ImVec2(560.0f, 300.0f)))
+        if (!BeginWindow(ICON_FA_TH_LIST "  Memory Regions###regions", ImVec2(760.0f, 540.0f), ImGuiWindowFlags_MenuBar, ImVec2(560.0f, 300.0f)))
             return;
         Engine& engine = m_workspace.Core();
         if (ImGui::BeginMenuBar())
         {
             if (ImGui::BeginMenu("View"))
             {
-                ImGui::MenuItem(ICON_FA_FILTER "  Committed only", nullptr, &m_committedOnly);
+                ImGui::MenuItem(ICON_FA_FILTER "  Committed Only", nullptr, &m_committedOnly);
                 ItemTooltip("Hide reserved and free address ranges, which hold no memory.");
                 ImGui::Separator();
                 if (ImGui::MenuItem(ICON_FA_SYNC "  Refresh", nullptr, false, engine.HasProcess()))
@@ -740,11 +740,11 @@ namespace Manifold::UI
                     m_workspace.OpenMemoryViewer(region.Base, !region.Executable());
                 if (ImGui::BeginPopupContextItem("##regionmenu"))
                 {
-                    if (ImGui::MenuItem("Show in hex view"))
+                    if (ImGui::MenuItem("Show in Hex View"))
                         m_workspace.OpenMemoryViewer(region.Base, true);
                     if (ImGui::MenuItem("Disassemble"))
                         m_workspace.OpenMemoryViewer(region.Base);
-                    if (ImGui::MenuItem("Copy base"))
+                    if (ImGui::MenuItem("Copy Base"))
                         ImGui::SetClipboardText(Hex(region.Base).c_str());
                     ImGui::EndPopup();
                 }

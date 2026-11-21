@@ -120,7 +120,7 @@ namespace Manifold::UI
                 return;
             }
             const bool il2cpp = Target::MonoBridge::DetectRuntime(*m_engine.Process()) == Target::ManagedRuntime::Il2Cpp;
-            std::vector<EmptyAction> actions = { { il2cpp ? ICON_FA_PLUG "  Load the IL2CPP runtime" : ICON_FA_PLUG "  Load the Mono runtime", nullptr, true } };
+            std::vector<EmptyAction> actions = { { il2cpp ? ICON_FA_PLUG "  Load the IL2CPP Runtime" : ICON_FA_PLUG "  Load the Mono Runtime", nullptr, true } };
             if (EmptyState(ICON_FA_DICE_D6, "No managed runtime loaded",
                     "This reads the game's Mono or IL2CPP runtime by running a small helper inside it: the classes, method addresses and "
                     "field offsets, and with the explorer switched on the scenes, the objects and an inspector.",
@@ -247,16 +247,16 @@ namespace Manifold::UI
         {
             if (!present)
             {
-                if (ImGui::MenuItem(ICON_FA_PLUG "  Load the runtime", nullptr, false, process && !working))
+                if (ImGui::MenuItem(ICON_FA_PLUG "  Load the Runtime", nullptr, false, process && !working))
                     m_engine.Managed().Load();
                 ItemTooltip("Reads the game's Mono or IL2CPP runtime through a small helper inside the game");
             }
             else
             {
-                if (ImGui::MenuItem(ICON_FA_SYNC "  Reload the classes", nullptr, false, !working))
+                if (ImGui::MenuItem(ICON_FA_SYNC "  Reload the Classes", nullptr, false, !working))
                     m_engine.Managed().Reload();
                 ItemTooltip("Reads the class list again, for assemblies the game loaded later");
-                if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut down", nullptr, false, !working))
+                if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut Down", nullptr, false, !working))
                 {
                     CloseAll();
                     m_engine.Managed().Stop();
@@ -274,21 +274,21 @@ namespace Manifold::UI
             Target::UnityExplorer& unity = mono.Unity();
             if (!unity.Enabled())
             {
-                if (ImGui::MenuItem(ICON_FA_PLAY "  Turn the explorer on"))
+                if (ImGui::MenuItem(ICON_FA_PLAY "  Turn the Explorer On"))
                     unity.SetEnabled(true);
                 ItemTooltip(mono.IsIl2Cpp() ? "Puts Manifold's frame stub on a per-frame Unity method in the game for scenes, objects and the inspector"
                                             : "Starts Manifold's managed agent in the game for scenes, objects and the inspector");
                 ImGui::Separator();
             }
             const bool background = m_status.RunInBackground.value_or(false);
-            if (ImGui::MenuItem("Keep the game running in the background", nullptr, background, m_status.Hooked))
+            if (ImGui::MenuItem("Keep the Game Running in the Background", nullptr, background, m_status.Hooked))
                 unity.SetRunInBackground(!background);
             ItemTooltip("Sets Application.runInBackground, so the game keeps updating while Manifold is in front. Most requests need the game to run. "
                         "Shut down sets it back.");
-            if (ImGui::MenuItem(ICON_FA_STOP "  Stop the running request", nullptr, false, m_status.Busy))
+            if (ImGui::MenuItem(ICON_FA_STOP "  Stop the Running Request", nullptr, false, m_status.Busy))
                 unity.Cancel();
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_TIMES "  Close all inspector tabs", nullptr, false, !m_tabs.empty()))
+            if (ImGui::MenuItem(ICON_FA_TIMES "  Close All Inspector Tabs", nullptr, false, !m_tabs.empty()))
             {
                 while (!m_tabs.empty())
                     CloseTab(m_tabs.size() - 1);
@@ -371,15 +371,15 @@ namespace Manifold::UI
     {
         if (unity.Enabled())
             return true;
-        std::vector<EmptyAction> actions = { { ICON_FA_PLAY "  Turn the explorer on", nullptr, true } };
+        std::vector<EmptyAction> actions = { { ICON_FA_PLAY "  Turn the Explorer On", nullptr, true } };
         const int chose = EmptyState(icon, what,
             m_engine.Mono().IsIl2Cpp()
                 ? "Scenes, objects and the inspector run through a small stub that Manifold puts on a per-frame Unity method inside the game. It calls into "
-                  "the game on its main thread, a bounded number of calls per frame, and Runtime > Shut down takes it out again. Setters and method "
+                  "the game on its main thread, a bounded number of calls per frame, and Runtime > Shut Down takes it out again. Setters and method "
                   "calls change the game, so save first.\n\n"
                   "The class list, method addresses and Structure Dissect's class lookup do not need it."
                 : "Scenes, objects and the inspector run through Manifold's managed agent inside the game. It answers from the game's frame callback, "
-                  "a few milliseconds per frame at most, and Runtime > Shut down takes it out again. Setters and method calls change the game, so save first.\n\n"
+                  "a few milliseconds per frame at most, and Runtime > Shut Down takes it out again. Setters and method calls change the game, so save first.\n\n"
                   "The class list, method addresses and Structure Dissect's Mono lookup do not need it.",
             actions, false);
         if (chose == 0)
@@ -393,7 +393,7 @@ namespace Manifold::UI
             return;
         if (!m_tree.Read)
         {
-            std::vector<EmptyAction> actions = { { ICON_FA_SITEMAP "  Read the scenes", nullptr, true } };
+            std::vector<EmptyAction> actions = { { ICON_FA_SITEMAP "  Read the Scenes", nullptr, true } };
             if (EmptyState(ICON_FA_SITEMAP, "Scene explorer",
                     "Lists the loaded scenes and their GameObjects. Unity calls must run on the game's main thread, so this hangs a small callback on "
                     "Application.onBeforeRender in the game; Shut down takes it out again.",
@@ -401,7 +401,7 @@ namespace Manifold::UI
                 unity.ReadScenes();
             return;
         }
-        if (IconButton(ICON_FA_SYNC, "Read the scenes again"))
+        if (IconButton(ICON_FA_SYNC, "Read the Scenes Again"))
             unity.ReadScenes();
         ImGui::SameLine();
         ImGui::SetNextItemWidth(-1.0f);
@@ -507,7 +507,7 @@ namespace Manifold::UI
         {
             if (ImGui::MenuItem(ICON_FA_EYE "  Inspect"))
                 OpenObject(node.Object, false);
-            if (ImGui::MenuItem(ICON_FA_EXTERNAL_LINK_ALT "  Inspect in a new tab"))
+            if (ImGui::MenuItem(ICON_FA_EXTERNAL_LINK_ALT "  Inspect in a New Tab"))
                 OpenObject(node.Object, true);
             if (ImGui::MenuItem(node.Active ? ICON_FA_EYE_SLASH "  Deactivate" : ICON_FA_EYE "  Activate"))
                 unity.SetActive(node.Object, !node.Active, 0);
@@ -689,7 +689,7 @@ namespace Manifold::UI
                         OpenObject(hit.Object, true, m_search.HeapScan);
                     if (ImGui::BeginPopupContextItem())
                     {
-                        if (ImGui::MenuItem(ICON_FA_EXTERNAL_LINK_ALT "  Inspect in a new tab"))
+                        if (ImGui::MenuItem(ICON_FA_EXTERNAL_LINK_ALT "  Inspect in a New Tab"))
                             OpenObject(hit.Object, true, m_search.HeapScan);
                         ImGui::Separator();
                         AddressMenuItems(m_workspace, hit.Object, ShowHex | DissectHere | CopyAddress, 8);
@@ -735,17 +735,17 @@ namespace Manifold::UI
                 if (ImGui::BeginPopupContextItem())
                 {
                     const bool live = m_engine.Mono().Unity().Enabled();
-                    if (ImGui::MenuItem(ICON_FA_EYE "  Static members", nullptr, false, live))
+                    if (ImGui::MenuItem(ICON_FA_EYE "  Static Members", nullptr, false, live))
                         OpenStatics(info.Handle);
                     if (!live)
                         ItemTooltip("Needs the explorer, which is off: turn it on under Scenes or Objects");
-                    if (ImGui::MenuItem(ICON_FA_SEARCH "  Find objects of this class", nullptr, false, live))
+                    if (ImGui::MenuItem(ICON_FA_SEARCH "  Find Objects of This Class", nullptr, false, live))
                     {
                         m_searchClass = info.FullName();
                         m_requestLeftTab = 1;
                         m_engine.Mono().Unity().Search({ m_searchClass, std::string(), m_searchHidden });
                     }
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the name"))
+                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Name"))
                         ImGui::SetClipboardText(info.FullName().c_str());
                     ImGui::EndPopup();
                 }
@@ -762,11 +762,11 @@ namespace Manifold::UI
         const Target::MonoClass* info = m_selected >= 0 && m_selected < static_cast<int>(m_classes.size()) ? &m_classes[static_cast<std::size_t>(m_selected)] : nullptr;
         if (info)
         {
-            if (ImGui::SmallButton(ICON_FA_EYE "  Static members"))
+            if (ImGui::SmallButton(ICON_FA_EYE "  Static Members"))
                 OpenStatics(info->Handle);
             ItemTooltip("Opens the class in the inspector: static fields and properties with their values");
             ImGui::SameLine();
-            if (ImGui::SmallButton(ICON_FA_SEARCH "  Find objects"))
+            if (ImGui::SmallButton(ICON_FA_SEARCH "  Find Objects"))
             {
                 m_searchClass = info->FullName();
                 m_requestLeftTab = 1;
@@ -839,15 +839,15 @@ namespace Manifold::UI
                         if (address)
                             AddressMenuItems(m_workspace, address, ShowCode | ShowHex);
                         else
-                            ImGui::MenuItem(ICON_FA_CODE "  Show in disassembler", nullptr, false, false);
-                        if (ImGui::MenuItem(ICON_FA_CIRCLE "  Set a breakpoint", nullptr, false, address != 0))
+                            ImGui::MenuItem(ICON_FA_CODE "  Show in Disassembler", nullptr, false, false);
+                        if (ImGui::MenuItem(ICON_FA_CIRCLE "  Set a Breakpoint", nullptr, false, address != 0))
                         {
                             Status status = m_engine.EnsureDebugger();
                             if (status)
                                 status = m_engine.Debugger().SetBreakpoint(address, Debug::BreakpointType::Execute, 1, false);
                             m_workspace.Report(status);
                         }
-                        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the name"))
+                        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Name"))
                             ImGui::SetClipboardText((m_selectedName + ":" + method).c_str());
                         ImGui::EndPopup();
                     }

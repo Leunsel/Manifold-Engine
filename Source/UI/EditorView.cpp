@@ -632,20 +632,20 @@ namespace Manifold::UI
                 pasted = true;
                 edited = true;
             }
-            if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Select all", "Ctrl+A"))
+            if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Select All", "Ctrl+A"))
                 buffer.SelectAll();
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_COMMENT "  Comment lines", ShortcutText(Command::EditorToggleComment), false, editable && language != Language::Json))
+            if (ImGui::MenuItem(ICON_FA_COMMENT "  Comment Lines", ShortcutText(Command::EditorToggleComment), false, editable && language != Language::Json))
             {
                 buffer.ToggleComment(CommentPrefix(language));
                 edited = true;
             }
-            if (ImGui::MenuItem(ICON_FA_CLONE "  Duplicate lines", ShortcutText(Command::EditorDuplicateLines), false, editable))
+            if (ImGui::MenuItem(ICON_FA_CLONE "  Duplicate Lines", ShortcutText(Command::EditorDuplicateLines), false, editable))
             {
                 buffer.DuplicateLines();
                 edited = true;
             }
-            if (!state.Console && ImGui::MenuItem(ICON_FA_LIST_OL "  Go to line…", ShortcutText(Command::EditorGotoLine)))
+            if (!state.Console && ImGui::MenuItem(ICON_FA_LIST_OL "  Go to Line…", ShortcutText(Command::EditorGotoLine)))
             {
                 view.GotoOpen = true;
                 view.GotoText = std::to_string(buffer.LineOf(buffer.Caret()) + 1);

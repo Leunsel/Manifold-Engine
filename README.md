@@ -20,7 +20,7 @@ Build with Visual Studio 2022 and clang-cl (the C++ desktop workload plus *C++ C
 msbuild Manifold-Engine.sln /p:Configuration=Release /p:Platform=x64 /m
 ```
 
-The program lands in `Build\x64\Release\Manifold-Engine.exe`. Many games need the program to run as administrator (Help → Restart as administrator). Protected processes and anti-cheat systems are not supported.
+The program lands in `Build\x64\Release\Manifold-Engine.exe`. Many games need the program to run as administrator (Help → Restart as Administrator). Protected processes and anti-cheat systems are not supported.
 
 ## Documentation
 

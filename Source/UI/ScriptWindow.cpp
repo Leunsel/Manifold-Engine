@@ -90,14 +90,14 @@ namespace Manifold::UI
         m_saved = m_text;
         std::string name;
         if (recordId == kTableLuaScript)
-            name = "Table Lua script";
+            name = "Table Lua Script";
         else if (recordId >= 0)
         {
             const Table::MemoryRecord* record = m_engine.Table().FindById(recordId);
             name = record ? record->Description : "Script";
         }
         else
-            name = lua ? "Lua script" : "Auto Assembler";
+            name = lua ? "Lua Script" : "Auto Assembler";
         m_windowId = "###script" + std::to_string(number);
         m_title = std::string(lua ? ICON_FA_MOON "  " : ICON_FA_CODE "  ") + name + m_windowId;
 
@@ -365,11 +365,11 @@ namespace Manifold::UI
             };
         if (ImGui::BeginMenu("File"))
         {
-            item(m_lua ? ICON_FA_CLONE "  New script window" : ICON_FA_CLONE "  New Auto Assembler window", Command::ScriptNewWindow);
+            item(m_lua ? ICON_FA_CLONE "  New Script Window" : ICON_FA_CLONE "  New Auto Assembler Window", Command::ScriptNewWindow);
             item(ICON_FA_FOLDER_OPEN "  Open...", Command::ScriptOpen);
-            item(m_recordId != kNoRecord ? ICON_FA_SAVE "  Save into the record" : ICON_FA_SAVE "  Save", Command::ScriptSave);
-            item(ICON_FA_SAVE "  Save to a file...", Command::ScriptSaveAs);
-            if (m_recordId == kNoRecord && !m_lua && ImGui::MenuItem(ICON_FA_TABLE "  Assign to the cheat table"))
+            item(m_recordId != kNoRecord ? ICON_FA_SAVE "  Save into the Record" : ICON_FA_SAVE "  Save", Command::ScriptSave);
+            item(ICON_FA_SAVE "  Save to a File...", Command::ScriptSaveAs);
+            if (m_recordId == kNoRecord && !m_lua && ImGui::MenuItem(ICON_FA_TABLE "  Assign to the Cheat Table"))
                 AssignToTable();
             ImGui::EndMenu();
         }
@@ -384,7 +384,7 @@ namespace Manifold::UI
             item(m_lua ? ICON_FA_PLAY "  Run" : sections ? ICON_FA_PLAY "  Execute [ENABLE]" : ICON_FA_PLAY "  Execute", Command::ScriptExecute);
             if (sections)
                 item(ICON_FA_STOP "  Execute [DISABLE]", Command::ScriptExecuteDisable);
-            item(ICON_FA_CHECK "  Check the syntax", Command::ScriptCheck);
+            item(ICON_FA_CHECK "  Check the Syntax", Command::ScriptCheck);
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -451,7 +451,7 @@ namespace Manifold::UI
             ImGui::PopStyleColor();
             ImGui::SameLine();
             const GhostButtons ghost;
-            if (ImGui::SmallButton(ICON_FA_EXPAND "  Show the message"))
+            if (ImGui::SmallButton(ICON_FA_EXPAND "  Show the Message"))
                 m_shownError.clear();
         }
         else if (!m_result.empty())
@@ -469,25 +469,25 @@ namespace Manifold::UI
         {
             if (AccentButton(ICON_FA_SAVE "  Save", Px(100.0f, 0.0f)))
                 SaveToRecord();
-            ItemTooltip(WithKeys("Save into the record", Command::ScriptSave).c_str());
+            ItemTooltip(WithKeys("Save into the Record", Command::ScriptSave).c_str());
             ImGui::SameLine();
             if (m_recordId >= 0 && !m_lua)
             {
                 if (ImGui::Button(ICON_FA_CHECK "  Check", Px(100.0f, 0.0f)))
                     Check();
-                ItemTooltip(WithKeys("Check the syntax", Command::ScriptCheck).c_str());
+                ItemTooltip(WithKeys("Check the Syntax", Command::ScriptCheck).c_str());
             }
             else if (m_lua)
             {
                 if (ImGui::Button(ICON_FA_PLAY "  Run", Px(100.0f, 0.0f)))
                     Run(false);
-                ItemTooltip(WithKeys("Run the script", Command::ScriptExecute).c_str());
+                ItemTooltip(WithKeys("Run the Script", Command::ScriptExecute).c_str());
             }
             ImGui::SameLine();
             if (ImGui::Button("Close", Px(100.0f, 0.0f)))
             {
                 if (dirty)
-                    m_workspace.Confirm("Close script", "The script has changes that are not saved. Close it anyway?", [this]() { m_open = false; }, "Close");
+                    m_workspace.Confirm("Close Script", "The script has changes that are not saved. Close it anyway?", [this]() { m_open = false; }, "Close");
                 else
                     m_open = false;
             }
@@ -497,22 +497,22 @@ namespace Manifold::UI
             const bool sections = !m_lua && Asm::HasSections(m_text);
             if (AccentButton(m_lua ? ICON_FA_PLAY "  Run" : sections ? ICON_FA_PLAY "  Execute [ENABLE]" : ICON_FA_PLAY "  Execute", Px(150.0f, 0.0f)))
                 Run(false);
-            ItemTooltip(WithKeys(m_lua ? "Run the script" : "Assemble and write the script", Command::ScriptExecute).c_str());
+            ItemTooltip(WithKeys(m_lua ? "Run the Script" : "Assemble and Write the Script", Command::ScriptExecute).c_str());
             if (sections)
             {
                 ImGui::SameLine();
                 if (ImGui::Button(ICON_FA_STOP "  Execute [DISABLE]", Px(150.0f, 0.0f)))
                     Run(true);
-                ItemTooltip(WithKeys("Run the [DISABLE] section", Command::ScriptExecuteDisable).c_str());
+                ItemTooltip(WithKeys("Run the [DISABLE] Section", Command::ScriptExecuteDisable).c_str());
             }
             ImGui::SameLine();
             if (ImGui::Button(ICON_FA_CHECK "  Check", Px(90.0f, 0.0f)))
                 Check();
-            ItemTooltip(WithKeys("Check the syntax", Command::ScriptCheck).c_str());
+            ItemTooltip(WithKeys("Check the Syntax", Command::ScriptCheck).c_str());
             if (!m_lua)
             {
                 ImGui::SameLine();
-                if (ImGui::Button(ICON_FA_TABLE "  Add to table", Px(120.0f, 0.0f)))
+                if (ImGui::Button(ICON_FA_TABLE "  Add to Table", Px(120.0f, 0.0f)))
                     AssignToTable();
             }
         }
@@ -560,7 +560,7 @@ namespace Manifold::UI
         if (m_errorLine > 0)
         {
             ImGui::SameLine();
-            if (ImGui::Button((ICON_FA_LONG_ARROW_ALT_RIGHT "  Go to line " + std::to_string(m_errorLine)).c_str()))
+            if (ImGui::Button((ICON_FA_LONG_ARROW_ALT_RIGHT "  Go to Line " + std::to_string(m_errorLine)).c_str()))
             {
                 m_editor.GotoLine = m_errorLine;
                 m_editor.Focus = true;

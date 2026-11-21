@@ -730,7 +730,7 @@ namespace Manifold::UI
             return;
         }
         const std::uint64_t identity = engine.Table().Identity();
-        m_workspace.Confirm("Export table files",
+        m_workspace.Confirm("Export Table Files",
             Count(existing, "file exists", "files exist") + " already in " + WideToUtf8(folder->wstring()) + ". Overwrite " + (existing == 1 ? "it" : "them") + "?",
             [this, names, folder = *folder, identity]()
             {
@@ -1069,23 +1069,23 @@ namespace Manifold::UI
 
     void TableFilesWindow::AddMenuItems()
     {
-        if (CommandItem(ICON_FA_PLUS "  Add files...", Command::TableFilesAdd))
+        if (CommandItem(ICON_FA_PLUS "  Add Files...", Command::TableFilesAdd))
             Import();
         ItemTooltip("Copy files from disk into the table. Pick as many as you like; a file with the same name is updated. Dropping files from Explorer onto this window does the same.");
-        if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Add a folder..."))
+        if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Add a Folder..."))
             ImportFolder();
         ItemTooltip("Copy every file that lies directly in a folder into the table.");
-        if (ImGui::MenuItem(ICON_FA_FILE_ALT "  New text file"))
+        if (ImGui::MenuItem(ICON_FA_FILE_ALT "  New Text File"))
             NewTextFile();
     }
 
     void TableFilesWindow::FileMenuItems()
     {
         const std::size_t selected = m_selected.size();
-        if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Replace from disk...", nullptr, false, selected == 1))
+        if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Replace from Disk...", nullptr, false, selected == 1))
             ReplaceFromDisk();
         ItemTooltip("Puts the content of a file on disk into this table file. The name stays.");
-        if (CommandItem(selected > 1 ? ICON_FA_FILE_EXPORT "  Export the selected files..." : ICON_FA_FILE_EXPORT "  Export...", Command::TableFilesExport, false, selected > 0))
+        if (CommandItem(selected > 1 ? ICON_FA_FILE_EXPORT "  Export the Selected Files..." : ICON_FA_FILE_EXPORT "  Export...", Command::TableFilesExport, false, selected > 0))
             Export();
         ItemTooltip(selected > 1 ? "Save copies of the selected files into a folder." : "Save a copy of the file to disk.");
     }
@@ -1101,7 +1101,7 @@ namespace Manifold::UI
         if (DangerCommandItem(ICON_FA_TRASH "  Delete...", Command::TableFilesDelete, selected > 0))
             Delete();
         ImGui::Separator();
-        if (CommandItem(selected > 1 ? ICON_FA_COPY "  Copy the names" : ICON_FA_COPY "  Copy the name", Command::TableFilesCopyName, false, selected > 0))
+        if (CommandItem(selected > 1 ? ICON_FA_COPY "  Copy the Names" : ICON_FA_COPY "  Copy the Name", Command::TableFilesCopyName, false, selected > 0))
             CopyNames();
         if (ImGui::BeginMenu(ICON_FA_CODE "  Copy as Lua", file != nullptr))
         {
@@ -1110,7 +1110,7 @@ namespace Manifold::UI
                 const std::string find = Table::LuaFindSnippet(file->Name);
                 if (ImGui::MenuItem(find.c_str()))
                     ImGui::SetClipboardText(find.c_str());
-                if (ImGui::MenuItem("Read the file into a string"))
+                if (ImGui::MenuItem("Read the File into a String"))
                     ImGui::SetClipboardText(Table::LuaReadSnippet(file->Name).c_str());
                 ItemTooltip(Table::LuaReadSnippet(file->Name).c_str());
             }
@@ -1128,13 +1128,13 @@ namespace Manifold::UI
             AddMenuItems();
             ImGui::Separator();
             FileMenuItems();
-            if (ImGui::MenuItem(ICON_FA_FILE_EXPORT "  Export all...", nullptr, false, any))
+            if (ImGui::MenuItem(ICON_FA_FILE_EXPORT "  Export All...", nullptr, false, any))
                 ExportAll();
             ImGui::Separator();
-            if (CommandItem(ICON_FA_SAVE "  Put the changes into the table", Command::TableFilesApply, false, m_textDirty))
+            if (CommandItem(ICON_FA_SAVE "  Put the Changes into the Table", Command::TableFilesApply, false, m_textDirty))
                 ApplyText();
             const std::size_t drafts = m_drafts.size() + (m_textDirty && !m_drafts.count(m_textKey) ? 1 : 0);
-            if (ImGui::MenuItem(ICON_FA_SAVE "  Put all changes into the table", nullptr, false, drafts > 0))
+            if (ImGui::MenuItem(ICON_FA_SAVE "  Put All Changes into the Table", nullptr, false, drafts > 0))
                 ApplyAll();
             ItemTooltip("Every file with a dot in the list has changes that are not in the table yet.");
             if (ImGui::MenuItem(ICON_FA_UNDO "  Revert", nullptr, false, m_textDirty))
@@ -1145,7 +1145,7 @@ namespace Manifold::UI
         {
             EditMenuItems();
             ImGui::Separator();
-            if (CommandItem(ICON_FA_CHECK_DOUBLE "  Select all", Command::TableFilesSelectAll, false, any))
+            if (CommandItem(ICON_FA_CHECK_DOUBLE "  Select All", Command::TableFilesSelectAll, false, any))
                 SelectAll();
             if (CommandItem(ICON_FA_SEARCH "  Find", Command::TableFilesFind, false, any))
             {
@@ -1171,7 +1171,7 @@ namespace Manifold::UI
             }
             ItemTooltip("Automatic picks the view from the content: text in the editor, images as images, everything else as hex.");
             ImGui::Separator();
-            ImGui::MenuItem("Fit images into the pane", nullptr, &m_imageFit);
+            ImGui::MenuItem("Fit Images into the Pane", nullptr, &m_imageFit);
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -1180,7 +1180,7 @@ namespace Manifold::UI
     void TableFilesWindow::Draw()
     {
         Collect();
-        if (!BeginWindow(ICON_FA_FILE_ARCHIVE "  Table files###tablefiles", ImVec2(980.0f, 600.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_MenuBar,
+        if (!BeginWindow(ICON_FA_FILE_ARCHIVE "  Table Files###tablefiles", ImVec2(980.0f, 600.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_MenuBar,
                 ImVec2(640.0f, 340.0f)))
             return;
         m_viewportWindow = ImGui::GetWindowViewport()->PlatformHandleRaw;
@@ -1204,7 +1204,7 @@ namespace Manifold::UI
         {
             const int clicked = EmptyState(ICON_FA_FILE_ARCHIVE, m_reading > 0 ? "Reading the files..." : "No table files",
                 "Files stored inside the table, for example Lua modules, images or sounds. Scripts read them with findTableFile.",
-                { { ICON_FA_PLUS "  Add files", ShortcutText(Command::TableFilesAdd), true }, { ICON_FA_FOLDER_OPEN "  Add a folder" }, { ICON_FA_FILE_ALT "  New text file", nullptr, false, true } }, false,
+                { { ICON_FA_PLUS "  Add Files", ShortcutText(Command::TableFilesAdd), true }, { ICON_FA_FOLDER_OPEN "  Add a Folder" }, { ICON_FA_FILE_ALT "  New Text File", nullptr, false, true } }, false,
                 "Or drop files from Explorer onto this window.");
             if (clicked == 0)
                 Import();
@@ -1280,7 +1280,7 @@ namespace Manifold::UI
             std::erase_if(m_selected, [&](const std::string& key) { return !visible.count(key); });
         }
         ImGui::SameLine();
-        if (IconButton(ICON_FA_PLUS, "Add files"))
+        if (IconButton(ICON_FA_PLUS, "Add Files"))
             Import();
 
         const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable | ImGuiTableFlags_Sortable |
@@ -1543,16 +1543,16 @@ namespace Manifold::UI
             m_findFocus = true;
         }
         ImGui::SameLine();
-        if (IconButton(ICON_FA_CHEVRON_UP, "Previous match (Shift+Enter)"))
+        if (IconButton(ICON_FA_CHEVRON_UP, "Previous Match (Shift+Enter)"))
             FindNext(true);
         ImGui::SameLine();
-        if (IconButton(ICON_FA_CHEVRON_DOWN, "Next match (Enter)"))
+        if (IconButton(ICON_FA_CHEVRON_DOWN, "Next Match (Enter)"))
             FindNext(false);
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();
         Muted(m_find.empty() ? std::string("Type to search") : m_findCount == 0 ? std::string("No match") : Count(static_cast<std::size_t>(m_findCount), "match", "matches"));
         ImGui::SameLine();
-        if (IconButton(ICON_FA_TIMES, "Close the search") || left)
+        if (IconButton(ICON_FA_TIMES, "Close the Search") || left)
         {
             m_findOpen = false;
             m_editor.Focus = true;
@@ -1572,13 +1572,13 @@ namespace Manifold::UI
             ImGui::AlignTextToFramePadding();
             ImGui::TextColored(ManifoldTheme::Warning, ICON_FA_EXCLAMATION_TRIANGLE "  The file changed in the table while you were editing.");
             ImGui::SameLine();
-            if (ImGui::Button("Load the table's version"))
+            if (ImGui::Button("Load the Table's Version"))
             {
                 RevertText();
                 LoadText(file, m_current);
             }
             ImGui::SameLine();
-            if (ImGui::Button("Keep mine"))
+            if (ImGui::Button("Keep Mine"))
             {
                 m_textData = file.Data.get();
                 m_textVersion = *file.Version;
@@ -1612,7 +1612,7 @@ namespace Manifold::UI
             ImGui::SameLine(0.0f, Px(14.0f));
         }
         ImGui::BeginDisabled(!m_textDirty);
-        if (AccentButton(ICON_FA_SAVE "  Put into the table"))
+        if (AccentButton(ICON_FA_SAVE "  Put into the Table"))
             ApplyText();
         if (const char* keys = ShortcutText(Command::TableFilesApply))
             ItemTooltip(keys);

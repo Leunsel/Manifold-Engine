@@ -277,7 +277,7 @@ namespace Manifold::UI
                     ImGui::TableNextColumn();
                     const auto copyText = [&entry]()
                         {
-                            if (ImGui::MenuItem(ICON_FA_COPY "  Copy text"))
+                            if (ImGui::MenuItem(ICON_FA_COPY "  Copy Text"))
                                 ImGui::SetClipboardText(entry.Text.c_str());
                         };
                     if (AddressCell(m_workspace, entry.Address, m_selected == entry.Address, DataActions, false, copyText))
@@ -373,7 +373,7 @@ namespace Manifold::UI
     void CodeDissectWindow::Draw()
     {
         Collect();
-        if (!BeginWindow(ICON_FA_PROJECT_DIAGRAM "  Code dissect###codedissect", ImVec2(940.0f, 640.0f), 0, ImVec2(640.0f, 400.0f)))
+        if (!BeginWindow(ICON_FA_PROJECT_DIAGRAM "  Code Dissect###codedissect", ImVec2(940.0f, 640.0f), 0, ImVec2(640.0f, 400.0f)))
             return;
         Engine& engine = m_workspace.Core();
         if (!engine.HasProcess() && !m_task.Running())
@@ -505,7 +505,7 @@ namespace Manifold::UI
     void AsmSearchWindow::Draw()
     {
         Collect();
-        if (!BeginWindow(ICON_FA_SEARCH_LOCATION "  Find assembly code###asmsearch", ImVec2(860.0f, 580.0f), 0, ImVec2(560.0f, 360.0f)))
+        if (!BeginWindow(ICON_FA_SEARCH_LOCATION "  Find Assembly Code###asmsearch", ImVec2(860.0f, 580.0f), 0, ImVec2(560.0f, 360.0f)))
             return;
         Engine& engine = m_workspace.Core();
         if (!engine.HasProcess() && !m_task.Running() && !m_result)

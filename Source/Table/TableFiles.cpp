@@ -485,7 +485,7 @@ namespace Manifold::Table
             names.insert(FileUseKey(file.Name));
         FileUse place;
         place.Where = FileUse::Place::TableScript;
-        place.Label = "Table Lua script";
+        place.Label = "Table Lua Script";
         ScanText(list.TableLuaScript, names, place, {}, uses);
         list.ForEach([&](MemoryRecord& record)
             {

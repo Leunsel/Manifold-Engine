@@ -36,12 +36,12 @@ namespace Manifold::UI
         };
 
         constexpr PageInfo kPages[] = {
-            { ICON_FA_SLIDERS_H, "General", "Layout, refresh rates and the program itself." },
-            { ICON_FA_PALETTE, "Appearance", "Theme, light or dark, accent, colors and sizes. Changes show at once." },
-            { ICON_FA_SEARCH, "Scanner", "The scan options start with these values each time the program opens." },
-            { ICON_FA_SCROLL, "Scripts", "Lua at start, scripts inside tables and opening processes by name." },
-            { ICON_FA_BUG, "Debugger", "Breakpoints, the in-process debugger, the Unity scene explorer and the log." },
-            { ICON_FA_KEYBOARD, "Keyboard", "The shortcuts of every window. Click keys to record new ones, right-click to remove them." },
+            { ICON_FA_SLIDERS_H, "General", "Layout, refresh rates, sounds and the program." },
+            { ICON_FA_PALETTE, "Appearance", "Theme, mode, colors and sizes." },
+            { ICON_FA_SEARCH, "Scanner", "Scan options the program starts with." },
+            { ICON_FA_SCROLL, "Scripts", "Lua, tables, backups and opening processes by name." },
+            { ICON_FA_BUG, "Debugger", "Structure Dissect, breakpoints, Unity and the log." },
+            { ICON_FA_KEYBOARD, "Keyboard", "Click keys to change them, right-click to remove them." },
         };
         constexpr int kPageCount = static_cast<int>(std::size(kPages));
 
@@ -691,7 +691,7 @@ namespace Manifold::UI
         ImGui::PopFont();
 
         const float textX = pos.x + badge + Px(14.0f);
-        const char* headerButton = m_page == 1 ? ICON_FA_UNDO "  Reset theme" : m_page == KeyboardPage ? ICON_FA_UNDO "  Reset all keys" : nullptr;
+        const char* headerButton = m_page == 1 ? ICON_FA_UNDO "  Reset Theme" : m_page == KeyboardPage ? ICON_FA_UNDO "  Reset All Keys" : nullptr;
         const float headerButtonWidth = headerButton ? ImGui::CalcTextSize(headerButton).x + ImGui::GetStyle().FramePadding.x * 2.0f + Px(16.0f) : 0.0f;
         const float textRight = std::max(textX + Px(120.0f), right - headerButtonWidth);
         ImGui::PushFont(Fonts::Bold(), ImGui::GetFontSize() * 1.3f);
@@ -709,25 +709,25 @@ namespace Manifold::UI
 
         if (m_page == 1)
         {
-            const char* label = ICON_FA_UNDO "  Reset theme";
+            const char* label = ICON_FA_UNDO "  Reset Theme";
             const float width = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
             ImGui::SetCursorScreenPos(ImVec2(right - width, std::round(pos.y + (badge - ImGui::GetFrameHeight()) * 0.5f)));
             ImGui::BeginDisabled(!OwnColors(settings.Theme) && settings.Theme.Sizes.empty());
             if (ImGui::Button(label))
                 m_themeReset = true;
             ImGui::EndDisabled();
-            ItemTooltip("Back to this theme's own colors and the default sizes; theme and mode stay");
+            ItemTooltip("Resets the colors and sizes of this theme; theme and mode stay.");
         }
         if (m_page == KeyboardPage)
         {
-            const char* label = ICON_FA_UNDO "  Reset all keys";
+            const char* label = ICON_FA_UNDO "  Reset All Keys";
             const float width = ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
             ImGui::SetCursorScreenPos(ImVec2(right - width, std::round(pos.y + (badge - ImGui::GetFrameHeight()) * 0.5f)));
             ImGui::BeginDisabled(settings.Shortcuts.empty());
             if (ImGui::Button(label))
                 m_shortcutsReset = true;
             ImGui::EndDisabled();
-            ItemTooltip("Back to the default shortcuts, the Cheat Engine keys and Manifold's own");
+            ItemTooltip("Restores all default shortcuts.");
         }
         ImGui::SetCursorScreenPos(ImVec2(pos.x, std::round(headerBottom + Px(26.0f))));
     }
@@ -812,9 +812,9 @@ namespace Manifold::UI
                         changed = true;
                     }
                     if (capturing)
-                        ItemTooltip(info.Digits ? "Press the modifier keys with a digit, like Ctrl+Alt+1. Esc cancels." : "Press the new keys. Esc cancels.");
+                        ItemTooltip(info.Digits ? "Press modifiers with a digit, like Ctrl+Alt+1. Esc cancels." : "Press the new keys. Esc cancels.");
                     else
-                        ItemTooltip(slot == 0 ? "Click and press the new keys. Right-click removes them." : "A second shortcut for the same command. Right-click removes it.");
+                        ItemTooltip(slot == 0 ? "Click to change, right-click to remove." : "Second shortcut. Right-click to remove.");
                 }
                 ImGui::SameLine(0.0f, Px(6.0f));
                 if (ResetButton(IsCustomized(info.Id)))
@@ -826,7 +826,7 @@ namespace Manifold::UI
                 ImGui::PopID();
                 list.EndRow();
             }
-            if (scope == static_cast<int>(CommandScope::ScriptEditor) && list.Row("Template shortcuts", "Each template has its own Shortcut setting; the built-in ones use the Cheat Engine keys Ctrl+I, Ctrl+Shift+A, Ctrl+Shift+F, Ctrl+L and Ctrl+Alt+T.", control))
+            if (scope == static_cast<int>(CommandScope::ScriptEditor) && list.Row("Template shortcuts", "Set in each template; the built-in ones use the Cheat Engine keys.", control))
             {
                 ImGui::Dummy(ImVec2(control, frame));
                 list.EndRow();
@@ -844,12 +844,12 @@ namespace Manifold::UI
         const float slider = std::round(Px(230.0f));
 
         list.Section("Layout");
-        if (list.Row("Compact mode", "Show only the address list. Handy while playing with a finished table.", toggle))
+        if (list.Row("Compact mode", "Show only the address list.", toggle))
         {
             changed |= ToggleSwitch("##compact", &settings.CompactMode);
             list.EndRow();
         }
-        if (list.Row("Release mode", "Hide addresses, types and developer tools. View > Release mode switches it back.", toggle))
+        if (list.Row("Release mode", "Hide addresses, types and developer tools.", toggle))
         {
             changed |= ToggleSwitch("##release", &settings.ReleaseMode);
             list.EndRow();
@@ -857,21 +857,19 @@ namespace Manifold::UI
 
         list.Section("Address list");
         const float addressChoice = std::round(Px(330.0f));
-        if (list.Row("Address column", "What the Address column shows for a record that is not a pointer: the address as written (mainmodule+10, \"game.exe\"+1A2B30), "
-                "the address it resolves to, or both with the resolved address dimmed behind the written one. The tooltip shows the other one.", addressChoice))
+        if (list.Row("Address column", "As written (\"game.exe\"+1A2B30), resolved, or both.", addressChoice))
         {
             changed |= Segmented("##addresscolumn", &settings.AddressColumn, { "As written", "Resolved", "Both" }, addressChoice);
             list.EndRow();
         }
-        if (list.Row("Address digits", "How resolved addresses and pointer targets (P->...) are written: as short as the value, with at least 8 digits like Cheat Engine (P->00F40000), "
-                "or at the pointer width of the process, 8 digits for 32-bit and 16 for 64-bit.", addressChoice))
+        if (list.Row("Address digits", "Digits of resolved addresses: short, at least 8 like Cheat Engine, or the pointer width.", addressChoice))
         {
             changed |= Segmented("##addressdigits", &settings.AddressDigits, { "Short", "At least 8", "Pointer width" }, addressChoice);
             list.EndRow();
         }
 
         list.Section("Refresh rates");
-        if (list.Row("Address list", "How often the values in the address list are read.", slider))
+        if (list.Row("Address list", "How often its values are read.", slider))
         {
             changed |= Milliseconds("##update", settings.UpdateIntervalMs, 16, 5000, slider);
             list.EndRow();
@@ -881,23 +879,20 @@ namespace Manifold::UI
             changed |= Milliseconds("##freeze", settings.FreezeIntervalMs, 10, 5000, slider);
             list.EndRow();
         }
-        if (list.Row("Found list", "How often the values in the found list are read again.", slider))
+        if (list.Row("Found list", "How often found values are read again.", slider))
         {
             changed |= Milliseconds("##results", settings.ResultValueRefreshMs, 50, 10000, slider);
             list.EndRow();
         }
 
         list.Section("Sounds");
-        if (list.Row("Play sounds", "A sound plays when a scan finishes, and when a search, a dissect or a patch scan that took longer than two seconds is done. "
-                "The error sound plays when a scan fails, when a script you switch on or off (with the mouse or a hotkey) fails, and when Execute, the Lua engine window or the table script ends in an error; "
-                "errors in timers and other callbacks stay silent, and it plays at most once a second. "
-                "Message boxes from scripts play the error sound for errors and warnings, the other sound for the rest.", toggle))
+        if (list.Row("Play sounds", "When a scan or a long search finishes, and when a script fails.", toggle))
         {
             changed |= ToggleSwitch("##playsounds", &settings.PlaySounds);
             list.EndRow();
         }
         const float tryWidth = std::round(Px(100.0f));
-        if (list.Row("Try them", "Plays the sound once, also when sounds are off. Files you put in the sounds folder are read again.", tryWidth * 2.0f + ImGui::GetStyle().ItemSpacing.x))
+        if (list.Row("Test sounds", "Plays a sound once, even when sounds are off.", tryWidth * 2.0f + ImGui::GetStyle().ItemSpacing.x))
         {
             if (ImGui::Button(ICON_FA_PLAY "  Success", ImVec2(tryWidth, 0.0f)))
                 Sounds::Preview(Sounds::Cue::Success);
@@ -907,9 +902,9 @@ namespace Manifold::UI
             list.EndRow();
         }
         const float soundsFolder = std::round(Px(130.0f));
-        if (list.Row("Sounds folder", "Success.wav or .mp3 and Error.wav or .mp3 here replace the built-in sounds. " + WideToUtf8(Paths::SoundsFolder().wstring()), soundsFolder))
+        if (list.Row("Sounds folder", "Success and Error .wav or .mp3 here replace the built-in sounds: " + WideToUtf8(Paths::SoundsFolder().wstring()), soundsFolder))
         {
-            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open folder", ImVec2(soundsFolder, 0.0f)))
+            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open Folder", ImVec2(soundsFolder, 0.0f)))
             {
                 std::error_code error;
                 std::filesystem::create_directories(Paths::SoundsFolder(), error);
@@ -919,8 +914,7 @@ namespace Manifold::UI
         }
 
         list.Section("Diagnostics");
-        if (list.Row("Profiler", "Measures every frame: the engine, Lua timers and tasks, each window, drawing and waiting, and adds Help > Profiler and diagnostics. "
-                "It costs a few microseconds per frame. The checks of setup and environment work without it.", toggle))
+        if (list.Row("Profiler", "Measures every frame, at a few microseconds per frame.", toggle))
         {
             if (ToggleSwitch("##profiler", &settings.ProfilerEnabled))
             {
@@ -929,7 +923,7 @@ namespace Manifold::UI
             }
             list.EndRow();
         }
-        if (list.Row("Frame time in the status bar", "Shows the work per frame and the frame rate at the bottom of the main window while the profiler is on. Click it to open the profiler.", toggle))
+        if (list.Row("Frame time in status bar", "Frame time and frame rate while the profiler is on.", toggle))
         {
             ImGui::BeginDisabled(!settings.ProfilerEnabled);
             changed |= ToggleSwitch("##profilerstatus", &settings.ProfilerInStatusBar);
@@ -937,35 +931,34 @@ namespace Manifold::UI
             list.EndRow();
         }
         const float profilerButton = std::round(Px(210.0f));
-        if (list.Row("Profiler and diagnostics", "Frame graph, the breakdown of a frame, threads, checks of the setup and app info. " + BindingText(Command::OpenProfiler, CurrentBinding(Command::OpenProfiler)) + " opens it from anywhere.",
-                profilerButton))
+        if (list.Row("Profiler and Diagnostics", "Frame graph, threads and setup checks (" + BindingText(Command::OpenProfiler, CurrentBinding(Command::OpenProfiler)) + ").", profilerButton))
         {
-            if (ImGui::Button(ICON_FA_TACHOMETER_ALT "  Open the profiler", ImVec2(profilerButton, 0.0f)))
+            if (ImGui::Button(ICON_FA_TACHOMETER_ALT "  Open Profiler", ImVec2(profilerButton, 0.0f)))
                 m_workspace.OpenProfiler();
             list.EndRow();
         }
 
         list.Section("Program");
-        if (list.Row("Splash screen", "Shows the logo and the start-up steps right away and for at least two seconds, then the main window appears. Off, the main window appears as soon as it is drawn. Takes effect at the next start.", toggle))
+        if (list.Row("Splash screen", "Logo and start-up steps for at least two seconds; applies at the next start.", toggle))
         {
             changed |= ToggleSwitch("##splash", &settings.ShowSplash);
             list.EndRow();
         }
         const bool elevated = Target::IsElevated();
         const float button = std::round(Px(210.0f));
-        if (list.Row("Administrator rights", elevated ? "The program runs as administrator and can open protected processes." : "Some games can only be opened with administrator rights.",
+        if (list.Row("Administrator rights", elevated ? "Running as administrator." : "Some games can only be opened as administrator.",
                 button))
         {
             if (elevated)
                 RightText(ICON_FA_SHIELD_ALT "  Administrator", button, ManifoldTheme::Accent);
-            else if (ImGui::Button(ICON_FA_SHIELD_ALT "  Restart as administrator", ImVec2(button, 0.0f)))
+            else if (ImGui::Button(ICON_FA_SHIELD_ALT "  Restart as Administrator", ImVec2(button, 0.0f)))
                 m_workspace.Window().RestartElevated();
             list.EndRow();
         }
         const float folder = std::round(Px(130.0f));
         if (list.Row("Settings file", WideToUtf8(Paths::SettingsFile().wstring()), folder))
         {
-            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open folder", ImVec2(folder, 0.0f)))
+            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open Folder", ImVec2(folder, 0.0f)))
                 OpenFolder(Paths::SettingsFile().parent_path());
             list.EndRow();
         }
@@ -984,7 +977,7 @@ namespace Manifold::UI
         const bool light = ManifoldTheme::IsLight();
 
         list.Section("Theme");
-        if (list.Row("Theme", "Standard, or the same look tinted red, green or blue. Color changes further down belong to the theme and mode shown.", -1.0f))
+        if (list.Row("Theme", "Color changes below apply to the theme and mode shown.", -1.0f))
         {
             const float space = std::round(Px(12.0f));
             const float width = std::floor(std::min(Px(150.0f), (list.ControlWidth() - space * 3.0f) / 4.0f));
@@ -1003,8 +996,7 @@ namespace Manifold::UI
             list.EndRow();
         }
         const float modeWidth = std::round(Px(250.0f));
-        const std::string modeText = std::string("System follows the app mode set in Windows and switches along with it. Windows is set to ") +
-            (ManifoldTheme::SystemLight() ? "light" : "dark") + " right now.";
+        const std::string modeText = std::string("System follows Windows, currently ") + (ManifoldTheme::SystemLight() ? "light" : "dark") + ".";
         if (list.Row("Mode", modeText, modeWidth))
         {
             int mode = 0;
@@ -1020,7 +1012,7 @@ namespace Manifold::UI
             }
             list.EndRow();
         }
-        if (list.Row("Window corners", "Rounded like Windows 11 windows, slightly rounded, or square. Applies to the main window and every tool window in its own window.", modeWidth))
+        if (list.Row("Window corners", "For the main window and floating tool windows.", modeWidth))
         {
             int corners = std::clamp(theme.Corners, 0, 2);
             if (Segmented("##corners", &corners, { "Round", "Slight", "Square" }, modeWidth))
@@ -1139,7 +1131,7 @@ namespace Manifold::UI
         }
 
         list.Section("Advanced");
-        if (list.Row("Every ImGui color", "Set here, a color wins over the one the colors above give it.", ToggleSwitchWidth()))
+        if (list.Row("All ImGui colors", "Colors set there override the ones above.", ToggleSwitchWidth()))
         {
             ToggleSwitch("##allcolors", &m_allImGuiColors);
             list.EndRow();
@@ -1161,7 +1153,7 @@ namespace Manifold::UI
         const float slider = std::round(Px(230.0f));
 
         list.Section("Scan options");
-        if (list.Row("Scan threads", "How many threads search at once. Auto uses half of the processor's threads, from 2 to 8.", slider))
+        if (list.Row("Scan threads", "Auto uses half the processor threads, 2 to 8.", slider))
         {
             const std::string format = settings.ScanThreads == 0 ? "Auto (" + std::to_string(AutoThreads()) + ")" : (settings.ScanThreads == 1 ? "1 thread" : "%d threads");
             BeginFillSlider("##threads", static_cast<float>(settings.ScanThreads) / 64.0f, slider);
@@ -1170,12 +1162,12 @@ namespace Manifold::UI
             changed |= ImGui::IsItemDeactivatedAfterEdit();
             list.EndRow();
         }
-        if (list.Row("Fast scan", "Look only at aligned addresses. Much faster and finds nearly every value.", toggle))
+        if (list.Row("Fast scan", "Aligned addresses only: much faster, finds nearly every value.", toggle))
         {
             changed |= ToggleSwitch("##fast", &settings.FastScan);
             list.EndRow();
         }
-        if (list.Row("Pause while scanning", "Stop the process during a scan, so values cannot change halfway through.", toggle))
+        if (list.Row("Pause while scanning", "Suspends the process so values can't change mid-scan.", toggle))
         {
             changed |= ToggleSwitch("##pause", &settings.PauseWhileScanning);
             list.EndRow();
@@ -1185,8 +1177,7 @@ namespace Manifold::UI
         for (const Scan::ValueType type : Scan::kAllTypes)
         {
             const std::uint32_t bit = Scan::AllTypeBit(type);
-            const std::string hint = std::string("The value type All looks for ") + Scan::TypeName(type) + " values as well.";
-            if (list.Row(Scan::TypeName(type), hint, toggle))
+            if (list.Row(Scan::TypeName(type), {}, toggle))
             {
                 bool on = (settings.AllTypes & bit) != 0;
                 if (ToggleSwitch(("##all" + std::to_string(bit)).c_str(), &on))
@@ -1199,17 +1190,17 @@ namespace Manifold::UI
         }
 
         list.Section("Memory to scan");
-        if (list.Row("Private memory", "Memory the process allocated itself, such as the heap. Most values live here.", toggle))
+        if (list.Row("Private memory", "Heap and other allocations, where most values live.", toggle))
         {
             changed |= ToggleSwitch("##private", &settings.ScanPrivate);
             list.EndRow();
         }
-        if (list.Row("Image memory", "The process's own files loaded into memory: code and static data.", toggle))
+        if (list.Row("Image memory", "Code and static data of the loaded modules.", toggle))
         {
             changed |= ToggleSwitch("##image", &settings.ScanImage);
             list.EndRow();
         }
-        if (list.Row("Mapped memory", "Shared and file-backed memory. Rarely holds values and makes scans slower.", toggle))
+        if (list.Row("Mapped memory", "Shared and file-backed memory; rarely needed, slower.", toggle))
         {
             changed |= ToggleSwitch("##mapped", &settings.ScanMapped);
             list.EndRow();
@@ -1217,9 +1208,9 @@ namespace Manifold::UI
 
         list.Section("Storage");
         const float folder = std::round(Px(130.0f));
-        if (list.Row("Temporary scan files", WideToUtf8(Paths::ScanFolder().wstring()), folder))
+        if (list.Row("Scan files", WideToUtf8(Paths::ScanFolder().wstring()), folder))
         {
-            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open folder", ImVec2(folder, 0.0f)))
+            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open Folder", ImVec2(folder, 0.0f)))
                 OpenFolder(Paths::ScanFolder());
             list.EndRow();
         }
@@ -1234,49 +1225,42 @@ namespace Manifold::UI
         const float choice = std::round(Px(250.0f));
 
         list.Section("Lua");
-        if (list.Row("Run autorun modules", "Run the Lua scripts and modules in the autorun folder when the program starts. Extensions > Modules lists them.", toggle))
+        if (list.Row("Run autorun modules", "Run the scripts in the autorun folder at start.", toggle))
         {
             changed |= ToggleSwitch("##autorun", &settings.AutorunEnabled);
             list.EndRow();
         }
-        if (list.Row("Hold new autorun modules", "A script or module that appears in the autorun folder does not run until it is allowed in Extensions > Modules. "
-                "A table's script can write files there, and this keeps such a file from running unseen at every start.", toggle))
+        if (list.Row("Hold new modules", "New autorun files only run once allowed in Extensions > Modules.", toggle))
         {
             changed |= ToggleSwitch("##holdmodules", &settings.HoldNewModules);
             list.EndRow();
         }
         if (list.Row("Autorun folder", WideToUtf8(Paths::AutorunFolder().wstring()), folder))
         {
-            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open folder", ImVec2(folder, 0.0f)))
+            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open Folder", ImVec2(folder, 0.0f)))
                 OpenFolder(Paths::AutorunFolder());
             list.EndRow();
         }
-        if (list.Row("Time limit for callbacks",
-                "Timers, hotkeys, menu and form events, structure and symbol lookups and custom types run while the window waits. One that takes longer than this is stopped with an error instead of freezing the program. "
-                "Scripts started with createThread, the table script and the Lua engine window have no limit.", choice))
+        if (list.Row("Callback time limit", "Timers, hotkeys and events that run longer are stopped.", choice))
         {
             changed |= Milliseconds("##callbacklimit", settings.ScriptCallbackLimitMs, 250, 60000, choice);
             list.EndRow();
         }
-        if (list.Row("Script windows in the app's look",
-                "Windows that scripts build with createForm look like Manifold's own: cards, its colors, its font and font size, whatever colors, borders and fonts the script sets. "
-                "Off: the colors, borders and fonts of the script, as Cheat Engine shows them. Pictures that scripts paint keep their colors either way.", toggle))
+        if (list.Row("Script windows in app style", "Off: createForm windows keep the script's colors and fonts, like Cheat Engine.", toggle))
         {
             changed |= ToggleSwitch("##scriptapplook", &settings.ScriptWindowsAppLook);
             list.EndRow();
         }
 
         list.Section("Script editors");
-        if (list.Row("Open as tabs",
-                "A new Auto Assembler or Lua script editor opens as a tab beside the ones already open, in one window. Off: each opens as a window of its own. "
-                "A tab can be dragged out with Shift held, and windows can be docked together the same way.", toggle))
+        if (list.Row("Open as tabs", "New script editors open as tabs in one window.", toggle))
         {
             changed |= ToggleSwitch("##editortabs", &settings.ScriptEditorTabs);
             list.EndRow();
         }
 
         list.Section("Tables");
-        if (list.Row("Lua script in a table", "What happens when a loaded table carries a Lua script.", choice))
+        if (list.Row("Table Lua script", "When a loaded table has a Lua script.", choice))
         {
             int policy = static_cast<int>(settings.TableScripts);
             if (Segmented("##policy", &policy, { "Ask", "Always", "Never" }, choice))
@@ -1286,10 +1270,7 @@ namespace Manifold::UI
             }
             list.EndRow();
         }
-        if (list.Row("Files in a saved table",
-                "How the files of a table (Table files window) are written. CE 7.5: each file is named by its tag, <name.lua>, which Cheat Engine 7.5 and older read; "
-                "a name that can't be a tag, such as one with a space, is still written as <File0 Name=...>. CE 7.6: every file as <File0 Name=...>, which only "
-                "Cheat Engine 7.6 and newer read with the right names. As loaded: the way the open table had them, CE 7.5 for a new table. Both kinds are always read.", choice))
+        if (list.Row("Table file names", "CE 7.5 keeps names readable for older Cheat Engine; CE 7.6 needs 7.6 or newer.", choice))
         {
             int naming = std::clamp(settings.TableFileNames, 0, 2);
             if (Segmented("##filenames", &naming, { "As loaded", "CE 7.5", "CE 7.6" }, choice))
@@ -1299,7 +1280,7 @@ namespace Manifold::UI
             }
             list.EndRow();
         }
-        if (list.Row("Active scripts on quit","What happens when the program closes while scripts are still active in the game.", choice))
+        if (list.Row("Active scripts on quit", "When the program closes with scripts still active.", choice))
         {
             int quit = static_cast<int>(settings.ActiveScriptsOnQuit);
             if (Segmented("##quitpolicy", &quit, { "Ask", "Turn off", "Leave" }, choice))
@@ -1311,19 +1292,17 @@ namespace Manifold::UI
         }
 
         list.Section("Backups");
-        if (list.Row("Back up the session",
-                "While there are changes that are not saved, the address list, the structures and the table script are written to the backups folder, with or without a table file. "
-                "Each session gets a folder of its own, named after the table, or after the opened process when there is no table file. Script text in an open editor is not part of it until it is applied.", toggle))
+        if (list.Row("Session backups", "Back up unsaved changes regularly; unapplied editor text is not included.", toggle))
         {
             changed |= ToggleSwitch("##backups", &settings.BackupsEnabled);
             list.EndRow();
         }
-        if (list.Row("Time between backups", "A backup is only written when something changed since the last one.", choice))
+        if (list.Row("Backup interval", "Only when something changed.", choice))
         {
             changed |= LogSlider("##backupinterval", settings.BackupIntervalMinutes, 1, 240, settings.BackupIntervalMinutes == 1 ? "%d minute" : "%d minutes", choice);
             list.EndRow();
         }
-        if (list.Row("Versions to keep", "Per session folder. Older backups are removed when a new one is written; other files in the folder are never touched.", choice))
+        if (list.Row("Backups to keep", "Per session; the oldest are removed first.", choice))
         {
             changed |= LogSlider("##backupversions", settings.BackupVersions, 1, 500, "%d", choice);
             list.EndRow();
@@ -1340,13 +1319,13 @@ namespace Manifold::UI
                 }
             }
             ImGui::SameLine();
-            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open folder", ImVec2(folder, 0.0f)))
+            if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open Folder", ImVec2(folder, 0.0f)))
                 OpenFolder(Backups::Folder(settings));
             list.EndRow();
         }
         if (!settings.BackupFolder.empty() && list.Row("Default backups folder", WideToUtf8(Paths::BackupFolder().wstring()), folder))
         {
-            if (ImGui::Button(ICON_FA_UNDO "  Use this", ImVec2(folder, 0.0f)))
+            if (ImGui::Button(ICON_FA_UNDO "  Use This", ImVec2(folder, 0.0f)))
             {
                 settings.BackupFolder.clear();
                 changed = true;
@@ -1355,12 +1334,12 @@ namespace Manifold::UI
         }
 
         list.Section("Open processes automatically");
-        if (list.Row("Open on start", "Open one of the processes below as soon as it starts.", toggle))
+        if (list.Row("Open on start", "Open a listed process as soon as it starts.", toggle))
         {
             changed |= ToggleSwitch("##autoattach", &settings.AutoAttachEnabled);
             list.EndRow();
         }
-        if (list.Row("Processes", "File names of the programs, for example game.exe.", -1.0f))
+        if (list.Row("Processes", "File names, such as game.exe.", -1.0f))
         {
             const float width = list.ControlWidth();
             const ImGuiStyle& style = ImGui::GetStyle();
@@ -1429,31 +1408,24 @@ namespace Manifold::UI
         const float toggle = ToggleSwitchWidth();
 
         list.Section("Structure Dissect");
-        if (list.Row("Open as tabs",
-                "A new Structure Dissect window opens as a tab beside the ones already open, in one window. Off: each opens as a window of its own. "
-                "A tab can be dragged out with Shift held.", toggle))
+        if (list.Row("Open as tabs", "New Structure Dissect windows open as tabs in one window.", toggle))
         {
             changed |= ToggleSwitch("##dissecttabs", &settings.StructureTabs);
             list.EndRow();
         }
-        if (list.Row("Use C++ RTTI",
-                "Structures and expanded pointers are named after the object's C++ class, pointer fields are labelled (vftable, Class*), and member objects "
-                "with a virtual function table of their own become embedded structures. Reads the run-time type information of programs built with MSVC or clang-cl.", toggle))
+        if (list.Row("Use C++ RTTI", "Name structures and pointers after their C++ class (MSVC, clang-cl).", toggle))
         {
             changed |= ToggleSwitch("##dissectrtti", &settings.StructureRtti);
             list.EndRow();
         }
 
         list.Section("Breakpoints");
-        if (list.Row("Hardware breakpoints for code", "Use a free debug register instead of changing the code, so integrity checks do not see it. There are only four.", toggle))
+        if (list.Row("Hardware code breakpoints", "Use one of the four debug registers and leave the code unchanged.", toggle))
         {
             changed |= ToggleSwitch("##hardware", &settings.UseHardwareExecuteBreakpoints);
             list.EndRow();
         }
-        if (list.Row("In-process debugger (VEH)",
-                "Runs the debugger inside the target instead of through Windows. It watches threads that hide themselves from a debugger, where the normal debugger "
-                "would see nothing. Use it per the note under About; the normal debugger is the default. Takes effect the next time you attach.",
-                toggle))
+        if (list.Row("In-process debugger (VEH)", "Also sees threads hidden from debuggers; read the note under About first.", toggle))
         {
             if (ToggleSwitch("##veh", &settings.UseInProcessDebugger))
             {
@@ -1463,30 +1435,26 @@ namespace Manifold::UI
             }
             list.EndRow();
         }
-        if (list.Row("Registers on break", "Show the registers when the process stops at a breakpoint.", toggle))
+        if (list.Row("Registers on break", "Show the registers when a breakpoint hits.", toggle))
         {
             changed |= ToggleSwitch("##registers", &settings.ShowRegistersOnBreak);
             list.EndRow();
         }
 
         list.Section("Unity");
-        if (list.Row("Start the scene explorer by itself",
-                "Turns the scene explorer on when a Mono game's runtime is loaded, so the Mono window shows scenes, objects and the inspector at once. "
-                "Its agent then runs in the game while the window uses it. If the game ends while the agent is in it, the log notes how long it ran, "
-                "its last request and the game's exit code.",
-                toggle))
+        if (list.Row("Start scene explorer automatically", "Starts when a Mono runtime is loaded; its agent runs inside the game.", toggle))
         {
             changed |= ToggleSwitch("##autoexplorer", &settings.AutoExplorer);
             list.EndRow();
         }
 
         list.Section("Log");
-        if (list.Row("Debug output of the process", "Write what the process sends with OutputDebugString to the log.", toggle))
+        if (list.Row("Process debug output", "Log what the process sends with OutputDebugString.", toggle))
         {
             changed |= ToggleSwitch("##debugstrings", &settings.LogDebugStrings);
             list.EndRow();
         }
-        if (list.Row("Debug messages", "Write the program's own debug messages to the log as well.", toggle))
+        if (list.Row("Debug messages", "Also log the program's own debug messages.", toggle))
         {
             if (ToggleSwitch("##verbose", &settings.VerboseLog))
             {

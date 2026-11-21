@@ -921,16 +921,16 @@ namespace Manifold::UI
         Table::StructDefinition* current = Current();
         if (ImGui::BeginMenu("File"))
         {
-            if (ImGui::MenuItem(ICON_FA_CLONE "  New window"))
+            if (ImGui::MenuItem(ICON_FA_CLONE "  New Window"))
                 m_workspace.OpenStructure(!m_columns.empty() && m_columns.front().Valid ? m_columns.front().Value : 0, m_structure, true);
-            if (ImGui::MenuItem(ICON_FA_SEARCH_LOCATION "  Find static pointers to the address", nullptr, false, !m_columns.empty() && m_columns.front().Valid && m_engine.HasProcess()))
+            if (ImGui::MenuItem(ICON_FA_SEARCH_LOCATION "  Find Static Pointers to the Address", nullptr, false, !m_columns.empty() && m_columns.front().Valid && m_engine.HasProcess()))
                 m_workspace.FindStaticPointers(m_columns.front().Value);
-            if (ImGui::MenuItem(ICON_FA_ROUTE "  Pointer scan for the address", nullptr, false, !m_columns.empty() && m_columns.front().Valid && m_engine.HasProcess()))
+            if (ImGui::MenuItem(ICON_FA_ROUTE "  Pointer Scan for the Address", nullptr, false, !m_columns.empty() && m_columns.front().Valid && m_engine.HasProcess()))
                 m_workspace.OpenPointerScan(m_columns.front().Value);
             ImGui::Separator();
-            item(ICON_FA_PLUS "  Add an address to compare", Command::AddStructureColumn);
+            item(ICON_FA_PLUS "  Add an Address to Compare", Command::AddStructureColumn);
             ImGui::BeginDisabled(m_columns.size() < 2);
-            if (ImGui::MenuItem(ICON_FA_TIMES "  Remove the last address"))
+            if (ImGui::MenuItem(ICON_FA_TIMES "  Remove the Last Address"))
                 m_columns.pop_back();
             ImGui::EndDisabled();
             ImGui::Separator();
@@ -940,7 +940,7 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenu("Structures"))
         {
-            item(ICON_FA_MAGIC "  Define a new structure...", Command::DefineStructure);
+            item(ICON_FA_MAGIC "  Define a New Structure...", Command::DefineStructure);
             if (!m_engine.Structures().Items.empty())
             {
                 ImGui::Separator();
@@ -954,21 +954,21 @@ namespace Manifold::UI
                 }
             }
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Rename the structure...", nullptr, false, current != nullptr))
+            if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Rename the Structure...", nullptr, false, current != nullptr))
             {
                 m_renameOpen = true;
                 m_renameText = current->Name;
             }
-            if (ImGui::MenuItem(ICON_FA_LIST "  Add to the address list", nullptr, false, current != nullptr && !current->Fields.empty()))
+            if (ImGui::MenuItem(ICON_FA_LIST "  Add to the Address List", nullptr, false, current != nullptr && !current->Fields.empty()))
             {
                 const std::uint64_t base = !m_columns.empty() && m_columns.front().Valid ? m_columns.front().Value : 0;
                 StructureToAddressList(m_engine, *current, base);
             }
             ImGui::Separator();
-            if (DangerMenuItem(ICON_FA_TRASH "  Delete the structure", nullptr, current != nullptr))
+            if (DangerMenuItem(ICON_FA_TRASH "  Delete the Structure", nullptr, current != nullptr))
             {
                 const std::string name = current->Name;
-                m_workspace.Confirm("Delete structure", "Delete the structure \"" + name + "\"?", [this, name]()
+                m_workspace.Confirm("Delete Structure", "Delete the structure \"" + name + "\"?", [this, name]()
                     {
                         if (Table::StructDefinition* target = m_engine.Structures().Find(name))
                             m_engine.Structures().Remove(*target);
@@ -976,10 +976,10 @@ namespace Manifold::UI
                             m_structure.clear();
                     }, "Delete");
             }
-            if (DangerMenuItem(ICON_FA_BROOM "  Delete all structures", nullptr, !m_engine.Structures().Items.empty()))
+            if (DangerMenuItem(ICON_FA_BROOM "  Delete All Structures", nullptr, !m_engine.Structures().Items.empty()))
             {
                 const std::size_t count = m_engine.Structures().Items.size();
-                m_workspace.Confirm("Delete all structures", "Delete all " + std::to_string(count) + (count == 1 ? " structure?" : " structures?"), [this]()
+                m_workspace.Confirm("Delete All Structures", "Delete all " + std::to_string(count) + (count == 1 ? " structure?" : " structures?"), [this]()
                     {
                         m_engine.Structures().Clear();
                         m_structure.clear();
@@ -990,7 +990,7 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenu("View"))
         {
-            item(ICON_FA_COMPRESS_ALT "  Collapse all pointers", Command::CollapseStructure, !m_expanded.empty());
+            item(ICON_FA_COMPRESS_ALT "  Collapse All Pointers", Command::CollapseStructure, !m_expanded.empty());
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -1157,7 +1157,7 @@ namespace Manifold::UI
             if (m_columns.size() > 1)
             {
                 ImGui::SameLine(0.0f, Px(2.0f));
-                if (IconButton(ICON_FA_TIMES, "Remove this column"))
+                if (IconButton(ICON_FA_TIMES, "Remove This Column"))
                 {
                     m_columns.erase(m_columns.begin() + static_cast<std::ptrdiff_t>(i));
                     ImGui::PopID();
@@ -1167,7 +1167,7 @@ namespace Manifold::UI
             ImGui::SameLine();
             ImGui::PopID();
         }
-        if (IconButton(ICON_FA_PLUS "##addcolumn", WithKeys("Add a column to compare another address", Command::AddStructureColumn).c_str()))
+        if (IconButton(ICON_FA_PLUS "##addcolumn", WithKeys("Add an Address to Compare", Command::AddStructureColumn).c_str()))
             m_columns.push_back({});
 
         ImGui::SetNextItemWidth(Px(240.0f));
@@ -1193,7 +1193,7 @@ namespace Manifold::UI
         }
         ImGui::SameLine();
         ImGui::BeginDisabled(!current);
-        if (IconButton(ICON_FA_I_CURSOR, "Rename the structure") && current)
+        if (IconButton(ICON_FA_I_CURSOR, "Rename the Structure") && current)
         {
             m_renameOpen = true;
             m_renameText = current->Name;
@@ -1226,16 +1226,16 @@ namespace Manifold::UI
 
         ImGui::SameLine(0.0f, Px(14.0f));
         ImGui::BeginDisabled(m_expanded.empty());
-        if (IconButton(ICON_FA_COMPRESS_ALT, WithKeys("Collapse all pointers", Command::CollapseStructure).c_str()))
+        if (IconButton(ICON_FA_COMPRESS_ALT, WithKeys("Collapse All Pointers", Command::CollapseStructure).c_str()))
             m_expanded.clear();
         ImGui::EndDisabled();
 
         ImGui::SameLine(0.0f, Px(14.0f));
         ImGui::BeginDisabled(!current);
-        if (IconButton(ICON_FA_TRASH, "Delete the structure", true) && current)
+        if (IconButton(ICON_FA_TRASH, "Delete the Structure", true) && current)
         {
             const std::string name = current->Name;
-            m_workspace.Confirm("Delete structure", "Delete the structure \"" + name + "\"?", [this, name]()
+            m_workspace.Confirm("Delete Structure", "Delete the structure \"" + name + "\"?", [this, name]()
                 {
                     if (Table::StructDefinition* target = m_engine.Structures().Find(name))
                         m_engine.Structures().Remove(*target);
@@ -1246,10 +1246,10 @@ namespace Manifold::UI
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::BeginDisabled(m_engine.Structures().Items.empty());
-        if (IconButton(ICON_FA_BROOM, "Delete all structures", true))
+        if (IconButton(ICON_FA_BROOM, "Delete All Structures", true))
         {
             const std::size_t count = m_engine.Structures().Items.size();
-            m_workspace.Confirm("Delete all structures", "Delete all " + std::to_string(count) + (count == 1 ? " structure?" : " structures?"), [this]()
+            m_workspace.Confirm("Delete All Structures", "Delete all " + std::to_string(count) + (count == 1 ? " structure?" : " structures?"), [this]()
                 {
                     m_engine.Structures().Clear();
                     m_structure.clear();
@@ -1644,7 +1644,7 @@ namespace Manifold::UI
         else
             ImGui::TextDisabled("%s", field.Name.c_str());
         ImGui::Separator();
-        item(ICON_FA_EDIT "  Change the value", Command::ChangeFieldValue, first != 0 && m_engine.HasProcess());
+        item(ICON_FA_EDIT "  Change the Value", Command::ChangeFieldValue, first != 0 && m_engine.HasProcess());
         item(ICON_FA_I_CURSOR "  Rename", Command::RenameField);
         ImGui::Separator();
         if (ImGui::BeginMenu(ICON_FA_EXCHANGE_ALT "  Type"))
@@ -1755,7 +1755,7 @@ namespace Manifold::UI
             }
             ImGui::EndMenu();
         }
-        if (ImGui::BeginMenu(ICON_FA_HASHTAG "  Show as"))
+        if (ImGui::BeginMenu(ICON_FA_HASHTAG "  Show As"))
         {
             const auto show = [&](const char* label, Table::FieldDisplay display)
                 {
@@ -1772,7 +1772,7 @@ namespace Manifold::UI
                 show("Binary", Table::FieldDisplay::Binary);
             ImGui::EndMenu();
         }
-        if (field.Type == Scan::ValueType::Pointer && ImGui::BeginMenu(ICON_FA_LINK "  Points to structure"))
+        if (field.Type == Scan::ValueType::Pointer && ImGui::BeginMenu(ICON_FA_LINK "  Points to Structure"))
         {
             for (const auto& item : m_engine.Structures().Items)
             {
@@ -1783,17 +1783,17 @@ namespace Manifold::UI
         }
         ImGui::Separator();
         ImGui::BeginDisabled(first == 0);
-        const std::string addLabel = multi ? ICON_FA_PLUS "  Add " + std::to_string(m_selected.size()) + " fields to the address list" : std::string(ICON_FA_PLUS "  Add to the address list");
+        const std::string addLabel = multi ? ICON_FA_PLUS "  Add " + std::to_string(m_selected.size()) + " fields to the address list" : std::string(ICON_FA_PLUS "  Add to the Address List");
         item(addLabel.c_str(), Command::FieldToAddressList);
-        item(ICON_FA_MEMORY "  Browse this memory", Command::BrowseField);
+        item(ICON_FA_MEMORY "  Browse This Memory", Command::BrowseField);
         if (field.Type == Scan::ValueType::Pointer)
-            item(ICON_FA_ARROW_RIGHT "  Browse the memory it points to", Command::BrowseFieldPointer);
-        item(ICON_FA_EYE "  Find out what accesses this field", Command::FieldAccesses);
-        item(ICON_FA_PEN "  Find out what writes to this field", Command::FieldWrites);
+            item(ICON_FA_ARROW_RIGHT "  Browse the Memory It Points To", Command::BrowseFieldPointer);
+        item(ICON_FA_EYE "  Find Out What Accesses This Field", Command::FieldAccesses);
+        item(ICON_FA_PEN "  Find Out What Writes to This Field", Command::FieldWrites);
         ImGui::EndDisabled();
         ImGui::Separator();
-        item(ICON_FA_PLUS "  Insert 4 bytes after", Command::InsertField);
-        const std::string deleteLabel = multi ? ICON_FA_TRASH "  Delete " + std::to_string(m_selected.size()) + " fields" : std::string(ICON_FA_TRASH "  Delete field");
+        item(ICON_FA_PLUS "  Insert 4 Bytes After", Command::InsertField);
+        const std::string deleteLabel = multi ? ICON_FA_TRASH "  Delete " + std::to_string(m_selected.size()) + " fields" : std::string(ICON_FA_TRASH "  Delete Field");
         if (DangerCommandItem(deleteLabel.c_str(), Command::DeleteField))
             RunFieldCommand(Command::DeleteField, definition, field, first, path, pointerSize);
     }

@@ -128,7 +128,7 @@ namespace Manifold::UI
                 Muted(line);
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Error codes"))
+            if (ImGui::BeginTabItem("Error Codes"))
             {
                 ErrorsTab();
                 ImGui::EndTabItem();
@@ -216,9 +216,9 @@ namespace Manifold::UI
         if (ImGui::BeginMenu("Log"))
         {
             const std::vector<std::size_t> selected = SelectedRows();
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the selected entries", ShortcutText(Command::LogCopy), false, m_logTab && !selected.empty()))
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Selected Entries", ShortcutText(Command::LogCopy), false, m_logTab && !selected.empty()))
                 Copy(selected);
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the shown entries", nullptr, false, !m_rows.empty()))
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Shown Entries", nullptr, false, !m_rows.empty()))
             {
                 std::vector<std::size_t> rows(m_rows.size());
                 for (std::size_t i = 0; i < rows.size(); ++i)
@@ -226,25 +226,25 @@ namespace Manifold::UI
                 Copy(rows);
             }
             ItemTooltip("Every entry the list shows with the current filters, as text.");
-            if (CommandItem(ICON_FA_CHECK_DOUBLE "  Select all", Command::LogSelectAll, false, m_logTab && !m_rows.empty()))
+            if (CommandItem(ICON_FA_CHECK_DOUBLE "  Select All", Command::LogSelectAll, false, m_logTab && !m_rows.empty()))
                 SelectAll();
             if (CommandItem(ICON_FA_SEARCH "  Find", Command::LogFind, false, m_logTab))
                 m_focusSearch = true;
             ImGui::Separator();
             bool verbose = RuntimeLog::Verbose();
-            if (ImGui::MenuItem(ICON_FA_BUG "  Record debug messages", nullptr, &verbose))
+            if (ImGui::MenuItem(ICON_FA_BUG "  Record Debug Messages", nullptr, &verbose))
             {
                 RuntimeLog::SetVerbose(verbose);
                 m_workspace.Core().Options().VerboseLog = verbose;
             }
             ItemTooltip("Also record the debug level. Saved with the settings.");
-            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open the log folder"))
+            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open the Log Folder"))
             {
                 const std::wstring folder = RuntimeLog::FilePath().parent_path().wstring();
                 ::ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             }
             ImGui::Separator();
-            if (DangerMenuItem(ICON_FA_ERASER "  Clear the log", nullptr, !m_entries.empty()))
+            if (DangerMenuItem(ICON_FA_ERASER "  Clear the Log", nullptr, !m_entries.empty()))
             {
                 RuntimeLog::Clear();
                 m_selected.clear();
@@ -255,7 +255,7 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenu("View", m_logTab))
         {
-            if (ImGui::BeginMenu(ICON_FA_SIGNAL "  Lowest level"))
+            if (ImGui::BeginMenu(ICON_FA_SIGNAL "  Lowest Level"))
             {
                 for (int i = 0; i < static_cast<int>(std::size(kLevels)); ++i)
                 {
@@ -265,7 +265,7 @@ namespace Manifold::UI
                 if (!RuntimeLog::Verbose())
                 {
                     ImGui::Separator();
-                    ImGui::TextDisabled("Debug messages are only recorded\nwith Log > Record debug messages.");
+                    ImGui::TextDisabled("Debug messages are only recorded\nwith Log > Record Debug Messages.");
                 }
                 ImGui::EndMenu();
             }
@@ -276,15 +276,15 @@ namespace Manifold::UI
                 ImGui::EndMenu();
             }
             ImGui::Separator();
-            ImGui::MenuItem(ICON_FA_ARROW_DOWN "  Follow new entries", nullptr, &m_follow);
+            ImGui::MenuItem(ICON_FA_ARROW_DOWN "  Follow New Entries", nullptr, &m_follow);
             ItemTooltip("Scroll along with new entries while the list is at its end.");
-            if (ImGui::MenuItem(ICON_FA_ALIGN_LEFT "  Wrap long messages", nullptr, &m_wrap))
+            if (ImGui::MenuItem(ICON_FA_ALIGN_LEFT "  Wrap Long Messages", nullptr, &m_wrap))
                 m_layoutWidth = -1.0f;
             ItemTooltip("Wrap long and multi-line messages in the list. Off shows their first line only.");
-            if (ImGui::MenuItem(ICON_FA_LAYER_GROUP "  Group repeats", nullptr, &m_group))
+            if (ImGui::MenuItem(ICON_FA_LAYER_GROUP "  Group Repeats", nullptr, &m_group))
                 m_dirty = true;
             ItemTooltip("Show repeats of the same message in a row as one entry with a count.");
-            ImGui::MenuItem(ICON_FA_COLUMNS "  Details pane", nullptr, &m_details);
+            ImGui::MenuItem(ICON_FA_COLUMNS "  Details Pane", nullptr, &m_details);
             ItemTooltip("Details below the list: the whole message, time to the millisecond, thread and source.");
             ImGui::EndMenu();
         }
@@ -325,12 +325,12 @@ namespace Manifold::UI
 
     void LogWindow::AreaMenu()
     {
-        if (ImGui::MenuItem(ICON_FA_EYE "  Show all", nullptr, false, !m_hiddenAreas.empty()))
+        if (ImGui::MenuItem(ICON_FA_EYE "  Show All", nullptr, false, !m_hiddenAreas.empty()))
         {
             m_hiddenAreas.clear();
             m_dirty = true;
         }
-        if (ImGui::MenuItem(ICON_FA_EYE_SLASH "  Hide all", nullptr, false, !m_areas.empty()))
+        if (ImGui::MenuItem(ICON_FA_EYE_SLASH "  Hide All", nullptr, false, !m_areas.empty()))
         {
             for (const auto& [area, count] : m_areas)
                 m_hiddenAreas.insert(area);
@@ -469,14 +469,14 @@ namespace Manifold::UI
         const Row& row = m_rows[index];
         const LogEntry& entry = m_entries[row.First];
         const std::vector<std::size_t> rows = SelectedRows();
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the message"))
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Message"))
             ImGui::SetClipboardText(entry.Text().c_str());
-        if (ImGui::MenuItem(rows.size() > 1 ? ICON_FA_COPY "  Copy the selected entries" : ICON_FA_COPY "  Copy the entry", ShortcutText(Command::LogCopy)))
+        if (ImGui::MenuItem(rows.size() > 1 ? ICON_FA_COPY "  Copy the Selected Entries" : ICON_FA_COPY "  Copy the Entry", ShortcutText(Command::LogCopy)))
             Copy(rows.empty() ? std::vector<std::size_t>{ index } : rows);
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the source", entry.Trace.c_str()))
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Source", entry.Trace.c_str()))
             ImGui::SetClipboardText(entry.Trace.c_str());
         ImGui::Separator();
-        if (ImGui::MenuItem((ICON_FA_FILTER "  Show only " + entry.Area).c_str()))
+        if (ImGui::MenuItem((ICON_FA_FILTER "  Show Only " + entry.Area).c_str()))
         {
             m_hiddenAreas.clear();
             for (const auto& [area, count] : m_areas)
@@ -491,13 +491,13 @@ namespace Manifold::UI
             m_hiddenAreas.insert(entry.Area);
             m_dirty = true;
         }
-        if (!m_hiddenAreas.empty() && ImGui::MenuItem(ICON_FA_EYE "  Show all areas"))
+        if (!m_hiddenAreas.empty() && ImGui::MenuItem(ICON_FA_EYE "  Show All Areas"))
         {
             m_hiddenAreas.clear();
             m_dirty = true;
         }
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_CHECK_DOUBLE "  Select all", ShortcutText(Command::LogSelectAll)))
+        if (ImGui::MenuItem(ICON_FA_CHECK_DOUBLE "  Select All", ShortcutText(Command::LogSelectAll)))
             SelectAll();
     }
 

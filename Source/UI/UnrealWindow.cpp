@@ -186,7 +186,7 @@ namespace Manifold::UI
         if (ImGui::Button(ICON_FA_GLOBE "  World"))
             Dissect(runtime.World(), "The world");
         ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_GAMEPAD "  Player controller"))
+        if (ImGui::Button(ICON_FA_GAMEPAD "  Player Controller"))
             Dissect(runtime.Controller(), "The local player controller");
         ImGui::SameLine();
         if (ImGui::Button(ICON_FA_USER "  Pawn"))
@@ -196,11 +196,11 @@ namespace Manifold::UI
 
     void UnrealWindow::Whois(const Target::UnrealRuntime& runtime)
     {
-        const float button = ImGui::CalcTextSize(ICON_FA_SEARCH "  Who owns it").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        const float button = ImGui::CalcTextSize(ICON_FA_SEARCH "  Who Owns It").x + ImGui::GetStyle().FramePadding.x * 2.0f;
         ImGui::SetNextItemWidth(Px(260.0f));
         const bool enter = InputTextWithHint("##unrealwhois", "Address or expression", m_whoisText, ImGuiInputTextFlags_EnterReturnsTrue);
         ImGui::SameLine();
-        if ((ImGui::Button(ICON_FA_SEARCH "  Who owns it", ImVec2(button, 0.0f)) || enter) && !Trim(m_whoisText).empty())
+        if ((ImGui::Button(ICON_FA_SEARCH "  Who Owns It", ImVec2(button, 0.0f)) || enter) && !Trim(m_whoisText).empty())
         {
             (void)runtime;
             Status error;
@@ -442,7 +442,7 @@ namespace Manifold::UI
             const GhostButtons ghost;
             if (entry.Kind == Target::UnrealKind::Class)
             {
-                if (ImGui::Button(ICON_FA_SITEMAP "  Dissect an instance"))
+                if (ImGui::Button(ICON_FA_SITEMAP "  Dissect an Instance"))
                 {
                     m_workspace.Core().Work().Start({ .Title = "Finding an instance of " + entry.Name, .Group = "unrealinstance", .Cancellable = true, .Quiet = true },
                         [this, found = m_runtime, type, name = entry.Name](WorkProgress&) -> BackgroundWork::Finish
@@ -504,12 +504,12 @@ namespace Manifold::UI
         const std::string symbol = Target::UnrealRuntime::OffsetSymbol(field.Owner, field.Name);
         ImGui::TextDisabled("%s", symbol.c_str());
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the offset symbol", symbol.c_str()))
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Offset Symbol", symbol.c_str()))
             ImGui::SetClipboardText(symbol.c_str());
         ItemTooltip("The symbol resolves to the offset in every session, so address list entries written with it survive game updates.");
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the offset", Hex(static_cast<std::uint64_t>(field.Start())).c_str()))
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Offset", Hex(static_cast<std::uint64_t>(field.Start())).c_str()))
             ImGui::SetClipboardText(Hex(static_cast<std::uint64_t>(field.Start())).c_str());
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the name"))
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Name"))
             ImGui::SetClipboardText(field.Name.c_str());
         if (field.Inner)
         {
@@ -529,24 +529,24 @@ namespace Manifold::UI
         if (ImGui::BeginMenu("Unreal"))
         {
             if (session.Resolving())
-                ImGui::MenuItem(ICON_FA_SPINNER "  Reading the reflection...", nullptr, false, false);
-            else if (ImGui::MenuItem(session.Runtime() ? ICON_FA_SYNC "  Resolve again" : ICON_FA_PLAY "  Start", nullptr, false, engine.HasProcess()))
+                ImGui::MenuItem(ICON_FA_SPINNER "  Reading the Reflection...", nullptr, false, false);
+            else if (ImGui::MenuItem(session.Runtime() ? ICON_FA_SYNC "  Resolve Again" : ICON_FA_PLAY "  Start", nullptr, false, engine.HasProcess()))
                 session.Start(false);
             ItemTooltip("Reads the game's name table, object array and reflection layout, also in a game that does not look like Unreal.");
-            if (ImGui::MenuItem(ICON_FA_LIST "  Read the types again", nullptr, false, m_runtime && m_index && !m_refreshing))
+            if (ImGui::MenuItem(ICON_FA_LIST "  Read the Types Again", nullptr, false, m_runtime && m_index && !m_refreshing))
                 ReadTypesAgain(true);
             ItemTooltip("Classes a game loads later, such as the Blueprints of a level, are listed after this.");
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut down", nullptr, false, !session.Stopped()))
+            if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut Down", nullptr, false, !session.Stopped()))
                 session.Stop();
             ItemTooltip("Drops what was resolved; dissects, symbols and types stop until Start, also in the next game.");
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View"))
         {
-            ImGui::MenuItem(ICON_FA_FILTER "  Properties declared here only", nullptr, &m_ownOnly);
+            ImGui::MenuItem(ICON_FA_FILTER "  Properties Declared Here Only", nullptr, &m_ownOnly);
             ItemTooltip("Properties: leave out the ones the type inherits from its parents.");
-            ImGui::MenuItem(ICON_FA_LAYER_GROUP "  Functions of the parents too", nullptr, &m_inherited);
+            ImGui::MenuItem(ICON_FA_LAYER_GROUP "  Functions of the Parents Too", nullptr, &m_inherited);
             ItemTooltip("Functions: also list the ones the parent types declare.");
             ImGui::EndMenu();
         }
@@ -624,9 +624,9 @@ namespace Manifold::UI
                 ImGui::Selectable((f.Name + "##fn").c_str(), false, ImGuiSelectableFlags_SpanAllColumns);
                 if (ImGui::BeginPopupContextItem("##fnmenu"))
                 {
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the name"))
+                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Name"))
                         ImGui::SetClipboardText(f.Name.c_str());
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the UFunction address"))
+                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the UFunction Address"))
                         ImGui::SetClipboardText(Hex(f.Address).c_str());
                     ImGui::EndPopup();
                 }
@@ -676,7 +676,7 @@ namespace Manifold::UI
         {
             const GhostButtons ghost;
             ImGui::BeginDisabled(m_findingInstances);
-            if (ImGui::Button(ICON_FA_SYNC "  Find again"))
+            if (ImGui::Button(ICON_FA_SYNC "  Find Again"))
                 FindInstances(m_runtime, type);
             ImGui::EndDisabled();
         }
@@ -708,11 +708,11 @@ namespace Manifold::UI
                 {
                     if (ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect"))
                         Dissect(object, "The object");
-                    if (ImGui::MenuItem(ICON_FA_TH "  Show in the hex view"))
+                    if (ImGui::MenuItem(ICON_FA_TH "  Show in the Hex View"))
                         m_workspace.RevealInMemoryViewer(object, 8, false, true);
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the address"))
+                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Address"))
                         ImGui::SetClipboardText(Hex(object).c_str());
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the full name"))
+                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Full Name"))
                         ImGui::SetClipboardText(name.c_str());
                     ImGui::EndPopup();
                 }

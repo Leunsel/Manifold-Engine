@@ -242,8 +242,8 @@ Windows, dialogs, notices, menu entries, toolbar buttons and status entries that
 
 | Function | Returns | |
 | --- | --- | --- |
-| `manifold.ui.getMode()` | table | How the main window looks: `{ release = boolean, compact = boolean }`. *Release* shows three columns, hides the Edit, Tools and Debug menus and toggles records with a double click; *compact* hides the scanner and shows only the address list. View > Compact mode and View > Release mode (Ctrl+Shift+C, Ctrl+Shift+R) switch the same. |
-| `manifold.ui.setMode(mode)` | nothing | Switches release and/or compact mode, like View > Release mode and View > Compact mode, and saves it with the settings. A key left out keeps its state, so `setMode{ compact = true }` changes only compact mode. |
+| `manifold.ui.getMode()` | table | How the main window looks: `{ release = boolean, compact = boolean }`. *Release* shows three columns, hides the Edit, Tools and Debug menus and toggles records with a double click; *compact* hides the scanner and shows only the address list. View > Compact Mode and View > Release Mode (Ctrl+Shift+C, Ctrl+Shift+R) switch the same. |
+| `manifold.ui.setMode(mode)` | nothing | Switches release and/or compact mode, like View > Release Mode and View > Compact Mode, and saves it with the settings. A key left out keeps its state, so `setMode{ compact = true }` changes only compact mode. |
 
 ### Menu, toolbar and status entries
 

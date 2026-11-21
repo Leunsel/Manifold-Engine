@@ -411,17 +411,17 @@ namespace Manifold::UI
             };
         if (ImGui::BeginMenu("File"))
         {
-            item(ICON_FA_CLONE "  New window", Command::NewViewerWindow);
+            item(ICON_FA_CLONE "  New Window", Command::NewViewerWindow);
             ImGui::Separator();
-            item(ICON_FA_FILE_EXPORT "  Save memory region...", Command::SaveMemoryRegion, process);
-            item(ICON_FA_FILE_IMPORT "  Load a file into memory...", Command::LoadMemoryRegion, process);
+            item(ICON_FA_FILE_EXPORT "  Save Memory Region...", Command::SaveMemoryRegion, process);
+            item(ICON_FA_FILE_IMPORT "  Load a File into Memory...", Command::LoadMemoryRegion, process);
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_DOWNLOAD "  Load symbols", nullptr, false, process))
+            if (ImGui::MenuItem(ICON_FA_DOWNLOAD "  Load Symbols", nullptr, false, process))
                 m_engine.LoadSymbols(false);
-            if (ImGui::MenuItem(ICON_FA_GLOBE "  Load Windows symbols", nullptr, false, process))
+            if (ImGui::MenuItem(ICON_FA_GLOBE "  Load Windows Symbols", nullptr, false, process))
                 m_engine.LoadSymbols(true);
-            if (ImGui::MenuItem(m_engine.MonoPresent() ? (m_engine.Mono().IsIl2Cpp() ? ICON_FA_DICE_D6 "  IL2CPP runtime loaded" : ICON_FA_DICE_D6 "  Mono runtime loaded")
-                                : m_engine.Managed().Loading() ? ICON_FA_DICE_D6 "  Loading the runtime..." : ICON_FA_DICE_D6 "  Load Mono / IL2CPP runtime",
+            if (ImGui::MenuItem(m_engine.MonoPresent() ? (m_engine.Mono().IsIl2Cpp() ? ICON_FA_DICE_D6 "  IL2CPP Runtime Loaded" : ICON_FA_DICE_D6 "  Mono Runtime Loaded")
+                                : m_engine.Managed().Loading() ? ICON_FA_DICE_D6 "  Loading the Runtime..." : ICON_FA_DICE_D6 "  Load Mono / IL2CPP Runtime",
                     nullptr, false, process && !m_engine.MonoPresent() && !m_engine.Managed().Loading()))
                 m_engine.Managed().Load();
             ItemTooltip("Reads the classes and methods of a Unity game (Mono or IL2CPP) so method names show here and resolve in addresses.");
@@ -432,29 +432,29 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenu("Search", process))
         {
-            item(ICON_FA_LOCATION_ARROW "  Go to address...", Command::GotoAddress);
-            item(ICON_FA_SEARCH "  Find bytes...", Command::FindMemory);
-            if (ImGui::MenuItem(ICON_FA_LIST "  Find all matching bytes..."))
+            item(ICON_FA_LOCATION_ARROW "  Go to Address...", Command::GotoAddress);
+            item(ICON_FA_SEARCH "  Find Bytes...", Command::FindMemory);
+            if (ImGui::MenuItem(ICON_FA_LIST "  Find All Matching Bytes..."))
                 m_workspace.OpenByteSearch();
-            item(ICON_FA_SEARCH_LOCATION "  Find assembly code...", Command::FindAssembly);
+            item(ICON_FA_SEARCH_LOCATION "  Find Assembly Code...", Command::FindAssembly);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View", process))
         {
-            item(ICON_FA_TH_LIST "  Memory regions", Command::MemoryRegions);
-            item(ICON_FA_TAGS "  Modules and symbols", Command::SymbolsAndModules);
-            item(ICON_FA_PROJECT_DIAGRAM "  Referenced functions", Command::ReferencedFunctions);
-            item(ICON_FA_QUOTE_LEFT "  Referenced strings", Command::ReferencedStrings);
-            item(ICON_FA_CODE_BRANCH "  Flow graph of the selected function", Command::FlowGraph);
+            item(ICON_FA_TH_LIST "  Memory Regions", Command::MemoryRegions);
+            item(ICON_FA_TAGS "  Modules and Symbols", Command::SymbolsAndModules);
+            item(ICON_FA_PROJECT_DIAGRAM "  Referenced Functions", Command::ReferencedFunctions);
+            item(ICON_FA_QUOTE_LEFT "  Referenced Strings", Command::ReferencedStrings);
+            item(ICON_FA_CODE_BRANCH "  Flow Graph of the Selected Function", Command::FlowGraph);
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_TH "  Hex view", nullptr, &m_engine.Options().MemoryHexView))
+            if (ImGui::MenuItem(ICON_FA_TH "  Hex View", nullptr, &m_engine.Options().MemoryHexView))
             {
                 if (!m_engine.Options().MemoryHexView)
                     m_hexFocus = false;
                 m_engine.SaveOptionsSoon();
             }
             ItemTooltip("Off gives the disassembler the whole height. The stack stays beside the registers while the process is stopped.");
-            if (ImGui::BeginMenu(ICON_FA_TH "  Hex view shows", m_engine.Options().MemoryHexView))
+            if (ImGui::BeginMenu(ICON_FA_TH "  Hex View Shows", m_engine.Options().MemoryHexView))
             {
                 const Command modes[] = { Command::HexBytes, Command::HexTwoBytes, Command::HexFourBytes, Command::HexEightBytes, Command::HexFourBytesDecimal, Command::HexFloat, Command::HexDouble };
                 for (int i = 0; i < static_cast<int>(std::size(modes)); ++i)
@@ -466,9 +466,9 @@ namespace Manifold::UI
                 BookmarkItems();
                 ImGui::EndMenu();
             }
-            ImGui::MenuItem(ICON_FA_CROSSHAIRS "  Follow breaks", nullptr, &m_followBreaks);
+            ImGui::MenuItem(ICON_FA_CROSSHAIRS "  Follow Breaks", nullptr, &m_followBreaks);
             ItemTooltip("Jump to the instruction when the process stops at a breakpoint.");
-            ImGui::MenuItem(ICON_FA_TAGS "  Show symbols", nullptr, &m_engine.Options().ShowSymbols);
+            ImGui::MenuItem(ICON_FA_TAGS "  Show Symbols", nullptr, &m_engine.Options().ShowSymbols);
             ItemTooltip("Names in the code: function headers with offsets below them, symbol names in operands, module+offset addresses. Off shows plain addresses.");
             HighlightItems(nullptr);
             ImGui::Separator();
@@ -487,56 +487,56 @@ namespace Manifold::UI
         if (ImGui::BeginMenu("Debug", process))
         {
             item(ICON_FA_PLAY "  Run", Command::DebugRun, broken);
-            item(ICON_FA_LEVEL_DOWN_ALT "  Step into", Command::DebugStepInto, broken);
-            item(ICON_FA_SHARE "  Step over", Command::DebugStepOver, broken);
-            item(ICON_FA_SIGN_OUT_ALT "  Step out", Command::DebugRunToReturn, broken);
+            item(ICON_FA_LEVEL_DOWN_ALT "  Step Into", Command::DebugStepInto, broken);
+            item(ICON_FA_SHARE "  Step Over", Command::DebugStepOver, broken);
+            item(ICON_FA_SIGN_OUT_ALT "  Step Out", Command::DebugRunToReturn, broken);
             ItemTooltip("Runs until the current function returns and stops at its caller, right after the call.");
             item(ICON_FA_PAUSE "  Break", Command::DebugBreak, !broken);
             const bool onException = broken && debugger.Break().Exception.Raised;
-            if (ImGui::MenuItem(ICON_FA_FORWARD "  Continue, exception handled", nullptr, false, onException))
+            if (ImGui::MenuItem(ICON_FA_FORWARD "  Continue, Exception Handled", nullptr, false, onException))
                 debugger.ResumeHandled();
             ItemTooltip("For a stop on an exception: go on at the current registers without giving the exception to the program. Run gives it to the program.");
-            if (ImGui::BeginMenu(ICON_FA_EXCLAMATION_TRIANGLE "  Break on unexpected exceptions"))
+            if (ImGui::BeginMenu(ICON_FA_EXCLAMATION_TRIANGLE "  Break on Unexpected Exceptions"))
             {
                 ExceptionBreakItems();
                 ImGui::EndMenu();
             }
             ImGui::Separator();
-            item(ICON_FA_CIRCLE "  Toggle breakpoint", Command::ToggleBreakpoint);
-            item(ICON_FA_SLIDERS_H "  Breakpoint with a condition...", Command::EditBreakpoint);
-            item(ICON_FA_MAP_MARKER_ALT "  Set the instruction pointer here", Command::SetInstructionPointer, broken);
+            item(ICON_FA_CIRCLE "  Toggle Breakpoint", Command::ToggleBreakpoint);
+            item(ICON_FA_SLIDERS_H "  Breakpoint with a Condition...", Command::EditBreakpoint);
+            item(ICON_FA_MAP_MARKER_ALT "  Set the Instruction Pointer Here", Command::SetInstructionPointer, broken);
             ImGui::Separator();
-            item(ICON_FA_LIST "  Breakpoint list", Command::BreakpointList);
-            item(ICON_FA_SHOE_PRINTS "  Break and trace from here...", Command::BreakAndTrace);
-            item(ICON_FA_STREAM "  Thread list", Command::ThreadList, process);
+            item(ICON_FA_LIST "  Breakpoint List", Command::BreakpointList);
+            item(ICON_FA_SHOE_PRINTS "  Break and Trace from Here...", Command::BreakAndTrace);
+            item(ICON_FA_STREAM "  Thread List", Command::ThreadList, process);
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_BUG "  Attach debugger", nullptr, false, !debugger.Attached()))
+            if (ImGui::MenuItem(ICON_FA_BUG "  Attach Debugger", nullptr, false, !debugger.Attached()))
                 m_workspace.Report(m_engine.EnsureDebugger());
-            if (ImGui::MenuItem(ICON_FA_UNLINK "  Detach debugger", nullptr, false, debugger.Attached()))
+            if (ImGui::MenuItem(ICON_FA_UNLINK "  Detach Debugger", nullptr, false, debugger.Attached()))
                 debugger.Detach();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Tools", process))
         {
             const std::size_t undoable = UndoableEdits();
-            const std::string undo = ICON_FA_UNDO_ALT "  Undo the last memory edit" + (undoable == 0 ? std::string() : " (" + std::to_string(undoable) + ")");
+            const std::string undo = ICON_FA_UNDO_ALT "  Undo the Last Memory Edit" + (undoable == 0 ? std::string() : " (" + std::to_string(undoable) + ")");
             item(undo.c_str(), Command::UndoMemoryEdit, undoable > 0);
-            if (ImGui::MenuItem(ICON_FA_HISTORY "  Write history..."))
+            if (ImGui::MenuItem(ICON_FA_HISTORY "  Write History..."))
                 m_workspace.OpenWriteHistory();
             ImGui::Separator();
-            item(ICON_FA_PLUS_SQUARE "  Allocate memory...", Command::AllocateMemory);
-            item(ICON_FA_FILL_DRIP "  Fill memory...", Command::FillMemory);
-            item(ICON_FA_RANDOM "  Create a thread...", Command::CreateThread);
-            item(ICON_FA_SYRINGE "  Inject a library...", Command::InjectLibrary);
+            item(ICON_FA_PLUS_SQUARE "  Allocate Memory...", Command::AllocateMemory);
+            item(ICON_FA_FILL_DRIP "  Fill Memory...", Command::FillMemory);
+            item(ICON_FA_RANDOM "  Create a Thread...", Command::CreateThread);
+            item(ICON_FA_SYRINGE "  Inject a Library...", Command::InjectLibrary);
             ImGui::Separator();
-            item(ICON_FA_PROJECT_DIAGRAM "  Dissect code", Command::DissectCode);
-            item(ICON_FA_SITEMAP "  Dissect data", Command::DissectData);
-            item(ICON_FA_BAND_AID "  Scan for patches", Command::ScanForPatches);
-            if (CommandItem(ICON_FA_ROUTE "  Pointer scan", Command::OpenPointerScan))
+            item(ICON_FA_PROJECT_DIAGRAM "  Dissect Code", Command::DissectCode);
+            item(ICON_FA_SITEMAP "  Dissect Data", Command::DissectData);
+            item(ICON_FA_BAND_AID "  Scan for Patches", Command::ScanForPatches);
+            if (CommandItem(ICON_FA_ROUTE "  Pointer Scan", Command::OpenPointerScan))
                 m_workspace.OpenPointerScan();
             ImGui::Separator();
             item(ICON_FA_CODE "  Auto Assembler", Command::ViewerAutoAssemble);
-            item(ICON_FA_MOON "  Lua engine", Command::ViewerLuaEngine);
+            item(ICON_FA_MOON "  Lua Engine", Command::ViewerLuaEngine);
             ImGui::EndMenu();
         }
         ScriptMenuBar();
@@ -617,7 +617,7 @@ namespace Manifold::UI
             }
             ImGui::EndMenu();
         }
-        if (ImGui::MenuItem("Clear highlight", nullptr, false, !m_highlight.empty()))
+        if (ImGui::MenuItem("Clear Highlight", nullptr, false, !m_highlight.empty()))
             m_highlight.clear();
         ImGui::Separator();
         ImGui::TextDisabled("Middle-click a register or value in the code");
@@ -663,7 +663,7 @@ namespace Manifold::UI
     {
         if (m_exceptionDialog && !ImGui::IsPopupOpen("##exceptionregion"))
             ImGui::OpenPopup("##exceptionregion");
-        if (!BeginModal("##exceptionregion", ICON_FA_EXCLAMATION_TRIANGLE, "Break on exceptions in a region", ImVec2(440.0f, 0.0f), &m_exceptionDialog, m_viewport))
+        if (!BeginModal("##exceptionregion", ICON_FA_EXCLAMATION_TRIANGLE, "Break on Exceptions in a Region", ImVec2(440.0f, 0.0f), &m_exceptionDialog, m_viewport))
             return;
         Muted("A module name stops at exceptions raised anywhere in that module. Or give the first and the last address of the range.");
         ImGui::Spacing();
@@ -732,7 +732,7 @@ namespace Manifold::UI
                     RemoveBookmark(slot);
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Remove all bookmarks"))
+            if (ImGui::MenuItem("Remove All Bookmarks"))
                 RemoveBookmark(-1);
             ImGui::EndMenu();
         }
@@ -766,29 +766,29 @@ namespace Manifold::UI
         button(ICON_FA_ARROW_LEFT, "Back", Command::NavigateBack);
         ImGui::EndDisabled();
         ImGui::SameLine();
-        button(ICON_FA_LOCATION_ARROW, "Go to address", Command::GotoAddress);
+        button(ICON_FA_LOCATION_ARROW, "Go to Address", Command::GotoAddress);
         ImGui::SameLine();
-        button(ICON_FA_SEARCH, "Find bytes", Command::FindMemory);
+        button(ICON_FA_SEARCH, "Find Bytes", Command::FindMemory);
         ImGui::SameLine(0.0f, Px(14.0f));
         ImGui::BeginDisabled(!broken);
         button(ICON_FA_PLAY, "Run", Command::DebugRun);
         ImGui::SameLine();
-        button(ICON_FA_LEVEL_DOWN_ALT, "Step into", Command::DebugStepInto);
+        button(ICON_FA_LEVEL_DOWN_ALT, "Step Into", Command::DebugStepInto);
         ImGui::SameLine();
-        button(ICON_FA_SHARE, "Step over", Command::DebugStepOver);
+        button(ICON_FA_SHARE, "Step Over", Command::DebugStepOver);
         ImGui::SameLine();
-        button(ICON_FA_SIGN_OUT_ALT, "Step out: run until the function returns to its caller", Command::DebugRunToReturn);
+        button(ICON_FA_SIGN_OUT_ALT, "Step Out", Command::DebugRunToReturn);
         ImGui::EndDisabled();
         ImGui::SameLine();
         ImGui::BeginDisabled(broken);
-        button(ICON_FA_PAUSE, "Break into the process", Command::DebugBreak);
+        button(ICON_FA_PAUSE, "Break into the Process", Command::DebugBreak);
         ImGui::EndDisabled();
         ImGui::SameLine();
-        button(ICON_FA_CIRCLE, "Toggle breakpoint on the selected instruction", Command::ToggleBreakpoint);
+        button(ICON_FA_CIRCLE, "Toggle Breakpoint", Command::ToggleBreakpoint);
         ImGui::SameLine(0.0f, Px(14.0f));
         button(ICON_FA_CODE, "Auto Assembler", Command::ViewerAutoAssemble);
         ImGui::SameLine();
-        button(ICON_FA_SITEMAP, "Dissect data at the hex view address", Command::DissectData);
+        button(ICON_FA_SITEMAP, "Dissect Data", Command::DissectData);
 
         const auto region = m_engine.Process()->RegionAt(m_selected);
         std::string where = m_engine.Describe(m_selected);
@@ -1892,7 +1892,7 @@ namespace Manifold::UI
             };
         ImGui::TextDisabled("%s", m_engine.Describe(instruction.Address).c_str());
         ImGui::Separator();
-        item(ICON_FA_LOCATION_ARROW "  Go to address", Command::GotoAddress);
+        item(ICON_FA_LOCATION_ARROW "  Go to Address", Command::GotoAddress);
         if (instruction.Target)
             item(ICON_FA_ARROW_RIGHT "  Follow", Command::FollowInstruction);
         item(ICON_FA_ARROW_LEFT "  Back", Command::NavigateBack, !m_history.empty());
@@ -1913,9 +1913,9 @@ namespace Manifold::UI
         HighlightItems(&instruction);
         ImGui::Separator();
         item(ICON_FA_EDIT "  Assemble", Command::AssembleInstruction);
-        item(m_nopped.count(instruction.Address) ? ICON_FA_UNDO "  Restore original code" : ICON_FA_BAN "  Replace with code that does nothing", Command::NopInstruction);
-        item(ICON_FA_UNDO_ALT "  Undo the last memory edit", Command::UndoMemoryEdit, UndoableEdits() > 0);
-        if (ImGui::BeginMenu(ICON_FA_MAGIC "  Create script"))
+        item(m_nopped.count(instruction.Address) ? ICON_FA_UNDO "  Restore Original Code" : ICON_FA_BAN "  Replace with Code That Does Nothing", Command::NopInstruction);
+        item(ICON_FA_UNDO_ALT "  Undo the Last Memory Edit", Command::UndoMemoryEdit, UndoableEdits() > 0);
+        if (ImGui::BeginMenu(ICON_FA_MAGIC "  Create Script"))
         {
             m_templates.MenuItems(instruction.Address);
             ImGui::EndMenu();
@@ -1923,42 +1923,42 @@ namespace Manifold::UI
         ImGui::Separator();
         item(ICON_FA_COMMENT "  Comment...", Command::CommentInstruction);
         ImGui::Separator();
-        item(ICON_FA_CIRCLE "  Toggle breakpoint", Command::ToggleBreakpoint);
-        item(ICON_FA_SLIDERS_H "  Breakpoint with a condition or register change...", Command::EditBreakpoint);
-        item(ICON_FA_SHOE_PRINTS "  Break and trace from here...", Command::BreakAndTrace);
-        item(ICON_FA_LIST_UL "  Find out what addresses this instruction accesses", Command::InstructionAccesses, instruction.Memory.Present);
-        if (ImGui::MenuItem(ICON_FA_PHONE "  Find out what calls this address"))
+        item(ICON_FA_CIRCLE "  Toggle Breakpoint", Command::ToggleBreakpoint);
+        item(ICON_FA_SLIDERS_H "  Breakpoint with a Condition or Register Change...", Command::EditBreakpoint);
+        item(ICON_FA_SHOE_PRINTS "  Break and Trace from Here...", Command::BreakAndTrace);
+        item(ICON_FA_LIST_UL "  Find Out What Addresses This Instruction Accesses", Command::InstructionAccesses, instruction.Memory.Present);
+        if (ImGui::MenuItem(ICON_FA_PHONE "  Find Out What Calls This Address"))
             m_workspace.StartWatch(Debug::WatchKind::Calls, instruction.Address, 1);
         {
             const auto dissect = m_engine.CodeDissect();
             const std::size_t references = dissect ? dissect->To(instruction.Address).size() : 0;
-            const std::string label = dissect ? ICON_FA_PROJECT_DIAGRAM "  Code that references this address (" + std::to_string(references) + ")" : ICON_FA_PROJECT_DIAGRAM "  Code that references this address...";
+            const std::string label = dissect ? ICON_FA_PROJECT_DIAGRAM "  Code That References This Address (" + std::to_string(references) + ")" : ICON_FA_PROJECT_DIAGRAM "  Code That References This Address...";
             item(label.c_str(), Command::CodeReferences);
             ItemTooltip(dissect ? "From the last code dissect" : "Needs a code dissect first; the window offers one");
             if (instruction.Memory.Absolute && dissect)
             {
                 const std::uint64_t operand = *instruction.Memory.Absolute;
-                const std::string other = ICON_FA_PROJECT_DIAGRAM "  Code that uses the operand address (" + std::to_string(dissect->To(operand).size()) + ")";
+                const std::string other = ICON_FA_PROJECT_DIAGRAM "  Code That Uses the Operand Address (" + std::to_string(dissect->To(operand).size()) + ")";
                 if (ImGui::MenuItem(other.c_str()))
                     m_workspace.OpenCodeDissect(CodeDissectWindow::References, operand);
             }
         }
         FunctionMenu(instruction);
         if (broken)
-            item(ICON_FA_MAP_MARKER_ALT "  Set the instruction pointer here", Command::SetInstructionPointer);
+            item(ICON_FA_MAP_MARKER_ALT "  Set the Instruction Pointer Here", Command::SetInstructionPointer);
         ImGui::Separator();
-        if (instruction.Memory.Absolute && ImGui::MenuItem(ICON_FA_TH "  Show the operand in the hex view", instruction.Target ? nullptr : ShortcutText(Command::FollowInstruction)))
+        if (instruction.Memory.Absolute && ImGui::MenuItem(ICON_FA_TH "  Show the Operand in the Hex View", instruction.Target ? nullptr : ShortcutText(Command::FollowInstruction)))
         {
             m_hexTop = *instruction.Memory.Absolute & ~0xFull;
             m_hexSelected = *instruction.Memory.Absolute;
         }
-        item(ICON_FA_PLUS "  Add this address to the address list", Command::AddInstructionToList);
+        item(ICON_FA_PLUS "  Add This Address to the Address List", Command::AddInstructionToList);
         if (ImGui::BeginMenu(ICON_FA_COPY "  Copy"))
         {
             item(m_engine.Options().ShowSymbols ? "Selected instructions with names" : "Selected instructions with module offsets", Command::CopyInstructions);
             if (ImGui::MenuItem(m_engine.Options().ShowSymbols ? "Selected instructions with module offsets" : "Selected instructions with names"))
                 CopyInstructions(m_engine.Options().ShowSymbols ? Target::AddressStyle::ModuleOffset : Target::AddressStyle::Name);
-            if (ImGui::MenuItem("Selected instructions with plain addresses"))
+            if (ImGui::MenuItem("Selected Instructions with Plain Addresses"))
                 CopyInstructions(Target::AddressStyle::Plain);
             item("Bytes only", Command::CopyInstructionBytes);
             ImGui::Separator();
@@ -2363,16 +2363,16 @@ namespace Manifold::UI
             ItemTooltip(NoFunctionReason(instruction.Address).c_str());
         }
         ImGui::Separator();
-        item(ICON_FA_ANGLE_DOUBLE_UP "  Go to the start", Command::GotoFunctionStart, span.has_value());
-        item(ICON_FA_ANGLE_DOUBLE_DOWN "  Go to the last instruction", Command::GotoFunctionEnd, span.has_value());
-        item(ICON_FA_I_CURSOR "  Select the whole function", Command::SelectFunction, span.has_value());
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the whole function", nullptr, false, span.has_value()))
+        item(ICON_FA_ANGLE_DOUBLE_UP "  Go to the Start", Command::GotoFunctionStart, span.has_value());
+        item(ICON_FA_ANGLE_DOUBLE_DOWN "  Go to the Last Instruction", Command::GotoFunctionEnd, span.has_value());
+        item(ICON_FA_I_CURSOR "  Select the Whole Function", Command::SelectFunction, span.has_value());
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Whole Function", nullptr, false, span.has_value()))
         {
             const Target::AddressStyle style = m_engine.Options().ShowSymbols ? Target::AddressStyle::Name : Target::AddressStyle::ModuleOffset;
             ImGui::SetClipboardText(Disasm::CopyText(InstructionsBetween(span->Start, span->Last, true), m_engine.Symbols(), style).c_str());
         }
         ImGui::Separator();
-        item(ICON_FA_CODE_BRANCH "  Show the flow graph", Command::FlowGraph);
+        item(ICON_FA_CODE_BRANCH "  Show the Flow Graph", Command::FlowGraph);
         ImGui::EndMenu();
     }
 
@@ -2405,27 +2405,27 @@ namespace Manifold::UI
             };
         ImGui::TextDisabled("%s", m_engine.Describe(address).c_str());
         ImGui::Separator();
-        item(ICON_FA_LOCATION_ARROW "  Go to address", Command::GotoAddress);
-        item(ICON_FA_ARROW_RIGHT "  Follow the pointer", Command::HexFollow);
+        item(ICON_FA_LOCATION_ARROW "  Go to Address", Command::GotoAddress);
+        item(ICON_FA_ARROW_RIGHT "  Follow the Pointer", Command::HexFollow);
         item(ICON_FA_ARROW_LEFT "  Back", Command::HexBack, !m_hexHistory.empty());
         if (m_hexDisplay != 0)
-            item(ICON_FA_EDIT "  Edit the value", Command::HexEditValue);
-        if (ImGui::MenuItem(ICON_FA_CODE "  Disassemble this address"))
+            item(ICON_FA_EDIT "  Edit the Value", Command::HexEditValue);
+        if (ImGui::MenuItem(ICON_FA_CODE "  Disassemble This Address"))
             Navigate(address);
-        item(ICON_FA_SITEMAP "  Dissect data at this address", Command::DissectData);
+        item(ICON_FA_SITEMAP "  Dissect Data at This Address", Command::DissectData);
         ImGui::Separator();
-        item(ICON_FA_EYE "  Find out what accesses this address", Command::HexAccesses);
-        item(ICON_FA_PEN "  Find out what writes to this address", Command::HexWrites);
-        item(ICON_FA_CIRCLE "  Break when written", Command::HexBreakOnWrite);
-        item(ICON_FA_CIRCLE "  Break when read or written", Command::HexBreakOnAccess);
+        item(ICON_FA_EYE "  Find Out What Accesses This Address", Command::HexAccesses);
+        item(ICON_FA_PEN "  Find Out What Writes to This Address", Command::HexWrites);
+        item(ICON_FA_CIRCLE "  Break When Written", Command::HexBreakOnWrite);
+        item(ICON_FA_CIRCLE "  Break When Read or Written", Command::HexBreakOnAccess);
         ImGui::Separator();
-        item(ICON_FA_PLUS "  Add this address to the address list", Command::HexAddToList);
+        item(ICON_FA_PLUS "  Add This Address to the Address List", Command::HexAddToList);
         if (ImGui::BeginMenu(ICON_FA_COPY "  Copy"))
         {
             AddressCopyItems(address);
             ImGui::Separator();
             item("16 bytes", Command::HexCopy);
-            if (ImGui::MenuItem("16 bytes as a C array"))
+            if (ImGui::MenuItem("16 Bytes as a C Array"))
             {
                 std::uint8_t bytes[16]{};
                 if (m_engine.Process()->ReadExact(address, bytes, sizeof(bytes)))
@@ -2438,8 +2438,8 @@ namespace Manifold::UI
             }
             ImGui::EndMenu();
         }
-        item(ICON_FA_PASTE "  Paste bytes", Command::HexPaste);
-        item(ICON_FA_UNDO_ALT "  Undo the last memory edit", Command::UndoMemoryEdit, UndoableEdits() > 0);
+        item(ICON_FA_PASTE "  Paste Bytes", Command::HexPaste);
+        item(ICON_FA_UNDO_ALT "  Undo the Last Memory Edit", Command::UndoMemoryEdit, UndoableEdits() > 0);
         if (ImGui::BeginMenu(ICON_FA_TH "  Show"))
         {
             const Command modes[] = { Command::HexBytes, Command::HexTwoBytes, Command::HexFourBytes, Command::HexEightBytes, Command::HexFourBytesDecimal, Command::HexFloat, Command::HexDouble };
@@ -2613,9 +2613,9 @@ namespace Manifold::UI
         const bool enter = InputTextWithHint("##pattern", "48 8B ?? 10 or 'text'", m_findText, ImGuiInputTextFlags_EnterReturnsTrue);
         if (!m_findError.empty())
             TextWithError(m_findError, ManifoldTheme::Error);
-        const bool next = enter || AccentButton("Find next", Px(100.0f, 0.0f));
+        const bool next = enter || AccentButton("Find Next", Px(100.0f, 0.0f));
         ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_LIST "  Find all", Px(100.0f, 0.0f)))
+        if (ImGui::Button(ICON_FA_LIST "  Find All", Px(100.0f, 0.0f)))
         {
             if (BytePattern(m_findText))
             {

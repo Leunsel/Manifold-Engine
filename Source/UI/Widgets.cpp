@@ -711,7 +711,7 @@ namespace Manifold::UI
                 Refocus(id, start, start);
             }
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Select all", "Ctrl+A", false, !value.empty()))
+            if (ImGui::MenuItem(ICON_FA_I_CURSOR "  Select All", "Ctrl+A", false, !value.empty()))
                 Refocus(id, 0, static_cast<int>(value.size()));
             ImGui::EndPopup();
             return changed && !(flags & ImGuiInputTextFlags_EnterReturnsTrue);

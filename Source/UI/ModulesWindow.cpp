@@ -106,13 +106,13 @@ namespace Manifold::UI
         {
             if (ImGui::BeginMenu("Modules"))
             {
-                if (ImGui::MenuItem(ICON_FA_SYNC "  Reload all modules"))
+                if (ImGui::MenuItem(ICON_FA_SYNC "  Reload All Modules"))
                     Ask(Action::ReloadAll, {});
                 ItemTooltip("Unloads every module, reads the autorun folder again and runs what is switched on.");
                 ImGui::Separator();
-                if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open the autorun folder"))
+                if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open the Autorun Folder"))
                     OpenInExplorer(Paths::AutorunFolder());
-                if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open the modules folder"))
+                if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open the Modules Folder"))
                     OpenInExplorer(Paths::AutorunFolder() / L"modules");
                 ImGui::EndMenu();
             }
@@ -123,7 +123,7 @@ namespace Manifold::UI
             const int chosen = EmptyState(ICON_FA_PUZZLE_PIECE, "No autorun modules",
                 engine.Options().AutorunEnabled ? "Lua scripts in the autorun folder run at start. A file in its root runs as it is; modules with their own folder go into autorun\\modules."
                                                 : "Running the autorun scripts at start is switched off in Settings, under Scripts. Reload all modules runs them now.",
-                { { ICON_FA_SYNC "  Reload all modules" }, { ICON_FA_FOLDER_OPEN "  Open the autorun folder" } }, false);
+                { { ICON_FA_SYNC "  Reload All Modules" }, { ICON_FA_FOLDER_OPEN "  Open the Autorun Folder" } }, false);
             if (chosen == 0)
                 Ask(Action::ReloadAll, {});
             else if (chosen == 1)
@@ -205,9 +205,9 @@ namespace Manifold::UI
             if (ImGui::MenuItem(ICON_FA_CHECK "  Allow", nullptr, false, module.State == State::Held || module.HeldNext))
                 Ask(Action::Allow, module.Key);
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open its folder"))
+            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open Its Folder"))
                 OpenInExplorer(module.Shape == Autorun::Shape::Folder ? module.Root : module.Entry.parent_path());
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the path"))
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Path"))
                 ImGui::SetClipboardText(WideToUtf8(module.Entry.wstring()).c_str());
             ImGui::EndPopup();
         }
@@ -259,7 +259,7 @@ namespace Manifold::UI
         if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Folder"))
             OpenInExplorer(module.Shape == Autorun::Shape::Folder ? module.Root : module.Entry.parent_path());
         ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_DATABASE "  Data folder"))
+        if (ImGui::Button(ICON_FA_DATABASE "  Data Folder"))
             OpenInExplorer(engine.Lua().ModuleDataFolder(module));
         ItemTooltip("Where the module keeps its settings and other files: autorun\\data, under its name.");
         ImGui::Spacing();

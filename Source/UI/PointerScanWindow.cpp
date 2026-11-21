@@ -425,10 +425,10 @@ namespace Manifold::UI
             if (ImGui::MenuItem(ICON_FA_STOP "  Stop", nullptr, false, running))
                 m_task.Cancel();
             ImGui::Separator();
-            ImGui::MenuItem("Offsets are multiples of the pointer size", nullptr, &m_aligned);
+            ImGui::MenuItem("Offsets Are Multiples of the Pointer Size", nullptr, &m_aligned);
             ItemTooltip("Follows only pointers to addresses that are a multiple of 8 (4 in a 32-bit process), which is where objects start. The last offset follows the address itself. "
                         "Turn it off for packed structures. Takes effect on the next scan.");
-            if (ImGui::BeginMenu("Most paths"))
+            if (ImGui::BeginMenu("Most Paths"))
             {
                 for (const std::uint64_t limit : kResultLimits)
                 {
@@ -441,11 +441,11 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenu("Memory"))
         {
-            ImGui::MenuItem("Read-only memory", nullptr, &m_memory.ReadOnly);
+            ImGui::MenuItem("Read-Only Memory", nullptr, &m_memory.ReadOnly);
             ItemTooltip("Also follows pointers that lie in read-only memory. Game objects are writable, so this mostly adds time and memory.");
-            ImGui::MenuItem("Mapped memory", nullptr, &m_memory.Mapped);
+            ImGui::MenuItem("Mapped Memory", nullptr, &m_memory.Mapped);
             ItemTooltip("Also reads memory-mapped files and shared sections.");
-            ImGui::MenuItem("Windows modules as bases", nullptr, &m_memory.SystemModules);
+            ImGui::MenuItem("Windows Modules as Bases", nullptr, &m_memory.SystemModules);
             ItemTooltip("Lets a path start in a library of Windows itself. Off, their memory is left out altogether.");
             ImGui::Separator();
             SectionLabel("Takes effect on the next scan");
@@ -470,7 +470,7 @@ namespace Manifold::UI
                     ImGui::TextDisabled("Rescan first: more than %s paths", Grouped(Scan::kPointerSortLimit).c_str());
                 ImGui::EndMenu();
             }
-            if (ImGui::BeginMenu("Value shown as"))
+            if (ImGui::BeginMenu("Value Shown As"))
             {
                 for (const Scan::ValueType type : Scan::kAllTypes)
                 {
@@ -480,7 +480,7 @@ namespace Manifold::UI
                 ImGui::EndMenu();
             }
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_LIST "  Copy all paths", nullptr, false, results))
+            if (ImGui::MenuItem(ICON_FA_LIST "  Copy All Paths", nullptr, false, results))
                 CopyAll();
             if (results && m_results->Count() > kCopiedPaths)
                 ImGui::TextDisabled("The first %s", Grouped(kCopiedPaths).c_str());
@@ -664,18 +664,18 @@ namespace Manifold::UI
                 if (ImGui::BeginPopupContextItem("##pointerpathmenu"))
                 {
                     m_selected = row;
-                    if (ImGui::MenuItem(ICON_FA_PLUS "  Add the path to the address list"))
+                    if (ImGui::MenuItem(ICON_FA_PLUS "  Add the Path to the Address List"))
                         AddToList(path);
-                    if (ImGui::MenuItem(ICON_FA_MEMORY "  Show where it points in the hex view", nullptr, false, address.has_value()))
+                    if (ImGui::MenuItem(ICON_FA_MEMORY "  Show Where It Points in the Hex View", nullptr, false, address.has_value()))
                         m_workspace.OpenMemoryViewer(*address, true);
-                    if (ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect the structure it points into", nullptr, false, address.has_value() && path.Count > 0))
+                    if (ImGui::MenuItem(ICON_FA_SITEMAP "  Dissect the Structure It Points Into", nullptr, false, address.has_value() && path.Count > 0))
                         m_workspace.OpenStructure(*address - path.Offsets[path.Count - 1]);
-                    if (ImGui::MenuItem(ICON_FA_CODE "  Show the base address in the hex view", nullptr, false, path.Module < m_bases.size() && m_bases[path.Module] != 0))
+                    if (ImGui::MenuItem(ICON_FA_CODE "  Show the Base Address in the Hex View", nullptr, false, path.Module < m_bases.size() && m_bases[path.Module] != 0))
                         m_workspace.OpenMemoryViewer(m_bases[path.Module] + path.ModuleOffset, true);
                     ImGui::Separator();
-                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the path"))
+                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Path"))
                         ImGui::SetClipboardText(m_results->PathText(path).c_str());
-                    if (ImGui::MenuItem(ICON_FA_LIST "  Copy all paths"))
+                    if (ImGui::MenuItem(ICON_FA_LIST "  Copy All Paths"))
                         CopyAll();
                     ImGui::EndPopup();
                 }
@@ -709,7 +709,7 @@ namespace Manifold::UI
     void PointerScanWindow::Draw()
     {
         Collect();
-        if (!BeginWindow(ICON_FA_ROUTE "  Pointer scan###pointerscan", ImVec2(860.0f, 580.0f), ImGuiWindowFlags_MenuBar, ImVec2(720.0f, 320.0f)))
+        if (!BeginWindow(ICON_FA_ROUTE "  Pointer Scan###pointerscan", ImVec2(860.0f, 580.0f), ImGuiWindowFlags_MenuBar, ImVec2(720.0f, 320.0f)))
             return;
         Engine& engine = m_workspace.Core();
         MenuBar();

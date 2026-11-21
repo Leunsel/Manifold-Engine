@@ -5,10 +5,10 @@ Templates turn the instruction you picked into a finished Auto Assembler script.
 ## Where templates come from
 
 - **Built-in templates** ship inside the program: AOB injection, code injection, full injection, cheat table framework and Call Lua. They sit at the top of the Template menu.
-- **Your templates** live in the `templates` folder next to `Manifold-Engine.exe`. Template → Open template folder creates and opens it.
+- **Your templates** live in the `templates` folder next to `Manifold-Engine.exe`. Template → Open Template Folder creates and opens it.
 - A template of yours with the same `Id` as a built-in one replaces the built-in one. Delete your file to get the original back.
 
-Changes in the folder are picked up on their own the next time a Template menu opens. Template → Reload templates loads everything again at once.
+Changes in the folder are picked up on their own the next time a Template menu opens. Template → Reload Templates loads everything again at once.
 
 ## Where templates appear
 
@@ -24,7 +24,7 @@ Templates that declare architectures are greyed out while a process of another a
 
 ## The Templates window
 
-Template → Manage templates... opens a window for all templates. Template → Save script as template... in an Auto Assembler window starts a new template from the script in it.
+Template → Manage Templates... opens a window for all templates. Template → Save Script as Template... in an Auto Assembler window starts a new template from the script in it.
 
 - **Left**: the templates by category, with a search field. Drag a template onto a category to move it there, or onto "Drop here: top level" below the list. Templates the program skipped are listed under "Skipped" with the reason.
 - **Toolbar**: new template, duplicate, move to the recycle bin, check all templates, open the template folder, import templates from a folder. Importing copies `.CEA` and `.Settings.lua` files and leaves files that already exist alone.

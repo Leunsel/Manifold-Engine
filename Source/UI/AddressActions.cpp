@@ -38,33 +38,33 @@ namespace Manifold::UI
                 clicked = true;
                 return true;
             };
-        if (item(ShowCode, ICON_FA_CODE "  Show in disassembler"))
+        if (item(ShowCode, ICON_FA_CODE "  Show in Disassembler"))
             workspace.OpenMemoryViewer(address, false);
-        if (item(ShowHex, ICON_FA_MEMORY "  Show in hex view"))
+        if (item(ShowHex, ICON_FA_MEMORY "  Show in Hex View"))
             workspace.OpenMemoryViewer(address, true);
-        if (item(DissectHere, ICON_FA_SITEMAP "  Dissect data at this address"))
+        if (item(DissectHere, ICON_FA_SITEMAP "  Dissect Data at This Address"))
             workspace.OpenStructure(address);
-        if (item(DissectHere, ICON_FA_CLONE "  Dissect in a new window"))
+        if (item(DissectHere, ICON_FA_CLONE "  Dissect in a New Window"))
             workspace.OpenStructure(address, {}, true);
-        if (item(DissectHere, ICON_FA_THUMBTACK "  Find static pointers to this address"))
+        if (item(DissectHere, ICON_FA_THUMBTACK "  Find Static Pointers to This Address"))
             workspace.FindStaticPointers(address);
-        if (item(DissectHere, ICON_FA_ROUTE "  Pointer scan for this address"))
+        if (item(DissectHere, ICON_FA_ROUTE "  Pointer Scan for This Address"))
             workspace.OpenPointerScan(address);
         if ((actions & (WatchAccesses | WatchWrites)) && (actions & (ShowCode | ShowHex | DissectHere)))
             ImGui::Separator();
-        if (item(WatchAccesses, ICON_FA_EYE "  Find out what accesses this address"))
+        if (item(WatchAccesses, ICON_FA_EYE "  Find Out What Accesses This Address"))
             workspace.StartWatch(Debug::WatchKind::Accesses, address, size);
-        if (item(WatchWrites, ICON_FA_PEN "  Find out what writes to this address"))
+        if (item(WatchWrites, ICON_FA_PEN "  Find Out What Writes to This Address"))
             workspace.StartWatch(Debug::WatchKind::Writes, address, size);
-        if (item(AddToList, ICON_FA_PLUS "  Add to the address list"))
+        if (item(AddToList, ICON_FA_PLUS "  Add to the Address List"))
             workspace.AddAddress(address, size == 8 ? Scan::ValueType::EightBytes : size == 2 ? Scan::ValueType::TwoBytes : size == 1 ? Scan::ValueType::Byte : Scan::ValueType::FourBytes);
         if ((actions & (CopyAddress | CopyModuleOffset)) && (actions & ~(CopyAddress | CopyModuleOffset)))
             ImGui::Separator();
-        if (item(CopyAddress, ICON_FA_COPY "  Copy address"))
+        if (item(CopyAddress, ICON_FA_COPY "  Copy Address"))
             ImGui::SetClipboardText(Hex(address).c_str());
         if ((actions & CopyModuleOffset) && engine.HasProcess() && engine.Process()->ModuleAt(address))
         {
-            if (item(CopyModuleOffset, ICON_FA_COPY "  Copy as module + offset"))
+            if (item(CopyModuleOffset, ICON_FA_COPY "  Copy as Module + Offset"))
                 ImGui::SetClipboardText(engine.Symbols().ModuleOffset(address).c_str());
         }
         return clicked;

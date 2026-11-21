@@ -184,7 +184,7 @@ namespace Manifold::UI
             switch (record.Kind)
             {
             case Table::RecordKind::Script: return ICON_FA_CODE "  Script";
-            case Table::RecordKind::Group: return record.AddressGroupHeader ? ICON_FA_FOLDER "  Group header with an address" : ICON_FA_FOLDER "  Group header";
+            case Table::RecordKind::Group: return record.AddressGroupHeader ? ICON_FA_FOLDER "  Group Header with an Address" : ICON_FA_FOLDER "  Group Header";
             default: return record.IsPointer() ? ICON_FA_LINK "  Pointer" : ICON_FA_HASHTAG "  Value";
             }
         }
@@ -415,7 +415,7 @@ namespace Manifold::UI
                         ImGui::TextColored(ManifoldTheme::Warning, "%s", step.Offset ? "the pointer here cannot be read" : "the offset is not a number or symbol");
                     }
                     ImGui::TableNextColumn();
-                    if (IconButton(ICON_FA_TIMES, "Remove this offset"))
+                    if (IconButton(ICON_FA_TIMES, "Remove This Offset"))
                         remove = static_cast<int>(i);
                     ImGui::PopID();
                 }
@@ -424,7 +424,7 @@ namespace Manifold::UI
                     m_offsets.erase(m_offsets.begin() + remove);
             }
         }
-        if (ImGui::SmallButton(ICON_FA_PLUS "  Pointer offset"))
+        if (ImGui::SmallButton(ICON_FA_PLUS "  Pointer Offset"))
             m_offsets.push_back("0");
         ItemTooltip("Turns this into a pointer: the address holds a pointer, and the offsets lead from it to the value. Offset 1 is added first.");
         EndSection();
@@ -612,7 +612,7 @@ namespace Manifold::UI
                 InputTextWithHint("##value", "value", hotkey.Value);
             }
             ImGui::SameLine();
-            const bool remove = IconButton(ICON_FA_TIMES, "Remove this hotkey");
+            const bool remove = IconButton(ICON_FA_TIMES, "Remove This Hotkey");
             ImGui::PopID();
             if (remove)
             {
@@ -620,7 +620,7 @@ namespace Manifold::UI
                 break;
             }
         }
-        if (ImGui::SmallButton(ICON_FA_PLUS "  Add hotkey"))
+        if (ImGui::SmallButton(ICON_FA_PLUS "  Add Hotkey"))
         {
             Table::Hotkey hotkey;
             hotkey.Id = static_cast<int>(m_hotkeys.size());
@@ -682,7 +682,7 @@ namespace Manifold::UI
             BeginSection("##script", ICON_FA_CODE, "Script");
             const std::size_t lines = static_cast<std::size_t>(std::count(record->Script.begin(), record->Script.end(), '\n')) + (record->Script.empty() ? 0 : 1);
             Muted(std::to_string(lines) + (lines == 1 ? " line" : " lines") + (record->Active ? "  ·  enabled" : ""));
-            if (ImGui::Button(ICON_FA_CODE "  Edit script"))
+            if (ImGui::Button(ICON_FA_CODE "  Edit Script"))
                 m_workspace.OpenScript(record->Script, record->Id);
             ImGui::Spacing();
             ToggleRow("async", "Marked as async", "Kept for Cheat Engine tables. This program switches every script in the background anyway.", &m_async);

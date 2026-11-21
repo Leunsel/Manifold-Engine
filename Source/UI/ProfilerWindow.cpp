@@ -28,7 +28,7 @@ namespace Manifold::UI
     namespace
     {
         const char* const kTabNames[] = { ICON_FA_CHART_BAR "  Overview", ICON_FA_STREAM "  Breakdown", ICON_FA_LAYER_GROUP "  Threads", ICON_FA_STETHOSCOPE "  Checks",
-            ICON_FA_INFO_CIRCLE "  App info" };
+            ICON_FA_INFO_CIRCLE "  App Info" };
 
         struct ZoneHelp
         {
@@ -360,7 +360,7 @@ namespace Manifold::UI
 
     void ProfilerWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_TACHOMETER_ALT "  Profiler and diagnostics###profiler", ImVec2(940.0f, 660.0f), ImGuiWindowFlags_MenuBar, ImVec2(640.0f, 440.0f)))
+        if (!BeginWindow(ICON_FA_TACHOMETER_ALT "  Profiler and Diagnostics###profiler", ImVec2(940.0f, 660.0f), ImGuiWindowFlags_MenuBar, ImVec2(640.0f, 440.0f)))
             return;
         const double now = ImGui::GetTime();
         if (now - m_sampledAt > 1.0)
@@ -466,28 +466,28 @@ namespace Manifold::UI
             if (!on)
             {
                 ImGui::Separator();
-                if (ImGui::MenuItem(ICON_FA_TACHOMETER_ALT "  Turn on the profiler"))
+                if (ImGui::MenuItem(ICON_FA_TACHOMETER_ALT "  Turn On the Profiler"))
                     RunAction(Diagnostics::Action::TurnOnProfiler);
             }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Report"))
         {
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy report"))
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy Report"))
             {
                 ImGui::SetClipboardText(DiagnosticsReport(m_workspace).c_str());
                 m_workspace.Core().Notify(LogLevel::Success, "Copied the diagnostics report");
             }
             ItemTooltip("Checks, app info, frame times and threads as text, for a bug report.");
-            if (ImGui::MenuItem(ICON_FA_SAVE "  Save report..."))
+            if (ImGui::MenuItem(ICON_FA_SAVE "  Save Report..."))
                 SaveReport();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View"))
         {
-            ImGui::MenuItem(ICON_FA_FILTER "  Hide zones under 10 \xC2\xB5s", nullptr, &m_hideTiny);
+            ImGui::MenuItem(ICON_FA_FILTER "  Hide Zones Under 10 \xC2\xB5s", nullptr, &m_hideTiny);
             ItemTooltip("Breakdown: leave out the zones that took less than 10 microseconds, so the slow parts stand out.");
-            ImGui::MenuItem(ICON_FA_EXCLAMATION_TRIANGLE "  Only problems and warnings", nullptr, &m_onlyIssues);
+            ImGui::MenuItem(ICON_FA_EXCLAMATION_TRIANGLE "  Only Problems and Warnings", nullptr, &m_onlyIssues);
             ItemTooltip("Checks: hide the notes and the checks that found nothing.");
             ImGui::EndMenu();
         }
@@ -496,7 +496,7 @@ namespace Manifold::UI
 
     bool ProfilerWindow::ProfilerOffCard()
     {
-        std::vector<EmptyAction> actions = { { ICON_FA_TACHOMETER_ALT "  Turn on the profiler", nullptr, true } };
+        std::vector<EmptyAction> actions = { { ICON_FA_TACHOMETER_ALT "  Turn On the Profiler", nullptr, true } };
         const int clicked = EmptyState(ICON_FA_STOPWATCH, "The profiler is off",
             "Turned on, it measures every frame: the engine, Lua, every window, drawing and waiting, so slow parts and stutters show up. It costs a few microseconds per frame. "
             "Checks, threads and app info below work without it.",
@@ -828,7 +828,7 @@ namespace Manifold::UI
             ImGui::Text("Frame %llu: work %s, whole %s", static_cast<unsigned long long>(m_pinnedFrame), Diagnostics::Milliseconds(Profiler::WorkMs(ago)).c_str(),
                 Diagnostics::Milliseconds(Profiler::FrameMs(ago)).c_str());
             ImGui::SameLine();
-            if (ImGui::SmallButton("Break it down"))
+            if (ImGui::SmallButton("Break It Down"))
                 m_requestedTab = BreakdownTab;
             ImGui::SameLine();
             if (ImGui::SmallButton("Unpin"))
@@ -896,7 +896,7 @@ namespace Manifold::UI
             ImGui::Text("Frame %llu: work %s, whole frame %s", static_cast<unsigned long long>(m_pinnedFrame), Diagnostics::Milliseconds(Profiler::WorkMs(ago)).c_str(),
                 Diagnostics::Milliseconds(Profiler::FrameMs(ago)).c_str());
             ImGui::SameLine();
-            if (ImGui::SmallButton("Back to the average"))
+            if (ImGui::SmallButton("Back to the Average"))
                 m_pinned = false;
         }
         else
@@ -907,7 +907,7 @@ namespace Manifold::UI
         {
             ImGui::SameLine(0.0f, Px(14.0f));
             Muted("Zones under 10 \xC2\xB5s hidden");
-            ItemTooltip("View > Hide zones under 10 \xC2\xB5s shows them again.");
+            ItemTooltip("View > Hide Zones Under 10 \xC2\xB5s shows them again.");
         }
 
         std::vector<double> value(m_topOf.size(), 0.0);
@@ -1153,9 +1153,9 @@ namespace Manifold::UI
         {
             ImGui::SameLine(0.0f, Px(14.0f));
             Muted("Notes and fine checks hidden");
-            ItemTooltip("View > Only problems and warnings shows them again.");
+            ItemTooltip("View > Only Problems and Warnings shows them again.");
         }
-        const char* againLabel = ICON_FA_SYNC "  Check again";
+        const char* againLabel = ICON_FA_SYNC "  Check Again";
         ImGui::SameLine();
         ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX() + Px(10.0f), ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize(againLabel).x - ImGui::GetStyle().FramePadding.x * 2.0f));
         if (ImGui::Button(againLabel))
@@ -1204,11 +1204,11 @@ namespace Manifold::UI
             const char* actionLabel = nullptr;
             switch (check.Act)
             {
-            case Diagnostics::Action::RestartElevated: actionLabel = ICON_FA_SHIELD_ALT "  Restart as administrator"; break;
-            case Diagnostics::Action::OpenCrashFolder: actionLabel = ICON_FA_FOLDER_OPEN "  Open the folder"; break;
-            case Diagnostics::Action::OpenSettings: actionLabel = ICON_FA_COGS "  Open the settings"; break;
-            case Diagnostics::Action::OpenLog: actionLabel = ICON_FA_STREAM "  Open the log"; break;
-            case Diagnostics::Action::TurnOnProfiler: actionLabel = ICON_FA_TACHOMETER_ALT "  Turn on the profiler"; break;
+            case Diagnostics::Action::RestartElevated: actionLabel = ICON_FA_SHIELD_ALT "  Restart as Administrator"; break;
+            case Diagnostics::Action::OpenCrashFolder: actionLabel = ICON_FA_FOLDER_OPEN "  Open the Folder"; break;
+            case Diagnostics::Action::OpenSettings: actionLabel = ICON_FA_COGS "  Open the Settings"; break;
+            case Diagnostics::Action::OpenLog: actionLabel = ICON_FA_STREAM "  Open the Log"; break;
+            case Diagnostics::Action::TurnOnProfiler: actionLabel = ICON_FA_TACHOMETER_ALT "  Turn On the Profiler"; break;
             case Diagnostics::Action::None: break;
             }
             if (actionLabel)

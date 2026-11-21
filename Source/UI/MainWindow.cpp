@@ -419,11 +419,11 @@ namespace Manifold::UI
         ImGui::BeginMenuBar();
         if (ImGui::BeginMenu("File"))
         {
-            Item(ICON_FA_FILE "  New table", Command::NewTable);
-            Item(ICON_FA_FOLDER_OPEN "  Open table...", Command::OpenTable);
-            if (!m_release && ImGui::MenuItem(ICON_FA_OBJECT_GROUP "  Merge table..."))
+            Item(ICON_FA_FILE "  New Table", Command::NewTable);
+            Item(ICON_FA_FOLDER_OPEN "  Open Table...", Command::OpenTable);
+            if (!m_release && ImGui::MenuItem(ICON_FA_OBJECT_GROUP "  Merge Table..."))
                 workspace.OpenTableDialog(true);
-            if (ImGui::BeginMenu(ICON_FA_HISTORY "  Recent tables", !engine.Options().RecentTables.empty()))
+            if (ImGui::BeginMenu(ICON_FA_HISTORY "  Recent Tables", !engine.Options().RecentTables.empty()))
             {
                 const std::vector<std::string> recent = engine.Options().RecentTables;
                 for (const std::string& path : recent)
@@ -434,7 +434,7 @@ namespace Manifold::UI
                 ImGui::EndMenu();
             }
             Item(ICON_FA_SAVE "  Save", Command::SaveTable);
-            Item(ICON_FA_SAVE "  Save as...", Command::SaveTableAs);
+            Item(ICON_FA_SAVE "  Save As...", Command::SaveTableAs);
             if (ImGui::BeginMenu(ICON_FA_LIFE_RING "  Backups"))
             {
                 if (ImGui::IsWindowAppearing())
@@ -451,11 +451,11 @@ namespace Manifold::UI
                         workspace.OpenBackup(version);
                 }
                 ImGui::Separator();
-                if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open a backup..."))
+                if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open a Backup..."))
                     workspace.OpenBackupDialog();
-                if (ImGui::MenuItem(ICON_FA_SAVE "  Back up now"))
+                if (ImGui::MenuItem(ICON_FA_SAVE "  Back Up Now"))
                     workspace.BackUpNow();
-                if (ImGui::MenuItem(ICON_FA_ARCHIVE "  Open the backups folder"))
+                if (ImGui::MenuItem(ICON_FA_ARCHIVE "  Open the Backups Folder"))
                     workspace.OpenBackupFolder();
                 ImGui::EndMenu();
             }
@@ -469,20 +469,20 @@ namespace Manifold::UI
         {
             if (!m_release)
             {
-                Item(ICON_FA_UNDO "  Undo last scan", Command::UndoScan);
-                if (CommandItem(ICON_FA_UNDO_ALT "  Undo last value change", Command::UndoRecordValue, false, !m_valueUndo.empty()))
+                Item(ICON_FA_UNDO "  Undo Last Scan", Command::UndoScan);
+                if (CommandItem(ICON_FA_UNDO_ALT "  Undo Last Value Change", Command::UndoRecordValue, false, !m_valueUndo.empty()))
                     UndoValueChange();
                 ImGui::Separator();
                 const bool selection = !list.Selection().empty();
-                if (CommandItem(ICON_FA_CUT "  Cut records", Command::CutRecords, false, selection))
+                if (CommandItem(ICON_FA_CUT "  Cut Records", Command::CutRecords, false, selection))
                     RunRecordCommand(Command::CutRecords, nullptr);
-                if (CommandItem(ICON_FA_COPY "  Copy records", Command::CopyRecords, false, selection))
+                if (CommandItem(ICON_FA_COPY "  Copy Records", Command::CopyRecords, false, selection))
                     RunRecordCommand(Command::CopyRecords, nullptr);
-                if (CommandItem(ICON_FA_PASTE "  Paste records", Command::PasteRecords))
+                if (CommandItem(ICON_FA_PASTE "  Paste Records", Command::PasteRecords))
                     RunRecordCommand(Command::PasteRecords, nullptr);
-                if (CommandItem(ICON_FA_CHECK_DOUBLE "  Select all records", Command::SelectAllRecords))
+                if (CommandItem(ICON_FA_CHECK_DOUBLE "  Select All Records", Command::SelectAllRecords))
                     RunRecordCommand(Command::SelectAllRecords, nullptr);
-                if (DangerCommandItem(ICON_FA_TRASH "  Delete records", Command::DeleteRecords, selection))
+                if (DangerCommandItem(ICON_FA_TRASH "  Delete Records", Command::DeleteRecords, selection))
                     RunRecordCommand(Command::DeleteRecords, nullptr);
                 ImGui::Separator();
             }
@@ -499,29 +499,29 @@ namespace Manifold::UI
         {
             if (!m_release)
             {
-                Item(ICON_FA_PLUS "  Add address manually", Command::AddAddress);
-                Item(ICON_FA_FOLDER_PLUS "  Add group", Command::AddGroup);
-                Item(ICON_FA_CODE "  Add Auto Assembler script", Command::AddScript);
+                Item(ICON_FA_PLUS "  Add Address Manually", Command::AddAddress);
+                Item(ICON_FA_FOLDER_PLUS "  Add Group", Command::AddGroup);
+                Item(ICON_FA_CODE "  Add Auto Assembler Script", Command::AddScript);
                 ImGui::Separator();
-                Item(ICON_FA_SCROLL "  Table Lua script", Command::TableLuaScript);
-                Item(ICON_FA_FILE_ARCHIVE "  Table files", Command::TableFiles);
+                Item(ICON_FA_SCROLL "  Table Lua Script", Command::TableLuaScript);
+                Item(ICON_FA_FILE_ARCHIVE "  Table Files", Command::TableFiles);
                 ImGui::Separator();
             }
-            Item(ICON_FA_TOGGLE_OFF "  Deactivate all records", Command::DeactivateAll);
+            Item(ICON_FA_TOGGLE_OFF "  Deactivate All Records", Command::DeactivateAll);
             ScriptMenuInto("table", scriptOpened, scriptClicked);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View"))
         {
             Settings& options = engine.Options();
-            Item(ICON_FA_COMPRESS_ALT "  Compact mode", Command::CompactMode, options.CompactMode);
+            Item(ICON_FA_COMPRESS_ALT "  Compact Mode", Command::CompactMode, options.CompactMode);
             ItemTooltip("Only the address list, without the scanner");
-            Item(ICON_FA_GAMEPAD "  Release mode", Command::ReleaseMode, options.ReleaseMode);
+            Item(ICON_FA_GAMEPAD "  Release Mode", Command::ReleaseMode, options.ReleaseMode);
             ItemTooltip("Hides addresses, types and the developer tools, so a table is simple to use. Turn it off here again.");
             if (!m_release)
             {
                 ImGui::Separator();
-                if (ImGui::BeginMenu("Address column"))
+                if (ImGui::BeginMenu("Address Column"))
                 {
                     const char* const columns[] = { "As written", "Resolved address", "Written and resolved" };
                     for (int i = 0; i < 3; ++i)
@@ -534,7 +534,7 @@ namespace Manifold::UI
                     }
                     ImGui::EndMenu();
                 }
-                if (ImGui::BeginMenu("Address digits"))
+                if (ImGui::BeginMenu("Address Digits"))
                 {
                     const char* const digits[] = { "Short (P->F40000)", "At least 8 (P->00F40000)", "Pointer width (8 or 16)" };
                     for (int i = 0; i < 3; ++i)
@@ -552,20 +552,20 @@ namespace Manifold::UI
         }
         if (!m_release && ImGui::BeginMenu("Tools"))
         {
-            Item(ICON_FA_MEMORY "  Memory viewer", Command::OpenMemoryViewer);
-            if (ImGui::MenuItem(ICON_FA_CLONE "  New memory viewer window"))
+            Item(ICON_FA_MEMORY "  Memory Viewer", Command::OpenMemoryViewer);
+            if (ImGui::MenuItem(ICON_FA_CLONE "  New Memory Viewer Window"))
                 workspace.OpenMemoryViewer(0, false, true);
-            Item(ICON_FA_SITEMAP "  Structure dissect", Command::OpenStructureDissect);
-            Item(ICON_FA_ROUTE "  Pointer scan", Command::OpenPointerScan);
+            Item(ICON_FA_SITEMAP "  Structure Dissect", Command::OpenStructureDissect);
+            Item(ICON_FA_ROUTE "  Pointer Scan", Command::OpenPointerScan);
             Item(ICON_FA_CODE "  Auto Assembler", Command::OpenAutoAssembler);
-            Item(ICON_FA_MOON "  Lua engine", Command::OpenLuaEngine);
+            Item(ICON_FA_MOON "  Lua Engine", Command::OpenLuaEngine);
             Item(ICON_FA_STREAM "  Log", Command::OpenLog);
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_PUZZLE_PIECE "  Autorun modules"))
+            if (ImGui::MenuItem(ICON_FA_PUZZLE_PIECE "  Autorun Modules"))
                 workspace.OpenModules();
-            if (ImGui::MenuItem(ICON_FA_SYNC "  Reload all modules"))
+            if (ImGui::MenuItem(ICON_FA_SYNC "  Reload All Modules"))
                 workspace.Report(engine.RunAutorun());
-            if (ImGui::MenuItem(ICON_FA_FOLDER "  Open autorun folder"))
+            if (ImGui::MenuItem(ICON_FA_FOLDER "  Open Autorun Folder"))
             {
                 std::error_code ignored;
                 std::filesystem::create_directories(Paths::AutorunFolder(), ignored);
@@ -603,12 +603,12 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenu("Help"))
         {
-            Item(ICON_FA_KEYBOARD "  Keyboard shortcuts", Command::OpenShortcuts);
-            if (!m_release && ImGui::MenuItem(ICON_FA_LIST_OL "  Error codes"))
+            Item(ICON_FA_KEYBOARD "  Keyboard Shortcuts", Command::OpenShortcuts);
+            if (!m_release && ImGui::MenuItem(ICON_FA_LIST_OL "  Error Codes"))
                 workspace.OpenLog();
             if (engine.Options().ProfilerEnabled)
-                Item(ICON_FA_TACHOMETER_ALT "  Profiler and diagnostics", Command::OpenProfiler);
-            if (!Target::IsElevated() && ImGui::MenuItem(ICON_FA_SHIELD_ALT "  Restart as administrator"))
+                Item(ICON_FA_TACHOMETER_ALT "  Profiler and Diagnostics", Command::OpenProfiler);
+            if (!Target::IsElevated() && ImGui::MenuItem(ICON_FA_SHIELD_ALT "  Restart as Administrator"))
                 workspace.Window().RestartElevated();
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_INFO_CIRCLE "  About"))
@@ -696,7 +696,7 @@ namespace Manifold::UI
         }
         else
         {
-            name = m_release ? "Open a game" : "Open process";
+            name = m_release ? "Open a Game" : "Open Process";
         }
         ImGui::PushFont(Fonts::Bold(), 0.0f);
         const float nameFull = ImGui::CalcTextSize(name.c_str()).x;
@@ -886,11 +886,11 @@ namespace Manifold::UI
 
     void MainWindow::ProcessItems()
     {
-        Item(ICON_FA_DESKTOP "  Open process...", Command::OpenProcess);
+        Item(ICON_FA_DESKTOP "  Open Process...", Command::OpenProcess);
         const std::string& last = m_engine.Options().LastProcess;
         const std::string lastLabel = ICON_FA_HISTORY "  Open " + (last.empty() ? std::string("the last process") : last);
         Item(lastLabel.c_str(), Command::OpenLastProcess);
-        if (ImGui::MenuItem(ICON_FA_TIMES "  Close process", nullptr, false, m_engine.HasProcess()))
+        if (ImGui::MenuItem(ICON_FA_TIMES "  Close Process", nullptr, false, m_engine.HasProcess()))
             m_engine.CloseProcess();
     }
 
@@ -910,16 +910,16 @@ namespace Manifold::UI
             if (!m_release)
             {
                 ImGui::Separator();
-                Item(ICON_FA_MEMORY "  Memory viewer", Command::OpenMemoryViewer);
-                if (engine.Debugger().Broken() && ImGui::MenuItem(ICON_FA_PAUSE_CIRCLE "  Show the break"))
+                Item(ICON_FA_MEMORY "  Memory Viewer", Command::OpenMemoryViewer);
+                if (engine.Debugger().Broken() && ImGui::MenuItem(ICON_FA_PAUSE_CIRCLE "  Show the Break"))
                     m_workspace.OpenMemoryViewer(engine.Debugger().Break().Address);
             }
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the name"))
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Name"))
                 ImGui::SetClipboardText(name.c_str());
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the process id"))
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Process ID"))
                 ImGui::SetClipboardText(id.c_str());
-            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Show the file in Explorer", nullptr, false, !path.empty()))
+            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Show the File in Explorer", nullptr, false, !path.empty()))
             {
                 const std::wstring arguments = L"/select,\"" + path + L"\"";
                 ::ShellExecuteW(nullptr, L"open", L"explorer.exe", arguments.c_str(), nullptr, SW_SHOWNORMAL);
@@ -967,8 +967,8 @@ namespace Manifold::UI
         if (!m_selectedResults.empty())
         {
             ImGui::SameLine();
-            ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize(ICON_FA_ARROW_DOWN "  Add 0000 selected").x - Px(16.0f));
-            if (ImGui::SmallButton((ICON_FA_ARROW_DOWN "  Add " + std::to_string(m_selectedResults.size()) + " selected").c_str()))
+            ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize(ICON_FA_ARROW_DOWN "  Add 0000 Selected").x - Px(16.0f));
+            if (ImGui::SmallButton((ICON_FA_ARROW_DOWN "  Add " + std::to_string(m_selectedResults.size()) + " Selected").c_str()))
             {
                 for (std::uint64_t index : m_selectedResults)
                 {
@@ -1129,28 +1129,28 @@ namespace Manifold::UI
 
     void MainWindow::ResultMenu(std::uint64_t index)
     {
-        if (CommandItem(ICON_FA_ARROW_DOWN "  Add selected to the address list", Command::AddResults))
+        if (CommandItem(ICON_FA_ARROW_DOWN "  Add Selected to the Address List", Command::AddResults))
             RunResultCommand(Command::AddResults, index);
-        if (!m_release && CommandItem(ICON_FA_EDIT "  Change the value of the selected results", Command::ChangeResultValue))
+        if (!m_release && CommandItem(ICON_FA_EDIT "  Change the Value of the Selected Results", Command::ChangeResultValue))
             RunResultCommand(Command::ChangeResultValue, index);
         if (m_release)
             return;
         ImGui::Separator();
-        if (CommandItem(ICON_FA_MEMORY "  Browse this memory region", Command::BrowseResult))
+        if (CommandItem(ICON_FA_MEMORY "  Browse This Memory Region", Command::BrowseResult))
             RunResultCommand(Command::BrowseResult, index);
-        if (CommandItem(ICON_FA_CODE "  Disassemble this memory region", Command::DisassembleResult))
+        if (CommandItem(ICON_FA_CODE "  Disassemble This Memory Region", Command::DisassembleResult))
             RunResultCommand(Command::DisassembleResult, index);
-        if (CommandItem(ICON_FA_SITEMAP "  Dissect data at this address", Command::DissectResult))
+        if (CommandItem(ICON_FA_SITEMAP "  Dissect Data at This Address", Command::DissectResult))
             RunResultCommand(Command::DissectResult, index);
         ImGui::Separator();
-        if (CommandItem(ICON_FA_EYE "  Find out what accesses this address", Command::ResultAccesses))
+        if (CommandItem(ICON_FA_EYE "  Find Out What Accesses This Address", Command::ResultAccesses))
             RunResultCommand(Command::ResultAccesses, index);
-        if (CommandItem(ICON_FA_PEN "  Find out what writes to this address", Command::ResultWrites))
+        if (CommandItem(ICON_FA_PEN "  Find Out What Writes to This Address", Command::ResultWrites))
             RunResultCommand(Command::ResultWrites, index);
         ImGui::Separator();
-        if (CommandItem(ICON_FA_COPY "  Copy the selected addresses", Command::CopyResults))
+        if (CommandItem(ICON_FA_COPY "  Copy the Selected Addresses", Command::CopyResults))
             RunResultCommand(Command::CopyResults, index);
-        if (CommandItem(ICON_FA_CHECK_DOUBLE "  Select all results", Command::SelectAllResults))
+        if (CommandItem(ICON_FA_CHECK_DOUBLE "  Select All Results", Command::SelectAllResults))
             RunResultCommand(Command::SelectAllResults, index);
     }
 
@@ -1238,7 +1238,7 @@ namespace Manifold::UI
             ImGui::OpenPopup("Change value##results");
             m_resultValueDialog = false;
         }
-        if (!BeginModal("Change value##results", ICON_FA_EDIT, "Change value", ImVec2(380.0f, 0.0f)))
+        if (!BeginModal("Change value##results", ICON_FA_EDIT, "Change Value", ImVec2(380.0f, 0.0f)))
             return;
         Scan::Scanner& scanner = m_engine.Scanner();
         Muted(std::to_string(m_resultValueTargets.size()) + (m_resultValueTargets.size() == 1 ? " result, " : " results, ") + ScanTypeLabel());
@@ -1514,7 +1514,7 @@ namespace Manifold::UI
             ImGui::OpenPopup("Save results##scan");
             m_saveResultsDialog = false;
         }
-        if (!BeginModal("Save results##scan", ICON_FA_SAVE, "Save results", ImVec2(380.0f, 0.0f)))
+        if (!BeginModal("Save results##scan", ICON_FA_SAVE, "Save Results", ImVec2(380.0f, 0.0f)))
             return;
         Scan::Scanner& scanner = m_engine.Scanner();
         Muted("A next scan can compare with these results later. They stay until New scan.");
@@ -1544,11 +1544,11 @@ namespace Manifold::UI
         const bool busy = scanner.Busy();
         const bool scanned = scanner.HasResults();
         const float buttonWidth = std::floor((ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2.0f) / 3.0f);
-        const bool iconsOnly = buttonWidth < ImGui::CalcTextSize(ICON_FA_FILTER "  Next scan").x + ImGui::GetStyle().FramePadding.x * 2.0f;
-        const char* firstLabel = iconsOnly ? ICON_FA_SEARCH "##firstscan" : ICON_FA_SEARCH "  First scan";
-        const char* newLabel = iconsOnly ? ICON_FA_REDO "##newscan" : ICON_FA_REDO "  New scan";
-        const char* nextLabel = iconsOnly ? ICON_FA_FILTER "##nextscan" : ICON_FA_FILTER "  Next scan";
-        const char* undoLabel = iconsOnly ? ICON_FA_UNDO "##undoscan" : ICON_FA_UNDO "  Undo scan";
+        const bool iconsOnly = buttonWidth < ImGui::CalcTextSize(ICON_FA_FILTER "  Next Scan").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        const char* firstLabel = iconsOnly ? ICON_FA_SEARCH "##firstscan" : ICON_FA_SEARCH "  First Scan";
+        const char* newLabel = iconsOnly ? ICON_FA_REDO "##newscan" : ICON_FA_REDO "  New Scan";
+        const char* nextLabel = iconsOnly ? ICON_FA_FILTER "##nextscan" : ICON_FA_FILTER "  Next Scan";
+        const char* undoLabel = iconsOnly ? ICON_FA_UNDO "##undoscan" : ICON_FA_UNDO "  Undo Scan";
 
         ImGui::BeginDisabled(busy);
         if (!scanned)
@@ -1853,7 +1853,7 @@ namespace Manifold::UI
         Table::AddressList& list = engine.Table();
         BeginCard("##addresslist", nullptr, ImVec2(0.0f, height), ImGuiWindowFlags_NoScrollbar);
         ImGui::AlignTextToFramePadding();
-        CardTitle(ICON_FA_LIST, "Address list", list.Count() ? std::to_string(list.Count()) + (list.Count() == 1 ? " record" : " records") : "");
+        CardTitle(ICON_FA_LIST, "Address List", list.Count() ? std::to_string(list.Count()) + (list.Count() == 1 ? " record" : " records") : "");
         const ImGuiStyle& style = ImGui::GetStyle();
         const float iconWidth = ImGui::GetFrameHeight();
         const float gap = Px(4.0f);
@@ -1879,15 +1879,15 @@ namespace Manifold::UI
             ImGui::SameLine(0.0f, Px(16.0f));
             if (ImGui::Button(iconsOnly ? ICON_FA_PLUS "##addaddress" : ICON_FA_PLUS "  Address", iconsOnly ? iconSize : ImVec2(0.0f, 0.0f)))
                 OpenAddDialog();
-            ItemTooltip(WithKeys("Add an address by hand", Command::AddAddress).c_str());
+            ItemTooltip(WithKeys("Add Address Manually", Command::AddAddress).c_str());
             ImGui::SameLine(0.0f, gap);
             if (ImGui::Button(iconsOnly ? ICON_FA_FOLDER_PLUS "##addgroup" : ICON_FA_FOLDER_PLUS "  Group", iconsOnly ? iconSize : ImVec2(0.0f, 0.0f)))
                 list.AddGroup("Group");
-            ItemTooltip(WithKeys("Add an empty group", Command::AddGroup).c_str());
+            ItemTooltip(WithKeys("Add Group", Command::AddGroup).c_str());
             ImGui::SameLine(0.0f, gap);
             if (ImGui::Button(iconsOnly ? ICON_FA_CODE "##addscript" : ICON_FA_CODE "  Script", iconsOnly ? iconSize : ImVec2(0.0f, 0.0f)))
                 AddScriptRecord();
-            ItemTooltip(WithKeys("Add an Auto Assembler script", Command::AddScript).c_str());
+            ItemTooltip(WithKeys("Add Auto Assembler Script", Command::AddScript).c_str());
             ImGui::PopStyleColor(3);
         }
         const float filterX = right - filterWidth - iconWidth - gap;
@@ -1896,10 +1896,10 @@ namespace Manifold::UI
         if (!ownLine)
             ImGui::SameLine();
         ImGui::SetCursorPosX(groupsX);
-        if (IconButton(ICON_FA_EXPAND_ALT, WithKeys("Expand every group", Command::ExpandGroups).c_str()))
+        if (IconButton(ICON_FA_EXPAND_ALT, WithKeys("Expand Every Group", Command::ExpandGroups).c_str()))
             list.ForEach([](Table::MemoryRecord& record) { if (!record.Children.empty()) record.Expanded = true; });
         ImGui::SameLine(0.0f, gap);
-        if (IconButton(ICON_FA_COMPRESS_ALT, WithKeys("Collapse every group", Command::CollapseGroups).c_str()))
+        if (IconButton(ICON_FA_COMPRESS_ALT, WithKeys("Collapse Every Group", Command::CollapseGroups).c_str()))
             list.ForEach([](Table::MemoryRecord& record) { if (!record.Children.empty()) record.Expanded = false; });
         ImGui::SameLine();
         ImGui::SetCursorPosX(filterX);
@@ -1909,7 +1909,7 @@ namespace Manifold::UI
         const bool filterOptions = m_filterActiveOnly || m_filterKind != 0;
         if (filterOptions)
             ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Accent);
-        if (IconButton(ICON_FA_FILTER, filterOptions ? "Filter options (some are on)" : "Filter options"))
+        if (IconButton(ICON_FA_FILTER, filterOptions ? "Filter Options (some are on)" : "Filter Options"))
             ImGui::OpenPopup("##filteroptions");
         if (filterOptions)
             ImGui::PopStyleColor();
@@ -1934,15 +1934,15 @@ namespace Manifold::UI
         const auto listMenu = [&](bool open) {
             if (!open)
                 return;
-            Item(ICON_FA_PLUS "  Add address manually", Command::AddAddress);
-            Item(ICON_FA_FOLDER_PLUS "  Add group", Command::AddGroup);
-            Item(ICON_FA_CODE "  Add Auto Assembler script", Command::AddScript);
+            Item(ICON_FA_PLUS "  Add Address Manually", Command::AddAddress);
+            Item(ICON_FA_FOLDER_PLUS "  Add Group", Command::AddGroup);
+            Item(ICON_FA_CODE "  Add Auto Assembler Script", Command::AddScript);
             if (CommandItem(ICON_FA_PASTE "  Paste", Command::PasteRecords))
                 RunRecordCommand(Command::PasteRecords, nullptr);
             ImGui::Separator();
-            if (CommandItem(ICON_FA_EXPAND_ALT "  Expand every group", Command::ExpandGroups))
+            if (CommandItem(ICON_FA_EXPAND_ALT "  Expand Every Group", Command::ExpandGroups))
                 RunRecordCommand(Command::ExpandGroups, nullptr);
-            if (CommandItem(ICON_FA_COMPRESS_ALT "  Collapse every group", Command::CollapseGroups))
+            if (CommandItem(ICON_FA_COMPRESS_ALT "  Collapse Every Group", Command::CollapseGroups))
                 RunRecordCommand(Command::CollapseGroups, nullptr);
             ImGui::EndPopup();
         };
@@ -1971,9 +1971,9 @@ namespace Manifold::UI
                 m_recentExists = !last.empty() && std::filesystem::exists(Utf8ToWide(last), error);
             }
             std::vector<EmptyAction> actions;
-            actions.push_back({ ICON_FA_FOLDER_OPEN "  Open table", ShortcutText(Command::OpenTable) });
+            actions.push_back({ ICON_FA_FOLDER_OPEN "  Open Table", ShortcutText(Command::OpenTable) });
             if (!m_release)
-                actions.push_back({ ICON_FA_PLUS "  Add address" });
+                actions.push_back({ ICON_FA_PLUS "  Add Address" });
             if (m_recentExists)
                 actions.push_back({ ICON_FA_HISTORY "  Open " + WideToUtf8(std::filesystem::path(Utf8ToWide(last)).filename().wstring()), nullptr, false, true, last.c_str() });
             const int clicked = EmptyState(ICON_FA_LIST, m_release ? "No table loaded" : "No entries yet",
@@ -2187,7 +2187,7 @@ namespace Manifold::UI
             remove();
             return;
         }
-        m_workspace.Confirm("Delete records", "Delete " + std::to_string(ids.size()) + (ids.size() == 1 ? " record" : " records") + " and their children?", remove, "Delete");
+        m_workspace.Confirm("Delete Records", "Delete " + std::to_string(ids.size()) + (ids.size() == 1 ? " record" : " records") + " and their children?", remove, "Delete");
     }
 
     void MainWindow::DetectMono()
@@ -2236,14 +2236,14 @@ namespace Manifold::UI
         SectionLabel(process ? unreal.StatusText().c_str() : "No process is open");
         if (unreal.Resolving())
         {
-            ImGui::MenuItem(ICON_FA_SPINNER "  Reading the reflection...", nullptr, false, false);
+            ImGui::MenuItem(ICON_FA_SPINNER "  Reading the Reflection...", nullptr, false, false);
         }
-        else if (ImGui::MenuItem(runtime ? ICON_FA_SYNC "  Resolve again" : ICON_FA_PLAY "  Start", nullptr, false, process))
+        else if (ImGui::MenuItem(runtime ? ICON_FA_SYNC "  Resolve Again" : ICON_FA_PLAY "  Start", nullptr, false, process))
         {
             unreal.Start(false);
         }
         ItemTooltip("Reads the game's name table, object array and reflection layout, also in a game that does not look like Unreal.");
-        if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut down", nullptr, false, !unreal.Stopped()))
+        if (ImGui::MenuItem(ICON_FA_POWER_OFF "  Shut Down", nullptr, false, !unreal.Stopped()))
             unreal.Stop();
         ItemTooltip("Drops what was resolved; dissects, symbols and types stop until Start, also in the next game.");
         ImGui::Separator();
@@ -2257,22 +2257,22 @@ namespace Manifold::UI
                 else
                     m_engine.Notify(LogLevel::Info, std::string(what) + " was not found. Is a level loaded?");
             };
-        dissect(ICON_FA_COGS "  Dissect the engine", &Target::UnrealRuntime::Engine, "The engine object");
-        dissect(ICON_FA_GLOBE "  Dissect the world", &Target::UnrealRuntime::World, "The world");
-        dissect(ICON_FA_GAMEPAD "  Dissect the player controller", &Target::UnrealRuntime::Controller, "The local player controller");
-        dissect(ICON_FA_USER "  Dissect the pawn", &Target::UnrealRuntime::Pawn, "The local pawn");
+        dissect(ICON_FA_COGS "  Dissect the Engine", &Target::UnrealRuntime::Engine, "The engine object");
+        dissect(ICON_FA_GLOBE "  Dissect the World", &Target::UnrealRuntime::World, "The world");
+        dissect(ICON_FA_GAMEPAD "  Dissect the Player Controller", &Target::UnrealRuntime::Controller, "The local player controller");
+        dissect(ICON_FA_USER "  Dissect the Pawn", &Target::UnrealRuntime::Pawn, "The local pawn");
         ImGui::Separator();
-        Item(ICON_FA_CUBES "  Types, properties and who owns an address", Command::OpenUnreal);
+        Item(ICON_FA_CUBES "  Types, Properties and Who Owns an Address", Command::OpenUnreal);
         ImGui::Separator();
         SectionLabel("Built in");
-        ImGui::MenuItem("Start by itself in Unreal games", nullptr, &config.AutoStart);
-        ImGui::MenuItem("Structure Dissect fields", nullptr, &config.Dissect);
+        ImGui::MenuItem("Start by Itself in Unreal Games", nullptr, &config.AutoStart);
+        ImGui::MenuItem("Structure Dissect Fields", nullptr, &config.Dissect);
         ItemTooltip("Structure Dissect fills Unreal objects with their reflected properties, nested structs, bitfield bools and the native gaps.");
-        ImGui::MenuItem("Structure names", nullptr, &config.Names);
+        ImGui::MenuItem("Structure Names", nullptr, &config.Names);
         ItemTooltip("New structures are named after the object's class and start at the object, also for an address inside it.");
-        ImGui::MenuItem("Offset symbols", nullptr, &config.Symbols);
+        ImGui::MenuItem("Offset Symbols", nullptr, &config.Symbols);
         ItemTooltip("Type_Property symbols such as Actor_RootComponent, and GObjects, FNamePool and GameEngine, work in addresses.");
-        ImGui::MenuItem("Custom types", nullptr, &config.Types);
+        ImGui::MenuItem("Custom Types", nullptr, &config.Types);
         ItemTooltip("UE FName, UE FString and UE Object Index show names, strings and weak references as text.");
         ImGui::EndMenu();
     }
@@ -2285,14 +2285,14 @@ namespace Manifold::UI
         SectionLabel(m_engine.HasProcess() ? rtti.StatusText().c_str() : "No process is open");
         ImGui::Separator();
         bool enabled = rtti.Enabled();
-        if (ImGui::MenuItem("Structure Dissect uses RTTI", nullptr, &enabled))
+        if (ImGui::MenuItem("Structure Dissect Uses RTTI", nullptr, &enabled))
         {
             rtti.SetEnabled(enabled);
             m_engine.SaveOptionsSoon();
         }
         ItemTooltip("New structures and expanded pointers are named after the object's C++ class, pointer fields are labelled (vftable, Class*), "
             "and member objects with a virtual function table of their own become embedded structures. Programs built with MSVC or clang-cl, 64-bit and 32-bit.");
-        if (ImGui::MenuItem(ICON_FA_ERASER "  Forget what was learned", nullptr, false, m_engine.HasProcess()))
+        if (ImGui::MenuItem(ICON_FA_ERASER "  Forget What Was Learned", nullptr, false, m_engine.HasProcess()))
             rtti.Reset();
         ItemTooltip("Drops the classes seen in this process and the Class::vftable symbols registered for them. The next lookup starts fresh.");
         ImGui::Separator();
@@ -2312,8 +2312,8 @@ namespace Manifold::UI
         else if (!m_engine.MonoPresent())
         {
             const bool il2cpp = m_engine.Process() && Target::MonoBridge::DetectRuntime(*m_engine.Process()) == Target::ManagedRuntime::Il2Cpp;
-            const char* load = il2cpp ? ICON_FA_PLUG "  Load IL2CPP runtime" : ICON_FA_PLUG "  Load Mono runtime";
-            if (ImGui::MenuItem(m_engine.Managed().Loading() ? ICON_FA_PLUG "  Loading the runtime..." : load, nullptr, false, !m_engine.Managed().Loading()))
+            const char* load = il2cpp ? ICON_FA_PLUG "  Load IL2CPP Runtime" : ICON_FA_PLUG "  Load Mono Runtime";
+            if (ImGui::MenuItem(m_engine.Managed().Loading() ? ICON_FA_PLUG "  Loading the Runtime..." : load, nullptr, false, !m_engine.Managed().Loading()))
                 m_engine.Managed().Load();
             ItemTooltip("Reads the classes and methods of the game's Mono or IL2CPP runtime, so method names show in the memory viewer, resolve in addresses and Structure Dissect finds the class of an object.");
         }
@@ -2321,15 +2321,15 @@ namespace Manifold::UI
         {
             const std::string loaded = mono.Module() + "  ·  " + Target::MonoBridge::RuntimeName(mono.Runtime()) + "  ·  " + std::to_string(mono.ClassCount()) + " classes";
             SectionLabel(loaded.c_str());
-            if (ImGui::MenuItem(ICON_FA_SYNC "  Reload classes", nullptr, false, !m_engine.Managed().Loading()))
+            if (ImGui::MenuItem(ICON_FA_SYNC "  Reload Classes", nullptr, false, !m_engine.Managed().Loading()))
                 m_engine.Managed().Reload();
             ItemTooltip("Reads the class list again, for assemblies the game loaded later");
-            if (ImGui::MenuItem(mono.IsIl2Cpp() ? ICON_FA_POWER_OFF "  Shut down IL2CPP" : ICON_FA_POWER_OFF "  Shut down Mono", nullptr, false, !m_engine.Managed().Loading()))
+            if (ImGui::MenuItem(mono.IsIl2Cpp() ? ICON_FA_POWER_OFF "  Shut Down IL2CPP" : ICON_FA_POWER_OFF "  Shut Down Mono", nullptr, false, !m_engine.Managed().Loading()))
                 m_engine.Managed().Stop();
             ItemTooltip("Ends the helper thread in the game and takes the Unity explorer's callback out. Managed method names and lookups stop until it is loaded again.");
         }
         ImGui::Separator();
-        Item(ICON_FA_DICE_D6 "  Mono / .NET dissector", Command::OpenMono);
+        Item(ICON_FA_DICE_D6 "  Mono / .NET Dissector", Command::OpenMono);
         ImGui::EndMenu();
     }
 
@@ -3217,33 +3217,33 @@ namespace Manifold::UI
             return;
         if (record.Kind == Table::RecordKind::Value)
         {
-            if (CommandItem(ICON_FA_EDIT "  Change value", Command::ChangeRecordValue))
+            if (CommandItem(ICON_FA_EDIT "  Change Value", Command::ChangeRecordValue))
                 RunRecordCommand(Command::ChangeRecordValue, &record);
-            if (CommandItem(ICON_FA_I_CURSOR "  Edit the value in place", Command::EditValueInline))
+            if (CommandItem(ICON_FA_I_CURSOR "  Edit the Value in Place", Command::EditValueInline))
                 RunRecordCommand(Command::EditValueInline, &record);
-            if (!m_release && CommandItem(ICON_FA_UNDO_ALT "  Undo last value change", Command::UndoRecordValue, false, !m_valueUndo.empty()))
+            if (!m_release && CommandItem(ICON_FA_UNDO_ALT "  Undo Last Value Change", Command::UndoRecordValue, false, !m_valueUndo.empty()))
                 RunRecordCommand(Command::UndoRecordValue, &record);
-            if (ImGui::BeginMenu(ICON_FA_SNOWFLAKE "  Freeze mode"))
+            if (ImGui::BeginMenu(ICON_FA_SNOWFLAKE "  Freeze Mode"))
             {
                 if (ImGui::MenuItem("Normal", nullptr, record.Freeze == Table::FreezeMode::Normal))
                     for (auto* target : selected) target->Freeze = Table::FreezeMode::Normal;
-                if (CommandItem("Allow increase", Command::FreezeAllowIncrease, record.Freeze == Table::FreezeMode::AllowIncrease))
+                if (CommandItem("Allow Increase", Command::FreezeAllowIncrease, record.Freeze == Table::FreezeMode::AllowIncrease))
                     for (auto* target : selected) target->Freeze = Table::FreezeMode::AllowIncrease;
-                if (CommandItem("Allow decrease", Command::FreezeAllowDecrease, record.Freeze == Table::FreezeMode::AllowDecrease))
+                if (CommandItem("Allow Decrease", Command::FreezeAllowDecrease, record.Freeze == Table::FreezeMode::AllowDecrease))
                     for (auto* target : selected) target->Freeze = Table::FreezeMode::AllowDecrease;
                 ImGui::EndMenu();
             }
             if (m_release)
                 return;
-            if (CommandItem(ICON_FA_HASHTAG "  Show as hexadecimal", Command::ShowAsHex, record.ShowHex))
+            if (CommandItem(ICON_FA_HASHTAG "  Show as Hexadecimal", Command::ShowAsHex, record.ShowHex))
                 RunRecordCommand(Command::ShowAsHex, &record);
-            if (ImGui::MenuItem(ICON_FA_MINUS_CIRCLE "  Show as signed", nullptr, record.ShowSigned))
+            if (ImGui::MenuItem(ICON_FA_MINUS_CIRCLE "  Show as Signed", nullptr, record.ShowSigned))
             {
                 for (auto* target : selected)
                     target->ShowSigned = !record.ShowSigned;
                 engine.RefreshValues(true);
             }
-            if (ImGui::BeginMenu(ICON_FA_EXCHANGE_ALT "  Change type"))
+            if (ImGui::BeginMenu(ICON_FA_EXCHANGE_ALT "  Change Type"))
             {
                 for (Scan::ValueType type : Scan::kRecordTypes)
                 {
@@ -3257,44 +3257,44 @@ namespace Manifold::UI
                 ImGui::EndMenu();
             }
         }
-        if (record.Kind == Table::RecordKind::Script && CommandItem(ICON_FA_CODE "  Edit script", Command::EditScript))
+        if (record.Kind == Table::RecordKind::Script && CommandItem(ICON_FA_CODE "  Edit Script", Command::EditScript))
             RunRecordCommand(Command::EditScript, &record);
-        if (CommandItem(ICON_FA_SLIDERS_H "  Edit record...", Command::EditRecord))
+        if (CommandItem(ICON_FA_SLIDERS_H "  Edit Record...", Command::EditRecord))
             RunRecordCommand(Command::EditRecord, &record);
-        if (CommandItem(ICON_FA_KEYBOARD "  Assign a hotkey...", Command::AssignHotkey))
+        if (CommandItem(ICON_FA_KEYBOARD "  Assign a Hotkey...", Command::AssignHotkey))
             RunRecordCommand(Command::AssignHotkey, &record);
-        if (CommandItem(ICON_FA_I_CURSOR "  Change description", Command::ChangeDescription))
+        if (CommandItem(ICON_FA_I_CURSOR "  Change Description", Command::ChangeDescription))
             RunRecordCommand(Command::ChangeDescription, &record);
-        if (ImGui::BeginMenu(ICON_FA_SITEMAP "  Group options"))
+        if (ImGui::BeginMenu(ICON_FA_SITEMAP "  Group Options"))
         {
-            ImGui::MenuItem("Hide children when deactivated", nullptr, &record.Options.HideChildren);
-            ImGui::MenuItem("Activate children as well", nullptr, &record.Options.ActivateChildren);
-            ImGui::MenuItem("Deactivate children as well", nullptr, &record.Options.DeactivateChildren);
-            ImGui::MenuItem("Set value of children too", nullptr, &record.Options.RecursiveSetValue);
-            ImGui::MenuItem("Always hide children", nullptr, &record.Options.AlwaysHideChildren);
-            ImGui::MenuItem("Allow manual collapse and expand", nullptr, &record.Options.AllowManualExpand);
+            ImGui::MenuItem("Hide Children When Deactivated", nullptr, &record.Options.HideChildren);
+            ImGui::MenuItem("Activate Children as Well", nullptr, &record.Options.ActivateChildren);
+            ImGui::MenuItem("Deactivate Children as Well", nullptr, &record.Options.DeactivateChildren);
+            ImGui::MenuItem("Set Value of Children Too", nullptr, &record.Options.RecursiveSetValue);
+            ImGui::MenuItem("Always Hide Children", nullptr, &record.Options.AlwaysHideChildren);
+            ImGui::MenuItem("Allow Manual Collapse and Expand", nullptr, &record.Options.AllowManualExpand);
             ImGui::EndMenu();
         }
-        if (CommandItem(ICON_FA_FOLDER_PLUS "  Put selected into a new group", Command::GroupRecords))
+        if (CommandItem(ICON_FA_FOLDER_PLUS "  Put Selected into a New Group", Command::GroupRecords))
             RunRecordCommand(Command::GroupRecords, &record);
         ImGui::Separator();
         if (record.Kind == Table::RecordKind::Value)
         {
             engine.ResolveRecord(record);
             ImGui::BeginDisabled(!record.AddressOk);
-            if (CommandItem(ICON_FA_MEMORY "  Browse this memory region", Command::BrowseRecord))
+            if (CommandItem(ICON_FA_MEMORY "  Browse This Memory Region", Command::BrowseRecord))
                 RunRecordCommand(Command::BrowseRecord, &record);
-            if (CommandItem(ICON_FA_CODE "  Disassemble this memory region", Command::DisassembleRecord))
+            if (CommandItem(ICON_FA_CODE "  Disassemble This Memory Region", Command::DisassembleRecord))
                 RunRecordCommand(Command::DisassembleRecord, &record);
-            if (CommandItem(ICON_FA_SITEMAP "  Dissect data at this address", Command::DissectRecord))
+            if (CommandItem(ICON_FA_SITEMAP "  Dissect Data at This Address", Command::DissectRecord))
                 RunRecordCommand(Command::DissectRecord, &record);
-            if (ImGui::MenuItem(ICON_FA_ROUTE "  Pointer scan for this address"))
+            if (ImGui::MenuItem(ICON_FA_ROUTE "  Pointer Scan for This Address"))
                 m_workspace.OpenPointerScan(record.ResolvedAddress);
-            if (CommandItem(ICON_FA_EYE "  Find out what accesses this address", Command::RecordAccesses))
+            if (CommandItem(ICON_FA_EYE "  Find Out What Accesses This Address", Command::RecordAccesses))
                 RunRecordCommand(Command::RecordAccesses, &record);
-            if (CommandItem(ICON_FA_PEN "  Find out what writes to this address", Command::RecordWrites))
+            if (CommandItem(ICON_FA_PEN "  Find Out What Writes to This Address", Command::RecordWrites))
                 RunRecordCommand(Command::RecordWrites, &record);
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy address"))
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy Address"))
                 ImGui::SetClipboardText(Hex(record.ResolvedAddress).c_str());
             ImGui::EndDisabled();
             ImGui::Separator();
@@ -3305,7 +3305,7 @@ namespace Manifold::UI
             RunRecordCommand(Command::CopyRecords, &record);
         if (CommandItem(ICON_FA_PASTE "  Paste", Command::PasteRecords))
             RunRecordCommand(Command::PasteRecords, &record);
-        if (ImGui::MenuItem(ICON_FA_PASTE "  Paste into this record"))
+        if (ImGui::MenuItem(ICON_FA_PASTE "  Paste into This Record"))
             m_workspace.PasteRecords(record.Id);
         if (DangerCommandItem(ICON_FA_TRASH "  Delete", Command::DeleteRecords))
             RunRecordCommand(Command::DeleteRecords, &record);
@@ -3321,7 +3321,7 @@ namespace Manifold::UI
         Table::MemoryRecord* first = m_valueTargets.empty() ? nullptr : m_engine.Table().FindById(m_valueTargets.front());
         const std::vector<Table::DropDownEntry> noEntries;
         const std::vector<Table::DropDownEntry>& entries = first ? m_engine.DropDownOf(*first) : noEntries;
-        if (!BeginModal("Change value##main", ICON_FA_EDIT, "Change value", ImVec2(entries.empty() ? 380.0f : 440.0f, 0.0f)))
+        if (!BeginModal("Change value##main", ICON_FA_EDIT, "Change Value", ImVec2(entries.empty() ? 380.0f : 440.0f, 0.0f)))
             return;
         Muted(m_valueTargets.size() == 1 && first ? first->Description : std::to_string(m_valueTargets.size()) + " records");
         bool apply = false;
@@ -3482,7 +3482,7 @@ namespace Manifold::UI
             ImGui::OpenPopup("Add address##main");
             m_addDialog = false;
         }
-        if (!BeginModal("Add address##main", ICON_FA_PLUS, "Add address", ImVec2(420.0f, 0.0f)))
+        if (!BeginModal("Add address##main", ICON_FA_PLUS, "Add Address", ImVec2(420.0f, 0.0f)))
             return;
         ImGui::TextUnformatted("Address");
         if (ImGui::IsWindowAppearing())
@@ -3527,7 +3527,7 @@ namespace Manifold::UI
             ImGui::OpenPopup("Description##main");
             m_descriptionDialog = false;
         }
-        if (!BeginModal("Description##main", ICON_FA_I_CURSOR, "Change description", ImVec2(380.0f, 0.0f)))
+        if (!BeginModal("Description##main", ICON_FA_I_CURSOR, "Change Description", ImVec2(380.0f, 0.0f)))
             return;
         if (ImGui::IsWindowAppearing())
             ImGui::SetKeyboardFocusHere();
@@ -3743,10 +3743,10 @@ namespace Manifold::UI
                     {
                         if (logError && ImGui::MenuItem(("Copy " + logCode).c_str()))
                             ImGui::SetClipboardText(logCode.c_str());
-                        if (ImGui::MenuItem("Copy the message"))
+                        if (ImGui::MenuItem("Copy the Message"))
                             ImGui::SetClipboardText(message.c_str());
                         ImGui::Separator();
-                        if (ImGui::MenuItem(ICON_FA_STREAM "  Open the log"))
+                        if (ImGui::MenuItem(ICON_FA_STREAM "  Open the Log"))
                             m_workspace.OpenLog();
                         ImGui::EndPopup();
                     }

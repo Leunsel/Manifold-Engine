@@ -513,7 +513,7 @@ namespace Manifold::UI
 
         const bool release = m_engine.Options().ReleaseMode;
         std::vector<EmptyAction> actions;
-        actions.push_back({ ICON_FA_DESKTOP "  Open process", ShortcutText(Command::OpenProcess), true });
+        actions.push_back({ ICON_FA_DESKTOP "  Open Process", ShortcutText(Command::OpenProcess), true });
         std::string footer;
         if (!last.empty() && m_lastProcessId)
             actions.push_back({ ICON_FA_HISTORY "  Open " + last, nullptr, false, true, "The process you opened last time is running" });
@@ -860,7 +860,7 @@ namespace Manifold::UI
             };
         if (!merge && UnsavedTable())
         {
-            Confirm("Open table", "The current table has changes that are not saved. Open the other table anyway?", load, "Open");
+            Confirm("Open Table", "The current table has changes that are not saved. Open the other table anyway?", load, "Open");
             return true;
         }
         load();
@@ -949,7 +949,7 @@ namespace Manifold::UI
             };
         if (UnsavedTable())
         {
-            Confirm("Open backup", "The current table has changes that are not saved. Open the backup anyway?", load, "Open");
+            Confirm("Open Backup", "The current table has changes that are not saved. Open the backup anyway?", load, "Open");
             return;
         }
         load();
@@ -963,7 +963,7 @@ namespace Manifold::UI
             m_engine.Notify(LogLevel::Warning, "The last run did not close properly. Its last backup of " + name + " from " + Backups::When(path) + " can be opened with File, Backups, Open a backup.");
             return;
         }
-        Confirm("Open backup", "The last run did not close properly and left changes that were not saved.\n\nOpen the backup of " + name + " from " + Backups::When(path) + "?",
+        Confirm("Open Backup", "The last run did not close properly and left changes that were not saved.\n\nOpen the backup of " + name + " from " + Backups::When(path) + "?",
             [this, path]() { OpenBackup(path); }, "Open");
     }
 
@@ -996,7 +996,7 @@ namespace Manifold::UI
     {
         const auto clear = [this]() { m_engine.NewTable(); };
         if (UnsavedTable())
-            Confirm("New table", "The current table has changes that are not saved. Throw it away?", clear, "Clear");
+            Confirm("New Table", "The current table has changes that are not saved. Throw it away?", clear, "Clear");
         else
             clear();
     }
@@ -1091,10 +1091,10 @@ namespace Manifold::UI
             ItemTooltip("Can be changed later in Settings, under Scripts");
             ImGui::Spacing();
             int choice = 0;
-            if (AccentButton(ICON_FA_TOGGLE_OFF "  Turn off and quit") || ImGui::IsKeyPressed(ImGuiKey_Enter, false))
+            if (AccentButton(ICON_FA_TOGGLE_OFF "  Turn Off and Quit") || ImGui::IsKeyPressed(ImGuiKey_Enter, false))
                 choice = 1;
             ImGui::SameLine();
-            if (ImGui::Button("Quit and leave them"))
+            if (ImGui::Button("Quit and Leave Them"))
                 choice = 2;
             ImGui::SameLine();
             if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false))
@@ -1327,10 +1327,10 @@ namespace Manifold::UI
                 m_tableScriptShown.clear();
                 m_engine.AnswerTableScript(run);
             };
-        if (AccentButton("Run the script", Px(130.0f, 0.0f)))
+        if (AccentButton("Run the Script", Px(130.0f, 0.0f)))
             answer(true);
         ImGui::SameLine();
-        if (ImGui::Button("Do not run it", Px(130.0f, 0.0f)))
+        if (ImGui::Button("Do Not Run It", Px(130.0f, 0.0f)))
             answer(false);
         ImGui::SameLine();
         if (ImGui::Button(ICON_FA_COPY "  Copy"))
@@ -1380,7 +1380,7 @@ namespace Manifold::UI
             if (!Target::IsElevated())
             {
                 ImGui::SameLine();
-                if (ImGui::SmallButton("Restart as administrator"))
+                if (ImGui::SmallButton("Restart as Administrator"))
                     m_shell.RestartElevated();
             }
             ImGui::Spacing();

@@ -160,7 +160,7 @@ namespace Manifold::UI
         {
             if (ImGui::MenuItem(ICON_FA_EYE "  Inspect"))
                 OpenObject(object, false);
-            if (ImGui::MenuItem(ICON_FA_EXTERNAL_LINK_ALT "  Inspect in a new tab"))
+            if (ImGui::MenuItem(ICON_FA_EXTERNAL_LINK_ALT "  Inspect in a New Tab"))
                 OpenObject(object, true);
             ImGui::Separator();
             AddressMenuItems(m_workspace, object, ShowHex | DissectHere | CopyAddress, 8);
@@ -636,7 +636,7 @@ namespace Manifold::UI
             ItemTooltip("Double-click to change it");
         if (ImGui::BeginPopupContextItem("##valuemenu"))
         {
-            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the value"))
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Value"))
                 ImGui::SetClipboardText(shown.Text.c_str());
             if (editable && ImGui::MenuItem(ICON_FA_PEN "  Change..."))
             {

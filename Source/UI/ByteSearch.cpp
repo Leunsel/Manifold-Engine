@@ -221,11 +221,11 @@ namespace Manifold::UI
                 if (ImGui::BeginPopupContextItem("##hitmenu"))
                 {
                     m_selected = row;
-                    if (ImGui::MenuItem(ICON_FA_CODE "  Show in the memory viewer"))
+                    if (ImGui::MenuItem(ICON_FA_CODE "  Show in the Memory Viewer"))
                         Reveal(row, true);
                     ImGui::Separator();
                     AddressMenuItems(m_workspace, hit.Address, hit.Code ? (CopyAddress | CopyModuleOffset) : (DissectHere | WatchAccesses | WatchWrites | AddToList | CopyAddress | CopyModuleOffset));
-                    if (ImGui::MenuItem(ICON_FA_LIST "  Copy all addresses"))
+                    if (ImGui::MenuItem(ICON_FA_LIST "  Copy All Addresses"))
                     {
                         std::string text;
                         for (const Hit& each : m_result->Hits)
@@ -263,7 +263,7 @@ namespace Manifold::UI
     void ByteSearchWindow::Draw()
     {
         Collect();
-        if (!BeginWindow(ICON_FA_SEARCH "  Find bytes###bytesearch", ImVec2(780.0f, 540.0f), 0, ImVec2(480.0f, 300.0f)))
+        if (!BeginWindow(ICON_FA_SEARCH "  Find Bytes###bytesearch", ImVec2(780.0f, 540.0f), 0, ImVec2(480.0f, 300.0f)))
             return;
         Engine& engine = m_workspace.Core();
         if (!engine.HasProcess() && !m_task.Running() && !m_result)
@@ -286,7 +286,7 @@ namespace Manifold::UI
         ImGui::BeginDisabled(running || !engine.HasProcess());
         ModuleScopeCombo("##bytescope", engine, m_scope, Px(280.0f), true);
         ImGui::SameLine();
-        if (AccentButton(ICON_FA_SEARCH "  Find all") || (enter && !running))
+        if (AccentButton(ICON_FA_SEARCH "  Find All") || (enter && !running))
         {
             Start();
             if (enter && m_error.empty())

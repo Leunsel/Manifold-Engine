@@ -126,14 +126,14 @@ namespace Manifold::UI
 
     void ShortcutsWindow::Draw()
     {
-        if (!BeginWindow(ICON_FA_KEYBOARD "  Keyboard shortcuts###shortcuts", ImVec2(640.0f, 680.0f), 0, ImVec2(440.0f, 300.0f)))
+        if (!BeginWindow(ICON_FA_KEYBOARD "  Keyboard Shortcuts###shortcuts", ImVec2(640.0f, 680.0f), 0, ImVec2(440.0f, 300.0f)))
             return;
         if (m_focusSearch)
         {
             ImGui::SetKeyboardFocusHere();
             m_focusSearch = false;
         }
-        const char* change = ICON_FA_PEN "  Change keys...";
+        const char* change = ICON_FA_PEN "  Change Keys...";
         const float changeWidth = ImGui::CalcTextSize(change).x + ImGui::GetStyle().FramePadding.x * 2.0f;
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Cheat Engine keys only").x - ImGui::GetFrameHeight() - changeWidth - Px(36.0f));
         InputTextWithHint("##filter", ICON_FA_SEARCH " Command, keys or window", m_filter);
