@@ -3054,10 +3054,15 @@ namespace Manifold::UI
         }
         m_hoveredChip = hovered;
 
-        // ∑ Links run from each widget's right edge to the chip of the function
-        // it names; the window's own handlers start at its title bar.
+        // ∑ Links never cross the form: each widget gets a port on the form's
+        // edge at its own height (on the side its chip is on), and only the
+        // part outside the form is drawn. A hovered or selected widget or chip
+        // adds a faint dashed guide from the widget to its port.
         ImDrawList* links = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
-        links->PushClipRect(areaMin, areaMax, true);
+        const float bodyTop = frameMin.y + titleHeight;
+        const ImVec2 innerMin(std::max(frameMin.x, areaMin.x), std::max(bodyTop, areaMin.y));
+        const ImVec2 innerMax(std::min(frameMax.x, areaMax.x), std::min(frameMax.y, areaMax.y));
+        const float formCenter = (frameMin.x + frameMax.x) * 0.5f;
         for (const auto& [id, meta] : m_form.Meta)
         {
             for (const auto& [key, name] : meta.Handlers)
@@ -3065,23 +3070,42 @@ namespace Manifold::UI
                 const auto chip = rects.find(name);
                 if (chip == rects.end())
                     continue;
-                ImVec2 from;
-                if (id == m_form.Window)
-                    from = ImVec2(frameMax.x, frameMin.y + titleHeight * 0.5f);
-                else if (const UiDesign::Rect* rect = m_trying ? nullptr : RectOf(id))
-                    from = ImVec2(rect->Max.x, (rect->Min.y + rect->Max.y) * 0.5f);
-                else
-                    continue;
-                const ImVec2 to(chip->second.first.x, (chip->second.first.y + chip->second.second.y) * 0.5f);
+                const ImVec2 chipMin = chip->second.first;
+                const ImVec2 chipMax = chip->second.second;
+                const bool right = (chipMin.x + chipMax.x) * 0.5f >= formCenter;
+                const float edge = right ? frameMax.x : frameMin.x;
+                const float out = right ? 1.0f : -1.0f;
+                const UiDesign::Rect* rect = nullptr;
+                float y = frameMin.y + titleHeight * 0.5f;
+                if (id != m_form.Window)
+                {
+                    rect = m_trying ? nullptr : RectOf(id);
+                    if (!rect)
+                        continue;
+                    y = std::clamp((rect->Min.y + rect->Max.y) * 0.5f, bodyTop + Px(8.0f), std::max(bodyTop + Px(8.0f), frameMax.y - Px(8.0f)));
+                }
+                const ImVec2 port(edge, y);
+                const ImVec2 to(right ? chipMin.x : chipMax.x, (chipMin.y + chipMax.y) * 0.5f);
                 const bool strong = name == hovered || name == m_activeChip || id == m_selected || id == m_hovered;
                 const ImU32 color = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, strong ? 0.95f : 0.35f));
-                const float bend = std::max(Px(30.0f), std::abs(to.x - from.x) * 0.45f);
-                links->AddBezierCubic(from, ImVec2(from.x + bend, from.y), ImVec2(to.x - bend, to.y), to, color, strong ? Px(2.0f) : Px(1.2f));
-                links->AddCircleFilled(from, strong ? Px(3.5f) : Px(2.5f), color);
+                const float bend = std::max(Px(30.0f), std::abs(to.x - port.x) * 0.45f);
+                links->PushClipRect(areaMin, areaMax, true);
+                links->AddBezierCubic(port, ImVec2(port.x + bend * out, port.y), ImVec2(to.x - bend * out, to.y), to, color, strong ? Px(2.0f) : Px(1.2f));
+                links->AddCircleFilled(port, strong ? Px(3.5f) : Px(2.5f), color);
                 links->AddCircleFilled(to, strong ? Px(3.5f) : Px(2.5f), color);
+                links->PopClipRect();
+                if (strong && rect && innerMax.x > innerMin.x && innerMax.y > innerMin.y)
+                {
+                    const float from = right ? rect->Max.x + Px(3.0f) : rect->Min.x - Px(3.0f);
+                    if ((port.x - from) * out > Px(4.0f))
+                    {
+                        links->PushClipRect(innerMin, innerMax, true);
+                        DashedLine(links, ImVec2(from, y), port, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.55f)), 1.0f, Px(4.0f), Px(3.0f));
+                        links->PopClipRect();
+                    }
+                }
             }
         }
-        links->PopClipRect();
         if (!hovered.empty())
         {
             for (const auto& [id, meta] : m_form.Meta)
