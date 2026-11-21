@@ -46,6 +46,8 @@
 #include "imgui_internal.h"
 
 #include <algorithm>
+#include <fstream>
+#include <sstream>
 #include <vector>
 
 #include <windows.h>
@@ -476,6 +478,38 @@ namespace Manifold::UI
             }
         }
         m_scripts.push_back(std::make_unique<ScriptWindow>(*this, m_nextWindow++, std::move(script), recordId, lua));
+    }
+
+    ScriptWindow* Workspace::ScriptFile(const std::filesystem::path& path)
+    {
+        std::error_code error;
+        for (auto& window : m_scripts)
+        {
+            if (window->Closed() || window->Path().empty())
+                continue;
+            if (window->Path() == path || std::filesystem::equivalent(window->Path(), path, error))
+                return window.get();
+        }
+        return nullptr;
+    }
+
+    ScriptWindow* Workspace::OpenScriptFile(const std::filesystem::path& path, int line)
+    {
+        ScriptWindow* window = ScriptFile(path);
+        if (!window)
+        {
+            std::ifstream file(path, std::ios::binary);
+            if (!file)
+                return nullptr;
+            std::stringstream content;
+            content << file.rdbuf();
+            m_scripts.push_back(std::make_unique<ScriptWindow>(*this, m_nextWindow++, content.str(), kNoRecord, true));
+            window = m_scripts.back().get();
+            window->SetFile(path);
+        }
+        window->Focus();
+        window->GotoLine(line);
+        return window;
     }
 
     std::uint32_t Workspace::ScriptEditorDock(const ScriptWindow& opening)

@@ -920,7 +920,7 @@ namespace Manifold::Lua
                         continue;
                     }
                     const std::string key = lua_tostring(State, -2);
-                    if (key == "name" || key == "kind" || key == "children" || key == "form" || (node.Kind == UiKind::Window && (key == "key" || key == "fragment")))
+                    if (key == "name" || key == "kind" || key == "children" || key == "form" || (node.Kind == UiKind::Window && (key == "key" || key == "fragment" || key == "script")))
                     {
                         lua_pop(State, 1);
                         continue;
@@ -1060,6 +1060,10 @@ namespace Manifold::Lua
                 lua_getfield(State, table, "key");
                 if (lua_type(State, -1) == LUA_TSTRING)
                     Form.Key = lua_tostring(State, -1);
+                lua_pop(State, 1);
+                lua_getfield(State, table, "script");
+                if (lua_type(State, -1) == LUA_TSTRING)
+                    Form.Script = lua_tostring(State, -1);
                 lua_pop(State, 1);
                 FormMeta meta;
                 if (!ReadMeta(table, window, meta))
@@ -1519,21 +1523,36 @@ namespace Manifold::Lua
     {
         FormMerge merge;
         merge.Text = std::string(script);
-        static const std::regex kDefined(R"(handlers\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\]))");
-        static const std::regex kAnchor(R"((^|\n)[^\n]*\bform\s*\.\s*(load|build)\s*\()");
+        static const std::regex kDefined(R"(handlers\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\])|function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\()");
+        static const std::regex kFormAnchor(R"((^|\n)[^\n]*\bform\s*\.\s*(load|build)\s*\()");
+        static const std::regex kWindowAnchor(R"((^|\n)[^\n]*\bwindow\s*\.\s*create\s*\()");
         std::set<std::string> defined;
         for (auto it = std::sregex_iterator(merge.Text.begin(), merge.Text.end(), kDefined); it != std::sregex_iterator(); ++it)
-            defined.insert((*it)[1].matched ? (*it)[1].str() : (*it)[2].str());
+        {
+            for (int group = 1; group <= 3; ++group)
+            {
+                if ((*it)[group].matched)
+                    defined.insert((*it)[group].str());
+            }
+        }
+        // ∑ A script that loads the form gets handlers.X stubs (the handlers
+        // table it passes to form.load); a standalone script that builds the
+        // window itself gets local functions above window.create.
         std::smatch anchor;
-        if (!std::regex_search(merge.Text, anchor, kAnchor))
-            return merge;
+        bool table = true;
+        if (!std::regex_search(merge.Text, anchor, kFormAnchor))
+        {
+            if (!std::regex_search(merge.Text, anchor, kWindowAnchor))
+                return merge;
+            table = false;
+        }
         merge.Anchored = true;
         std::string stubs;
         for (const auto& [name, params] : FormHandlerList(form))
         {
             if (defined.count(name))
                 continue;
-            stubs += "function handlers." + name + "(" + params + ")\nend\n\n";
+            stubs += (table ? "function handlers." : "local function ") + name + "(" + params + ")\nend\n\n";
             merge.Added.push_back(name);
         }
         if (stubs.empty())
@@ -1541,6 +1560,20 @@ namespace Manifold::Lua
         const std::size_t at = static_cast<std::size_t>(anchor.position(0)) + static_cast<std::size_t>(anchor.length(1));
         merge.Text.insert(at, stubs);
         return merge;
+    }
+
+    int FormFunctionLine(std::string_view script, std::string_view name)
+    {
+        if (!FormIsIdentifier(name))
+            return 0;
+        const std::string word(name);
+        const std::regex pattern("(^|\\n)[^\\n]*(function\\s+(handlers\\s*\\.\\s*)?" + word + "\\s*\\(|handlers\\s*(\\.\\s*" + word + "|\\[\\s*[\"']" + word + "[\"']\\s*\\])\\s*=\\s*function)");
+        const std::string text(script);
+        std::smatch found;
+        if (!std::regex_search(text, found, pattern))
+            return 0;
+        const std::size_t at = static_cast<std::size_t>(found.position(0)) + static_cast<std::size_t>(found.length(1));
+        return 1 + static_cast<int>(std::count(text.begin(), text.begin() + static_cast<std::ptrdiff_t>(at), '\n'));
     }
 
     int FormIndexOf(const FormDocument& form, int node)
@@ -1969,6 +2002,8 @@ namespace Manifold::Lua
             }
             if (!form.Key.empty())
                 writer.Line(1, "key = " + Quote(form.Key) + ",");
+            if (!form.Script.empty())
+                writer.Line(1, "script = " + Quote(form.Script) + ",");
             if (const FormMeta* meta = MetaOf(form, form.Window))
             {
                 for (const FormHandler& handler : kWindowHandlers)

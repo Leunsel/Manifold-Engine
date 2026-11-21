@@ -288,8 +288,27 @@ namespace Manifold::UI
             std::stringstream content;
             content << file.rdbuf();
             m_text = content.str();
-            m_path = *path;
+            SetFile(*path);
         }
+    }
+
+    void ScriptWindow::SetFile(const std::filesystem::path& path)
+    {
+        m_path = path;
+        m_fileText = m_text;
+        m_title = std::string(m_lua ? ICON_FA_MOON "  " : ICON_FA_CODE "  ") + WideToUtf8(path.filename().wstring()) + m_windowId;
+    }
+
+    void ScriptWindow::ReplaceText(std::string text)
+    {
+        m_text = std::move(text);
+    }
+
+    void ScriptWindow::GotoLine(int line)
+    {
+        if (line > 0)
+            m_editor.GotoLine = line;
+        m_bringToFront = true;
     }
 
     void ScriptWindow::SaveFile(bool askName)
@@ -308,7 +327,7 @@ namespace Manifold::UI
         m_resultOk = static_cast<bool>(file);
         m_result = file ? "Saved to " + WideToUtf8(path->filename().wstring()) + "." : "Could not write " + WideToUtf8(path->wstring()) + ".";
         if (file)
-            m_path = *path;
+            SetFile(*path);
     }
 
     void ScriptWindow::AssignToTable()

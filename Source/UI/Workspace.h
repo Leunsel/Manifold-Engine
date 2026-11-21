@@ -123,6 +123,8 @@ namespace Manifold::UI
         void OpenStaticPointers();
         void OpenPointerScan(std::uint64_t address = 0);
         void OpenScript(std::string script, int recordId = kNoRecord, bool lua = false);
+        ScriptWindow* ScriptFile(const std::filesystem::path& path);
+        ScriptWindow* OpenScriptFile(const std::filesystem::path& path, int line = 0);
         std::uint32_t ScriptEditorDock(const ScriptWindow& opening);
         void OpenLua();
         void OpenLog();

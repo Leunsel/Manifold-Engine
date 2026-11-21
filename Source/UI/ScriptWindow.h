@@ -22,6 +22,12 @@ namespace Manifold::UI
         void Focus() { m_bringToFront = true; }
         const std::string& WindowId() const { return m_windowId; }
         bool Placed() const { return m_placed; }
+        const std::filesystem::path& Path() const { return m_path; }
+        const std::string& Text() const { return m_text; }
+        bool FileChanged() const { return m_text != m_fileText; }
+        void SetFile(const std::filesystem::path& path);
+        void ReplaceText(std::string text);
+        void GotoLine(int line);
 
     private:
         bool EscapeCloses() const override { return false; }
@@ -44,6 +50,7 @@ namespace Manifold::UI
         int m_dockTries = 0;
         std::string m_text;
         std::string m_saved;
+        std::string m_fileText;
         std::filesystem::path m_path;
         int m_recordId = 0;
         bool m_lua = false;

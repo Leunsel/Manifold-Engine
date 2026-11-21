@@ -2652,7 +2652,7 @@ local function formHeader(path, spec, handlers)
   end
   local options = {}
   for key, value in pairs(spec) do
-    if key ~= "form" and key ~= "title" and key ~= "children" then
+    if key ~= "form" and key ~= "title" and key ~= "children" and key ~= "script" and key ~= "fragment" then
       if not WINDOW_KEYS[key] then
         misuse(("%s: form.%s is not a window option (known options: %s)"):format(path, tostring(key), table.concat(sortedNames(WINDOW_KEYS), ", ")))
       end

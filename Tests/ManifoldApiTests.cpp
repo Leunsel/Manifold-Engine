@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -1707,6 +1708,48 @@ return M
             CHECK(engine.Lua().Run("", "form options").Ok());
         }
 
+        void UiFormLinks(Engine& engine)
+        {
+            Lua::FormDocument form = SampleForm();
+            form.Script = "Player.lua";
+            const std::string saved = Lua::FormSave(form);
+            CHECK(saved.find("script = \"Player.lua\"") != std::string::npos);
+            Lua::FormDocument loaded;
+            std::string error;
+            std::vector<std::string> notes;
+            CHECK_MSG(Lua::FormLoad(saved, loaded, error, &notes) && notes.empty() && loaded.Script == "Player.lua", error);
+            LuaCheck(engine, "form script key", R"LUA(
+                local made = manifold.ui.form.build({ form = 1, title = "Linked", script = "Linked.lua", children = { { kind = "text", text = "x" } } })
+                made.remove()
+                return "ok")LUA");
+
+            const std::string standalone = Lua::FormScript(form, Lua::FormScriptStyle::Standalone);
+            const std::string stub = "local function itemMenu(choice, text, row, widget)\nend\n\n";
+            std::string trimmed = standalone;
+            CHECK(trimmed.find(stub) != std::string::npos);
+            trimmed.erase(trimmed.find(stub), stub.size());
+            CHECK_EQ(Lua::FormFunctionLine(trimmed, "itemMenu"), 0);
+            const Lua::FormMerge merged = Lua::FormMergeScript(trimmed, form);
+            CHECK(merged.Anchored && merged.Added == std::vector<std::string>({ "itemMenu" }));
+            CHECK(merged.Text.find(stub + "window = ui.window.create(") != std::string::npos);
+            const int line = Lua::FormFunctionLine(merged.Text, "itemMenu");
+            CHECK(line > 0);
+            if (line > 0)
+            {
+                std::size_t at = 0;
+                for (int i = 1; i < line && at != std::string::npos; ++i)
+                    at = merged.Text.find('\n', at) + 1;
+                CHECK(merged.Text.compare(at, std::strlen("local function itemMenu("), "local function itemMenu(") == 0);
+            }
+            const std::string withFile = Lua::FormScript(form, Lua::FormScriptStyle::FormFile, "Player.form.lua");
+            CHECK(Lua::FormFunctionLine(withFile, "saveClicked") > 0);
+            CHECK_EQ(Lua::FormFunctionLine("handlers[\"godChanged\"] = function(value) end", "godChanged"), 1);
+            CHECK_EQ(Lua::FormFunctionLine("-- nothing\nlocal x = 1\n", "godChanged"), 0);
+            CHECK_EQ(Lua::FormFunctionLine("function handlers.saveClickedTwice() end", "saveClicked"), 0);
+            CHECK(engine.Lua().Run(merged.Text, "form link").Ok());
+            CHECK(engine.Lua().Run("", "form link").Ok());
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -1852,6 +1895,7 @@ return M
         UiFormImport(engine);
         UiFormReload(engine);
         UiWindowOptions(engine);
+        UiFormLinks(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

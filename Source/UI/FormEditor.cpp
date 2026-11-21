@@ -9,6 +9,7 @@
 #include "Lua/LuaEngine.h"
 #include "Lua/UiFormImport.h"
 #include "UI/Fonts.h"
+#include "UI/ScriptWindow.h"
 #include "UI/Shortcuts.h"
 #include "UI/Theme.h"
 #include "UI/UiScale.h"
@@ -220,15 +221,20 @@ namespace Manifold::UI
             draw->PopClipRect();
         }
 
-        void Tag(ImDrawList* draw, ImVec2 min, float top, const std::string& text, ImU32 background, ImU32 foreground, float right = 0.0f)
+        // ∑ Tags are drawn over the whole preview area, not clipped to the
+        // previewed window, so a widget at the window's edge still shows its
+        // full tag; one that would leave the area is moved back into it.
+        void Tag(ImDrawList* draw, ImVec2 min, ImVec2 areaMin, ImVec2 areaMax, const std::string& text, ImU32 background, ImU32 foreground, float right = 0.0f)
         {
             const ImVec2 size = ImGui::CalcTextSize(text.c_str());
             const ImVec2 padding(Px(5.0f), Px(1.0f));
+            const float width = size.x + padding.x * 2.0f;
             const float height = size.y + padding.y * 2.0f;
-            ImVec2 at(right > 0.0f ? std::max(min.x, right - size.x - padding.x * 2.0f) : min.x, min.y - height - Px(2.0f));
-            if (at.y < top)
+            ImVec2 at(right > 0.0f ? std::max(min.x, right - width) : min.x, min.y - height - Px(2.0f));
+            if (at.y < areaMin.y)
                 at.y = min.y + Px(2.0f);
-            draw->AddRectFilled(at, ImVec2(at.x + size.x + padding.x * 2.0f, at.y + height), background, Px(3.0f));
+            at.x = std::max(areaMin.x + Px(2.0f), std::min(at.x, areaMax.x - width - Px(2.0f)));
+            draw->AddRectFilled(at, ImVec2(at.x + width, at.y + height), background, Px(3.0f));
             draw->AddText(ImVec2(at.x + padding.x, at.y + padding.y), foreground, text.c_str());
         }
 
@@ -732,9 +738,17 @@ namespace Manifold::UI
         if (m_path.empty())
             std::filesystem::create_directories(Paths::AutorunFolder(), ignored);
         const std::filesystem::path folder = m_path.empty() ? Paths::AutorunFolder() : m_path.parent_path();
-        const auto chosen = m_workspace.SaveFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" } }, WideToUtf8((folder / Utf8ToWide(ScriptFileName())).wstring()), L"lua");
+        const std::filesystem::path linked = LinkedScript();
+        const auto chosen = m_workspace.SaveFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" } },
+            WideToUtf8((linked.empty() ? folder / Utf8ToWide(ScriptFileName()) : linked).wstring()), L"lua");
         if (!chosen)
             return;
+        if (LinkedScript() != std::filesystem::path(*chosen).lexically_normal())
+        {
+            SetLink(*chosen);
+            if (withFile && !Save(false))
+                return;
+        }
         std::string existing;
         if (withFile && std::filesystem::exists(*chosen) && ReadFile(*chosen, existing))
         {
@@ -838,6 +852,21 @@ namespace Manifold::UI
             if (ImGui::MenuItem(ICON_FA_SHAPES "  Save as Template..."))
                 SaveAsTemplate();
             ImGui::Separator();
+            {
+                const std::filesystem::path script = LinkedScript();
+                if (ImGui::MenuItem(ICON_FA_LINK "  Link Script..."))
+                    LinkScript();
+                ItemTooltip("Links the form to the Lua script that holds its handlers, so the handler buttons open their functions there.");
+                if (ImGui::MenuItem(ICON_FA_FILE_CODE "  Open Linked Script", nullptr, false, !script.empty()))
+                    OpenLinked();
+                if (ImGui::MenuItem(ICON_FA_UNLINK "  Unlink Script", nullptr, false, !script.empty()))
+                {
+                    Remember();
+                    m_form.Script.clear();
+                    Changed();
+                }
+                ImGui::Separator();
+            }
             if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Import Cheat Engine Form..."))
                 ImportFile();
             ItemTooltip("Reads a form from a .FRM file or a cheat table (.CT) and turns it into a manifold.ui form.");
@@ -1186,6 +1215,17 @@ namespace Manifold::UI
         if (ImGui::Button(ICON_FA_PLAY "  Run Script"))
             RunScript();
         ItemTooltip("Runs the script in Manifold's Lua engine, so the real window opens. Running it again replaces that window.");
+        if (const std::filesystem::path script = LinkedScript(); !script.empty())
+        {
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            std::error_code ignored;
+            const bool exists = std::filesystem::exists(script, ignored);
+            const std::string label = std::string(ICON_FA_FILE_CODE "  ") + WideToUtf8(script.filename().wstring()) + (exists ? "" : "  (missing)") + "##linked";
+            if (ImGui::TextLink(label.c_str()) && exists)
+                OpenLinked();
+            ItemTooltip(("Linked script: " + WideToUtf8(script.wstring()) + "\nClick to open it.").c_str());
+        }
         if (!m_path.empty())
         {
             if (const int live = m_engine.Lua().Ui().Watching(WideToUtf8(m_path.wstring())); live > 0)
@@ -1621,6 +1661,15 @@ namespace Manifold::UI
         const ImGuiPayload* payload = ImGui::GetDragDropPayload();
         const bool dragging = payload && (payload->IsDataType(kKindPayload) || payload->IsDataType(kNodePayload));
         const ImU32 onAccent = ImGui::GetColorU32(ManifoldTheme::Page);
+        const ImRect area = ImGui::GetCurrentWindow()->InnerClipRect;
+        struct PendingTag
+        {
+            ImVec2 Min;
+            std::string Text;
+            ImU32 Background;
+            float Right;
+        };
+        std::vector<PendingTag> tags;
         if (!dragging)
         {
             if (m_hovered && m_hovered != m_selected)
@@ -1628,14 +1677,14 @@ namespace Manifold::UI
                 if (const UiDesign::Rect* rect = RectOf(m_hovered))
                 {
                     DashedRect(draw, ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), ImVec2(rect->Max.x + 2.0f, rect->Max.y + 2.0f), soft, Px(1.5f), Px(5.0f), Px(3.0f));
-                    Tag(draw, ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), min.y, label(m_hovered), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.55f)), onAccent, rect->Max.x + 2.0f);
+                    tags.push_back({ ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), label(m_hovered), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.55f)), rect->Max.x + 2.0f });
                 }
             }
             if (m_selected != m_form.Window)
             {
                 outline(m_selected, accent, Px(2.0f));
                 if (const UiDesign::Rect* rect = RectOf(m_selected))
-                    Tag(draw, ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), min.y, label(m_selected), accent, onAccent);
+                    tags.push_back({ ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), label(m_selected), accent, 0.0f });
             }
         }
         else if (ImGui::IsMouseHoveringRect(min, max))
@@ -1663,6 +1712,10 @@ namespace Manifold::UI
                 ImGui::EndDragDropTarget();
             }
         }
+        draw->PopClipRect();
+        draw->PushClipRect(area.Min, area.Max, true);
+        for (const PendingTag& tag : tags)
+            Tag(draw, tag.Min, area.Min, area.Max, tag.Text, tag.Background, onAccent, tag.Right);
         draw->PopClipRect();
     }
 
@@ -1947,7 +2000,7 @@ namespace Manifold::UI
         ItemTooltip((std::string(handler.Help) + "\nThe function gets (" + std::string(handler.Params) + ").").c_str());
         ImGui::TableSetColumnIndex(1);
         const float button = ImGui::GetFrameHeight();
-        ImGui::SetNextItemWidth(-(button + ImGui::GetStyle().ItemInnerSpacing.x));
+        ImGui::SetNextItemWidth(-(button * 2.0f + ImGui::GetStyle().ItemInnerSpacing.x * 2.0f));
         const std::string key(handler.Key);
         std::string value;
         if (const auto meta = m_form.Meta.find(node.Id); meta != m_form.Meta.end())
@@ -1957,6 +2010,7 @@ namespace Manifold::UI
         }
         const std::string before = value;
         bool edited = InputTextWithHint("##fn", "function name", value, ImGuiInputTextFlags_CharsNoBlank);
+        const bool doubleClicked = ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
         if (IconButton(ICON_FA_MAGIC, "Name the handler after the widget", false, button))
         {
@@ -1966,6 +2020,11 @@ namespace Manifold::UI
             value = base + key.substr(2);
             edited = true;
         }
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+        const std::filesystem::path script = LinkedScript();
+        const std::string goTip = script.empty() ? std::string("Write the function: the editor asks where the script goes, links it to the form and opens it there")
+                                                 : "Open the function in " + WideToUtf8(script.filename().wstring()) + "; a missing one is added first (also on a double click on the name)";
+        const bool open = IconButton(ICON_FA_EXTERNAL_LINK_ALT, goTip.c_str(), false, button);
         if (edited && value != before)
         {
             Remember(ImGui::GetID("##fn"));
@@ -1975,6 +2034,8 @@ namespace Manifold::UI
                 m_form.Meta[node.Id].Handlers[key] = value;
             Changed();
         }
+        if (open || doubleClicked)
+            OpenHandler(node, handler);
         ImGui::PopID();
     }
 
@@ -2393,6 +2454,118 @@ namespace Manifold::UI
             return;
         }
         m_engine.Notify(LogLevel::Success, "Saved the template " + FormStem(path) + "; File > New from Template lists it.");
+    }
+
+    std::filesystem::path FormEditorWindow::LinkedScript() const
+    {
+        if (m_form.Script.empty())
+            return {};
+        std::filesystem::path script(Utf8ToWide(m_form.Script));
+        if (script.is_relative())
+            script = (m_path.empty() ? Paths::ProgramFolder() : m_path.parent_path()) / script;
+        return script.lexically_normal();
+    }
+
+    void FormEditorWindow::SetLink(const std::filesystem::path& script)
+    {
+        std::string stored = WideToUtf8(script.wstring());
+        if (!m_path.empty())
+        {
+            std::error_code error;
+            const std::filesystem::path relative = std::filesystem::relative(script, m_path.parent_path(), error);
+            if (!error && !relative.empty() && relative.wstring().rfind(L"..", 0) != 0)
+                stored = WideToUtf8(relative.generic_wstring());
+        }
+        if (stored == m_form.Script)
+            return;
+        Remember();
+        m_form.Script = stored;
+        Changed();
+    }
+
+    void FormEditorWindow::LinkScript()
+    {
+        const std::filesystem::path folder = m_path.empty() ? Paths::AutorunFolder() : m_path.parent_path();
+        if (const auto chosen = m_workspace.OpenFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" }, { L"All files", L"*.*" } }, folder))
+            SetLink(*chosen);
+    }
+
+    void FormEditorWindow::OpenLinked(int line)
+    {
+        const std::filesystem::path script = LinkedScript();
+        if (script.empty())
+            return;
+        if (!m_workspace.OpenScriptFile(script, line))
+            m_engine.Notify(LogLevel::Error, "Could not open " + WideToUtf8(script.wstring()));
+    }
+
+    void FormEditorWindow::OpenHandler(UiNode& node, const Lua::FormHandler& handler)
+    {
+        const std::string key(handler.Key);
+        std::string name;
+        if (const auto meta = m_form.Meta.find(node.Id); meta != m_form.Meta.end())
+        {
+            if (const auto found = meta->second.Handlers.find(key); found != meta->second.Handlers.end())
+                name = found->second;
+        }
+        if (name.empty())
+        {
+            std::string base = m_form.Meta.count(node.Id) ? m_form.Meta[node.Id].Name : std::string();
+            if (base.empty())
+                base = node.Kind == UiKind::Window ? std::string("window") : std::string(Lua::UiKindName(node.Kind));
+            name = base + key.substr(2);
+            Remember();
+            m_form.Meta[node.Id].Handlers[key] = name;
+            Changed();
+        }
+        if (!Lua::FormIsIdentifier(name))
+        {
+            m_engine.Notify(LogLevel::Warning, name + " is no Lua function name.");
+            return;
+        }
+        std::filesystem::path script = LinkedScript();
+        std::error_code ignored;
+        if (script.empty() || !std::filesystem::exists(script, ignored))
+        {
+            Export();
+            script = LinkedScript();
+            if (script.empty() || !std::filesystem::exists(script, ignored))
+                return;
+        }
+        ScriptWindow* window = m_workspace.ScriptFile(script);
+        std::string text;
+        if (window)
+            text = window->Text();
+        else if (!ReadFile(script, text))
+        {
+            m_engine.Notify(LogLevel::Error, "Could not read " + WideToUtf8(script.wstring()));
+            return;
+        }
+        int line = Lua::FormFunctionLine(text, name);
+        if (line == 0)
+        {
+            const Lua::FormMerge merge = Lua::FormMergeScript(text, m_form);
+            if (!merge.Anchored)
+            {
+                m_engine.Notify(LogLevel::Warning, WideToUtf8(script.filename().wstring()) + " neither loads the form nor creates its window, so " + name + " was not added; write it yourself.");
+                OpenLinked();
+                return;
+            }
+            if (window)
+                window->ReplaceText(merge.Text);
+            else if (!WriteFile(script, merge.Text))
+            {
+                m_engine.Notify(LogLevel::Error, "Could not write " + WideToUtf8(script.wstring()));
+                return;
+            }
+            std::string names;
+            for (const std::string& added : merge.Added)
+                names += (names.empty() ? "" : ", ") + added;
+            if (!names.empty())
+                m_engine.Notify(LogLevel::Success, "Added " + names + " to " + WideToUtf8(script.filename().wstring()) + (window ? " (not saved yet)." : "."));
+            line = Lua::FormFunctionLine(merge.Text, name);
+        }
+        OpenLinked(line);
     }
 
     void FormEditorWindow::ImportFile()

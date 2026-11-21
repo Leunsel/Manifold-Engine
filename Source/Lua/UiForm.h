@@ -55,6 +55,7 @@ namespace Manifold::Lua
         std::string Key;
         std::map<int, FormMeta> Meta;
         bool Fragment = false;
+        std::string Script;
     };
 
     struct FormTemplate
@@ -104,6 +105,7 @@ namespace Manifold::Lua
     std::span<const FormTemplate> FormTemplates();
     std::vector<std::pair<std::string, std::string>> FormHandlerList(const FormDocument& form);
     FormMerge FormMergeScript(std::string_view script, const FormDocument& form);
+    int FormFunctionLine(std::string_view script, std::string_view name);
     int FormIndexOf(const FormDocument& form, int node);
     std::string FormUniqueName(const FormDocument& form, std::string_view base, int except = 0);
     bool FormIsIdentifier(std::string_view name);

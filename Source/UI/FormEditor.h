@@ -84,6 +84,11 @@ namespace Manifold::UI
         void SnippetMenu();
         void SaveAsTemplate();
         std::filesystem::path TemplateFolder() const;
+        std::filesystem::path LinkedScript() const;
+        void SetLink(const std::filesystem::path& script);
+        void LinkScript();
+        void OpenLinked(int line = 0);
+        void OpenHandler(Lua::UiNode& node, const Lua::FormHandler& handler);
         void ImportFile();
         void ImportTable();
         void ImportChoices(std::vector<Table::CeFormEntry> entries, std::string source);

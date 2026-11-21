@@ -7875,7 +7875,7 @@ local function formHeader(path, spec, handlers)
   end
   local options = {}
   for key, value in pairs(spec) do
-    if key ~= "form" and key ~= "title" and key ~= "children" then
+    if key ~= "form" and key ~= "title" and key ~= "children" and key ~= "script" and key ~= "fragment" then
       if not WINDOW_KEYS[key] then
         misuse(("%s: form.%s is not a window option (known options: %s)"):format(path, tostring(key), table.concat(sortedNames(WINDOW_KEYS), ", ")))
       end
@@ -7935,9 +7935,9 @@ local function checkForm(path, spec, handlers)
     end
     for index, child in ipairs(list) do
       local copy, label = formWidget(path, child, ("%s.children[%d]"):format(where, index), resolve)
-      local keys = WIDGET_KEYS[child.kind]
 )MLUA"),
-            std::string_view(R"MLUA(      if not keys then
+            std::string_view(R"MLUA(      local keys = WIDGET_KEYS[child.kind]
+      if not keys then
         misuse(('%s: %s: kind must be one of "%s", got %q'):format(path, label, table.concat(WIDGET_KINDS, '", "'), child.kind))
       end
       if parentKind ~= "window" and not CONTAINERS[parentKind] then
@@ -8222,9 +8222,9 @@ local function flatFilters(path, filters)
     return nil
   end
   local flat = {}
-  for index, pair in ipairs(filters) do
 )MLUA"),
-            std::string_view(R"MLUA(    if type(pair) ~= "table" or type(pair[1]) ~= "string" or type(pair[2]) ~= "string" then
+            std::string_view(R"MLUA(  for index, pair in ipairs(filters) do
+    if type(pair) ~= "table" or type(pair[1]) ~= "string" or type(pair[2]) ~= "string" then
       misuse(("%s: filter %d must be { description, pattern }"):format(path, index))
     end
     flat[#flat + 1] = pair[1]
@@ -8488,10 +8488,10 @@ end)
 
 local theme = subarea(ui, "theme", "The names `manifold.ui` takes for colours and icons.")
 
-define(theme, "colors", {
-  returns = "table",
 )MLUA"),
-            std::string_view(R"MLUA(  doc = "The theme colour names, which follow the theme and light or dark mode.",
+            std::string_view(R"MLUA(define(theme, "colors", {
+  returns = "table",
+  doc = "The theme colour names, which follow the theme and light or dark mode.",
 }, function()
   return table.move(UI_COLORS, 1, #UI_COLORS, 1, {})
 end)
