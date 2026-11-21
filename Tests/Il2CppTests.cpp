@@ -690,6 +690,11 @@ namespace Manifold::Tests
         }
         const std::vector<std::string> names = bridge.MethodsOf("Player");
         CHECK(names.size() == 4 && names[0] == "TakeDamage" && names[1] == "Heal" && names[3] == "get_Health");
+        const std::vector<Target::MonoField> inherited = bridge.InstanceFieldsOf("Game.Player");
+        CHECK_EQ(inherited.size(), 4u);
+        CHECK(inherited.size() == 4 && inherited[0].Name == "health" && inherited[3].Name == "id" && inherited[3].Offset == 0x10);
+        CHECK_EQ(bridge.InstanceFieldsOf("Game.Actor").size(), 1u);
+        CHECK(bridge.InstanceFieldsOf("Nope").empty());
         CHECK(bridge.FieldOffset("Player", "ammo") == 0x1C);
         CHECK(bridge.FieldOffset("Game.Player", "speed") == 0x20);
         CHECK(!bridge.FieldOffset("Player", "s_count").has_value());

@@ -130,6 +130,7 @@ namespace Manifold::Target
         std::vector<MonoField> FieldsOf(std::string_view className);
         std::vector<MonoField> TypedFieldsOf(std::string_view className);
         std::vector<MonoField> TypedFieldsOf(std::uint64_t klass);
+        std::vector<MonoField> InstanceFieldsOf(std::string_view className);
         // One class with its members loaded: methods with handles (and for
         // IL2CPP their code addresses and parameter counts), fields, parent.
         std::optional<MonoClass> ClassDetails(std::string_view className);
@@ -203,6 +204,7 @@ namespace Manifold::Target
         Status Enumerate(WorkProgress* progress, bool starting);
         void EnsureMembers(int classIndex);
         std::vector<MonoField> TypedFields(int classIndex);
+        int ParentIndex(int classIndex);
         void DescribeValueType(const std::string& prefix, std::uint64_t klass, MonoField& field);
         std::optional<std::string> ResolveHead(std::uint64_t header, bool allowRuntimeFallback);
 

@@ -639,7 +639,7 @@ namespace Manifold::UI
                 Table::ManagedLayouts nested;
                 if (const auto className = engine.Mono().ClassNameAt(address))
                 {
-                    fields = engine.Mono().TypedFieldsOf(*className);
+                    fields = engine.Mono().InstanceFieldsOf(*className);
                     Table::CollectManagedLayouts(engine.Mono(), fields, nested);
                 }
                 return [&engine, definition, fields, nested, scripts, finish]()

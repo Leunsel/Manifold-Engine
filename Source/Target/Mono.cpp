@@ -347,6 +347,43 @@ namespace Manifold::Target
         return TypedFields(found == m_handleIndex.end() ? -1 : found->second);
     }
 
+    std::vector<MonoField> MonoBridge::InstanceFieldsOf(std::string_view className)
+    {
+        std::lock_guard lock(m_lock);
+        std::vector<MonoField> all;
+        int index = FindClass(className);
+        for (int depth = 0; index >= 0 && depth < 48; ++depth)
+        {
+            const std::vector<MonoField> own = TypedFields(index);
+            all.insert(all.end(), own.begin(), own.end());
+            index = ParentIndex(index);
+        }
+        return all;
+    }
+
+    int MonoBridge::ParentIndex(int classIndex)
+    {
+        if (classIndex < 0 || classIndex >= static_cast<int>(m_classes.size()) || m_classes[static_cast<std::size_t>(classIndex)].Discovered)
+            return -1;
+        const std::string prefix = IsIl2Cpp() ? "il2cpp_" : "mono_";
+        const std::uint64_t parent = CallFn((prefix + "class_get_parent").c_str(), m_classes[static_cast<std::size_t>(classIndex)].Handle).value_or(0);
+        if (!parent)
+            return -1;
+        if (const auto known = m_handleIndex.find(parent); known != m_handleIndex.end())
+            return known->second;
+        MonoClass info;
+        info.Handle = parent;
+        info.Name = CallString((prefix + "class_get_name").c_str(), parent);
+        info.Namespace = CallString((prefix + "class_get_namespace").c_str(), parent);
+        if (info.Name.empty())
+            return -1;
+        const int index = static_cast<int>(m_classes.size());
+        m_classIndex.emplace(info.FullName(), index);
+        m_handleIndex.emplace(parent, index);
+        m_classes.push_back(std::move(info));
+        return index;
+    }
+
     std::vector<MonoField> MonoBridge::TypedFields(int classIndex)
     {
         if (classIndex < 0 || classIndex >= static_cast<int>(m_classes.size()) || !m_backend)
