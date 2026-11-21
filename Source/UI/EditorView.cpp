@@ -283,7 +283,10 @@ namespace Manifold::UI
 
         void BarToggle(const char* label, const char* tooltip, bool& value, float side, bool& changed)
         {
-            if (value)
+            // The pop must follow the push of this frame, not the value the
+            // click just flipped, or ImGui reports a style stack mismatch.
+            const bool lit = value;
+            if (lit)
             {
                 ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.30f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.42f));
@@ -296,7 +299,7 @@ namespace Manifold::UI
                 changed = true;
             }
             ImGui::PopStyleVar();
-            if (value)
+            if (lit)
                 ImGui::PopStyleColor(3);
             ItemTooltip(tooltip);
         }
