@@ -151,15 +151,28 @@ namespace Manifold::UI
             selected = &modules.front();
             m_selected = selected->Key;
         }
-        const float detail = std::clamp(ImGui::GetContentRegionAvail().y * 0.42f, Px(150.0f), Px(300.0f));
+        const float gap = Px(6.0f);
+        const float minTable = Px(90.0f);
+        const float minDetails = Px(110.0f);
+        const float available = ImGui::GetContentRegionAvail().y;
+        if (m_detailHeight <= 0.0f)
+            m_detailHeight = std::clamp(available * 0.42f, Px(150.0f), Px(300.0f));
+        m_detailHeight = std::clamp(m_detailHeight, minDetails, std::max(minDetails, available - minTable - gap));
+        float top = available - m_detailHeight - gap;
+        float bottom = m_detailHeight;
+        const ImVec2 start = ImGui::GetCursorPos();
         if (BeginDataTable("##modules", { { "", 1.0f, 44.0f }, { "Name", 2.2f }, { "Category", 1.0f }, { "Version", 1.0f, 70.0f }, { "Origin", 1.0f, 104.0f }, { "State", 1.6f }, { "Load", 1.0f, 64.0f } },
-                ImVec2(0.0f, ImGui::GetContentRegionAvail().y - detail - ImGui::GetStyle().ItemSpacing.y)))
+                ImVec2(0.0f, top)))
         {
             for (const Module& module : modules)
                 Row(module);
             ImGui::EndTable();
         }
-        ImGui::BeginChild("##moduledetail", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+        ImGui::SetCursorPos(ImVec2(start.x, start.y + top));
+        if (Splitter("##modulesplit", false, gap, &top, &bottom, minTable, minDetails))
+            m_detailHeight = bottom;
+        ImGui::SetCursorPos(ImVec2(start.x, start.y + top + gap));
+        ImGui::BeginChild("##moduledetail", ImVec2(0.0f, m_detailHeight), ImGuiChildFlags_Borders);
         selected = Autorun::Find(modules, m_selected);
         if (selected)
             Details(*selected);
@@ -180,8 +193,10 @@ namespace Manifold::UI
         ImGui::EndDisabled();
         ImGui::TableNextColumn();
         const bool isSelected = m_selected == module.Key && module.State != State::Superseded;
-        if (ImGui::Selectable(module.Name.c_str(), isSelected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap))
+        ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));
+        if (ImGui::Selectable(module.Name.c_str(), isSelected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap, ImVec2(0.0f, ImGui::GetFrameHeight())))
             m_selected = module.Key;
+        ImGui::PopStyleVar();
         if (ImGui::BeginPopupContextItem("##modulemenu"))
         {
             m_selected = module.Key;
@@ -197,14 +212,19 @@ namespace Manifold::UI
             ImGui::EndPopup();
         }
         ImGui::TableNextColumn();
+        ImGui::AlignTextToFramePadding();
         ImGui::TextColored(ManifoldTheme::Muted, "%s", module.Category.c_str());
         ImGui::TableNextColumn();
+        ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted(module.Header.Version.c_str());
         ImGui::TableNextColumn();
+        ImGui::AlignTextToFramePadding();
         ImGui::TextColored(ManifoldTheme::Muted, "%s", OriginText(module));
         ImGui::TableNextColumn();
+        ImGui::AlignTextToFramePadding();
         ImGui::TextColored(StateColor(module), "%s", module.HeldNext && module.State == State::Loaded ? "Loaded, held next time" : Autorun::StateText(module));
         ImGui::TableNextColumn();
+        ImGui::AlignTextToFramePadding();
         if (module.State == State::Loaded)
             ImGui::TextColored(ManifoldTheme::Muted, "%.0f ms", module.LoadMs);
         ImGui::PopID();

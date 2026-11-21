@@ -33,5 +33,6 @@ namespace Manifold::UI
         std::string m_selected;
         Action m_action = Action::None;
         std::string m_actionName;
+        float m_detailHeight = 0.0f;
     };
 }
