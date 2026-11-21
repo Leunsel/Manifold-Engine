@@ -53,6 +53,7 @@ namespace Manifold
         void (*g_destroyViewportWindow)(ImGuiViewport*) = nullptr;
         void (*g_createViewportChain)(ImGuiViewport*) = nullptr;
         void (*g_resizeViewportChain)(ImGuiViewport*, ImVec2) = nullptr;
+        void (*g_setViewportAlpha)(ImGuiViewport*, float) = nullptr;
         HICON g_viewportIcon = nullptr;
         HICON g_viewportIconSmall = nullptr;
         HWND g_mainWindow = nullptr;
@@ -309,6 +310,15 @@ namespace Manifold
         void SetViewportTitle(ImGuiViewport* viewport, const char* title)
         {
             g_setViewportTitle(viewport, PlainTitle(title).c_str());
+        }
+
+        // ∑ The backend switches WS_EX_LAYERED on and off for a window that is not fully opaque (inactive window opacity,
+        //   manifold.ui opacity). The window is drawn again right after, because an unchanged tool window is otherwise only
+        //   presented once a second and the style change can leave it showing an old frame until then.
+        void SetViewportAlpha(ImGuiViewport* viewport, float alpha)
+        {
+            g_setViewportAlpha(viewport, alpha);
+            g_toolFrames[viewport->ID].Dirty = true;
         }
 
         constexpr DWORD kWindowStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME | WS_CLIPCHILDREN;
@@ -979,6 +989,11 @@ namespace Manifold
         {
             g_destroyViewportWindow = platform.Platform_DestroyWindow;
             platform.Platform_DestroyWindow = &DestroyViewportWindow;
+        }
+        if (platform.Platform_SetWindowAlpha && platform.Platform_SetWindowAlpha != &SetViewportAlpha)
+        {
+            g_setViewportAlpha = platform.Platform_SetWindowAlpha;
+            platform.Platform_SetWindowAlpha = &SetViewportAlpha;
         }
         if (platform.Renderer_CreateWindow && platform.Renderer_CreateWindow != &CreateViewportChain)
         {

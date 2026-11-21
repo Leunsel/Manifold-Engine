@@ -515,6 +515,9 @@ namespace Manifold::UI
                 ImGui::Separator();
                 Item(ICON_FA_SCROLL "  Table Lua Script", Command::TableLuaScript);
                 Item(ICON_FA_FILE_ARCHIVE "  Table Files", Command::TableFiles);
+                if (ImGui::MenuItem(ICON_FA_COMMENTS "  Comment List"))
+                    m_workspace.OpenCommentList();
+                ItemTooltip("The comments and headers on disassembler lines, saved with the table.");
                 ImGui::Separator();
             }
             Item(ICON_FA_TOGGLE_OFF "  Deactivate All Records", Command::DeactivateAll);

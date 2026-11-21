@@ -137,6 +137,7 @@ While a memory viewer window has the focus.
 | `Shift+F5` | Conditional Breakpoint | `EditBreakpoint` | Manifold |
 | `Ctrl+T` | Break and Trace | `BreakAndTrace` | Manifold |
 | `Ctrl+Shift+T` | Thread List | `ThreadList` | Manifold |
+| `Ctrl+Alt+Shift+C` | Comment List | `CommentList` | Manifold |
 
 ## Memory Viewer: Disassembler
 

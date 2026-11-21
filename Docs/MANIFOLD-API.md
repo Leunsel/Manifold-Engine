@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 11 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 12 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -274,7 +274,7 @@ Tool windows that dock into the workspace like Manifold's own. A window holds wi
 
 | Function | Returns | |
 | --- | --- | --- |
-| `manifold.ui.window.create(title, options?)` | window | Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one. |
+| `manifold.ui.window.create(title, options?)` | window | Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `opacity` (0.1 to 1, while the window has the focus) and `inactiveOpacity` (while another window has it; default `opacity`): without them the user's window opacity settings apply, and only a floating window can be see-through, a docked one stays opaque; `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one. |
 
 ### Window objects
 
@@ -285,7 +285,7 @@ Tool windows that dock into the workspace like Manifold's own. A window holds wi
 | `window.add(kind, options?)` | widget | Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object). |
 | `window.clear()` | boolean | Removes every widget of the window. |
 | `window.remove()` | boolean | Removes the window and its widgets for good. |
-| `window.update(options)` | boolean | Changes the title, icon, update interval or handlers. |
+| `window.update(options)` | boolean | Changes the title, icon, opacity (`opacity`, `inactiveOpacity`), update interval or handlers. |
 | `window.show()` | boolean | Shows the window again after the user or `hide` closed it. |
 | `window.hide()` | boolean | Hides the window; `show` brings it back with its widgets. |
 | `window.focus()` | boolean | Shows the window and brings it to the front. |

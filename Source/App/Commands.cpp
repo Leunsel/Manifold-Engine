@@ -124,6 +124,7 @@ namespace Manifold
             { EditBreakpoint, "EditBreakpoint", Scope::MemoryViewer, "Conditional Breakpoint", Shift | ImGuiKey_F5, 0, Own },
             { BreakAndTrace, "BreakAndTrace", Scope::MemoryViewer, "Break and Trace", Ctrl | ImGuiKey_T, 0, Own },
             { ThreadList, "ThreadList", Scope::MemoryViewer, "Thread List", Ctrl | Shift | ImGuiKey_T, 0, Own },
+            { CommentList, "CommentList", Scope::MemoryViewer, "Comment List", Ctrl | Alt | Shift | ImGuiKey_C, 0, Own },
 
             { FollowInstruction, "FollowInstruction", Scope::Disassembler, "Follow Jump or Call", ImGuiKey_Space, 0, CE },
             { NavigateBack, "NavigateBack", Scope::Disassembler, "Back", ImGuiKey_Backspace, 0, CE },

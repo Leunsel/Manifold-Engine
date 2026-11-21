@@ -37,6 +37,7 @@
 #include "UI/ToolWindows.h"
 #include "UI/WatchWindow.h"
 #include "UI/WriteHistoryWindow.h"
+#include "UI/CommentListWindow.h"
 #include "UI/ModulesWindow.h"
 #include "UI/FlowGraphWindow.h"
 
@@ -165,6 +166,7 @@ namespace Manifold::UI
         drawOne("Profiler", m_profiler);
         drawOne("NOP Sled", m_nopSled);
         drawOne("Write history", m_writeHistory);
+        drawOne("Comment list", m_commentList);
         drawOne("Modules", m_modules);
         drawOne("Flow graph", m_flowGraph);
         {
@@ -666,6 +668,13 @@ namespace Manifold::UI
         if (!m_writeHistory)
             m_writeHistory = std::make_unique<WriteHistoryWindow>(*this);
         m_writeHistory->Show();
+    }
+
+    void Workspace::OpenCommentList()
+    {
+        if (!m_commentList)
+            m_commentList = std::make_unique<CommentListWindow>(*this);
+        m_commentList->Show();
     }
 
     void Workspace::OpenFlowGraph(std::uint64_t address)

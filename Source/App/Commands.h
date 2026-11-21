@@ -133,6 +133,7 @@ namespace Manifold
         EditBreakpoint,
         BreakAndTrace,
         ThreadList,
+        CommentList,
 
         FollowInstruction,
         NavigateBack,

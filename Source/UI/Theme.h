@@ -34,6 +34,7 @@
     X(CodeNumber, "Code: Numbers") \
     X(CodeString, "Code: Strings") \
     X(CodeComment, "Code: Comments") \
+    X(CodeUserComment, "Code: Your Comments") \
     X(CodeSection, "Code: Sections") \
     X(CodeLabel, "Code: Labels") \
     X(FlowJump, "Disassembler: Jumps") \
@@ -73,7 +74,7 @@ namespace ManifoldTheme
         .Warning = C(0.95f, 0.70f, 0.32f), .Error = C(0.95f, 0.42f, 0.36f), .Changed = C(0.98f, 0.38f, 0.38f),
         .AddressText = C(0.55f, 0.76f, 0.98f), .BytesText = C(0.58f, 0.60f, 0.64f),
         .CodeKeyword = C(0.80f, 0.56f, 0.98f), .CodeRegister = C(0.45f, 0.82f, 0.98f), .CodeNumber = C(0.98f, 0.78f, 0.45f),
-        .CodeString = C(0.62f, 0.88f, 0.52f), .CodeComment = C(0.45f, 0.50f, 0.55f), .CodeSection = C(0.98f, 0.55f, 0.35f),
+        .CodeString = C(0.62f, 0.88f, 0.52f), .CodeComment = C(0.45f, 0.50f, 0.55f), .CodeUserComment = C(0.98f, 0.66f, 0.84f), .CodeSection = C(0.98f, 0.55f, 0.35f),
         .CodeLabel = C(0.98f, 0.92f, 0.55f), .FlowJump = C(0.98f, 0.70f, 0.40f), .FlowCall = C(0.55f, 0.85f, 0.98f),
         .FlowReturn = C(0.95f, 0.50f, 0.50f), .Breakpoint = C(0.92f, 0.26f, 0.30f), .CurrentLine = C(0.18f, 0.86f, 0.62f, 0.22f),
         .Surface = C(0.075f, 0.080f, 0.092f), .Frame = C(0.13f, 0.14f, 0.16f), .Button = C(0.15f, 0.16f, 0.18f),
@@ -88,7 +89,7 @@ namespace ManifoldTheme
         .Warning = C(0.68f, 0.42f, 0.00f), .Error = C(0.80f, 0.20f, 0.16f), .Changed = C(0.86f, 0.16f, 0.18f),
         .AddressText = C(0.10f, 0.40f, 0.78f), .BytesText = C(0.38f, 0.40f, 0.45f),
         .CodeKeyword = C(0.55f, 0.22f, 0.80f), .CodeRegister = C(0.00f, 0.50f, 0.60f), .CodeNumber = C(0.66f, 0.42f, 0.00f),
-        .CodeString = C(0.20f, 0.52f, 0.18f), .CodeComment = C(0.50f, 0.54f, 0.58f), .CodeSection = C(0.80f, 0.33f, 0.10f),
+        .CodeString = C(0.20f, 0.52f, 0.18f), .CodeComment = C(0.50f, 0.54f, 0.58f), .CodeUserComment = C(0.72f, 0.16f, 0.50f), .CodeSection = C(0.80f, 0.33f, 0.10f),
         .CodeLabel = C(0.52f, 0.44f, 0.00f), .FlowJump = C(0.78f, 0.42f, 0.06f), .FlowCall = C(0.10f, 0.46f, 0.74f),
         .FlowReturn = C(0.78f, 0.25f, 0.28f), .Breakpoint = C(0.85f, 0.18f, 0.22f), .CurrentLine = C(0.05f, 0.56f, 0.41f, 0.16f),
         .Surface = C(0.986f, 0.988f, 0.991f), .Frame = C(0.906f, 0.914f, 0.929f), .Button = C(0.886f, 0.894f, 0.910f),
@@ -103,7 +104,7 @@ namespace ManifoldTheme
         .Warning = C(0.96f, 0.78f, 0.36f), .Error = C(1.00f, 0.47f, 0.33f), .Changed = C(1.00f, 0.56f, 0.30f),
         .AddressText = C(0.58f, 0.76f, 0.98f), .BytesText = C(0.62f, 0.58f, 0.59f),
         .CodeKeyword = C(0.82f, 0.60f, 0.98f), .CodeRegister = C(0.47f, 0.82f, 0.96f), .CodeNumber = C(0.98f, 0.80f, 0.47f),
-        .CodeString = C(0.64f, 0.87f, 0.54f), .CodeComment = C(0.53f, 0.47f, 0.49f), .CodeSection = C(0.98f, 0.62f, 0.40f),
+        .CodeString = C(0.64f, 0.87f, 0.54f), .CodeComment = C(0.53f, 0.47f, 0.49f), .CodeUserComment = C(0.48f, 0.88f, 0.80f), .CodeSection = C(0.98f, 0.62f, 0.40f),
         .CodeLabel = C(0.98f, 0.91f, 0.58f), .FlowJump = C(0.98f, 0.72f, 0.42f), .FlowCall = C(0.57f, 0.84f, 0.98f),
         .FlowReturn = C(0.98f, 0.55f, 0.50f), .Breakpoint = C(0.96f, 0.30f, 0.28f), .CurrentLine = C(0.93f, 0.42f, 0.55f, 0.20f),
         .Surface = C(0.088f, 0.073f, 0.078f), .Frame = C(0.155f, 0.128f, 0.135f), .Button = C(0.178f, 0.146f, 0.154f),
@@ -118,7 +119,7 @@ namespace ManifoldTheme
         .Warning = C(0.64f, 0.44f, 0.00f), .Error = C(0.80f, 0.24f, 0.08f), .Changed = C(0.82f, 0.36f, 0.02f),
         .AddressText = C(0.10f, 0.40f, 0.76f), .BytesText = C(0.42f, 0.38f, 0.40f),
         .CodeKeyword = C(0.55f, 0.24f, 0.78f), .CodeRegister = C(0.00f, 0.50f, 0.60f), .CodeNumber = C(0.64f, 0.42f, 0.00f),
-        .CodeString = C(0.22f, 0.50f, 0.20f), .CodeComment = C(0.56f, 0.50f, 0.52f), .CodeSection = C(0.78f, 0.33f, 0.08f),
+        .CodeString = C(0.22f, 0.50f, 0.20f), .CodeComment = C(0.56f, 0.50f, 0.52f), .CodeUserComment = C(0.02f, 0.50f, 0.46f), .CodeSection = C(0.78f, 0.33f, 0.08f),
         .CodeLabel = C(0.52f, 0.44f, 0.00f), .FlowJump = C(0.76f, 0.42f, 0.04f), .FlowCall = C(0.10f, 0.46f, 0.72f),
         .FlowReturn = C(0.80f, 0.26f, 0.24f), .Breakpoint = C(0.84f, 0.16f, 0.18f), .CurrentLine = C(0.76f, 0.20f, 0.36f, 0.13f),
         .Surface = C(0.990f, 0.982f, 0.983f), .Frame = C(0.935f, 0.905f, 0.910f), .Button = C(0.918f, 0.886f, 0.892f),
@@ -133,7 +134,7 @@ namespace ManifoldTheme
         .Warning = C(0.96f, 0.72f, 0.32f), .Error = C(0.97f, 0.43f, 0.38f), .Changed = C(0.99f, 0.40f, 0.40f),
         .AddressText = C(0.56f, 0.76f, 0.98f), .BytesText = C(0.58f, 0.63f, 0.60f),
         .CodeKeyword = C(0.80f, 0.58f, 0.98f), .CodeRegister = C(0.42f, 0.82f, 0.94f), .CodeNumber = C(0.98f, 0.78f, 0.45f),
-        .CodeString = C(0.86f, 0.84f, 0.50f), .CodeComment = C(0.45f, 0.53f, 0.48f), .CodeSection = C(0.98f, 0.57f, 0.36f),
+        .CodeString = C(0.86f, 0.84f, 0.50f), .CodeComment = C(0.45f, 0.53f, 0.48f), .CodeUserComment = C(0.98f, 0.66f, 0.84f), .CodeSection = C(0.98f, 0.57f, 0.36f),
         .CodeLabel = C(0.96f, 0.90f, 0.62f), .FlowJump = C(0.98f, 0.70f, 0.40f), .FlowCall = C(0.55f, 0.84f, 0.98f),
         .FlowReturn = C(0.95f, 0.52f, 0.50f), .Breakpoint = C(0.92f, 0.28f, 0.30f), .CurrentLine = C(0.52f, 0.82f, 0.40f, 0.20f),
         .Surface = C(0.071f, 0.086f, 0.076f), .Frame = C(0.125f, 0.150f, 0.133f), .Button = C(0.145f, 0.172f, 0.153f),
@@ -148,7 +149,7 @@ namespace ManifoldTheme
         .Warning = C(0.68f, 0.44f, 0.00f), .Error = C(0.80f, 0.20f, 0.16f), .Changed = C(0.85f, 0.16f, 0.18f),
         .AddressText = C(0.10f, 0.40f, 0.76f), .BytesText = C(0.38f, 0.43f, 0.40f),
         .CodeKeyword = C(0.55f, 0.22f, 0.78f), .CodeRegister = C(0.00f, 0.48f, 0.64f), .CodeNumber = C(0.66f, 0.42f, 0.00f),
-        .CodeString = C(0.45f, 0.45f, 0.00f), .CodeComment = C(0.48f, 0.55f, 0.50f), .CodeSection = C(0.80f, 0.33f, 0.10f),
+        .CodeString = C(0.45f, 0.45f, 0.00f), .CodeComment = C(0.48f, 0.55f, 0.50f), .CodeUserComment = C(0.72f, 0.16f, 0.50f), .CodeSection = C(0.80f, 0.33f, 0.10f),
         .CodeLabel = C(0.56f, 0.40f, 0.00f), .FlowJump = C(0.78f, 0.42f, 0.06f), .FlowCall = C(0.10f, 0.46f, 0.72f),
         .FlowReturn = C(0.78f, 0.25f, 0.28f), .Breakpoint = C(0.85f, 0.18f, 0.22f), .CurrentLine = C(0.20f, 0.52f, 0.20f, 0.14f),
         .Surface = C(0.984f, 0.990f, 0.985f), .Frame = C(0.900f, 0.925f, 0.906f), .Button = C(0.880f, 0.906f, 0.886f),
@@ -163,7 +164,7 @@ namespace ManifoldTheme
         .Warning = C(0.96f, 0.72f, 0.34f), .Error = C(0.96f, 0.44f, 0.40f), .Changed = C(0.99f, 0.42f, 0.42f),
         .AddressText = C(0.52f, 0.82f, 0.96f), .BytesText = C(0.58f, 0.62f, 0.70f),
         .CodeKeyword = C(0.78f, 0.58f, 0.98f), .CodeRegister = C(0.40f, 0.86f, 0.80f), .CodeNumber = C(0.98f, 0.78f, 0.47f),
-        .CodeString = C(0.62f, 0.88f, 0.54f), .CodeComment = C(0.45f, 0.51f, 0.60f), .CodeSection = C(0.98f, 0.57f, 0.38f),
+        .CodeString = C(0.62f, 0.88f, 0.54f), .CodeComment = C(0.45f, 0.51f, 0.60f), .CodeUserComment = C(0.98f, 0.68f, 0.84f), .CodeSection = C(0.98f, 0.57f, 0.38f),
         .CodeLabel = C(0.97f, 0.91f, 0.56f), .FlowJump = C(0.98f, 0.70f, 0.42f), .FlowCall = C(0.52f, 0.84f, 0.98f),
         .FlowReturn = C(0.95f, 0.52f, 0.52f), .Breakpoint = C(0.92f, 0.28f, 0.32f), .CurrentLine = C(0.38f, 0.61f, 0.97f, 0.22f),
         .Surface = C(0.068f, 0.084f, 0.118f), .Frame = C(0.115f, 0.140f, 0.190f), .Button = C(0.135f, 0.162f, 0.215f),
@@ -178,7 +179,7 @@ namespace ManifoldTheme
         .Warning = C(0.68f, 0.44f, 0.00f), .Error = C(0.80f, 0.20f, 0.16f), .Changed = C(0.85f, 0.16f, 0.18f),
         .AddressText = C(0.00f, 0.46f, 0.62f), .BytesText = C(0.38f, 0.42f, 0.50f),
         .CodeKeyword = C(0.52f, 0.24f, 0.80f), .CodeRegister = C(0.00f, 0.50f, 0.48f), .CodeNumber = C(0.66f, 0.42f, 0.00f),
-        .CodeString = C(0.20f, 0.50f, 0.18f), .CodeComment = C(0.47f, 0.52f, 0.60f), .CodeSection = C(0.80f, 0.33f, 0.10f),
+        .CodeString = C(0.20f, 0.50f, 0.18f), .CodeComment = C(0.47f, 0.52f, 0.60f), .CodeUserComment = C(0.72f, 0.16f, 0.50f), .CodeSection = C(0.80f, 0.33f, 0.10f),
         .CodeLabel = C(0.52f, 0.44f, 0.00f), .FlowJump = C(0.78f, 0.42f, 0.06f), .FlowCall = C(0.05f, 0.44f, 0.70f),
         .FlowReturn = C(0.78f, 0.25f, 0.28f), .Breakpoint = C(0.85f, 0.18f, 0.22f), .CurrentLine = C(0.15f, 0.40f, 0.82f, 0.14f),
         .Surface = C(0.979f, 0.985f, 0.996f), .Frame = C(0.890f, 0.910f, 0.950f), .Button = C(0.868f, 0.890f, 0.935f),

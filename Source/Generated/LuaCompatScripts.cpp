@@ -5024,7 +5024,7 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 11
+local API_VERSION = 12
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -7273,8 +7273,8 @@ widgetObject = function(entry)
   return proxy
 end
 
-local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open = "boolean", dock = "boolean", interval = "number", key = "string", onClose = "function", onUpdate = "function" }
-local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", onClose = "function", onUpdate = "function" }
+local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open = "boolean", dock = "boolean", interval = "number", key = "string", opacity = "number", inactiveOpacity = "number", onClose = "function", onUpdate = "function" }
+local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", opacity = "number", inactiveOpacity = "number", onClose = "function", onUpdate = "function" }
 local WINDOW_DOC = "manifold.ui.window.Window."
 local windowKeys = {}
 
@@ -7319,7 +7319,7 @@ local function windowObject(entry)
     if options.onUpdate ~= nil then
       entry.onUpdate = options.onUpdate
     end
-    local copy = { title = options.title, icon = options.icon, interval = options.interval, handlers = entry.onClose and UI_HANDLER_BITS.onClose or 0 }
+    local copy = { title = options.title, icon = options.icon, interval = options.interval, opacity = options.opacity, inactiveOpacity = options.inactiveOpacity, handlers = entry.onClose and UI_HANDLER_BITS.onClose or 0 }
     if options.onUpdate ~= nil then
       copy.updates = true
     end
@@ -7359,7 +7359,7 @@ define(window, "create", {
     { name = "options", type = "table", optional = true, keys = WINDOW_KEYS },
   },
   returns = "window",
-  doc = "Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one.",
+  doc = "Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `opacity` (0.1 to 1, while the window has the focus) and `inactiveOpacity` (while another window has it; default `opacity`): without them the user's window opacity settings apply, and only a floating window can be see-through, a docked one stays opaque; `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one.",
 }, function(title, options)
   options = options or {}
   checkIcon("manifold.ui.window.create", options.icon)
@@ -7377,6 +7377,8 @@ define(window, "create", {
     height = options.height,
     dock = options.dock,
     interval = options.interval,
+    opacity = options.opacity,
+    inactiveOpacity = options.inactiveOpacity,
     updates = options.onUpdate ~= nil,
     handlers = options.onClose and UI_HANDLER_BITS.onClose or 0,
   })
@@ -7399,13 +7401,13 @@ native.docDefine(nil, "manifold.ui.window.Window", {
   doc = "`manifold.ui.window.create` returns a window object: dot calls only, read-only, unknown names raise. A call on a window that is gone (removed, or its script ran again) returns `nil, error` with code `ME-7010`.",
 })
 local WINDOW_METHOD_DOCS = {
-  add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object)." },
+)MLUA"),
+            std::string_view(R"MLUA(  add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object)." },
   clear = { returns = "boolean", doc = "Removes every widget of the window." },
   remove = { returns = "boolean", doc = "Removes the window and its widgets for good." },
-  update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, update interval or handlers." },
+  update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, opacity (`opacity`, `inactiveOpacity`), update interval or handlers." },
   show = { returns = "boolean", doc = "Shows the window again after the user or `hide` closed it." },
-)MLUA"),
-            std::string_view(R"MLUA(  hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
+  hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
   focus = { returns = "boolean", doc = "Shows the window and brings it to the front." },
   isOpen = { returns = "boolean", doc = "Whether the window exists and is shown." },
 }
@@ -7580,7 +7582,8 @@ local NOTICE_KEYS = { level = "string", progress = "number", sticky = "boolean" 
 
 local notice = subarea(ui, "notice", "Short notices in the lower right corner, the same ones Manifold shows. A notice fades after a few seconds unless it is `sticky` or has a `progress`; a right click dismisses it.")
 
-local function checkLevel(path, level)
+)MLUA"),
+            std::string_view(R"MLUA(local function checkLevel(path, level)
   if level ~= nil then
     local known = false
     for _, name in ipairs(NOTICE_LEVELS) do
@@ -7605,8 +7608,7 @@ local function noticeObject(entry)
           state.progress = options.progress
         end
         if options.sticky ~= nil then
-)MLUA"),
-            std::string_view(R"MLUA(          state.sticky = options.sticky
+          state.sticky = options.sticky
         end
         local sticky = state.sticky or (state.progress >= 0 and state.progress < 1)
         if not native.uiNoticeUpdate(entry.id, state.text, state.level, state.progress, sticky) then
@@ -7871,7 +7873,8 @@ local function unloadModule(key)
   end
   local owned = moduleOwned[key]
   moduleOwned[key] = nil
-  if owned then
+)MLUA"),
+            std::string_view(R"MLUA(  if owned then
     for _, remove in pairs(owned) do
       pcall(remove)
     end
@@ -7909,8 +7912,7 @@ local function moduleRequire(name, ...)
     local cache = modulePrivate[key]
     local cached = cache and cache[name]
     if cached == MODULE_LOADING then
-)MLUA"),
-            std::string_view(R"MLUA(      error("loop or previous error loading module '" .. name .. "'", 2)
+      error("loop or previous error loading module '" .. name .. "'", 2)
     end
     if cached ~= nil then
       return cached

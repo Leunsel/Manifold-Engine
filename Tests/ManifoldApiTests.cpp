@@ -12,6 +12,7 @@
 #include "lua.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -59,7 +60,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 11 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 12 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -642,6 +643,36 @@ return M
             return static_cast<int>(ParseDecimal(result).value_or(0));
         }
 
+        void UiOpacity(Engine& engine)
+        {
+            Lua::UiModel& model = engine.Lua().Ui();
+            const int plain = LuaInteger(engine, "ui opacity default", R"LUA(
+                return tostring(manifold.ui.window.create("Opaque", { key = "opacity plain" }).id))LUA");
+            const Lua::UiNode* node = model.Find(plain);
+            CHECK(node && node->Opacity < 0.0f && node->InactiveOpacity < 0.0f);
+
+            const int overlay = LuaInteger(engine, "ui opacity", R"LUA(
+                uiOpacityWindow = manifold.ui.window.create("Overlay", { key = "opacity overlay", opacity = 0.8, inactiveOpacity = 0.4, dock = false })
+                return tostring(uiOpacityWindow.id))LUA");
+            node = model.Find(overlay);
+            CHECK(node && std::abs(node->Opacity - 0.8f) < 0.001f && std::abs(node->InactiveOpacity - 0.4f) < 0.001f && !node->Dock);
+
+            LuaCheck(engine, "ui opacity update", R"LUA(
+                if not uiOpacityWindow.update({ opacity = 2, inactiveOpacity = 0.01 }) then return "update" end
+                local ok, problem = pcall(uiOpacityWindow.update, { opacity = "half" })
+                if ok or not manifold.error.is(problem) or problem.code ~= "ME-7007" then return "a string opacity was taken" end
+                ok, problem = pcall(manifold.ui.window.create, "Bad", { opacity = true })
+                if ok or problem.code ~= "ME-7007" then return "a boolean opacity was taken" end
+                return "ok")LUA");
+            node = model.Find(overlay);
+            CHECK(node && node->Opacity == 1.0f && std::abs(node->InactiveOpacity - 0.1f) < 0.001f);
+            LuaCheck(engine, "ui opacity cleanup", R"LUA(
+                uiOpacityWindow.remove()
+                manifold.ui.window.create("Opaque", { key = "opacity plain" }).remove()
+                uiOpacityWindow = nil
+                return "ok")LUA");
+        }
+
         void UiApi(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -1001,6 +1032,7 @@ return M
         DocApi(engine);
         Documentation(engine);
         UiApi(engine);
+        UiOpacity(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

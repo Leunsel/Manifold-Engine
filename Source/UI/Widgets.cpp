@@ -1383,6 +1383,62 @@ namespace Manifold::UI
         ImGui::End();
     }
 
+    namespace
+    {
+        struct OpacityRequest
+        {
+            float Active = 1.0f;
+            float Inactive = 1.0f;
+        };
+
+        std::map<ImGuiID, OpacityRequest> g_opacityRequests;
+
+        float ClampOpacity(float value)
+        {
+            return std::clamp(value, 0.1f, 1.0f);
+        }
+    }
+
+    void SetWindowOpacity(float active, float inactive)
+    {
+        const ImGuiWindow* window = ImGui::GetCurrentWindow();
+        if (window && window->RootWindow)
+            g_opacityRequests[window->RootWindow->ID] = { ClampOpacity(active), ClampOpacity(inactive) };
+    }
+
+    void ApplyWindowOpacity(float active, float inactive)
+    {
+        // ∑ A floating window has its own Win32 window (a viewport); the Win32 backend makes it layered and sets its alpha
+        //   from viewport->Alpha, which ImGui resets to 1 every frame. A docked window draws into the main window and has
+        //   no alpha of its own, so it stays opaque. Popups, menus and tooltips keep their own alpha: they belong to the
+        //   window that opened them, and a see-through menu is hard to read.
+        ImGuiContext& g = *GImGui;
+        std::map<ImGuiID, OpacityRequest> requests;
+        requests.swap(g_opacityRequests);
+        if (!(g.IO.ConfigFlags & ImGuiConfigFlags_ViewportsEnable))
+            return;
+        active = ClampOpacity(active);
+        inactive = ClampOpacity(inactive);
+        for (int i = 1; i < g.Viewports.Size; ++i)
+        {
+            ImGuiViewportP* viewport = g.Viewports[i];
+            const ImGuiWindow* window = viewport->Window;
+            if (!window || !window->Active || viewport->PlatformWindowCreated == false)
+                continue;
+            if (window->Flags & (ImGuiWindowFlags_Tooltip | ImGuiWindowFlags_Popup | ImGuiWindowFlags_Modal | ImGuiWindowFlags_ChildMenu))
+                continue;
+            const ImGuiWindow* shown = window;
+            if (const ImGuiDockNode* node = window->DockNodeAsHost; node && node->IsLeafNode() && node->VisibleWindow)
+                shown = node->VisibleWindow;
+            OpacityRequest wanted{ active, inactive };
+            if (const auto found = requests.find(shown->ID); found != requests.end())
+                wanted = found->second;
+            const float alpha = (viewport->Flags & ImGuiViewportFlags_IsFocused) ? wanted.Active : wanted.Inactive;
+            if (alpha < 1.0f)
+                viewport->Alpha *= alpha;
+        }
+    }
+
     void KeepEscape()
     {
         if (!g_toolEscape.empty())

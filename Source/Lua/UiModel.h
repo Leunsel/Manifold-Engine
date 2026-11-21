@@ -146,6 +146,8 @@ namespace Manifold::Lua
         bool Open = true;
         bool FocusRequest = false;
         bool Dock = true;
+        float Opacity = -1.0f;          // below 0: the user's setting
+        float InactiveOpacity = -1.0f;  // below 0: Opacity, else the user's setting
         double Interval = 0.0;
         double NextUpdate = 0.0;
         bool Updates = false;

@@ -67,7 +67,7 @@ namespace Manifold::UI
         const char* const kTextColors[] = { "Text", "Label", "Muted", "Success", "Warning", "Error", "Changed" };
 
         constexpr ThemeMode kModes[] = { ThemeMode::Light, ThemeMode::Dark, ThemeMode::System };
-        const char* const kCodeColors[] = { "AddressText", "BytesText", "CodeKeyword", "CodeRegister", "CodeNumber", "CodeString", "CodeComment", "CodeSection",
+        const char* const kCodeColors[] = { "AddressText", "BytesText", "CodeKeyword", "CodeRegister", "CodeNumber", "CodeString", "CodeComment", "CodeUserComment", "CodeSection",
             "CodeLabel", "FlowJump", "FlowCall", "FlowReturn", "Breakpoint", "CurrentLine" };
 
         void OpenFolder(const std::filesystem::path& folder)
@@ -1020,6 +1020,22 @@ namespace Manifold::UI
                 theme.Corners = corners;
                 edited = true;
             }
+            list.EndRow();
+        }
+        const auto opacity = [&](const char* id, int& value) {
+            BeginFillSlider(id, static_cast<float>(value - 20) / 80.0f, modeWidth);
+            ImGui::SliderInt(id, &value, 20, 100, value >= 100 ? "Opaque" : "%d %%", ImGuiSliderFlags_AlwaysClamp);
+            EndFillSlider();
+            edited |= ImGui::IsItemDeactivatedAfterEdit();
+        };
+        if (list.Row("Floating Window Opacity", "Tool windows outside the main window while they have the focus.", modeWidth))
+        {
+            opacity("##activeopacity", settings.ActiveWindowOpacity);
+            list.EndRow();
+        }
+        if (list.Row("Inactive Window Opacity", "The same windows while another window has the focus, to see the game behind them.", modeWidth))
+        {
+            opacity("##inactiveopacity", settings.InactiveWindowOpacity);
             list.EndRow();
         }
 

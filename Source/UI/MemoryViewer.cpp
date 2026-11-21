@@ -523,6 +523,7 @@ namespace Manifold::UI
             item(undo.c_str(), Command::UndoMemoryEdit, undoable > 0);
             if (ImGui::MenuItem(ICON_FA_HISTORY "  Write History..."))
                 m_workspace.OpenWriteHistory();
+            item(ICON_FA_COMMENTS "  Comment List", Command::CommentList);
             ImGui::Separator();
             item(ICON_FA_PLUS_SQUARE "  Allocate Memory...", Command::AllocateMemory);
             item(ICON_FA_FILL_DRIP "  Fill Memory...", Command::FillMemory);
@@ -1198,16 +1199,14 @@ namespace Manifold::UI
             if (methodHeader && blockStarts[i] && i != 0)
                 drawList->AddLine(ImVec2(origin.x, y), ImVec2(origin.x + width, y), ImGui::GetColorU32(ManifoldTheme::RowSeparator));
 
+            // ∑ The user's comment and the automatic one (method name, the value a memory operand points at, the effective
+            //   address at a break) share the column: the user's first in its own colour, then the automatic one. Before, a
+            //   user comment hid the automatic one, so a commented line lost the value it reads.
             std::string comment;
             ImU32 commentColor = ImGui::GetColorU32(ManifoldTheme::Muted);
             const auto note = m_engine.Table().DisasmNotes.find(m_engine.Symbols().ModuleOffset(line.Address));
-            const bool userComment = note != m_engine.Table().DisasmNotes.end() && !note->second.Comment.empty();
-            if (userComment)
-            {
-                comment = note->second.Comment;
-                commentColor = ImGui::GetColorU32(ManifoldTheme::CodeComment);
-            }
-            else if (methodHeader)
+            const std::string* userComment = note != m_engine.Table().DisasmNotes.end() && !note->second.Comment.empty() ? &note->second.Comment : nullptr;
+            if (methodHeader)
             {
                 comment = *methodHeader;
                 commentColor = ImGui::GetColorU32(ManifoldTheme::Accent);
@@ -1228,8 +1227,36 @@ namespace Manifold::UI
                 if (const auto effective = disassembler.EffectiveAddress(line, info.Registers))
                     comment = "-> " + m_engine.Describe(*effective);
             }
+            float commentEnd = commentX;
+            if (userComment)
+            {
+                cell(commentX, rightX + Px(4.0f), textY, ImGui::GetColorU32(ManifoldTheme::CodeUserComment), *userComment);
+                commentEnd += font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, userComment->data(), userComment->data() + userComment->size()).x;
+            }
             if (!comment.empty())
-                cell(commentX, rightX + Px(4.0f), textY, commentColor, comment);
+            {
+                float x = commentEnd;
+                if (userComment)
+                {
+                    x += charWidth;
+                    cell(x, rightX + Px(4.0f), textY, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.55f)), "|");
+                    x += charWidth * 2.0f;
+                }
+                cell(x, rightX + Px(4.0f), textY, commentColor, comment);
+                commentEnd = x + font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, comment.data(), comment.data() + comment.size()).x;
+            }
+            if (static_cast<int>(i) == hoveredRow && commentEnd > rightX - Px(4.0f) && ImGui::GetIO().MousePos.x >= commentX && hovered)
+            {
+                ShowTooltip([&]()
+                    {
+                        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 34.0f);
+                        if (userComment)
+                            ImGui::TextColored(ManifoldTheme::CodeUserComment, "%s", userComment->c_str());
+                        if (!comment.empty())
+                            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(commentColor), "%s", comment.c_str());
+                        ImGui::PopTextWrapPos();
+                    });
+            }
 
             if (line.Target && (line.Kind == Disasm::Flow::Jump || line.Kind == Disasm::Flow::ConditionalJump))
             {
@@ -1545,6 +1572,7 @@ namespace Manifold::UI
             break;
         case Command::BreakpointList: m_workspace.OpenBreakpoints(); break;
         case Command::ThreadList: m_workspace.OpenThreadList(); break;
+        case Command::CommentList: m_workspace.OpenCommentList(); break;
         case Command::EditBreakpoint: m_workspace.OpenBreakpointEditor(m_selected, Debug::BreakpointType::Execute, 1, m_viewport); break;
         case Command::BreakAndTrace:
         {
@@ -1924,6 +1952,7 @@ namespace Manifold::UI
         }
         ImGui::Separator();
         item(ICON_FA_COMMENT "  Comment...", Command::CommentInstruction);
+        item(ICON_FA_COMMENTS "  Comment List", Command::CommentList);
         ImGui::Separator();
         item(ICON_FA_CIRCLE "  Toggle Breakpoint", Command::ToggleBreakpoint);
         item(ICON_FA_SLIDERS_H "  Breakpoint with a Condition or Register Change...", Command::EditBreakpoint);

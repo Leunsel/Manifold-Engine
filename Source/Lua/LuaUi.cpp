@@ -345,6 +345,10 @@ namespace Manifold::Lua
             ReadFloat(state, props, "width", node.Width);
             ReadFloat(state, props, "height", node.Height);
             ReadFloat(state, props, "ratio", node.Ratio);
+            if (ReadFloat(state, props, "opacity", node.Opacity))
+                node.Opacity = std::clamp(node.Opacity, 0.1f, 1.0f);
+            if (ReadFloat(state, props, "inactiveOpacity", node.InactiveOpacity))
+                node.InactiveOpacity = std::clamp(node.InactiveOpacity, 0.1f, 1.0f);
             node.Ratio = std::clamp(node.Ratio, 0.05f, 0.95f);
             ReadNumber(state, props, "step", node.Step);
             if (ReadNumber(state, props, "min", node.Min))

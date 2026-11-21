@@ -12,6 +12,7 @@
 #include "UI/ProfilerWindow.h"
 #include "UI/Theme.h"
 #include "UI/SettingsWindow.h"
+#include "UI/Widgets.h"
 
 #include "imgui.h"
 
@@ -252,6 +253,8 @@ namespace Manifold
                 m_workspace->OpenNopSled();
             else if (window == "writehistory")
                 m_workspace->OpenWriteHistory();
+            else if (window == "comments")
+                m_workspace->OpenCommentList();
             else if (window == "flowgraph")
                 m_workspace->OpenFlowGraph();
         }
@@ -405,6 +408,7 @@ namespace Manifold
         if (!m_dropped.empty())
             m_workspace->DropFiles(std::exchange(m_dropped, {}), m_dropMerges, m_dropWindow, static_cast<float>(m_dropPoint.x), static_cast<float>(m_dropPoint.y));
         m_workspace->Draw();
+        UI::ApplyWindowOpacity(static_cast<float>(m_settings.ActiveWindowOpacity) / 100.0f, static_cast<float>(m_settings.InactiveWindowOpacity) / 100.0f);
         if (!m_started && ++m_frames >= 2)
         {
             m_started = true;

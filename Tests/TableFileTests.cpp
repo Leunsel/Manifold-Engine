@@ -7,6 +7,7 @@
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
 #include "Table/CheatTable.h"
+#include "Table/CommentList.h"
 #include "Table/Structures.h"
 #include "Table/TableFiles.h"
 
@@ -340,6 +341,43 @@ namespace Manifold::Tests
             CHECK_EQ(keys.size(), loaded.Files.size());
         }
 
+        void CommentList()
+        {
+            const Table::NoteKey module = Table::ParseNoteKey("\"game.exe\"+1A2B");
+            CHECK(module.Parsed && module.Module == "game.exe" && module.Offset == 0x1A2B);
+            const Table::NoteKey plain = Table::ParseNoteKey("7FF61000");
+            CHECK(plain.Parsed && plain.Module.empty() && plain.Offset == 0x7FF61000);
+            CHECK(!Table::ParseNoteKey("\"game.exe\"").Parsed && !Table::ParseNoteKey("\"\"+10").Parsed && !Table::ParseNoteKey("hook here").Parsed);
+
+            Table::AddressList list;
+            list.DisasmNotes["\"game.exe\"+100"] = { "damage", "" };
+            list.DisasmNotes["\"game.exe\"+20"] = { "", "Combat" };
+            list.DisasmNotes["\"Engine.dll\"+8"] = { "tick", "Loop" };
+            list.DisasmNotes["1000"] = { "heap", "" };
+            list.DisasmNotes["\"game.exe\"+30"] = {};
+            list.DisasmNotes["odd key"] = { "kept", "" };
+            // ∑ By module and number, not by text: +20 before +100, plain addresses first, unparsed keys last, empty notes left out.
+            const std::vector<std::string> expected = { "1000", "\"Engine.dll\"+8", "\"game.exe\"+20", "\"game.exe\"+100", "odd key" };
+            CHECK(Table::SortedNoteKeys(list) == expected);
+            CHECK(Table::SortedNoteKeys(list, "COMBAT") == std::vector<std::string>{ "\"game.exe\"+20" });
+            CHECK(Table::SortedNoteKeys(list, "engine") == std::vector<std::string>{ "\"Engine.dll\"+8" });
+            CHECK(Table::SortedNoteKeys(list, "  heap ") == std::vector<std::string>{ "1000" });
+
+            list.SetClean();
+            CHECK(Table::RemoveNotes(list, { "nothing" }).empty() && !list.Dirty());
+            std::vector<Table::RemovedNote> removed = Table::RemoveNotes(list, { "\"game.exe\"+100", "\"Engine.dll\"+8", "\"game.exe\"+100" });
+            CHECK(removed.size() == 2 && list.Dirty() && !list.DisasmNotes.count("\"game.exe\"+100") && !list.DisasmNotes.count("\"Engine.dll\"+8"));
+            CHECK(removed.size() == 2 && removed[1].Note.Header == "Loop");
+
+            list.SetClean();
+            list.DisasmNotes["\"Engine.dll\"+8"] = { "written since", "" };
+            CHECK_EQ(Table::RestoreNotes(list, removed), 1u);
+            CHECK(list.Dirty() && list.DisasmNotes["\"game.exe\"+100"].Comment == "damage" && list.DisasmNotes["\"Engine.dll\"+8"].Comment == "written since");
+            list.SetClean();
+            CHECK_EQ(Table::RestoreNotes(list, removed), 0u);
+            CHECK(!list.Dirty());
+        }
+
         void Content()
         {
             Table::AddressList list;
@@ -506,6 +544,7 @@ namespace Manifold::Tests
         ExportNames();
         DuplicateNames();
         Content();
+        CommentList();
         SafeWrites();
         ImageLimits();
         TableIdentity();

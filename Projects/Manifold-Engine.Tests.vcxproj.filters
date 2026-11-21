@@ -306,6 +306,9 @@
     <ClCompile Include="..\Source\Table\CheatTable.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Table\CommentList.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>

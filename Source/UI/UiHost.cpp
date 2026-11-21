@@ -190,6 +190,14 @@ namespace Manifold::UI
         if (wantsKeys(window))
             flags |= ImGuiWindowFlags_NoNavInputs;
         const bool visible = BeginToolWindow(title.c_str(), &open, size, flags, ImVec2(160.0f, 100.0f), false);
+        if (window.Opacity >= 0.0f || window.InactiveOpacity >= 0.0f)
+        {
+            const Settings& settings = m_engine.Options();
+            const float active = window.Opacity >= 0.0f ? window.Opacity : static_cast<float>(settings.ActiveWindowOpacity) / 100.0f;
+            const float inactive = window.InactiveOpacity >= 0.0f ? window.InactiveOpacity
+                                 : (window.Opacity >= 0.0f ? window.Opacity : static_cast<float>(settings.InactiveWindowOpacity) / 100.0f);
+            SetWindowOpacity(active, inactive);
+        }
         if (visible)
         {
             ImGui::PushID(id);

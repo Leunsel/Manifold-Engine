@@ -318,6 +318,9 @@
     <ClCompile Include="..\Source\Table\CheatTable.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Table\CommentList.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
@@ -430,6 +433,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\CodeTools.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\CommentListWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\ConsoleView.cpp">
@@ -804,6 +810,9 @@
     <ClInclude Include="..\Source\Table\CheatTable.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Table\CommentList.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Table\ManagedStructures.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
@@ -925,6 +934,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\CodeTools.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\CommentListWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\ConsoleView.h">

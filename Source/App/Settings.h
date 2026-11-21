@@ -105,6 +105,8 @@ namespace Manifold
         std::string BackupFolder;
 
         bool CompactMode = false;
+        int ActiveWindowOpacity = 100;
+        int InactiveWindowOpacity = 100;
         bool PlaySounds = true;
         bool ReleaseMode = false;
         bool ProfilerEnabled = false;

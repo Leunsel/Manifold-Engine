@@ -87,6 +87,12 @@ namespace Manifold::UI
     void TextFitted(std::string_view text, float maxWidth, const ImVec4& color);
     bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags = 0, ImVec2 minimum = ImVec2(260.0f, 160.0f), bool escapeCloses = true);
     void EndToolWindow();
+    // Opacity of the current window's own platform window this frame, 1 = opaque; inside its Begin/End. A docked window
+    // has none of its own and stays opaque.
+    void SetWindowOpacity(float active, float inactive);
+    // Gives every floating window its opacity for this frame: the one SetWindowOpacity asked for, else active or inactive
+    // (whether its platform window has the focus). Call once after the interface is built, before ImGui::Render.
+    void ApplyWindowOpacity(float active, float inactive);
     void KeepEscape();
     void HoldEscape();
     bool EscapeFree();

@@ -100,6 +100,8 @@ namespace Manifold
             { "Backups", "BackupFolder", &Settings::BackupFolder },
             { "Interface", "Mode", &kMode },
             { "Interface", "Compact", &Settings::CompactMode },
+            { "Interface", "ActiveWindowOpacity", &Settings::ActiveWindowOpacity, 20, 100 },
+            { "Interface", "InactiveWindowOpacity", &Settings::InactiveWindowOpacity, 20, 100 },
             { "Interface", "PlaySounds", &Settings::PlaySounds },
             { "Interface", "Profiler", &Settings::ProfilerEnabled },
             { "Interface", "ProfilerStatusBar", &Settings::ProfilerInStatusBar },

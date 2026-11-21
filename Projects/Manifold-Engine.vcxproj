@@ -207,6 +207,7 @@ exit /b 0</Command>
     </ClCompile>
     <ClCompile Include="..\Source\Table\AddressList.cpp" />
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
+    <ClCompile Include="..\Source\Table\CommentList.cpp" />
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />
     <ClCompile Include="..\Source\Table\RttiStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
@@ -245,6 +246,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\ByteSearch.cpp" />
     <ClCompile Include="..\Source\UI\CodeEditor.cpp" />
     <ClCompile Include="..\Source\UI\CodeTools.cpp" />
+    <ClCompile Include="..\Source\UI\CommentListWindow.cpp" />
     <ClCompile Include="..\Source\UI\ConsoleView.cpp" />
     <ClCompile Include="..\Source\UI\DebugWindows.cpp" />
     <ClCompile Include="..\Source\UI\DialogHost.cpp" />
@@ -371,6 +373,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Syscalls\Syscall.h" />
     <ClInclude Include="..\Source\Table\AddressList.h" />
     <ClInclude Include="..\Source\Table\CheatTable.h" />
+    <ClInclude Include="..\Source\Table\CommentList.h" />
     <ClInclude Include="..\Source\Table\ManagedStructures.h" />
     <ClInclude Include="..\Source\Table\RttiStructures.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
@@ -412,6 +415,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\ByteSearch.h" />
     <ClInclude Include="..\Source\UI\CodeEditor.h" />
     <ClInclude Include="..\Source\UI\CodeTools.h" />
+    <ClInclude Include="..\Source\UI\CommentListWindow.h" />
     <ClInclude Include="..\Source\UI\ConsoleView.h" />
     <ClInclude Include="..\Source\UI\DebugWindows.h" />
     <ClInclude Include="..\Source\UI\DialogHost.h" />
