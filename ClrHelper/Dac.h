@@ -207,6 +207,85 @@ namespace Manifold::ClrHelper
         ClrAddress FreeMethodTable;
     };
 
+    struct DacpGcHeapData
+    {
+        BOOL ServerMode;
+        BOOL GcStructuresValid;
+        UINT HeapCount;
+        UINT MaxGeneration;
+    };
+
+    struct DacpGenerationData
+    {
+        ClrAddress StartSegment;
+        ClrAddress AllocationStart;
+        ClrAddress AllocContextPtr;
+        ClrAddress AllocContextLimit;
+    };
+
+    // Generations 0, 1, 2 and the large object heap.
+    constexpr int kDacGenerations = 4;
+
+    struct DacpGcHeapDetails
+    {
+        ClrAddress HeapAddr;
+        ClrAddress AllocAllocated;
+        ClrAddress MarkArray;
+        ClrAddress CurrentCGcState;
+        ClrAddress NextSweepObj;
+        ClrAddress SavedSweepEphemeralSeg;
+        ClrAddress SavedSweepEphemeralStart;
+        ClrAddress BackgroundSavedLowestAddress;
+        ClrAddress BackgroundSavedHighestAddress;
+        DacpGenerationData GenerationTable[kDacGenerations];
+        ClrAddress EphemeralHeapSegment;
+        ClrAddress FinalizationFillPointers[kDacGenerations + 3];
+        ClrAddress LowestAddress;
+        ClrAddress HighestAddress;
+        ClrAddress CardTable;
+    };
+
+    struct DacpHeapSegmentData
+    {
+        ClrAddress SegmentAddr;
+        ClrAddress Allocated;
+        ClrAddress Committed;
+        ClrAddress Reserved;
+        ClrAddress Used;
+        ClrAddress Mem;
+        ClrAddress Next;
+        ClrAddress GcHeap;
+        ClrAddress HighAllocMark;
+        std::uint64_t Flags;  // size_t in the DAC: 4 bytes in a 32-bit one
+        ClrAddress BackgroundAllocated;
+    };
+
+    enum DacpObjectType : DWORD
+    {
+        kObjectString = 0,
+        kObjectFree = 1,
+        kObjectObject = 2,
+        kObjectArray = 3,
+        kObjectOther = 4,
+    };
+
+    struct DacpObjectData
+    {
+        ClrAddress MethodTable;
+        DacpObjectType ObjectType;
+        std::uint64_t Size;
+        ClrAddress ElementTypeHandle;
+        DWORD ElementType;
+        DWORD Rank;
+        std::uint64_t NumComponents;
+        std::uint64_t ComponentSize;
+        ClrAddress ArrayDataPtr;
+        ClrAddress ArrayBoundsPtr;
+        ClrAddress ArrayLowerBoundsPtr;
+        ClrAddress Rcw;
+        ClrAddress Ccw;
+    };
+
     // ∑ The DAC writes these structs; a newer runtime could make one longer
     // than declared here. Every call gets the struct inside a larger zeroed
     // buffer, so a longer answer lands in slack instead of on the stack.
@@ -258,7 +337,7 @@ namespace Manifold::ClrHelper
         virtual Unused STDMETHODCALLTYPE GetThreadpoolData(void*) = 0;
         virtual Unused STDMETHODCALLTYPE GetWorkRequestData(ClrAddress, void*) = 0;
         virtual Unused STDMETHODCALLTYPE GetHillClimbingLogEntry(ClrAddress, void*) = 0;
-        virtual Unused STDMETHODCALLTYPE GetObjectData(ClrAddress, void*) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetObjectData(ClrAddress object, DacpObjectData* data) = 0;
         virtual HRESULT STDMETHODCALLTYPE GetObjectStringData(ClrAddress object, unsigned count, WCHAR* text, unsigned* needed) = 0;
         virtual HRESULT STDMETHODCALLTYPE GetObjectClassName(ClrAddress object, unsigned count, WCHAR* name, unsigned* needed) = 0;
         virtual HRESULT STDMETHODCALLTYPE GetMethodTableName(ClrAddress mt, unsigned count, WCHAR* name, unsigned* needed) = 0;
@@ -271,11 +350,11 @@ namespace Manifold::ClrHelper
         virtual Unused STDMETHODCALLTYPE GetFrameName(ClrAddress, unsigned, WCHAR*, unsigned*) = 0;
         virtual HRESULT STDMETHODCALLTYPE GetPEFileBase(ClrAddress file, ClrAddress* base) = 0;
         virtual HRESULT STDMETHODCALLTYPE GetPEFileName(ClrAddress file, unsigned count, WCHAR* name, unsigned* needed) = 0;
-        virtual Unused STDMETHODCALLTYPE GetGCHeapData(void*) = 0;
-        virtual Unused STDMETHODCALLTYPE GetGCHeapList(unsigned, ClrAddress*, unsigned*) = 0;
-        virtual Unused STDMETHODCALLTYPE GetGCHeapDetails(ClrAddress, void*) = 0;
-        virtual Unused STDMETHODCALLTYPE GetGCHeapStaticData(void*) = 0;
-        virtual Unused STDMETHODCALLTYPE GetHeapSegmentData(ClrAddress, void*) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetGCHeapData(DacpGcHeapData* data) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetGCHeapList(unsigned count, ClrAddress* heaps, unsigned* needed) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetGCHeapDetails(ClrAddress heap, DacpGcHeapDetails* details) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetGCHeapStaticData(DacpGcHeapDetails* details) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetHeapSegmentData(ClrAddress segment, DacpHeapSegmentData* data) = 0;
         virtual Unused STDMETHODCALLTYPE GetOOMData(ClrAddress, void*) = 0;
         virtual Unused STDMETHODCALLTYPE GetOOMStaticData(void*) = 0;
         virtual Unused STDMETHODCALLTYPE GetHeapAnalyzeData(ClrAddress, void*) = 0;

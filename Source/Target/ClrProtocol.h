@@ -18,7 +18,7 @@ namespace Manifold::Target::ClrProtocol
     // Bumped whenever a message changes; Open fails on a mismatch, so a helper
     // left over from another build never answers in a layout the program
     // misreads.
-    constexpr std::uint32_t kVersion = 1;
+    constexpr std::uint32_t kVersion = 2;
     // A reply larger than this is a broken helper, not data.
     constexpr std::uint32_t kMaxMessage = 256u * 1024u * 1024u;
 
@@ -32,6 +32,18 @@ namespace Manifold::Target::ClrProtocol
         MethodAt = 6,      // u64 address -> the managed method around it
         MethodCode = 7,    // u64 method desc -> its native code now
         Flush = 8,         // drop the cached memory and the DAC's caches
+        HeapStats = 9,     // -> the objects on the GC heap, counted per type
+        Instances = 10,    // u64 method table, u32 limit -> addresses of its objects
+        ObjectInfo = 11,   // u64 address -> the object there, as the runtime sees it
+    };
+
+    enum class ObjectKind : std::uint32_t
+    {
+        String = 0,
+        Free = 1,
+        Object = 2,
+        Array = 3,
+        Other = 4,
     };
 
     enum TypeFlags : std::uint32_t

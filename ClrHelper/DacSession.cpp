@@ -282,6 +282,27 @@ namespace Manifold::ClrHelper
         return copied ? S_OK : HRESULT_FROM_WIN32(ERROR_PARTIAL_COPY);
     }
 
+    std::size_t DataTarget::ReadDirect(ClrAddress address, std::uint8_t* buffer, std::size_t size)
+    {
+        if (!size || address > static_cast<ClrAddress>(~static_cast<std::uintptr_t>(0)))
+            return 0;
+        SIZE_T got = 0;
+        if (::ReadProcessMemory(m_process, reinterpret_cast<LPCVOID>(static_cast<std::uintptr_t>(address)), buffer, size, &got) && got == size)
+            return size;
+        // Part of the range is not readable: the readable pages from the start.
+        std::size_t done = 0;
+        while (done < size)
+        {
+            const ClrAddress at = address + done;
+            const std::size_t chunk = std::min<std::size_t>(size - done, kPage - static_cast<std::size_t>(at & (kPage - 1)));
+            got = 0;
+            if (!::ReadProcessMemory(m_process, reinterpret_cast<LPCVOID>(static_cast<std::uintptr_t>(at)), buffer + done, chunk, &got) || got != chunk)
+                break;
+            done += chunk;
+        }
+        return done;
+    }
+
     HRESULT DataTarget::GetMetadata(LPCWSTR imagePath, ULONG32, ULONG32, GUID*, ULONG32, ULONG32, ULONG32 bufferSize, BYTE* buffer, ULONG32* dataSize)
     {
         if (!imagePath)
@@ -389,6 +410,18 @@ namespace Manifold::ClrHelper
             case P::Op::MethodAt: MethodAt(argument, out); break;
             case P::Op::MethodCode: MethodCode(argument, out); break;
             case P::Op::Flush: Flush(); m_modulesLoaded = false; break;
+            case P::Op::HeapStats:
+                if (std::string error = HeapStats(out); !error.empty())
+                    return Failure(error);
+                break;
+            case P::Op::Instances:
+            {
+                const std::uint32_t limit = in.U32();
+                if (std::string error = Instances(argument, in.Ok() ? std::min<std::uint32_t>(limit, 1000000) : 1000, out); !error.empty())
+                    return Failure(error);
+                break;
+            }
+            case P::Op::ObjectInfo: ObjectInfo(argument, out); break;
             default: return Failure("unknown request " + std::to_string(static_cast<int>(op)));
         }
         return out.Done();
@@ -1122,5 +1155,248 @@ namespace Manifold::ClrHelper
             return;
         }
         out.U64(data->NativeCodeAddr);
+    }
+
+    std::string DacSession::HeapSegments(std::vector<HeapSegment>& out)
+    {
+        Padded<DacpGcHeapData> heap;
+        if (FAILED(m_sos->GetGCHeapData(heap.Ptr())))
+            return "the runtime did not describe its GC heap";
+        if (!heap->GcStructuresValid)
+            return "the game is in the middle of a garbage collection; try again";
+        std::vector<DacpGcHeapDetails> heaps;
+        if (heap->ServerMode)
+        {
+            const unsigned count = std::min<unsigned>(heap->HeapCount, 1024);
+            std::vector<ClrAddress> list(count);
+            unsigned needed = 0;
+            if (!count || FAILED(m_sos->GetGCHeapList(count, list.data(), &needed)))
+                return "the runtime did not list its GC heaps";
+            for (unsigned i = 0; i < std::min(count, needed); ++i)
+            {
+                Padded<DacpGcHeapDetails> details;
+                if (SUCCEEDED(m_sos->GetGCHeapDetails(list[i], details.Ptr())))
+                    heaps.push_back(details.Value);
+            }
+        }
+        else
+        {
+            Padded<DacpGcHeapDetails> details;
+            if (FAILED(m_sos->GetGCHeapStaticData(details.Ptr())))
+                return "the runtime did not describe its GC heap";
+            heaps.push_back(details.Value);
+        }
+        // Every generation's list of segments (regions on .NET 7 and later),
+        // the large object heap's among them; a segment is in several lists
+        // under the older layout, so each one is walked once.
+        std::set<ClrAddress> seen;
+        for (const DacpGcHeapDetails& details : heaps)
+        {
+            for (int generation = 0; generation < kDacGenerations; ++generation)
+            {
+                ClrAddress segment = details.GenerationTable[generation].StartSegment;
+                for (int guard = 0; segment && guard < 1000000; ++guard)
+                {
+                    if (!seen.insert(segment).second)
+                        break;
+                    Padded<DacpHeapSegmentData> data;
+                    if (FAILED(m_sos->GetHeapSegmentData(segment, data.Ptr())))
+                        break;
+                    HeapSegment part;
+                    part.Start = data->Mem;
+                    // The segment the GC allocates in is filled up to the heap's
+                    // allocation pointer; its own mark lags behind.
+                    part.End = segment == details.EphemeralHeapSegment && details.AllocAllocated ? details.AllocAllocated : data->Allocated;
+                    part.Large = generation == kDacGenerations - 1;
+                    if (part.Start && part.End > part.Start)
+                        out.push_back(part);
+                    segment = data->Next;
+                }
+            }
+        }
+        if (out.empty())
+            return "the runtime's GC heap has no segments";
+        return {};
+    }
+
+    const DacSession::ObjectSize& DacSession::SizeOf(ClrAddress mt)
+    {
+        if (const auto found = m_sizes.find(mt); found != m_sizes.end())
+            return found->second;
+        ObjectSize size;
+        // A method table is pointer aligned and never in the first 64 KB; a
+        // word that fails this is no object header, and asking the DAC about
+        // every such word would be slow.
+        if (mt >= 0x10000 && (mt & (kPointer - 1)) == 0)
+        {
+            const TypeInfo& info = Type(mt);
+            if (info.Valid && info.Data.BaseSize >= 2 * kPointer && info.Data.BaseSize < 0x1000000)
+            {
+                size.Valid = true;
+                size.Base = info.Data.BaseSize;
+                size.Component = info.Data.ComponentSize;
+            }
+        }
+        if (m_sizes.size() > 2000000)
+            m_sizes.clear();
+        return m_sizes.emplace(mt, size).first->second;
+    }
+
+    template <typename Visit>
+    std::string DacSession::WalkHeap(Visit&& visit, HeapTotals& totals)
+    {
+        std::vector<HeapSegment> segments;
+        if (std::string error = HeapSegments(segments); !error.empty())
+            return error;
+        constexpr std::size_t kChunk = 4u << 20;
+        std::vector<std::uint8_t> buffer(kChunk);
+        for (const HeapSegment& segment : segments)
+        {
+            ++totals.Segments;
+            ClrAddress bufferStart = 0;
+            std::size_t bufferLength = 0;
+            // The bytes at [at, at + need) from a window over the segment,
+            // read again whenever the walk leaves it.
+            const auto fetch = [&](ClrAddress at, std::size_t need) -> const std::uint8_t*
+                {
+                    if (bufferLength && at >= bufferStart && at + need <= bufferStart + bufferLength)
+                        return buffer.data() + (at - bufferStart);
+                    const std::size_t wanted = static_cast<std::size_t>(std::min<ClrAddress>(kChunk, segment.End - at));
+                    bufferStart = at;
+                    bufferLength = m_target.ReadDirect(at, buffer.data(), wanted);
+                    return bufferLength >= need ? buffer.data() : nullptr;
+                };
+            const ClrAddress align = segment.Large ? 8 : kPointer;
+            ClrAddress at = segment.Start;
+            while (at + 2 * kPointer <= segment.End)
+            {
+                const std::uint8_t* header = fetch(at, 2 * kPointer);
+                if (!header)
+                {
+                    // An unreadable page: go on after it.
+                    at = (at + 0x1000) & ~static_cast<ClrAddress>(0xFFF);
+                    ++totals.Skipped;
+                    continue;
+                }
+                ClrAddress mt = 0;
+                std::memcpy(&mt, header, kPointer);
+                mt &= ~static_cast<ClrAddress>(3);  // the GC's mark bits
+                const ObjectSize& size = mt ? SizeOf(mt) : ObjectSize{};
+                if (!size.Valid)
+                {
+                    // Zeroed space (an allocation context not handed out yet)
+                    // or a word inside something else: step on to the next one.
+                    at += kPointer;
+                    ++totals.Skipped;
+                    continue;
+                }
+                std::uint64_t bytes = size.Base;
+                if (size.Component)
+                {
+                    std::uint32_t count = 0;
+                    std::memcpy(&count, header + kPointer, sizeof(count));
+                    bytes += static_cast<std::uint64_t>(count) * size.Component;
+                }
+                bytes = (bytes + align - 1) & ~(align - 1);
+                if (at + bytes > segment.End)
+                    bytes = segment.End - at;
+                ++totals.Objects;
+                totals.Bytes += bytes;
+                if (!visit(at, mt, bytes))
+                    return {};
+                at += bytes;
+            }
+        }
+        return {};
+    }
+
+    std::string DacSession::HeapStats(P::Writer& out)
+    {
+        struct Count
+        {
+            std::uint64_t Objects = 0;
+            std::uint64_t Bytes = 0;
+        };
+        std::unordered_map<ClrAddress, Count> counts;
+        HeapTotals totals;
+        const std::string error = WalkHeap([&](ClrAddress, ClrAddress mt, std::uint64_t bytes)
+            {
+                Count& count = counts[mt];
+                ++count.Objects;
+                count.Bytes += bytes;
+                return true;
+            }, totals);
+        if (!error.empty())
+            return error;
+        out.U64(totals.Objects);
+        out.U64(totals.Bytes);
+        out.U32(totals.Segments);
+        out.U64(totals.Skipped);
+        out.U32(static_cast<std::uint32_t>(counts.size()));
+        for (const auto& [mt, count] : counts)
+        {
+            out.U64(mt);
+            out.Text(mt == m_globals.FreeMethodTable ? std::string("Free") : NameOf(mt));
+            out.U64(count.Objects);
+            out.U64(count.Bytes);
+        }
+        return {};
+    }
+
+    std::string DacSession::Instances(ClrAddress mt, std::uint32_t limit, P::Writer& out)
+    {
+        std::vector<ClrAddress> found;
+        std::uint64_t total = 0;
+        HeapTotals totals;
+        const std::string error = WalkHeap([&](ClrAddress at, ClrAddress type, std::uint64_t)
+            {
+                if (type == mt)
+                {
+                    ++total;
+                    if (found.size() < limit)
+                        found.push_back(at);
+                }
+                return true;
+            }, totals);
+        if (!error.empty())
+            return error;
+        out.U64(total);
+        out.U32(static_cast<std::uint32_t>(found.size()));
+        for (ClrAddress address : found)
+            out.U64(address);
+        return {};
+    }
+
+    void DacSession::ObjectInfo(ClrAddress address, P::Writer& out)
+    {
+        Padded<DacpObjectData> data;
+        if (!address || FAILED(m_sos->GetObjectData(address, data.Ptr())) || !data->MethodTable)
+        {
+            out.U8(0);
+            return;
+        }
+        out.U8(1);
+        out.U64(data->MethodTable);
+        out.Text(data->ObjectType == kObjectFree ? std::string("Free") : NameOf(data->MethodTable));
+        out.U32(static_cast<std::uint32_t>(data->ObjectType));
+        out.U64(data->Size);
+        // A type handle with the low bit set is a type descriptor, not a
+        // method table (pointers, function pointers); no class to name.
+        const ClrAddress element = (data->ElementTypeHandle & 1) ? 0 : data->ElementTypeHandle;
+        out.U64(element);
+        out.Text(element ? NameOf(element) : std::string());
+        out.U32(data->ElementType);
+        out.U32(data->Rank);
+        // The DAC counts only an array's elements; a string's length is its
+        // first field, right after the method table.
+        std::uint64_t length = data->NumComponents;
+        if (data->ObjectType == kObjectString)
+        {
+            std::uint32_t characters = 0;
+            length = m_target.Read(address + kPointer, &characters, sizeof(characters)) ? characters : 0;
+        }
+        out.U64(length);
+        out.U64(data->ComponentSize);
+        out.U64(data->ArrayDataPtr);
     }
 }

@@ -42,6 +42,9 @@ namespace Manifold::Target
         std::optional<int> ParentIndex(int classIndex) override;
         std::optional<std::uint64_t> StaticAddress(int classIndex, std::string_view field) override;
         std::string Description() const override;
+        Result<ManagedHeap> ReadHeap() override;
+        Result<ManagedInstances> Instances(std::uint64_t klass, std::uint32_t limit) override;
+        std::optional<ManagedObject> ObjectAt(std::uint64_t address) override;
 
     private:
         struct CodeEntry
@@ -50,7 +53,8 @@ namespace Manifold::Target
             std::string Name;
         };
 
-        std::optional<std::vector<std::uint8_t>> Ask(ClrProtocol::Op op, std::uint64_t argument, unsigned timeoutMs, std::string* error = nullptr);
+        std::optional<std::vector<std::uint8_t>> Ask(ClrProtocol::Op op, std::uint64_t argument, unsigned timeoutMs, std::string* error = nullptr,
+            const std::uint32_t* extra = nullptr);
         const std::pair<const std::uint64_t, CodeEntry>* FindCode(std::uint64_t address);
         bool AskCode(std::uint64_t address);
         int AddDescribed(std::uint64_t mt);
