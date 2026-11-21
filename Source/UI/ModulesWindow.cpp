@@ -168,7 +168,7 @@ namespace Manifold::UI
                 Row(module);
             ImGui::EndTable();
         }
-        ImGui::SetCursorPos(ImVec2(start.x, start.y + top));
+        ImGui::SetCursorPos(start);
         if (Splitter("##modulesplit", false, gap, &top, &bottom, minTable, minDetails))
             m_detailHeight = bottom;
         ImGui::SetCursorPos(ImVec2(start.x, start.y + top + gap));
