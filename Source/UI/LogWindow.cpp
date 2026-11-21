@@ -101,7 +101,7 @@ namespace Manifold::UI
                     float bottom = m_detailHeight;
                     const ImVec2 start = ImGui::GetCursorPos();
                     Table(top);
-                    ImGui::SetCursorPos(ImVec2(start.x, start.y + top));
+                    ImGui::SetCursorPos(start);
                     if (Splitter("##logsplit", false, gap, &top, &bottom, minTable, minDetails))
                         m_detailHeight = bottom;
                     ImGui::SetCursorPos(ImVec2(start.x, start.y + top + gap));
