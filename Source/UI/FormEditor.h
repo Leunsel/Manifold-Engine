@@ -163,6 +163,7 @@ namespace Manifold::UI
         double m_nextScriptPoll = 0.0;
         bool m_scriptConflict = false;
         CodeEditorState m_scriptEditor;
+        CodeAssist m_assist;
         int m_codeTab = 0;
         std::set<std::string> m_badImages;
         std::string m_paletteFilter;

@@ -9,6 +9,7 @@
 #include "Lua/LuaEngine.h"
 #include "Lua/UiFormImport.h"
 #include "UI/Fonts.h"
+#include "UI/LuaWindow.h"
 #include "UI/ScriptWindow.h"
 #include "UI/Shortcuts.h"
 #include "UI/Theme.h"
@@ -347,6 +348,111 @@ namespace Manifold::UI
         m_host = std::make_unique<UiHost>(m_engine, workspace.Window(), &m_form.Model);
         m_tryHost = std::make_unique<UiHost>(m_engine, workspace.Window(), &m_try.Model);
         m_codeEditor.ReadOnly = true;
+        // ∑ The script pane completes like a script window (the Lua engine's
+        // globals and documented classes) and knows the open form: after the
+        // widgets table of form.load (`w.` in the generated script) it offers
+        // the named widgets, and after one of them, after the window variable
+        // or after a handler's `widget` parameter, the widget/window methods.
+        m_assist = MakeLuaAssist(m_engine);
+        {
+            const auto base = m_assist.Complete;
+            const auto baseDescribe = m_assist.Describe;
+            const auto classOf = [this](const std::string& chain, std::string& member) -> std::string {
+                std::string windowName = "window";
+                std::string widgetsName = "w";
+                {
+                    // `window, w = ui.form.load(` / `local win, widgets = manifold.ui.form.build(`
+                    const std::string& text = m_form.ScriptText;
+                    for (const std::string_view call : { std::string_view("form.load("), std::string_view("form.build(") })
+                    {
+                        const std::size_t at = text.find(call);
+                        if (at == std::string::npos)
+                            continue;
+                        std::size_t lineStart = text.rfind('\n', at);
+                        lineStart = lineStart == std::string::npos ? 0 : lineStart + 1;
+                        std::string head = text.substr(lineStart, at - lineStart);
+                        const std::size_t equals = head.find('=');
+                        if (equals == std::string::npos)
+                            continue;
+                        head = head.substr(0, equals);
+                        if (head.rfind("local ", 0) == 0)
+                            head = head.substr(6);
+                        const std::size_t comma = head.find(',');
+                        if (comma == std::string::npos)
+                            continue;
+                        const std::string first = Trim(std::string_view(head).substr(0, comma));
+                        const std::string second = Trim(std::string_view(head).substr(comma + 1));
+                        if (Lua::FormIsIdentifier(first))
+                            windowName = first;
+                        if (Lua::FormIsIdentifier(second))
+                            widgetsName = second;
+                        break;
+                    }
+                }
+                member.clear();
+                if (chain == windowName)
+                    return "manifold.ui.window.Window";
+                if (chain == "widget")
+                    return "manifold.ui.window.Widget";
+                if (chain == widgetsName)
+                    return "*widgets";
+                if (chain.size() > widgetsName.size() + 1 && chain.compare(0, widgetsName.size() + 1, widgetsName + ".") == 0)
+                {
+                    const std::string rest = chain.substr(widgetsName.size() + 1);
+                    if (!Lua::FormIsIdentifier(rest))
+                        return {};
+                    for (const auto& [id, meta] : m_form.Meta)
+                    {
+                        if (meta.Name == rest)
+                            return "manifold.ui.window.Widget";
+                    }
+                    if (rest.find('.') == std::string::npos)
+                        member = rest;
+                    return member.empty() ? std::string() : std::string("*widgets");
+                }
+                return {};
+            };
+            m_assist.Complete = [this, base, classOf](const std::string& chain, const std::string& prefix, bool method) {
+                std::string member;
+                const std::string owner = classOf(chain, member);
+                if (owner == "*widgets" && member.empty())
+                {
+                    std::vector<CodeSuggestion> names;
+                    for (const auto& [id, meta] : m_form.Meta)
+                    {
+                        if (meta.Name.empty() || id == m_form.Window || meta.Name.compare(0, prefix.size(), prefix) != 0)
+                            continue;
+                        const UiNode* node = m_form.Model.Find(id);
+                        const std::string kind = node ? std::string(Lua::FormKindTitle(node->Kind)) : std::string("Widget");
+                        names.push_back({ meta.Name, "object", "  " + kind, kind + " \"" + meta.Name + "\" of this form: a widget object (value, set, get, ...).", nullptr });
+                    }
+                    std::sort(names.begin(), names.end(), [](const CodeSuggestion& a, const CodeSuggestion& b) { return a.Name < b.Name; });
+                    return names;
+                }
+                if (!owner.empty() && owner[0] != '*')
+                {
+                    std::vector<Lua::LuaCompletion> items = m_engine.Lua().CompleteClass(owner, prefix, method);
+                    std::vector<CodeSuggestion> result;
+                    result.reserve(items.size());
+                    for (Lua::LuaCompletion& item : items)
+                        result.push_back({ std::move(item.Name), std::move(item.Kind), std::move(item.Signature), std::move(item.Text), std::move(item.Doc) });
+                    return result;
+                }
+                return base(chain, prefix, method);
+            };
+            m_assist.Describe = [this, baseDescribe, classOf](const std::string& chain, bool method) -> std::shared_ptr<const Lua::DocRecord> {
+                const std::size_t dot = chain.find_last_of(".:");
+                if (dot != std::string::npos)
+                {
+                    std::string member;
+                    const std::string owner = classOf(chain.substr(0, dot), member);
+                    if (!owner.empty() && owner[0] != '*')
+                        return m_engine.Lua().ClassMember(owner, chain.substr(dot + 1));
+                }
+                return baseDescribe(chain, method);
+            };
+        }
+        m_scriptEditor.Assist = &m_assist;
         Lua::FormDocument form = Lua::NewForm("New Form");
         const int section = Lua::FormAdd(form, UiKind::Section, form.Window);
         Lua::FormAdd(form, UiKind::Checkbox, section);
