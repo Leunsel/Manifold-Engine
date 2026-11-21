@@ -10,6 +10,7 @@
 #include "Lua/LuaEngine.h"
 #include "Lua/LuaModules.h"
 #include "Lua/LuaUi.h"
+#include "Lua/LuaDotNet.h"
 #include "Lua/LuaRtti.h"
 #include "Lua/LuaUnreal.h"
 #include "Scan/Scanner.h"
@@ -850,6 +851,7 @@ namespace Manifold::Lua
             RegisterUiNatives(state, -1);
             RegisterUnrealNatives(state, -1);
             RegisterRttiNatives(state, -1);
+            RegisterDotNetNatives(state, -1);
             RegisterModuleNatives(state, -1);
             if (lua_pcall(state, 1, 1, 0) != LUA_OK)
             {

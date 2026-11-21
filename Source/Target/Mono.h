@@ -32,6 +32,8 @@ namespace Manifold::Target
         std::uint64_t Handle = 0;   // MonoMethod* / MethodInfo* in the target
         std::uint64_t Address = 0;  // the code: JIT-compiled on first resolve (Mono), known up front (IL2CPP)
         int ParamCount = -1;        // read for IL2CPP; -1 when not read
+        std::uint32_t Token = 0;    // .NET: the MethodDef token
+        bool Static = false;        // .NET: a static method
     };
 
     struct MonoField
@@ -86,6 +88,8 @@ namespace Manifold::Target
         bool Discovered = false;    // IL2CPP: named from its shape in memory (a generic instance, an array)
         bool ValueTypesRead = false;
         std::vector<MonoField> Statics; // .NET: the static fields, read with the members
+        std::uint32_t Token = 0;        // .NET: the TypeDef token (0 for a type found by its object)
+        std::uint64_t Module = 0;       // .NET: the runtime's module the type belongs to
 
         std::string FullName() const { return Namespace.empty() ? Name : Namespace + "." + Name; }
     };
@@ -217,6 +221,8 @@ namespace Manifold::Target
         // whole heap in the helper and take a while; they do not hold the
         // bridge while they run.
         Result<ManagedHeap> ReadHeap();
+        // .NET: the loaded assemblies' modules.
+        std::vector<ManagedModule> Modules();
         Result<ManagedInstances> Instances(std::uint64_t klass, std::uint32_t limit);
         std::optional<ManagedObject> ObjectAt(std::uint64_t address);
         std::optional<int> FieldOffset(std::string_view className, std::string_view fieldName);
