@@ -3386,18 +3386,26 @@ namespace Manifold::UI
                         for (const Table::MemoryRecord* up = record->Parent; up; up = up->Parent)
                             ++depth;
                         const char* icon = record->Kind == Table::RecordKind::Script ? ICON_FA_CODE : record->Kind == Table::RecordKind::Group ? ICON_FA_FOLDER : ICON_FA_HASHTAG;
+                        // ∑ a description binds only when it names exactly one record;
+                        // a shared or empty one binds by id instead
+                        const int twins = record->Description.empty() ? 0 : m_engine.Table().CountByDescription(record->Description);
+                        const bool unique = twins == 1;
                         ImGui::PushID(record->Id);
                         ImGui::Indent(Px(12.0f) * static_cast<float>(depth));
-                        const std::string label = std::string(icon) + "  " + (record->Description.empty() ? "(no description)" : record->Description);
-                        if (ImGui::Selectable(label.c_str(), record->Description == current && !byId))
+                        const std::string label = std::string(icon) + "  " + (record->Description.empty() ? "(no description)" : record->Description) +
+                                                  (unique ? std::string() : "  \xC2\xB7  #" + std::to_string(record->Id));
+                        const bool chosen = byId ? current == std::to_string(record->Id) : unique && record->Description == current;
+                        if (ImGui::Selectable(label.c_str(), chosen))
                         {
-                            // descriptions read well and survive copying the table; an empty one needs the id
-                            if (record->Description.empty())
-                                store(std::to_string(record->Id), true);
-                            else
+                            if (unique)
                                 store(record->Description, false);
+                            else
+                                store(std::to_string(record->Id), true);
                             ImGui::CloseCurrentPopup();
                         }
+                        if (!unique && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                            ImGui::SetTooltip("%s", twins > 1 ? (std::to_string(twins) + " records have this description, so this one is bound by its id.").c_str()
+                                                              : "Without a description the record is bound by its id.");
                         ImGui::Unindent(Px(12.0f) * static_cast<float>(depth));
                         ImGui::PopID();
                         ++shown;
@@ -3412,7 +3420,15 @@ namespace Manifold::UI
                     ImGui::TableNextRow();
                     ImGui::TableSetColumnIndex(1);
                     Table::MemoryRecord* record = byId ? m_engine.Table().FindById(std::atoi(current.c_str())) : m_engine.Table().FindByDescription(current);
-                    if (record)
+                    const int twins = byId || !record ? 0 : m_engine.Table().CountByDescription(current);
+                    if (twins > 1)
+                    {
+                        ImGui::PushTextWrapPos(0.0f);
+                        ImGui::TextColored(ManifoldTheme::Warning, "%s", (std::string(ICON_FA_EXCLAMATION_TRIANGLE "  ") + std::to_string(twins) +
+                            " records have this description, so it does not say which one is meant: the widget stays disabled. Pick the record from the list to bind it by its id, or give the records distinct descriptions.").c_str());
+                        ImGui::PopTextWrapPos();
+                    }
+                    else if (record)
                         Muted(std::string(record->Kind == Table::RecordKind::Script ? "A script" : record->Kind == Table::RecordKind::Group ? "A group" : "A value") + " of the open table" +
                               (wantsValue && record->Kind != Table::RecordKind::Value ? ": it has no value to show" : ""));
                     else
@@ -4511,6 +4527,15 @@ namespace Manifold::UI
             m_selected = m_form.Window;
         m_hovered = 0;
         m_problems = Lua::FormProblems(m_form);
+        // bindings that the open table cannot resolve to one record
+        for (const auto& [id, meta] : m_form.Meta)
+        {
+            if (meta.Record.empty() || meta.RecordById || !m_form.Model.Find(id))
+                continue;
+            if (const int twins = m_engine.Table().CountByDescription(meta.Record); twins > 1)
+                m_problems.push_back({ id, std::string(Lua::FormKindTitle(m_form.Model.Find(id)->Kind)) + ": " + std::to_string(twins) + " records of the open table are named \"" + meta.Record +
+                                               "\"; bind it by id (pick it in Memory Record)" });
+        }
         m_problemNodes.clear();
         for (const Lua::FormProblem& problem : m_problems)
             m_problemNodes.insert(problem.Node);

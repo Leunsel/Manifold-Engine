@@ -356,6 +356,9 @@ namespace Manifold
             { ErrorCode::TableRecordNoValue, "The memory record {} has no value.",
                 "Scripts and groups are switched on and off; only value records have an address and a value.",
                 "Use setActive for scripts and groups." },
+            { ErrorCode::TableRecordAmbiguous, "Several memory records are named {}.",
+                "The description is not unique in the table, so it does not say which record is meant.",
+                "Give the records distinct descriptions, or name the record by its id (a form takes record = <id>, the Form Editor #id). manifold.record.findAll lists them." },
 
             { ErrorCode::LuaSyntax, "Lua syntax error: {}.",
                 "The script does not compile.",

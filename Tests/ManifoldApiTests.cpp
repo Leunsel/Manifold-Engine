@@ -69,7 +69,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 20 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 21 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -394,6 +394,15 @@ namespace Manifold::Tests
                 if none ~= nil or noValue.code ~= "ME-6010" then return "script value " .. tostring(noValue) end
                 local missing, notFound = R.find("No Such Record")
                 if missing ~= nil or notFound.code ~= "ME-6008" then return "find missing " .. tostring(notFound) end
+                -- a description shared by two records names neither
+                local twin = R.create({ kind = "group", description = "Probe Group" })
+                local either, ambiguous = R.find("Probe Group")
+                if either ~= nil or ambiguous.code ~= "ME-6011" or not ambiguous.message:find("(2)", 1, true) then return "ambiguous find " .. tostring(ambiguous) end
+                local twins = R.findAll("Probe Group")
+                if #twins ~= 2 or twins[1] ~= group or twins[2] ~= twin then return "findAll" end
+                if #R.findAll("Nobody") ~= 0 then return "findAll none" end
+                twin.remove()
+                if R.find("Probe Group") ~= group then return "unique again" end
                 local count = 0
                 for _, each in ipairs(R.all()) do
                   if each == value or each == float or each == group or each == script or each == child then count = count + 1 end
@@ -2313,6 +2322,8 @@ return M
                 end
                 local R = manifold.record
                 bindSwitch = R.create({ kind = "script", description = "Bind Switch", script = "[ENABLE]\n[DISABLE]\n" })
+                bindTwinA = R.create({ description = "Bind Twin", address = ("%X"):format(probeValue) })
+                bindTwinB = R.create({ description = "Bind Twin", address = ("%X"):format(probeValue) })
                 bindNumber = R.create({ description = "Bind Number", address = ("%X"):format(probeValue) })
                 bindClicks = 0
                 bindWindow, bindWidgets = manifold.ui.form.build({ form = 1, title = "Bind Probe", children = {
@@ -2322,12 +2333,13 @@ return M
                     { kind = "text", name = "shown", record = "Bind Number" },
                     { kind = "slider", name = "lost", record = "No Such Record" },
                     { kind = "slider", name = "guarded", record = "Bind Number", enabledWhen = "god" },
+                    { kind = "number", name = "twin", record = "Bind Twin" },
                   } }, { flipped = function() bindClicks = bindClicks + 1 end })
                 local w = bindWidgets
                 if w.god.get() ~= false then return "checkbox starts as the record" end
                 if w.amount.get() ~= 77 then return "number shows the value: " .. tostring(w.amount.get()) end
                 if w.shown.get() ~= "77" then return "text shows the value: " .. tostring(w.shown.get()) end
-                bindIds = { god = w.god.id, flip = w.flip.id, amount = w.amount.id, shown = w.shown.id, lost = w.lost.id, guarded = w.guarded.id }
+                bindIds = { god = w.god.id, flip = w.flip.id, amount = w.amount.id, shown = w.shown.id, lost = w.lost.id, guarded = w.guarded.id, twin = w.twin.id }
 
                 local function raises(fn, needle)
                   local ok, failure = pcall(fn)
@@ -2343,13 +2355,16 @@ return M
             std::map<std::string, int> ids;
             {
                 std::string result;
-                engine.Lua().RunWithResult("return ('%d %d %d %d %d %d'):format(bindIds.god, bindIds.flip, bindIds.amount, bindIds.shown, bindIds.lost, bindIds.guarded)", "bind ids", result);
+                engine.Lua().RunWithResult("return ('%d %d %d %d %d %d %d'):format(bindIds.god, bindIds.flip, bindIds.amount, bindIds.shown, bindIds.lost, bindIds.guarded, bindIds.twin)", "bind ids", result);
                 std::istringstream read(result);
-                for (const char* name : { "god", "flip", "amount", "shown", "lost", "guarded" })
+                for (const char* name : { "god", "flip", "amount", "shown", "lost", "guarded", "twin" })
                     read >> ids[name];
             }
             const auto node = [&](const char* name) { return model.Find(ids[name]); };
             CHECK(node("lost") && !node("lost")->Enabled);
+            // two records share the description: the widget binds to neither, and says so once
+            CHECK(node("twin") && !node("twin")->Enabled && node("twin")->Number == 0.0);
+            CHECK_EQ(CountEntries(engine, LogLevel::Warning, "Several memory records are named \"Bind Twin\""), std::size_t(1));
             CHECK(node("guarded") && !node("guarded")->Enabled); // its rule: god is off
 
             // the user turns the switch on and types a number: the records follow
@@ -2385,6 +2400,8 @@ return M
                 bindWindow.remove()
                 bindSwitch.remove()
                 bindNumber.remove()
+                bindTwinA.remove()
+                bindTwinB.remove()
                 return "ok")LUA");
             CHECK(!FindWindow(model, "Bind Probe"));
             g_probeValue = keptValue;

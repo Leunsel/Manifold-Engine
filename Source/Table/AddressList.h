@@ -171,6 +171,7 @@ namespace Manifold::Table
 
         MemoryRecord* FindById(int id);
         MemoryRecord* FindByDescription(std::string_view description);
+        int CountByDescription(std::string_view description); // how many records have it
         void ForEach(const std::function<void(MemoryRecord&)>& visit);
         void ForEachVisible(const std::function<void(MemoryRecord&, int depth)>& visit);
         std::vector<MemoryRecord*> Flatten();
@@ -223,6 +224,7 @@ namespace Manifold::Table
         std::vector<std::unique_ptr<MemoryRecord>> m_roots;
         std::unordered_map<int, MemoryRecord*> m_byId;
         std::unordered_map<std::string, MemoryRecord*> m_byDescription;
+        std::unordered_map<std::string, int> m_descriptionCount;
         std::uint64_t m_describedAt = 0;
         std::vector<int> m_selection;
         int m_nextId = 0;

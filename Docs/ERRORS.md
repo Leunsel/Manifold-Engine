@@ -133,6 +133,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-6008 | There is no memory record …. | No record of the open table has that id or description. | Check the spelling; descriptions are matched as they are written in the address list. manifold.record.all lists the records. |
 | ME-6009 | The memory record … is gone. | The record was deleted, or the table was replaced by a new, opened or restored one. | Find the record again with manifold.record.find. |
 | ME-6010 | The memory record … has no value. | Scripts and groups are switched on and off; only value records have an address and a value. | Use setActive for scripts and groups. |
+| ME-6011 | Several memory records are named …. | The description is not unique in the table, so it does not say which record is meant. | Give the records distinct descriptions, or name the record by its id (a form takes record = <id>, the Form Editor #id). manifold.record.findAll lists them. |
 
 ## Lua
 

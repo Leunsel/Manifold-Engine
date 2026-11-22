@@ -108,13 +108,29 @@ namespace Manifold::Lua
             }
             else
             {
-                shown = luaL_checkstring(state, 1);
-                record = table.FindByDescription(shown);
-                shown = "\"" + shown + "\"";
+                // ∑ a description names a record only when no other record has it
+                const std::string description = luaL_checkstring(state, 1);
+                record = table.FindByDescription(description);
+                shown = "\"" + description + "\"";
+                if (const int count = record ? table.CountByDescription(description) : 0; count > 1)
+                    return PushFailure(state, ErrorCode::TableRecordAmbiguous, shown + " (" + std::to_string(count) + ")");
             }
             if (!record)
                 return PushFailure(state, ErrorCode::TableRecordNotFound, shown);
             lua_pushinteger(state, record->Id);
+            return 1;
+        }
+
+        int RecordFindAll(lua_State* state)
+        {
+            const std::string description = luaL_checkstring(state, 1);
+            std::vector<MemoryRecord*> found;
+            for (MemoryRecord* record : Owner(state).Table().Flatten())
+            {
+                if (record->Description == description)
+                    found.push_back(record);
+            }
+            PushIds(state, found);
             return 1;
         }
 
@@ -404,6 +420,7 @@ namespace Manifold::Lua
             { "recordIdentity", &RecordIdentity },
             { "recordFind", &RecordFind },
             { "recordAll", &RecordAll },
+            { "recordFindAll", &RecordFindAll },
             { "recordSelected", &RecordSelected },
             { "recordChildren", &RecordChildren },
             { "recordInfo", &RecordInfo },

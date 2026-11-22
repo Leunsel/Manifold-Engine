@@ -267,6 +267,7 @@ namespace Manifold::Table
         m_roots.clear();
         m_byId.clear();
         m_byDescription.clear();
+        m_descriptionCount.clear();
         m_selection.clear();
         TableLuaScript.clear();
         TableComment.clear();
@@ -301,8 +302,21 @@ namespace Manifold::Table
         if (m_describedAt == m_generation)
             return;
         m_byDescription.clear();
-        ForEach([&](MemoryRecord& record) { m_byDescription.emplace(record.Description, &record); });
+        m_descriptionCount.clear();
+        ForEach([&](MemoryRecord& record) {
+            m_byDescription.emplace(record.Description, &record);
+            ++m_descriptionCount[record.Description];
+        });
         m_describedAt = m_generation;
+    }
+
+    int AddressList::CountByDescription(std::string_view description)
+    {
+        // a description edited without a table change shows up as a miss: count again then
+        if (!FindByDescription(description))
+            return 0;
+        const auto found = m_descriptionCount.find(std::string(description));
+        return found == m_descriptionCount.end() ? 0 : found->second;
     }
 
     MemoryRecord* AddressList::FindById(int id)
