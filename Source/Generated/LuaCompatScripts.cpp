@@ -5215,7 +5215,7 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 23
+local API_VERSION = 24
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -7547,25 +7547,25 @@ local function withCommon(keys)
 end
 
 local WIDGET_KEYS = {
-  row = withCommon({ align = "string", gap = "number" }),
-  column = withCommon({ gap = "number", scroll = "boolean" }),
+  row = withCommon({ align = "string", gap = "number", wrap = "boolean" }),
+  column = withCommon({ gap = "number", scroll = "boolean", labelPosition = "string" }),
   grid = withCommon({ columns = "integer" }),
-  section = withCommon({ title = "string", icon = "string", badge = "string", collapsible = "boolean", open = "boolean", gap = "number" }),
+  section = withCommon({ title = "string", icon = "string", badge = "string", collapsible = "boolean", open = "boolean", gap = "number", labelPosition = "string" }),
   tabs = withCommon({}),
-  tab = withCommon({ title = "string", icon = "string", gap = "number", scroll = "boolean" }),
-  split = withCommon({ vertical = "boolean", ratio = "number" }),
-  text = withCommon({ text = "string", color = "string", wrap = "boolean", mono = "boolean" }),
-  heading = withCommon({ text = "string", icon = "string" }),
+  tab = withCommon({ title = "string", icon = "string", gap = "number", scroll = "boolean", labelPosition = "string" }),
+  split = withCommon({ vertical = "boolean", ratio = "number", labelPosition = "string" }),
+  text = withCommon({ text = "string", color = "string", wrap = "boolean", mono = "boolean", align = "string", size = "number", bold = "boolean" }),
+  heading = withCommon({ text = "string", icon = "string", color = "string", align = "string", size = "number" }),
   separator = withCommon({ text = "string" }),
   spacer = withCommon({}),
   button = withCommon({ text = "string", icon = "string", style = "string", shortcut = "string", confirm = "string", onClick = "function" }),
   checkbox = withCommon({ label = "string", value = "boolean", style = "string", onChange = "function" }),
-  input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", readOnly = "boolean", maxLength = "integer", focus = "boolean", onChange = "function", onSubmit = "function" }),
-  number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", focus = "boolean", onChange = "function" }),
-  slider = withCommon({ label = "string", value = "number", min = "number", max = "number", integer = "boolean", format = "string", onChange = "function" }),
-  combo = withCommon({ label = "string", items = "table", value = "choice", multi = "boolean", onChange = "function" }),
-  radio = withCommon({ label = "string", items = "table", value = "integer", horizontal = "boolean", onChange = "function" }),
-  color = withCommon({ label = "string", value = "string", alpha = "boolean", onChange = "function" }),
+  input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", readOnly = "boolean", maxLength = "integer", focus = "boolean", labelPosition = "string", onChange = "function", onSubmit = "function" }),
+  number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", focus = "boolean", labelPosition = "string", onChange = "function" }),
+  slider = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", format = "string", labelPosition = "string", onChange = "function" }),
+  combo = withCommon({ label = "string", items = "table", value = "choice", multi = "boolean", hint = "string", labelPosition = "string", onChange = "function" }),
+  radio = withCommon({ label = "string", items = "table", value = "integer", horizontal = "boolean", labelPosition = "string", onChange = "function" }),
+  color = withCommon({ label = "string", value = "string", alpha = "boolean", labelPosition = "string", onChange = "function" }),
   table = withCommon({ columns = "table", rows = "table", value = "integer", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
   tree = withCommon({ items = "table", value = "string", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
   progress = withCommon({ value = "number", text = "string" }),
@@ -7664,7 +7664,11 @@ local function checkOptions(path, keys, options)
   elseif options.style ~= nil and not BUTTON_STYLES[options.style] then
     misuse(('%s: options.style must be one of "default", "accent", "danger", got %q'):format(path, options.style))
   end
-  if options.align ~= nil and not ROW_ALIGNS[options.align] then
+  if options.labelPosition ~= nil and options.labelPosition ~= "left" and options.labelPosition ~= "above" and options.labelPosition ~= "right" then
+    misuse(('%s: options.labelPosition must be "left", "above" or "right", got %q'):format(path, options.labelPosition))
+  end
+)MLUA"),
+            std::string_view(R"MLUA(  if options.align ~= nil and not ROW_ALIGNS[options.align] then
     misuse(('%s: options.align must be one of "left", "center", "right", got %q'):format(path, options.align))
   end
   if options.columns ~= nil and keys.columns == "integer" and (options.columns < 1 or options.columns > 16) then
@@ -7683,8 +7687,7 @@ local function handlerBits(options)
       bits = bits | bit
     end
   end
-)MLUA"),
-            std::string_view(R"MLUA(  return bits
+  return bits
 end
 
 local function props(options)
@@ -7884,10 +7887,10 @@ widgetObject = function(entry)
   return proxy
 end
 
-local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open = "boolean", dock = "boolean", interval = "number", key = "string", opacity = "number", inactiveOpacity = "number",
+local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open = "boolean", dock = "boolean", interval = "number", key = "string", opacity = "number", inactiveOpacity = "number", labelPosition = "string",
   minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean", modal = "boolean",
   position = "string", x = "number", y = "number", onClose = "function", onUpdate = "function" }
-local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", opacity = "number", inactiveOpacity = "number",
+local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", opacity = "number", inactiveOpacity = "number", labelPosition = "string",
   minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean", modal = "boolean",
   onClose = "function", onUpdate = "function" }
 local WINDOW_FLAG_KEYS = { "minWidth", "minHeight", "maxWidth", "maxHeight", "resizable", "autoSize", "scrollbar", "topmost", "modal" }
@@ -7936,7 +7939,7 @@ local function windowObject(entry)
     if options.onUpdate ~= nil then
       entry.onUpdate = options.onUpdate
     end
-    local copy = { title = options.title, icon = options.icon, interval = options.interval, opacity = options.opacity, inactiveOpacity = options.inactiveOpacity, handlers = entry.onClose and UI_HANDLER_BITS.onClose or 0 }
+    local copy = { title = options.title, icon = options.icon, interval = options.interval, opacity = options.opacity, inactiveOpacity = options.inactiveOpacity, labelPosition = options.labelPosition, handlers = entry.onClose and UI_HANDLER_BITS.onClose or 0 }
     for _, key in ipairs(WINDOW_FLAG_KEYS) do
       copy[key] = options[key]
     end
@@ -8003,6 +8006,7 @@ define(window, "create", {
     interval = options.interval,
     opacity = options.opacity,
     inactiveOpacity = options.inactiveOpacity,
+    labelPosition = options.labelPosition,
     updates = options.onUpdate ~= nil,
     handlers = options.onClose and UI_HANDLER_BITS.onClose or 0,
     key = options.key,
@@ -8053,13 +8057,14 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
   title = "Widget objects",
   doc = table.concat({
     "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line); `minWidth` and `maxWidth` keep fields, buttons and lists within that range, and a text wraps at `maxWidth`. Handlers get the widget as their last argument.",
-    "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line. `gap` (points) sets the space between the widgets of a row, column, section or tab; a column or tab with `scroll = true` scrolls inside its `height` (200).",
+    "- Labels of fields (`input`, `number`, `slider`, `combo`, `radio`, `color`): `labelPosition` is `left` (the default: the labels of one column, section or window share a column and the fields line up after it, and a checkbox among them lines up with the fields), `above` or `right` (after the field). Set on a window, column, section, tab or split it is the default for the fields inside. When none is set and a column is too narrow for the labels beside the fields, the labels go above them instead. A field fills the rest of its line unless it has a `width`, so no label is cut off; a negative `height` makes a table, tree, canvas, scrolling column or tab, multi-line input or section fill the height that is left.",
+    "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line. In a row, fields, bars, cards, lists and columns without a `width` share the free width equally, a `spacer` without a width takes a share too (so what follows it goes to the right), and `wrap = true` moves a widget that does not fit to the next line. `gap` (points) sets the space between the widgets of a row, column, section or tab; a column or tab with `scroll = true` scrolls inside its `height` (200).",
     "- `grid`: places its widgets in `columns` (2) cells per row, row by row. The first column fits its content and the others share the rest, so `text` then a field per row lines labels up; a field without a `label` fills its cell.",
     "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it, `open = false` starts it folded.",
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
-    "- `text` (`text`, `color`, `wrap`, `mono`), `heading` (`text`, `icon`), `separator` (`text` puts a caption into the line), `spacer`.",
-    "- `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through.",
-    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
+    "- `text` (`text`, `color`, `wrap`, `mono`, `bold`, `size` in points, `align` = `left`, `center` or `right` for text that does not wrap), `heading` (`text`, `icon`, `color`, `size`, `align`), `separator` (`text` puts a caption into the line), `spacer`.",
+    "- `button`: `text`, `icon` (an icon without text makes an icon button), `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through.",
+    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
@@ -8075,11 +8080,11 @@ local WIDGET_METHOD_DOCS = {
     "By kind: a `text` or `heading` takes `text`; a `button` `text`, `icon`, `style`; a `checkbox` `label`, `value`, `style`; an `input` `label`, `value`, `hint`, `readOnly`; a `number` or `slider` `label`, `value`, `min`, `max`, `format`; a `combo` or `radio` `items` and `value` (new items keep the chosen number while it exists); a `progress` `value` (0..1) and `text`; a `table` `columns`, `rows`, `value`; a `tree` `items`, `value`; a `section` or `tab` `title`, `icon`, `badge`. A new `value` does not call `onChange`.",
     "Example: `w.speed.update({ value = 2, enabled = god.get() })`, `w.status.update({ text = \"Attached\", color = \"success\" })`.",
   }, " ") },
-  get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a colour's `#RRGGBB`, a number, the chosen combo, radio or table row's number (a combo with `multi` returns the list of chosen numbers), the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
+)MLUA"),
+            std::string_view(R"MLUA(  get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a colour's `#RRGGBB`, a number, the chosen combo, radio or table row's number (a combo with `multi` returns the list of chosen numbers), the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
   set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
   draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
-)MLUA"),
-            std::string_view(R"MLUA(  getView = { returns = "table", doc = "A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom." },
+  getView = { returns = "table", doc = "A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom." },
   setView = { params = { { name = "view", type = "table", keys = { x = "number", y = "number", scale = "number" } } }, returns = "boolean", doc = "Moves or zooms a canvas's view." },
 }
 for _, name in ipairs({ "add", "clear", "remove", "update", "get", "set", "draw", "getView", "setView" }) do
@@ -8319,7 +8324,8 @@ local function checkForm(path, spec, handlers)
         copy.image = nil
       end
       checkOptions(path .. "(" .. child.kind .. ")", keys, copy)
-      walk(child.kind, child.children, label, depth + 1)
+)MLUA"),
+            std::string_view(R"MLUA(      walk(child.kind, child.children, label, depth + 1)
     end
   end
   walk("window", spec.children, "form", 1)
@@ -8345,8 +8351,7 @@ end
 -- hides it), `links.modals` the form's modals by name (`opens` shows one).
 local function fillForm(path, made, members, children, resolve, folder, links)
   -- `links.wiring` (shared by the form's windows) holds the enabledWhen rules
-)MLUA"),
-            std::string_view(R"MLUA(  -- by the name of the widget they listen to; `refresh(name)` applies them
+  -- by the name of the widget they listen to; `refresh(name)` applies them
   local wiring = links.wiring
   if wiring and not wiring.refresh then
     wiring.refresh = function(name)
@@ -8613,7 +8618,8 @@ local function buildForm(path, spec, handlers, folder)
     fillForm(path, made, members, spec.children, resolve, folder, { window = made, modals = modalMembers, wiring = wiring })
     for _, modal in ipairs(modals) do
       local handle = rawget(modalMembers, modal.name)
-      fillForm(path, handle, members, modal.spec.children, resolve, folder, { window = handle, modals = modalMembers, wiring = wiring })
+)MLUA"),
+            std::string_view(R"MLUA(      fillForm(path, handle, members, modal.spec.children, resolve, folder, { window = handle, modals = modalMembers, wiring = wiring })
     end
     for name in pairs(wiring.rules) do
       wiring.refresh(name)
@@ -8652,8 +8658,7 @@ local function readFormFile(file, folder, block)
   if not ok or type(spec) ~= "table" then
     return nil, "ME-7014", ok and (shown .. " does not return a table") or tostring(spec)
   end
-)MLUA"),
-            std::string_view(R"MLUA(  return spec, shown
+  return spec, shown
 end
 
 local function reloadForm(watch, start)
@@ -8841,7 +8846,8 @@ define(form, "load", {
   return made, widgets, modalTable
 end)
 
-local function plainObject(entry, prefix, docPrefix, methods, fields)
+)MLUA"),
+            std::string_view(R"MLUA(local function plainObject(entry, prefix, docPrefix, methods, fields)
   local proxy, members = strict(prefix)
   for name, spec in pairs(methods) do
     bind(proxy, prefix .. "." .. name, members, name, spec, spec.body, docPrefix .. name)
@@ -8874,8 +8880,7 @@ native.docDefine(nil, "manifold.ui.dialog.Dialog", {
   doc = "The dialog functions return at once; the dialog shows on top of the program and calls `onClose` with the answer when the user is done.",
 })
 native.docDefine(nil, "manifold.ui.dialog.Dialog.close", { returns = "boolean", doc = "Closes the dialog without an answer; `onClose` is not called." })
-)MLUA"),
-            std::string_view(R"MLUA(native.docDefine(nil, "manifold.ui.dialog.Dialog.id", { kind = "field", type = "integer", doc = "The dialog's number." })
+native.docDefine(nil, "manifold.ui.dialog.Dialog.id", { kind = "field", type = "integer", doc = "The dialog's number." })
 
 local dialog = subarea(ui, "dialog", "Dialogs on top of the program. They do not block the script: each takes `onClose`, which gets the answer, or nil when the user cancelled.")
 
@@ -9123,7 +9128,8 @@ define(menu, "add", {
   return addEntry("menu", MENU_KEYS, { path = path, text = text }, options)
 end)
 
-local TOOLBAR_KEYS = { text = "string", tooltip = "string", enabled = "boolean", onClick = "function", icon = "string" }
+)MLUA"),
+            std::string_view(R"MLUA(local TOOLBAR_KEYS = { text = "string", tooltip = "string", enabled = "boolean", onClick = "function", icon = "string" }
 local toolbar = subarea(ui, "toolbar", "Buttons in the main window's title bar, between the process and the Memory view button.")
 
 define(toolbar, "add", {
@@ -9149,8 +9155,7 @@ define(status, "add", {
   returns = "entry",
   doc = "Adds a status entry. Options: `icon`, `tooltip`, `color` (a theme name), `onClick(entry)`.",
 }, function(text, options)
-)MLUA"),
-            std::string_view(R"MLUA(  return addEntry("status", STATUS_KEYS, { text = text }, options)
+  return addEntry("status", STATUS_KEYS, { text = text }, options)
 end)
 
 local image = subarea(ui, "image", "Pictures for `image` widgets and canvas drawings.")
@@ -9423,7 +9428,8 @@ end)
 define(moduleArea, "onUnload", {
   params = { { name = "handler", type = "function" } },
   returns = "true, or nil, error",
-  doc = "Calls `handler()` when the calling module is unloaded: before it is reloaded, when it is switched off, and before all modules run again. The program removes what the module registered through `manifold` on its own; the handler takes down the rest, such as Cheat Engine menu items, forms and timers. Handlers run in reverse order. `ME-7011` when the caller is not an autorun module.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Calls `handler()` when the calling module is unloaded: before it is reloaded, when it is switched off, and before all modules run again. The program removes what the module registered through `manifold` on its own; the handler takes down the rest, such as Cheat Engine menu items, forms and timers. Handlers run in reverse order. `ME-7011` when the caller is not an autorun module.",
 }, function(handler)
   local key = callerModule()
   if not key then
@@ -9460,8 +9466,7 @@ debug.getregistry()["Manifold.UiTick"] = function(now)
     if entry then
       if event.name == "dialog" then
         uiEntries[event.target] = nil
-)MLUA"),
-            std::string_view(R"MLUA(        forget(entry.owner, entry.id)
+        forget(entry.owner, entry.id)
         if entry.onDialog then
           callHandler(entry.onDialog, table.unpack(event, 1, event.n))
         end

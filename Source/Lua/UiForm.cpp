@@ -55,15 +55,18 @@ namespace Manifold::Lua
             { "topmost", T::Bool, "Stays above other windows while floating; it does not dock." },
             { "position", T::Choice, "Where the window opens the first time.", "default|center|mouse" },
             { "open", T::Bool, "Shown when the script runs; off creates it hidden until the script calls show()." },
+            { "labelPosition", T::Choice, "Where the labels of the fields inside go, unless a field says otherwise: left (lined up in one column), above, or right.", "default|left|above|right" },
         };
 
         constexpr FormProp kRow[] = {
             { "align", T::Choice, "Where the row's widgets sit in the line.", "left|center|right" },
             { "gap", T::Number, "Space between the widgets in points; empty for the usual space." },
+            { "wrap", T::Bool, "Widgets that do not fit go to the next line, like a toolbar that wraps." },
         };
         constexpr FormProp kColumn[] = {
             { "gap", T::Number, "Space between the widgets in points; empty for the usual space." },
-            { "scroll", T::Bool, "Scrolls inside its height (200 when the height is 0)." },
+            { "scroll", T::Bool, "Scrolls inside its height (200 when the height is 0, the rest of the window when it is negative)." },
+            { "labelPosition", T::Choice, "Where the labels of the fields inside go, unless a field says otherwise: left (lined up in one column), above, or right.", "default|left|above|right" },
         };
         constexpr FormProp kGrid[] = { { "columns", T::Integer, "Number of columns. Widgets fill the cells row by row; the first column fits its content, the others share the rest." } };
         constexpr FormProp kSection[] = {
@@ -73,31 +76,40 @@ namespace Manifold::Lua
             { "collapsible", T::Bool, "The user can fold the section." },
             { "open", T::Bool, "A collapsible section starts unfolded." },
             { "gap", T::Number, "Space between the widgets in points; empty for the usual space." },
+            { "labelPosition", T::Choice, "Where the labels of the fields inside go, unless a field says otherwise: left (lined up in one column), above, or right.", "default|left|above|right" },
         };
         constexpr FormProp kTab[] = {
             { "title", T::String, "Text on the tab." },
             { "icon", T::Icon, "Font Awesome icon on the tab." },
             { "gap", T::Number, "Space between the widgets in points; empty for the usual space." },
-            { "scroll", T::Bool, "Scrolls inside its height (200 when the height is 0)." },
+            { "scroll", T::Bool, "Scrolls inside its height (200 when the height is 0, the rest of the window when it is negative)." },
+            { "labelPosition", T::Choice, "Where the labels of the fields inside go, unless a field says otherwise: left (lined up in one column), above, or right.", "default|left|above|right" },
         };
         constexpr FormProp kSplit[] = {
             { "vertical", T::Bool, "Stacks the two parts instead of placing them side by side." },
             { "ratio", T::Number, "Share of the first part, 0.05 to 0.95." },
+            { "labelPosition", T::Choice, "Where the labels of the fields inside go, unless a field says otherwise: left (lined up in one column), above, or right.", "default|left|above|right" },
         };
         constexpr FormProp kText[] = {
             { "text", T::Text, "The text." },
             { "color", T::Color, "Theme colour name or #RRGGBB." },
             { "wrap", T::Bool, "Wraps at the edge of the window." },
             { "mono", T::Bool, "Fixed-width font." },
+            { "bold", T::Bool, "Bold font." },
+            { "size", T::Number, "Font size in points; 0 for the usual size." },
+            { "align", T::Choice, "Where a text that does not wrap sits in its line.", "left|center|right" },
         };
         constexpr FormProp kHeading[] = {
             { "text", T::String, "The heading." },
             { "icon", T::Icon, "Font Awesome icon in front of it." },
+            { "color", T::Color, "Theme colour name or #RRGGBB." },
+            { "size", T::Number, "Font size in points; 0 for the usual size." },
+            { "align", T::Choice, "Where the heading sits in its line.", "left|center|right" },
         };
         constexpr FormProp kSeparator[] = { { "text", T::String, "Optional text inside the line." } };
         constexpr FormProp kButton[] = {
             { "text", T::String, "Text on the button." },
-            { "icon", T::Icon, "Font Awesome icon in front of the text." },
+            { "icon", T::Icon, "Font Awesome icon in front of the text; with no text, an icon button." },
             { "style", T::Choice, "Look of the button.", "default|accent|danger" },
             { "shortcut", T::String, "Keys that click it while its window has the focus, like Ctrl+S or F5." },
             { "confirm", T::String, "Asks this before the click goes through; empty for no question." },
@@ -116,6 +128,7 @@ namespace Manifold::Lua
             { "readOnly", T::Bool, "The text can be selected and copied, not changed." },
             { "maxLength", T::Integer, "Most characters; 0 for no limit." },
             { "focus", T::Bool, "The cursor is in this field when the window opens." },
+            { "labelPosition", T::Choice, "Where the label goes: left of the field (in the container's label column), above it, or right of it; default follows the container.", "default|left|above|right" },
         };
         constexpr FormProp kNumber[] = {
             { "label", T::String, "Text beside the field." },
@@ -127,31 +140,38 @@ namespace Manifold::Lua
             { "hex", T::Bool, "Shown and typed as hexadecimal (whole numbers)." },
             { "format", T::String, "printf format for decimals, like %.2f." },
             { "focus", T::Bool, "The cursor is in this field when the window opens." },
+            { "labelPosition", T::Choice, "Where the label goes: left of the field (in the container's label column), above it, or right of it; default follows the container.", "default|left|above|right" },
         };
         constexpr FormProp kSlider[] = {
             { "label", T::String, "Text beside the slider." },
             { "value", T::Number, "Value at the start." },
             { "min", T::Number, "Left end (0 when empty)." },
             { "max", T::Number, "Right end (1, or 100 for whole numbers, when empty)." },
+            { "step", T::Number, "The value snaps to steps of this size; 0 for none." },
             { "integer", T::Bool, "Whole numbers only." },
             { "format", T::String, "printf format, like %.1f x." },
+            { "labelPosition", T::Choice, "Where the label goes: left of the field (in the container's label column), above it, or right of it; default follows the container.", "default|left|above|right" },
         };
         constexpr FormProp kCombo[] = {
             { "label", T::String, "Text beside the box." },
             { "items", T::Items, "The choices, one per line." },
             { "multi", T::Bool, "Several items can be ticked; the value is then the list of their numbers." },
             { "value", T::Integer, "The chosen item at the start (its number); none for nothing chosen." },
+            { "hint", T::String, "Grey text while nothing is chosen." },
+            { "labelPosition", T::Choice, "Where the label goes: left of the field (in the container's label column), above it, or right of it; default follows the container.", "default|left|above|right" },
         };
         constexpr FormProp kRadio[] = {
             { "label", T::String, "Text beside the group." },
             { "items", T::Items, "The choices, one per line." },
             { "value", T::Integer, "Number of the chosen item at the start; 0 for none." },
             { "horizontal", T::Bool, "Places the choices in one line." },
+            { "labelPosition", T::Choice, "Where the label goes: left of the field (in the container's label column), above it, or right of it; default follows the container.", "default|left|above|right" },
         };
         constexpr FormProp kColor[] = {
             { "label", T::String, "Text beside the colour." },
             { "value", T::Color, "Colour at the start, #RRGGBB or #RRGGBBAA." },
             { "alpha", T::Bool, "Has an alpha channel; the value is #RRGGBBAA." },
+            { "labelPosition", T::Choice, "Where the label goes: left of the field (in the container's label column), above it, or right of it; default follows the container.", "default|left|above|right" },
         };
         constexpr FormProp kTable[] = {
             { "columns", T::Columns, "One column per line: title | width | align (width and align are optional)." },
@@ -2481,6 +2501,9 @@ namespace Manifold::Lua
         if (key == "text") return node.Text;
         if (key == "color") return node.Color;
         if (key == "wrap") return flag(node.Wrap);
+        if (key == "labelPosition") return node.LabelPosition.empty() ? std::string("default") : node.LabelPosition;
+        if (key == "size") return NumberText(node.FontSize);
+        if (key == "bold") return flag(node.Bold);
         if (key == "mono") return flag(node.Mono);
         if (key == "style") return node.Style.empty() ? std::string(node.Kind == UiKind::Checkbox ? "checkbox" : "default") : node.Style;
         if (key == "multi") return flag(node.Multi);
@@ -2612,6 +2635,9 @@ namespace Manifold::Lua
         else if (key == "text") node.Text = text;
         else if (key == "color") node.Color = Trim(text);
         else if (key == "wrap") node.Wrap = yes;
+        else if (key == "labelPosition") node.LabelPosition = value == "default" ? std::string() : text;
+        else if (key == "size") node.FontSize = numeric ? std::clamp(real, 0.0f, 200.0f) : 0.0f;
+        else if (key == "bold") node.Bold = yes;
         else if (key == "mono") node.Mono = yes;
         else if (key == "style") node.Style = value == "default" || value == "checkbox" ? std::string() : text;
         else if (key == "multi")

@@ -177,6 +177,7 @@ namespace Manifold::UI
         ImDrawList* m_marks = nullptr; // the marks layer of the frame being drawn (see PreviewFrame)
         std::map<int, ImDrawList*> m_frameMarks;                 // per window: its frame's marks layer, this frame only
         std::map<int, std::pair<ImVec2, ImVec2>> m_frameClips;   // per window: where its marks may draw
+        ImVec2 m_surfaceMin, m_surfaceMax;                       // the visible work surface (tags may sit beside a form)
         ImGuiID m_previewMenu = 0;
         std::string m_activeChip;
         std::string m_hoveredChip;

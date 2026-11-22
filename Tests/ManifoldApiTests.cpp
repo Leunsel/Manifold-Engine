@@ -25,6 +25,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -69,7 +70,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 23 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 24 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -2504,6 +2505,76 @@ return M
             CHECK(Lua::FormConvertScript("local x = platform.load(\"a\")\n").empty());
         }
 
+        void UiLayoutOptions(Engine& engine)
+        {
+            // labelPosition (window, containers, fields), slider step, combo hint, text style, row wrap
+            Lua::UiModel& model = engine.Lua().Ui();
+            LuaCheck(engine, "layout options", R"LUA(
+                local w = manifold.ui.window.create("Layout Probe", { labelPosition = "above" })
+                local col = w.add("column", { labelPosition = "right" })
+                layoutIds = {
+                  window = w.id,
+                  column = col.id,
+                  speed = col.add("slider", { label = "Speed", step = 0.5, labelPosition = "left" }).id,
+                  mode = w.add("combo", { label = "Mode", items = { "A", "B" }, hint = "Pick one" }).id,
+                  title = w.add("text", { text = "Title", bold = true, size = 18, align = "center" }).id,
+                  head = w.add("heading", { text = "Head", color = "accent", align = "right", size = 20 }).id,
+                  bar = w.add("row", { wrap = true }).id,
+                }
+                layoutWindow = w
+                local ok, problem = pcall(function() w.add("input", { label = "x", labelPosition = "top" }) end)
+                if ok then return "labelPosition top was accepted" end
+                local text = type(problem) == "table" and problem.message or tostring(problem)
+                if not text:find('must be "left", "above" or "right"', 1, true) then return "message: " .. text end
+                w.update({ labelPosition = "left" })
+                return "ok")LUA");
+            std::map<std::string, int> ids;
+            {
+                std::string result;
+                engine.Lua().RunWithResult("return ('%d %d %d %d %d %d %d'):format(layoutIds.window, layoutIds.column, layoutIds.speed, layoutIds.mode, layoutIds.title, layoutIds.head, layoutIds.bar)", "layout ids", result);
+                std::istringstream read(result);
+                for (const char* name : { "window", "column", "speed", "mode", "title", "head", "bar" })
+                    read >> ids[name];
+            }
+            const auto node = [&](const char* name) { return model.Find(ids[name]); };
+            CHECK(node("window") && node("window")->LabelPosition == "left");
+            CHECK(node("column") && node("column")->LabelPosition == "right");
+            CHECK(node("speed") && node("speed")->LabelPosition == "left" && node("speed")->Step == 0.5);
+            CHECK(node("mode") && node("mode")->Hint == "Pick one");
+            CHECK(node("title") && node("title")->Bold && node("title")->FontSize == 18.0f && node("title")->Align == "center");
+            CHECK(node("head") && node("head")->Color == "accent" && node("head")->Align == "right" && node("head")->FontSize == 20.0f);
+            CHECK(node("bar") && node("bar")->Wrap);
+            LuaCheck(engine, "layout options done", R"LUA(
+                layoutWindow.remove()
+                return "ok")LUA");
+
+            // the editor writes and reads them
+            Lua::FormDocument form = Lua::NewForm("Layout");
+            Lua::FormSetProp(*form.Model.Find(form.Window), "labelPosition", "above");
+            const int slider = Lua::FormAdd(form, Lua::UiKind::Slider, form.Window);
+            Lua::FormSetProp(*form.Model.Find(slider), "labelPosition", "left");
+            Lua::FormSetProp(*form.Model.Find(slider), "step", "0.25");
+            const int text = Lua::FormAdd(form, Lua::UiKind::Text, form.Window);
+            Lua::FormSetProp(*form.Model.Find(text), "bold", "true");
+            Lua::FormSetProp(*form.Model.Find(text), "size", "16");
+            Lua::FormSetProp(*form.Model.Find(text), "align", "right");
+            const int row = Lua::FormAdd(form, Lua::UiKind::Row, form.Window);
+            Lua::FormSetProp(*form.Model.Find(row), "wrap", "true");
+            const int combo = Lua::FormAdd(form, Lua::UiKind::Combo, form.Window);
+            Lua::FormSetProp(*form.Model.Find(combo), "hint", "Choose");
+            CHECK(Lua::FormPropValue(*form.Model.Find(combo), "labelPosition") == "default");
+            const std::string saved = Lua::FormSave(form);
+            CHECK(saved.find("labelPosition = \"above\"") != std::string::npos && saved.find("labelPosition = \"left\"") != std::string::npos);
+            CHECK(saved.find("bold = true") != std::string::npos && saved.find("size = 16") != std::string::npos && saved.find("align = \"right\"") != std::string::npos);
+            CHECK(saved.find("wrap = true") != std::string::npos && saved.find("hint = \"Choose\"") != std::string::npos && saved.find("step = 0.25") != std::string::npos);
+            Lua::FormDocument loaded;
+            std::string error;
+            std::vector<std::string> notes;
+            CHECK_MSG(Lua::FormLoad(saved, loaded, error, &notes) && notes.empty(), error + (notes.empty() ? std::string() : " / " + notes.front()));
+            CHECK(Lua::FormSave(loaded) == saved);
+            CHECK_MSG(engine.Lua().Run("local w = manifold.ui.form.build((function() " + saved.substr(saved.find("return {")) + " end)())\nw.remove()\n", "layout form").Ok(), saved);
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -2656,6 +2727,7 @@ return M
         UiFormModals(engine);
         UiFormOneFile(engine);
         UiFormRules(engine);
+        UiLayoutOptions(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

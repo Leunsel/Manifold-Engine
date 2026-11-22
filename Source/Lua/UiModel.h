@@ -184,6 +184,10 @@ namespace Manifold::Lua
         double NextUpdate = 0.0;
         bool Updates = false;
         bool PendingChange = false; // number: typed but not yet left or entered, so not reported yet
+        std::string LabelPosition;  // field: "left", "above" or "right"; container/window: the default for its fields; empty inherits
+        float FontSize = 0.0f;      // text/heading: points, 0 for the usual size
+        bool Bold = false;          // text: bold
+        bool OpenChanged = false;   // collapsible section: open was set by the script, apply it once
         bool Binds = false;        // window: widgets bound to memory records, refreshed every kBindInterval
         double NextBind = 0.0;
         std::uint32_t Handlers = 0;

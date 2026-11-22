@@ -57,6 +57,73 @@ namespace Manifold::UI
             return std::string(text) + "##v" + std::to_string(node.Id);
         }
 
+        // the kinds whose label the layout places (left, above or right)
+        bool PlacedLabel(UiKind kind)
+        {
+            return kind == UiKind::Input || kind == UiKind::Number || kind == UiKind::Slider || kind == UiKind::Combo || kind == UiKind::Color || kind == UiKind::Radio;
+        }
+
+        // ∑ the kinds that share a row's free width when they have no width of
+        // their own (fields, bars, cards, lists, a flexible spacer)
+        bool Flexible(const Lua::UiNode& node)
+        {
+            if (node.Width > 0.0f)
+                return false;
+            if (node.Width < 0.0f)
+                return true; // "fill" in a row: a share of the line
+            switch (node.Kind)
+            {
+            case UiKind::Input:
+            case UiKind::Number:
+            case UiKind::Slider:
+            case UiKind::Combo:
+            case UiKind::Color:
+            case UiKind::Progress:
+            case UiKind::Section:
+            case UiKind::Table:
+            case UiKind::Tree:
+            case UiKind::Canvas:
+            case UiKind::Column:
+            case UiKind::Spacer:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        // ∑ an integer slider formats a 64-bit value: "%d" becomes "%lld", and a
+        // float format ("%.1f x") keeps its text around a "%lld"
+        std::string IntegerFormat(const std::string& format)
+        {
+            if (format.empty())
+                return "%lld";
+            const std::size_t at = format.find('%');
+            if (at == std::string::npos)
+                return format + " %lld";
+            std::size_t end = at + 1;
+            while (end < format.size() && std::string_view("-+ #0123456789.lhjzt").find(format[end]) != std::string_view::npos)
+                ++end;
+            if (end >= format.size())
+                return format;
+            const char conversion = format[end];
+            if (conversion == '%')
+                return format;
+            if (std::string_view("dioxXuc").find(conversion) == std::string_view::npos && std::string_view("fFeEgGaA").find(conversion) == std::string_view::npos)
+                return "%lld";
+            const char kind = conversion == 'x' || conversion == 'X' || conversion == 'o' || conversion == 'u' ? conversion : 'd';
+            return format.substr(0, at) + "%ll" + kind + format.substr(end + 1);
+        }
+
+        // a height of 0 is the kind's own, a negative one fills what is left below
+        float FillHeight(float points, float fallback)
+        {
+            if (points > 0.0f)
+                return Px(points);
+            if (points < 0.0f)
+                return std::max(ImGui::GetContentRegionAvail().y, Px(40.0f));
+            return fallback;
+        }
+
         std::optional<std::string> FileDialog(const Lua::UiDialog& dialog, void* owner)
         {
             std::wstring filter;
@@ -214,6 +281,8 @@ namespace Manifold::UI
             flags |= ImGuiWindowFlags_AlwaysAutoResize;
         if (!window.Scrollbar)
             flags |= ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+        else
+            flags |= ImGuiWindowFlags_HorizontalScrollbar; // content wider than the window stays reachable
         ToolWindowExtras extras;
         extras.Maximum = ImVec2(window.MaxWidth, window.MaxHeight);
         extras.Topmost = window.Topmost;
@@ -373,6 +442,11 @@ namespace Manifold::UI
             ImGui::BeginDisabled();
         }
         ImGui::PushID(window);
+        m_labelPosition = "left";
+        m_labelWidth = 0.0f;
+        m_labelChosen = false;
+        m_rowSlot = 0.0f;
+        m_limit = 0.0f;
         DrawChildren(*node, false);
         ImGui::PopID();
         if (picking)
@@ -384,6 +458,26 @@ namespace Manifold::UI
         PruneTextures();
     }
 
+    float UiHost::Avail() const
+    {
+        // inside a slotted container (a column or card in a row) the content stays within its slot
+        const float avail = ImGui::GetContentRegionAvail().x;
+        if (m_limit <= 0.0f)
+            return avail;
+        return std::max(0.0f, std::min(avail, m_limit - (ImGui::GetCursorPosX() - m_limitStart)));
+    }
+
+    float UiHost::SlotWidth(const Lua::UiNode& node) const
+    {
+        if (node.Width > 0.0f)
+            return Px(node.Width);
+        if (m_rowSlot > 0.0f)
+            return m_rowSlot;
+        if (m_limit > 0.0f)
+            return Avail();
+        return 0.0f;
+    }
+
     void UiHost::DrawChildren(const Lua::UiNode& node, bool row)
     {
         bool first = true;
@@ -391,16 +485,105 @@ namespace Manifold::UI
         if (gap && !row)
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, Px(node.Gap)));
         const std::vector<int> children = node.Children;
+        // ∑ labels: the window's and each container's labelPosition is the
+        // default for the fields inside; left labels of one container share a
+        // column, so the fields line up; a row puts each label beside its field
+        const std::string outerPosition = m_labelPosition;
+        const float outerLabelWidth = m_labelWidth;
+        const bool outerChosen = m_labelChosen;
+        if (!node.LabelPosition.empty())
+        {
+            m_labelPosition = node.LabelPosition;
+            m_labelChosen = true;
+        }
+        m_labelWidth = 0.0f;
+        if (!row)
+        {
+            for (const int child : children)
+            {
+                const Lua::UiNode* item = Model().Find(child);
+                if (!item || (!item->Visible && !m_design) || !PlacedLabel(item->Kind) || item->Label.empty())
+                    continue;
+                if ((item->LabelPosition.empty() ? m_labelPosition : item->LabelPosition) == "left")
+                    m_labelWidth = std::max(m_labelWidth, ImGui::CalcTextSize(item->Label.c_str()).x);
+            }
+            // ∑ too narrow for labels beside the fields: unless a window or
+            // container asked for left labels, they go above, so no field is
+            // squeezed until its value is cut off (a field's own wins)
+            if (!m_labelChosen && m_labelPosition == "left" && m_labelWidth > 0.0f
+                && Avail() - m_labelWidth - ImGui::GetStyle().ItemInnerSpacing.x * 2.0f < Px(120.0f))
+            {
+                m_labelPosition = "above";
+                m_labelWidth = 0.0f;
+            }
+        }
+        // ∑ a row: widgets without a width of their own share the line, each
+        // gets the same slot, after the fixed ones (measured last frame); a
+        // wrapping row moves a widget that does not fit to the next line
+        float slot = 0.0f;
+        const float spacing = gap ? Px(node.Gap) : ImGui::GetStyle().ItemSpacing.x;
+        if (row)
+        {
+            int flexible = 0;
+            int count = 0;
+            float fixed = 0.0f;
+            for (const int child : children)
+            {
+                const Lua::UiNode* item = Model().Find(child);
+                if (!item || (!item->Visible && !m_design))
+                    continue;
+                ++count;
+                if (Flexible(*item))
+                    ++flexible;
+                else if (const auto known = m_itemWidths.find(child); known != m_itemWidths.end())
+                    fixed += known->second;
+            }
+            if (node.Wrap)
+                slot = Px(200.0f);
+            else if (flexible > 0)
+                slot = std::max(Px(60.0f), (Avail() - fixed - spacing * static_cast<float>(std::max(0, count - 1))) / static_cast<float>(flexible));
+        }
+        const float rowStart = ImGui::GetCursorPosX();
+        const float rowEnd = rowStart + Avail();
         for (const int child : children)
         {
             Lua::UiNode* item = Model().Find(child);
             if (!item || (!item->Visible && !m_design))
                 continue;
             if (row && !first)
-                ImGui::SameLine(0.0f, gap ? Px(node.Gap) : -1.0f);
+            {
+                const auto known = m_itemWidths.find(child);
+                const float next = known == m_itemWidths.end() ? 0.0f : known->second;
+                ImGui::SameLine(0.0f, spacing);
+                if (node.Wrap && ImGui::GetCursorPosX() + next > rowEnd && next > 0.0f)
+                {
+                    ImGui::NewLine();
+                    ImGui::SetCursorPosX(rowStart);
+                }
+            }
             first = false;
-            DrawNode(*item);
+            const float outerSlot = m_rowSlot;
+            const bool outerRow = m_inRow;
+            m_inRow = row;
+            if (row)
+            {
+                m_rowSlot = Flexible(*item) ? slot : 0.0f;
+                ImGui::BeginGroup();
+                DrawNode(*item);
+                ImGui::EndGroup();
+                m_itemWidths[child] = ImGui::GetItemRectSize().x;
+            }
+            else
+            {
+                m_rowSlot = 0.0f;
+                DrawNode(*item);
+            }
+            m_rowSlot = outerSlot;
+            m_inRow = outerRow;
         }
+        m_labelPosition = outerPosition;
+        m_labelWidth = outerLabelWidth;
+        m_labelChosen = outerChosen;
         if (gap && !row)
             ImGui::PopStyleVar();
         if (first && m_design && node.Kind != UiKind::Window)
@@ -431,12 +614,21 @@ namespace Manifold::UI
     void UiHost::DrawGrid(Lua::UiNode& node)
     {
         const int columns = std::clamp(node.GridColumns, 1, 16);
-        const ImVec2 size(node.Width > 0.0f ? Px(node.Width) : 0.0f, 0.0f);
+        const ImVec2 size(SlotWidth(node), 0.0f);
         if (!ImGui::BeginTable("##grid", columns, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX, size))
             return;
+        // ∑ label columns fit their text: the first one, and in an even grid
+        // ("label | field | label | field") every second one
         for (int c = 0; c < columns; ++c)
-            ImGui::TableSetupColumn(nullptr, c == 0 && columns > 1 ? ImGuiTableColumnFlags_WidthFixed : ImGuiTableColumnFlags_WidthStretch);
+        {
+            const bool label = columns > 1 && (c == 0 || (columns % 2 == 0 && c % 2 == 0));
+            ImGui::TableSetupColumn(nullptr, label ? ImGuiTableColumnFlags_WidthFixed : ImGuiTableColumnFlags_WidthStretch);
+        }
         const bool outer = m_inGrid;
+        const float outerLabelWidth = m_labelWidth;
+        const float outerSlot = m_rowSlot;
+        m_labelWidth = 0.0f; // a cell's field keeps its label beside it
+        m_rowSlot = 0.0f;
         if (m_design && node.Children.empty())
         {
             ImGui::TableNextColumn();
@@ -446,13 +638,18 @@ namespace Manifold::UI
         for (const int child : children)
         {
             Lua::UiNode* item = Model().Find(child);
-            if (!item || (!item->Visible && !m_design))
+            if (!item)
                 continue;
             ImGui::TableNextColumn();
+            // a hidden widget keeps its cell, so the cells after it stay in their columns
+            if (!item->Visible && !m_design)
+                continue;
             m_inGrid = true;
             DrawNode(*item);
         }
         m_inGrid = outer;
+        m_labelWidth = outerLabelWidth;
+        m_rowSlot = outerSlot;
         ImGui::EndTable();
     }
 
@@ -483,6 +680,11 @@ namespace Manifold::UI
         const bool inGrid = m_inGrid;
         m_cell = inGrid;
         m_inGrid = false;
+        // one group around the widget, so its tooltip covers all of it (a
+        // switch and its text, a field and its label, every radio button)
+        const bool tooltip = !node.Tooltip.empty();
+        if (tooltip)
+            ImGui::BeginGroup();
         switch (node.Kind)
         {
         case UiKind::Row:
@@ -493,18 +695,33 @@ namespace Manifold::UI
             break;
         case UiKind::Column:
         case UiKind::Tab:
+        {
+            // a column in a row keeps its content within its share of the line
+            const float outerLimit = m_limit;
+            const float outerStart = m_limitStart;
+            const float width = SlotWidth(node);
             if (node.Scroll)
             {
-                const ImVec2 size(node.Width > 0.0f ? Px(node.Width) : 0.0f, node.Height > 0.0f ? Px(node.Height) : Px(200.0f));
+                const ImVec2 size(width, FillHeight(node.Height, Px(200.0f)));
                 ImGui::BeginChild("##scroll", size, ImGuiChildFlags_None);
+                m_limit = 0.0f;
                 DrawChildren(node, false);
+                m_limit = outerLimit;
                 ImGui::EndChild();
                 break;
+            }
+            if (width > 0.0f)
+            {
+                m_limit = width;
+                m_limitStart = ImGui::GetCursorPosX();
             }
             ImGui::BeginGroup();
             DrawChildren(node, false);
             ImGui::EndGroup();
+            m_limit = outerLimit;
+            m_limitStart = outerStart;
             break;
+        }
         case UiKind::Section:
             DrawSection(node);
             break;
@@ -515,35 +732,51 @@ namespace Manifold::UI
             DrawSplit(node);
             break;
         case UiKind::Text:
+        case UiKind::Heading:
         {
+            // ∑ text and headings: a colour, a size, bold, and an alignment
+            // (centre or right of the line) for text that does not wrap; text
+            // beside a field (in a row or a cell) sits on the field's line
+            const bool heading = node.Kind == UiKind::Heading;
+            const std::string text = heading ? IconText(node.Icon, node.Text) : node.Text;
             const ImVec4 color = Color(node.Color, ManifoldTheme::Text);
-            if (m_cell)
+            if (m_cell || m_inRow)
                 ImGui::AlignTextToFramePadding();
-            if (node.Mono)
+            ImFont* font = heading || node.Bold ? Fonts::Bold() : nullptr;
+            const float size = node.FontSize > 0.0f ? Px(node.FontSize) : 0.0f;
+            if (node.Mono && !font)
                 PushMono();
+            else if (font || size > 0.0f)
+                ImGui::PushFont(font ? font : ImGui::GetFont(), size);
             ImGui::PushStyleColor(ImGuiCol_Text, color);
+            const bool wraps = node.MaxWidth > 0.0f || node.Wrap;
+            if (!wraps && (node.Align == "center" || node.Align == "right"))
+            {
+                const float free = Avail() - ImGui::CalcTextSize(text.c_str()).x;
+                if (free > 0.0f)
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (node.Align == "right" ? free : free * 0.5f));
+            }
             if (node.MaxWidth > 0.0f)
             {
                 ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + Px(node.MaxWidth));
-                ImGui::TextUnformatted(node.Text.c_str());
+                ImGui::TextUnformatted(text.c_str());
                 ImGui::PopTextWrapPos();
             }
             else if (node.Wrap)
-                ImGui::TextWrapped("%s", node.Text.c_str());
+            {
+                ImGui::PushTextWrapPos(m_limit > 0.0f ? m_limitStart + m_limit : 0.0f);
+                ImGui::TextUnformatted(text.c_str());
+                ImGui::PopTextWrapPos();
+            }
             else
-                ImGui::TextUnformatted(node.Text.c_str());
+                ImGui::TextUnformatted(text.c_str());
             ImGui::PopStyleColor();
-            if (node.Mono)
+            if (node.Mono && !font)
                 PopMono();
+            else if (font || size > 0.0f)
+                ImGui::PopFont();
             break;
         }
-        case UiKind::Heading:
-            if (m_cell)
-                ImGui::AlignTextToFramePadding();
-            ImGui::PushFont(Fonts::Bold(), 0.0f);
-            ImGui::TextUnformatted(IconText(node.Icon, node.Text).c_str());
-            ImGui::PopFont();
-            break;
         case UiKind::Separator:
             if (node.Text.empty())
                 ImGui::Separator();
@@ -551,12 +784,14 @@ namespace Manifold::UI
                 ImGui::SeparatorText(node.Text.c_str());
             break;
         case UiKind::Spacer:
-            ImGui::Dummy(ImVec2(Px(node.Width > 0.0f ? node.Width : 1.0f), Px(node.Height > 0.0f ? node.Height : 8.0f)));
+            // in a row a spacer without a width takes the free space: what follows goes to the right
+            ImGui::Dummy(ImVec2(m_rowSlot > 0.0f && node.Width <= 0.0f ? m_rowSlot : Px(node.Width > 0.0f ? node.Width : 1.0f), Px(node.Height > 0.0f ? node.Height : 8.0f)));
             break;
         case UiKind::Button:
         {
-            const std::string label = Label(node, IconText(node.Icon, node.Text.empty() ? std::string("Button") : node.Text));
-            ImVec2 size(node.Width > 0.0f ? Px(node.Width) : (node.Width < 0.0f || m_cell ? -FLT_MIN : 0.0f), node.Height > 0.0f ? Px(node.Height) : 0.0f);
+            // an icon without text makes an icon button
+            const std::string label = Label(node, node.Text.empty() && !node.Icon.empty() ? IconText(node.Icon, "") : IconText(node.Icon, node.Text.empty() ? std::string("Button") : node.Text));
+            ImVec2 size(node.Width > 0.0f ? Px(node.Width) : (node.Width < 0.0f || m_cell ? (m_rowSlot > 0.0f ? m_rowSlot : -FLT_MIN) : 0.0f), node.Height > 0.0f ? Px(node.Height) : 0.0f);
             if (node.MinWidth > 0.0f || node.MaxWidth > 0.0f)
             {
                 const ImGuiStyle& style = ImGui::GetStyle();
@@ -612,7 +847,7 @@ namespace Manifold::UI
             break;
         }
         case UiKind::Progress:
-            ImGui::ProgressBar(node.Fraction, ImVec2(node.Width > 0.0f ? Px(node.Width) : -FLT_MIN, node.Height > 0.0f ? Px(node.Height) : 0.0f), node.Text.empty() ? nullptr : node.Text.c_str());
+            ImGui::ProgressBar(node.Fraction, ImVec2(SlotWidth(node) > 0.0f ? SlotWidth(node) : -FLT_MIN, node.Height > 0.0f ? Px(node.Height) : 0.0f), node.Text.empty() ? nullptr : node.Text.c_str());
             break;
         case UiKind::Image:
             DrawImage(node);
@@ -625,7 +860,7 @@ namespace Manifold::UI
             break;
         case UiKind::Tree:
         {
-            const ImVec2 size(node.Width > 0.0f ? Px(node.Width) : 0.0f, node.Height > 0.0f ? Px(node.Height) : Px(200.0f));
+            const ImVec2 size(SlotWidth(node), FillHeight(node.Height, Px(200.0f)));
             m_treePopup = ImGui::GetID("##context");
             ImGui::BeginChild("##tree", size, ImGuiChildFlags_Borders);
             DrawTree(node, node.Tree);
@@ -638,9 +873,11 @@ namespace Manifold::UI
             DrawValue(node);
             break;
         }
+        if (tooltip)
+            ImGui::EndGroup();
         m_inGrid = inGrid;
         ImGui::EndDisabled();
-        if (!node.Tooltip.empty())
+        if (tooltip)
             ItemTooltip(node.Tooltip.c_str());
         ImGui::PopID();
     }
@@ -651,7 +888,16 @@ namespace Manifold::UI
         if (node.Collapsible)
         {
             const std::string header = IconText(node.Icon, title.empty() ? std::string("Section") : title) + (node.Badge.empty() ? std::string() : "  ·  " + node.Badge) + "###section";
-            if (ImGui::CollapsingHeader(header.c_str(), node.Open ? ImGuiTreeNodeFlags_DefaultOpen : 0))
+            // a script's update{ open = } folds or unfolds it; the user's folding is kept in open
+            if (node.OpenChanged)
+            {
+                ImGui::SetNextItemOpen(node.Open, ImGuiCond_Always);
+                node.OpenChanged = false;
+            }
+            const bool open = ImGui::CollapsingHeader(header.c_str(), node.Open ? ImGuiTreeNodeFlags_DefaultOpen : 0);
+            if (!m_design)
+                node.Open = open;
+            if (open)
             {
                 ImGui::Indent(Px(6.0f));
                 DrawChildren(node, false);
@@ -663,11 +909,13 @@ namespace Manifold::UI
         ImGui::PushStyleColor(ImGuiCol_Border, ManifoldTheme::CardBorder);
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, Px(6.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, Px(10.0f, 8.0f));
-        const float height = node.Height > 0.0f ? Px(node.Height) : 0.0f;
+        const float height = FillHeight(node.Height, 0.0f);
         ImGuiChildFlags flags = ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding;
         if (height <= 0.0f)
             flags |= ImGuiChildFlags_AutoResizeY;
-        ImGui::BeginChild("##section", ImVec2(node.Width > 0.0f ? Px(node.Width) : 0.0f, height), flags);
+        ImGui::BeginChild("##section", ImVec2(SlotWidth(node), height), flags);
+        const float outerLimit = m_limit;
+        m_limit = 0.0f; // the card's own width holds its content
         ImGui::PopStyleVar(2);
         ImGui::PopStyleColor(2);
         if (!title.empty() || !node.Badge.empty())
@@ -676,6 +924,7 @@ namespace Manifold::UI
             CardTitle(glyph.empty() ? nullptr : glyph.c_str(), title.c_str(), node.Badge);
         }
         DrawChildren(node, false);
+        m_limit = outerLimit;
         ImGui::EndChild();
     }
 
@@ -698,10 +947,25 @@ namespace Manifold::UI
             const ImGuiTabItemFlags tabFlags = m_design && m_design->ForceTab == tab->Id ? ImGuiTabItemFlags_SetSelected : 0;
             if (m_design && m_design->ForceTab == tab->Id)
                 m_design->ForceTab = 0;
-            if (ImGui::BeginTabItem(label.c_str(), nullptr, tabFlags))
+            // a tab's own options: disabled, a tooltip on its header, a scrolling page
+            ImGui::BeginDisabled(!tab->Enabled);
+            const bool selected = ImGui::BeginTabItem(label.c_str(), nullptr, tabFlags);
+            ImGui::EndDisabled();
+            if (!tab->Tooltip.empty())
+                ItemTooltip(tab->Tooltip.c_str());
+            if (selected)
             {
                 ImGui::PushID(tab->Id);
-                DrawChildren(*tab, false);
+                ImGui::BeginDisabled(!tab->Enabled);
+                if (tab->Scroll)
+                {
+                    ImGui::BeginChild("##tabscroll", ImVec2(0.0f, FillHeight(tab->Height, Px(200.0f))), ImGuiChildFlags_None);
+                    DrawChildren(*tab, false);
+                    ImGui::EndChild();
+                }
+                else
+                    DrawChildren(*tab, false);
+                ImGui::EndDisabled();
                 ImGui::PopID();
                 ImGui::EndTabItem();
             }
@@ -720,7 +984,7 @@ namespace Manifold::UI
         const ImVec2 avail = ImGui::GetContentRegionAvail();
         const float gap = Px(6.0f);
         const float height = node.Height > 0.0f ? Px(node.Height) : std::max(avail.y, Px(120.0f));
-        const float width = node.Width > 0.0f ? Px(node.Width) : avail.x;
+        const float width = SlotWidth(node) > 0.0f ? SlotWidth(node) : avail.x;
         const float total = (node.Vertical ? height : width) - gap;
         const float first = std::max(Px(20.0f), total * node.Ratio);
         const float second = std::max(Px(20.0f), total - first);
@@ -745,6 +1009,8 @@ namespace Manifold::UI
         {
             const float delta = node.Vertical ? ImGui::GetIO().MouseDelta.y : ImGui::GetIO().MouseDelta.x;
             node.Ratio = std::clamp(node.Ratio + delta / total, 0.05f, 0.95f);
+            if (delta != 0.0f)
+                Model().Touch(node);
         }
         if (!node.Vertical)
             ImGui::SameLine(0.0f, 0.0f);
@@ -754,27 +1020,69 @@ namespace Manifold::UI
         ImGui::EndChild();
     }
 
+    // ∑ A field and its label share the space they have, so neither is cut
+    // off: "left" draws the label in the container's label column and the
+    // field fills the rest of the line, "above" puts the label over a field as
+    // wide as the line, "right" (ImGui's way) leaves room for the label after
+    // the field. Without a label the field fills the line. In a row the line
+    // is the widget's share of it. A width of the widget's own wins; minWidth
+    // and maxWidth clamp the field. Returns the field's width.
+    float UiHost::FieldLayout(const Lua::UiNode& node, const std::string& side)
+    {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const std::string& text = node.Label;
+        const float own = node.Width > 0.0f ? Px(node.Width) : 0.0f;
+        const float line = m_rowSlot > 0.0f ? m_rowSlot : Avail();
+        float width = 0.0f;
+        if (!text.empty() && side == "left")
+        {
+            const float start = ImGui::GetCursorPosX();
+            const float column = std::max(m_labelWidth, ImGui::CalcTextSize(text.c_str()).x) + style.ItemInnerSpacing.x * 2.0f;
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(text.c_str());
+            ImGui::SameLine(0.0f, 0.0f);
+            ImGui::SetCursorPosX(start + column);
+            width = own > 0.0f ? own : (m_rowSlot > 0.0f ? m_rowSlot - column : Avail());
+        }
+        else if (!text.empty() && side == "above")
+        {
+            ImGui::TextUnformatted(text.c_str());
+            width = own > 0.0f ? own : line;
+        }
+        else if (!text.empty())
+            width = own > 0.0f ? own : line - ImGui::CalcTextSize(text.c_str()).x - style.ItemInnerSpacing.x;
+        else
+            width = own > 0.0f ? own : line;
+        if (node.MinWidth > 0.0f)
+            width = std::max(width, Px(node.MinWidth));
+        if (node.MaxWidth > 0.0f)
+            width = std::min(width, Px(node.MaxWidth));
+        return std::max(width, Px(40.0f));
+    }
+
     void UiHost::DrawValue(Lua::UiNode& node)
     {
-        if (node.MinWidth > 0.0f || node.MaxWidth > 0.0f)
+        const std::string side = node.LabelPosition.empty() ? m_labelPosition : node.LabelPosition;
+        std::string label = Label(node, node.Label);
+        float fieldWidth = 0.0f;
+        if (PlacedLabel(node.Kind) && node.Kind != UiKind::Radio)
         {
-            float width = node.Width > 0.0f ? Px(node.Width) : (node.Width < 0.0f || (m_cell && node.Label.empty())) ? ImGui::GetContentRegionAvail().x : ImGui::CalcItemWidth();
-            if (node.MinWidth > 0.0f)
-                width = std::max(width, Px(node.MinWidth));
-            if (node.MaxWidth > 0.0f)
-                width = std::min(width, Px(node.MaxWidth));
-            ImGui::SetNextItemWidth(width);
+            fieldWidth = FieldLayout(node, side);
+            if (side == "left" || side == "above" || node.Label.empty())
+                label = Label(node, ""); // the label is drawn already
+            if (!(node.Kind == UiKind::Input && node.Multiline))
+                ImGui::SetNextItemWidth(fieldWidth);
         }
-        else if (node.Width > 0.0f)
-            ImGui::SetNextItemWidth(Px(node.Width));
-        else if (node.Width < 0.0f || (m_cell && node.Label.empty()))
-            ImGui::SetNextItemWidth(-FLT_MIN);
+        else if (node.Kind == UiKind::Checkbox && m_labelWidth > 0.0f && !m_inRow)
+        {
+            // a checkbox among left-labelled fields lines up with the fields
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + m_labelWidth + ImGui::GetStyle().ItemInnerSpacing.x * 2.0f);
+        }
         if (node.Focus && !node.Focused && !m_design)
         {
             ImGui::SetKeyboardFocusHere();
             node.Focused = true;
         }
-        const std::string label = Label(node, node.Label);
         switch (node.Kind)
         {
         case UiKind::Checkbox:
@@ -818,7 +1126,7 @@ namespace Manifold::UI
                 flags |= ImGuiInputTextFlags_ReadOnly;
             bool entered = false;
             if (node.Multiline)
-                InputMultiline(label.c_str(), node.String, ImVec2(node.Width > 0.0f ? Px(node.Width) : -FLT_MIN, node.Height > 0.0f ? Px(node.Height) : Px(80.0f)), flags);
+                InputMultiline(label.c_str(), node.String, ImVec2(fieldWidth > 0.0f ? fieldWidth : -FLT_MIN, FillHeight(node.Height, Px(80.0f))), flags);
             else
             {
                 flags |= ImGuiInputTextFlags_EnterReturnsTrue;
@@ -866,7 +1174,7 @@ namespace Manifold::UI
             if (node.Integer || node.Hex)
             {
                 std::int64_t value = static_cast<std::int64_t>(node.Number);
-                const std::int64_t step = node.Step > 0.0 ? static_cast<std::int64_t>(node.Step) : 1;
+                const std::int64_t step = node.Step > 0.0 ? std::max<std::int64_t>(1, std::llround(node.Step)) : 1;
                 const std::int64_t fast = step * 10;
                 changed = ImGui::InputScalar(label.c_str(), ImGuiDataType_S64, &value, &step, &fast, node.Hex ? "%llX" : "%lld", node.Hex ? ImGuiInputTextFlags_CharsHexadecimal : 0);
                 if (changed)
@@ -876,7 +1184,7 @@ namespace Manifold::UI
             {
                 double value = node.Number;
                 const double step = node.Step > 0.0 ? node.Step : 0.0;
-                changed = ImGui::InputDouble(label.c_str(), &value, step, step * 10.0, node.Format.empty() ? "%.3f" : node.Format.c_str());
+                changed = ImGui::InputDouble(label.c_str(), &value, step, step * 10.0, node.Format.empty() ? "%g" : node.Format.c_str());
                 if (changed)
                     node.Number = value;
             }
@@ -909,7 +1217,13 @@ namespace Manifold::UI
                 std::int64_t value = static_cast<std::int64_t>(node.Number);
                 const std::int64_t low = node.HasMin ? static_cast<std::int64_t>(node.Min) : 0;
                 const std::int64_t high = node.HasMax ? static_cast<std::int64_t>(node.Max) : 100;
-                changed = ImGui::SliderScalar(label.c_str(), ImGuiDataType_S64, &value, &low, &high, node.Format.empty() ? "%lld" : node.Format.c_str());
+                const std::string format = IntegerFormat(node.Format);
+                changed = ImGui::SliderScalar(label.c_str(), ImGuiDataType_S64, &value, &low, &high, format.c_str(), ImGuiSliderFlags_AlwaysClamp);
+                if (changed && node.Step > 1.0)
+                {
+                    const std::int64_t step = std::llround(node.Step);
+                    value = low + (value - low + step / 2) / step * step;
+                }
                 if (changed)
                     node.Number = static_cast<double>(value);
             }
@@ -918,7 +1232,9 @@ namespace Manifold::UI
                 double value = node.Number;
                 const double low = node.HasMin ? node.Min : 0.0;
                 const double high = node.HasMax ? node.Max : 1.0;
-                changed = ImGui::SliderScalar(label.c_str(), ImGuiDataType_Double, &value, &low, &high, node.Format.empty() ? "%.3f" : node.Format.c_str());
+                changed = ImGui::SliderScalar(label.c_str(), ImGuiDataType_Double, &value, &low, &high, node.Format.empty() ? "%.2f" : node.Format.c_str(), ImGuiSliderFlags_AlwaysClamp);
+                if (changed && node.Step > 0.0)
+                    value = std::clamp(low + std::round((value - low) / node.Step) * node.Step, low, high);
                 if (changed)
                     node.Number = value;
             }
@@ -942,7 +1258,7 @@ namespace Manifold::UI
                     if (item >= 1 && item <= static_cast<int>(node.Items.size()))
                         preview += (preview.empty() ? "" : ", ") + node.Items[static_cast<std::size_t>(item - 1)];
                 }
-                if (ImGui::BeginCombo(label.c_str(), preview.empty() ? "None" : preview.c_str()))
+                if (ImGui::BeginCombo(label.c_str(), preview.empty() ? (node.Hint.empty() ? "None" : node.Hint.c_str()) : preview.c_str()))
                 {
                     for (int i = 0; i < static_cast<int>(node.Items.size()); ++i)
                     {
@@ -971,7 +1287,7 @@ namespace Manifold::UI
                 }
                 break;
             }
-            const char* preview = node.Selected > 0 && node.Selected <= static_cast<int>(node.Items.size()) ? node.Items[static_cast<std::size_t>(node.Selected - 1)].c_str() : "";
+            const char* preview = node.Selected > 0 && node.Selected <= static_cast<int>(node.Items.size()) ? node.Items[static_cast<std::size_t>(node.Selected - 1)].c_str() : node.Hint.c_str();
             if (ImGui::BeginCombo(label.c_str(), preview))
             {
                 for (int i = 0; i < static_cast<int>(node.Items.size()); ++i)
@@ -992,7 +1308,17 @@ namespace Manifold::UI
         }
         case UiKind::Radio:
         {
-            if (!node.Horizontal && !node.Label.empty())
+            const bool left = !node.Label.empty() && side == "left";
+            if (left)
+            {
+                const float start = ImGui::GetCursorPosX();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(node.Label.c_str());
+                ImGui::SameLine(0.0f, 0.0f);
+                ImGui::SetCursorPosX(start + std::max(m_labelWidth, ImGui::CalcTextSize(node.Label.c_str()).x) + ImGui::GetStyle().ItemInnerSpacing.x * 2.0f);
+                ImGui::BeginGroup();
+            }
+            else if (!node.Label.empty() && (side == "above" || !node.Horizontal))
                 ImGui::TextUnformatted(node.Label.c_str());
             for (int i = 0; i < static_cast<int>(node.Items.size()); ++i)
             {
@@ -1008,7 +1334,9 @@ namespace Manifold::UI
                 }
                 ImGui::PopID();
             }
-            if (node.Horizontal && !node.Label.empty())
+            if (left)
+                ImGui::EndGroup();
+            else if (node.Horizontal && !node.Label.empty() && side == "right")
             {
                 ImGui::SameLine();
                 ImGui::TextUnformatted(node.Label.c_str());
@@ -1080,7 +1408,7 @@ namespace Manifold::UI
         for (const auto& row : node.Rows)
             columns = std::max(columns, row.size());
         columns = std::clamp<std::size_t>(columns, 1, 64);
-        const ImVec2 size(node.Width > 0.0f ? Px(node.Width) : 0.0f, node.Height > 0.0f ? Px(node.Height) : Px(200.0f));
+        const ImVec2 size(SlotWidth(node), FillHeight(node.Height, Px(200.0f)));
         const ImGuiID popup = ImGui::GetID("##context");
         const ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp;
         if (ImGui::BeginTable("##table", static_cast<int>(columns), flags, size))
@@ -1192,7 +1520,7 @@ namespace Manifold::UI
     {
         CanvasState& state = m_canvases[node.Id];
         const ImVec2 avail = ImGui::GetContentRegionAvail();
-        const ImVec2 size(node.Width > 0.0f ? Px(node.Width) : std::max(avail.x, Px(40.0f)), node.Height > 0.0f ? Px(node.Height) : Px(200.0f));
+        const ImVec2 size(SlotWidth(node) > 0.0f ? SlotWidth(node) : std::max(avail.x, Px(40.0f)), FillHeight(node.Height, Px(200.0f)));
         const ImVec2 origin = ImGui::GetCursorScreenPos();
         const ImGuiID popup = ImGui::GetID("##context");
         ImGui::InvisibleButton("##canvas", size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);

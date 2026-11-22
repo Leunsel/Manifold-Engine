@@ -419,8 +419,13 @@ namespace Manifold::Lua
                 else if (!node.Multi && node.Selected == 0 && !node.Chosen.empty())
                     node.Selected = node.Chosen.front();
             }
-            if (node.Kind == UiKind::Section || node.Kind == UiKind::Window)
+            if (node.Kind == UiKind::Window)
                 ReadBool(state, props, "open", node.Open);
+            if (node.Kind == UiKind::Section && ReadBool(state, props, "open", node.Open))
+                node.OpenChanged = true;
+            ReadString(state, props, "labelPosition", node.LabelPosition);
+            ReadFloat(state, props, "size", node.FontSize);
+            ReadBool(state, props, "bold", node.Bold);
             ReadFloat(state, props, "width", node.Width);
             ReadFloat(state, props, "height", node.Height);
             ReadFloat(state, props, "ratio", node.Ratio);

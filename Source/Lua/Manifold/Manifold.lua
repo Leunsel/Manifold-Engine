@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 23
+local API_VERSION = 24
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -2325,25 +2325,25 @@ local function withCommon(keys)
 end
 
 local WIDGET_KEYS = {
-  row = withCommon({ align = "string", gap = "number" }),
-  column = withCommon({ gap = "number", scroll = "boolean" }),
+  row = withCommon({ align = "string", gap = "number", wrap = "boolean" }),
+  column = withCommon({ gap = "number", scroll = "boolean", labelPosition = "string" }),
   grid = withCommon({ columns = "integer" }),
-  section = withCommon({ title = "string", icon = "string", badge = "string", collapsible = "boolean", open = "boolean", gap = "number" }),
+  section = withCommon({ title = "string", icon = "string", badge = "string", collapsible = "boolean", open = "boolean", gap = "number", labelPosition = "string" }),
   tabs = withCommon({}),
-  tab = withCommon({ title = "string", icon = "string", gap = "number", scroll = "boolean" }),
-  split = withCommon({ vertical = "boolean", ratio = "number" }),
-  text = withCommon({ text = "string", color = "string", wrap = "boolean", mono = "boolean" }),
-  heading = withCommon({ text = "string", icon = "string" }),
+  tab = withCommon({ title = "string", icon = "string", gap = "number", scroll = "boolean", labelPosition = "string" }),
+  split = withCommon({ vertical = "boolean", ratio = "number", labelPosition = "string" }),
+  text = withCommon({ text = "string", color = "string", wrap = "boolean", mono = "boolean", align = "string", size = "number", bold = "boolean" }),
+  heading = withCommon({ text = "string", icon = "string", color = "string", align = "string", size = "number" }),
   separator = withCommon({ text = "string" }),
   spacer = withCommon({}),
   button = withCommon({ text = "string", icon = "string", style = "string", shortcut = "string", confirm = "string", onClick = "function" }),
   checkbox = withCommon({ label = "string", value = "boolean", style = "string", onChange = "function" }),
-  input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", readOnly = "boolean", maxLength = "integer", focus = "boolean", onChange = "function", onSubmit = "function" }),
-  number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", focus = "boolean", onChange = "function" }),
-  slider = withCommon({ label = "string", value = "number", min = "number", max = "number", integer = "boolean", format = "string", onChange = "function" }),
-  combo = withCommon({ label = "string", items = "table", value = "choice", multi = "boolean", onChange = "function" }),
-  radio = withCommon({ label = "string", items = "table", value = "integer", horizontal = "boolean", onChange = "function" }),
-  color = withCommon({ label = "string", value = "string", alpha = "boolean", onChange = "function" }),
+  input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", readOnly = "boolean", maxLength = "integer", focus = "boolean", labelPosition = "string", onChange = "function", onSubmit = "function" }),
+  number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", focus = "boolean", labelPosition = "string", onChange = "function" }),
+  slider = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", format = "string", labelPosition = "string", onChange = "function" }),
+  combo = withCommon({ label = "string", items = "table", value = "choice", multi = "boolean", hint = "string", labelPosition = "string", onChange = "function" }),
+  radio = withCommon({ label = "string", items = "table", value = "integer", horizontal = "boolean", labelPosition = "string", onChange = "function" }),
+  color = withCommon({ label = "string", value = "string", alpha = "boolean", labelPosition = "string", onChange = "function" }),
   table = withCommon({ columns = "table", rows = "table", value = "integer", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
   tree = withCommon({ items = "table", value = "string", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
   progress = withCommon({ value = "number", text = "string" }),
@@ -2441,6 +2441,9 @@ local function checkOptions(path, keys, options)
     end
   elseif options.style ~= nil and not BUTTON_STYLES[options.style] then
     misuse(('%s: options.style must be one of "default", "accent", "danger", got %q'):format(path, options.style))
+  end
+  if options.labelPosition ~= nil and options.labelPosition ~= "left" and options.labelPosition ~= "above" and options.labelPosition ~= "right" then
+    misuse(('%s: options.labelPosition must be "left", "above" or "right", got %q'):format(path, options.labelPosition))
   end
   if options.align ~= nil and not ROW_ALIGNS[options.align] then
     misuse(('%s: options.align must be one of "left", "center", "right", got %q'):format(path, options.align))
@@ -2661,10 +2664,10 @@ widgetObject = function(entry)
   return proxy
 end
 
-local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open = "boolean", dock = "boolean", interval = "number", key = "string", opacity = "number", inactiveOpacity = "number",
+local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open = "boolean", dock = "boolean", interval = "number", key = "string", opacity = "number", inactiveOpacity = "number", labelPosition = "string",
   minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean", modal = "boolean",
   position = "string", x = "number", y = "number", onClose = "function", onUpdate = "function" }
-local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", opacity = "number", inactiveOpacity = "number",
+local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", opacity = "number", inactiveOpacity = "number", labelPosition = "string",
   minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean", modal = "boolean",
   onClose = "function", onUpdate = "function" }
 local WINDOW_FLAG_KEYS = { "minWidth", "minHeight", "maxWidth", "maxHeight", "resizable", "autoSize", "scrollbar", "topmost", "modal" }
@@ -2713,7 +2716,7 @@ local function windowObject(entry)
     if options.onUpdate ~= nil then
       entry.onUpdate = options.onUpdate
     end
-    local copy = { title = options.title, icon = options.icon, interval = options.interval, opacity = options.opacity, inactiveOpacity = options.inactiveOpacity, handlers = entry.onClose and UI_HANDLER_BITS.onClose or 0 }
+    local copy = { title = options.title, icon = options.icon, interval = options.interval, opacity = options.opacity, inactiveOpacity = options.inactiveOpacity, labelPosition = options.labelPosition, handlers = entry.onClose and UI_HANDLER_BITS.onClose or 0 }
     for _, key in ipairs(WINDOW_FLAG_KEYS) do
       copy[key] = options[key]
     end
@@ -2779,6 +2782,7 @@ define(window, "create", {
     interval = options.interval,
     opacity = options.opacity,
     inactiveOpacity = options.inactiveOpacity,
+    labelPosition = options.labelPosition,
     updates = options.onUpdate ~= nil,
     handlers = options.onClose and UI_HANDLER_BITS.onClose or 0,
     key = options.key,
@@ -2829,13 +2833,14 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
   title = "Widget objects",
   doc = table.concat({
     "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line); `minWidth` and `maxWidth` keep fields, buttons and lists within that range, and a text wraps at `maxWidth`. Handlers get the widget as their last argument.",
-    "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line. `gap` (points) sets the space between the widgets of a row, column, section or tab; a column or tab with `scroll = true` scrolls inside its `height` (200).",
+    "- Labels of fields (`input`, `number`, `slider`, `combo`, `radio`, `color`): `labelPosition` is `left` (the default: the labels of one column, section or window share a column and the fields line up after it, and a checkbox among them lines up with the fields), `above` or `right` (after the field). Set on a window, column, section, tab or split it is the default for the fields inside. When none is set and a column is too narrow for the labels beside the fields, the labels go above them instead. A field fills the rest of its line unless it has a `width`, so no label is cut off; a negative `height` makes a table, tree, canvas, scrolling column or tab, multi-line input or section fill the height that is left.",
+    "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line. In a row, fields, bars, cards, lists and columns without a `width` share the free width equally, a `spacer` without a width takes a share too (so what follows it goes to the right), and `wrap = true` moves a widget that does not fit to the next line. `gap` (points) sets the space between the widgets of a row, column, section or tab; a column or tab with `scroll = true` scrolls inside its `height` (200).",
     "- `grid`: places its widgets in `columns` (2) cells per row, row by row. The first column fits its content and the others share the rest, so `text` then a field per row lines labels up; a field without a `label` fills its cell.",
     "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it, `open = false` starts it folded.",
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
-    "- `text` (`text`, `color`, `wrap`, `mono`), `heading` (`text`, `icon`), `separator` (`text` puts a caption into the line), `spacer`.",
-    "- `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through.",
-    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
+    "- `text` (`text`, `color`, `wrap`, `mono`, `bold`, `size` in points, `align` = `left`, `center` or `right` for text that does not wrap), `heading` (`text`, `icon`, `color`, `size`, `align`), `separator` (`text` puts a caption into the line), `spacer`.",
+    "- `button`: `text`, `icon` (an icon without text makes an icon button), `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through.",
+    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",

@@ -103,6 +103,21 @@ namespace Manifold::UI
         bool m_inGrid = false;
         bool m_cell = false;
         std::map<int, float> m_rowWidths;
+        // ∑ layout of fields: where labels go (inherited from the window and its
+        // containers), the aligned label column of the current container, the
+        // share of a row the widget being drawn gets, and the width a slotted
+        // container's content stays within
+        std::string m_labelPosition = "left";
+        float m_labelWidth = 0.0f;
+        bool m_labelChosen = false; // a window or container set labelPosition
+        float m_rowSlot = 0.0f;
+        bool m_inRow = false;
+        float m_limit = 0.0f;
+        float m_limitStart = 0.0f;
+        std::map<int, float> m_itemWidths;
+        float Avail() const;
+        float SlotWidth(const Lua::UiNode& node) const;
+        float FieldLayout(const Lua::UiNode& node, const std::string& side);
         std::map<int, Texture> m_textures;
         std::map<int, CanvasState> m_canvases;
         std::uint64_t m_textureGeneration = 0;

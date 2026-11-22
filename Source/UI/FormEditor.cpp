@@ -223,23 +223,6 @@ namespace Manifold::UI
             draw->PopClipRect();
         }
 
-        // ∑ Tags are drawn over the whole preview area, not clipped to the
-        // previewed window, so a widget at the window's edge still shows its
-        // full tag; one that would leave the area is moved back into it.
-        void Tag(ImDrawList* draw, ImVec2 min, ImVec2 areaMin, ImVec2 areaMax, const std::string& text, ImU32 background, ImU32 foreground, float right = 0.0f)
-        {
-            const ImVec2 size = ImGui::CalcTextSize(text.c_str());
-            const ImVec2 padding(Px(5.0f), Px(1.0f));
-            const float width = size.x + padding.x * 2.0f;
-            const float height = size.y + padding.y * 2.0f;
-            ImVec2 at(right > 0.0f ? std::max(min.x, right - width) : min.x, min.y - height - Px(2.0f));
-            if (at.y < areaMin.y)
-                at.y = min.y + Px(2.0f);
-            at.x = std::max(areaMin.x + Px(2.0f), std::min(at.x, areaMax.x - width - Px(2.0f)));
-            draw->AddRectFilled(at, ImVec2(at.x + width, at.y + height), background, Px(3.0f));
-            draw->AddText(ImVec2(at.x + padding.x, at.y + padding.y), foreground, text.c_str());
-        }
-
         bool GroupHeader(const char* label, bool open)
         {
             ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
@@ -1453,9 +1436,10 @@ namespace Manifold::UI
         draw->AddRectFilled(ImVec2(min.x, min.y + Px(4.0f)), ImVec2(min.x + Px(3.0f), max.y - Px(4.0f)), ImGui::GetColorU32(family), Px(1.5f));
         const float y = min.y + (size.y - ImGui::GetTextLineHeight()) * 0.5f;
         draw->AddText(ImVec2(min.x + Px(10.0f), y), ImGui::GetColorU32(family), KindIcon(kind));
-        draw->PushClipRect(min, max, true);
-        draw->AddText(ImVec2(min.x + Px(30.0f), y), ImGui::GetColorU32(ManifoldTheme::Text), title.c_str());
-        draw->PopClipRect();
+        {
+            const float limit = std::max(min.x + Px(30.0f), max.x - Px(6.0f));
+            ImGui::RenderTextEllipsis(draw, ImVec2(min.x + Px(30.0f), y), ImVec2(limit, y + ImGui::GetTextLineHeight()), limit, title.c_str(), nullptr, nullptr);
+        }
         if (clicked)
             Add(kind);
         if (ImGui::BeginDragDropSource())
@@ -1467,7 +1451,7 @@ namespace Manifold::UI
             ImGui::TextUnformatted(title.c_str());
             ImGui::EndDragDropSource();
         }
-        ItemTooltip(std::string(Lua::FormKindHelp(kind)).append("\nClick adds it to the selected container, or drag it into the outline or the preview.").c_str());
+        ItemTooltip((title + ": " + std::string(Lua::FormKindHelp(kind))).append("\nClick adds it to the selected container, or drag it into the outline or the preview.").c_str());
         ImGui::PopID();
     }
 
@@ -1739,11 +1723,17 @@ namespace Manifold::UI
         draw->AddText(ImVec2(iconX, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(modalRoot ? ManifoldTheme::CodeLabel : FamilyColor(FamilyOf(node->Kind)), alpha)),
             modalRoot ? ICON_FA_WINDOW_RESTORE : KindIcon(node->Kind));
         const float textRight = right - markers;
-        draw->PushClipRect(ImVec2(textX, rowMin.y), ImVec2(std::max(textX, textRight), rowMax.y), true);
+        // ∑ the name always fits (the row grows and the outline scrolls
+        // sideways); the kind and caption after it end in "..." where the
+        // markers begin instead of being cut through a letter
         draw->AddText(ImVec2(textX, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(selected ? ManifoldTheme::Text : ManifoldTheme::Label, alpha)), first.c_str());
-        if (!second.empty())
-            draw->AddText(ImVec2(textX + firstWidth + Px(8.0f), y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, alpha * 0.9f)), second.c_str());
-        draw->PopClipRect();
+        const float secondX = textX + firstWidth + Px(8.0f);
+        if (!second.empty() && secondX + ImGui::CalcTextSize("...").x < textRight)
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::WithAlpha(ManifoldTheme::Muted, alpha * 0.9f));
+            ImGui::RenderTextEllipsis(draw, ImVec2(secondX, y), ImVec2(textRight, y + ImGui::GetTextLineHeight()), textRight, second.c_str(), nullptr, nullptr);
+            ImGui::PopStyleColor();
+        }
         if (rowHovered && !overEye && !overChevron && textX + textWidth > textRight && !ImGui::IsMouseDragging(ImGuiMouseButton_Left))
             ImGui::SetTooltip("%s%s%s", first.c_str(), second.empty() ? "" : "  ", second.c_str());
 
@@ -2172,6 +2162,8 @@ namespace Manifold::UI
         m_marks->PushClipRect(clipMin, ImVec2(std::max(clipMin.x, clipMax.x), std::max(clipMin.y, clipMax.y)), false);
         m_frameMarks[id] = m_marks;
         m_frameClips[id] = { clipMin, clipMax };
+        m_surfaceMin = area->InnerClipRect.Min;
+        m_surfaceMax = area->InnerClipRect.Max;
         draw = frameWindow->DrawList;
         for (int i = 1; i <= 6; ++i)
         {
@@ -2184,8 +2176,12 @@ namespace Manifold::UI
             draw->AddRectFilled(frameMin, ImVec2(frameMax.x, frameMin.y + Px(2.0f)), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::CodeLabel, 0.9f)), Px(6.0f), ImDrawFlags_RoundCornersTop);
         const std::string title = UiHost::IconText(window->Icon, window->Title.empty() ? std::string("Script") : window->Title);
         const float textY = frameMin.y + (titleHeight - ImGui::GetTextLineHeight()) * 0.5f;
-        draw->AddText(ImVec2(frameMin.x + Px(10.0f), textY), ImGui::GetColorU32(ManifoldTheme::Text), title.c_str());
-        float titleRight = frameMin.x + Px(10.0f) + ImGui::CalcTextSize(title.c_str()).x;
+        // a long title in a narrow form ends in "..." before the close cross
+        const float titleLimit = std::max(frameMin.x + Px(10.0f), frameMax.x - Px(20.0f) - ImGui::CalcTextSize(ICON_FA_TIMES).x);
+        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Text);
+        ImGui::RenderTextEllipsis(draw, ImVec2(frameMin.x + Px(10.0f), textY), ImVec2(titleLimit, textY + ImGui::GetTextLineHeight()), titleLimit, title.c_str(), nullptr, nullptr);
+        ImGui::PopStyleColor();
+        float titleRight = std::min(titleLimit, frameMin.x + Px(10.0f) + ImGui::CalcTextSize(title.c_str()).x);
         if (modal)
         {
             // a pill with the modal's name: what modals.<name> and opens use
@@ -2792,6 +2788,7 @@ namespace Manifold::UI
             std::string Text;
             ImU32 Background;
             float Right;
+            int Node = 0;
         };
         std::vector<PendingTag> tags;
         if (!dragging)
@@ -2801,14 +2798,14 @@ namespace Manifold::UI
                 if (const UiDesign::Rect* rect = RectOf(m_hovered))
                 {
                     DashedRect(draw, ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), ImVec2(rect->Max.x + 2.0f, rect->Max.y + 2.0f), soft, Px(1.5f), Px(5.0f), Px(3.0f));
-                    tags.push_back({ ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), label(m_hovered), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.55f)), rect->Max.x + 2.0f });
+                    tags.push_back({ ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), label(m_hovered), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.55f)), rect->Max.x + 2.0f, m_hovered });
                 }
             }
             if (m_selected != window && mine(m_selected))
             {
                 outline(m_selected, accent, Px(2.0f));
                 if (const UiDesign::Rect* rect = RectOf(m_selected))
-                    tags.push_back({ ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), label(m_selected), accent, 0.0f });
+                    tags.push_back({ ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), label(m_selected), accent, 0.0f, m_selected });
             }
         }
         else if (ImGui::IsMouseHoveringRect(min, max) && overMe)
@@ -2864,9 +2861,120 @@ namespace Manifold::UI
             }
         }
         draw->PopClipRect();
-        draw->PushClipRect(area.Min, area.Max, true);
+        // ∑ A tag never covers another widget: it goes above or below its
+        // widget where that space is free, else into the margin beside the
+        // form (a short line leads to the frame), and only when none of that
+        // fits over the content, faint. It fades while the mouse is on it, so
+        // what lies under it can still be seen and clicked.
+        const ImRect surface(m_surfaceMin, m_surfaceMax);
+        draw->PushClipRect(surface.Min, surface.Max, false);
+        const auto within = [&](int node, int outer) {
+            for (const UiNode* item = m_form.Model.Find(node); item && item->Parent; item = m_form.Model.Find(item->Parent))
+            {
+                if (item->Parent == outer)
+                    return true;
+            }
+            return false;
+        };
+        std::vector<ImRect> placed;
+        const auto blocked = [&](const ImRect& box, int owner) {
+            for (const ImRect& other : placed)
+            {
+                if (other.Overlaps(box))
+                    return true;
+            }
+            for (const UiDesign::Rect& rect : m_design.Rects)
+            {
+                if (rect.Node == owner || !mine(rect.Node) || within(owner, rect.Node) || within(rect.Node, owner))
+                    continue;
+                if (ImRect(rect.Min, rect.Max).Overlaps(box))
+                    return true;
+            }
+            return false;
+        };
+        const auto faded = [](ImU32 color, float factor) {
+            ImVec4 value = ImGui::ColorConvertU32ToFloat4(color);
+            value.w *= factor;
+            return ImGui::GetColorU32(value);
+        };
         for (const PendingTag& tag : tags)
-            Tag(draw, tag.Min, area.Min, area.Max, tag.Text, tag.Background, onAccent, tag.Right);
+        {
+            const UiDesign::Rect* rect = RectOf(tag.Node);
+            if (!rect)
+                continue;
+            const ImVec2 textSize = ImGui::CalcTextSize(tag.Text.c_str());
+            const ImVec2 padding(Px(5.0f), Px(1.0f));
+            const ImVec2 size(textSize.x + padding.x * 2.0f, textSize.y + padding.y * 2.0f);
+            const ImVec2 selMin(rect->Min.x - 2.0f, rect->Min.y - 2.0f);
+            const ImVec2 selMax(rect->Max.x + 2.0f, rect->Max.y + 2.0f);
+            const float gap = Px(2.0f);
+            const float leftX = std::max(min.x + gap, std::min(selMin.x, max.x - size.x - gap));
+            const float rightX = std::max(min.x + gap, std::min(selMax.x - size.x, max.x - size.x - gap));
+            std::vector<ImVec2> inside = {
+                ImVec2(leftX, selMin.y - size.y - gap), ImVec2(rightX, selMin.y - size.y - gap),
+                ImVec2(leftX, selMax.y + gap), ImVec2(rightX, selMax.y + gap),
+            };
+            if (tag.Right > 0.0f)
+                inside = { inside[1], inside[0], inside[3], inside[2] };
+            std::optional<ImRect> box;
+            for (const ImVec2& at : inside)
+            {
+                const ImRect candidate(at, ImVec2(at.x + size.x, at.y + size.y));
+                if (candidate.Min.y >= min.y && candidate.Max.y <= max.y && candidate.Min.x >= min.x && candidate.Max.x <= max.x && !blocked(candidate, tag.Node))
+                {
+                    box = candidate;
+                    break;
+                }
+            }
+            float leader = 0.0f; // the frame edge a tag in the margin points at
+            if (!box)
+            {
+                const float y = std::clamp(selMin.y, min.y, std::max(min.y, max.y - size.y));
+                const float margin = Px(12.0f);
+                const ImRect left(ImVec2(min.x - margin - size.x, y), ImVec2(min.x - margin, y + size.y));
+                const ImRect right(ImVec2(max.x + margin, y), ImVec2(max.x + margin + size.x, y + size.y));
+                const auto free = [&](const ImRect& candidate) {
+                    if (candidate.Min.x < surface.Min.x + gap || candidate.Max.x > surface.Max.x - gap)
+                        return false;
+                    for (const ImRect& other : placed)
+                    {
+                        if (other.Overlaps(candidate))
+                            return false;
+                    }
+                    return true;
+                };
+                if (free(left))
+                {
+                    box = left;
+                    leader = min.x;
+                }
+                else if (free(right))
+                {
+                    box = right;
+                    leader = max.x;
+                }
+            }
+            float alpha = 1.0f;
+            if (!box)
+            {
+                const ImVec2 at(leftX, selMin.y - size.y - gap >= min.y ? selMin.y - size.y - gap : selMin.y + gap);
+                box = ImRect(at, ImVec2(at.x + size.x, at.y + size.y));
+                alpha = 0.6f;
+            }
+            if (box->Contains(io.MousePos))
+                alpha = 0.15f;
+            placed.push_back(*box);
+            const ImU32 background = faded(tag.Background, alpha);
+            if (leader != 0.0f)
+            {
+                const float mid = (box->Min.y + box->Max.y) * 0.5f;
+                const float from = leader < box->Min.x ? box->Min.x : box->Max.x;
+                draw->AddLine(ImVec2(from, mid), ImVec2(leader, mid), background, Px(1.5f));
+                draw->AddCircleFilled(ImVec2(leader, mid), Px(2.5f), background);
+            }
+            draw->AddRectFilled(box->Min, box->Max, background, Px(3.0f));
+            draw->AddText(ImVec2(box->Min.x + padding.x, box->Min.y + padding.y), faded(onAccent, alpha), tag.Text.c_str());
+        }
         draw->PopClipRect();
     }
 
@@ -2955,13 +3063,22 @@ namespace Manifold::UI
                 ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(at.x + Px(3.0f), at.y + ImGui::GetTextLineHeight() * 0.5f), Px(2.5f), ImGui::GetColorU32(ManifoldTheme::Accent));
             ImGui::SetCursorScreenPos(ImVec2(at.x + Px(10.0f), at.y));
         }
-        ImGui::PushStyleColor(ImGuiCol_Text, changed ? ManifoldTheme::Text : ManifoldTheme::Label);
-        ImGui::TextUnformatted(TitleCase(prop.Key).c_str());
-        ImGui::PopStyleColor();
-        ItemTooltip((std::string(prop.Key) + ": " + std::string(prop.Help) + (changed ? "\nChanged from the default." : "")).c_str());
+        // ∑ the name ends in "..." before the reset button instead of running
+        // under it; the tooltip has the whole name
+        const float side = ImGui::GetFrameHeight() * 0.8f;
+        {
+            const std::string title = TitleCase(prop.Key);
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const float limit = std::max(at.x, at.x + (cellRight - ImGui::GetCursorPosX()) - (resettable ? side + ImGui::GetStyle().ItemInnerSpacing.x : 0.0f));
+            const ImVec2 size = ImGui::CalcTextSize(title.c_str());
+            ImGui::Dummy(ImVec2(std::min(size.x, limit - at.x), size.y));
+            ImGui::PushStyleColor(ImGuiCol_Text, changed ? ManifoldTheme::Text : ManifoldTheme::Label);
+            ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(), at, ImVec2(limit, at.y + size.y), limit, title.c_str(), nullptr, &size);
+            ImGui::PopStyleColor();
+        }
+        ItemTooltip((TitleCase(prop.Key) + " (" + std::string(prop.Key) + "): " + std::string(prop.Help) + (changed ? "\nChanged from the default." : "")).c_str());
         if (resettable)
         {
-            const float side = ImGui::GetFrameHeight() * 0.8f;
             ImGui::SameLine(std::max(0.0f, cellRight - side));
             if (IconButton(ICON_FA_UNDO, "Back to the default", false, side))
             {
@@ -3311,7 +3428,18 @@ namespace Manifold::UI
         ImGui::Spacing();
         ImGui::BeginChild("##props", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None);
         ImGui::PushID(node->Id);
-        const float labels = Px(118.0f);
+        // ∑ the name column is as wide as this widget's longest option name
+        // plus the reset button, within 45 % of the panel
+        float labels = Px(118.0f);
+        {
+            float longest = 0.0f;
+            for (const Lua::FormProp& prop : Lua::FormProps(node->Kind))
+                longest = std::max(longest, ImGui::CalcTextSize(TitleCase(prop.Key).c_str()).x);
+            for (const Lua::FormHandler& handler : Lua::FormHandlers(node->Kind))
+                longest = std::max(longest, ImGui::CalcTextSize(std::string(handler.Key).c_str()).x);
+            const float wanted = longest + Px(10.0f) + ImGui::GetFrameHeight() * 0.8f + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::GetStyle().CellPadding.x * 2.0f;
+            labels = std::clamp(wanted, labels, std::max(labels, ImGui::GetContentRegionAvail().x * 0.45f));
+        }
         const auto beginTable = [&](const char* id) {
             if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX))
                 return false;
