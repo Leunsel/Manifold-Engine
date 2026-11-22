@@ -209,7 +209,7 @@ namespace Manifold
     private:
         void UpdateAutoAttach();
         Asm::AaResult Assemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record,
-            int* luaHeldBack);
+            int* luaHeldBack, bool scanInCheck = false);
         Settings& m_settings;
         SettingsStore m_settingsStore;
         TargetSession m_target;

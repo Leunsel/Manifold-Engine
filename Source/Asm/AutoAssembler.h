@@ -52,6 +52,7 @@ namespace Manifold::Asm
     {
         AaSection Section = AaSection::Whole;
         bool CheckOnly = false;
+        bool ScanInCheck = false;
         std::string Owner;
         std::filesystem::path IncludeFolder;
     };

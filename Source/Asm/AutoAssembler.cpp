@@ -916,8 +916,6 @@ namespace Manifold::Asm
             {
                 for (const ScanCommand& scan : m_scans)
                 {
-                    if (!m_host.Process || !m_host.Symbols)
-                        return Fail(ErrorCode::NoProcess, scan.Line, "");
                     const std::string& patternText = scan.Arguments.back();
                     const auto pattern = Scan::ParsePattern(patternText);
                     if (!pattern)
@@ -926,6 +924,19 @@ namespace Manifold::Asm
                         m_result.Line = scan.Line;
                         return false;
                     }
+                    // ∑ CE turns every aobscan into DEFINE(name, 00000000) during a syntax check and
+                    //   scans only on the real pass. A check that scanned would fail on a module that is
+                    //   not loaded or a pattern that is gone, where CE's check passes, and every
+                    //   activation that checks first would scan twice. The program's own checks
+                    //   (Engine::CheckScript: the script editor, the record checks) still scan, since
+                    //   telling the user that a pattern is gone is what they are for.
+                    if (m_options.CheckOnly && !m_options.ScanInCheck)
+                    {
+                        m_values[Lower(scan.Arguments[0])] = 0;
+                        continue;
+                    }
+                    if (!m_host.Process || !m_host.Symbols)
+                        return Fail(ErrorCode::NoProcess, scan.Line, "");
                     std::uint64_t start = 0;
                     std::uint64_t stop = m_host.Process->HighestAddress();
                     if (scan.Kind == "aobscanmodule")
@@ -1269,8 +1280,20 @@ namespace Manifold::Asm
                         return failed;
                     }
                     const auto source = m_host.Symbols->Evaluate(target, Extra());
+                    // ∑ A syntax check must not depend on the game's memory: custom commands answer the
+                    //   check with define(Name, 0), so reassemble(Name+4) points at nothing. CE's own
+                    //   placeholder for this case is nop; any source that does not resolve, read or
+                    //   assemble becomes that during a check, and only the real pass reports it.
+                    const auto checkPlaceholder = [&]() {
+                        AssembleResult placeholder;
+                        placeholder.Ok = true;
+                        placeholder.Bytes.assign(1, 0x90);
+                        return placeholder;
+                    };
                     if (!source.Ok())
                     {
+                        if (m_options.CheckOnly)
+                            return checkPlaceholder();
                         AssembleResult failed;
                         failed.Error = AsmError::UnknownSymbol;
                         failed.Message = "reassemble: " + source.Error.Text;
@@ -1278,6 +1301,13 @@ namespace Manifold::Asm
                     }
                     Disasm::Disassembler disassembler(m_is64);
                     const Disasm::Instruction instruction = disassembler.Read(*m_host.Process, *source.Value, nullptr);
+                    if (m_options.CheckOnly)
+                    {
+                        if (!instruction.Valid)
+                            return checkPlaceholder();
+                        AssembleResult checked = Assemble(instruction.Text(), options);
+                        return checked.Ok ? checked : checkPlaceholder();
+                    }
                     text = instruction.Text();
                 }
                 return Assemble(text, options);
@@ -1285,6 +1315,21 @@ namespace Manifold::Asm
 
             bool CheckAsserts()
             {
+                // ∑ CE skips assert during a syntax check: the address may come from a custom command's
+                //   define(Name, 0) answer, and the bytes only mean something on the real pass.
+                if (m_options.CheckOnly)
+                {
+                    for (const AssertCommand& check : m_asserts)
+                    {
+                        if (!Scan::ParsePattern(check.Bytes))
+                        {
+                            m_result.Error = Status::Fail(ErrorCode::ScanBadPattern, check.Bytes);
+                            m_result.Line = check.Line;
+                            return false;
+                        }
+                    }
+                    return true;
+                }
                 for (const AssertCommand& check : m_asserts)
                 {
                     if (!m_host.Process || !m_host.Symbols)

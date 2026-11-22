@@ -457,6 +457,33 @@ namespace Manifold::Tests
             CHECK_MSG(unknown.Ok(), unknown.Error.Text);
             const Asm::AaResult definedZero = engine.AutoAssemble("define(SITE,0)\nalloc(cave,$100)\ncave:\nreadmem(SITE,7)\n", true);
             CHECK_MSG(definedZero.Ok(), definedZero.Error.Text);
+            const std::string hookShape =
+                "define(Hook,0000000000000000)\n"
+                "alloc(n_Hook,$1000,Hook)\n"
+                "assert(Hook,83 79 0C 05 75 0B)\n"
+                "label(o_Hook r_Hook z_Hook)\n"
+                "n_Hook:\n  mov dword ptr [rcx+0C],02\n"
+                "o_Hook:\n  readMem(Hook,4)\n  reassemble(Hook+4)\n  jmp r_Hook\n"
+                "z_Hook:\n  readMem(Hook,6)\n"
+                "Hook:\n  jmp n_Hook\n  db 90\n"
+                "r_Hook:\n"
+                "registersymbol(Hook z_Hook)\n";
+            const Asm::AaResult hookCheck = engine.AutoAssemble(hookShape, true);
+            CHECK_MSG(hookCheck.Ok(), hookCheck.Error.Text);
+            const Asm::AaResult missingSource = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreassemble(NoSuchSymbol)\n", true);
+            CHECK_MSG(missingSource.Ok(), missingSource.Error.Text);
+            const Asm::AaResult missingSourceReal = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreassemble(NoSuchSymbol)\n", false);
+            CHECK(!missingSourceReal.Ok());
+            const Asm::AaResult assertReal = engine.AutoAssemble("assert(10,83 79 0C 05)\n", false);
+            CHECK(!assertReal.Ok() && assertReal.Error.Code == ErrorCode::AaAssertFailed);
+            const std::string missingModule = "aobscanmodule(Gone,NoSuchModule.dll,90 90 90)\nalloc(cave,$100,Gone)\ncave:\nreadmem(Gone,3)\nGone:\njmp cave\n";
+            const Asm::AaResult scriptCheck = engine.AutoAssemble(missingModule, true);
+            CHECK_MSG(scriptCheck.Ok(), scriptCheck.Error.Text);
+            Asm::AaMemory checkMemory;
+            const ScriptCheck programCheck = engine.CheckScript(missingModule, Asm::AaSection::Whole, checkMemory);
+            CHECK(!programCheck.Result.Ok() && programCheck.Result.Error.Code == ErrorCode::ExprUnknownSymbol);
+            const Asm::AaResult badAssertPattern = engine.AutoAssemble("assert(10,ZZ)\n", true);
+            CHECK(!badAssertPattern.Ok() && badAssertPattern.Error.Code == ErrorCode::ScanBadPattern);
             const Asm::AaResult unreadableReal = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreadmem(10,4)\n", false);
             CHECK(!unreadableReal.Ok() && unreadableReal.Error.Code == ErrorCode::AaReadMemFailed && unreadableReal.Line == 3);
             const Asm::AaResult unknownReal = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreadmem(NoSuchSymbol,4)\n", false);
