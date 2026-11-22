@@ -138,7 +138,9 @@ namespace Manifold
         //   table, so a switch carries the record's id and the table's identity across it and finds the record again after.
         Status ActivateTree(int recordId, bool active, int viaParent = -1, bool fromScript = false);
         Status SwitchTree(int recordId, std::uint64_t identity, bool active, int viaParent, bool fromScript);
-        Status ActivatePlain(Table::MemoryRecord& record, bool active);
+        // A value or group switch; record is found again after the read and
+        // is nullptr (a TableRecordGone status) when Lua deleted it meanwhile.
+        Status ActivatePlain(Table::MemoryRecord*& record, int recordId, std::uint64_t identity, bool active);
         void FinishRecordActivation(int recordId, std::uint64_t identity, bool active, bool fromScript);
         Table::MemoryRecord* Refind(int recordId, std::uint64_t identity);
         Status Vanished(int recordId, std::uint64_t identity, const std::string& description, const char* during);

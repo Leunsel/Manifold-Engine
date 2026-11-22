@@ -8,6 +8,7 @@
 #include "Text/TextBuffer.h"
 
 #include <algorithm>
+#include <chrono>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -797,6 +798,25 @@ namespace Manifold::Tests
             CHECK_EQ(shrink.ReplaceAll("xx", "y", {}), static_cast<std::size_t>(3));
             CHECK_EQ(shrink.Text(), std::string("yAyAy"));
             CHECK_EQ(shrink.Caret(), static_cast<std::size_t>(2));
+            Text::TextBuffer grow("xxAxxAxx");
+            grow.SetCaret(6, false);
+            CHECK_EQ(grow.ReplaceAll("xx", "yyy", {}), static_cast<std::size_t>(3));
+            CHECK_EQ(grow.Text(), std::string("yyyAyyyAyyy"));
+            CHECK_EQ(grow.Caret(), static_cast<std::size_t>(8));
+
+            // Many matches in a big text: one edit, not one per match (that
+            // moved the whole rest of the text each time and took minutes).
+            std::string big;
+            for (int i = 0; i < 200000; ++i)
+                big += "ab ";
+            Text::TextBuffer large(big);
+            const auto started = std::chrono::steady_clock::now();
+            CHECK_EQ(large.ReplaceAll("ab", "xyz", {}), static_cast<std::size_t>(200000));
+            const auto took = std::chrono::steady_clock::now() - started;
+            CHECK_EQ(large.Size(), static_cast<std::size_t>(800000));
+            CHECK(large.Text().substr(0, 8) == "xyz xyz " && large.Text().find("ab") == std::string::npos);
+            CHECK_MSG(took < std::chrono::seconds(2), std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(took).count()) + " ms");
+            CHECK(large.Undo() && large.Text() == big);
         }
     }
 

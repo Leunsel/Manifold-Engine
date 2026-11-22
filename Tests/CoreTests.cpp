@@ -184,6 +184,26 @@ namespace Manifold::Tests
                 CHECK_EQ(entities.Root->Text, std::string("AB\xF0\x9F\x98\x80|&#0;|&#;|&#x;|&#xD800;|&#x110000;|&#-5;|&#12a;|&#x0000000041;"));
                 CHECK(entities.Root->Text.find('\0') == std::string::npos);
             }
+
+            // Control characters go out as character references and come back;
+            // NUL is left out; a tab or line break in an attribute survives.
+            Xml::Node node;
+            node.Name = "A";
+            node.SetAttribute("x", std::string("a\tb\nc\x01", 6));
+            node.Text = std::string("line\nnext <b> \x1B[0m\x07|\x00|", 22);
+            const std::string written = Xml::Write(node, false);
+            CHECK(written.find('\x1B') == std::string::npos && written.find('\x07') == std::string::npos && written.find('\x01') == std::string::npos);
+            CHECK(written.find('\0') == std::string::npos);
+            CHECK(written.find("CDATA") == std::string::npos);
+            CHECK(written.find("x=\"a&#x9;b&#xA;c&#x1;\"") != std::string::npos);
+            const auto reread = Xml::Parse(written);
+            CHECK(reread.Root);
+            if (reread.Root)
+            {
+                CHECK_EQ(reread.Root->Attribute("x").value_or(""), std::string("a\tb\nc\x01", 6));
+                CHECK_EQ(reread.Root->Text, std::string("line\nnext <b> \x1B[0m\x07||", 21));
+            }
+            CHECK_EQ(EscapeXml("a\tb\r\nc"), "a\tb\r\nc");
         }
 
         void TableRoundTrip()
@@ -1263,6 +1283,49 @@ data:
         CHECK(!Table::UsableHotkeyKeys({}) && !Table::UsableHotkeyKeys({ VK_LBUTTON }) && !Table::UsableHotkeyKeys({ VK_RBUTTON, VK_LBUTTON }));
         CHECK(!Table::UsableHotkeyKeys({ 0 }) && !Table::UsableHotkeyKeys({ 255 }) && !Table::UsableHotkeyKeys({ VK_F1, 300 }) && !Table::UsableHotkeyKeys({ -1 }));
         CHECK(!Table::UsableHotkeyKeys({ 16, 17, 18, 65, 66, 67 }));
+
+        // As in Cheat Engine, the longest key set that is down wins: Ctrl+F1
+        // does not also fire F1, F1 alone still does, Shift+F1 with nothing
+        // longer registered fires with Ctrl held too.
+        {
+            static bool s_down[256] = {};
+            Table::SetKeyDownReader([](int key) { return key >= 0 && key < 256 && s_down[key]; });
+            const std::vector<int> f1{ VK_F1 }, ctrlF1{ VK_CONTROL, VK_F1 }, shiftF2{ VK_SHIFT, VK_F2 };
+            bool f1Held = false, ctrlF1Held = false, shiftF2Held = false;
+            struct Fired { bool F1 = false, CtrlF1 = false, ShiftF2 = false; };
+            const auto frame = [&] {
+                Table::BeginHotkeyFrame();
+                Fired fired;
+                fired.F1 = Table::KeysPressed(f1, f1Held);
+                fired.CtrlF1 = Table::KeysPressed(ctrlF1, ctrlF1Held);
+                fired.ShiftF2 = Table::KeysPressed(shiftF2, shiftF2Held);
+                return fired;
+            };
+            frame(); // every set known
+            s_down[VK_CONTROL] = s_down[VK_F1] = true;
+            Fired fired = frame();
+            CHECK(!fired.F1 && fired.CtrlF1);
+            s_down[VK_CONTROL] = false; // F1 still held: no late F1
+            fired = frame();
+            CHECK(!fired.F1 && !fired.CtrlF1);
+            s_down[VK_F1] = false;
+            frame();
+            s_down[VK_F1] = true;
+            fired = frame();
+            CHECK(fired.F1 && !fired.CtrlF1);
+            s_down[VK_F1] = false;
+            frame();
+            s_down[VK_CONTROL] = s_down[VK_SHIFT] = s_down[VK_F2] = true;
+            fired = frame();
+            CHECK(fired.ShiftF2);
+            std::fill(std::begin(s_down), std::end(s_down), false);
+            // Asked first in a frame, F1 still sees Ctrl+F1 from the frame before.
+            frame();
+            s_down[VK_CONTROL] = s_down[VK_F1] = true;
+            Table::BeginHotkeyFrame();
+            CHECK(!Table::KeysPressed(f1, f1Held));
+            Table::SetKeyDownReader(nullptr);
+        }
 
         const char* text = R"CT(<CheatTable><CheatEntries>
 <CheatEntry><ID>1</ID><Description>"Run"</Description><VariableType>Auto Assembler Script</VariableType><AssemblerScript>[ENABLE]

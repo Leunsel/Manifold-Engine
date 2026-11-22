@@ -134,6 +134,10 @@ namespace Manifold::Tests
             CHECK(!Table::FilterAddress("FFFF").has_value());
             CHECK(!Table::FilterAddress("+1A0000").has_value());
             CHECK(!Table::FilterAddress("health").has_value());
+            CHECK(!Table::FilterAddress("added").has_value());
+            CHECK(!Table::FilterAddress("FACADE").has_value());
+            CHECK(Table::FilterAddress("0xFACADE") == std::optional<std::uint64_t>(0xFACADE));
+            CHECK(Table::FilterAddress("DEAD0") == std::optional<std::uint64_t>(0xDEAD0));
             CHECK(!Table::FilterAddress("game.exe+10").has_value());
             CHECK(!Table::FilterAddress("12345678123456789").has_value());
             CHECK(!Table::FilterAddress("").has_value());

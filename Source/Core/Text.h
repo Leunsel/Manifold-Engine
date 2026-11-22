@@ -39,5 +39,10 @@ namespace Manifold
     bool IsHexDigit(char c);
     int HexValue(char c);
 
-    std::string EscapeXml(std::string_view text);
+    // Escapes text for XML; control characters become character references
+    // (tab and line breaks too when attribute is set) and NUL is left out.
+    std::string EscapeXml(std::string_view text, bool attribute = false);
+    // Whether text holds a control character other than tab and line breaks
+    // (one that a CDATA section cannot carry).
+    bool HasXmlControl(std::string_view text);
 }

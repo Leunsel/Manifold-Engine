@@ -739,16 +739,41 @@ namespace Manifold::Text
         const std::vector<std::size_t> matches = FindAll(m_text, needle, options);
         if (matches.empty())
             return 0;
-        // Back to front, so the earlier offsets stay valid; Undo reverts the
-        // edits in reverse order, which is front to back again.
-        Group& group = Begin(EditKind::Other);
-        std::size_t caret = m_caret;
-        for (auto at = matches.rbegin(); at != matches.rend(); ++at)
+        // One edit from the first match to the end of the last one, built in a
+        // single pass: an edit per match moved the rest of the text each time,
+        // which took minutes for tens of thousands of matches in a big script.
+        const std::size_t first = matches.front();
+        const std::size_t last = matches.back() + needle.size();
+        std::string replaced;
+        replaced.reserve(last - first + matches.size() * replacement.size());
+        std::size_t at = first;
+        for (const std::size_t match : matches)
         {
-            Apply(group, *at, needle.size(), replacement);
-            if (*at < caret)
-                caret = caret >= *at + needle.size() ? caret - needle.size() + replacement.size() : *at;
+            replaced.append(m_text, at, match - at);
+            replaced.append(replacement);
+            at = match + needle.size();
         }
+        // The caret moves with the text before it; inside a match it goes to
+        // that match's start.
+        std::size_t caret = m_caret;
+        std::ptrdiff_t shift = 0;
+        bool inside = false;
+        for (const std::size_t match : matches)
+        {
+            if (match >= m_caret)
+                break;
+            if (m_caret < match + needle.size())
+            {
+                caret = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(match) + shift);
+                inside = true;
+                break;
+            }
+            shift += static_cast<std::ptrdiff_t>(replacement.size()) - static_cast<std::ptrdiff_t>(needle.size());
+        }
+        if (!inside)
+            caret = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(m_caret) + shift);
+        Group& group = Begin(EditKind::Other);
+        Apply(group, first, last - first, replaced);
         m_caret = m_anchor = std::min(caret, m_text.size());
         End(group);
         return matches.size();

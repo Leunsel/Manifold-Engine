@@ -318,21 +318,49 @@ namespace Manifold
         return bytes;
     }
 
-    std::string EscapeXml(std::string_view text)
+    std::string EscapeXml(std::string_view text, bool attribute)
     {
+        // ∑ XML allows no control characters as they are, so they go out as
+        //   character references (the reader takes them back); NUL has none
+        //   and is left out. In an attribute, a reader turns a raw tab or line
+        //   break into a space, so those are references there too.
+        static constexpr char kDigits[] = "0123456789ABCDEF";
         std::string result;
         result.reserve(text.size());
         for (char c : text)
         {
+            const unsigned char code = static_cast<unsigned char>(c);
             switch (c)
             {
             case '&': result += "&amp;"; break;
             case '<': result += "&lt;"; break;
             case '>': result += "&gt;"; break;
             case '"': result += "&quot;"; break;
-            default: result += c; break;
+            default:
+                if (code == 0)
+                    break;
+                if (code < 0x20 && (attribute || (c != '\t' && c != '\n' && c != '\r')))
+                {
+                    result += "&#x";
+                    if (code >= 0x10)
+                        result += kDigits[code >> 4];
+                    result += kDigits[code & 0xF];
+                    result += ';';
+                    break;
+                }
+                result += c;
+                break;
             }
         }
         return result;
+    }
+
+    bool HasXmlControl(std::string_view text)
+    {
+        return std::any_of(text.begin(), text.end(), [](char c)
+            {
+                const unsigned char code = static_cast<unsigned char>(c);
+                return code < 0x20 && c != '\t' && c != '\n' && c != '\r';
+            });
     }
 }

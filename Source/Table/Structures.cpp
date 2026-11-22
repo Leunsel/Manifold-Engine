@@ -213,9 +213,14 @@ namespace Manifold::Table
     std::optional<std::uint64_t> FilterAddress(std::string_view text)
     {
         std::string_view digits = TrimView(text);
-        if (digits.size() > 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X'))
+        const bool prefixed = digits.size() > 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X');
+        if (prefixed)
             digits.remove_prefix(2);
         if (digits.empty() || digits.size() > 16)
+            return std::nullopt;
+        // A word of letters only ("added", "facade", "decade") is a name the
+        // filter looks for, not an address, unless it is written with 0x.
+        if (!prefixed && std::none_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; }))
             return std::nullopt;
         std::uint64_t value = 0;
         for (const char c : digits)

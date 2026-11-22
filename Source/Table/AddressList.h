@@ -238,7 +238,15 @@ namespace Manifold::Table
 
     const char* HotkeyActionName(HotkeyAction action);
     bool UsableHotkeyKeys(const std::vector<int>& keys);
+    // Whether the key set went down since the last call (wasDown keeps that).
+    // Like Cheat Engine, a set does not fire while a longer known set that
+    // holds all its keys is down too: Ctrl+F1 does not also fire F1.
     bool KeysPressed(const std::vector<int>& keys, bool& wasDown);
+    // Once per frame, before the hotkeys are asked (Engine tick).
+    void BeginHotkeyFrame();
+    // Tests: reads key states from keyDown instead of GetAsyncKeyState
+    // (nullptr puts that back) and forgets the known key sets.
+    void SetKeyDownReader(bool (*keyDown)(int));
     std::string KeysText(const std::vector<int>& keys);
 
     // Whether an address is written relative to a record above it: "+18", "-4".

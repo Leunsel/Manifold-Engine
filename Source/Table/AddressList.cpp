@@ -3,6 +3,7 @@
 #include "Core/Text.h"
 
 #include <algorithm>
+#include <mutex>
 
 #include <windows.h>
 
@@ -480,10 +481,90 @@ namespace Manifold::Table
         return std::any_of(keys.begin(), keys.end(), [](int key) { return key != VK_LBUTTON && key != VK_RBUTTON; });
     }
 
+    namespace
+    {
+        bool AsyncKeyDown(int key)
+        {
+            return (::GetAsyncKeyState(key) & 0x8000) != 0;
+        }
+
+        // ∑ Every key set asked this frame and the last one, from the table,
+        //   Lua's createHotkey and form widgets alike: as in Cheat Engine, a
+        //   set fires only when no longer known set that holds all its keys is
+        //   down too, so Ctrl+F1 does not also fire F1. Last frame's sets
+        //   count because the pollers ask one after another; a removed set
+        //   lingers for one frame.
+        struct HotkeySets
+        {
+            std::mutex Lock;
+            std::vector<std::vector<int>> Current;
+            std::vector<std::vector<int>> Previous;
+            bool (*KeyDown)(int) = &AsyncKeyDown;
+        };
+
+        HotkeySets& Sets()
+        {
+            static HotkeySets sets;
+            return sets;
+        }
+
+        bool Holds(const std::vector<int>& bigger, const std::vector<int>& keys)
+        {
+            return bigger.size() > keys.size() &&
+                   std::all_of(keys.begin(), keys.end(), [&](int key) { return std::find(bigger.begin(), bigger.end(), key) != bigger.end(); });
+        }
+    }
+
+    void BeginHotkeyFrame()
+    {
+        HotkeySets& sets = Sets();
+        std::lock_guard lock(sets.Lock);
+        std::swap(sets.Previous, sets.Current);
+        sets.Current.clear();
+    }
+
+    void SetKeyDownReader(bool (*keyDown)(int))
+    {
+        HotkeySets& sets = Sets();
+        std::lock_guard lock(sets.Lock);
+        sets.KeyDown = keyDown ? keyDown : &AsyncKeyDown;
+        sets.Current.clear();
+        sets.Previous.clear();
+    }
+
     bool KeysPressed(const std::vector<int>& keys, bool& wasDown)
     {
-        const bool down = !keys.empty() && std::all_of(keys.begin(), keys.end(), [](int key) { return (::GetAsyncKeyState(key) & 0x8000) != 0; });
-        const bool pressed = down && !wasDown;
+        if (keys.empty())
+        {
+            wasDown = false;
+            return false;
+        }
+        HotkeySets& sets = Sets();
+        std::lock_guard lock(sets.Lock);
+        if (std::find(sets.Current.begin(), sets.Current.end(), keys) == sets.Current.end())
+            sets.Current.push_back(keys);
+        const auto allDown = [&](const std::vector<int>& set) { return std::all_of(set.begin(), set.end(), [&](int key) { return sets.KeyDown(key); }); };
+        const bool down = allDown(keys);
+        // A held set stays held while a longer one covers it, so letting go
+        // of Ctrl with F1 still down does not fire F1 afterwards.
+        bool covered = false;
+        if (down && !wasDown)
+        {
+            for (const std::vector<std::vector<int>>* list : { &sets.Current, &sets.Previous })
+            {
+                for (const std::vector<int>& other : *list)
+                {
+                    if (Holds(other, keys) && allDown(other))
+                    {
+                        covered = true;
+                        break;
+                    }
+                }
+                if (covered)
+                    break;
+            }
+        }
+        const bool pressed = down && !wasDown && !covered;
         wasDown = down;
         return pressed;
     }

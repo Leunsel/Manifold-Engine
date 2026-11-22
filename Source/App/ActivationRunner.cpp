@@ -323,7 +323,7 @@ namespace Manifold
         }
         else
         {
-            const Status plain = ActivatePlain(*record, active);
+            const Status plain = ActivatePlain(record, recordId, identity, active);
             trace.Seconds = m_engine.Now() - started;
             if (!plain)
             {
@@ -331,6 +331,8 @@ namespace Manifold
                 trace.Error = plain.Text;
             }
             Traced(std::move(trace));
+            if (!record)
+                return plain;
             if (!plain)
             {
                 NoteOutcome(recordId, plain);
@@ -363,18 +365,24 @@ namespace Manifold
         return Status::Success();
     }
 
-    Status ActivationRunner::ActivatePlain(Table::MemoryRecord& record, bool active)
+    Status ActivationRunner::ActivatePlain(Table::MemoryRecord*& record, int recordId, std::uint64_t identity, bool active)
     {
-        if (record.Kind == Table::RecordKind::Value && active)
+        if (record->Kind == Table::RecordKind::Value && active)
         {
             if (!m_engine.Process())
                 return Status::Fail(ErrorCode::NoProcess);
-            std::vector<std::uint8_t> bytes = m_engine.ReadRecord(record);
+            // ∑ Reading resolves the address, which may run Lua (a symbol
+            //   lookup callback, a {$lua} symbol) that deletes the record or
+            //   replaces the table: found again by id afterwards.
+            const std::string description = record->Description;
+            std::vector<std::uint8_t> bytes = m_engine.ReadRecord(*record);
+            if (!(record = Refind(recordId, identity)))
+                return Vanished(recordId, identity, description, "while its value was read");
             if (bytes.empty())
-                return Status::Fail(ErrorCode::ReadFailed, record.AddressOk ? Hex(record.ResolvedAddress) : record.Address);
-            record.FrozenBytes = std::move(bytes);
+                return Status::Fail(ErrorCode::ReadFailed, record->AddressOk ? Hex(record->ResolvedAddress) : record->Address);
+            record->FrozenBytes = std::move(bytes);
         }
-        record.Active = active;
+        record->Active = active;
         return Status::Success();
     }
 
@@ -686,7 +694,7 @@ namespace Manifold
         m_progressCurrent = record->Description;
         if (record->Kind != Table::RecordKind::Script)
         {
-            const Status status = ActivatePlain(*record, active);
+            const Status status = ActivatePlain(record, recordId, identity, active);
             trace.Seconds = m_engine.Now() - started;
             if (!status)
             {
@@ -695,6 +703,8 @@ namespace Manifold
             }
             Traced(std::move(trace));
             Unpend(recordId);
+            if (!record)
+                return;
             NoteOutcome(recordId, status);
             if (!status)
             {

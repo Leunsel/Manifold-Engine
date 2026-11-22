@@ -300,7 +300,8 @@ namespace Manifold::Xml
 
         bool NeedsCdata(const std::string& text)
         {
-            return text.find('\n') != std::string::npos || text.find('<') != std::string::npos || text.find('&') != std::string::npos;
+            // A CDATA section cannot carry control characters; such text is escaped instead.
+            return (text.find('\n') != std::string::npos || text.find('<') != std::string::npos || text.find('&') != std::string::npos) && !HasXmlControl(text);
         }
 
         void WriteNode(const Node& node, std::string& out, int depth)
@@ -308,7 +309,7 @@ namespace Manifold::Xml
             const std::string indent(static_cast<std::size_t>(depth) * 2, ' ');
             out += indent + "<" + node.Name;
             for (const auto& [name, value] : node.Attributes)
-                out += " " + name + "=\"" + EscapeXml(value) + "\"";
+                out += " " + name + "=\"" + EscapeXml(value, true) + "\"";
             if (node.Children.empty() && node.Text.empty())
             {
                 out += "/>\n";

@@ -605,6 +605,7 @@ namespace Manifold
         }
         {
             PROFILE_ZONE("Hotkeys");
+            Table::BeginHotkeyFrame();
             m_tables.UpdateHotkeys();
         }
         {
