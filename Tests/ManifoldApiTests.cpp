@@ -2575,6 +2575,89 @@ return M
             CHECK_MSG(engine.Lua().Run("local w = manifold.ui.form.build((function() " + saved.substr(saved.find("return {")) + " end)())\nw.remove()\n", "layout form").Ok(), saved);
         }
 
+        void UiFormEditing()
+        {
+            using Lua::UiKind;
+            // Change Kind keeps the widget, its children, name and handlers
+            Lua::FormDocument form = Lua::NewForm("Editing");
+            const int column = Lua::FormAdd(form, UiKind::Column, form.Window);
+            const int a = Lua::FormAdd(form, UiKind::Button, column);
+            const int b = Lua::FormAdd(form, UiKind::Checkbox, column);
+            CHECK(Lua::FormKindChoices(UiKind::Column).size() == 3);
+            CHECK(Lua::FormKindChoices(UiKind::Button).empty());
+            CHECK(Lua::FormChangeKind(form, column, UiKind::Section));
+            CHECK(form.Model.Find(column)->Kind == UiKind::Section && form.Model.Find(column)->Title == "Section" && form.Model.Find(column)->Children.size() == 2);
+            CHECK(!Lua::FormChangeKind(form, a, UiKind::Slider));
+            const int number = Lua::FormAdd(form, UiKind::Number, form.Window);
+            form.Meta[number].Handlers["onChange"] = "numberChanged";
+            CHECK(Lua::FormChangeKind(form, number, UiKind::Slider));
+            const Lua::UiNode* slider = form.Model.Find(number);
+            CHECK(slider->Kind == UiKind::Slider && slider->HasMin && slider->HasMax && slider->Max > slider->Min);
+            CHECK(form.Meta[number].Handlers["onChange"] == "numberChanged");
+            const int combo = Lua::FormAdd(form, UiKind::Combo, form.Window);
+            form.Model.Find(combo)->Multi = true;
+            form.Model.Find(combo)->Chosen = { 2, 3 };
+            CHECK(Lua::FormChangeKind(form, combo, UiKind::Radio));
+            CHECK(!form.Model.Find(combo)->Multi && form.Model.Find(combo)->Selected == 2);
+
+            // Unwrap moves the widgets out in the container's place
+            const int index = Lua::FormIndexOf(form, column);
+            CHECK(Lua::FormUnwrap(form, column));
+            CHECK(!form.Model.Find(column));
+            CHECK(Lua::FormIndexOf(form, a) == index && Lua::FormIndexOf(form, b) == index + 1);
+            CHECK(form.Model.Find(a)->Parent == form.Window);
+            CHECK(!Lua::FormUnwrap(form, form.Window) && !Lua::FormUnwrap(form, a));
+
+            // names from record descriptions, renaming in scripts
+            CHECK(Lua::FormNameFromText(form, "Infinite Health") == "infiniteHealth");
+            CHECK(Lua::FormNameFromText(form, "2x Speed!") == "record2xSpeed");
+            form.Meta[a].Name = "infiniteHealth";
+            CHECK(Lua::FormNameFromText(form, "Infinite Health") == "infiniteHealth1");
+            CHECK(Lua::FormRenameIdentifier("function goldChanged(v)\n  goldChangedNot(goldChanged)\nend", "goldChanged", "cashChanged")
+                  == "function cashChanged(v)\n  goldChangedNot(cashChanged)\nend");
+
+            // every problem with a fix is gone after it
+            Lua::FormDocument broken = Lua::NewForm("");
+            const int tabs = Lua::FormAdd(broken, UiKind::Tabs, broken.Window);
+            Lua::FormRemove(broken, broken.Model.Find(tabs)->Children.front());
+            const int empty = Lua::FormAdd(broken, UiKind::Combo, broken.Window);
+            broken.Model.Find(empty)->Items.clear();
+            const int past = Lua::FormAdd(broken, UiKind::Radio, broken.Window);
+            broken.Model.Find(past)->Selected = 9;
+            const int icon = Lua::FormAdd(broken, UiKind::Button, broken.Window);
+            broken.Model.Find(icon)->Icon = "no-such-icon";
+            const int coloured = Lua::FormAdd(broken, UiKind::Text, broken.Window);
+            broken.Model.Find(coloured)->Color = "#12";
+            const int twin = Lua::FormAdd(broken, UiKind::Button, broken.Window);
+            broken.Meta[twin].Name = broken.Meta[icon].Name;
+            broken.Meta[twin].Handlers["onClick"] = "not a name";
+            broken.Meta[icon].EnabledWhen = "nobody";
+            broken.Meta[icon].Opens = "missing";
+            const int multi = Lua::FormAdd(broken, UiKind::Combo, broken.Window);
+            broken.Model.Find(multi)->Multi = true;
+            broken.Meta[multi].Record = "God Mode";
+            const int modal = Lua::FormAddModal(broken);
+            Lua::FormRenameModal(broken, modal, "");
+            std::vector<Lua::FormProblem> problems = Lua::FormProblems(broken);
+            int fixable = 0;
+            for (const Lua::FormProblem& problem : problems)
+                fixable += problem.Fix != Lua::FormFix::None ? 1 : 0;
+            CHECK_MSG(fixable >= 11, std::to_string(fixable) + " of " + std::to_string(problems.size()));
+            for (int round = 0; round < 20; ++round)
+            {
+                problems = Lua::FormProblems(broken);
+                const auto next = std::find_if(problems.begin(), problems.end(), [](const Lua::FormProblem& problem) { return problem.Fix != Lua::FormFix::None; });
+                if (next == problems.end())
+                    break;
+                CHECK_MSG(Lua::FormApplyFix(broken, *next), next->Text);
+                CHECK(!Lua::FormFixLabel(next->Fix).empty());
+            }
+            std::string left;
+            for (const Lua::FormProblem& problem : Lua::FormProblems(broken))
+                left += problem.Text + "; ";
+            CHECK_MSG(left.empty(), left);
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -2728,6 +2811,7 @@ return M
         UiFormOneFile(engine);
         UiFormRules(engine);
         UiLayoutOptions(engine);
+        UiFormEditing();
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

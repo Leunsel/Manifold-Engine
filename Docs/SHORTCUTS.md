@@ -320,3 +320,6 @@ While the Form Editor has the focus. Widget keys act on the selected widget and 
 | `Ctrl+C` | Copy Widget | `FormCopy` | Manifold |
 | `Ctrl+X` | Cut Widget | `FormCut` | Manifold |
 | `Ctrl+V` | Paste Widgets | `FormPaste` | Manifold |
+| `F2` | Rename Widget | `FormRename` | Manifold |
+| `Alt+Left` | Select Parent | `FormSelectParent` | Manifold |
+| `Ctrl+F` | Find a Widget | `FormFind` | Manifold |

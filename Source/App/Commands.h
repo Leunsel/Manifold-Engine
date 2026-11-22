@@ -257,6 +257,9 @@ namespace Manifold
         FormCopy,
         FormCut,
         FormPaste,
+        FormRename,
+        FormSelectParent,
+        FormFind,
 
         Count
     };

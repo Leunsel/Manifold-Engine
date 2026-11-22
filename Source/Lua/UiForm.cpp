@@ -2848,9 +2848,9 @@ namespace Manifold::Lua
                 if (!meta->Name.empty())
                 {
                     if (!FormIsIdentifier(meta->Name))
-                        problems.push_back({ id, kind + " \"" + meta->Name + "\": the name must be a Lua name (letters, digits, _, no keyword)" });
+                        problems.push_back({ id, kind + " \"" + meta->Name + "\": the name must be a Lua name (letters, digits, _, no keyword)", FormFix::Rename });
                     else if (const auto [at, fresh] = names.emplace(meta->Name, id); !fresh)
-                        problems.push_back({ id, kind + " \"" + meta->Name + "\": another widget has this name" });
+                        problems.push_back({ id, kind + " \"" + meta->Name + "\": another widget has this name", FormFix::Rename });
                 }
                 for (const FormHandler& handler : FormHandlers(node->Kind))
                 {
@@ -2858,55 +2858,55 @@ namespace Manifold::Lua
                     if (found == meta->Handlers.end() || found->second.empty())
                         continue;
                     if (!FormIsIdentifier(found->second))
-                        problems.push_back({ id, kind + ": " + std::string(handler.Key) + " \"" + found->second + "\" is no Lua name" });
+                        problems.push_back({ id, kind + ": " + std::string(handler.Key) + " \"" + found->second + "\" is no Lua name", FormFix::NameHandler, std::string(handler.Key) });
                     else if (const auto [at, fresh] = signatures.emplace(found->second, std::string(handler.Params)); !fresh && at->second != handler.Params)
-                        problems.push_back({ id, kind + ": " + found->second + " is also used for a handler with other arguments (" + at->second + ")" });
+                        problems.push_back({ id, kind + ": " + found->second + " is also used for a handler with other arguments (" + at->second + ")", FormFix::NameHandler, std::string(handler.Key) });
                 }
             }
             if (node->Kind == UiKind::Tabs && node->Children.empty())
-                problems.push_back({ id, "Tabs: holds no tab" });
+                problems.push_back({ id, "Tabs: holds no tab", FormFix::AddTab });
             if (node->Kind == UiKind::Split && node->Children.size() != 2)
                 problems.push_back({ id, "Split: shows its first two widgets; it has " + std::to_string(node->Children.size()) });
             if ((node->Kind == UiKind::Combo || node->Kind == UiKind::Radio) && node->Items.empty())
-                problems.push_back({ id, kind + ": has no items" });
+                problems.push_back({ id, kind + ": has no items", FormFix::SeedItems });
             if ((node->Kind == UiKind::Combo || node->Kind == UiKind::Radio) && node->Selected > static_cast<int>(node->Items.size()))
-                problems.push_back({ id, kind + ": value " + std::to_string(node->Selected) + " is past the last item" });
+                problems.push_back({ id, kind + ": value " + std::to_string(node->Selected) + " is past the last item", FormFix::ClampValue });
             if (node->Kind == UiKind::Color && !node->String.empty() && !HexColor(node->String))
-                problems.push_back({ id, "Color: the value must be #RRGGBB or #RRGGBBAA" });
+                problems.push_back({ id, "Color: the value must be #RRGGBB or #RRGGBBAA", FormFix::ClearValue });
             if (!node->Icon.empty() && IconGlyph(node->Icon).empty())
-                problems.push_back({ id, kind + ": \"" + node->Icon + "\" is no Font Awesome icon name; pick one with the button beside Icon" });
-            for (const std::string* colour : { &node->Color, &node->Background })
+                problems.push_back({ id, kind + ": \"" + node->Icon + "\" is no Font Awesome icon name; pick one with the button beside Icon", FormFix::ClearIcon });
+            for (const auto& [colour, field] : { std::pair{ &node->Color, "color" }, std::pair{ &node->Background, "background" } })
             {
                 if (!colour->empty() && colour->front() == '#' && !HexColor(*colour))
-                    problems.push_back({ id, kind + ": colour \"" + *colour + "\" must be #RRGGBB or #RRGGBBAA" });
+                    problems.push_back({ id, kind + ": colour \"" + *colour + "\" must be #RRGGBB or #RRGGBBAA", FormFix::ClearColour, field });
             }
             if (node->Kind == UiKind::Combo && node->Multi)
             {
                 if (const FormMeta* meta = MetaOf(form, id); meta && !meta->Record.empty())
-                    problems.push_back({ id, kind + ": a combo that ticks several items cannot show a memory record; switch Multi off or unbind it" });
+                    problems.push_back({ id, kind + ": a combo that ticks several items cannot show a memory record; switch Multi off or unbind it", FormFix::MultiOff });
             }
             if (node->Kind == UiKind::Window && node->Title.empty())
-                problems.push_back({ id, "Window: has no title" });
+                problems.push_back({ id, "Window: has no title", FormFix::Title });
             if (const FormMeta* meta = MetaOf(form, id); meta && !meta->Opens.empty())
             {
                 bool known = false;
                 for (const int modal : form.Modals)
                     known = known || FormModalName(form, modal) == meta->Opens;
                 if (!known)
-                    problems.push_back({ id, kind + ": opens \"" + meta->Opens + "\", but the form has no modal of that name" });
+                    problems.push_back({ id, kind + ": opens \"" + meta->Opens + "\", but the form has no modal of that name", FormFix::ClearOpens });
             }
             if (const FormMeta* meta = MetaOf(form, id); meta && !meta->EnabledWhen.empty())
             {
                 const std::optional<FormRule> rule = FormParseWhen(meta->EnabledWhen);
                 const UiNode* source = rule ? form.Model.Find(FormFindNamed(form, rule->Source)) : nullptr;
                 if (!rule)
-                    problems.push_back({ id, kind + ": Enabled When \"" + meta->EnabledWhen + "\" cannot be read" });
+                    problems.push_back({ id, kind + ": Enabled When \"" + meta->EnabledWhen + "\" cannot be read", FormFix::ClearRule });
                 else if (!source)
-                    problems.push_back({ id, kind + ": Enabled When names \"" + rule->Source + "\", but no widget has that name" });
+                    problems.push_back({ id, kind + ": Enabled When names \"" + rule->Source + "\", but no widget has that name", FormFix::ClearRule });
                 else if (source->Kind != UiKind::Checkbox && source->Kind != UiKind::Combo && source->Kind != UiKind::Radio)
-                    problems.push_back({ id, kind + ": Enabled When names \"" + rule->Source + "\", which is no checkbox, combo or radio" });
+                    problems.push_back({ id, kind + ": Enabled When names \"" + rule->Source + "\", which is no checkbox, combo or radio", FormFix::ClearRule });
                 else if (!rule->Values.empty() && source->Kind == UiKind::Checkbox)
-                    problems.push_back({ id, kind + ": Enabled When: \"" + rule->Source + "\" is a checkbox, which is on or off" });
+                    problems.push_back({ id, kind + ": Enabled When: \"" + rule->Source + "\" is a checkbox, which is on or off", FormFix::ClearRule });
                 else
                 {
                     for (const std::string& value : rule->Values)
@@ -2924,10 +2924,272 @@ namespace Manifold::Lua
         for (const int window : FormWindows(form))
         {
             if (FormIsModal(form, window) && FormModalName(form, window).empty())
-                problems.push_back({ window, "Modal: has no name" });
+                problems.push_back({ window, "Modal: has no name", FormFix::ModalName });
             visit(window);
         }
         return problems;
+    }
+
+    std::string_view FormFixLabel(FormFix fix)
+    {
+        switch (fix)
+        {
+        case FormFix::Rename: return "Give It a Free Name";
+        case FormFix::NameHandler: return "Name It After the Widget";
+        case FormFix::AddTab: return "Add a Tab";
+        case FormFix::SeedItems: return "Add Items";
+        case FormFix::ClampValue: return "Choose the Last Item";
+        case FormFix::ClearValue: return "Clear the Value";
+        case FormFix::ClearIcon: return "Remove the Icon";
+        case FormFix::ClearColour: return "Remove the Colour";
+        case FormFix::MultiOff: return "Switch Multi Off";
+        case FormFix::Title: return "Add a Title";
+        case FormFix::ClearOpens: return "Open Nothing";
+        case FormFix::ClearRule: return "Remove Enabled When";
+        case FormFix::ModalName: return "Give It a Name";
+        case FormFix::None: break;
+        }
+        return {};
+    }
+
+    bool FormApplyFix(FormDocument& form, const FormProblem& problem)
+    {
+        UiNode* node = form.Model.Find(problem.Node);
+        if (!node || problem.Fix == FormFix::None)
+            return false;
+        const auto base = [&]() {
+            const auto meta = form.Meta.find(node->Id);
+            return meta != form.Meta.end() && !meta->second.Name.empty() ? meta->second.Name : std::string(UiKindName(node->Kind));
+        };
+        switch (problem.Fix)
+        {
+        case FormFix::Rename:
+        {
+            // ∑ keep what can be kept of the old name (letters, digits, _)
+            std::string wanted;
+            for (const char c : base())
+            {
+                if (std::isalnum(static_cast<unsigned char>(c)) || c == '_')
+                    wanted += c;
+            }
+            if (wanted.empty() || std::isdigit(static_cast<unsigned char>(wanted.front())))
+                wanted = std::string(UiKindName(node->Kind)) + wanted;
+            form.Meta[node->Id].Name = FormUniqueName(form, wanted, node->Id);
+            break;
+        }
+        case FormFix::NameHandler:
+        {
+            if (problem.Detail.size() < 3)
+                return false;
+            std::string name = base() + problem.Detail.substr(2);
+            const std::vector<std::pair<std::string, std::string>> used = FormHandlerList(form);
+            const auto taken = [&](const std::string& candidate) {
+                for (const auto& [function, params] : used)
+                {
+                    if (function == candidate)
+                        return true;
+                }
+                return false;
+            };
+            for (int n = 2; taken(name) || !FormIsIdentifier(name); ++n)
+                name = base() + problem.Detail.substr(2) + std::to_string(n);
+            form.Meta[node->Id].Handlers[problem.Detail] = name;
+            break;
+        }
+        case FormFix::AddTab:
+            return FormAdd(form, UiKind::Tab, node->Id) != 0;
+        case FormFix::SeedItems:
+            node->Items = { "First", "Second" };
+            node->Selected = std::min(node->Selected, 2);
+            break;
+        case FormFix::ClampValue:
+            node->Selected = static_cast<int>(node->Items.size());
+            break;
+        case FormFix::ClearValue:
+            node->String.clear();
+            break;
+        case FormFix::ClearIcon:
+            node->Icon.clear();
+            break;
+        case FormFix::ClearColour:
+            (problem.Detail == "background" ? node->Background : node->Color).clear();
+            break;
+        case FormFix::MultiOff:
+            node->Multi = false;
+            node->Selected = node->Chosen.empty() ? node->Selected : node->Chosen.front();
+            node->Chosen.clear();
+            break;
+        case FormFix::Title:
+            node->Title = FormIsModal(form, node->Id) ? "Dialog" : "Window";
+            break;
+        case FormFix::ClearOpens:
+            form.Meta[node->Id].Opens.clear();
+            break;
+        case FormFix::ClearRule:
+            form.Meta[node->Id].EnabledWhen.clear();
+            break;
+        case FormFix::ModalName:
+        {
+            std::string name = "dialog";
+            for (int n = 2;; ++n)
+            {
+                bool taken = false;
+                for (const int modal : form.Modals)
+                    taken = taken || (modal != node->Id && FormModalName(form, modal) == name);
+                if (!taken)
+                    break;
+                name = "dialog" + std::to_string(n);
+            }
+            return FormRenameModal(form, node->Id, name);
+        }
+        case FormFix::None:
+            return false;
+        }
+        form.Model.Touch(*node);
+        return true;
+    }
+
+    std::vector<UiKind> FormKindChoices(UiKind kind)
+    {
+        static const std::vector<std::vector<UiKind>> groups = {
+            { UiKind::Row, UiKind::Column, UiKind::Grid, UiKind::Section },
+            { UiKind::Number, UiKind::Slider },
+            { UiKind::Combo, UiKind::Radio },
+            { UiKind::Text, UiKind::Heading },
+        };
+        for (const std::vector<UiKind>& group : groups)
+        {
+            if (std::find(group.begin(), group.end(), kind) == group.end())
+                continue;
+            std::vector<UiKind> others;
+            for (const UiKind other : group)
+            {
+                if (other != kind)
+                    others.push_back(other);
+            }
+            return others;
+        }
+        return {};
+    }
+
+    bool FormChangeKind(FormDocument& form, int id, UiKind kind)
+    {
+        UiNode* node = form.Model.Find(id);
+        if (!node)
+            return false;
+        const std::vector<UiKind> choices = FormKindChoices(node->Kind);
+        if (std::find(choices.begin(), choices.end(), kind) == choices.end())
+            return false;
+        const UiNode* parent = form.Model.Find(node->Parent);
+        if (!parent || !FormCanHold(parent->Kind, kind))
+            return false;
+        // ∑ what the new kind needs and the old one did not have
+        if (kind == UiKind::Section && node->Title.empty())
+            node->Title = "Section";
+        if (kind == UiKind::Slider && (!node->HasMin || !node->HasMax || node->Max <= node->Min))
+        {
+            node->Min = node->HasMin ? node->Min : 0.0;
+            node->Max = node->HasMax && node->Max > node->Min ? node->Max : node->Min + (node->Integer ? 100.0 : 1.0);
+            node->HasMin = true;
+            node->HasMax = true;
+        }
+        if (kind == UiKind::Radio && node->Multi)
+        {
+            node->Selected = node->Chosen.empty() ? node->Selected : node->Chosen.front();
+            node->Chosen.clear();
+            node->Multi = false;
+        }
+        node->Kind = kind;
+        // handlers the new kind does not have are dropped (none of the pairs differ today)
+        if (const auto meta = form.Meta.find(id); meta != form.Meta.end())
+        {
+            std::erase_if(meta->second.Handlers, [&](const auto& entry) {
+                for (const FormHandler& handler : FormHandlers(kind))
+                {
+                    if (handler.Key == entry.first)
+                        return false;
+                }
+                return true;
+            });
+            if (!FormCanBind(kind))
+            {
+                meta->second.Record.clear();
+                meta->second.RecordById = false;
+            }
+        }
+        form.Model.Touch(*node);
+        return true;
+    }
+
+    bool FormUnwrap(FormDocument& form, int id)
+    {
+        const UiNode* node = form.Model.Find(id);
+        if (!node || node->Kind == UiKind::Window || node->Kind == UiKind::Tab || !UiIsContainer(node->Kind))
+            return false;
+        const UiNode* parent = form.Model.Find(node->Parent);
+        if (!parent)
+            return false;
+        for (const int child : node->Children)
+        {
+            const UiNode* item = form.Model.Find(child);
+            if (!item || !FormCanHold(parent->Kind, item->Kind))
+                return false;
+        }
+        const int parentId = parent->Id;
+        int index = FormIndexOf(form, id);
+        for (const int child : std::vector<int>(node->Children))
+        {
+            if (!FormMove(form, child, parentId, index))
+                return false;
+            ++index;
+        }
+        return FormRemove(form, id);
+    }
+
+    std::string FormNameFromText(const FormDocument& form, std::string_view text)
+    {
+        std::string name;
+        bool upper = false;
+        for (const char c : text)
+        {
+            if (std::isalnum(static_cast<unsigned char>(c)))
+            {
+                if (name.empty())
+                    name += static_cast<char>(std::isdigit(static_cast<unsigned char>(c)) ? c : std::tolower(static_cast<unsigned char>(c)));
+                else
+                    name += upper ? static_cast<char>(std::toupper(static_cast<unsigned char>(c))) : c;
+                upper = false;
+            }
+            else
+                upper = !name.empty();
+            if (name.size() >= 40)
+                break;
+        }
+        if (name.empty() || std::isdigit(static_cast<unsigned char>(name.front())))
+            name = "record" + name;
+        return FormUniqueName(form, name);
+    }
+
+    std::string FormRenameIdentifier(std::string_view text, std::string_view from, std::string_view to)
+    {
+        const auto part = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+        std::string out;
+        out.reserve(text.size());
+        std::size_t at = 0;
+        while (at < text.size())
+        {
+            const std::size_t found = from.empty() ? std::string_view::npos : text.find(from, at);
+            if (found == std::string_view::npos)
+            {
+                out.append(text.substr(at));
+                break;
+            }
+            const bool whole = (found == 0 || !part(text[found - 1])) && (found + from.size() >= text.size() || !part(text[found + from.size()]));
+            out.append(text.substr(at, found - at));
+            out.append(whole ? to : from);
+            at = found + from.size();
+        }
+        return out;
     }
 
     bool FormCanBind(UiKind kind)

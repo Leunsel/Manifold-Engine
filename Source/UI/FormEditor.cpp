@@ -40,6 +40,7 @@ namespace Manifold::UI
 
         constexpr const char* kKindPayload = "MFORM_KIND";
         constexpr const char* kNodePayload = "MFORM_NODE";
+        constexpr const char* kRecordPayload = "MANIFOLD_RECORD"; // a record dragged from the address list (its id)
         constexpr std::size_t kUndoLimit = 200;
         constexpr const char* kRunChunk = "=Form Editor";
 
@@ -929,6 +930,140 @@ namespace Manifold::UI
         Select(wrapper);
     }
 
+    void FormEditorWindow::ChangeKind(int id, UiKind kind)
+    {
+        Remember();
+        if (!Lua::FormChangeKind(m_form, id, kind))
+        {
+            m_undo.pop_back();
+            return;
+        }
+        Changed();
+        Select(id);
+    }
+
+    void FormEditorWindow::Unwrap(int id)
+    {
+        const UiNode* node = m_form.Model.Find(id);
+        if (!node)
+            return;
+        const int parent = node->Parent;
+        const int first = node->Children.empty() ? 0 : node->Children.front();
+        Remember();
+        if (!Lua::FormUnwrap(m_form, id))
+        {
+            m_undo.pop_back();
+            m_engine.Notify(LogLevel::Warning, "The widgets inside cannot go where this container is.");
+            return;
+        }
+        Changed();
+        Select(first ? first : parent);
+    }
+
+    void FormEditorWindow::FixProblem(const Lua::FormProblem& problem)
+    {
+        Remember();
+        if (!Lua::FormApplyFix(m_form, problem))
+        {
+            m_undo.pop_back();
+            return;
+        }
+        Changed();
+        Select(problem.Node);
+    }
+
+    // a problem the editor can repair gets a link under its text
+    void FormEditorWindow::FixLink(const Lua::FormProblem& problem)
+    {
+        if (problem.Fix == Lua::FormFix::None)
+            return;
+        ImGui::Indent(Px(22.0f));
+        const std::string label = std::string(ICON_FA_MAGIC "  ") + std::string(Lua::FormFixLabel(problem.Fix)) + "##fix";
+        if (ImGui::TextLink(label.c_str()))
+            FixProblem(problem);
+        ItemTooltip("Repairs it now; Undo takes it back.");
+        ImGui::Unindent(Px(22.0f));
+    }
+
+    void FormEditorWindow::SelectParent()
+    {
+        const UiNode* node = m_form.Model.Find(m_selected);
+        if (node && node->Parent)
+            Select(node->Parent);
+    }
+
+    // ∑ a double click on a widget shows its handler: the first one
+    // that has a function, else the first it can have (added like the
+    // handler's button in the properties does)
+    void FormEditorWindow::OpenFirstHandler(int id)
+    {
+        UiNode* node = m_form.Model.Find(id);
+        if (!node)
+            return;
+        const std::span<const Lua::FormHandler> handlers = Lua::FormHandlers(node->Kind);
+        if (handlers.empty())
+            return;
+        const Lua::FormHandler* chosen = &handlers.front();
+        if (const auto meta = m_form.Meta.find(id); meta != m_form.Meta.end())
+        {
+            for (const Lua::FormHandler& handler : handlers)
+            {
+                if (const auto found = meta->second.Handlers.find(std::string(handler.Key)); found != meta->second.Handlers.end() && !found->second.empty())
+                {
+                    chosen = &handler;
+                    break;
+                }
+            }
+        }
+        OpenHandler(*node, *chosen);
+    }
+
+    // ∑ handlers named after the widget (goldChanged for gold) follow
+    // its new name, in the form and in the script, unless another widget
+    // still uses the old function or the new name is taken
+    void FormEditorWindow::RenameFunctions(int id, const std::string& from, const std::string& to)
+    {
+        UiNode* node = m_form.Model.Find(id);
+        const auto meta = m_form.Meta.find(id);
+        if (!node || meta == m_form.Meta.end() || !Lua::FormIsIdentifier(to))
+            return;
+        const std::string oldBase = from.empty() ? std::string(Lua::UiKindName(node->Kind)) : from;
+        std::vector<std::string> renamed;
+        for (auto& [key, function] : meta->second.Handlers)
+        {
+            if (key.size() < 3 || function != oldBase + key.substr(2))
+                continue;
+            const std::string fresh = to + key.substr(2);
+            bool shared = false;
+            bool taken = Lua::FormFunctionLine(m_form.ScriptText, fresh) > 0;
+            for (const auto& [other, otherMeta] : m_form.Meta)
+            {
+                for (const auto& [otherKey, otherFunction] : otherMeta.Handlers)
+                {
+                    if (other == id && otherKey == key)
+                        continue;
+                    shared = shared || otherFunction == function;
+                    taken = taken || otherFunction == fresh;
+                }
+            }
+            if (taken)
+                continue;
+            if (!shared && m_form.ScriptLoaded && Lua::FormFunctionLine(m_form.ScriptText, function) > 0)
+            {
+                m_form.ScriptText = Lua::FormRenameIdentifier(m_form.ScriptText, function, fresh);
+                m_scriptEditor.KeepCursor = true;
+            }
+            renamed.push_back(function + " to " + fresh);
+            function = fresh;
+        }
+        if (renamed.empty())
+            return;
+        std::string text = "Renamed ";
+        for (std::size_t i = 0; i < renamed.size(); ++i)
+            text += (i ? ", " : "") + renamed[i];
+        m_engine.Notify(LogLevel::Info, text + ".");
+    }
+
     void FormEditorWindow::Delete()
     {
         if (m_selected == m_form.Window || !m_form.Model.Find(m_selected))
@@ -1290,6 +1425,9 @@ namespace Manifold::UI
         case Command::FormCopy: Copy(); break;
         case Command::FormCut: Cut(); break;
         case Command::FormPaste: Paste(); break;
+        case Command::FormRename: m_focusName = true; break;
+        case Command::FormSelectParent: SelectParent(); break;
+        case Command::FormFind: m_focusOutlineFilter = true; break;
         default: break;
         }
     }
@@ -1302,7 +1440,8 @@ namespace Manifold::UI
             if (Pressed(command))
                 RunCommand(command);
         }
-        for (const Command command : { Command::FormUndo, Command::FormRedo, Command::FormDuplicate, Command::FormDelete, Command::FormMoveUp, Command::FormMoveDown, Command::FormCopy, Command::FormCut, Command::FormPaste })
+        for (const Command command : { Command::FormUndo, Command::FormRedo, Command::FormDuplicate, Command::FormDelete, Command::FormMoveUp, Command::FormMoveDown, Command::FormCopy, Command::FormCut, Command::FormPaste,
+                 Command::FormRename, Command::FormSelectParent, Command::FormFind })
         {
             if (Pressed(command) && !typing && !m_trying)
                 RunCommand(command);
@@ -1494,9 +1633,86 @@ namespace Manifold::UI
     void FormEditorWindow::Outline()
     {
         SectionLabel("Outline");
+        // ∑ Find: rows whose name, kind or caption hold the text, with the
+        // containers above them (dimmed); Enter selects the first one, Escape
+        // empties the field
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (m_focusOutlineFilter)
+        {
+            ImGui::SetKeyboardFocusHere();
+            m_focusOutlineFilter = false;
+        }
+        InputTextWithHint("##outlinefilter", ICON_FA_SEARCH "  Find a widget (Ctrl+F)", m_outlineFilter);
+        if (ImGui::IsItemActive() && ImGui::IsKeyPressed(ImGuiKey_Escape))
+            m_outlineFilter.clear();
+        const bool pickFirst = ImGui::IsItemDeactivated() && ImGui::IsKeyPressed(ImGuiKey_Enter, false);
+        m_outlineShown.clear();
+        m_outlineMatches.clear();
+        if (!m_outlineFilter.empty())
+        {
+            std::function<bool(int)> mark = [&](int id) {
+                const UiNode* node = m_form.Model.Find(id);
+                if (!node)
+                    return false;
+                const auto meta = m_form.Meta.find(id);
+                const std::string text = (meta != m_form.Meta.end() ? meta->second.Name + " " : std::string()) + Caption(m_form, *node);
+                bool any = ContainsNoCase(text, m_outlineFilter);
+                if (any)
+                    m_outlineMatches.insert(id);
+                for (const int child : node->Children)
+                    any = mark(child) || any;
+                if (any)
+                    m_outlineShown.insert(id);
+                return any;
+            };
+            for (const int window : Lua::FormWindows(m_form))
+                mark(window);
+            if (pickFirst)
+            {
+                for (const int id : m_outlineOrder)
+                {
+                    if (m_outlineMatches.count(id))
+                    {
+                        Select(id);
+                        break;
+                    }
+                }
+            }
+        }
+        m_outlineOrder = std::move(m_outlineDrawn);
+        m_outlineDrawn.clear();
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ManifoldTheme::Surface);
-        ImGui::BeginChild("##outline", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+        // the rows take the arrow keys themselves (no nav highlight jumping between them)
+        ImGui::BeginChild("##outline", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoNavInputs);
         ImGui::PopStyleColor();
+        if (ImGui::IsWindowFocused() && !ImGui::GetIO().WantTextInput && !ImGui::GetIO().KeyAlt && !ImGui::GetIO().KeyCtrl && !m_outlineOrder.empty())
+        {
+            // ∑ Up and Down walk the rows, Left folds or goes up, Right
+            // unfolds or goes to the first widget inside, Enter shows a handler
+            const auto at = std::find(m_outlineOrder.begin(), m_outlineOrder.end(), m_selected);
+            const std::ptrdiff_t index = at == m_outlineOrder.end() ? -1 : at - m_outlineOrder.begin();
+            const UiNode* selected = m_form.Model.Find(m_selected);
+            if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
+                Select(m_outlineOrder[static_cast<std::size_t>(std::min<std::ptrdiff_t>(index + 1, static_cast<std::ptrdiff_t>(m_outlineOrder.size()) - 1))]);
+            else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
+                Select(m_outlineOrder[static_cast<std::size_t>(std::max<std::ptrdiff_t>(index - 1, 0))]);
+            else if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && selected)
+            {
+                if (!selected->Children.empty() && !m_collapsed.count(m_selected) && m_outlineFilter.empty())
+                    m_collapsed.insert(m_selected);
+                else
+                    SelectParent();
+            }
+            else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && selected && !selected->Children.empty())
+            {
+                if (m_collapsed.count(m_selected))
+                    m_collapsed.erase(m_selected);
+                else
+                    Select(selected->Children.front());
+            }
+            else if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && selected)
+                OpenFirstHandler(m_selected);
+        }
         // ∑ Own rows instead of ImGui tree nodes: full-width hover and
         // selection, indent guides per level (the selected container's guide
         // lit), a chevron that only folds, and the markers at the right edge.
@@ -1537,6 +1753,10 @@ namespace Manifold::UI
         UiNode* node = m_form.Model.Find(id);
         if (!node)
             return;
+        const bool filtering = !m_outlineFilter.empty();
+        if (filtering && !m_outlineShown.count(id))
+            return;
+        m_outlineDrawn.push_back(id);
         ImGui::PushID(id);
         const bool container = Lua::UiIsContainer(node->Kind);
         const bool hasChildren = !node->Children.empty();
@@ -1552,7 +1772,7 @@ namespace Manifold::UI
                 }
             }
         }
-        const bool open = hasChildren && !m_collapsed.count(id);
+        const bool open = hasChildren && (filtering || !m_collapsed.count(id));
         const float indent = Px(15.0f);
         const float rowHeight = ImGui::GetFrameHeight() + Px(1.0f);
         const float pad = Px(6.0f);
@@ -1560,7 +1780,7 @@ namespace Manifold::UI
         const float y0 = ImGui::GetCursorScreenPos().y;
         const float chevronX = x0 + pad + indent * static_cast<float>(depth);
         const float iconX = chevronX + indent;
-        const float alpha = node->Visible ? 1.0f : 0.45f;
+        const float alpha = (node->Visible ? 1.0f : 0.45f) * (filtering && !m_outlineMatches.count(id) ? 0.55f : 1.0f);
 
         const auto meta = m_form.Meta.find(id);
         const std::string name = meta == m_form.Meta.end() ? std::string() : meta->second.Name;
@@ -1619,6 +1839,8 @@ namespace Manifold::UI
             else
                 m_collapsed.erase(id);
         }
+        else if (rowHovered && !hasChildren && !overEye && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            OpenFirstHandler(id);
         if (id == m_selected && m_scrollOutline && !ImGui::IsRectVisible(rowMin, rowMax))
             ImGui::SetScrollHereY(0.4f);
         // ∑ the rows run with no item spacing, and a popup takes the spacing
@@ -1669,6 +1891,11 @@ namespace Manifold::UI
                 const UiKind kindDropped = static_cast<UiKind>(*static_cast<const int*>(payload->Data));
                 if (DropAt(id, where, parent, index))
                     AddInto(kindDropped, parent, index);
+            }
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kRecordPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect); payload && payload->DataSize == sizeof(int))
+            {
+                if (DropAt(id, where, parent, index))
+                    AddRecordAt(*static_cast<const int*>(payload->Data), parent, index);
             }
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kNodePayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
             {
@@ -1817,6 +2044,11 @@ namespace Manifold::UI
                 Delete();
             return;
         }
+        if (CommandItem(ICON_FA_LEVEL_UP_ALT "  Select Parent", Command::FormSelectParent))
+            Select(node->Parent);
+        if (!Lua::FormHandlers(node->Kind).empty() && ImGui::MenuItem(ICON_FA_BOLT "  Show Handler"))
+            OpenFirstHandler(id);
+        ImGui::Separator();
         if (node->Kind != UiKind::Tab && ImGui::BeginMenu(ICON_FA_LAYER_GROUP "  Wrap In"))
         {
             for (const UiKind kind : { UiKind::Row, UiKind::Column, UiKind::Grid, UiKind::Section })
@@ -1827,6 +2059,20 @@ namespace Manifold::UI
             }
             ImGui::EndMenu();
         }
+        if (container && node->Kind != UiKind::Tab && ImGui::MenuItem(ICON_FA_EXPAND_ARROWS_ALT "  Unwrap", nullptr, false, !node->Children.empty()))
+            Unwrap(id);
+        ItemTooltip("Moves the widgets inside out to where this container is and removes it.");
+        if (const std::vector<UiKind> kinds = Lua::FormKindChoices(node->Kind); !kinds.empty() && ImGui::BeginMenu(ICON_FA_EXCHANGE_ALT "  Change Kind"))
+        {
+            for (const UiKind kind : kinds)
+            {
+                const std::string label = std::string(KindIcon(kind)) + "  " + std::string(Lua::FormKindTitle(kind));
+                if (ImGui::MenuItem(label.c_str()))
+                    ChangeKind(id, kind);
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::Separator();
         if (CommandItem(ICON_FA_CUT "  Cut", Command::FormCut))
             Cut();
         if (CommandItem(ICON_FA_COPY "  Copy", Command::FormCopy))
@@ -1848,23 +2094,31 @@ namespace Manifold::UI
 
     void FormEditorWindow::Toolbar()
     {
+        // ∑ what does not fit beside the last item goes to the next line
+        // instead of being cut off at the pane's edge
+        const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+        const auto next = [&](float width) {
+            if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + width <= right)
+                ImGui::SameLine();
+        };
+        const auto buttonWidth = [](const char* text) { return ImGui::CalcTextSize(text, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2.0f; };
         int mode = m_trying ? 1 : 0;
         if (Segmented("##mode", &mode, { ICON_FA_MOUSE_POINTER "  Design", ICON_FA_HAND_POINTER "  Try" }, Px(190.0f)) && (mode == 1) != m_trying)
             ToggleTry();
-        ImGui::SameLine();
+        next(buttonWidth(ICON_FA_PLAY "  Run Script"));
         if (ImGui::Button(ICON_FA_PLAY "  Run Script"))
             RunScript();
         ItemTooltip("Runs the script in Manifold's Lua engine, so the real window opens. Running it again replaces that window.");
-        ImGui::SameLine();
+        next(ImGui::GetFrameHeight());
         if (IconButton(ICON_FA_CROSSHAIRS, "Bring the form back to the top left of the work surface"))
             m_pan = ImVec2(Px(-m_form.CanvasX + 40.0f), Px(-m_form.CanvasY + 30.0f));
         if (const std::filesystem::path script = LinkedScript(); !script.empty() && !m_oneFile)
         {
-            ImGui::SameLine();
-            ImGui::AlignTextToFramePadding();
             std::error_code ignored;
             const bool exists = std::filesystem::exists(script, ignored);
             const std::string label = std::string(ICON_FA_FILE_CODE "  ") + WideToUtf8(script.filename().wstring()) + (exists ? "" : "  (missing)") + "##linked";
+            next(ImGui::CalcTextSize(label.c_str(), nullptr, true).x);
+            ImGui::AlignTextToFramePadding();
             if (ImGui::TextLink(label.c_str()) && exists)
                 OpenLinked();
             ItemTooltip(("Linked script: " + WideToUtf8(script.wstring()) + "\nClick to open it.").c_str());
@@ -1873,10 +2127,10 @@ namespace Manifold::UI
         {
             if (const int live = m_engine.Lua().Ui().Watching(WideToUtf8(m_path.wstring())); live > 0)
             {
-                ImGui::SameLine();
-                ImGui::AlignTextToFramePadding();
                 const bool pending = m_dirty || (m_oneFile && ScriptDirty());
                 const std::string text = std::string(ICON_FA_SYNC "  Live in ") + std::to_string(live) + (live == 1 ? " Window" : " Windows") + (pending ? " (save to update)" : "");
+                next(ImGui::CalcTextSize(text.c_str()).x);
+                ImGui::AlignTextToFramePadding();
                 ImGui::TextColored(pending ? ManifoldTheme::Warning : ManifoldTheme::Success, "%s", text.c_str());
                 ItemTooltip(m_oneFile ? "This script is running and built its window from the form. Saving rebuilds that window right away; widgets that keep their name keep their value. Changed handler code takes effect when the script runs again."
                                       : "A running script loaded this file with manifold.ui.form.load. Saving it rebuilds that window right away, with the script's handlers; widgets that keep their name keep their value.");
@@ -1885,17 +2139,20 @@ namespace Manifold::UI
         const std::vector<Lua::FormProblem>& problems = m_problems;
         if (!problems.empty())
         {
-            ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Warning);
             const std::string label = std::string(ICON_FA_EXCLAMATION_TRIANGLE "  ") + std::to_string(problems.size()) + (problems.size() == 1 ? " Problem" : " Problems");
+            next(buttonWidth(label.c_str()));
+            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Warning);
             if (ImGui::Button(label.c_str()))
                 m_problemsDialog.Open();
             ImGui::PopStyleColor();
         }
         if (m_trying)
         {
-            ImGui::SameLine();
+            next(ImGui::CalcTextSize("Clicks reach the widgets; handlers are not called.").x);
+            ImGui::AlignTextToFramePadding();
+            ImGui::PushTextWrapPos(0.0f);
             Muted("Clicks reach the widgets; handlers are not called.");
+            ImGui::PopTextWrapPos();
         }
         Breadcrumb();
     }
@@ -2579,6 +2836,17 @@ namespace Manifold::UI
             return spot;
         spot.Target = node->Id;
         const bool across = parent->Kind == UiKind::Row || parent->Kind == UiKind::Grid;
+        // ∑ the left or right edge of a widget in a column, section, tab
+        // or window: dropped there, the two go side by side into a new row
+        if (!across && node->Kind != UiKind::Tab && parent->Kind != UiKind::Split && parent->Kind != UiKind::Tabs && Lua::FormCanHold(parent->Kind, UiKind::Row))
+        {
+            const float side = std::min(Px(28.0f), (best->Max.x - best->Min.x) * 0.2f);
+            if (mouse.x < best->Min.x + side || mouse.x > best->Max.x - side)
+            {
+                spot.Where = mouse.x < best->Min.x + side ? Drop::Left : Drop::Right;
+                return spot;
+            }
+        }
         const float low = across ? best->Min.x : best->Min.y;
         const float high = across ? best->Max.x : best->Max.y;
         const float at = across ? mouse.x : mouse.y;
@@ -2608,11 +2876,25 @@ namespace Manifold::UI
         }
         const UiNode* node = m_form.Model.Find(spot.Target);
         const UiNode* parent = node ? m_form.Model.Find(node->Parent) : nullptr;
-        const bool across = parent && (parent->Kind == UiKind::Row || parent->Kind == UiKind::Grid);
+        const bool beside = spot.Where == Drop::Left || spot.Where == Drop::Right;
+        const bool across = beside || (parent && (parent->Kind == UiKind::Row || parent->Kind == UiKind::Grid));
         const float thick = Px(3.0f);
         ImVec2 a;
         ImVec2 b;
-        if (across)
+        if (beside)
+        {
+            // the target's place is shared: its half lit, a bar on the side the new widget takes
+            const float x = spot.Where == Drop::Left ? rect->Min.x - thick : rect->Max.x + thick;
+            draw->AddRect(rect->Min, rect->Max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.45f)), Px(3.0f), 0, Px(1.0f));
+            a = ImVec2(x, rect->Min.y);
+            b = ImVec2(x, rect->Max.y);
+            const char* hint = ICON_FA_COLUMNS " side by side";
+            const ImVec2 size = ImGui::CalcTextSize(hint);
+            const ImVec2 at(spot.Where == Drop::Left ? rect->Min.x + Px(4.0f) : rect->Max.x - size.x - Px(10.0f), rect->Min.y - size.y - Px(4.0f));
+            draw->AddRectFilled(ImVec2(at.x - Px(4.0f), at.y - Px(1.0f)), ImVec2(at.x + size.x + Px(4.0f), at.y + size.y + Px(1.0f)), accent, Px(3.0f));
+            draw->AddText(at, ImGui::GetColorU32(ManifoldTheme::Page), hint);
+        }
+        else if (across)
         {
             const float x = spot.Where == Drop::Before ? rect->Min.x - thick : rect->Max.x + thick;
             a = ImVec2(x, rect->Min.y);
@@ -2629,8 +2911,109 @@ namespace Manifold::UI
         draw->AddCircleFilled(b, thick * 1.4f, accent);
     }
 
+    // ∑ A record from the address list becomes the widget that fits it,
+    // bound to it: a switch for a script or group, a combo for a value with a
+    // drop-down list, a field for text, a number otherwise.
+    int FormEditorWindow::AddRecordWidget(int parent, int index, int recordId)
+    {
+        const Table::MemoryRecord* record = m_engine.Table().FindById(recordId);
+        const UiNode* holder = m_form.Model.Find(parent);
+        if (!record || !holder)
+            return 0;
+        UiKind kind = UiKind::Number;
+        if (record->Kind != Table::RecordKind::Value)
+            kind = UiKind::Checkbox;
+        else if (!record->DropDown.empty())
+            kind = UiKind::Combo;
+        else if (record->Type == Scan::ValueType::String || record->Type == Scan::ValueType::ByteArray)
+            kind = UiKind::Input;
+        if (!Lua::FormCanHold(holder->Kind, kind))
+            return 0;
+        const int id = Lua::FormAdd(m_form, kind, parent, index);
+        UiNode* node = m_form.Model.Find(id);
+        if (!node)
+            return 0;
+        const std::string label = record->Description.empty() ? std::string("Record ") + std::to_string(record->Id) : record->Description;
+        node->Label = label;
+        if (kind == UiKind::Checkbox)
+            node->Style = "switch";
+        else if (kind == UiKind::Combo)
+        {
+            node->Items.clear();
+            for (const Table::DropDownEntry& entry : record->DropDown)
+                node->Items.push_back(entry.Text.empty() ? entry.Value : entry.Text);
+            node->Selected = 0;
+        }
+        else if (kind == UiKind::Number)
+        {
+            node->Integer = record->Type != Scan::ValueType::Float && record->Type != Scan::ValueType::Double;
+            node->Hex = record->ShowHex && node->Integer;
+        }
+        Lua::FormMeta& meta = m_form.Meta[id];
+        meta.Name = Lua::FormNameFromText(m_form, label);
+        const bool unique = !record->Description.empty() && m_engine.Table().CountByDescription(record->Description) == 1;
+        meta.Record = unique ? record->Description : std::to_string(record->Id);
+        meta.RecordById = !unique;
+        m_form.Model.Touch(*node);
+        return id;
+    }
+
+    void FormEditorWindow::AddRecordAt(int record, int parent, int index)
+    {
+        Remember();
+        const int id = AddRecordWidget(parent, index, record);
+        if (!id)
+        {
+            m_undo.pop_back();
+            m_engine.Notify(LogLevel::Warning, "That record cannot go there.");
+            return;
+        }
+        Changed();
+        Select(id);
+    }
+
+    void FormEditorWindow::DropBeside(const ImGuiPayload* payload, const DropSpot& spot)
+    {
+        const UiNode* target = m_form.Model.Find(spot.Target);
+        if (!target)
+            return;
+        const int moving = payload->IsDataType(kNodePayload) ? *static_cast<const int*>(payload->Data) : 0;
+        if (moving && (moving == spot.Target || Within(spot.Target, moving)))
+            return;
+        FormDocument before = m_form;
+        const int row = Lua::FormAdd(m_form, UiKind::Row, target->Parent, Lua::FormIndexOf(m_form, spot.Target));
+        int placed = 0;
+        if (row && Lua::FormMove(m_form, spot.Target, row, 0))
+        {
+            const int index = spot.Where == Drop::Left ? 0 : 1;
+            if (payload->IsDataType(kKindPayload))
+                placed = Lua::FormAdd(m_form, static_cast<UiKind>(*static_cast<const int*>(payload->Data)), row, index);
+            else if (payload->IsDataType(kRecordPayload) && payload->DataSize == sizeof(int))
+                placed = AddRecordWidget(row, index, *static_cast<const int*>(payload->Data));
+            else if (moving && Lua::FormMove(m_form, moving, row, index))
+                placed = moving;
+        }
+        if (!placed)
+        {
+            m_form = std::move(before);
+            return;
+        }
+        m_undo.push_back(std::move(before));
+        if (m_undo.size() > kUndoLimit)
+            m_undo.pop_front();
+        m_redo.clear();
+        m_lastSource = 0;
+        Changed();
+        Select(placed);
+    }
+
     void FormEditorWindow::DropPayload(const ImGuiPayload* payload, const DropSpot& spot)
     {
+        if (spot.Where == Drop::Left || spot.Where == Drop::Right)
+        {
+            DropBeside(payload, spot);
+            return;
+        }
         int parent = 0;
         int index = -1;
         if (!DropAt(spot.Target, spot.Where, parent, index))
@@ -2638,6 +3021,12 @@ namespace Manifold::UI
         if (payload->IsDataType(kKindPayload))
         {
             AddInto(static_cast<UiKind>(*static_cast<const int*>(payload->Data)), parent, index);
+            return;
+        }
+        if (payload->IsDataType(kRecordPayload))
+        {
+            if (payload->DataSize == sizeof(int))
+                AddRecordAt(*static_cast<const int*>(payload->Data), parent, index);
             return;
         }
         const int moving = *static_cast<const int*>(payload->Data);
@@ -2689,7 +3078,9 @@ namespace Manifold::UI
             bool onGrip = false;
             for (const auto& [gripMin, gripMax] : m_grips)
                 onGrip = onGrip || (io.MousePos.x >= gripMin.x && io.MousePos.y >= gripMin.y && io.MousePos.x < gripMax.x && io.MousePos.y < gripMax.y);
-            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload() && !onGrip)
+            if (pointed && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload() && !onGrip)
+                OpenFirstHandler(pointed);
+            else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload() && !onGrip)
             {
                 Select(pointed ? pointed : window);
                 m_pressNode = pointed;
@@ -2779,7 +3170,7 @@ namespace Manifold::UI
             }
         }
         const ImGuiPayload* payload = ImGui::GetDragDropPayload();
-        const bool dragging = payload && (payload->IsDataType(kKindPayload) || payload->IsDataType(kNodePayload));
+        const bool dragging = payload && (payload->IsDataType(kKindPayload) || payload->IsDataType(kNodePayload) || payload->IsDataType(kRecordPayload));
         const ImU32 onAccent = ImGui::GetColorU32(ManifoldTheme::Page);
         const ImRect area(clip.first, clip.second);
         struct PendingTag
@@ -2830,6 +3221,8 @@ namespace Manifold::UI
                     DropPayload(kind, spot);
                 if (const ImGuiPayload* moved = ImGui::AcceptDragDropPayload(kNodePayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
                     DropPayload(moved, spot);
+                if (const ImGuiPayload* record = ImGui::AcceptDragDropPayload(kRecordPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
+                    DropPayload(record, spot);
                 ImGui::EndDragDropTarget();
             }
         }
@@ -3007,6 +3400,11 @@ namespace Manifold::UI
             ItemTooltip("key: a window created with the same key replaces the earlier one, so running the script again does not open a second window.");
             ImGui::TableSetColumnIndex(1);
             ImGui::SetNextItemWidth(-FLT_MIN);
+            if (m_focusName)
+            {
+                ImGui::SetKeyboardFocusHere();
+                m_focusName = false;
+            }
             std::string key = m_form.Key;
             if (InputTextWithHint("##key", "none", key))
             {
@@ -3017,9 +3415,14 @@ namespace Manifold::UI
             return;
         }
         ImGui::TextUnformatted("Name");
-        ItemTooltip("The widget's name in the script: w.<name>. Widgets the script reads or changes need one.");
+        ItemTooltip("The widget's name in the script: w.<name>. Widgets the script reads or changes need one. F2 jumps here; handlers named after the widget follow a new name.");
         ImGui::TableSetColumnIndex(1);
         ImGui::SetNextItemWidth(-FLT_MIN);
+        if (m_focusName)
+        {
+            ImGui::SetKeyboardFocusHere();
+            m_focusName = false;
+        }
         std::string name = m_form.Meta.count(node.Id) ? m_form.Meta[node.Id].Name : std::string();
         if (InputTextWithHint("##name", "no name", name, ImGuiInputTextFlags_CharsNoBlank))
         {
@@ -3040,6 +3443,7 @@ namespace Manifold::UI
             if (Lua::FormIsIdentifier(name) && name != m_renameFrom && Lua::FormFindNamed(m_form, m_renameFrom) == 0)
             {
                 Lua::FormRenameReferences(m_form, m_renameFrom, name);
+                RenameFunctions(node.Id, m_renameFrom, name);
                 Changed();
             }
             m_renameNode = 0;
@@ -3316,7 +3720,10 @@ namespace Manifold::UI
             break;
         }
         case FormPropType::Number:
-            edited = InputTextWithHint("##v", prop.Key == "min" || prop.Key == "max" ? "none" : "0", value, ImGuiInputTextFlags_CharsScientific);
+            if ((prop.Key == "width" || prop.Key == "height") && node.Kind != UiKind::Window)
+                edited = SizeControl(node, prop.Key, value);
+            else
+                edited = InputTextWithHint("##v", prop.Key == "min" || prop.Key == "max" ? "none" : "0", value, ImGuiInputTextFlags_CharsScientific);
             break;
         case FormPropType::File:
         {
@@ -3353,6 +3760,52 @@ namespace Manifold::UI
             Changed();
         }
         ImGui::PopID();
+    }
+
+    // ∑ Width and height as a choice instead of a number to know: Auto
+    // (the usual size), Fill (the rest of the line or of the height) and
+    // Fixed, which starts from the size the widget has in the preview.
+    bool FormEditorWindow::SizeControl(UiNode& node, std::string_view key, std::string& value)
+    {
+        const bool height = key == "height";
+        static constexpr UiKind kFillHeight[] = { UiKind::Table, UiKind::Tree, UiKind::Canvas, UiKind::Column, UiKind::Tab, UiKind::Section, UiKind::Input };
+        const bool canFill = !height || std::find(std::begin(kFillHeight), std::end(kFillHeight), node.Kind) != std::end(kFillHeight);
+        const double number = std::atof(value.c_str());
+        enum { Auto, Fill, Fixed };
+        const int mode = number > 0.0 ? Fixed : number < 0.0 && canFill ? Fill : Auto;
+        std::vector<const char*> options = { "Auto" };
+        if (canFill)
+            options.push_back("Fill");
+        options.push_back("Fixed");
+        int shown = mode == Fixed ? static_cast<int>(options.size()) - 1 : mode == Fill ? 1 : 0;
+        const float avail = ImGui::GetContentRegionAvail().x;
+        const float segment = mode == Fixed ? std::max(Px(120.0f), avail * 0.6f) : avail;
+        bool edited = false;
+        if (Segmented("##size", &shown, options, std::min(segment, avail)))
+        {
+            const bool fixed = shown == static_cast<int>(options.size()) - 1;
+            if (fixed && mode != Fixed)
+            {
+                const UiDesign::Rect* rect = RectOf(node.Id);
+                const float pixels = rect ? (height ? rect->Max.y - rect->Min.y : rect->Max.x - rect->Min.x) : 0.0f;
+                const int points = static_cast<int>(std::lround(pixels / std::max(Px(1.0f), 0.01f)));
+                value = std::to_string(points > 0 ? points : 100);
+            }
+            else if (!fixed)
+                value = shown == 1 && canFill ? "-1" : "0";
+            edited = true;
+        }
+        ItemTooltip(height ? "Auto: the usual height. Fill: the height that is left in the window (lists, tables, canvases, scrolling columns, multi-line fields). Fixed: this many points."
+                           : "Auto: the usual width (fields, bars and lists take the rest of the line, buttons fit their text). Fill: the rest of the line, or the widget's share of a row. Fixed: this many points.");
+        if (mode == Fixed)
+        {
+            // beside the choice where there is room, else below it
+            if (avail - segment > Px(40.0f))
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            edited = InputTextWithHint("##v", "points", value, ImGuiInputTextFlags_CharsScientific) || edited;
+        }
+        return edited;
     }
 
     void FormEditorWindow::HandlerRow(UiNode& node, const Lua::FormHandler& handler)
@@ -3770,9 +4223,11 @@ namespace Manifold::UI
             }
         }
         bool any = false;
-        for (const Lua::FormProblem& problem : m_problems)
+        const std::vector<Lua::FormProblem> problems = m_problems; // a fix below changes the form
+        const int nodeId = node->Id;
+        for (const Lua::FormProblem& problem : problems)
         {
-            if (problem.Node != node->Id)
+            if (problem.Node != nodeId)
                 continue;
             if (!any)
             {
@@ -3785,6 +4240,9 @@ namespace Manifold::UI
             ImGui::TextUnformatted((std::string(ICON_FA_EXCLAMATION_TRIANGLE "  ") + problem.Text).c_str());
             ImGui::PopStyleColor();
             ImGui::PopTextWrapPos();
+            ImGui::PushID(&problem);
+            FixLink(problem);
+            ImGui::PopID();
         }
         if (!ImGui::IsAnyItemActive())
             m_lastSource = 0;
@@ -4008,6 +4466,7 @@ namespace Manifold::UI
                 }
                 ItemTooltip("Click to select the widget");
                 ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(), ImGui::GetFontSize(), at, ImGui::GetColorU32(ManifoldTheme::Warning), text.c_str(), nullptr, width);
+                FixLink(problems[i]);
                 ImGui::PopID();
             }
             ImGui::EndChild();

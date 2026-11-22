@@ -136,10 +136,31 @@ namespace Manifold::Lua
     // table, so the script stays valid Lua for highlighting and completion.
     inline constexpr std::string_view kFormStandIn = "{ --[[ edited on the canvas ]] }";
 
+    // what the problems list can repair with one click
+    enum class FormFix
+    {
+        None,
+        Rename,      // a Lua name that no other widget has
+        NameHandler, // Detail = the handler key: named after the widget
+        AddTab,
+        SeedItems,
+        ClampValue,
+        ClearValue,  // a colour picker's value
+        ClearIcon,
+        ClearColour, // Detail = "color" or "background"
+        MultiOff,
+        Title,
+        ClearOpens,
+        ClearRule,
+        ModalName,
+    };
+
     struct FormProblem
     {
         int Node = 0;
         std::string Text;
+        FormFix Fix = FormFix::None;
+        std::string Detail;
     };
 
     std::span<const FormProp> FormProps(UiKind kind);
@@ -182,6 +203,20 @@ namespace Manifold::Lua
     std::string FormPropLiteral(const UiNode& node, std::string_view key);
 
     std::vector<FormProblem> FormProblems(const FormDocument& form);
+    std::string_view FormFixLabel(FormFix fix);
+    bool FormApplyFix(FormDocument& form, const FormProblem& problem);
+
+    // Change Kind keeps the widget, its children, name and handlers: rows,
+    // columns, grids and sections into each other, number and slider, combo
+    // and radio, text and heading.
+    std::vector<UiKind> FormKindChoices(UiKind kind);
+    bool FormChangeKind(FormDocument& form, int node, UiKind kind);
+    // Unwrap moves a container's widgets into its parent, in its place.
+    bool FormUnwrap(FormDocument& form, int node);
+    // a Lua name for a text ("Infinite Health" -> infiniteHealth) no widget has
+    std::string FormNameFromText(const FormDocument& form, std::string_view text);
+    // renames a Lua name in a script where it stands as a whole name
+    std::string FormRenameIdentifier(std::string_view text, std::string_view from, std::string_view to);
 
     std::optional<FormRule> FormParseWhen(std::string_view text);
     std::string FormWhenText(const FormRule& rule);

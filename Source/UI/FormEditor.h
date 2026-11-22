@@ -49,6 +49,8 @@ namespace Manifold::UI
             Before,
             Inside,
             After,
+            Left,  // beside a widget in a column: both go into a new row
+            Right,
         };
 
         bool EscapeCloses() const override { return false; }
@@ -82,6 +84,17 @@ namespace Manifold::UI
         const UiDesign::Rect* RectOf(int id) const;
         bool Within(int node, int ancestor) const;
         void DropPayload(const ImGuiPayload* payload, const DropSpot& spot);
+        void DropBeside(const ImGuiPayload* payload, const DropSpot& spot);
+        int AddRecordWidget(int parent, int index, int record);
+        void AddRecordAt(int record, int parent, int index);
+        void ChangeKind(int id, Lua::UiKind kind);
+        void Unwrap(int id);
+        void SelectParent();
+        void FixProblem(const Lua::FormProblem& problem);
+        void FixLink(const Lua::FormProblem& problem);
+        void OpenFirstHandler(int id);
+        void RenameFunctions(int id, const std::string& from, const std::string& to);
+        bool SizeControl(Lua::UiNode& node, std::string_view key, std::string& value);
         void SyncImages(Lua::FormDocument& form);
         std::filesystem::path ResolveImage(const std::string& source) const;
         void Copy();
@@ -211,6 +224,13 @@ namespace Manifold::UI
         float m_outlineWidth = 0.0f;
         int m_outlineRows = 0;
         ImVec2 m_menuSpacing = ImVec2(8.0f, 4.0f);
+        std::string m_outlineFilter;
+        bool m_focusOutlineFilter = false;
+        bool m_focusName = false;
+        std::set<int> m_outlineShown;   // with a filter: the rows that match, and the containers above them
+        std::set<int> m_outlineMatches;
+        std::vector<int> m_outlineOrder; // the rows as drawn last frame, for the arrow keys
+        std::vector<int> m_outlineDrawn;
         int m_renameNode = 0;       // the widget whose name field is being typed into
         std::string m_renameFrom;   // its name when typing started
 
