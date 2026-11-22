@@ -69,7 +69,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 21 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 22 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -397,7 +397,7 @@ namespace Manifold::Tests
                 -- a description shared by two records names neither
                 local twin = R.create({ kind = "group", description = "Probe Group" })
                 local either, ambiguous = R.find("Probe Group")
-                if either ~= nil or ambiguous.code ~= "ME-6011" or not ambiguous.message:find("(2)", 1, true) then return "ambiguous find " .. tostring(ambiguous) end
+                if either ~= nil or ambiguous.code ~= "ME-6011" or not ambiguous.message:find("(2 records)", 1, true) then return "ambiguous find " .. tostring(ambiguous) end
                 local twins = R.findAll("Probe Group")
                 if #twins ~= 2 or twins[1] ~= group or twins[2] ~= twin then return "findAll" end
                 if #R.findAll("Nobody") ~= 0 then return "findAll none" end
@@ -2364,7 +2364,7 @@ return M
             CHECK(node("lost") && !node("lost")->Enabled);
             // two records share the description: the widget binds to neither, and says so once
             CHECK(node("twin") && !node("twin")->Enabled && node("twin")->Number == 0.0);
-            CHECK_EQ(CountEntries(engine, LogLevel::Warning, "Several memory records are named \"Bind Twin\""), std::size_t(1));
+            CHECK_EQ(CountEntries(engine, LogLevel::Warning, "More than one memory record matches \"Bind Twin\""), std::size_t(1));
             CHECK(node("guarded") && !node("guarded")->Enabled); // its rule: god is off
 
             // the user turns the switch on and types a number: the records follow

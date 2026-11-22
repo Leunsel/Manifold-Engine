@@ -518,6 +518,8 @@ namespace Manifold::UI
                 if (ImGui::MenuItem(ICON_FA_COMMENTS "  Comment List"))
                     m_workspace.OpenCommentList();
                 ItemTooltip("The comments and headers on disassembler lines, saved with the table.");
+                Item(ICON_FA_STETHOSCOPE "  Address List Debug", Command::OpenRecordDebug);
+                ItemTooltip("Every record with its ID, address chain, bytes and flags, a check for broken links and lookups, and the trace of every switch on or off.");
                 ImGui::Separator();
             }
             Item(ICON_FA_TOGGLE_OFF "  Deactivate All Records", Command::DeactivateAll);
@@ -2282,6 +2284,26 @@ namespace Manifold::UI
         EndCard();
     }
 
+    void MainWindow::RevealRecord(int recordId)
+    {
+        Table::AddressList& list = m_engine.Table();
+        Table::MemoryRecord* record = list.FindById(recordId);
+        if (!record)
+            return;
+        for (Table::MemoryRecord* parent = record->Parent; parent; parent = parent->Parent)
+            parent->Expanded = true;
+        if (!RowMatches(*record))
+        {
+            m_tableFilter.clear();
+            m_filterActiveOnly = false;
+            m_filterKind = 0;
+        }
+        list.Select(recordId, false);
+        m_anchorRecord = recordId;
+        m_lastClickedRecord = recordId;
+        m_scrollToRecord = recordId;
+    }
+
     Table::MemoryRecord* MainWindow::FocusRecord()
     {
         Table::AddressList& list = m_engine.Table();
@@ -3476,6 +3498,10 @@ namespace Manifold::UI
             ImGui::EndDisabled();
             ImGui::Separator();
         }
+        if (ImGui::MenuItem(ICON_FA_STETHOSCOPE "  Debug This Record"))
+            m_workspace.OpenRecordDebug(record.Id);
+        ItemTooltip("Opens the Address List Debug window on this record: ID, address chain, bytes, links, problems and its switches.");
+        ImGui::Separator();
         if (CommandItem(ICON_FA_CUT "  Cut", Command::CutRecords))
             RunRecordCommand(Command::CutRecords, &record);
         if (CommandItem(ICON_FA_COPY "  Copy", Command::CopyRecords))

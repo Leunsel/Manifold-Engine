@@ -88,6 +88,7 @@ namespace Manifold::UI
     class NopSledWindow;
     class WriteHistoryWindow;
     class CommentListWindow;
+    class RecordDebugWindow;
     class FormEditorWindow;
     class ModulesWindow;
     class FlowGraphWindow;
@@ -158,6 +159,12 @@ namespace Manifold::UI
         void OpenNopSled();
         void OpenWriteHistory();
         void OpenCommentList();
+        // The Address List Debug window, on that record when one is given.
+        void OpenRecordDebug(int recordId = -1);
+        // The same window on one of its tabs: records, check, trace or internals; false for another name.
+        bool OpenRecordDebugPage(std::string_view page);
+        // Selects the record in the address list and scrolls there, opening the groups above it.
+        void RevealRecord(int recordId);
         void OpenFormEditor(const std::filesystem::path& path = {});
         void OpenModules();
         void OpenFlowGraph(std::uint64_t address = 0);
@@ -244,6 +251,7 @@ namespace Manifold::UI
         std::unique_ptr<NopSledWindow> m_nopSled;
         std::unique_ptr<WriteHistoryWindow> m_writeHistory;
         std::unique_ptr<CommentListWindow> m_commentList;
+        std::unique_ptr<RecordDebugWindow> m_recordDebug;
         std::unique_ptr<FormEditorWindow> m_formEditor;
         std::unique_ptr<ModulesWindow> m_modules;
         std::unique_ptr<FlowGraphWindow> m_flowGraph;

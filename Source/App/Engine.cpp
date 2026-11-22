@@ -445,12 +445,12 @@ namespace Manifold
     ScriptCheck Engine::CheckScript(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory)
     {
         ScriptCheck check;
-        check.Result = Assemble(script, section, memory, true, "check", nullptr, m_tables.ScriptsTrusted() ? nullptr : &check.LuaHeldBack);
+        check.Result = Assemble(script, section, memory, true, "check", nullptr, m_tables.ScriptsTrusted() ? nullptr : &check.LuaHeldBack, true);
         return check;
     }
 
     Asm::AaResult Engine::Assemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record,
-        int* luaHeldBack)
+        int* luaHeldBack, bool scanInCheck)
     {
         Asm::AaHost host;
         host.Process = m_target.Process().get();
@@ -487,6 +487,7 @@ namespace Manifold
         Asm::AaOptions options;
         options.Section = section;
         options.CheckOnly = checkOnly;
+        options.ScanInCheck = scanInCheck;
         options.Owner = owner;
         if (!m_tables.Table().FilePath.empty())
             options.IncludeFolder = std::filesystem::path(Utf8ToWide(m_tables.Table().FilePath)).parent_path();

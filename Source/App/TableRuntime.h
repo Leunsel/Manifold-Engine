@@ -23,6 +23,25 @@ namespace Manifold
         std::string Tooltip;
     };
 
+    // One step of how a record's address comes about, for the Address List Debug window: the base expression or the parent's
+    // address, then for each pointer offset the read and the added offset. A step that fails has Ok false and ends the chain.
+    struct AddressStep
+    {
+        enum class Kind
+        {
+            Base,
+            Parent,
+            Relative,
+            Read,
+            Offset
+        };
+        Kind What = Kind::Base;
+        std::string Text;
+        std::uint64_t Value = 0;
+        bool Ok = true;
+        std::string Error;
+    };
+
     class TableRuntime
     {
     public:
@@ -35,6 +54,8 @@ namespace Manifold
         Table::StructureStore& Structures() { return m_structures; }
 
         void ResolveRecord(Table::MemoryRecord& record);
+        // The same walk as ResolveRecord, step by step; it reads the process but leaves the record as it is (a parent may be resolved).
+        std::vector<AddressStep> ExplainAddress(Table::MemoryRecord& record);
         std::vector<std::uint8_t> ReadRecord(Table::MemoryRecord& record);
         std::string AddressHex(std::uint64_t address) const;
         RecordAddressText AddressTextOf(const Table::MemoryRecord& record) const;
@@ -47,6 +68,10 @@ namespace Manifold
         void RefreshRecord(int id);
         bool NeedsValue(const Table::MemoryRecord& record) const;
         void SetVisibleRecords(std::vector<int> ids);
+        // The records the address list drew last frame and so refreshes; empty and not known before it drew once.
+        const std::vector<int>& VisibleRecords() const { return m_visibleRecords; }
+        bool VisibleKnown() const { return m_visibleKnown; }
+        double LastValueRefresh() const { return m_lastValues; }
         void UpdateFreezes();
         void UpdateHotkeys();
 

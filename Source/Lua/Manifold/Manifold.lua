@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 21
+local API_VERSION = 22
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -888,9 +888,11 @@ do
       getAddress = { returns = "integer", doc = "The address the record's value is at now (pointers followed). `nil` and an error when it does not resolve; `ME-6010` for scripts and groups." },
       children = { returns = "table", doc = "The records directly below this one, in the address list's order." },
       parent = { returns = "record", doc = "The record this one is below, or nil at the top level." },
+      find = { params = { { name = "record", type = "string|table" } }, returns = "record", doc = "A record below this one: by its description at any depth (`script.find(\"Multiplier:\")`), or by a path that starts at this record's children (`script.find({ \"Type:\", \"Multiplier:\" })`). Tables repeat names below every script, so this finds a script's own child however often the name occurs elsewhere. Exactly one record must match: `nil` and `ME-6011` with the count when several do, `ME-6008` when none does." },
+      path = { returns = "table", doc = "The descriptions from the top level down to this record, its own last: the path `manifold.record.find` takes. It stays the same when the record's id changes, as long as the groups above it keep their names." },
       remove = { returns = "boolean", doc = "Deletes the record and the records below it from the table, switching it off first when it is on." },
     }
-    for _, name in ipairs({ "info", "getDescription", "setDescription", "getValue", "setValue", "isActive", "setActive", "toggle", "getAddress", "children", "parent", "remove" }) do
+    for _, name in ipairs({ "info", "getDescription", "setDescription", "getValue", "setValue", "isActive", "setActive", "toggle", "getAddress", "children", "parent", "find", "path", "remove" }) do
       native.docDefine(nil, RECORD_DOC .. name, METHODS[name])
     end
     native.docDefine(nil, RECORD_DOC .. "id", { kind = "field", type = "integer", doc = "The record's id, the number Cheat Engine tables store with it." })
@@ -975,6 +977,25 @@ do
         end
         return info.parent and recordObject(info.parent) or nil
       end)
+      method("find", function(key)
+        local found, code, message
+        if type(key) == "table" then
+          local ok, value, failedCode, failedMessage = pcall(native.recordFindPath, key, id, identity)
+          if not ok then
+            misuse(prefix .. ".find: " .. tostring(value))
+          end
+          found, code, message = value, failedCode, failedMessage
+        else
+          found, code, message = native.recordFindBelow(id, identity, key)
+        end
+        if not found then
+          return result(nil, code, message)
+        end
+        return recordObject(found)
+      end)
+      method("path", function()
+        return failure(native.recordPath(id, identity))
+      end)
       method("remove", function()
         return failure(native.recordRemove(id, identity))
       end)
@@ -993,11 +1014,20 @@ do
     end
 
     define(record, "find", {
-      params = { { name = "record", type = "integer|string" } },
+      params = { { name = "record", type = "integer|string|table" } },
       returns = "record",
-      doc = "The record with this id, or the one record with this description (as written in the address list). `nil` and an `ME-6008` error when there is none, and an `ME-6011` error when several records have the description, so it does not say which one is meant; `findAll` lists them.",
+      doc = "The record with this id, the one record with this description (as written in the address list), or the one at this path: the descriptions from the top level down, `{ \"Player\", \"Stats\", \"Health\" }`, as `record.path()` gives them. Ids change when records are copied between tables and names repeat in many tables, but a path stays as long as the groups keep their names. A description or a path has to lead to exactly one record: `nil` and `ME-6011` with the count when several match (`findAll` lists the records with a description). `nil` and an `ME-6008` error when there is none.",
     }, function(key)
-      local id, code, message = native.recordFind(key)
+      local id, code, message
+      if type(key) == "table" then
+        local ok, value, failedCode, failedMessage = pcall(native.recordFindPath, key)
+        if not ok then
+          misuse("manifold.record.find: " .. tostring(value))
+        end
+        id, code, message = value, failedCode, failedMessage
+      else
+        id, code, message = native.recordFind(key)
+      end
       if not id then
         return result(nil, code, message)
       end

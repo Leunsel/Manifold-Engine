@@ -41,6 +41,7 @@ namespace Manifold
             { OpenStaticPointers, "OpenStaticPointers", Scope::Global, "Find Static Pointers", Ctrl | Alt | ImGuiKey_K, 0, Own },
             { OpenFormEditor, "OpenFormEditor", Scope::Global, "Form Editor", Ctrl | Alt | ImGuiKey_G, 0, Own },
             { OpenOpcodeConverter, "OpenOpcodeConverter", Scope::Global, "Opcode Converter", Ctrl | Alt | ImGuiKey_O, 0, Own },
+            { OpenRecordDebug, "OpenRecordDebug", Scope::Global, "Address List Debug", Ctrl | Alt | Shift | ImGuiKey_D, 0, Own },
 
             { NewTable, "NewTable", Scope::Main, "New Table", Ctrl | ImGuiKey_N, 0, Own },
             { OpenLastProcess, "OpenLastProcess", Scope::Main, "Open Last Process", Ctrl | Shift | ImGuiKey_P, 0, Own },

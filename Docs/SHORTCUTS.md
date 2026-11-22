@@ -30,6 +30,7 @@ Works in every window, unless the focused window uses the same keys for somethin
 | `Ctrl+Alt+K` | Find Static Pointers | `OpenStaticPointers` | Manifold |
 | `Ctrl+Alt+G` | Form Editor | `OpenFormEditor` | Manifold |
 | `Ctrl+Alt+O` | Opcode Converter | `OpenOpcodeConverter` | Manifold |
+| `Ctrl+Alt+Shift+D` | Address List Debug | `OpenRecordDebug` | Manifold |
 
 ## Main Window
 

@@ -22,6 +22,7 @@ namespace Manifold::UI
         explicit MainWindow(Workspace& workspace);
         void Draw();
         void FocusScanValue() { m_focusValue = true; }
+        void RevealRecord(int recordId);
 
     private:
         void TitleBar();

@@ -215,6 +215,8 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\CommentList.cpp" />
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />
+    <ClCompile Include="..\Source\Table\RecordCheck.cpp" />
+    <ClCompile Include="..\Source\Table\RecordPath.cpp" />
     <ClCompile Include="..\Source\Table\RttiStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Table\TableFiles.cpp" />
@@ -283,6 +285,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\PointerScanWindow.cpp" />
     <ClCompile Include="..\Source\UI\ProcessIcon.cpp" />
     <ClCompile Include="..\Source\UI\ProfilerWindow.cpp" />
+    <ClCompile Include="..\Source\UI\RecordDebugWindow.cpp" />
     <ClCompile Include="..\Source\UI\RecordEditor.cpp" />
     <ClCompile Include="..\Source\UI\ScriptUi.cpp" />
     <ClCompile Include="..\Source\UI\ScriptWindow.cpp" />
@@ -393,6 +396,8 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Table\CheatTable.h" />
     <ClInclude Include="..\Source\Table\CommentList.h" />
     <ClInclude Include="..\Source\Table\ManagedStructures.h" />
+    <ClInclude Include="..\Source\Table\RecordCheck.h" />
+    <ClInclude Include="..\Source\Table\RecordPath.h" />
     <ClInclude Include="..\Source\Table\RttiStructures.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
     <ClInclude Include="..\Source\Table\TableFiles.h" />
@@ -463,6 +468,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\PointerScanWindow.h" />
     <ClInclude Include="..\Source\UI\ProcessIcon.h" />
     <ClInclude Include="..\Source\UI\ProfilerWindow.h" />
+    <ClInclude Include="..\Source\UI\RecordDebugWindow.h" />
     <ClInclude Include="..\Source\UI\RecordEditor.h" />
     <ClInclude Include="..\Source\UI\ScriptUi.h" />
     <ClInclude Include="..\Source\UI\ScriptWindow.h" />

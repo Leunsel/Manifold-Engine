@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 21 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 22 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -116,7 +116,7 @@ The memory records of the open cheat table: the address list. A record is found 
 
 | Function | Returns | |
 | --- | --- | --- |
-| `manifold.record.find(record)` | record | The record with this id, or the one record with this description (as written in the address list). `nil` and an `ME-6008` error when there is none, and an `ME-6011` error when several records have the description, so it does not say which one is meant; `findAll` lists them. |
+| `manifold.record.find(record)` | record | The record with this id, the one record with this description (as written in the address list), or the one at this path: the descriptions from the top level down, `{ "Player", "Stats", "Health" }`, as `record.path()` gives them. Ids change when records are copied between tables and names repeat in many tables, but a path stays as long as the groups keep their names. A description or a path has to lead to exactly one record: `nil` and `ME-6011` with the count when several match (`findAll` lists the records with a description). `nil` and an `ME-6008` error when there is none. |
 | `manifold.record.findAll(description)` | table | Every record with this description, in the address list's order; an empty list when there is none. |
 | `manifold.record.all()` | table | Every record of the table, groups and their children included, in the address list's order from top to bottom. |
 | `manifold.record.selected()` | table | The records selected in the address list, in the order they were selected. |
@@ -139,6 +139,8 @@ The memory records of the open cheat table: the address list. A record is found 
 | `record.getAddress()` | integer | The address the record's value is at now (pointers followed). `nil` and an error when it does not resolve; `ME-6010` for scripts and groups. |
 | `record.children()` | table | The records directly below this one, in the address list's order. |
 | `record.parent()` | record | The record this one is below, or nil at the top level. |
+| `record.find(record)` | record | A record below this one: by its description at any depth (`script.find("Multiplier:")`), or by a path that starts at this record's children (`script.find({ "Type:", "Multiplier:" })`). Tables repeat names below every script, so this finds a script's own child however often the name occurs elsewhere. Exactly one record must match: `nil` and `ME-6011` with the count when several do, `ME-6008` when none does. |
+| `record.path()` | table | The descriptions from the top level down to this record, its own last: the path `manifold.record.find` takes. It stays the same when the record's id changes, as long as the groups above it keep their names. |
 | `record.remove()` | boolean | Deletes the record and the records below it from the table, switching it off first when it is on. |
 | `record.id` | integer | The record's id, the number Cheat Engine tables store with it. |
 

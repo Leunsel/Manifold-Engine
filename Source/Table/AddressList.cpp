@@ -113,7 +113,10 @@ namespace Manifold::Table
                     note(*child);
             };
         note(*record);
-        if (record->Id <= 0 || FindById(record->Id))
+        // ∑ Id 0 is the default of a record made in code, so it means "give it one" - unless the table file said 0: CE tables
+        //   often number from 0, and Lua that calls getMemoryRecordByID(0) must find that record.
+        const bool fileZero = record->Id == 0 && record->FileId == 0;
+        if ((record->Id <= 0 && !fileZero) || FindById(record->Id))
             record->Id = NextId();
         record->Parent = parent;
         auto& siblings = parent ? parent->Children : m_roots;

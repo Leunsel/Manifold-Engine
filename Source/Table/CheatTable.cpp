@@ -71,7 +71,10 @@ namespace Manifold::Table
         {
             auto record = std::make_unique<MemoryRecord>();
             if (const auto id = ParseDecimal(node.ChildText("ID")); id && *id >= 0 && *id <= kMaxRecordId)
+            {
                 record->Id = static_cast<int>(*id);
+                record->FileId = record->Id;
+            }
             record->Description = StripQuotes(node.ChildText("Description"));
             const std::string type = Trim(node.ChildText("VariableType"));
             if (const Xml::Node* script = node.Child("AssemblerScript"); script || EqualsNoCase(type, kScriptType))
@@ -750,6 +753,16 @@ namespace Manifold::Table
         LoadedTable table;
         if (!ParseTable(text, table))
             return {};
+        // ∑ Records from the clipboard get new IDs when they are pasted; the IDs they had are no table file's, so the Address
+        //   List Debug window must not report them as renumbered.
+        const std::function<void(MemoryRecord&)> forget = [&](MemoryRecord& record)
+            {
+                record.FileId = -1;
+                for (auto& child : record.Children)
+                    forget(*child);
+            };
+        for (auto& record : table.Records)
+            forget(*record);
         return std::move(table.Records);
     }
 }

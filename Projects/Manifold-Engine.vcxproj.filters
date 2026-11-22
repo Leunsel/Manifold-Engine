@@ -342,6 +342,12 @@
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Table\RecordCheck.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\RecordPath.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\RttiStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
@@ -544,6 +550,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\ProfilerWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\RecordDebugWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\RecordEditor.cpp">
@@ -870,6 +879,12 @@
     <ClInclude Include="..\Source\Table\ManagedStructures.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Table\RecordCheck.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Table\RecordPath.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Table\RttiStructures.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
@@ -1078,6 +1093,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\ProfilerWindow.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\RecordDebugWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\RecordEditor.h">
