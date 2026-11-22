@@ -25,17 +25,23 @@ namespace Manifold
         Status error;
         std::optional<std::uint64_t> base;
         const std::string_view written = TrimView(record.Address);
-        if (!written.empty() && (written.front() == '+' || written.front() == '-') && record.Parent)
+        if (Table::IsRelativeAddress(written))
         {
-            ResolveRecord(*record.Parent);
-            if (!record.Parent->AddressOk)
+            Table::MemoryRecord* from = Table::RelativeBase(record);
+            if (!from)
             {
-                record.AddressError = record.Parent->AddressError.empty() ? ErrorMessage(ErrorCode::ExprUnknownSymbol, record.Parent->Description) : record.Parent->AddressError;
+                record.AddressError = ErrorMessage(ErrorCode::ExprUnknownSymbol, std::string(written) + " (no record with an address above it)");
+                return;
+            }
+            ResolveRecord(*from);
+            if (!from->AddressOk)
+            {
+                record.AddressError = from->AddressError.empty() ? ErrorMessage(ErrorCode::ExprUnknownSymbol, from->Description) : from->AddressError;
                 return;
             }
             const auto delta = m_engine.Evaluate(written.substr(1), &error);
             if (delta)
-                base = written.front() == '+' ? record.Parent->ResolvedAddress + *delta : record.Parent->ResolvedAddress - *delta;
+                base = written.front() == '+' ? from->ResolvedAddress + *delta : from->ResolvedAddress - *delta;
         }
         else
         {
@@ -85,9 +91,12 @@ namespace Manifold
         Status error;
         std::uint64_t address = 0;
         const std::string_view written = TrimView(record.Address);
-        if (!written.empty() && (written.front() == '+' || written.front() == '-') && record.Parent)
+        if (Table::IsRelativeAddress(written))
         {
-            Table::MemoryRecord& parent = *record.Parent;
+            Table::MemoryRecord* from = Table::RelativeBase(record);
+            if (!from)
+                return fail(AddressStep::Kind::Parent, std::string(written), "No record above this one has an address to count from.");
+            Table::MemoryRecord& parent = *from;
             ResolveRecord(parent);
             const std::string name = (parent.Description.empty() ? std::string("Parent") : "\"" + parent.Description + "\"") + " (ID " + std::to_string(parent.Id) + ")";
             if (!parent.AddressOk)
@@ -147,10 +156,11 @@ namespace Manifold
             return text;
         }
         const std::string_view written = TrimView(record.Address);
-        if (!written.empty() && (written.front() == '+' || written.front() == '-') && record.Parent)
+        if (Table::IsRelativeAddress(written))
         {
+            const Table::MemoryRecord* from = Table::RelativeBase(record);
             text.Text = record.AddressOk ? AddressHex(record.ResolvedAddress) : record.Address;
-            text.Tooltip = (record.Parent->Description.empty() ? std::string("Parent") : record.Parent->Description) + " " + std::string(written);
+            text.Tooltip = (!from ? std::string("No record with an address above") : from->Description.empty() ? std::string("Parent") : from->Description) + " " + std::string(written);
             return text;
         }
         const int mode = m_engine.Options().AddressColumn;

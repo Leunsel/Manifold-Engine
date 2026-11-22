@@ -446,6 +446,29 @@ namespace Manifold::Table
         return "?";
     }
 
+    bool IsRelativeAddress(std::string_view address)
+    {
+        const std::string_view written = TrimView(address);
+        return !written.empty() && (written.front() == '+' || written.front() == '-');
+    }
+
+    bool HasOwnAddress(const MemoryRecord& record)
+    {
+        if (record.Kind == RecordKind::Value)
+            return true;
+        return record.Kind == RecordKind::Group && record.AddressGroupHeader && !TrimView(record.Address).empty();
+    }
+
+    MemoryRecord* RelativeBase(const MemoryRecord& record)
+    {
+        for (MemoryRecord* above = record.Parent; above; above = above->Parent)
+        {
+            if (HasOwnAddress(*above))
+                return above;
+        }
+        return nullptr;
+    }
+
     bool UsableHotkeyKeys(const std::vector<int>& keys)
     {
         if (keys.empty() || keys.size() > static_cast<std::size_t>(kMaxHotkeyKeys))

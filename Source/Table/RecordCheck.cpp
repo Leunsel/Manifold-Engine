@@ -138,17 +138,6 @@ namespace Manifold::Table
             return marks;
         }
 
-        bool RelativeAddress(const MemoryRecord& record)
-        {
-            const std::string_view written = TrimView(record.Address);
-            return !written.empty() && (written.front() == '+' || written.front() == '-');
-        }
-
-        bool HasOwnAddress(const MemoryRecord& record)
-        {
-            return record.Kind == RecordKind::Value || (record.Kind == RecordKind::Group && record.AddressGroupHeader);
-        }
-
         bool ValueAction(HotkeyAction action)
         {
             return action == HotkeyAction::SetValue || action == HotkeyAction::Increase || action == HotkeyAction::Decrease;
@@ -355,11 +344,11 @@ namespace Manifold::Table
             {
                 if (TrimView(record.Address).empty())
                     issue(id, IssueLevel::Error, "address", "No address.");
-                else if (RelativeAddress(record) && !record.Parent)
+                else if (IsRelativeAddress(record.Address) && !record.Parent)
                     issue(id, IssueLevel::Error, "address", "The address " + Trim(record.Address) + " is relative to the parent, but the record has no parent.");
-                else if (RelativeAddress(record) && !HasOwnAddress(*record.Parent))
-                    issue(id, IssueLevel::Error, "address", "The address " + Trim(record.Address) + " is relative to the parent " + RecordName(*record.Parent) +
-                        ", which has no address (only values and groups shown as address headers have one).");
+                else if (IsRelativeAddress(record.Address) && !RelativeBase(record))
+                    issue(id, IssueLevel::Error, "address", "The address " + Trim(record.Address) + " counts from the records above it, but none of them has an address "
+                        "(only values and groups shown as address headers have one).");
                 for (std::size_t i = 0; i < record.Offsets.size(); ++i)
                 {
                     if (TrimView(record.Offsets[i]).empty())

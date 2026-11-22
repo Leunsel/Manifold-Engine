@@ -151,7 +151,7 @@ namespace Manifold::Tests
             CHECK(Has(issues, emptyScript.Id, "script", IssueLevel::Error, "empty"));
 
             CHECK(Has(issues, orphan.Id, "address", IssueLevel::Error, "no parent"));
-            CHECK(Has(issues, relativeToScript.Id, "address", IssueLevel::Error, "no address"));
+            CHECK(Has(issues, relativeToScript.Id, "address", IssueLevel::Error, "none of them has an address"));
             CHECK(Of(issues, relative.Id, "address").empty());
             CHECK(Of(issues, header.Id, "address").empty());
             CHECK(Has(issues, pointer.Id, "address", IssueLevel::Info, "Offset 2"));
@@ -395,6 +395,35 @@ local s = getAddressList().getMemoryRecordByID(99)
             Table::MemoryRecord& child = list.AddValue("Child", "+18", Scan::ValueType::EightBytes, &header);
             const std::vector<AddressStep> relative = engine.Tables().ExplainAddress(child);
             CHECK(relative.size() == 2 && relative[0].What == AddressStep::Kind::Parent && relative[1].Value == reinterpret_cast<std::uint64_t>(block + 0x18));
+
+            // The owner's Isaac table: "[Chapter] ()->" has the address, "[Other]" below it is a plain group, and the "+0004"
+            // records below that count from the header, not from the group without an address.
+            Table::MemoryRecord& plain = list.AddGroup("[Other]", &header);
+            Table::MemoryRecord& innerScript = list.AddScript("Inner Script", "[ENABLE]\n[DISABLE]\n", &plain);
+            Table::MemoryRecord& floor = list.AddValue("[0004] Floor Type", "+4", Scan::ValueType::FourBytes, &plain);
+            Table::MemoryRecord& deeper = list.AddValue("[0010] Deeper", "+10", Scan::ValueType::FourBytes, &innerScript);
+            CHECK(Table::RelativeBase(floor) == &header && Table::RelativeBase(deeper) == &header && Table::RelativeBase(header) == nullptr);
+            engine.ResolveRecord(floor);
+            engine.ResolveRecord(deeper);
+            CHECK_MSG(floor.AddressOk && floor.ResolvedAddress == reinterpret_cast<std::uint64_t>(block + 4), floor.AddressError);
+            CHECK_MSG(deeper.AddressOk && deeper.ResolvedAddress == reinterpret_cast<std::uint64_t>(block + 0x10), deeper.AddressError);
+            const std::vector<AddressStep> skipped = engine.Tables().ExplainAddress(floor);
+            CHECK(skipped.size() == 2 && skipped[0].Text.find("Header") != std::string::npos && skipped[1].Value == reinterpret_cast<std::uint64_t>(block + 4));
+            CHECK(engine.Tables().AddressTextOf(floor).Tooltip == "Header +4");
+            const std::vector<RecordIssue> fine = Table::CheckRecords(list);
+            CHECK(Of(fine, floor.Id, "address").empty() && Of(fine, deeper.Id, "address").empty());
+
+            // A value above counts too, and a value's own relative address chains on.
+            Table::MemoryRecord& baseValue = list.AddValue("[0008] Base Value", "+8", Scan::ValueType::EightBytes, &plain);
+            Table::MemoryRecord& below = list.AddValue("[0004] Below Value", "+4", Scan::ValueType::FourBytes, &baseValue);
+            engine.ResolveRecord(below);
+            CHECK(Table::RelativeBase(below) == &baseValue && below.AddressOk && below.ResolvedAddress == reinterpret_cast<std::uint64_t>(block + 0xC));
+
+            // Without any record with an address above, it fails with a message that says so.
+            Table::MemoryRecord& loose = list.AddGroup("Loose");
+            Table::MemoryRecord& orphan = list.AddValue("Orphan", "+4", Scan::ValueType::FourBytes, &loose);
+            engine.ResolveRecord(orphan);
+            CHECK(!orphan.AddressOk && orphan.AddressError.find("no record with an address above") != std::string::npos);
 
             Table::MemoryRecord& script = list.AddScript("Script", "[ENABLE]\n[DISABLE]\n");
             CHECK(engine.Tables().ExplainAddress(script).empty());

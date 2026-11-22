@@ -240,6 +240,14 @@ namespace Manifold::Table
     bool UsableHotkeyKeys(const std::vector<int>& keys);
     bool KeysPressed(const std::vector<int>& keys, bool& wasDown);
     std::string KeysText(const std::vector<int>& keys);
+
+    // Whether an address is written relative to a record above it: "+18", "-4".
+    bool IsRelativeAddress(std::string_view address);
+    // A value record, or a group shown as an address header with an address written.
+    bool HasOwnAddress(const MemoryRecord& record);
+    // The record a relative address counts from: the nearest one above that has an address of its own. Groups and scripts
+    // without one in between are skipped, as in Cheat Engine ("[Other]" below a pointer header). Null when none is above.
+    MemoryRecord* RelativeBase(const MemoryRecord& record);
     // "F1", "Ctrl+Shift+G", "Num 1": the keys KeysText writes, back; empty when a
     // part names no key or only modifiers are given
     std::vector<int> ParseKeysText(std::string_view text);
