@@ -381,6 +381,43 @@ namespace Manifold::Tests
             ExpectBytes(report, "wait", x64, "9B");
             ExpectBytes(report, "finit", x64, "9B DB E3");
             ExpectBytes(report, "movabs rax, 1122334455667788", x64, "48 B8 88 77 66 55 44 33 22 11");
+
+            // fstcw/fstsw are 9B plus the fn form: the rip-relative displacement counts from the end of
+            // the fn instruction, one byte later than the line's address (it pointed one byte too far).
+            const AssembleOptions image = Mode64(0x140000000);
+            ExpectBytes(report, "fnstcw word ptr [140001000]", image, "D9 3D FA 0F 00 00");
+            ExpectBytes(report, "fstcw word ptr [140001000]", image, "9B D9 3D F9 0F 00 00");
+            ExpectBytes(report, "fstsw [140001000]", image, "9B DD 3D F9 0F 00 00");
+            ExpectBytes(report, "fstenv [140001000]", image, "9B D9 35 F9 0F 00 00");
+
+            // a size word on a lone immediate sets the operand size; a 32-bit push does not exist in
+            // 64-bit code, and a size word that contradicts a register is an error, not ignored.
+            ExpectBytes(report, "push word 1234", x64, "66 68 34 12");
+            ExpectBytes(report, "push word 5", Mode32(), "66 6A 05");
+            ExpectBytes(report, "push dword 5", Mode32(), "6A 05");
+            ExpectBytes(report, "push 5", x64, "6A 05");
+            if (const AssembleResult pushed = Asm::Assemble("push dword 5", x64); pushed.Ok)
+                Failed(report, x64, "push dword 5", "an error", Outcome(pushed));
+            ++report.Cases;
+            if (const AssembleResult sized = Asm::Assemble("mov byte ptr eax,5", x64); sized.Ok)
+                Failed(report, x64, "mov byte ptr eax,5", "an error", Outcome(sized));
+            ++report.Cases;
+
+            // a prefix a branch cannot take is an error, not a far stub that drops it
+            for (const char* line : { "lock jmp 140000100", "lock call 140000100", "rep jz 140000100" })
+            {
+                ++report.Cases;
+                if (const AssembleResult prefixed = Asm::Assemble(line, image); prefixed.Ok)
+                    Failed(report, image, line, "an error", Outcome(prefixed));
+            }
+            ExpectBytes(report, "jmp 7FF600000000", image, "FF 25 00 00 00 00 00 00 00 00 F6 7F 00 00");
+
+            // in 32-bit code a rel32 branch reaches every address; the wrap counts from the end
+            ExpectBytes(report, "jmp 80001000", Mode32(0x1000), "E9 FB FF FF 7F");
+            ExpectBytes(report, "call 80001000", Mode32(0x1000), "E8 FB FF FF 7F");
+            ExpectBytes(report, "jz 80001000", Mode32(0x1000), "0F 84 FA FF FF 7F");
+            ExpectBytes(report, "jmp 80001004", Mode32(0x1000), "E9 FF FF FF 7F");
+            ExpectBytes(report, "jmp 80001005", Mode32(0x1000), "E9 00 00 00 80");
         }
 
         void TestMemory(Report& report)

@@ -38,12 +38,14 @@ namespace Manifold::Asm
                 Place,
                 Label,
                 Code,
-                Bytes
+                Bytes,
+                Align
             };
             Kind Type = Kind::Code;
             std::string Text;
             std::vector<std::uint8_t> Data;
             int Line = 0;
+            std::uint64_t Alignment = 0;
         };
 
         struct PendingRead
@@ -105,61 +107,133 @@ namespace Manifold::Asm
             return "__anonymous_" + std::to_string(index);
         }
 
+        bool IsPlaceLine(const std::string& text)
+        {
+            return text.size() > 1 && text.back() == ':';
+        }
+
+        std::string ReplaceAnonymous(const std::string& text, bool forward, const std::string& label)
+        {
+            const char lower = forward ? 'f' : 'b';
+            const char upper = forward ? 'F' : 'B';
+            std::string result;
+            for (std::size_t at = 0; at < text.size();)
+            {
+                const bool start = at == 0 || !AnonymousNameChar(text[at - 1]);
+                if (start && at + 1 < text.size() && text[at] == '@' && (text[at + 1] == lower || text[at + 1] == upper) &&
+                    (at + 2 >= text.size() || !AnonymousNameChar(text[at + 2])))
+                {
+                    result += label;
+                    at += 2;
+                    continue;
+                }
+                result += text[at++];
+            }
+            return result;
+        }
+
+        // ∑ CE's unlabeledlabels (autoassembler.pas 800-897): every line that ends in ':' is a place,
+        //   not only @@: (newmem:, a named label, an address line). @f is the next place after the
+        //   line, @b the last place before it. @@: lines become declared labels with their own names.
         bool ResolveAnonymousLabels(std::vector<SourceLine>& lines, std::string& problem, int& problemLine)
         {
-            std::vector<std::size_t> places;
-            for (std::size_t i = 0; i < lines.size(); ++i)
+            bool used = false;
+            for (const SourceLine& line : lines)
             {
-                if (lines[i].Text.size() >= 3 && lines[i].Text.compare(0, 3, "@@:") == 0)
-                    places.push_back(i);
+                const std::string lower = Lower(line.Text);
+                used = used || line.Text == "@@:" || lower.find("@f") != std::string::npos || lower.find("@b") != std::string::npos;
             }
-            bool referenced = false;
-            for (std::size_t i = 0; i < lines.size() && !referenced; ++i)
-            {
-                const std::string lower = Lower(lines[i].Text);
-                referenced = lower.find("@f") != std::string::npos || lower.find("@b") != std::string::npos;
-            }
-            if (places.empty() && !referenced)
+            if (!used)
                 return true;
-            std::size_t label = 0;
-            for (std::size_t i = 0; i < lines.size(); ++i)
+            std::vector<std::string> places;
+            std::vector<SourceLine> declarations;
+            for (SourceLine& line : lines)
             {
-                std::string& text = lines[i].Text;
-                const bool isPlace = text.size() >= 3 && text.compare(0, 3, "@@:") == 0;
-                const std::size_t own = isPlace ? label : places.size();
-                std::string result;
-                for (std::size_t at = 0; at < text.size();)
+                if (line.Text == "@@:")
                 {
-                    const bool start = at == 0 || !AnonymousNameChar(text[at - 1]);
-                    if (start && at + 1 < text.size() && text[at] == '@' && (text[at + 1] == 'f' || text[at + 1] == 'F' || text[at + 1] == 'b' || text[at + 1] == 'B') &&
-                        (at + 2 >= text.size() || !AnonymousNameChar(text[at + 2])))
-                    {
-                        const bool forward = text[at + 1] == 'f' || text[at + 1] == 'F';
-                        const std::size_t next = isPlace ? own + 1 : label;
-                        if (forward ? next >= places.size() : (isPlace ? own == 0 : label == 0))
-                        {
-                            problem = forward ? "@f has no @@: after it" : "@b has no @@: before it";
-                            problemLine = lines[i].Line;
-                            return false;
-                        }
-                        result += AnonymousLabel(forward ? next : (isPlace ? own - 1 : label - 1));
-                        at += 2;
-                        continue;
-                    }
-                    result += text[at++];
+                    const std::string name = AnonymousLabel(declarations.size());
+                    declarations.push_back({ "label(" + name + ")", line.Line });
+                    line.Text = name + ":";
                 }
-                text = std::move(result);
-                if (isPlace)
+                if (IsPlaceLine(line.Text))
+                    places.push_back(line.Text.substr(0, line.Text.size() - 1));
+            }
+            std::ptrdiff_t lastSeen = -1;
+            for (SourceLine& line : lines)
+            {
+                if (IsPlaceLine(line.Text))
                 {
-                    text = AnonymousLabel(own) + ":" + text.substr(3);
-                    ++label;
+                    ++lastSeen;
+                    continue;
+                }
+                if (ReplaceAnonymous(line.Text, true, "") != line.Text)
+                {
+                    if (lastSeen + 1 >= static_cast<std::ptrdiff_t>(places.size()))
+                    {
+                        problem = "@f has no label line (name:) after it";
+                        problemLine = line.Line;
+                        return false;
+                    }
+                    line.Text = ReplaceAnonymous(line.Text, true, places[static_cast<std::size_t>(lastSeen + 1)]);
+                }
+                else if (ReplaceAnonymous(line.Text, false, "") != line.Text)
+                {
+                    if (lastSeen < 0)
+                    {
+                        problem = "@b has no label line (name:) before it";
+                        problemLine = line.Line;
+                        return false;
+                    }
+                    line.Text = ReplaceAnonymous(line.Text, false, places[static_cast<std::size_t>(lastSeen)]);
                 }
             }
-            std::vector<SourceLine> declarations;
-            for (std::size_t i = 0; i < places.size(); ++i)
-                declarations.push_back({ "label(" + AnonymousLabel(i) + ")", lines[places[i]].Line });
             lines.insert(lines.begin(), declarations.begin(), declarations.end());
             return true;
+        }
+
+        // ∑ CE reads the sizes of alloc, globalalloc, readmem and fullaccess with StrToInt
+        //   (autoassembler.pas 2455, 2646, 2822): decimal, hex only with $ or 0x. Reading them as
+        //   hex made readmem(x,14) copy 20 bytes, so the cave ran 6 bytes of the next instruction.
+        std::optional<std::uint64_t> ParseSize(std::string_view text)
+        {
+            const std::string trimmed = Trim(std::string(text));
+            if (trimmed.empty())
+                return std::nullopt;
+            std::string_view digits = trimmed;
+            int base = 10;
+            if (digits.front() == '$')
+            {
+                digits.remove_prefix(1);
+                base = 16;
+            }
+            else if (digits.size() > 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X'))
+            {
+                digits.remove_prefix(2);
+                base = 16;
+            }
+            else if (digits.front() == '#')
+            {
+                digits.remove_prefix(1);
+            }
+            if (digits.empty() || digits.size() > 16)
+                return std::nullopt;
+            std::uint64_t value = 0;
+            for (const char c : digits)
+            {
+                int digit = -1;
+                if (c >= '0' && c <= '9')
+                    digit = c - '0';
+                else if (base == 16 && c >= 'a' && c <= 'f')
+                    digit = c - 'a' + 10;
+                else if (base == 16 && c >= 'A' && c <= 'F')
+                    digit = c - 'A' + 10;
+                if (digit < 0)
+                    return std::nullopt;
+                if (value > (~0ull - static_cast<std::uint64_t>(digit)) / static_cast<std::uint64_t>(base))
+                    return std::nullopt;
+                value = value * static_cast<std::uint64_t>(base) + static_cast<std::uint64_t>(digit);
+            }
+            return value;
         }
 
         std::vector<std::string> NameList(const std::vector<std::string>& arguments)
@@ -187,6 +261,8 @@ namespace Manifold::Asm
             return names;
         }
 
+        // ∑ CE's replacetoken works on tokens, and a quoted string is one token with its quotes, so a
+        //   define never changes text inside 'db' or "module" strings.
         std::string ReplaceWord(const std::string& text, const std::string& word, const std::string& replacement)
         {
             if (word.empty())
@@ -195,20 +271,28 @@ namespace Manifold::Asm
             std::size_t at = 0;
             while (at < text.size())
             {
-                const std::size_t found = text.find(word, at);
-                if (found == std::string::npos)
+                const char c = text[at];
+                if (c == '\'' || c == '"')
                 {
-                    out.append(text, at, std::string::npos);
-                    break;
+                    const std::size_t close = text.find(c, at + 1);
+                    const std::size_t end = close == std::string::npos ? text.size() : close + 1;
+                    out.append(text, at, end - at);
+                    at = end;
+                    continue;
                 }
-                const bool leftOk = found == 0 || !IsWordChar(text[found - 1]);
-                const bool rightOk = found + word.size() >= text.size() || !IsWordChar(text[found + word.size()]);
-                out.append(text, at, found - at);
-                if (leftOk && rightOk)
-                    out += replacement;
-                else
-                    out += word;
-                at = found + word.size();
+                if (text.compare(at, word.size(), word) == 0)
+                {
+                    const bool leftOk = at == 0 || !IsWordChar(text[at - 1]);
+                    const bool rightOk = at + word.size() >= text.size() || !IsWordChar(text[at + word.size()]);
+                    if (leftOk && rightOk)
+                    {
+                        out += replacement;
+                        at += word.size();
+                        continue;
+                    }
+                }
+                out += c;
+                ++at;
             }
             return out;
         }
@@ -345,6 +429,75 @@ namespace Manifold::Asm
             return std::string_view::npos;
         }
 
+        // ∑ The {$...} directives in an assembler part (outside comments and strings). {$strict}
+        //   turns off CE's implicit labels; {$try}/{$except} and the C blocks change what the code
+        //   means, so stripping them like comments would run the script without its exception
+        //   handler. Those are reported instead of being dropped.
+        struct Directives
+        {
+            bool Strict = false;
+            std::string Unsupported;
+        };
+
+        Directives ScanDirectives(std::string_view lower)
+        {
+            Directives found;
+            bool inBlock = false;
+            bool inBraceComment = false;
+            char quote = 0;
+            for (std::size_t i = 0; i < lower.size(); ++i)
+            {
+                const char c = lower[i];
+                const char next = i + 1 < lower.size() ? lower[i + 1] : '\0';
+                if (inBlock)
+                {
+                    if (c == '*' && next == '/')
+                    {
+                        inBlock = false;
+                        ++i;
+                    }
+                    continue;
+                }
+                if (inBraceComment)
+                {
+                    if (c == '}')
+                        inBraceComment = false;
+                    continue;
+                }
+                if (quote)
+                {
+                    if (c == quote || c == '\n')
+                        quote = 0;
+                    continue;
+                }
+                if (c == '\'' || c == '"')
+                    quote = c;
+                else if (c == '/' && next == '/')
+                {
+                    while (i + 1 < lower.size() && lower[i + 1] != '\n')
+                        ++i;
+                }
+                else if (c == '/' && next == '*')
+                {
+                    inBlock = true;
+                    ++i;
+                }
+                else if (c == '{' && next == '$')
+                {
+                    const std::size_t close = lower.find('}', i);
+                    const std::string name = Trim(std::string(lower.substr(i + 2, close == std::string_view::npos ? std::string_view::npos : close - i - 2)));
+                    if (name == "strict")
+                        found.Strict = true;
+                    else if ((name == "try" || name == "except" || name == "c" || name == "ccode" || name == "luacode") && found.Unsupported.empty())
+                        found.Unsupported = "{$" + name + "}";
+                    i = close == std::string_view::npos ? lower.size() : close;
+                }
+                else if (c == '{')
+                    inBraceComment = true;
+            }
+            return found;
+        }
+
         std::optional<Command> ParseCommand(const std::string& line)
         {
             const std::size_t open = line.find('(');
@@ -427,7 +580,7 @@ namespace Manifold::Asm
                 if (!Layout())
                     return Abort();
                 MeasureLabels();
-                if (!CheckAsserts())
+                if (!CheckAsserts() || !CheckThreads())
                     return Abort();
                 if (m_options.CheckOnly)
                 {
@@ -499,6 +652,15 @@ namespace Manifold::Asm
                 while (at < sectioned.size())
                 {
                     const std::size_t luaStart = FindLuaBlock(lower, at);
+                    const std::size_t asmEnd = luaStart == std::string::npos ? sectioned.size() : luaStart;
+                    const Directives directives = ScanDirectives(std::string_view(lower).substr(at, asmEnd - at));
+                    m_strict = m_strict || directives.Strict;
+                    if (!directives.Unsupported.empty())
+                    {
+                        const std::size_t where = lower.find(directives.Unsupported, at);
+                        const int line = static_cast<int>(std::count(sectioned.begin(), sectioned.begin() + static_cast<std::ptrdiff_t>(where == std::string::npos ? at : where), '\n')) + 1;
+                        return Fail(ErrorCode::AaUnknownCommand, line, directives.Unsupported + " is not supported yet; the script would run without it", directives.Unsupported);
+                    }
                     if (luaStart == std::string::npos)
                     {
                         text += StripComments(std::string_view(sectioned).substr(at));
@@ -546,13 +708,25 @@ namespace Manifold::Asm
                 std::vector<SourceLine> included;
                 if (!ExpandIncludes(selected, included, 0))
                     return false;
+                for (const SourceLine& line : included)
+                {
+                    if (EqualsNoCase(line.Text, "[32-bit]") || EqualsNoCase(line.Text, "[64-bit]") || EqualsNoCase(line.Text, "[/32-bit]") || EqualsNoCase(line.Text, "[/64-bit]"))
+                        return Fail(ErrorCode::AaUnknownCommand, line.Line, "[32-bit]/[64-bit] blocks are not supported", line.Text);
+                }
+                std::string problem;
+                int problemLine = 0;
+                if (!ResolveAnonymousLabels(included, problem, problemLine))
+                    return Fail(ErrorCode::AsmSyntax, problemLine, problem, "");
                 std::vector<SourceLine> expanded;
                 std::vector<std::pair<std::string, std::string>> seen;
                 if (!ExpandCustomCommands(included, expanded, seen, 0))
                     return false;
 
+                // ∑ CE applies defines in script order (autoassembler.pas 2004-2050): a define counts
+                //   from its own line on, its value already has the earlier defines applied (so
+                //   define(b,a+4) works), and a second define of the same name replaces the value.
                 std::vector<std::pair<std::string, std::string>> defines;
-                for (const SourceLine& line : expanded)
+                for (SourceLine line : expanded)
                 {
                     const auto command = ParseCommand(line.Text);
                     if (command && command->Name == "define")
@@ -564,14 +738,15 @@ namespace Manifold::Asm
                         std::string value = command->Arguments[1];
                         for (std::size_t extra = 2; extra < command->Arguments.size(); ++extra)
                             value += "," + command->Arguments[extra];
-                        defines.emplace_back(command->Arguments[0], value);
-                    }
-                }
-                for (SourceLine line : expanded)
-                {
-                    const auto command = ParseCommand(line.Text);
-                    if (command && command->Name == "define")
+                        for (const auto& [name, earlier] : defines)
+                            value = ReplaceWord(value, name, earlier);
+                        const auto same = std::find_if(defines.begin(), defines.end(), [&](const auto& define) { return define.first == command->Arguments[0]; });
+                        if (same != defines.end())
+                            same->second = value;
+                        else
+                            defines.emplace_back(command->Arguments[0], value);
                         continue;
+                    }
                     if (!command || (command->Name != "registersymbol" && command->Name != "unregistersymbol"))
                     {
                         for (const auto& [name, value] : defines)
@@ -581,10 +756,6 @@ namespace Manifold::Asm
                 }
                 for (const auto& [name, value] : defines)
                     m_defines[Lower(name)] = value;
-                std::string problem;
-                int problemLine = 0;
-                if (!ResolveAnonymousLabels(out, problem, problemLine))
-                    return Fail(ErrorCode::AsmSyntax, problemLine, problem, "");
                 return true;
             }
 
@@ -601,7 +772,13 @@ namespace Manifold::Asm
                             std::string value = command->Arguments[1];
                             for (std::size_t extra = 2; extra < command->Arguments.size(); ++extra)
                                 value += "," + command->Arguments[extra];
-                            seen.emplace_back(command->Arguments[0], value);
+                            for (const auto& [defined, earlier] : seen)
+                                value = ReplaceWord(value, defined, earlier);
+                            const auto same = std::find_if(seen.begin(), seen.end(), [&](const auto& define) { return define.first == command->Arguments[0]; });
+                            if (same != seen.end())
+                                same->second = value;
+                            else
+                                seen.emplace_back(command->Arguments[0], value);
                         }
                     }
                     if (name.empty() || !m_host.IsCustomCommand || !m_host.IsCustomCommand(name) || line.Text.back() != ')')
@@ -694,13 +871,79 @@ namespace Manifold::Asm
                             return false;
                         continue;
                     }
+                    std::string spaced = text;
+                    std::replace(spaced.begin(), spaced.end(), ',', ' ');
+                    const std::vector<std::string> words = NameList({ spaced });
+                    if (!words.empty() && EqualsNoCase(words.front(), "align"))
+                    {
+                        const auto alignment = words.size() >= 2 ? ParseNumber(words[1]) : std::nullopt;
+                        const auto fill = words.size() >= 3 ? ParseNumber(words[2]) : std::optional<std::uint64_t>(0);
+                        if (words.size() > 3 || !alignment || *alignment == 0 || *alignment > 0x10000 || !fill || *fill > 0xFF)
+                            return Fail(ErrorCode::AaBadArguments, line.Line, "align needs a size and an optional fill byte, like align 10 or align 10 CC", text);
+                        Statement statement;
+                        statement.Type = Statement::Kind::Align;
+                        statement.Text = text;
+                        statement.Line = line.Line;
+                        statement.Alignment = *alignment;
+                        statement.Data.assign(1, static_cast<std::uint8_t>(*fill));
+                        m_statements.push_back(std::move(statement));
+                        continue;
+                    }
                     Statement statement;
                     statement.Type = Statement::Kind::Code;
                     statement.Text = text;
                     statement.Line = line.Line;
                     m_statements.push_back(std::move(statement));
                 }
+                PromotePotentialLabels();
+                for (const auto& [name, line] : m_register)
+                {
+                    const std::string key = Lower(name);
+                    const bool declared = m_declared.count(key) || m_defines.count(key);
+                    if (!declared)
+                        return Fail(ErrorCode::AaBadArguments, line, "registersymbol(" + name + "): " + name + " is not declared here with alloc, label, define or an aobscan");
+                }
                 return true;
+            }
+
+            // ∑ CE's getPotentialLabels (autoassembler.pas 708-731, used at 2975 and 3027): without
+            //   {$strict}, a "name:" line whose name is no symbol, no number and has no + or . is a
+            //   label even without label(name). In a syntax check that also covers a [DISABLE] part
+            //   whose names the [ENABLE] part registers; the real pass still needs an address for it.
+            void PromotePotentialLabels()
+            {
+                if (m_strict)
+                    return;
+                for (const Statement& statement : m_statements)
+                {
+                    if (statement.Type != Statement::Kind::Place)
+                        continue;
+                    const std::string& name = statement.Text;
+                    const std::string key = Lower(name);
+                    if (name.empty() || m_declared.count(key) || !std::all_of(name.begin(), name.end(), [](char c) { return IsWordChar(c) && c != '.'; }))
+                        continue;
+                    if (std::all_of(name.begin(), name.end(), [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; }))
+                        continue;
+                    if (KnownName(name))
+                        continue;
+                    if (m_host.Symbols && m_host.Symbols->Evaluate(name, Extra()).Ok())
+                        continue;
+                    // ∑ Stricter than CE on the real pass: the name must also be used by the code (a
+                    //   jump to it). A bare "Hook:" whose symbol is missing, say in a [DISABLE] part
+                    //   after a failed enable, would otherwise become a label at the current address
+                    //   and write the original bytes to the wrong place.
+                    if (!m_options.CheckOnly)
+                    {
+                        const bool used = std::any_of(m_statements.begin(), m_statements.end(), [&](const Statement& other) {
+                            return other.Type == Statement::Kind::Code && ReplaceWord(Lower(other.Text), key, "\x02") != Lower(other.Text);
+                        });
+                        if (!used)
+                            continue;
+                    }
+                    m_labels[key] = name;
+                    m_declared.insert(key);
+                    m_potential.insert(key);
+                }
             }
 
             bool NeedArguments(const Command& command, const SourceLine& line, std::size_t least, const char* usage)
@@ -726,7 +969,7 @@ namespace Manifold::Asm
                 {
                     if (!NeedArguments(command, line, 2, "alloc(name, size[, near address])"))
                         return false;
-                    const auto size = ParseNumber(command.Arguments[1]);
+                    const auto size = ParseSize(command.Arguments[1]);
                     if (!size || *size == 0)
                         return Fail(ErrorCode::AaBadArguments, line.Line, "the size of alloc is not a number", line.Text);
                     if (!DeclareName(command.Arguments[0], line.Line, line.Text))
@@ -822,7 +1065,7 @@ namespace Manifold::Asm
                         return false;
                     if (!m_host.Process || !m_host.Symbols)
                         return Fail(ErrorCode::NoProcess, line.Line, "");
-                    const auto size = ParseNumber(command.Arguments[1]);
+                    const auto size = ParseSize(command.Arguments[1]);
                     if (!size || *size == 0 || *size > 0x100000)
                         return Fail(ErrorCode::AaBadArguments, line.Line, "readmem(address, size) got an invalid address or size", line.Text);
                     Statement statement;
@@ -975,8 +1218,17 @@ namespace Manifold::Asm
 
             bool Allocate()
             {
-                std::map<std::string, std::vector<PendingAlloc*>> groups;
-                std::vector<std::string> order;
+                // ∑ CE groups allocations in script order (autoassembler.pas 3359-3445): one without a
+                //   near address joins the running group, and a different near address starts a new
+                //   one. So alloc(data,8) next to alloc(newmem,$1000,INJECT) lands beside newmem, in
+                //   reach of rip-relative code, instead of anywhere in the 64-bit address space.
+                struct Group
+                {
+                    std::vector<PendingAlloc*> Members;
+                    std::optional<std::uint64_t> Near;
+                };
+                std::vector<Group> groups;
+                std::optional<std::size_t> running;
                 for (PendingAlloc& alloc : m_allocs)
                 {
                     if (alloc.Global && m_host.Symbols)
@@ -987,34 +1239,47 @@ namespace Manifold::Asm
                             continue;
                         }
                     }
-                    const std::string key = Lower(alloc.Near) + (alloc.Global ? "|global" : "");
-                    if (!groups.count(key))
-                        order.push_back(key);
-                    groups[key].push_back(&alloc);
-                }
-
-                std::uint64_t fakeBase = kCheckOnlyBase;
-                for (const std::string& key : order)
-                {
-                    auto& members = groups[key];
-                    std::uint64_t total = 0;
-                    for (PendingAlloc* alloc : members)
-                        total += (alloc->Size + 15) & ~15ull;
-                    std::uint64_t nearAddress = 0;
-                    const PendingAlloc& first = *members.front();
-                    if (!first.Near.empty())
+                    std::optional<std::uint64_t> nearValue;
+                    if (!alloc.Near.empty())
                     {
                         if (!m_host.Symbols)
-                            return Fail(ErrorCode::NoProcess, first.Line, "");
-                        const auto value = m_host.Symbols->Evaluate(first.Near, Extra());
+                            return Fail(ErrorCode::NoProcess, alloc.Line, "");
+                        const auto value = m_host.Symbols->Evaluate(alloc.Near, Extra());
                         if (!value.Ok())
                         {
                             m_result.Error = value.Error;
-                            m_result.Line = first.Line;
+                            m_result.Line = alloc.Line;
                             return false;
                         }
-                        nearAddress = *value.Value;
+                        nearValue = *value.Value;
                     }
+                    if (alloc.Global)
+                    {
+                        groups.push_back({ { &alloc }, nearValue });
+                        continue;
+                    }
+                    if (running && nearValue && groups[*running].Near && *groups[*running].Near != *nearValue)
+                        running.reset();
+                    if (!running)
+                    {
+                        groups.push_back({});
+                        running = groups.size() - 1;
+                    }
+                    Group& group = groups[*running];
+                    group.Members.push_back(&alloc);
+                    if (nearValue && !group.Near)
+                        group.Near = nearValue;
+                }
+
+                std::uint64_t fakeBase = kCheckOnlyBase;
+                for (const Group& group : groups)
+                {
+                    const auto& members = group.Members;
+                    std::uint64_t total = 0;
+                    for (PendingAlloc* alloc : members)
+                        total += (alloc->Size + 15) & ~15ull;
+                    const std::uint64_t nearAddress = group.Near.value_or(0);
+                    const PendingAlloc& first = *members.front();
                     std::uint64_t block = 0;
                     if (!m_options.CheckOnly && !m_host.Process)
                         return Fail(ErrorCode::NoProcess, first.Line, "");
@@ -1127,6 +1392,12 @@ namespace Manifold::Asm
                             {
                                 if (!current && m_options.CheckOnly)
                                     current = 0;
+                                if (!current && m_potential.count(Lower(statement.Text)))
+                                {
+                                    m_result.Error = Status::Fail(ErrorCode::ExprUnknownSymbol, statement.Text);
+                                    m_result.Line = statement.Line;
+                                    return false;
+                                }
                                 if (!current)
                                     return Fail(ErrorCode::AaLabelNotPlaced, statement.Line, statement.Text);
                                 const std::string key = Lower(statement.Text);
@@ -1150,6 +1421,16 @@ namespace Manifold::Asm
                         if (!current)
                             return Fail(ErrorCode::AsmSyntax, statement.Line, "no address is set for this line; start the block with an address line like newmem:", statement.Text);
 
+                        if (statement.Type == Statement::Kind::Align)
+                        {
+                            // ∑ CE's align (Assemblerunit.pas 4938): pad with the fill byte up to the next
+                            //   multiple. The pad depends on the address, so it never keeps a reserve
+                            //   from an earlier pass; moved labels make the layout run again.
+                            const std::uint64_t pad = (statement.Alignment - (*current % statement.Alignment)) % statement.Alignment;
+                            m_output.push_back({ *current, std::vector<std::uint8_t>(static_cast<std::size_t>(pad), statement.Data.front()), statement.Line });
+                            *current += pad;
+                            continue;
+                        }
                         std::vector<std::uint8_t> bytes;
                         if (statement.Type == Statement::Kind::Bytes)
                         {
@@ -1370,9 +1651,10 @@ namespace Manifold::Asm
                 for (const FullAccessCommand& access : m_fullAccess)
                 {
                     const auto address = m_host.Symbols->Evaluate(access.Address, Extra());
-                    const auto size = ParseNumber(access.Size);
-                    if (address.Ok() && size)
-                        m_host.Process->Protect(*address.Value, static_cast<std::size_t>(*size), PAGE_EXECUTE_READWRITE);
+                    const auto size = ParseSize(access.Size);
+                    if (!address.Ok() || !size)
+                        return Fail(ErrorCode::AaBadArguments, access.Line, "fullaccess(address, size) got an invalid address or size");
+                    m_host.Process->Protect(*address.Value, static_cast<std::size_t>(*size), PAGE_EXECUTE_READWRITE);
                 }
 
                 std::vector<AaWrite> merged;
@@ -1383,17 +1665,45 @@ namespace Manifold::Asm
                     else
                         merged.push_back(write);
                 }
+                merged.erase(std::remove_if(merged.begin(), merged.end(), [](const AaWrite& write) { return write.Bytes.empty(); }), merged.end());
+                // ∑ A failed write must not leave the earlier ones behind: Abort frees this run's
+                //   allocations, and a hook already written into the game would then jump into freed
+                //   memory. The bytes each write replaces are kept, and on a failure every finished
+                //   write is put back (newest first) before the error is returned.
+                std::vector<AaWrite> undo;
                 for (const AaWrite& write : merged)
                 {
+                    AaWrite original{ write.Address, std::vector<std::uint8_t>(write.Bytes.size()), write.Line };
+                    const bool saved = m_host.Process->ReadExact(write.Address, original.Bytes.data(), original.Bytes.size());
                     const Status status = m_host.Process->Write(write.Address, write.Bytes);
                     if (!status)
                     {
+                        for (auto done = undo.rbegin(); done != undo.rend(); ++done)
+                        {
+                            if (!done->Bytes.empty() && !m_host.Process->Write(done->Address, done->Bytes))
+                                LOG_WARN("Auto Assembler", "Could not restore the bytes at " + Hex(done->Address) + " after a failed write.");
+                        }
                         m_result.Error = Status::Fail(ErrorCode::AaWriteFailed, Hex(write.Address));
                         m_result.Line = write.Line;
                         return false;
                     }
+                    if (!saved)
+                        original.Bytes.clear();
+                    undo.push_back(std::move(original));
                 }
                 m_result.Writes = std::move(merged);
+                return true;
+            }
+
+            // ∑ CE checks createthread targets before it writes anything (autoassembler.pas 3116-3165);
+            //   a target that does not resolve used to be a note after the code was already in place.
+            bool CheckThreads()
+            {
+                for (const ThreadCommand& thread : m_threads)
+                {
+                    if (!FinalValue(thread.Address))
+                        return Fail(ErrorCode::AaBadArguments, thread.Line, "createthread(" + thread.Address + "): the address does not resolve");
+                }
                 return true;
             }
 
@@ -1412,72 +1722,9 @@ namespace Manifold::Asm
 
             void Finish()
             {
-                for (const AaAllocation& allocation : m_newAllocations)
-                    m_memory.Allocations.push_back(allocation);
-                m_allocatedBlocks.clear();
-
-                for (const auto& [key, value] : m_values)
-                    m_memory.Values[key] = value;
-                for (const auto& [key, value] : m_placed)
-                    m_memory.Values[key] = value;
-
-                for (const auto& [name, line] : m_register)
-                {
-                    const auto defined = m_defines.find(Lower(name));
-                    const auto value = defined != m_defines.end() ? FinalValue(defined->second) : FinalValue(name);
-                    if (!value)
-                    {
-                        m_result.Notes.push_back("registersymbol: " + name + " has no address");
-                        continue;
-                    }
-                    const auto size = defined == m_defines.end() ? m_sizes.find(Lower(name)) : m_sizes.end();
-                    if (m_host.Symbols)
-                    {
-                        m_host.Symbols->Register(name, *value, m_options.Owner);
-                        if (size != m_sizes.end())
-                            m_host.Symbols->SetSize(name, size->second);
-                    }
-                    m_result.Symbols[name] = *value;
-                    if (size != m_sizes.end())
-                        m_result.SymbolSizes[name] = size->second;
-                    if (std::find_if(m_memory.Registered.begin(), m_memory.Registered.end(), [&](const std::string& known) { return EqualsNoCase(known, name); }) ==
-                        m_memory.Registered.end())
-                        m_memory.Registered.push_back(name);
-                }
-                std::vector<std::string> unregister;
-                for (const std::string& name : m_unregister)
-                {
-                    if (name == "*")
-                        unregister.insert(unregister.end(), m_memory.Registered.begin(), m_memory.Registered.end());
-                    else
-                        unregister.push_back(name);
-                }
-                for (const std::string& name : unregister)
-                {
-                    if (m_host.Symbols)
-                        m_host.Symbols->Unregister(name);
-                    m_memory.Registered.erase(std::remove_if(m_memory.Registered.begin(), m_memory.Registered.end(), [&](const std::string& known) { return EqualsNoCase(known, name); }),
-                        m_memory.Registered.end());
-                }
-
-                for (const ThreadCommand& thread : m_threads)
-                {
-                    const auto address = FinalValue(thread.Address);
-                    if (!address)
-                    {
-                        m_result.Notes.push_back("createthread: " + thread.Address + " has no address");
-                        continue;
-                    }
-                    if (!m_host.Process)
-                    {
-                        m_result.Notes.push_back("createthread: no process is open");
-                        continue;
-                    }
-                    const Status status = m_host.Process->CreateThread(*address, 0, !thread.Mode.empty());
-                    if (!status)
-                        m_result.Notes.push_back(status.Text);
-                }
-
+                // ∑ CE order (autoassembler.pas 2718-2758, 4234-4282): dealloc only frees what an earlier
+                //   run allocated (never this run's code, which a new thread may be running), and the
+                //   symbols to unregister go before the ones to register.
                 std::vector<std::string> deallocs;
                 for (const std::string& name : m_deallocs)
                 {
@@ -1511,6 +1758,72 @@ namespace Manifold::Asm
                             m_result.Notes.push_back(status.Text);
                     }
                 }
+                for (const AaAllocation& allocation : m_newAllocations)
+                    m_memory.Allocations.push_back(allocation);
+                m_allocatedBlocks.clear();
+
+                for (const auto& [key, value] : m_values)
+                    m_memory.Values[key] = value;
+                for (const auto& [key, value] : m_placed)
+                    m_memory.Values[key] = value;
+
+                std::vector<std::string> unregister;
+                for (const std::string& name : m_unregister)
+                {
+                    if (name == "*")
+                        unregister.insert(unregister.end(), m_memory.Registered.begin(), m_memory.Registered.end());
+                    else
+                        unregister.push_back(name);
+                }
+                for (const std::string& name : unregister)
+                {
+                    if (m_host.Symbols)
+                        m_host.Symbols->Unregister(name);
+                    m_memory.Registered.erase(std::remove_if(m_memory.Registered.begin(), m_memory.Registered.end(), [&](const std::string& known) { return EqualsNoCase(known, name); }),
+                        m_memory.Registered.end());
+                }
+
+                for (const auto& [name, line] : m_register)
+                {
+                    const auto defined = m_defines.find(Lower(name));
+                    const auto value = defined != m_defines.end() ? FinalValue(defined->second) : FinalValue(name);
+                    if (!value)
+                    {
+                        m_result.Notes.push_back("registersymbol: " + name + " has no address");
+                        continue;
+                    }
+                    const auto size = defined == m_defines.end() ? m_sizes.find(Lower(name)) : m_sizes.end();
+                    if (m_host.Symbols)
+                    {
+                        m_host.Symbols->Register(name, *value, m_options.Owner);
+                        if (size != m_sizes.end())
+                            m_host.Symbols->SetSize(name, size->second);
+                    }
+                    m_result.Symbols[name] = *value;
+                    if (size != m_sizes.end())
+                        m_result.SymbolSizes[name] = size->second;
+                    if (std::find_if(m_memory.Registered.begin(), m_memory.Registered.end(), [&](const std::string& known) { return EqualsNoCase(known, name); }) ==
+                        m_memory.Registered.end())
+                        m_memory.Registered.push_back(name);
+                }
+                for (const ThreadCommand& thread : m_threads)
+                {
+                    const auto address = FinalValue(thread.Address);
+                    if (!address)
+                    {
+                        m_result.Notes.push_back("createthread: " + thread.Address + " has no address");
+                        continue;
+                    }
+                    if (!m_host.Process)
+                    {
+                        m_result.Notes.push_back("createthread: no process is open");
+                        continue;
+                    }
+                    const Status status = m_host.Process->CreateThread(*address, 0, !thread.Mode.empty());
+                    if (!status)
+                        m_result.Notes.push_back(status.Text);
+                }
+
                 for (const PendingAlloc& alloc : m_allocs)
                 {
                     if (alloc.Global && m_host.Symbols && !m_host.Symbols->FindRegistered(alloc.Name))
@@ -1562,6 +1875,8 @@ namespace Manifold::Asm
             std::vector<std::string> m_deallocs;
             std::map<std::string, std::string> m_labels;
             std::set<std::string> m_declared;
+            std::set<std::string> m_potential;
+            bool m_strict = false;
             std::vector<std::pair<std::string, int>> m_register;
             std::map<std::string, std::string> m_defines;
             std::vector<std::string> m_unregister;
