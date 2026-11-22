@@ -49,7 +49,12 @@ namespace Manifold::Lua
         std::string Opens;
         bool Closes = false;
         std::string EnabledWhen; // "god", "not god" or "mode = Multiplier, Double" (see FormParseWhen)
+        std::string Record;      // record = a memory record's description, or its id when RecordById
+        bool RecordById = false;
     };
+
+    // the kinds a memory record can be bound to (record = ...)
+    bool FormCanBind(UiKind kind);
 
     // enabledWhen: the widget is enabled while another one says so.
     struct FormRule

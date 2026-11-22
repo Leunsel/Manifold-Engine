@@ -5215,7 +5215,7 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 19
+local API_VERSION = 20
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -8055,7 +8055,9 @@ local form = subarea(ui, "form", "Windows described by a table, as the Form Edit
 local FORM_SKIP = {
   file = { form = true, title = true, children = true, script = true, fragment = true, editor = true, modals = true },
   modal = { name = true, title = true, children = true },
-  node = { kind = true, name = true, children = true, opens = true, closes = true, enabledWhen = true },
+  node = { kind = true, name = true, children = true, opens = true, closes = true, enabledWhen = true, record = true },
+  -- the kinds a memory record can be bound to (record = "description" or id)
+  bindable = { checkbox = true, button = true, number = true, slider = true, input = true, text = true, combo = true, radio = true },
 }
 
 -- ∑ enabledWhen: a widget of a form is enabled while another one says so,
@@ -8129,14 +8131,14 @@ end
 
 local function formHeader(path, spec, handlers)
   if math.type(spec.form) ~= "integer" then
-    misuse(path .. ": the table has no form = 1, so it is no form")
+)MLUA"),
+            std::string_view(R"MLUA(    misuse(path .. ": the table has no form = 1, so it is no form")
   end
   if spec.form > 1 then
     misuse(("%s: the form is from a newer Manifold (form = %d)"):format(path, spec.form))
   end
   if type(spec.title) ~= "string" then
-)MLUA"),
-            std::string_view(R"MLUA(    misuse(("%s: form.title must be a string, got %s"):format(path, kindOf(spec.title)))
+    misuse(("%s: form.title must be a string, got %s"):format(path, kindOf(spec.title)))
   end
   local resolve = formResolver(path, handlers)
   return formWindowOptions(path, spec, "form", resolve, FORM_SKIP.file), resolve
@@ -8253,6 +8255,17 @@ local function checkForm(path, spec, handlers)
         rule.label = label
         whens[#whens + 1] = rule
       end
+      if child.record ~= nil then
+        if (type(child.record) ~= "string" or child.record == "") and math.type(child.record) ~= "integer" then
+          misuse(("%s: %s.record must be a memory record's description or id, got %s"):format(path, label, kindOf(child.record)))
+        end
+        if not FORM_SKIP.bindable[child.kind] then
+          misuse(("%s: %s: a %s cannot show a memory record (a checkbox, button, number, slider, input, text, combo or radio can)"):format(path, label, child.kind))
+        end
+        if child.kind == "combo" and child.multi then
+          misuse(("%s: %s: a combo with multi = true cannot show a memory record"):format(path, label))
+        end
+      end
       if child.opens ~= nil or child.closes ~= nil then
         if child.kind ~= "button" then
           misuse(("%s: %s: only a button opens or closes a window"):format(path, label))
@@ -8324,7 +8337,114 @@ local function fillForm(path, made, members, children, resolve, folder, links)
         if rule.negate then
           on = not on
         end
+        if wiring.missing[rule.handle] then
+          on = false
+        end
         pcall(rule.handle.update, { enabled = on })
+      end
+    end
+
+    -- ∑ record = "God Mode": the widget shows the memory record and changes
+    -- it, without code. A checkbox follows whether the record is on, a
+    -- button switches it, the other kinds show and write its value. The
+    -- window refreshes them ten times a second while it is open; a widget
+    -- whose record is not in the table is disabled until it is.
+    wiring.binds = wiring.binds or {}
+    wiring.missing = wiring.missing or {}
+    local function shownValue(bind, value, text)
+      if bind.kind == "number" or bind.kind == "slider" then
+        return type(value) == "number" and value or tonumber(text)
+      end
+      if bind.kind == "combo" or bind.kind == "radio" then
+        for index, item in ipairs(bind.items or {}) do
+          if item == text or tostring(item) == tostring(value) then
+            return index
+          end
+        end
+        return nil
+      end
+      return text
+    end
+    wiring.bindRefresh = function(windowHandle)
+      for _, bind in ipairs(wiring.binds) do
+        if bind.window == windowHandle then
+          local record = manifold.record.find(bind.record)
+          local found = record ~= nil
+          if found ~= bind.found then
+            bind.found = found
+            wiring.missing[bind.handle] = not found or nil
+            if bind.rule then
+              wiring.refresh(bind.rule)
+            else
+              pcall(bind.handle.update, { enabled = found })
+            end
+            bind.last = nil
+          end
+          if record and bind.kind == "checkbox" then
+            local active = record.isActive()
+            if active ~= nil and active ~= bind.last then
+              bind.last = active
+              pcall(bind.handle.set, active)
+            end
+          elseif record and bind.kind ~= "button" then
+            local value, text = record.getValue()
+            if value ~= nil then
+              local shown = shownValue(bind, value, text)
+              local ok, current = pcall(bind.handle.get)
+              -- an input the user is typing into differs from what it last showed: leave it
+              local typing = bind.kind == "input" and ok and bind.last ~= nil and current ~= bind.last
+              if not typing and shown ~= nil and (shown ~= bind.last or current ~= shown) then
+                bind.last = shown
+                pcall(bind.handle.set, shown)
+              end
+            end
+          end
+        end
+      end
+    end
+    wiring.bindWrite = function(bind, value)
+      local record, missing = manifold.record.find(bind.record)
+      local ok, problem
+      if not record then
+        ok, problem = nil, missing
+      elseif bind.kind == "checkbox" then
+        ok, problem = record.setActive(value)
+      elseif bind.kind == "button" then
+        ok, problem = record.toggle()
+        ok = ok ~= nil or nil
+      elseif bind.kind == "combo" or bind.kind == "radio" then
+        local item = bind.items and bind.items[value]
+        if item ~= nil then
+          ok, problem = record.setValue(tostring(item))
+        else
+          ok = true
+        end
+      else
+        ok, problem = record.setValue(value)
+      end
+)MLUA"),
+            std::string_view(R"MLUA(      if ok == nil then
+        emit("warning", "manifold.ui", ("%s could not change the record %s: %s"):format(bind.label, tostring(bind.record), tostring(problem)))
+        bind.last = nil
+      else
+        bind.last = bind.kind == "checkbox" and value or bind.last
+      end
+    end
+    -- after the form's windows are filled: each window with bound widgets refreshes them
+    wiring.start = function()
+      local windows = {}
+      for _, bind in ipairs(wiring.binds) do
+        windows[bind.window] = true
+      end
+      for windowHandle in pairs(windows) do
+        local entry = uiEntries[windowHandle.id]
+        if entry then
+          entry.onBind = function()
+            wiring.bindRefresh(windowHandle)
+          end
+          native.uiUpdate(windowHandle.id, { binds = true })
+          wiring.bindRefresh(windowHandle)
+        end
       end
     end
   end
@@ -8356,6 +8476,28 @@ local function fillForm(path, made, members, children, resolve, folder, links)
           end
         end
       end
+      local bind
+      if wiring and child.record ~= nil then
+        bind = { record = child.record, kind = child.kind, items = child.items, window = links.window, label = label }
+        if child.enabledWhen ~= nil then
+          bind.rule = formWhen(child.enabledWhen).source
+        end
+        -- a text only shows the value: nothing to write back
+        local handlerKey = child.kind ~= "text" and (child.kind == "button" and "onClick" or child.kind == "input" and "onSubmit" or "onChange") or nil
+        local original = handlerKey and copy[handlerKey]
+        if handlerKey then copy[handlerKey] = function(...)
+          -- the record first, then the script's own handler with the same arguments
+          local first = ...
+          if child.kind == "button" then
+            wiring.bindWrite(bind)
+          else
+            wiring.bindWrite(bind, first)
+          end
+          if original then
+            return original(...)
+          end
+        end end
+      end
       if wiring and child.name and (child.kind == "checkbox" or child.kind == "combo" or child.kind == "radio") then
         -- a widget others may listen to: its changes reach their rules first
         local original = copy.onChange
@@ -8377,6 +8519,10 @@ local function fillForm(path, made, members, children, resolve, folder, links)
         rule.handle = handle
         wiring.rules[rule.source] = wiring.rules[rule.source] or {}
         table.insert(wiring.rules[rule.source], rule)
+      end
+      if bind then
+        bind.handle = handle
+        wiring.binds[#wiring.binds + 1] = bind
       end
       add(handle, child.children, label)
     end
@@ -8405,6 +8551,9 @@ local function buildForm(path, spec, handlers, folder)
     end
     for name in pairs(wiring.rules) do
       wiring.refresh(name)
+    end
+    if wiring.start then
+      wiring.start()
     end
   end)
   if not ok then
@@ -8441,8 +8590,7 @@ end
 
 local function reloadForm(watch, start)
   if start then
-)MLUA"),
-            std::string_view(R"MLUA(    watch.entry = uiEntries[watch.window.id]
+    watch.entry = uiEntries[watch.window.id]
     watch.entry.onFormReload = function()
       reloadForm(watch)
     end
@@ -8544,6 +8692,18 @@ local function reloadForm(watch, start)
     for name in pairs(watch.wiring.rules) do
       watch.wiring.refresh(name)
     end
+    -- the old bindings went with the old widgets
+    local entry = uiEntries[watch.window.id]
+    if entry then
+      entry.onBind = nil
+    end
+    for _, handle in pairs(watch.modals) do
+      entry = uiEntries[handle.id]
+      if entry then
+        entry.onBind = nil
+      end
+    end
+    watch.wiring.start()
   end
   if not ok then
     emit("error", "manifold.ui", failure)
@@ -8564,7 +8724,8 @@ define(form, "build", {
     { name = "options", type = "table", optional = true, keys = { reload = "boolean", onReload = "function" } },
   },
   returns = "window",
-  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like." .. " `modals` lists modal forms: window tables like the form itself with a `name`, each made as a modal window (`modal = true`) that waits hidden; `modals.<name>.show()` opens it. A button's `opens = \"<name>\"` opens that modal when clicked and `closes = true` hides the window it is in; both run before the button's `onClick`." .. " Any widget can take `enabledWhen`, which enables it only while another widget of the form says so, without code: `\"god\"` (that checkbox or switch is on, or that combo or radio has a choice), `\"not god\"`, or `\"mode = Multiplier, Double\"` (one of these items of that combo or radio is chosen). It follows the user's changes; a script's `set` does not update it." .. " The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty." .. " A script file that holds its form as `local form = { form = 1, ... }` (as the Form Editor writes it) gets a live reload like `load`: saving the script rebuilds the window's widgets from the table in the file, with the same handlers; the handlers' own code changes only when the script runs again. `options.reload = false` switches that off, `options.onReload(window, widgets, modals)` runs after each rebuild.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like." .. " `modals` lists modal forms: window tables like the form itself with a `name`, each made as a modal window (`modal = true`) that waits hidden; `modals.<name>.show()` opens it. A button's `opens = \"<name>\"` opens that modal when clicked and `closes = true` hides the window it is in; both run before the button's `onClick`." .. " Any widget can take `enabledWhen`, which enables it only while another widget of the form says so, without code: `\"god\"` (that checkbox or switch is on, or that combo or radio has a choice), `\"not god\"`, or `\"mode = Multiplier, Double\"` (one of these items of that combo or radio is chosen). It follows the user's changes; a script's `set` does not update it." .. " A checkbox, button, number, slider, input, text, combo or radio can take `record`: a memory record's description or id (see `manifold.record`), which binds the widget to it without code. A checkbox shows and switches whether the record is on, a button switches it, a number or slider shows and writes its value, an input writes when Enter is pressed, a text shows the value as the address list does, a combo or radio writes the chosen item's text (a drop-down entry of the record). The window refreshes them ten times a second while it is open, the script's own handlers still run after the write, and a widget whose record is not in the table is disabled until it is." .. " The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty." .. " A script file that holds its form as `local form = { form = 1, ... }` (as the Form Editor writes it) gets a live reload like `load`: saving the script rebuilds the window's widgets from the table in the file, with the same handlers; the handlers' own code changes only when the script runs again. `options.reload = false` switches that off, `options.onReload(window, widgets, modals)` runs after each rebuild.",
 }, function(spec, handlers, options)
   options = options or {}
   local info = callerFrame()
@@ -8680,8 +8841,7 @@ define(dialog, "input", {
   doc = "Asks for a line of text, starting from `value`. `onClose(text)` gets the text, or nil.",
 }, function(text, options)
   options = options or {}
-)MLUA"),
-            std::string_view(R"MLUA(  return openDialog("input", { text = text, title = options.title, value = options.value }, options.onClose)
+  return openDialog("input", { text = text, title = options.title, value = options.value }, options.onClose)
 end)
 
 define(dialog, "choose", {
@@ -8767,7 +8927,8 @@ local function noticeObject(entry)
           state.progress = options.progress
         end
         if options.sticky ~= nil then
-          state.sticky = options.sticky
+)MLUA"),
+            std::string_view(R"MLUA(          state.sticky = options.sticky
         end
         local sticky = state.sticky or (state.progress >= 0 and state.progress < 1)
         if not native.uiNoticeUpdate(entry.id, state.text, state.level, state.progress, sticky) then
@@ -8955,8 +9116,7 @@ native.docDefine(nil, "manifold.ui.image.Image", { kind = "class", title = "Imag
 native.docDefine(nil, "manifold.ui.image.Image.remove", { returns = "boolean", doc = "Frees the picture; widgets and drawings that show it go blank." })
 native.docDefine(nil, "manifold.ui.image.Image.id", { kind = "field", type = "integer", doc = "The image's number." })
 native.docDefine(nil, "manifold.ui.image.Image.width", { kind = "field", type = "integer", doc = "Width in pixels." })
-)MLUA"),
-            std::string_view(R"MLUA(native.docDefine(nil, "manifold.ui.image.Image.height", { kind = "field", type = "integer", doc = "Height in pixels." })
+native.docDefine(nil, "manifold.ui.image.Image.height", { kind = "field", type = "integer", doc = "Height in pixels." })
 
 define(ui, "getMode", {
   returns = "table",
@@ -9073,7 +9233,8 @@ local function moduleRequire(name, ...)
   local key = info and native.moduleOfSource(info.source) or nil
   if key then
     local cache = modulePrivate[key]
-    local cached = cache and cache[name]
+)MLUA"),
+            std::string_view(R"MLUA(    local cached = cache and cache[name]
     if cached == MODULE_LOADING then
       error("loop or previous error loading module '" .. name .. "'", 2)
     end
@@ -9251,6 +9412,14 @@ debug.getregistry()["Manifold.UiTick"] = function(now)
       end
     end
   end
+  -- widgets bound to memory records (record = ... in a form), after the
+  -- events: what the user just typed is written before the record is read
+  for _, id in ipairs(native.uiBindsDue(now)) do
+    local entry = uiEntries[id]
+    if entry and entry.onBind and not callHandler(entry.onBind) then
+      entry.onBind = nil
+    end
+  end
 end
 
 rawset(_G, "manifold", manifold)
@@ -9267,8 +9436,7 @@ local RULES = [[
 ## Schema
 
 1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`. An area may group its functions into sub-areas one level down (`manifold.ui.window`, `manifold.ui.dialog`).
-)MLUA"),
-            std::string_view(R"MLUA(2. **Names.** Areas are lower-case nouns. Functions are lowerCamelCase: a lookup without side effects is named after what it returns (`process.module`, `log.channel`), everything else starts with a verb (`open`, `read`, `create`). Predicates start with `is` or `has` and return a boolean. Settings come in `get…`/`set…` pairs. The five log functions are named after their level. Constants are lowerCamelCase fields. There are no aliases and no capitalised duplicates.
+2. **Names.** Areas are lower-case nouns. Functions are lowerCamelCase: a lookup without side effects is named after what it returns (`process.module`, `log.channel`), everything else starts with a verb (`open`, `read`, `create`). Predicates start with `is` or `has` and return a boolean. Settings come in `get…`/`set…` pairs. The five log functions are named after their level. Constants are lowerCamelCase fields. There are no aliases and no capitalised duplicates.
 3. **Calls use a dot.** `manifold.log.info("ready")`, never `manifold.log:info("ready")`. No function takes `self`, and the objects the API returns (channels) work the same way. A colon call raises an error that says so.
 4. **Arguments.** Required arguments come first, optional ones after them, and settings go into one `options` table at the end. A `?` after a name marks it optional. A missing, extra or wrongly typed argument and an unknown option key raise `ME-7007`, naming the function and the argument. Addresses are integers or address expressions such as `"game.exe+10"`.
 5. **Results.** A function that can fail while the script runs (no process, unreadable memory, unknown symbol) returns its value on success, or `true` when it has none, and `nil, error` on failure. It does not raise for those. Predicates never fail.

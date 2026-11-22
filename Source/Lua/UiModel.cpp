@@ -292,8 +292,11 @@ namespace Manifold::Lua
         double next = std::numeric_limits<double>::infinity();
         for (const int id : m_windows)
         {
-            if (const UiNode* node = Find(id); node && node->Updates && node->Open)
+            const UiNode* node = Find(id);
+            if (node && node->Updates && node->Open)
                 next = std::min(next, node->NextUpdate);
+            if (node && node->Binds && node->Open)
+                next = std::min(next, node->NextBind);
         }
         return next;
     }

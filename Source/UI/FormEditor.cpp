@@ -2667,6 +2667,8 @@ namespace Manifold::UI
                 text += "  " + meta->second.Name;
             if (meta != m_form.Meta.end() && !meta->second.EnabledWhen.empty())
                 text += "  \xC2\xB7  " ICON_FA_TOGGLE_ON " " + meta->second.EnabledWhen;
+            if (meta != m_form.Meta.end() && !meta->second.Record.empty())
+                text += "  \xC2\xB7  " ICON_FA_LINK " " + (meta->second.RecordById ? "#" + meta->second.Record : meta->second.Record);
             return text;
         };
         {
@@ -3318,6 +3320,107 @@ namespace Manifold::UI
                     Remember();
                     m_form.Meta[node->Id].Closes = closes;
                     Changed();
+                }
+                ImGui::EndTable();
+            }
+        }
+        if (Lua::FormCanBind(node->Kind))
+        {
+            // ∑ record = ...: the widget shows and changes a memory record of the table
+            ImGui::Spacing();
+            const auto found = m_form.Meta.find(node->Id);
+            const std::string current = found == m_form.Meta.end() ? std::string() : found->second.Record;
+            const bool byId = found != m_form.Meta.end() && found->second.RecordById;
+            const std::string header = std::string(ICON_FA_LINK "  Memory Record") + (current.empty() ? "" : "  \xC2\xB7  " + (byId ? "#" + current : current)) + "###memoryrecord";
+            const auto store = [&](const std::string& record, bool id) {
+                if (record == current && id == byId)
+                    return;
+                Remember();
+                m_form.Meta[node->Id].Record = record;
+                m_form.Meta[node->Id].RecordById = id && !record.empty();
+                Changed();
+            };
+            if (GroupHeader(header.c_str(), !current.empty()) && beginTable("##recordtable"))
+            {
+                const bool wantsValue = node->Kind != UiKind::Checkbox && node->Kind != UiKind::Button;
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted("Record");
+                ItemTooltip(node->Kind == UiKind::Checkbox ? "record: the box shows whether this memory record is on and switches it, like its box in the address list. No code needed."
+                            : node->Kind == UiKind::Button   ? "record: a click switches this memory record on or off. No code needed."
+                            : node->Kind == UiKind::Text     ? "record: the text shows this memory record's value, as the address list shows it."
+                            : node->Kind == UiKind::Input    ? "record: the field shows this memory record's value and writes it when Enter is pressed."
+                            : node->Kind == UiKind::Combo || node->Kind == UiKind::Radio ? "record: the chosen item's text is written to this memory record (a drop-down entry of it), and the item that matches its value is chosen."
+                                                             : "record: the widget shows this memory record's value and writes it when it is changed.");
+                ImGui::TableSetColumnIndex(1);
+                const float button = ImGui::GetFrameHeight();
+                ImGui::SetNextItemWidth(-(button + ImGui::GetStyle().ItemInnerSpacing.x));
+                std::string text = byId ? "#" + current : current;
+                if (InputTextWithHint("##record", "description, or #id", text))
+                {
+                    const bool id = text.size() > 1 && text[0] == '#' && text.find_first_not_of("0123456789", 1) == std::string::npos;
+                    store(id ? text.substr(1) : text, id);
+                }
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+                if (IconButton(ICON_FA_LIST "##pickrecord", "Pick a record of the open table", false, button))
+                {
+                    m_recordFilter.clear();
+                    ImGui::OpenPopup("##records");
+                }
+                if (ImGui::BeginPopup("##records"))
+                {
+                    ImGui::SetNextItemWidth(Px(280.0f));
+                    if (ImGui::IsWindowAppearing())
+                        ImGui::SetKeyboardFocusHere();
+                    InputTextWithHint("##recordfilter", ICON_FA_SEARCH " Filter", m_recordFilter);
+                    ImGui::BeginChild("##recordlist", ImVec2(Px(280.0f), Px(260.0f)));
+                    int shown = 0;
+                    for (Table::MemoryRecord* record : m_engine.Table().Flatten())
+                    {
+                        if (wantsValue && record->Kind != Table::RecordKind::Value)
+                            continue;
+                        if (!m_recordFilter.empty() && !ContainsNoCase(record->Description, m_recordFilter))
+                            continue;
+                        int depth = 0;
+                        for (const Table::MemoryRecord* up = record->Parent; up; up = up->Parent)
+                            ++depth;
+                        const char* icon = record->Kind == Table::RecordKind::Script ? ICON_FA_CODE : record->Kind == Table::RecordKind::Group ? ICON_FA_FOLDER : ICON_FA_HASHTAG;
+                        ImGui::PushID(record->Id);
+                        ImGui::Indent(Px(12.0f) * static_cast<float>(depth));
+                        const std::string label = std::string(icon) + "  " + (record->Description.empty() ? "(no description)" : record->Description);
+                        if (ImGui::Selectable(label.c_str(), record->Description == current && !byId))
+                        {
+                            // descriptions read well and survive copying the table; an empty one needs the id
+                            if (record->Description.empty())
+                                store(std::to_string(record->Id), true);
+                            else
+                                store(record->Description, false);
+                            ImGui::CloseCurrentPopup();
+                        }
+                        ImGui::Unindent(Px(12.0f) * static_cast<float>(depth));
+                        ImGui::PopID();
+                        ++shown;
+                    }
+                    if (shown == 0)
+                        Muted(m_engine.Table().Count() == 0 ? "No table is open, or it has no records." : wantsValue ? "No value record matches." : "No record matches.");
+                    ImGui::EndChild();
+                    ImGui::EndPopup();
+                }
+                if (!current.empty())
+                {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(1);
+                    Table::MemoryRecord* record = byId ? m_engine.Table().FindById(std::atoi(current.c_str())) : m_engine.Table().FindByDescription(current);
+                    if (record)
+                        Muted(std::string(record->Kind == Table::RecordKind::Script ? "A script" : record->Kind == Table::RecordKind::Group ? "A group" : "A value") + " of the open table" +
+                              (wantsValue && record->Kind != Table::RecordKind::Value ? ": it has no value to show" : ""));
+                    else
+                        Muted(m_engine.Table().Count() == 0 ? "No table is open; the record is looked up when the form runs." : "Not in the open table; the widget stays disabled until it is.");
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton(ICON_FA_TIMES "##unbind"))
+                        store({}, false);
+                    ItemTooltip("Unbind the widget");
                 }
                 ImGui::EndTable();
             }

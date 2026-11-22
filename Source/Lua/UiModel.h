@@ -183,8 +183,13 @@ namespace Manifold::Lua
         double Interval = 0.0;
         double NextUpdate = 0.0;
         bool Updates = false;
+        bool Binds = false;        // window: widgets bound to memory records, refreshed every kBindInterval
+        double NextBind = 0.0;
         std::uint32_t Handlers = 0;
     };
+
+    // seconds between two refreshes of a window's record-bound widgets
+    inline constexpr double kBindInterval = 0.1;
 
     namespace UiHandler
     {

@@ -69,7 +69,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 19 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 20 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -2300,6 +2300,112 @@ return M
             CHECK(!FindWindow(model, "Rules Probe"));
         }
 
+        void RecordBinding(Engine& engine)
+        {
+            // record = ... in a form: widgets follow and change memory records without code.
+            const std::int32_t keptValue = g_probeValue;
+            g_probeValue = 77;
+            Lua::UiModel& model = engine.Lua().Ui();
+            LuaCheck(engine, "record binding", R"LUA(
+                if not manifold.process.isOpen() then
+                  local info, problem = manifold.process.open(probePid)
+                  if not info then return "open " .. tostring(problem) end
+                end
+                local R = manifold.record
+                bindSwitch = R.create({ kind = "script", description = "Bind Switch", script = "[ENABLE]\n[DISABLE]\n" })
+                bindNumber = R.create({ description = "Bind Number", address = ("%X"):format(probeValue) })
+                bindClicks = 0
+                bindWindow, bindWidgets = manifold.ui.form.build({ form = 1, title = "Bind Probe", children = {
+                    { kind = "checkbox", name = "god", label = "God", style = "switch", record = "Bind Switch" },
+                    { kind = "button", name = "flip", text = "Flip", record = bindSwitch.id, onClick = "flipped" },
+                    { kind = "number", name = "amount", record = "Bind Number", integer = true },
+                    { kind = "text", name = "shown", record = "Bind Number" },
+                    { kind = "slider", name = "lost", record = "No Such Record" },
+                    { kind = "slider", name = "guarded", record = "Bind Number", enabledWhen = "god" },
+                  } }, { flipped = function() bindClicks = bindClicks + 1 end })
+                local w = bindWidgets
+                if w.god.get() ~= false then return "checkbox starts as the record" end
+                if w.amount.get() ~= 77 then return "number shows the value: " .. tostring(w.amount.get()) end
+                if w.shown.get() ~= "77" then return "text shows the value: " .. tostring(w.shown.get()) end
+                bindIds = { god = w.god.id, flip = w.flip.id, amount = w.amount.id, shown = w.shown.id, lost = w.lost.id, guarded = w.guarded.id }
+
+                local function raises(fn, needle)
+                  local ok, failure = pcall(fn)
+                  if ok then return "no error for " .. needle end
+                  local message = type(failure) == "table" and failure.message or tostring(failure)
+                  if not message:find(needle, 1, true) then return "message lacks '" .. needle .. "': " .. message end
+                end
+                return raises(function() manifold.ui.form.build({ form = 1, title = "Bad", children = { { kind = "section", record = "x" } } }) end, "a section cannot show a memory record")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", children = { { kind = "number", record = {} } } }) end, "record must be a memory record's description or id")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", children = { { kind = "combo", multi = true, items = { "a" }, record = "x" } } }) end, "multi = true cannot show a memory record")
+                  or "ok")LUA");
+            CHECK(!FindWindow(model, "Bad"));
+            std::map<std::string, int> ids;
+            {
+                std::string result;
+                engine.Lua().RunWithResult("return ('%d %d %d %d %d %d'):format(bindIds.god, bindIds.flip, bindIds.amount, bindIds.shown, bindIds.lost, bindIds.guarded)", "bind ids", result);
+                std::istringstream read(result);
+                for (const char* name : { "god", "flip", "amount", "shown", "lost", "guarded" })
+                    read >> ids[name];
+            }
+            const auto node = [&](const char* name) { return model.Find(ids[name]); };
+            CHECK(node("lost") && !node("lost")->Enabled);
+            CHECK(node("guarded") && !node("guarded")->Enabled); // its rule: god is off
+
+            // the user turns the switch on and types a number: the records follow
+            if (Lua::UiNode* god = model.Find(ids["god"]))
+                god->Bool = true;
+            model.Post({ ids["god"], "change", { true } });
+            if (Lua::UiNode* amount = model.Find(ids["amount"]))
+                amount->Number = 555;
+            model.Post({ ids["amount"], "change", { 555.0 } });
+            engine.Lua().Tick(10000.0);
+            CHECK_EQ(g_probeValue, 555);
+            CHECK(node("guarded") && node("guarded")->Enabled);
+            LuaCheck(engine, "record binding writes", R"LUA(
+                if not bindSwitch.isActive() then return "the switch did not activate the record" end
+                -- the record changes elsewhere: a hotkey switches it off
+                bindSwitch.setActive(false)
+                return "ok")LUA");
+            g_probeValue = 42; // the game changes the value
+            engine.Lua().Tick(10000.5);
+            CHECK(node("god") && !node("god")->Bool);
+            CHECK(node("amount") && node("amount")->Number == 42.0);
+            CHECK(node("shown") && node("shown")->Text == "42");
+
+            // the button switches the record, then the script's own handler runs
+            model.Post({ ids["flip"], "click", {} });
+            engine.Lua().Tick(10001.0);
+            engine.Lua().Tick(10001.5);
+            CHECK(node("god") && node("god")->Bool);
+            LuaCheck(engine, "record binding button", R"LUA(
+                if not bindSwitch.isActive() then return "the button did not switch the record" end
+                if bindClicks ~= 1 then return "the script's onClick ran " .. bindClicks .. " times" end
+                bindSwitch.setActive(false)
+                bindWindow.remove()
+                bindSwitch.remove()
+                bindNumber.remove()
+                return "ok")LUA");
+            CHECK(!FindWindow(model, "Bind Probe"));
+            g_probeValue = keptValue;
+
+            // the document: record saved by description or id, read back
+            Lua::FormDocument form = Lua::NewForm("Bound");
+            const int box = Lua::FormAdd(form, Lua::UiKind::Checkbox, form.Window);
+            form.Meta[box].Record = "God Mode";
+            const int field = Lua::FormAdd(form, Lua::UiKind::Number, form.Window);
+            form.Meta[field].Record = "12";
+            form.Meta[field].RecordById = true;
+            const std::string saved = Lua::FormSave(form);
+            CHECK(saved.find("record = \"God Mode\"") != std::string::npos && saved.find("record = 12") != std::string::npos);
+            Lua::FormDocument loaded;
+            std::string error;
+            std::vector<std::string> notes;
+            CHECK_MSG(Lua::FormLoad(saved, loaded, error, &notes) && notes.empty(), error);
+            CHECK(Lua::FormSave(loaded) == saved);
+            CHECK(Lua::FormCanBind(Lua::UiKind::Slider) && !Lua::FormCanBind(Lua::UiKind::Section));
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -2434,6 +2540,7 @@ return M
         WithoutProcess(engine);
         OwnProcess(engine);
         RecordApi(engine);
+        RecordBinding(engine);
         Version2(engine);
         Assist(engine);
         DocApi(engine);

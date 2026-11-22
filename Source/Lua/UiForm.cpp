@@ -976,6 +976,8 @@ namespace Manifold::Lua
                     parts.push_back("closes = true");
                 if (!meta->EnabledWhen.empty())
                     parts.push_back("enabledWhen = " + Quote(meta->EnabledWhen));
+                if (!meta->Record.empty() && FormCanBind(node.Kind))
+                    parts.push_back("record = " + (meta->RecordById ? meta->Record : Quote(meta->Record)));
             }
             std::vector<const UiNode*> children;
             for (const int child : node.Children)
@@ -1069,6 +1071,20 @@ namespace Manifold::Lua
                         lua_pop(State, 1);
                         continue;
                     }
+                    if (key == "record" && FormCanBind(node.Kind))
+                    {
+                        if (lua_isinteger(State, -1))
+                        {
+                            meta.Record = std::to_string(lua_tointeger(State, -1));
+                            meta.RecordById = true;
+                        }
+                        else if (lua_type(State, -1) == LUA_TSTRING && lua_tostring(State, -1)[0])
+                            meta.Record = lua_tostring(State, -1);
+                        else
+                            Warn(Where(node.Kind, meta.Name) + ": record must be a memory record's description or id and was left out");
+                        lua_pop(State, 1);
+                        continue;
+                    }
                     if (node.Kind != UiKind::Window && key == "enabledWhen")
                     {
                         if (lua_type(State, -1) == LUA_TSTRING && FormParseWhen(lua_tostring(State, -1)))
@@ -1147,7 +1163,7 @@ namespace Manifold::Lua
                 }
                 if (!ReadMeta(table, node, meta))
                     return false;
-                if (!meta.Name.empty() || !meta.Handlers.empty() || !meta.Opens.empty() || meta.Closes || !meta.EnabledWhen.empty())
+                if (!meta.Name.empty() || !meta.Handlers.empty() || !meta.Opens.empty() || meta.Closes || !meta.EnabledWhen.empty() || !meta.Record.empty())
                     Form.Meta[id] = std::move(meta);
                 return ReadChildren(table, id, depth);
             }
@@ -2863,6 +2879,24 @@ namespace Manifold::Lua
             visit(window);
         }
         return problems;
+    }
+
+    bool FormCanBind(UiKind kind)
+    {
+        switch (kind)
+        {
+        case UiKind::Checkbox:
+        case UiKind::Button:
+        case UiKind::Number:
+        case UiKind::Slider:
+        case UiKind::Input:
+        case UiKind::Text:
+        case UiKind::Combo:
+        case UiKind::Radio:
+            return true;
+        default:
+            return false;
+        }
     }
 
     std::optional<FormRule> FormParseWhen(std::string_view text)

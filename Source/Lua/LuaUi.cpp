@@ -449,6 +449,12 @@ namespace Manifold::Lua
                 node.Updates = updates;
                 node.NextUpdate = 0.0;
             }
+            bool binds = false;
+            if (node.Kind == UiKind::Window && ReadBool(state, props, "binds", binds))
+            {
+                node.Binds = binds;
+                node.NextBind = 0.0;
+            }
             if (lua_getfield(state, props, "items") == LUA_TTABLE)
             {
                 if (node.Kind == UiKind::Tree)
@@ -663,6 +669,25 @@ namespace Manifold::Lua
                 if (!node || !node->Updates || !node->Open || now < node->NextUpdate)
                     continue;
                 node->NextUpdate = now + std::max(node->Interval, 0.016);
+                lua_pushinteger(state, id);
+                lua_rawseti(state, -2, index++);
+            }
+            return 1;
+        }
+
+        // windows whose record-bound widgets are due for a refresh
+        int UiBindsDue(lua_State* state)
+        {
+            const double now = luaL_checknumber(state, 1);
+            UiModel& model = Model(state);
+            lua_newtable(state);
+            lua_Integer index = 1;
+            for (const int id : model.Windows())
+            {
+                UiNode* node = model.Find(id);
+                if (!node || !node->Binds || !node->Open || now < node->NextBind)
+                    continue;
+                node->NextBind = now + kBindInterval;
                 lua_pushinteger(state, id);
                 lua_rawseti(state, -2, index++);
             }
@@ -995,6 +1020,7 @@ namespace Manifold::Lua
             { "uiView", &UiView },
             { "uiSetView", &UiSetView },
             { "uiDue", &UiDue },
+            { "uiBindsDue", &UiBindsDue },
             { "uiTakeEvents", &UiTakeEvents },
             { "uiPost", &UiPost },
             { "uiForgetOwner", &UiForgetOwner },

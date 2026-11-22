@@ -239,5 +239,6 @@ namespace Manifold::UI
         float m_rightWidth = 0.0f;
         float m_codeHeight = 0.0f;
         std::string m_iconFilter;
+        std::string m_recordFilter;
     };
 }
