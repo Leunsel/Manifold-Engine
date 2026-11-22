@@ -248,6 +248,8 @@ namespace Manifold::UI
         std::set<int> m_collapsed;
         float m_outlineX = 0.0f;
         float m_outlineWidth = 0.0f;
+        float m_outlineExtent = 0.0f;     // the widest row last frame (every row takes it, so they end together)
+        float m_outlineExtentNext = 0.0f;
         int m_outlineRows = 0;
         ImVec2 m_menuSpacing = ImVec2(8.0f, 4.0f);
         std::map<std::string, std::pair<ImVec2, ImVec2>> m_chipRects; // this frame's function chips

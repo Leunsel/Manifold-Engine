@@ -1722,6 +1722,8 @@ namespace Manifold::UI
         m_outlineX = ImGui::GetCursorScreenPos().x;
         m_outlineWidth = ImGui::GetContentRegionAvail().x;
         m_outlineRows = 0;
+        m_outlineExtent = m_outlineExtentNext;
+        m_outlineExtentNext = 0.0f;
         std::vector<int> path;
         OutlineNode(m_form.Window, 0, path);
         for (const int modal : m_form.Modals)
@@ -1803,8 +1805,13 @@ namespace Manifold::UI
         const float slot = rowHeight * 0.85f;
         const bool hasHandlers = meta != m_form.Meta.end() && !meta->second.Handlers.empty();
         const float markers = (node->Kind != UiKind::Window ? rowHeight : 0.0f) + (m_problemNodes.count(id) ? slot : 0.0f) + (hasHandlers ? slot : 0.0f);
-        const float visibleRight = ImGui::GetCurrentWindow()->InnerClipRect.Max.x;
-        const float right = std::max(visibleRight - pad, textX + firstWidth + Px(10.0f) + markers);
+        // ∑ the pane's right edge where it is with no sideways scrolling: taken
+        // from the screen, a scrolled outline made every row as much wider as
+        // it was scrolled, so the scrollbar never reached an end
+        const float visibleRight = ImGui::GetCurrentWindow()->InnerClipRect.Max.x - ImGui::GetScrollX();
+        const float needed = textX + firstWidth + Px(10.0f) + markers;
+        m_outlineExtentNext = std::max(m_outlineExtentNext, needed - x0);
+        const float right = std::max({ visibleRight - pad, needed, x0 + m_outlineExtent });
         const float rowWidth = std::max(m_outlineWidth, right + pad - x0);
 
         ImGui::SetCursorScreenPos(ImVec2(x0, y0));
