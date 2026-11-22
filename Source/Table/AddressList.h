@@ -77,6 +77,9 @@ namespace Manifold::Table
     struct MemoryRecord
     {
         int Id = 0;
+        // ∑ The ID the table file gave the record, -1 when it didn't come from a file. Add renumbers a taken (or root 0) ID, and
+        //   Lua that looks a record up by the file's ID then finds another one; the Address List Debug window reports that.
+        int FileId = -1;
         std::string Description;
         RecordKind Kind = RecordKind::Value;
         Scan::ValueType Type = Scan::ValueType::FourBytes;

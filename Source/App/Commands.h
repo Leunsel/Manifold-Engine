@@ -51,6 +51,7 @@ namespace Manifold
         OpenStaticPointers,
         OpenFormEditor,
         OpenOpcodeConverter,
+        OpenRecordDebug,
 
         NewTable,
         OpenLastProcess,

@@ -201,6 +201,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Table\CheatTable.cpp" />
     <ClCompile Include="..\Source\Table\CommentList.cpp" />
     <ClCompile Include="..\Source\Table\ManagedStructures.cpp" />
+    <ClCompile Include="..\Source\Table\RecordCheck.cpp" />
     <ClCompile Include="..\Source\Table\RttiStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Table\TableFiles.cpp" />
@@ -258,6 +259,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\MonoTests.cpp" />
     <ClCompile Include="..\Tests\OpcodeTests.cpp" />
     <ClCompile Include="..\Tests\PointerScanTests.cpp" />
+    <ClCompile Include="..\Tests\RecordDebugTests.cpp" />
     <ClCompile Include="..\Tests\RelayTests.cpp" />
     <ClCompile Include="..\Tests\RttiTests.cpp" />
     <ClCompile Include="..\Tests\SpeedhackTests.cpp" />

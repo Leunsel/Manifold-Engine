@@ -157,7 +157,7 @@ namespace Manifold
         void ApplyHotkey(Table::MemoryRecord& record, const Table::Hotkey& hotkey) { m_tables.ApplyHotkey(record, hotkey); }
         Status WriteRecord(Table::MemoryRecord& record, std::string_view text, bool recursive = true) { return m_tables.WriteRecord(record, text, recursive); }
         Status AddToRecord(Table::MemoryRecord& record, double delta) { return m_tables.AddToRecord(record, delta); }
-        Status SetActive(Table::MemoryRecord& record, bool active) { return m_activation.SetActive(record, active); }
+        Status SetActive(Table::MemoryRecord& record, bool active, bool fromScript = false) { return m_activation.SetActive(record, active, fromScript); }
         void RequestActive(Table::MemoryRecord& record, bool active, bool fromScript = false);
         bool ActivationPending(int recordId) const { return m_activation.ActivationPending(recordId); }
         bool InsideActivation() const { return m_activation.InsideActivation(); }

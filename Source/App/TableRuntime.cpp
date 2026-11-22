@@ -69,6 +69,61 @@ namespace Manifold
         record.AddressError.clear();
     }
 
+    std::vector<AddressStep> TableRuntime::ExplainAddress(Table::MemoryRecord& record)
+    {
+        std::vector<AddressStep> steps;
+        const auto fail = [&](AddressStep::Kind kind, std::string text, std::string error)
+            {
+                steps.push_back({ kind, std::move(text), 0, false, std::move(error) });
+                return steps;
+            };
+        const bool addressHeader = record.Kind == Table::RecordKind::Group && record.AddressGroupHeader;
+        if (record.Kind != Table::RecordKind::Value && !addressHeader)
+            return steps;
+        if (!m_engine.Session().Process())
+            return fail(AddressStep::Kind::Base, record.Address, ErrorMessage(ErrorCode::NoProcess));
+        Status error;
+        std::uint64_t address = 0;
+        const std::string_view written = TrimView(record.Address);
+        if (!written.empty() && (written.front() == '+' || written.front() == '-') && record.Parent)
+        {
+            Table::MemoryRecord& parent = *record.Parent;
+            ResolveRecord(parent);
+            const std::string name = (parent.Description.empty() ? std::string("Parent") : "\"" + parent.Description + "\"") + " (ID " + std::to_string(parent.Id) + ")";
+            if (!parent.AddressOk)
+                return fail(AddressStep::Kind::Parent, name, parent.AddressError.empty() ? ErrorMessage(ErrorCode::ExprUnknownSymbol, parent.Description) : parent.AddressError);
+            steps.push_back({ AddressStep::Kind::Parent, name, parent.ResolvedAddress });
+            const auto delta = m_engine.Evaluate(written.substr(1), &error);
+            if (!delta)
+                return fail(AddressStep::Kind::Relative, std::string(written), error.Text);
+            address = written.front() == '+' ? parent.ResolvedAddress + *delta : parent.ResolvedAddress - *delta;
+            steps.push_back({ AddressStep::Kind::Relative, std::string(written), address });
+        }
+        else
+        {
+            const auto base = m_engine.Evaluate(record.Address, &error);
+            if (!base)
+                return fail(AddressStep::Kind::Base, record.Address, error.Text);
+            address = *base;
+            steps.push_back({ AddressStep::Kind::Base, record.Address, address });
+        }
+        for (const std::string& offsetText : record.Offsets)
+        {
+            const auto pointer = m_engine.Session().Process()->ReadPointer(address);
+            if (!pointer)
+                return fail(AddressStep::Kind::Read, "[" + Hex(address) + "]", ErrorMessage(ErrorCode::ExprPointerUnreadable, Hex(address)));
+            steps.push_back({ AddressStep::Kind::Read, "[" + Hex(address) + "]", *pointer });
+            Status offsetError;
+            const std::string shown = offsetText.empty() ? "0" : offsetText;
+            const auto offset = m_engine.Evaluate(shown, &offsetError);
+            if (!offset)
+                return fail(AddressStep::Kind::Offset, shown, offsetError.Text);
+            address = *pointer + *offset;
+            steps.push_back({ AddressStep::Kind::Offset, "+ " + shown, address });
+        }
+        return steps;
+    }
+
     std::string TableRuntime::AddressHex(std::uint64_t address) const
     {
         const int mode = m_engine.Options().AddressDigits;

@@ -38,6 +38,7 @@
 #include "UI/WatchWindow.h"
 #include "UI/WriteHistoryWindow.h"
 #include "UI/CommentListWindow.h"
+#include "UI/RecordDebugWindow.h"
 #include "UI/FormEditor.h"
 #include "UI/OpcodeWindow.h"
 #include "UI/ModulesWindow.h"
@@ -171,6 +172,7 @@ namespace Manifold::UI
         drawOne("NOP Sled", m_nopSled);
         drawOne("Write history", m_writeHistory);
         drawOne("Comment list", m_commentList);
+        drawOne("Address list debug", m_recordDebug);
         drawOne("Form editor", m_formEditor);
         drawOne("Modules", m_modules);
         drawOne("Flow graph", m_flowGraph);
@@ -232,6 +234,7 @@ namespace Manifold::UI
         case Command::OpenStaticPointers:
         case Command::OpenFormEditor:
         case Command::OpenOpcodeConverter:
+        case Command::OpenRecordDebug:
         case Command::OpenLog:
             return !m_engine.Options().ReleaseMode;
         default:
@@ -261,6 +264,7 @@ namespace Manifold::UI
         case Command::OpenStaticPointers: OpenStaticPointers(); break;
         case Command::OpenFormEditor: OpenFormEditor(); break;
         case Command::OpenOpcodeConverter: OpenOpcodeConverter(); break;
+        case Command::OpenRecordDebug: OpenRecordDebug(); break;
         case Command::OpenLog: OpenLog(); break;
         case Command::OpenProfiler: OpenProfiler(); break;
         default: break;
@@ -726,6 +730,26 @@ namespace Manifold::UI
         if (!m_commentList)
             m_commentList = std::make_unique<CommentListWindow>(*this);
         m_commentList->Show();
+    }
+
+    void Workspace::OpenRecordDebug(int recordId)
+    {
+        if (!m_recordDebug)
+            m_recordDebug = std::make_unique<RecordDebugWindow>(*this);
+        m_recordDebug->Focus(recordId);
+    }
+
+    bool Workspace::OpenRecordDebugPage(std::string_view page)
+    {
+        if (!m_recordDebug)
+            m_recordDebug = std::make_unique<RecordDebugWindow>(*this);
+        return m_recordDebug->ShowPage(page);
+    }
+
+    void Workspace::RevealRecord(int recordId)
+    {
+        if (m_main)
+            m_main->RevealRecord(recordId);
     }
 
     void Workspace::OpenOpcodeConverter(std::uint64_t address, std::span<const std::uint8_t> bytes)

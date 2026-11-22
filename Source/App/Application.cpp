@@ -255,6 +255,15 @@ namespace Manifold
                 m_workspace->OpenWriteHistory();
             else if (window == "comments")
                 m_workspace->OpenCommentList();
+            else if (window == "recorddebug")
+                m_workspace->OpenRecordDebug();
+            else if (window.rfind("recorddebug:", 0) == 0)
+            {
+                if (const auto id = ParseDecimal(window.substr(12)))
+                    m_workspace->OpenRecordDebug(static_cast<int>(*id));
+                else
+                    m_workspace->OpenRecordDebugPage(window.substr(12));
+            }
             else if (window == "flowgraph")
                 m_workspace->OpenFlowGraph();
             else if (window == "opcodes")

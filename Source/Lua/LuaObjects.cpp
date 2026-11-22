@@ -455,7 +455,7 @@ namespace Manifold::Lua
                     {
                         Table::MemoryRecord& target = CheckRecord(s, 1);
                         if (target.Active)
-                            Owner(s).SetActive(target, false);
+                            Owner(s).SetActive(target, false, true);
                         const int id = target.Id;
                         Owner(s).Table().Remove(target);
                         EngineOf(s).RecordDestroyed(id);
@@ -538,7 +538,7 @@ namespace Manifold::Lua
                     } },
                 { "setactive", [](lua_State* s) -> int
                     {
-                        const Status status = Owner(s).SetActive(CheckRecord(s, 1), lua_toboolean(s, 2) != 0);
+                        const Status status = Owner(s).SetActive(CheckRecord(s, 1), lua_toboolean(s, 2) != 0, true);
                         lua_pushboolean(s, status.Ok());
                         return 1;
                     } },
@@ -641,7 +641,7 @@ namespace Manifold::Lua
                     }
                     engine.DropQueued(record.Id);
                 }
-                const Status status = engine.SetActive(record, wanted);
+                const Status status = engine.SetActive(record, wanted, true);
                 if (!status)
                     EngineOf(state).PrintError(status.Text);
                 return 0;

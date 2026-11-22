@@ -71,7 +71,10 @@ namespace Manifold::Table
         {
             auto record = std::make_unique<MemoryRecord>();
             if (const auto id = ParseDecimal(node.ChildText("ID")); id && *id >= 0 && *id <= kMaxRecordId)
+            {
                 record->Id = static_cast<int>(*id);
+                record->FileId = record->Id;
+            }
             record->Description = StripQuotes(node.ChildText("Description"));
             const std::string type = Trim(node.ChildText("VariableType"));
             if (const Xml::Node* script = node.Child("AssemblerScript"); script || EqualsNoCase(type, kScriptType))

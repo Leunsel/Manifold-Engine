@@ -28,6 +28,10 @@ namespace Manifold
         bool Active = false;
         bool FromScript = false;
         Asm::AaMemory Memory;
+        Asm::AaMemory Before;
+        double StartedAt = 0.0;
+        double QueuedAt = 0.0;
+        int ViaParent = -1;
         std::shared_ptr<Target::Process> Process;
         std::future<Asm::AaResult> Result;
     };
@@ -38,24 +42,106 @@ namespace Manifold
 
     ActivationRunner::~ActivationRunner() = default;
 
-    Status ActivationRunner::ActivateTree(Table::MemoryRecord& record, bool active)
+    ActivationTraceEntry ActivationRunner::TraceStart(const Table::MemoryRecord& record, bool active, bool fromScript, int viaParent) const
+    {
+        ActivationTraceEntry entry;
+        entry.RecordId = record.Id;
+        entry.Description = record.Description;
+        entry.Kind = record.Kind;
+        entry.Active = active;
+        entry.Async = m_async;
+        entry.FromScript = fromScript;
+        entry.ViaParent = viaParent;
+        return entry;
+    }
+
+    void ActivationRunner::TraceScript(ActivationTraceEntry& entry, const Asm::AaResult& result, const Asm::AaMemory& before, const Asm::AaMemory& after) const
+    {
+        if (!result.Ok())
+        {
+            entry.Result = ActivationTraceEntry::Outcome::Failed;
+            entry.Error = result.Error.Text;
+            entry.ErrorLine = result.Line;
+        }
+        entry.WriteCount = result.Writes.size();
+        for (const Asm::AaWrite& write : result.Writes)
+        {
+            entry.BytesWritten += write.Bytes.size();
+            if (entry.Writes.size() < kTraceWrites)
+                entry.Writes.push_back(write);
+        }
+        const auto sameAllocation = [](const Asm::AaAllocation& a, const Asm::AaAllocation& b) { return a.Name == b.Name && a.Address == b.Address; };
+        for (const Asm::AaAllocation& allocation : after.Allocations)
+        {
+            if (std::none_of(before.Allocations.begin(), before.Allocations.end(), [&](const Asm::AaAllocation& old) { return sameAllocation(old, allocation); }))
+                entry.Allocated.push_back(allocation);
+        }
+        for (const Asm::AaAllocation& allocation : before.Allocations)
+        {
+            if (std::none_of(after.Allocations.begin(), after.Allocations.end(), [&](const Asm::AaAllocation& now) { return sameAllocation(now, allocation); }))
+                entry.Released.push_back(allocation);
+        }
+        for (const std::string& name : after.Registered)
+        {
+            if (std::find(before.Registered.begin(), before.Registered.end(), name) == before.Registered.end())
+                entry.Registered.push_back(name);
+        }
+        for (const std::string& name : before.Registered)
+        {
+            if (std::find(after.Registered.begin(), after.Registered.end(), name) == after.Registered.end())
+                entry.Unregistered.push_back(name);
+        }
+        entry.Notes = result.Notes;
+    }
+
+    void ActivationRunner::Traced(ActivationTraceEntry entry)
+    {
+        entry.Serial = ++m_traceSerial;
+        entry.At = m_engine.Now();
+        m_trace.push_back(std::move(entry));
+        while (m_trace.size() > kTraceLength)
+            m_trace.pop_front();
+    }
+
+    std::vector<QueuedActivation> ActivationRunner::Queue() const
+    {
+        std::vector<QueuedActivation> queue;
+        if (m_running)
+            queue.push_back({ m_running->RecordId, m_running->Active, m_running->FromScript, true, m_running->ViaParent, m_running->QueuedAt });
+        for (const ActivationJob& job : m_activations)
+            queue.push_back({ job.RecordId, job.Active, job.FromScript, false, job.ViaParent, job.QueuedAt });
+        return queue;
+    }
+
+    Status ActivationRunner::ActivateTree(Table::MemoryRecord& record, bool active, int viaParent, bool fromScript)
     {
         if (record.Active == active)
             return Status::Success();
+        ActivationTraceEntry trace = TraceStart(record, active, fromScript, viaParent);
+        trace.Async = false;
         if (!m_engine.Lua().BeforeActivation(record, active))
+        {
+            trace.Result = ActivationTraceEntry::Outcome::Vetoed;
+            Traced(std::move(trace));
             return Status::Success();
+        }
         if (!active && record.Options.DeactivateChildren)
         {
             for (auto it = record.Children.rbegin(); it != record.Children.rend(); ++it)
             {
-                const Status status = ActivateTree(**it, false);
+                const Status status = ActivateTree(**it, false, record.Id, fromScript);
                 if (!status)
                     m_engine.Notify(status);
             }
         }
+        const double started = m_engine.Now();
         if (record.Kind == Table::RecordKind::Script)
         {
+            const Asm::AaMemory before = record.ScriptMemory;
             const Asm::AaResult result = m_engine.AutoAssemble(record.Script, active ? Asm::AaSection::Enable : Asm::AaSection::Disable, record.ScriptMemory, false, OwnerOf(record), &record);
+            trace.Seconds = m_engine.Now() - started;
+            TraceScript(trace, result, before, record.ScriptMemory);
+            Traced(std::move(trace));
             if (!result.Ok())
             {
                 record.LastError = result.Error.Text;
@@ -71,6 +157,13 @@ namespace Manifold
         else
         {
             const Status plain = ActivatePlain(record, active);
+            trace.Seconds = m_engine.Now() - started;
+            if (!plain)
+            {
+                trace.Result = ActivationTraceEntry::Outcome::Failed;
+                trace.Error = plain.Text;
+            }
+            Traced(std::move(trace));
             if (!plain)
             {
                 m_engine.Lua().AfterActivation(record, active, false);
@@ -82,7 +175,7 @@ namespace Manifold
         {
             for (const auto& child : record.Children)
             {
-                const Status status = ActivateTree(*child, true);
+                const Status status = ActivateTree(*child, true, record.Id, fromScript);
                 if (!status)
                     m_engine.Notify(status);
             }
@@ -173,7 +266,7 @@ namespace Manifold
     {
         if (!m_async)
         {
-            const Status status = SetActive(record, active);
+            const Status status = SetActive(record, active, fromScript);
             if (!status)
             {
                 m_engine.Notify(status);
@@ -193,7 +286,12 @@ namespace Manifold
                 return;
             }
         }
-        m_activations.push_back({ record.Id, active, fromScript });
+        ActivationJob job;
+        job.RecordId = record.Id;
+        job.Active = active;
+        job.FromScript = fromScript;
+        job.QueuedAt = m_engine.Now();
+        m_activations.push_back(job);
         ++m_pending[record.Id];
         ++m_progressTotal;
     }
@@ -258,7 +356,13 @@ namespace Manifold
             std::reverse(ids.begin(), ids.end());
         for (int id : ids)
         {
-            m_activations.push_front({ id, active, fromScript });
+            ActivationJob job;
+            job.RecordId = id;
+            job.Active = active;
+            job.FromScript = fromScript;
+            job.ViaParent = record.Id;
+            job.QueuedAt = m_engine.Now();
+            m_activations.push_front(job);
             ++m_pending[id];
             ++m_progressTotal;
         }
@@ -353,15 +457,26 @@ namespace Manifold
                 m_activations.push_front(again);
                 for (const auto& child : record->Children)
                 {
-                    m_activations.push_front({ child->Id, false, fromScript });
+                    ActivationJob childJob;
+                    childJob.RecordId = child->Id;
+                    childJob.Active = false;
+                    childJob.FromScript = fromScript;
+                    childJob.ViaParent = recordId;
+                    childJob.QueuedAt = m_engine.Now();
+                    m_activations.push_front(childJob);
                     ++m_pending[child->Id];
                     ++m_progressTotal;
                 }
                 return;
             }
         }
+        ActivationTraceEntry trace = TraceStart(*record, active, fromScript, job.ViaParent);
+        const double started = m_engine.Now();
+        trace.Waited = job.QueuedAt > 0.0 ? started - job.QueuedAt : 0.0;
         if (!m_engine.Lua().BeforeActivation(*record, active))
         {
+            trace.Result = ActivationTraceEntry::Outcome::Vetoed;
+            Traced(std::move(trace));
             Unpend(recordId);
             return;
         }
@@ -369,6 +484,13 @@ namespace Manifold
         if (record->Kind != Table::RecordKind::Script)
         {
             const Status status = ActivatePlain(*record, active);
+            trace.Seconds = m_engine.Now() - started;
+            if (!status)
+            {
+                trace.Result = ActivationTraceEntry::Outcome::Failed;
+                trace.Error = status.Text;
+            }
+            Traced(std::move(trace));
             Unpend(recordId);
             if (!status)
             {
@@ -388,6 +510,10 @@ namespace Manifold
         running->Active = active;
         running->FromScript = fromScript;
         running->Memory = record->ScriptMemory;
+        running->Before = record->ScriptMemory;
+        running->StartedAt = started;
+        running->QueuedAt = job.QueuedAt;
+        running->ViaParent = job.ViaParent;
         running->Process = m_engine.Process();
         Asm::AaOptions options;
         options.Section = active ? Asm::AaSection::Enable : Asm::AaSection::Disable;
@@ -439,6 +565,12 @@ namespace Manifold
         Table::MemoryRecord* record = m_engine.Table().FindById(running->RecordId);
         if (!record)
             return;
+        ActivationTraceEntry trace = TraceStart(*record, running->Active, running->FromScript, running->ViaParent);
+        trace.Async = true;
+        trace.Seconds = m_engine.Now() - running->StartedAt;
+        trace.Waited = running->QueuedAt > 0.0 ? running->StartedAt - running->QueuedAt : 0.0;
+        TraceScript(trace, result, running->Before, running->Memory);
+        Traced(std::move(trace));
         record->ScriptMemory = std::move(running->Memory);
         if (!result.Ok())
         {
@@ -541,11 +673,11 @@ namespace Manifold
         return status;
     }
 
-    Status ActivationRunner::SetActive(Table::MemoryRecord& record, bool active)
+    Status ActivationRunner::SetActive(Table::MemoryRecord& record, bool active, bool fromScript)
     {
         if (m_running && Manifold::OnMainThread())
             WaitForActivation();
-        const Status status = ActivateTree(record, active);
+        const Status status = ActivateTree(record, active, -1, fromScript);
         m_engine.Table().Refresh();
         return status;
     }

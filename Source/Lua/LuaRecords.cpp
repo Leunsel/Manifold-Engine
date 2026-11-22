@@ -295,7 +295,7 @@ namespace Manifold::Lua
                 }
                 engine.DropQueued(record->Id);
             }
-            const Status status = engine.SetActive(*record, wanted);
+            const Status status = engine.SetActive(*record, wanted, true);
             if (!status)
                 return PushFailure(state, status);
             lua_pushboolean(state, 1);
@@ -385,7 +385,7 @@ namespace Manifold::Lua
             Engine& engine = Owner(state);
             if (record->Active)
             {
-                const Status status = engine.SetActive(*record, false);
+                const Status status = engine.SetActive(*record, false, true);
                 if (!status)
                     return PushFailure(state, status);
             }
