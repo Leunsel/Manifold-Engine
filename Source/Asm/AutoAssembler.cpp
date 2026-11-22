@@ -1044,15 +1044,22 @@ namespace Manifold::Asm
                 {
                     Statement& statement = m_statements[read.Index];
                     const auto address = m_host.Symbols->Evaluate(read.Address, Extra());
-                    if (!address.Ok())
-                        return Fail(ErrorCode::AaBadArguments, read.Line, "readmem(address, size) got an invalid address or size", read.Text);
+                    // ∑ CE reads nothing for readmem during a syntax check, and an address it cannot
+                    //   resolve there becomes 0. Custom commands rely on that: they answer a check with
+                    //   define(Name, 0) and run their scan only on the real pass, so a check that read
+                    //   (or resolved) the source would reject scripts that CE accepts. Here a check still
+                    //   copies the bytes when they can be read, and keeps zeros when they cannot.
                     if (m_options.CheckOnly)
                     {
-                        const std::uint64_t at = *address.Value;
-                        const bool fake = std::any_of(m_fakeBlocks.begin(), m_fakeBlocks.end(), [at](const auto& block) { return at >= block.first && at < block.second; });
-                        if (fake)
-                            continue;
+                        const auto fake = [&](std::uint64_t at) {
+                            return std::any_of(m_fakeBlocks.begin(), m_fakeBlocks.end(), [at](const auto& block) { return at >= block.first && at < block.second; });
+                        };
+                        if (address.Ok() && !fake(*address.Value) && !m_host.Process->ReadExact(*address.Value, statement.Data.data(), statement.Data.size()))
+                            std::fill(statement.Data.begin(), statement.Data.end(), std::uint8_t(0));
+                        continue;
                     }
+                    if (!address.Ok())
+                        return Fail(ErrorCode::AaBadArguments, read.Line, "readmem(address, size) got an invalid address or size", read.Text);
                     if (!m_host.Process->ReadExact(*address.Value, statement.Data.data(), statement.Data.size()))
                     {
                         m_result.Error = Status::Fail(ErrorCode::AaReadMemFailed, Hex(*address.Value));

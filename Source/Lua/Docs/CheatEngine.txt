@@ -922,10 +922,10 @@ function AOBScan(aobstring, OPTIONAL protectionflags, OPTIONAL alignmenttype, OP
     Scans memory for one AOB pattern string. Optional arguments: protection flags, alignment type and alignment parameter. Returns the matches.
 
 function AOBScanUnique(aobstring, OPTIONAL protectionflags, OPTIONAL alignmenttype, OPTIONAL alignmentparam)
-    Scans for the AOB string and returns the first match as an integer, or nil. A match may be arbitrary, so the pattern should be unique.
+    Scans for the AOB string and returns the match as an integer. Returns nil when the pattern is not found or occurs more than once.
 
 function AOBScanModuleUnique(modulename, aobstring, OPTIONAL protectionflags, OPTIONAL alignmenttype, OPTIONAL alignmentparam)
-    Scans one module for the AOB string and returns the first match as an integer, or nil.
+    Scans one module for the AOB string and returns the match as an integer. Returns nil when the pattern is not found or occurs more than once in the module.
 
 function allocateMemory(size, BaseAddress OPTIONAL, Protection OPTIONAL)
     Allocates memory in the target process. Optional arguments: a preferred base address and the protection.

@@ -449,10 +449,18 @@ namespace Manifold::Tests
             CHECK_EQ(g_mainModuleProbe[1], mainBase + 0x10);
             CHECK_EQ(g_mainModuleProbe[2], mainBase + 0x20);
             CHECK_EQ(g_mainModuleProbe[3] & 0xFFFF, std::uint64_t(0xB848));
+            // A syntax check reads nothing it cannot read, like CE: custom commands answer the
+            // check with define(Name, 0) (the owner's ManifoldScanModule) and readmem(Name, n) follows.
             const Asm::AaResult unreadable = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreadmem(10,4)\n", true);
-            CHECK(!unreadable.Ok() && unreadable.Error.Code == ErrorCode::AaReadMemFailed && unreadable.Line == 3);
+            CHECK_MSG(unreadable.Ok(), unreadable.Error.Text);
             const Asm::AaResult unknown = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreadmem(NoSuchSymbol,4)\n", true);
-            CHECK(!unknown.Ok() && unknown.Error.Code == ErrorCode::AaBadArguments && unknown.Line == 3);
+            CHECK_MSG(unknown.Ok(), unknown.Error.Text);
+            const Asm::AaResult definedZero = engine.AutoAssemble("define(SITE,0)\nalloc(cave,$100)\ncave:\nreadmem(SITE,7)\n", true);
+            CHECK_MSG(definedZero.Ok(), definedZero.Error.Text);
+            const Asm::AaResult unreadableReal = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreadmem(10,4)\n", false);
+            CHECK(!unreadableReal.Ok() && unreadableReal.Error.Code == ErrorCode::AaReadMemFailed && unreadableReal.Line == 3);
+            const Asm::AaResult unknownReal = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreadmem(NoSuchSymbol,4)\n", false);
+            CHECK(!unknownReal.Ok() && unknownReal.Error.Code == ErrorCode::AaBadArguments && unknownReal.Line == 3);
             for (const char* id : { "manifold.builtin.code-injection", "manifold.builtin.full-injection" })
             {
                 const GenerationResult result = Run(engine, library, id, request);
