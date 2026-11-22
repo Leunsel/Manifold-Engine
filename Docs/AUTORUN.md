@@ -102,7 +102,11 @@ This makes planting visible; it is not a sandbox. A script can still write the s
 
 They are built on the program's own [manifold API](MANIFOLD-API.md) and do not run in stock Cheat Engine. Up to version 2.0.0 they were `Manifold-Godot.lua` and `Manifold-SigMaker.lua` with a `Manifold-SigMaker-Modules` folder in the root of `autorun`; such old copies are superseded by the modules and can be deleted.
 
-Unreal Engine support and C++ run-time type information are built into the program (Extensions → Unreal Engine and Extensions → C++ RTTI, [`manifold.unreal`](MANIFOLD-API.md) and [`manifold.rtti`](MANIFOLD-API.md)). The program skips an old `Manifold-UE.lua` or `Manifold-RTTI.lua` in its `autorun` folder (state *Built in*); those files can be deleted. The global `ManifoldRTTI` of the RTTI script is still there: its functions call `manifold.rtti` and return what the script returned, so tables and scripts written against it keep working, and `<Class>::vftable` symbols in saved tables resolve as before.
+Unreal Engine support and C++ run-time type information are built into the program (Extensions → Unreal Engine and Extensions → C++ RTTI, [`manifold.unreal`](MANIFOLD-API.md) and [`manifold.rtti`](MANIFOLD-API.md)).
+
+- The program skips an old `Manifold-UE.lua` or `Manifold-RTTI.lua` in its `autorun` folder (state *Built in*); those files can be deleted.
+- The global `ManifoldRTTI` of the RTTI script is still there: its functions call `manifold.rtti` and return what the script returned, so tables and scripts written against it keep working.
+- `<Class>::vftable` symbols in saved tables resolve as before.
 
 Building the program copies the repository's `Autorun` folder into `autorun` next to the executable, and `Tools\Install.ps1` does the same for the install folder. Only files that are newer in the repository are copied, and nothing is removed. The build also embeds the names and content hashes of these modules (`Tools/embed_modules.py`), which is how the program knows a shipped module from another one.
 
@@ -116,11 +120,23 @@ Building the program copies the repository's `Autorun` folder into `autorun` nex
 
 ## Living together
 
-The Unreal tool, Godot and the built-in RTTI stage never answer for each other's objects. The Unreal tool resolves only in a game that looks like Unreal (or when it is started by hand), Godot only behind its version literal, and RTTI asks the Unreal tool and `ManifoldGodot.claims` before it names an object; `manifold.rtti.claims` tells a script what RTTI names. Structure Dissect asks the built-in Unreal tool, then Mono, then RTTI, and only then the script hooks; script hooks are asked in the order they were registered, and the first answer wins.
+The Unreal tool, Godot and the built-in RTTI stage never answer for each other's objects:
+
+- The Unreal tool resolves only in a game that looks like Unreal (or when it is started by hand).
+- Godot resolves only behind its version literal.
+- RTTI asks the Unreal tool and `ManifoldGodot.claims` before it names an object; `manifold.rtti.claims` tells a script what RTTI names.
+
+Structure Dissect asks the built-in Unreal tool, then Mono, then RTTI, and only then the script hooks. Script hooks are asked in the order they were registered, and the first answer wins.
 
 ## Checking them
 
-`Manifold-Engine.Tests.exe --filter=modules,autorun` checks the loader on folders it builds itself (what is found, headers, order, `require`, unloading, the held and changed states) and then loads the repository's `Autorun` folder twice without a process, switches both modules off and on, opens and closes the test program and checks that nothing reports an error or a wrong API call, that neither the Unreal tool nor Godot claims the test program, and that the shipped modules match the embedded hashes. For a deeper look, the headless harness runs them against a process without writing to it:
+`Manifold-Engine.Tests.exe --filter=modules,autorun`:
+
+1. checks the loader on folders it builds itself: what is found, headers, order, `require`, unloading, the held and changed states;
+2. loads the repository's `Autorun` folder twice without a process, switches both modules off and on, and opens and closes the test program;
+3. checks that nothing reports an error or a wrong API call, that neither the Unreal tool nor Godot claims the test program, and that the shipped modules match the embedded hashes.
+
+For a deeper look, the headless harness runs them against a process without writing to it:
 
 ```bash
 Manifold-Engine.Tests.exe --compat Tests\Target\TestTarget.CT --autorun=Autorun --process=Game.exe --dry-run --home=<empty folder> --eval=<script.lua>

@@ -1,60 +1,941 @@
 # Features
 
-Manifold Engine is built on the Manifold UI (Dear ImGui with docking and multi-viewport on Direct3D 11), so every tool runs in its own window that can be moved to another screen, and with Shift held tool windows can be docked into each other or beside the scanner and address list in the main window. It draws on the graphics card that the main window's display is connected to, unless Windows has a graphics setting for Manifold-Engine.exe. Settings → Appearance → Floating Window Opacity and Inactive Window Opacity make tool windows outside the main window see-through, for one value while they have the focus and another while a different window (or the game) has it, so a window over the game can stay open without hiding it; windows docked into the main window stay opaque.
+Everything Manifold Engine does, window by window. The keyboard shortcuts are in [SHORTCUTS.md](SHORTCUTS.md), the error codes in [ERRORS.md](ERRORS.md).
 
-It reads and writes Cheat Engine tables (`.CT`): records, groups, pointers, scripts, hotkeys, drop-down lists, structures, registered symbols and the table's Lua script.
+Manifold Engine reads and writes Cheat Engine tables (`.CT`): records, groups, pointers, scripts, hotkeys, drop-down lists, structures, registered symbols and the table's Lua script.
 
-## What it does
+## Contents
 
-- **Memory scanner**: first and next scans for byte, 2/4/8 bytes, float, double, string (UTF-8 or UTF-16, with or without case) and byte patterns with wildcards. Exact, bigger, smaller, between, unknown initial value, increased/decreased (by), changed, unchanged, same as first scan. Rounded, truncated or exact float compare. Writable/executable/copy-on-write filters, region types, start and stop address or one module, fast scan alignment, pausing the process. Scans run on several threads and keep their results in temporary files, so hundreds of millions of results do not fill the memory. Undo the last scan.
-  - **All** scans byte, 2/4/8 bytes, float and double in one pass (Settings → Scanner → Types for All picks which); every result keeps its own type.
-  - **Grouped** finds several values that lie next to each other, written as `type:value` separated by spaces: `4:100 f:1.5 d:*`. Types are `1`, `2`, `4`, `8` (bytes), `f` (float), `d` (double), `p` (pointer), `s` (text), `u` (UTF-16 text) and `skip:N` (N bytes in between). A value is a number, `*` for any value, or a range like `10..20`; text with spaces goes in quotes. With `within:N` the values after the first one may lie anywhere in the N bytes from the first, in any order. Adding a result puts each value into the address list under a group.
-  - **Custom types** registered by scripts (`registerCustomTypeLua`) appear in the value type list; they scan for an exact value, unknown initial value, changed, unchanged and same as first scan.
-  - **Compare to**: a next scan that looks at the earlier value (increased, decreased, changed, unchanged) compares with the previous scan, the first scan, or results saved under a name with the Save button beside it. Saved results stay until New scan.
-- **Address list**: groups and nested records, freezing (normal, allow increase, allow decrease), pointers with any number of offsets, hex and signed display, drop-down value lists, colors, hotkeys (toggle, activate, deactivate, set, increase, decrease), drag and drop, copy and paste as Cheat Engine XML, and the group options of Cheat Engine: hide children when deactivated, activate and deactivate children as well, set the value of children, always hide children, manual collapse. Addresses and pointer bases are address expressions (`"game.exe"+1A2B30`, `[[base]+8]+4`, registered symbols, exports); `mainmodule` and Cheat Engine's `$process` stand for the base of the opened process's executable, so `mainmodule+1A2B30` keeps working when the game's exe is renamed, and both work the same in pointers, Auto Assembler scripts, Lua and the memory viewer's Go to address. View → Address Column (and Settings → General → Address List) picks what the Address column shows: the address as written, the address it resolves to, or both, with the resolved one dimmed (the default). View → Address Digits writes resolved addresses and pointer targets short (`P->F40000`), with at least 8 digits like Cheat Engine (`P->00F40000`), or at the pointer width of the process.
-  - **Address List Debug** (Table → Address List Debug, *Debug This Record* in a record's menu, `Ctrl+Alt+Shift+D`) is a second list of the open table for table authors and for working on Manifold. **Records** shows every record, also the children the address list hides, with its ID (marked when the table file gave it another one), kind, address as written with its offsets, resolved address, value with its raw bytes, the time since its last refresh, its flags (frozen, queued, async, not saved, hotkeys, dropdown list or link, custom type, Lua events) and its problems; the columns can be hidden and moved (right-click the header), a filter takes a description, an ID or an address, and the arrow keys walk the list. It follows the selection of the address list (Records menu), and a double click or Enter selects the record there. The inspector beside it has everything about the selected record: identity and position, the address chain step by step (base or parent, each pointer read and offset, and the step where it breaks), value and frozen bytes, the script's allocations, registered symbols and labels, the dropdown list or link, its path (right-click: Copy as Lua), the records whose lists link to it, the Lua that looks it up and the records its own Lua looks up, its Lua events, hotkeys (and whether they are held until the table's script is accepted), its problems and its last switches; Copy Report (`Ctrl+C`) puts all of it into text. **Table Check** lists the problems of the whole table, which it keeps up to date while the table changes: dropdown links to a record that isn't there, to itself, to a list without entries, to a name several records have, or to a list that links on; Lua (the table script, record scripts, On Activate and On Deactivate, `.lua` table files) that looks up a description or ID with `getMemoryRecordByDescription`, `getMemoryRecordByID` or `manifold.record.find` and finds nothing or the wrong record, and `manifold.record.find` paths that lead nowhere or to several records; records with the same full path, which no lookup can tell apart; IDs the table file gave twice, so a record got another one; scripts without `[ENABLE]` or `[DISABLE]`; addresses that are empty or relative to a parent without an address; unregistered custom types; hotkeys without keys, without a value, twice on one record or shared by several records; group options on records without children. Run Check with the Process also resolves every address (and says at which step it breaks or that nothing can be read there) and assembles each script's `[ENABLE]` part, or `[DISABLE]` when it is on, without writing anything, like the script editor's Check. **Activation Trace** keeps the last 500 times a record was switched on or off: when, how long it took and waited in the queue, how it ended (done, failed with the error and line, or stopped by Lua), who started it (by hand or hotkey, Lua, or its group), and for scripts every write with its address and bytes, the allocations made and released and the symbols registered and unregistered. **Internals** shows the address list's state: generation and identity of the table, record counts, deepest nesting, renumbered and unresolved records, which records are refreshed and how often, whether scripts are trusted, and the activation mode with the queue. `--open=recorddebug` opens the window at start, `recorddebug:<ID>` on that record, and `recorddebug:check`, `:trace` or `:internals` on that tab.
-- **Table files**: Table → Table Files (`Ctrl+Alt+F`) shows the files stored inside the cheat table, such as Lua modules, Auto Assembler scripts, themes, images and sounds, which scripts read with `findTableFile`. The list has the name, the type (found from the content first, then from the extension), the size, the size the file takes in the `.CT` (a hidden column; right-click the header) and how many scripts name the file; click a header to sort, click again to turn the order, a third time for the order in the table. The filter takes several words that match name or type. Ctrl and Shift select several files, `Ctrl+A` all shown ones. `F2` or a double-click renames in place; a name that is taken or not allowed is marked while typing. Add files with File → Add Files (`Ctrl+O`), a whole folder, or by dropping files or folders from Explorer onto the window, also while it floats outside the main window; a file with the same name is updated. Files are read off the UI thread; one file may be 256 MB and all files together 512 MB, as when a table is loaded. Replace from disk, Export (`Ctrl+E`, one file to a path, several into a folder, with a question before anything is overwritten), Export all, Duplicate, Delete (`Del`, with a question that says when scripts name the file), Copy the name (`Ctrl+Shift+C`) and Copy as Lua (`findTableFile('name')`, or the lines that read the file into a string) are in the menu bar and the context menu. The right side follows the content: text, Lua, JSON and Auto Assembler open in the code editor (JSON with check, Format and Compact; `Ctrl+F` searches the text while the cursor is in it and filters the list otherwise), pictures (PNG, JPEG, BMP, GIF, TGA) are shown fitted or in actual size, everything else as hex. The switch above it shows any file as hex or as Details: exact size, size in the table, SHA-256, first bytes and the places that name the file (the table Lua script, record scripts, other table files) with the line; a click opens that place. Edits stay a draft per file, marked with a dot in the list, until Put into the table (`Ctrl+S`; File → Put All Changes into the Table for every draft) or Revert; switching files or closing the window keeps the drafts. The window follows the table at once: files a script creates, writes through `Stream`, or deletes, and a loaded table. When a script changes a file that has a draft, a bar offers the table's version or keeping the draft. Writing to a table file's stream from Lua now marks the table as changed. Settings > Scripts > Tables > Table File Names picks how files are written: CE 7.5 names each file by its tag (`<name.lua Encoding="Ascii85">`, read by Cheat Engine 7.5 and older), CE 7.6 writes every file as `<File0 Name="name.lua" Encoding="Ascii85">`, `<File1 ...>` (Cheat Engine 7.6 and newer read the `Name` attribute, 7.5 shows only `File0`), As Loaded (the default) keeps the spelling of the open table and uses CE 7.5 for a new one. A name that cannot be a tag (a space, a leading digit, brackets) is written the CE 7.6 way in every mode, so the table always opens again. Both spellings are read; backups and `saveTable` follow the same setting. Not there: drag from the window to Explorer, an XML colouring, playing sounds.
-- **Memory viewer** (as many windows as you like, each with its own File, Search, View, Debug and Tools menus like Cheat Engine's): Zydis disassembler with symbols, jump arrows and flow colors, assembling in place with NOP fill, replacing code with NOPs and restoring it, hex view with live change highlighting and in-place editing as bytes, integers, floats or doubles, go to address, byte search (the next match, or every match in a list that stays open and moves the viewer to the one you pick), bookmarks (ten slots; the set shortcut on a bookmarked line or the Bookmarks menu removes one), a write history of every memory edit made in the viewers (Tools → Write History: time, address by name, what made the edit, the bytes before and after, whether they are still in memory, and undo or redo per edit), a flow graph of the selected function (G or View → Flow Graph: its blocks laid out top to bottom with taken, not-taken and loop edges, pan and zoom with a minimap, a double click goes into a called function and Backspace comes back, breakpoints and the current break line marked, and Copy as Mermaid), the function around an instruction (Home goes to its start, End to its last instruction, Ctrl+Shift+A selects it, and the Function menu copies it: the bounds come from the unwind data or the Mono or IL2CPP method where there is one, otherwise from a search back for aligned int3 padding that checks a path from there leads to the instruction and the function before it does not), copying addresses and instructions with names, module offsets or plain addresses, saving a region to a file and loading a file into memory, filling memory, creating a thread, allocating memory and injecting a DLL. Scripts from any instruction through templates. View → Show Symbols switches names on or off: with it on, every place a symbol starts (a registered symbol, an export, or a Mono method) gets a header line, the instructions below it show their offset from that start (`+0`, `+3`, ...), call and jump targets show their symbol names (also `mov r11, <method>` before an indirect call), and addresses read as module+offset; when the listing starts inside a function, that function's name stays pinned as the first row while scrolling (a click goes to its start); off shows plain addresses. File → Load Mono Runtime reads a Mono game's runtime without opening the Mono window. The bar between the disassembler and the hex view can be dragged, and the split is remembered; View → Hex View hides the hex view and gives the disassembler the whole height (while the process is stopped the stack stays beside the registers), and anything that shows an address in the hex view brings it back.
-- **Debugger**: for 64-bit and 32-bit (WOW64) processes, through Windows or in-process (Settings → Debugger; a 32-bit game gets the 32-bit agent `ManifoldAgent32.dll`): software and hardware breakpoints, break, step into, step over, run until return, editing registers and flags, stack view, debug output of the process in the log. The register panel beside the code (its width can be dragged) marks values that changed since the last break, names the symbol a register points to, and shows XMM0–XMM15 (XMM0–XMM7 for 32-bit processes) and MXCSR as floats, doubles, integers or hex; a double click changes any register. Each flag explains itself in a tooltip (meaning, which instructions read it, its value at the last stop). When the instruction at RIP is a conditional jump, cmov or set, the flags it reads are outlined and the panel says whether it will jump, move or set. During a step the panel and the stack keep the last values instead of disappearing. The stack sits beside the hex view in the same column, with the offset from RSP, the value, the symbol it points to and the slot RBP points to.
-  - **Conditional breakpoints and register changes**: a breakpoint can carry a condition and a set of register changes, both written as small Lua-like expressions over the registers (`RAX`, `EAX`, `AL`), the flags (`ZF`), memory reads (`readInteger(RCX+8)`, `[RSP]`) and symbols. The process stops only when the condition holds; a breakpoint can also just change registers (`EAX = 0`, `RIP = RIP + 5`) or flags and keep running, or fire only in one thread. Data breakpoints (break when an address is read or written) carry the same conditions. The conditions and changes run inside the target, so a breakpoint that rarely matches barely costs anything.
-  - **Breakpoint list**: every breakpoint with its type, condition, changes and hit count in one window, to add, edit or remove.
-  - **Thread list**: the threads of the process with their start address, TEB, priority, and whether a thread hides itself from debuggers.
-  - **Break and trace**: set a breakpoint and record the instructions the thread runs from it, up to a chosen number of steps, stepping into or over calls, with an optional start and stop condition. Calls and returns are indented into a tree and each step keeps its registers.
-  - **Comments**: a note on any instruction (`Ctrl+Shift+C`), saved in the table. The comment column shows it first, in its own colour (Settings → Appearance → Code: Your Comments, set per theme and mode), and after it the automatic comment: the method name, the value a memory operand points at, or the effective address at a break. A line that is too long for the column shows both in full when the mouse is over it. The **Comment List** (Table menu, the memory viewer's Tools and context menus, `Ctrl+Alt+Shift+C`) has every comment and header of the table, sorted by module and offset, with where each one is now and a filter. A double-click or Enter goes there in the disassembler; comments and headers can be edited, copied (`Ctrl+C`, tab-separated) and removed one by one or several at once (`Ctrl`/`Shift` select, `Ctrl+A`, `Del`); `Ctrl+Z` or Undo Remove puts them back while the same table is open. Edits and removals mark the table as changed.
-- **Find out what…**: what accesses an address, what writes to it, what addresses an instruction accesses, and what calls an address. Each runs in its own window with hit counts and the registers of the last hit.
-- **Structure dissect**: guesses pointers, floats, strings and integers, follows pointers into nested structures, compares several addresses side by side, edits names, types and values. A pointer is any aligned value that points into committed memory, and a string stops before the next pointer. The Address column shows where each field lies, the first address plus the offset and, below an expanded pointer, the address it points to plus the offset (View → Address Column hides it; a double-click browses the memory there, and the tooltip lists the address in every compared column). A filter above the fields keeps the ones whose name, offset (+1A0), type or value matches; an address typed there (hex, 10000 or more) keeps and selects the shown field that holds it and says how many bytes into the field it lies, and View → Go to Address (`Ctrl+G`) takes any address or expression and selects that field without filtering; the Type menu shows the field's current value read as every type, so the right one stands out. File → New Window (or *Dissect in a new window* on any address) opens another dissect window; with *Open as Tabs* (Settings → Debugger, on by default) they join the first one as tabs, as Auto Assembler scripts do. The arrow keys move through the fields like a tree (Right opens a pointer, Left closes it), and the line below the fields shows the pointer path of the selected field, `[[base+50]+28]+10`, which a click copies (right-click for the field names or the address). Structures are saved in the table. When a Mono runtime is loaded (see Mono / .NET), dissecting the address of a Mono object names it by its class and fills in the real field names, offsets and types straight from the runtime, and following a pointer to another object does the same — no manual structure building. Generic instances such as `List<Item>` or `Dictionary<K,V>` are read from the object's own class with their type arguments in the name, arrays show their elements as `[0]`, `[1]`, ... (up to 1024, structs inline), and `IntPtr` fields such as `m_CachedPtr` are pointers.
-- **Auto Assembler**: Cheat Engine's script language with `[ENABLE]`/`[DISABLE]`, `alloc`, `label`, `define`, `aobscan(module|region)`, `assert`, `registersymbol`, `readmem`, `reassemble`, `include`, `loadlibrary`, `createthread`, `{$lua}` blocks and more. See [AUTO-ASSEMBLER.md](AUTO-ASSEMBLER.md). A new Auto Assembler or Lua script editor opens as a tab beside the editors already open, each tab with its own menus, keys and buttons; with Shift held a tab can be dragged out into a window of its own. Settings → Scripts → Script Editors → Open as Tabs switches back to one window per editor.
-- **Code editor**: the Auto Assembler and script windows, the Lua engine, the Templates window and Table Files share one editor. Find (`Ctrl+F`) and Replace (`Ctrl+H`) open a bar above the text with Match Case and Whole Word, the number of matches, Previous and Next (`Shift+F3`, `F3`, or `Shift+Enter` and `Enter` in the field), Replace and Replace All (one step for Undo); every match is marked in the text, a selection on one line becomes the search text, and `Esc` closes the bar. The right-click menu has Find, Replace, Find Next and Find Previous beside the other edit commands.
-- **Opcode converter**: Tools → Opcode Converter (`Ctrl+Alt+O`; also in the memory viewer's Tools menu at the selected address, and *Open in the Opcode Converter* on an instruction) turns bytes into instructions and instructions into bytes, for x64 or x86, at an address so that rip-relative operands and jump and call targets come out right. Type instructions on the left (one per line, `//` comments) or bytes on the right (`48 8B 05`, `488B05`, `0x48, 0x8B`, `\x48\x8B`); the other side follows, and a list shows each instruction's address, bytes and any problem with its line. With a process open it can use its symbols. The Copy menu copies the bytes spaced, without spaces, as an escaped string or a C array, the instructions, or a listing with addresses.
-- **Script templates**: AOB injection, code injection, full injection and more as files in the `templates` folder, sorted into categories by folder or by their settings, with inputs, includes and a preview. Templates of the Manifold Template Loader for Cheat Engine work unchanged. See [TEMPLATES.md](TEMPLATES.md).
-- **Pointer scan**: Tools → Pointer Scan (`Ctrl+Alt+P`), *Pointer scan for this address* in the address menus, in an address list record's menu and in Structure Dissect's File menu. It finds the chains of pointers that lead from a module to an address, so a value can be found again after the game starts anew: `[["game.exe"+offset]+18]+34`. The scan reads the process once into a pointer map (every pointer-aligned value that points into the memory read, eight bytes each, sorted by where it points) and then searches backwards from the address level by level, up to the chosen number of levels (5 by default, at most 12) and the largest offset (1000). Each pointer in the heap is followed once, along its shortest way to the address and with the smallest offset; a path ends at the first pointer that lies in a module, and a module pointer gets one path for every way into the structure it points to. Deeper paths come last, so the limit on the number of paths (2,000,000 by default, Scan menu) cuts those first. By default only writable memory is read, memory-mapped files and the libraries of Windows are left out, and pointers must point to an address that is a multiple of the pointer size; the Scan and Memory menus change that. Thread stacks are not used as bases. The window shows each path with its offsets, where it points now and the value there (type in the Paths menu); a double-click or the context menu adds a path to the address list as a pointer record, and paths can be copied, ordered by level, last offset or base address, saved to a `.mptr` file in the `tables` folder and opened again. **Rescan** keeps the paths that lead to an address or to a value in the process that is open now: after a restart, find the value again, rescan with its new address, and the paths that survive are the stable ones. Paths are stored as module name and offset, so they hold when modules load elsewhere. Paths beyond 64 MB are kept in a temporary file. 64-bit and 32-bit processes. For a single level, *Find static pointers* below is quicker and stays its own window.
-- **Static pointers**: *Find static pointers* (Tools menu and the memory viewer's Tools menu, Ctrl+Alt+K; for one address in the right-click menus of the address list, the found list, the hex view and the other address menus, and in Structure Dissect's File menu) looks through the writable sections of the loaded modules for pointers to the address or to a structure start up to a largest offset (1000 by default) before it. It is a single level, not a pointer scan, and takes well under a second. Each hit shows `"game.exe"+offset`, the offset to the address and whether the pointer still holds the same value; a double-click adds it to the address list as a pointer.
-- **Speedhack**: the game's time runs faster or slower by a factor. *Speedhack* at the bottom of the scan panel has the switch (`Ctrl+Shift+H`), the factor as a number, a slider from 0.1 to 10 and buttons for 0.25, 0.5, 1, 2, 5 and 10; `Ctrl+Alt+Up` and `Ctrl+Alt+Down` step through the usual factors, and the menu of the process in the title bar has the same choices, also in compact mode. Scripts use `speedhack_setSpeed(speed)` and `speedhack_getSpeed()` as in Cheat Engine, or `manifold.speed`. 0 stops the time, 1000 is the highest factor.
-  - **How**: a small library (`ManifoldAgent.dll`, `ManifoldAgent32.dll` for 32-bit games; the same file the in-process debugger uses, and each of the two works with or without the other) is loaded into the game, and the first five bytes of `RtlQueryPerformanceCounter` (which `QueryPerformanceCounter` leads to), `GetTickCount`, `GetTickCount64` (in kernel32 and in kernelbase) and `timeGetTime` are replaced by a jump to it. The library returns `base + (real - reference) * speed` and moves base and reference on every change, so a clock never jumps and never runs backwards when the speed changes. `Sleep`, waitable timers and the wall clock (`GetSystemTimeAsFileTime`) stay as they are: scaling the wall clock breaks certificate checks and save-file times. The jumps are written while the process is paused and no thread stands in the bytes.
-  - **Turning it off** sets the speed back to 1. If the game's clocks still equal the real ones (the speed never differed from 1), the hooks are taken out at once, every byte is restored and the library is unloaded. After a speed other than 1 the game's clocks are ahead of or behind the real ones, and taking the hooks out would make them jump, backwards after a fast run, which freezes games that wait for a point in time. So the hooks stay and pass time on at normal speed, as in Cheat Engine. *Remove Hooks* (below the switch and in the process menu) takes them out regardless and says what happens.
-  - **When Manifold Engine closes or crashes**: on a normal close and when the process is closed, the speed goes back to 1 first. If the program is killed or crashes, the library notices it through a handle to the program and goes back to speed 1 by itself; the game keeps running. The hooks stay at normal speed, and a Manifold Engine started later takes them over when it opens the game. No thread of the speedhack runs in the game at any time.
-  - Tools → Scan for Patches leaves the speedhack's own jumps out of its list, like the debugger's breakpoints. Games with anti-cheat are not supported: they block the library or detect the changed time functions.
-- **Lua**: Lua 5.4 with a Cheat-Engine-compatible API: memory, symbols, AOB scans, `autoAssemble`, the address list and its records, timers, hotkeys, `createThread` with a non-blocking `sleep`, debugger breakpoints with callbacks. Menu items that scripts add to the memory viewer show up in its context menu and menu bar, and items added to the main form's menu show up in the main window's Extensions menu or in its File, Edit, Table and Help menus, and windows that scripts build with `createForm` are drawn with Lazarus' layout rules: panels, labels, buttons, text fields, lists, tree views, splitters, menu bars, context menus and paint boxes, whose canvas drawing is replayed by the graphics card. See [LUA-API.md](LUA-API.md). Beside it, the `manifold` namespace is the program's own API with one fixed, checked schema: coloured log levels and channels in the Lua engine output, process and typed memory helpers that return `nil, error` with an `ME-` code and the script line, the table's memory records (`manifold.record`: find by id, description or path, read and write values as the address list does, switch scripts and groups on and off, create and remove records; a path is the list of descriptions from the top level down, `manifold.record.find({ "Player", "Stats", "Health" })`, which stays when ids change and finds records in tables that repeat names, `record.find("Multiplier:")` finds a record below another one, `record.path()` gives the path, and a name or path that several records have fails with `ME-6011` instead of picking one), and protected calls with tracebacks. `manifold.ui` builds windows with rows, grids, cards, tabs, tables, trees, radio groups, colour pickers and canvases drawn by the graphics card, plus dialogs, notices with progress, and entries in the main window's Extensions menu, title bar and status bar, all in Manifold's own look (a floating script window can be see-through: `opacity` and `inactiveOpacity`); a script's windows and entries go away when it runs again. Tools > Form Editor lays such a window out by hand: a palette, an outline with drag and drop, a live preview drawn by the same code as the real window (click a widget to select it, or switch to Try to use it), the options and handler names of the selected widget, undo, and the Lua it turns into. Widgets move by dragging them in the preview too, copy and paste between forms, and come from templates and snippets (File > New from Template, Insert); `image` widgets take a picture file. File > Import Cheat Engine Form reads a form from a `.FRM` file, a cheat table's `<Forms>` or the open table and turns it into such a form: pixel positions become rows, grids and splits, event names become handler names, and a list says what had no counterpart. A window built with `manifold.ui.form.load` reloads live: saving its `.form.lua` file rebuilds the widgets in the running window with the script's handlers, and widgets that keep their name keep their value; the editor shows when the open file is live. Windows take size limits (`minWidth`, `minHeight`, `maxWidth`, `maxHeight`), a fixed or automatic size, a first position (centre, mouse, or exact) and can stay on top; a window with a `key` keeps its place, size and dock spot between runs. Buttons take a keyboard `shortcut` and a `confirm` question, inputs `readOnly`, `maxLength` and `focus`, containers a `gap` and a scrolling area; the editor's preview keeps to the limits and its corner grip tries other sizes. Nothing is cut off at narrow sizes: the labels of a column, section or window line up in one label column and the fields fill the rest of the line (`labelPosition` puts labels `left`, `above` or `right`, for a whole container or one field; without one, labels move above the fields when the window gets too narrow for them), widgets in a row without a width share the free width, a spacer pushes what follows to the right, `wrap = true` moves what does not fit to the next line, and a negative height fills the rest of the window. In the editor, Width and Height are a choice of Auto, Fill and Fixed (Fixed starts from the size the widget has in the preview); dropping a widget on the left or right edge of another one in a column puts both side by side into a new row; the context menu selects the parent (Alt+Left), shows a widget's handler (also a double click on it), wraps widgets in a container, unwraps one and changes a widget's kind where nothing is lost (row, column, grid and section; number and slider; combo and radio; text and heading); F2 jumps to the name, and handlers named after a widget follow a new name in the form and the script; the outline has a Find field (Ctrl+F) and takes the arrow keys; several widgets can be selected at once (Ctrl+click adds or takes one out, Shift+click in the outline takes the rows between, Ctrl+A every widget of the container): the properties then show the options they all have and change all of them, marking options whose values differ, and Delete, Duplicate, Copy, Cut, Move Up and Down, Wrap In, Change Kind, dragging, Enabled When and a wire from the port take every selected widget; the problems list repairs what it can with one click; a record dragged from the address list becomes a switch, combo, field or number bound to it; and the toolbar wraps instead of cutting off. Sliders snap to a `step` and keep their value within `min` and `max`, also when typed, combos show a `hint` while nothing is chosen, a button with an icon and no text is an icon button, and texts and headings take `bold`, `size`, `align` and `color`. A form can be linked to the script that holds its handlers (saved as `script` in the form file; Export Script links it). The preview is a work surface that moves by dragging empty space, the middle button or the wheel; the form moves by its title, and each handler shows as a function chip beside it, linked by a curve to its widget. A click on a chip, the button beside a handler or a double click on its name shows the function in the linked script, which the editor's bottom pane edits directly (saved together with the form, undone with it, and refreshed when the file changes on disk); a missing function is drawn dashed and added on the click, without touching the rest of the script. The places of the form and the chips are saved in the form file (`editor`), which `manifold.ui.form.load` ignores. Run Script runs the linked script, and the script pane completes the form's widgets after `w.`. Links leave the form at ports on its edge instead of crossing it. A link under the mouse lights up: a click shows its function, a right click unlinks it. The selected widget has a port beside its form: a wire dragged from it onto a function chip makes the widget's handler call it, onto a checkbox, combo or radio makes the widget follow it (Enabled When), onto a modal form makes a button open it, and onto empty space offers a new function or one the script has that no widget calls yet; while dragging, a tooltip says what letting go will do. A chip's menu shows the function, renames it (in the script and every widget), puts it back beside the form, unlinks it from every widget and inserts ready-made lines into it: write to the log, enable or disable a widget, set a widget's value, write or switch on a memory record of the open table. Widgets bound to a memory record show it as a pill left of their form, dashed when the open table lacks it. A right click on empty space shows everything, goes back to the form, puts the chips back and lists the functions no widget calls. The outline draws its own rows with indent guides, folds containers and scrolls sideways for deep trees, and a long path above the preview folds its middle into a menu. A form file can hold modal forms (`modals`): dialogs in front of the program that block it until they are closed (`modal = true` on any window). The editor shows each as its own frame on the work surface, a button's Opens names the modal it shows (drawn as an arrow to it) and Closes hides the window the button is in, without code; `manifold.ui.form.load` returns the modals as a third table (`modals.<name>.show()`), and Try flashes the modal a button opens. Export Script into a script that already loads the form adds only the handler stubs it lacks and keeps the rest. Each form on the work surface is a layer of its own: the selected one lies on top with its title, outline, size guide and marks, links and chips lie below the forms. A checkbox can be drawn as a switch (`style = "switch"`), a combo can tick several items (`multi = true`, its value is then a list), and any widget of a form can follow another one without code (`enabledWhen = "god"`, `"not god"` or `"mode = Multiplier"`): it is enabled only while that switch is on or that item is chosen; the editor sets it up in an Enabled When group, draws the link between the two, shows the start state dimmed and plays it in Try. A checkbox, button, number, slider, input, text, combo or radio can be bound to a memory record of the table (`record = "God Mode"`, picked from the open table in the Memory Record group): the switch shows and switches the record, a button toggles it, the value widgets show and write its value, refreshed ten times a second while the window is open, and a widget whose record is missing stays disabled until the table has it. File > New Trainer from the Table makes such a form from the open table in one step: every script and group becomes a switch, every value a field (a combo for a drop-down list, a text field for text), bound to its record, the table's groups become sections, and what belongs to a script sits indented below its switch, enabled while it is on; the switches get F1, F2, ... as hotkeys, skipping keys the table's own hotkeys use. A checkbox or button takes a `hotkey` (like `F1` or `Ctrl+F2`, pressed into the Hotkey field in the editor): it switches or clicks it from anywhere, also while the game has the focus, as long as its window is open, and a checkbox shows the key beside it; the problems list names keys used twice, keys a record of the open table uses too and buttons whose confirm question a hotkey cannot answer. A number or slider takes `hotkeyIncrease` and `hotkeyDecrease`, which move it by `hotkeyStep` (else its step, else 1) within its limits, and a combo or radio `hotkeyNext` and `hotkeyPrevious`, which choose the next or previous item; their keys show after the field. A table's rows can be read and changed from Lua one at a time (`getRows`, `getRow`, `addRow`, `setRow`, `removeRow`), and a combo's, radio's or tree's items read with `getItems`. File > New from Template > Trainer lays out categories of such switches, modes and multipliers, and the snippets Switch with Slider and Mode with Slider add one pair at a time. In the script pane, `w.<name>.update(`, `get` and `set` show what that widget's kind takes, key by key. It saves form and handlers in one `.lua` script: the form is a table in it (`local form = { form = 1, ... }`, shown in the script pane as one locked line and written out on saving) that `manifold.ui.form.build` makes the window from, and saving that script rebuilds its running window live too. Older `.form.lua` files with a linked script still open, and File > Convert to One File moves the form into its script (the `.form.lua` file stays where it is). It can also export one standalone script with plain `manifold.ui` calls; `Examples/Form-Demo.lua` loads `Examples/Form-Demo.form.lua`. `Examples/Manifold-UI-Demo.lua` shows all of it; `Examples/Manifold-Snake.lua` is a small game on a canvas (steered with the keyboard through `onKey`) that also measures frames per second, the Lua time per frame and the drawings per frame, with a slider that adds up to 20000 moving dots. See [MANIFOLD-API.md](MANIFOLD-API.md). The Lua engine opens by itself when a script prints (*Show on print*, saved with the settings). The `Autorun` folder holds modules built on it: Godot 4 support for Structure Dissect and a signature maker; see [AUTORUN.md](AUTORUN.md). C++ RTTI is built into the program (see C++ RTTI below).
-- **Mono / .NET**: for Mono-based Unity games (those with `mono-2.0-bdwgc.dll` or `mono.dll`) the classes, methods and field offsets are read from the runtime, and an address like `Assembly-CSharp:PlayerController:TakeDamage` resolves to the JIT-compiled code so scripts and the Auto Assembler can target a method without an AOB scan. This works without injecting a native DLL, in 64-bit and 32-bit games: a small worker (x64 or x86 code) is written into an executable page and run on one thread attached to the Mono domain, and the `mono_*` functions are called through it. To read the class list it loads a small managed dumper (`Managed/ManifoldDumper`, .NET 3.5, embedded in the program) into the game's root domain, which walks every assembly on its own thread and hands Manifold the classes, fields and methods in one block; Manifold checks samples of it against the runtime and reads the classes through the `mono_*` functions alone when the dumper cannot run. A root domain cannot unload an assembly, so the dumper stays loaded until the game ends; only its data is freed. When the game has a Mono runtime, Extensions → Unity (Mono / IL2CPP) in the main window's title bar has the entries to load it, reload its classes and open the Mono window. The Mono window's Classes tab lists the classes as a tree by assembly and namespace (a filter opens the groups that hold a match), and the inspector shows an object's static members in a section of their own below its instance members (the Statics switch hides them). The Lua side has `mono_isPresent`, `mono_enumClasses`, `mono_class_getMethods`, `mono_class_getFieldOffset` and `mono_getAddress`.
-- **IL2CPP**: IL2CPP builds of Unity games (those with `GameAssembly.dll`) are read the same way, through the `il2cpp_*` functions: classes, parents, methods with their parameter counts, and instance field offsets, with metadata calls only. IL2CPP has no JIT, so every method already has its code in `GameAssembly.dll`; loading reads all method addresses once (one call per class), so `Class:Method` names resolve in addresses and the Auto Assembler, the memory viewer names the methods it shows, and Structure Dissect names objects by their class. The same Extensions → Unity menu, Mono window (Classes tab) and `mono_*` Lua functions serve both runtimes, as in Cheat Engine; `mono_isIl2Cpp()` tells them apart. The scene explorer and inspector work for IL2CPP too. An IL2CPP game cannot load a managed assembly, so instead of the managed agent a small native stub runs there: Manifold points the `MethodInfo` of a per-frame Unity method (`UnitySynchronizationContext.ExecuteTasks`, else `BeforeRenderHelper.Invoke` or `Canvas.SendWillRenderCanvases`) at the stub, which runs a bounded batch of `il2cpp_runtime_invoke` calls per frame on the game's main thread and then goes on to the method itself; no game code is patched, and Shut down sets the pointer back. Objects the explorer shows are kept alive with GC handles, exceptions stay inside `il2cpp_runtime_invoke`, and field values are read straight from memory. What a game's build has stripped (for example `Object.FindObjectsOfType`) is reported as missing instead of being called. It starts only when you switch the explorer on in the Mono window; the setting that starts the explorer by itself applies to Mono games. Both runtimes are read in 64-bit and 32-bit (WOW64) games; a 32-bit game gets an x86 build of the worker.
-- **Unreal Engine**: Unreal Engine 4 and 5 games, 64-bit and 32-bit, are read without an SDK, game offsets or signatures: the name table (FNamePool, or TNameEntryArray before 4.23), the object array and the reflection layout are found in the running game, read-only, in about a second, by itself when an Unreal game is opened. Structure Dissect then knows Unreal objects: a new structure is named after the object's class and starts at the object, the fields are the class's reflected properties with their real names, nested structs inline, bitfield bools as one-bit fields, the native gaps in between, and expanding an object pointer or a TArray fills that one the same way. The custom types `UE FName`, `UE FString` and `UE Object Index` show names, strings and weak references as text, and `<Type>_<Property>` symbols such as `Actor_RootComponent` (and `GObjects`, `FNamePool`, `GameEngine`) resolve in every session, so address list entries keep working after a game update. Extensions → Unreal Engine (Ctrl+Alt+U) has the status, start and shut down, quick dissects of the engine, world, player controller and pawn, the switches for each part, and a window with every class, struct and enum, their properties, functions, live instances and enum values, a search over all property names (`.name`) and "who owns this address". Lua scripts use `manifold.unreal` (status, configure, fields, offsets, owner, walk, dump, ...), and `manifold.unreal.configure` takes addresses, layout offsets or search patterns for a game the search does not find. An old `Manifold-UE.lua` in the `autorun` folder is skipped.
-- **C++ RTTI**: class names from the run-time type information of programs built with MSVC or clang-cl, 64-bit and 32-bit, read-only and without an index of the whole game. Structure Dissect names a new structure and an expanded pointer after the object's class, and an address at a base class part moves to the object's start; after the guess, pointer fields are labelled (`vftable`, `vftable (Base)`, `Class*`, `vbtable`, and `virtual N` in a virtual function table), and a member object with a table of another class becomes an embedded structure named after that class. `<Class>::vftable` and `<Class>::vftable@<Base>` symbols resolve in every session, so a table finds a class again after a game update. Single, multiple and virtual inheritance are read, also an object that starts with its virtual base table. Extensions → C++ RTTI shows what was seen and turns the dissect stage off; `manifold.rtti` has the class of an address, the owner of an address, base classes, virtual function tables, the instances of a class and the name demangler. RTTI never answers for an object the Unreal tool or a Godot script claims. Unreal Engine games are built without RTTI and GCC builds use another format; there it finds nothing.
-- **Autorun modules**: the Lua scripts in the `autorun` folder next to the program run at start: files in its root as they are, like in Cheat Engine, and modules in `autorun\modules`, each a file or a folder with an `init.lua`, sorted into category folders. A module's header names it and its version and says which modules it requires, so the order follows from that; a missing requirement or an error stops only that module. `require` finds a module's own files, other modules by name and the shared `autorun\lib`. Extensions → Modules lists everything with state, version, load time and errors, and switches, reloads and allows modules; scripts use `manifold.module`. A script that is new in the folder is held until it is allowed, and a script that writes into the folder is logged, so a table cannot plant one unseen. See [AUTORUN.md](AUTORUN.md). Processes can be opened automatically when they start (Settings).
-- **Logs and error codes**: a log window for debugging. Long and multi-line messages (Lua tracebacks included) wrap instead of being cut off, repeats in a row show as one entry with a count, and the list filters by level, area and text, with counters for warnings and errors that filter with one click. Below the list the picked entry is shown in full: the message as selectable text, the time to the millisecond, how long after the entry before it, the thread and the source line, and what an `ME-` code in it means. Entries can be picked with Ctrl and Shift and copied as text (Ctrl+C). Everything is also written to `Manifold-Engine.log`, with milliseconds. Every failure ends in a code like `ME-1006`; hovering it shows the cause and what helps. The list is in [ERRORS.md](ERRORS.md) and in the program (Help → Error Codes). A crash writes a minidump and a short report into `crashes`.
-- **Keyboard shortcuts** for the features of every window, the same keys as Cheat Engine 7.5 where it has one (Ctrl+M memory viewer, Ctrl+Alt+A Auto Assembler, F5/F6 what accesses/writes, Ctrl+B browse, Ctrl+D disassemble, Ctrl+G go to, F7/F8/F9 stepping, Ctrl+I code injection template and so on) and own keys for the rest. Menus, context menus and button tooltips show them. Keys of the focused window win, so one key can mean the right thing in each window. Settings → Keyboard changes any of them (record new keys, add a second shortcut, remove or reset; it warns when two commands of one window share keys); changes go into `configs\Manifold-Engine.ini` under `[Shortcuts]`. The default list is in [SHORTCUTS.md](SHORTCUTS.md), the current one in the program (Help → Keyboard Shortcuts, F1).
-- Symbols and modules (registered symbols, modules, exports), memory regions, settings.
+- [Interface](#interface)
+- [Memory scanner](#memory-scanner)
+- [Address list](#address-list)
+- [Address List Debug](#address-list-debug)
+- [Table files](#table-files)
+- [Memory viewer](#memory-viewer)
+- [Debugger](#debugger)
+- [Structure Dissect](#structure-dissect)
+- [Auto Assembler and code editor](#auto-assembler-and-code-editor)
+- [Opcode converter](#opcode-converter)
+- [Script templates](#script-templates)
+- [Pointer scan](#pointer-scan)
+- [Static pointers](#static-pointers)
+- [Speedhack](#speedhack)
+- [Lua](#lua)
+- [Script windows: manifold.ui](#script-windows-manifoldui)
+- [Form Editor](#form-editor)
+- [Autorun modules](#autorun-modules)
+- [Mono](#mono)
+- [IL2CPP](#il2cpp)
+- [.NET](#net)
+- [Unreal Engine](#unreal-engine)
+- [C++ RTTI](#c-rtti)
+- [Logs and error codes](#logs-and-error-codes)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Use](#use)
+
+## Interface
+
+- Manifold Engine is built on the Manifold UI: Dear ImGui with docking and multi-viewport on Direct3D 11. Every tool runs in its own window that can be moved to another screen.
+- With Shift held, tool windows dock into each other or beside the scanner and address list in the main window.
+- It draws on the graphics card that the main window's display is connected to, unless Windows has a graphics setting for Manifold-Engine.exe.
+- Settings → Appearance → Floating Window Opacity and Inactive Window Opacity make tool windows outside the main window see-through: one value while they have the focus, another while a different window (or the game) has it. A window over the game can stay open without hiding it. Windows docked into the main window stay opaque.
+- Symbols and modules (registered symbols, modules, exports), memory regions and the settings each have a window of their own.
+
+## Memory scanner
+
+**Value types**: byte, 2/4/8 bytes, float, double, string (UTF-8 or UTF-16, with or without case) and byte patterns with wildcards.
+
+**Scan types**: exact, bigger, smaller, between, unknown initial value, increased/decreased (by), changed, unchanged, same as first scan. Floats compare rounded, truncated or exact.
+
+**Options**: writable/executable/copy-on-write filters, region types, start and stop address or one module, fast scan alignment, pausing the process.
+
+Scans run on several threads and keep their results in temporary files, so hundreds of millions of results do not fill the memory. The last scan can be undone.
+
+### All
+
+Scans byte, 2/4/8 bytes, float and double in one pass; every result keeps its own type. Settings → Scanner → Types for All picks which types take part.
+
+### Grouped
+
+Finds several values that lie next to each other, written as `type:value` separated by spaces: `4:100 f:1.5 d:*`.
+
+| Type | Meaning |
+| --- | --- |
+| `1`, `2`, `4`, `8` | integers of that many bytes |
+| `f`, `d` | float, double |
+| `p` | pointer |
+| `s`, `u` | text, UTF-16 text |
+| `skip:N` | N bytes in between |
+
+- A value is a number, `*` for any value, or a range like `10..20`; text with spaces goes in quotes.
+- With `within:N` the values after the first one may lie anywhere in the N bytes from the first, in any order.
+- Adding a result puts each value into the address list under a group.
+
+### Custom types
+
+Types that scripts register (`registerCustomTypeLua`) appear in the value type list. They scan for an exact value, unknown initial value, changed, unchanged and same as first scan.
+
+### Compare to
+
+A next scan that looks at the earlier value (increased, decreased, changed, unchanged) compares with one of:
+
+- the previous scan,
+- the first scan,
+- results saved under a name with the Save button beside it. Saved results stay until New Scan.
+
+## Address list
+
+### Records
+
+- Groups and nested records.
+- Freezing: normal, allow increase, allow decrease.
+- Pointers with any number of offsets.
+- Hex and signed display, drop-down value lists, colours.
+- Hotkeys: toggle, activate, deactivate, set, increase, decrease.
+- Drag and drop, copy and paste as Cheat Engine XML.
+- The group options of Cheat Engine: hide children when deactivated, activate and deactivate children as well, set the value of children, always hide children, manual collapse.
+
+### Addresses
+
+- Addresses and pointer bases are address expressions: `"game.exe"+1A2B30`, `[[base]+8]+4`, registered symbols, exports.
+- `mainmodule` and Cheat Engine's `$process` stand for the base of the opened process's executable, so `mainmodule+1A2B30` keeps working when the game's exe is renamed. Both work the same in pointers, Auto Assembler scripts, Lua and the memory viewer's Go to Address.
+- Relative addresses (`+X`, `-X`) count from the nearest record above that has an address of its own, as in Cheat Engine; groups and scripts without one in between are skipped.
+
+### View options
+
+| Option | Choices |
+| --- | --- |
+| View → Address Column (also Settings → General → Address List) | the address as written, the address it resolves to, or both with the resolved one dimmed (the default) |
+| View → Address Digits | resolved addresses and pointer targets short (`P->F40000`), with at least 8 digits like Cheat Engine (`P->00F40000`), or at the pointer width of the process |
+
+## Address List Debug
+
+Table → Address List Debug, *Debug This Record* in a record's menu, or `Ctrl+Alt+Shift+D`. A second list of the open table for table authors and for working on Manifold.
+
+| Tab | Shows |
+| --- | --- |
+| **Records** | every record, also the children the address list hides |
+| **Table Check** | the problems of the whole table, kept up to date while the table changes |
+| **Activation Trace** | the last 500 times a record was switched on or off |
+| **Internals** | the address list's own state |
+
+`--open=recorddebug` opens the window at start, `recorddebug:<ID>` on that record, and `recorddebug:check`, `:trace` or `:internals` on that tab.
+
+### Records
+
+- Each row has the ID (marked when the table file gave it another one), kind, address as written with its offsets, resolved address, value with its raw bytes, the time since its last refresh, its flags and its problems.
+- Flags: frozen, queued, async, not saved, hotkeys, dropdown list or link, custom type, Lua events.
+- Columns can be hidden and moved (right-click the header). The filter takes a description, an ID or an address, and the arrow keys walk the list.
+- It follows the selection of the address list (Records menu); a double click or Enter selects the record there.
+
+The **inspector** beside it has everything about the selected record:
+
+- identity and position;
+- the address chain step by step: base or parent, each pointer read and offset, and the step where it breaks;
+- value and frozen bytes;
+- the script's allocations, registered symbols and labels;
+- the dropdown list or link, and the records whose lists link to it;
+- its path (right-click: Copy as Lua);
+- the Lua that looks it up, and the records its own Lua looks up;
+- its Lua events, hotkeys (and whether they are held until the table's script is accepted), its problems and its last switches.
+
+Copy Report (`Ctrl+C`) puts all of it into text.
+
+### Table Check
+
+Finds:
+
+- dropdown links to a record that isn't there, to itself, to a list without entries, to a name several records have, or to a list that links on;
+- Lua that looks up a description or ID with `getMemoryRecordByDescription`, `getMemoryRecordByID` or `manifold.record.find` and finds nothing or the wrong record, in the table script, record scripts, On Activate and On Deactivate, and `.lua` table files;
+- `manifold.record.find` paths that lead nowhere or to several records;
+- records with the same full path, which no lookup can tell apart;
+- IDs the table file gave twice, so a record got another one;
+- scripts without `[ENABLE]` or `[DISABLE]`;
+- addresses that are empty or relative to a parent without an address;
+- unregistered custom types;
+- hotkeys without keys, without a value, twice on one record or shared by several records;
+- group options on records without children.
+
+**Run Check with the Process** also resolves every address (and says at which step it breaks or that nothing can be read there) and assembles each script's `[ENABLE]` part, or `[DISABLE]` when it is on, without writing anything, like the script editor's Check.
+
+### Activation Trace
+
+For each of the last 500 switches:
+
+- when, how long it took and how long it waited in the queue;
+- how it ended: done, failed with the error and line, or stopped by Lua;
+- who started it: by hand or hotkey, Lua, or its group;
+- for scripts every write with its address and bytes, the allocations made and released, and the symbols registered and unregistered.
+
+### Internals
+
+Generation and identity of the table, record counts, deepest nesting, renumbered and unresolved records, which records are refreshed and how often, whether scripts are trusted, and the activation mode with the queue.
+
+## Table files
+
+Table → Table Files (`Ctrl+Alt+F`) shows the files stored inside the cheat table, such as Lua modules, Auto Assembler scripts, themes, images and sounds, which scripts read with `findTableFile`.
+
+### The list
+
+- Columns: name, type (found from the content first, then from the extension), size, how many scripts name the file, and the size the file takes in the `.CT` (a hidden column; right-click the header).
+- Click a header to sort, click again to turn the order, a third time for the order in the table.
+- The filter takes several words that match name or type.
+- Ctrl and Shift select several files, `Ctrl+A` all shown ones.
+- `F2` or a double-click renames in place; a name that is taken or not allowed is marked while typing.
+
+### Adding files
+
+- File → Add Files (`Ctrl+O`), a whole folder, or dropping files or folders from Explorer onto the window, also while it floats outside the main window. A file with the same name is updated.
+- Files are read off the UI thread. One file may be 256 MB and all files together 512 MB, as when a table is loaded.
+
+### Actions
+
+In the menu bar and the context menu:
+
+- Replace from disk.
+- Export (`Ctrl+E`): one file to a path, several into a folder, with a question before anything is overwritten. Export All.
+- Duplicate.
+- Delete (`Del`), with a question that says when scripts name the file.
+- Copy the name (`Ctrl+Shift+C`).
+- Copy as Lua: `findTableFile('name')`, or the lines that read the file into a string.
+
+### Preview and editing
+
+- The right side follows the content:
+  - text, Lua, JSON and Auto Assembler open in the code editor (JSON with check, Format and Compact; `Ctrl+F` searches the text while the cursor is in it and filters the list otherwise);
+  - pictures (PNG, JPEG, BMP, GIF, TGA) are shown fitted or in actual size;
+  - everything else as hex.
+- The switch above it shows any file as hex or as **Details**: exact size, size in the table, SHA-256, first bytes and the places that name the file (the table Lua script, record scripts, other table files) with the line; a click opens that place.
+- Edits stay a **draft** per file, marked with a dot in the list, until Put into the Table (`Ctrl+S`; File → Put All Changes into the Table for every draft) or Revert. Switching files or closing the window keeps the drafts.
+- The window follows the table at once: files a script creates, writes through `Stream` or deletes, and a loaded table. When a script changes a file that has a draft, a bar offers the table's version or keeping the draft.
+- Writing to a table file's stream from Lua marks the table as changed.
+
+### File names in the saved table
+
+Settings → Scripts → Tables → Table File Names picks how files are written:
+
+| Setting | Written as | Read by |
+| --- | --- | --- |
+| CE 7.5 | each file named by its tag: `<name.lua Encoding="Ascii85">` | Cheat Engine 7.5 and older |
+| CE 7.6 | `<File0 Name="name.lua" Encoding="Ascii85">`, `<File1 ...>` | Cheat Engine 7.6 and newer read `Name`; 7.5 shows only `File0` |
+| As Loaded (the default) | the spelling of the open table; CE 7.5 for a new one | |
+
+- A name that cannot be a tag (a space, a leading digit, brackets) is written the CE 7.6 way in every mode, so the table always opens again.
+- Both spellings are read; backups and `saveTable` follow the same setting.
+
+Not there yet: drag from the window to Explorer, an XML colouring, playing sounds.
+
+## Memory viewer
+
+As many windows as you like, each with its own File, Search, View, Debug and Tools menus like Cheat Engine's.
+
+### Disassembler
+
+- Zydis disassembler with symbols, jump arrows and flow colours.
+- Assembling in place with NOP fill; replacing code with NOPs and restoring it.
+- Copying addresses and instructions with names, module offsets or plain addresses.
+- Scripts from any instruction through templates.
+- **View → Show Symbols** switches names on or off. With it on:
+  - every place a symbol starts (a registered symbol, an export, or a Mono method) gets a header line;
+  - the instructions below it show their offset from that start (`+0`, `+3`, ...);
+  - call and jump targets show their symbol names (also `mov r11, <method>` before an indirect call), and addresses read as module+offset;
+  - when the listing starts inside a function, that function's name stays pinned as the first row while scrolling (a click goes to its start).
+
+  Off shows plain addresses.
+
+### Function bounds
+
+The function around an instruction: Home goes to its start, End to its last instruction, Ctrl+Shift+A selects it, and the Function menu copies it.
+
+The bounds come from the unwind data or the Mono or IL2CPP method where there is one. Otherwise they come from a search back for aligned int3 padding that checks that a path from there leads to the instruction and the function before it does not.
+
+### Flow graph
+
+G or View → Flow Graph shows the selected function:
+
+- its blocks laid out top to bottom with taken, not-taken and loop edges;
+- pan and zoom with a minimap;
+- a double click goes into a called function and Backspace comes back;
+- breakpoints and the current break line are marked;
+- Copy as Mermaid.
+
+### Hex view
+
+- Live change highlighting and in-place editing as bytes, integers, floats or doubles.
+- The bar between the disassembler and the hex view can be dragged, and the split is remembered.
+- View → Hex View hides the hex view and gives the disassembler the whole height (while the process is stopped the stack stays beside the registers). Anything that shows an address in the hex view brings it back.
+
+### Navigation and search
+
+- Go to address.
+- Byte search: the next match, or every match in a list that stays open and moves the viewer to the one you pick.
+- Bookmarks: ten slots. The set shortcut on a bookmarked line or the Bookmarks menu removes one.
+
+### Write history
+
+Tools → Write History lists every memory edit made in the viewers: time, address by name, what made the edit, the bytes before and after, and whether they are still in memory. Each edit can be undone or redone on its own.
+
+### Other tools
+
+- Saving a region to a file and loading a file into memory.
+- Filling memory, creating a thread, allocating memory, injecting a DLL.
+- File → Load Mono Runtime reads a Mono game's runtime without opening the Mono window.
+
+## Debugger
+
+For 64-bit and 32-bit (WOW64) processes, through Windows or in-process (Settings → Debugger; a 32-bit game gets the 32-bit agent `ManifoldAgent32.dll`).
+
+- Software and hardware breakpoints, break, step into, step over, run until return.
+- Editing registers and flags, a stack view, and the debug output of the process in the log.
+
+### Register panel
+
+Beside the code; its width can be dragged.
+
+- Marks values that changed since the last break and names the symbol a register points to.
+- Shows XMM0–XMM15 (XMM0–XMM7 for 32-bit processes) and MXCSR as floats, doubles, integers or hex.
+- A double click changes any register.
+- Each flag explains itself in a tooltip: its meaning, which instructions read it, its value at the last stop.
+- When the instruction at RIP is a conditional jump, cmov or set, the flags it reads are outlined and the panel says whether it will jump, move or set.
+- During a step the panel and the stack keep the last values instead of disappearing.
+
+The **stack** sits beside the hex view in the same column, with the offset from RSP, the value, the symbol it points to and the slot RBP points to.
+
+### Conditional breakpoints and register changes
+
+A breakpoint can carry a condition and a set of register changes, both written as small Lua-like expressions over:
+
+- the registers (`RAX`, `EAX`, `AL`) and the flags (`ZF`),
+- memory reads (`readInteger(RCX+8)`, `[RSP]`),
+- symbols.
+
+The process stops only when the condition holds. A breakpoint can also just change registers (`EAX = 0`, `RIP = RIP + 5`) or flags and keep running, or fire only in one thread. Data breakpoints (break when an address is read or written) carry the same conditions.
+
+The conditions and changes run inside the target, so a breakpoint that rarely matches barely costs anything.
+
+### Breakpoint list
+
+Every breakpoint with its type, condition, changes and hit count in one window, to add, edit or remove.
+
+### Thread list
+
+The threads of the process with their start address, TEB, priority, and whether a thread hides itself from debuggers.
+
+### Break and trace
+
+Sets a breakpoint and records the instructions the thread runs from it:
+
+- up to a chosen number of steps, stepping into or over calls;
+- with an optional start and stop condition;
+- calls and returns are indented into a tree, and each step keeps its registers.
+
+### Comments
+
+- A note on any instruction (`Ctrl+Shift+C`), saved in the table.
+- The comment column shows it first, in its own colour (Settings → Appearance → Code: Your Comments, set per theme and mode), and after it the automatic comment: the method name, the value a memory operand points at, or the effective address at a break.
+- A line that is too long for the column shows both in full when the mouse is over it.
+
+The **Comment List** (Table menu, the memory viewer's Tools and context menus, `Ctrl+Alt+Shift+C`) has every comment and header of the table:
+
+- sorted by module and offset, with where each one is now and a filter;
+- a double-click or Enter goes there in the disassembler;
+- comments and headers can be edited, copied (`Ctrl+C`, tab-separated) and removed one by one or several at once (`Ctrl`/`Shift` select, `Ctrl+A`, `Del`);
+- `Ctrl+Z` or Undo Remove puts them back while the same table is open;
+- edits and removals mark the table as changed.
+
+### Find out what…
+
+- what accesses an address,
+- what writes to it,
+- what addresses an instruction accesses,
+- what calls an address.
+
+Each runs in its own window with hit counts and the registers of the last hit.
+
+## Structure Dissect
+
+### Guessing and browsing
+
+- Guesses pointers, floats, strings and integers, follows pointers into nested structures, compares several addresses side by side, and edits names, types and values.
+- A pointer is any aligned value that points into committed memory, and a string stops before the next pointer.
+- The **Address** column shows where each field lies: the first address plus the offset and, below an expanded pointer, the address it points to plus the offset. View → Address Column hides it; a double-click browses the memory there, and the tooltip lists the address in every compared column.
+- The arrow keys move through the fields like a tree (Right opens a pointer, Left closes it).
+- The line below the fields shows the pointer path of the selected field, `[[base+50]+28]+10`, which a click copies (right-click for the field names or the address).
+- Structures are saved in the table.
+
+### Finding a field
+
+- A filter above the fields keeps the ones whose name, offset (`+1A0`), type or value matches.
+- An address typed there (hex, 10000 or more) keeps and selects the shown field that holds it and says how many bytes into the field it lies.
+- View → Go to Address (`Ctrl+G`) takes any address or expression and selects that field without filtering.
+- The Type menu shows the field's current value read as every type, so the right one stands out.
+
+### Windows and tabs
+
+File → New Window (or *Dissect in a New Window* on any address) opens another dissect window. With *Open as Tabs* (Settings → Debugger, on by default) they join the first one as tabs, as Auto Assembler scripts do.
+
+### Managed objects
+
+When a Mono runtime is loaded (see [Mono](#mono)), dissecting the address of a Mono object names it by its class and fills in the real field names, offsets and types straight from the runtime. Following a pointer to another object does the same, so no structure has to be built by hand.
+
+- Generic instances such as `List<Item>` or `Dictionary<K,V>` are read from the object's own class with their type arguments in the name.
+- Arrays show their elements as `[0]`, `[1]`, ... (up to 1024, structs inline).
+- `IntPtr` fields such as `m_CachedPtr` are pointers.
+
+IL2CPP, .NET, Unreal Engine and C++ RTTI name objects the same way; see their sections below.
+
+## Auto Assembler and code editor
+
+### Auto Assembler
+
+Cheat Engine's script language with `[ENABLE]`/`[DISABLE]`, `alloc`, `label`, `define`, `aobscan(module|region)`, `assert`, `registersymbol`, `readmem`, `reassemble`, `include`, `loadlibrary`, `createthread`, `{$lua}` blocks and more. See [AUTO-ASSEMBLER.md](AUTO-ASSEMBLER.md).
+
+- A new Auto Assembler or Lua script editor opens as a tab beside the editors already open, each tab with its own menus, keys and buttons.
+- With Shift held a tab can be dragged out into a window of its own.
+- Settings → Scripts → Script Editors → Open as Tabs switches back to one window per editor.
+
+### Code editor
+
+The Auto Assembler and script windows, the Lua engine, the Templates window and Table Files share one editor.
+
+- Find (`Ctrl+F`) and Replace (`Ctrl+H`) open a bar above the text with Match Case and Whole Word and the number of matches.
+- Previous and Next: `Shift+F3` and `F3`, or `Shift+Enter` and `Enter` in the field.
+- Replace and Replace All (one step for Undo).
+- Every match is marked in the text, a selection on one line becomes the search text, and `Esc` closes the bar.
+- The right-click menu has Find, Replace, Find Next and Find Previous beside the other edit commands.
+
+## Opcode converter
+
+Tools → Opcode Converter (`Ctrl+Alt+O`; also in the memory viewer's Tools menu at the selected address, and *Open in the Opcode Converter* on an instruction).
+
+- Turns bytes into instructions and instructions into bytes, for x64 or x86, at an address, so that rip-relative operands and jump and call targets come out right.
+- Type instructions on the left (one per line, `//` comments) or bytes on the right (`48 8B 05`, `488B05`, `0x48, 0x8B`, `\x48\x8B`); the other side follows.
+- A list shows each instruction's address, bytes and any problem with its line.
+- With a process open it can use its symbols.
+- The Copy menu copies the bytes spaced, without spaces, as an escaped string or a C array, the instructions, or a listing with addresses.
+
+## Script templates
+
+AOB injection, code injection, full injection and more, as files in the `templates` folder, sorted into categories by folder or by their settings, with inputs, includes and a preview. Templates of the Manifold Template Loader for Cheat Engine work unchanged. See [TEMPLATES.md](TEMPLATES.md).
+
+## Pointer scan
+
+Tools → Pointer Scan (`Ctrl+Alt+P`), *Pointer Scan for This Address* in the address menus, in an address list record's menu and in Structure Dissect's File menu.
+
+It finds the chains of pointers that lead from a module to an address, so a value can be found again after the game starts anew: `[["game.exe"+offset]+18]+34`. 64-bit and 32-bit processes.
+
+### How it searches
+
+1. The scan reads the process once into a pointer map: every pointer-aligned value that points into the memory read, eight bytes each, sorted by where it points.
+2. It searches backwards from the address level by level, up to the chosen number of levels (5 by default, at most 12) and the largest offset (1000).
+3. Each pointer in the heap is followed once, along its shortest way to the address and with the smallest offset.
+4. A path ends at the first pointer that lies in a module; a module pointer gets one path for every way into the structure it points to.
+
+Deeper paths come last, so the limit on the number of paths (2,000,000 by default, Scan menu) cuts those first. Paths beyond 64 MB are kept in a temporary file.
+
+### What it reads
+
+- By default only writable memory is read, memory-mapped files and the libraries of Windows are left out, and pointers must point to an address that is a multiple of the pointer size. The Scan and Memory menus change that.
+- Thread stacks are not used as bases.
+
+### The window
+
+- Each path with its offsets, where it points now and the value there (type in the Paths menu).
+- A double-click or the context menu adds a path to the address list as a pointer record.
+- Paths can be copied, ordered by level, last offset or base address, saved to a `.mptr` file in the `tables` folder and opened again.
+- Paths are stored as module name and offset, so they hold when modules load elsewhere.
+
+### Rescan
+
+Keeps the paths that lead to an address, or to a value, in the process that is open now. After a restart, find the value again and rescan with its new address: the paths that survive are the stable ones.
+
+For a single level, [Static pointers](#static-pointers) is quicker and stays its own window.
+
+## Static pointers
+
+*Find Static Pointers*: Tools menu and the memory viewer's Tools menu, `Ctrl+Alt+K`. For one address it is in the right-click menus of the address list, the found list, the hex view and the other address menus, and in Structure Dissect's File menu.
+
+- Looks through the writable sections of the loaded modules for pointers to the address, or to a structure start up to a largest offset (1000 by default) before it.
+- It is a single level, not a pointer scan, and takes well under a second.
+- Each hit shows `"game.exe"+offset`, the offset to the address and whether the pointer still holds the same value.
+- A double-click adds it to the address list as a pointer.
+
+## Speedhack
+
+The game's time runs faster or slower by a factor.
+
+### Using it
+
+- *Speedhack* at the bottom of the scan panel has the switch (`Ctrl+Shift+H`), the factor as a number, a slider from 0.1 to 10 and buttons for 0.25, 0.5, 1, 2, 5 and 10.
+- `Ctrl+Alt+Up` and `Ctrl+Alt+Down` step through the usual factors.
+- The menu of the process in the title bar has the same choices, also in compact mode.
+- Scripts use `speedhack_setSpeed(speed)` and `speedhack_getSpeed()` as in Cheat Engine, or `manifold.speed`.
+- 0 stops the time, 1000 is the highest factor.
+
+### How it works
+
+- A small library is loaded into the game: `ManifoldAgent.dll`, or `ManifoldAgent32.dll` for 32-bit games. It is the same file the in-process debugger uses, and each of the two works with or without the other.
+- The first five bytes of these functions are replaced by a jump to it: `RtlQueryPerformanceCounter` (which `QueryPerformanceCounter` leads to), `GetTickCount`, `GetTickCount64` (in kernel32 and in kernelbase) and `timeGetTime`.
+- The library returns `base + (real - reference) * speed` and moves base and reference on every change, so a clock never jumps and never runs backwards when the speed changes.
+- `Sleep`, waitable timers and the wall clock (`GetSystemTimeAsFileTime`) stay as they are: scaling the wall clock breaks certificate checks and save-file times.
+- The jumps are written while the process is paused and no thread stands in the bytes.
+
+### Turning it off
+
+Turning it off sets the speed back to 1.
+
+- If the game's clocks still equal the real ones (the speed never differed from 1), the hooks are taken out at once, every byte is restored and the library is unloaded.
+- After a speed other than 1 the game's clocks are ahead of or behind the real ones. Taking the hooks out would make them jump, backwards after a fast run, which freezes games that wait for a point in time. So the hooks stay and pass time on at normal speed, as in Cheat Engine.
+- *Remove Hooks* (below the switch and in the process menu) takes them out regardless and says what happens.
+
+### When Manifold Engine closes or crashes
+
+- On a normal close and when the process is closed, the speed goes back to 1 first.
+- If the program is killed or crashes, the library notices it through a handle to the program and goes back to speed 1 by itself; the game keeps running.
+- The hooks stay at normal speed, and a Manifold Engine started later takes them over when it opens the game.
+- No thread of the speedhack runs in the game at any time.
+
+### Limits
+
+- Tools → Scan for Patches leaves the speedhack's own jumps out of its list, like the debugger's breakpoints.
+- Games with anti-cheat are not supported: they block the library or detect the changed time functions.
+
+## Lua
+
+Lua 5.4 with two APIs side by side. The Lua engine opens by itself when a script prints (*Show on Print*, saved with the settings).
+
+### The Cheat Engine API
+
+See [LUA-API.md](LUA-API.md).
+
+- Memory, symbols, AOB scans, `autoAssemble`, the address list and its records, timers, hotkeys, `createThread` with a non-blocking `sleep`, debugger breakpoints with callbacks.
+- Menu items that scripts add to the memory viewer show up in its context menu and menu bar. Items added to the main form's menu show up in the main window's Extensions menu or in its File, Edit, Table and Help menus.
+- Windows that scripts build with `createForm` are drawn with Lazarus' layout rules: panels, labels, buttons, text fields, lists, tree views, splitters, menu bars, context menus and paint boxes, whose canvas drawing is replayed by the graphics card.
+
+### The manifold API
+
+The `manifold` namespace is the program's own API with one fixed, checked schema. See [MANIFOLD-API.md](MANIFOLD-API.md).
+
+- Coloured log levels and channels in the Lua engine output.
+- Process and typed memory helpers that return `nil, error` with an `ME-` code and the script line.
+- Protected calls with tracebacks.
+- **`manifold.record`**, the table's memory records:
+  - find by id, description or path; read and write values as the address list does; switch scripts and groups on and off; create and remove records;
+  - a path is the list of descriptions from the top level down, `manifold.record.find({ "Player", "Stats", "Health" })`. It stays when ids change and finds records in tables that repeat names;
+  - `record.find("Multiplier:")` finds a record below another one, and `record.path()` gives the path;
+  - a name or path that several records have fails with `ME-6011` instead of picking one.
+
+## Script windows: manifold.ui
+
+`manifold.ui` builds windows in Manifold's own look, drawn by the graphics card. See [MANIFOLD-API.md](MANIFOLD-API.md).
+
+- **Widgets**: rows, grids, cards, tabs, tables, trees, radio groups, colour pickers and canvases.
+- **Beyond windows**: dialogs, notices with progress, and entries in the main window's Extensions menu, title bar and status bar.
+- A script's windows and entries go away when it runs again.
+- A floating script window can be see-through: `opacity` and `inactiveOpacity`.
+
+### Window options
+
+- Size limits (`minWidth`, `minHeight`, `maxWidth`, `maxHeight`), a fixed or automatic size, a first position (centre, mouse, or exact), staying on top.
+- A window with a `key` keeps its place, size and dock spot between runs.
+- `modal = true` on any window makes it a dialog in front of the program that blocks it until it is closed.
+
+### Widget options
+
+- Buttons take a keyboard `shortcut` and a `confirm` question; a button with an icon and no text is an icon button.
+- Inputs take `readOnly`, `maxLength` and `focus`; containers a `gap` and a scrolling area.
+- Sliders snap to a `step` and keep their value within `min` and `max`, also when typed.
+- Combos show a `hint` while nothing is chosen.
+- Texts and headings take `bold`, `size`, `align` and `color`.
+- A checkbox can be drawn as a switch (`style = "switch"`), and a combo can tick several items (`multi = true`; its value is then a list).
+- `image` widgets take a picture file.
+
+### Layout at any size
+
+Nothing is cut off at narrow sizes:
+
+- The labels of a column, section or window line up in one label column, and the fields fill the rest of the line.
+- `labelPosition` puts labels `left`, `above` or `right`, for a whole container or one field. Without one, labels move above the fields when the window gets too narrow for them.
+- Widgets in a row without a width share the free width, and a spacer pushes what follows to the right.
+- `wrap = true` moves what does not fit to the next line.
+- A negative height fills the rest of the window.
+
+### Widgets that follow other widgets and records
+
+- **Enabled When**: any widget of a form can follow another one without code (`enabledWhen = "god"`, `"not god"` or `"mode = Multiplier"`). It is enabled only while that switch is on or that item is chosen.
+- **Memory records**: a checkbox, button, number, slider, input, text, combo or radio can be bound to a memory record of the table (`record = "God Mode"`).
+  - The switch shows and switches the record, a button toggles it, and the value widgets show and write its value.
+  - Values are refreshed ten times a second while the window is open.
+  - A widget whose record is missing stays disabled until the table has it.
+
+### Hotkeys
+
+| Option | Widgets | Effect |
+| --- | --- | --- |
+| `hotkey` (like `F1` or `Ctrl+F2`) | checkbox, button | switches or clicks it; a checkbox shows the key beside it |
+| `hotkeyIncrease`, `hotkeyDecrease` | number, slider | moves it by `hotkeyStep` (else its step, else 1) within its limits |
+| `hotkeyNext`, `hotkeyPrevious` | combo, radio | chooses the next or previous item |
+
+The keys work from anywhere, also while the game has the focus, as long as the window is open. The keys of value widgets show after the field.
+
+### Tables and items from Lua
+
+- A table widget's rows can be read and changed one at a time: `getRows`, `getRow`, `addRow`, `setRow`, `removeRow`.
+- A combo's, radio's or tree's items are read with `getItems`.
+
+### Forms from files
+
+- A window built with `manifold.ui.form.load` reloads live: saving its `.form.lua` file rebuilds the widgets in the running window with the script's handlers, and widgets that keep their name keep their value.
+- `manifold.ui.form.load` returns the modal forms of the file as a third table (`modals.<name>.show()`).
+- A form can also be a table inside the script (`local form = { form = 1, ... }`) that `manifold.ui.form.build` makes the window from; saving that script rebuilds its running window live too.
+
+### Examples
+
+- `Examples/Manifold-UI-Demo.lua` shows all of it.
+- `Examples/Form-Demo.lua` loads `Examples/Form-Demo.form.lua`.
+- `Examples/Manifold-Snake.lua` is a small game on a canvas, steered with the keyboard through `onKey`. It also measures frames per second, the Lua time per frame and the drawings per frame, with a slider that adds up to 20000 moving dots.
+
+## Form Editor
+
+Tools → Form Editor (`Ctrl+Alt+G`) lays out a `manifold.ui` window by hand.
+
+### Parts of the editor
+
+- A palette, an outline with drag and drop, and a live preview drawn by the same code as the real window. Click a widget to select it, or switch to **Try** to use it.
+- The options and handler names of the selected widget, undo, and the Lua it turns into.
+- The problems list repairs what it can with one click; the toolbar wraps instead of cutting off.
+- The editor shows when the open file is live.
+
+### Making a form
+
+- Widgets move by dragging them in the preview too, copy and paste between forms, and come from templates and snippets (File → New from Template, Insert).
+- **File → Import Cheat Engine Form** reads a form from a `.FRM` file, a cheat table's `<Forms>` or the open table: pixel positions become rows, grids and splits, event names become handler names, and a list says what had no counterpart.
+- **File → New Trainer from the Table** makes a form from the open table in one step:
+  - every script and group becomes a switch, every value a field (a combo for a drop-down list, a text field for text), bound to its record;
+  - the table's groups become sections, and what belongs to a script sits indented below its switch, enabled while it is on;
+  - the switches get F1, F2, ... as hotkeys, skipping keys the table's own hotkeys use.
+- **File → New from Template → Trainer** lays out categories of switches, modes and multipliers; the snippets Switch with Slider and Mode with Slider add one pair at a time.
+- A record dragged from the address list becomes a switch, combo, field or number bound to it.
+
+### Size and layout
+
+- Width and Height are a choice of Auto, Fill and Fixed (Fixed starts from the size the widget has in the preview).
+- The preview keeps to the window's size limits, and its corner grip tries other sizes.
+- Dropping a widget on the left or right edge of another one in a column puts both side by side into a new row.
+
+### Editing widgets
+
+- The context menu selects the parent (Alt+Left), shows a widget's handler (also a double click on it), wraps widgets in a container and unwraps one.
+- **Change Kind** where nothing is lost: row, column, grid and section; number and slider; combo and radio; text and heading.
+- F2 jumps to the name. Handlers named after a widget follow a new name in the form and the script.
+- The outline has a Find field (Ctrl+F) and takes the arrow keys. It draws its own rows with indent guides, folds containers and scrolls sideways for deep trees.
+- A long path above the preview folds its middle into a menu.
+- Enabled When is set up in its own group: the editor draws the link between the two widgets, shows the start state dimmed and plays it in Try.
+- The record of a widget is picked from the open table in the Memory Record group.
+- Hotkeys are set by pressing them in the Hotkey field. The problems list names keys used twice, keys a record of the open table uses too, and buttons whose confirm question a hotkey cannot answer.
+
+### Several widgets at once
+
+- Ctrl+click adds or takes one out, Shift+click in the outline takes the rows between, Ctrl+A every widget of the container.
+- The properties then show the options they all have and change all of them, marking options whose values differ.
+- Delete, Duplicate, Copy, Cut, Move Up and Down, Wrap In, Change Kind, dragging, Enabled When and a wire from the port take every selected widget.
+
+### The work surface
+
+- The preview is a work surface that moves by dragging empty space, the middle button or the wheel. The form moves by its title.
+- Each form on the work surface is a layer of its own: the selected one lies on top with its title, outline, size guide and marks; links and chips lie below the forms.
+- The places of the form and the chips are saved in the form file (`editor`), which `manifold.ui.form.load` ignores.
+- A right click on empty space shows everything, goes back to the form, puts the chips back and lists the functions no widget calls.
+
+### Handlers as function chips
+
+A form can be linked to the script that holds its handlers (saved as `script` in the form file; Export Script links it).
+
+- Each handler shows as a **function chip** beside the form, linked by a curve to its widget. Links leave the form at ports on its edge instead of crossing it.
+- A click on a chip, the button beside a handler or a double click on its name shows the function in the linked script. The editor's bottom pane edits it directly: saved together with the form, undone with it, and refreshed when the file changes on disk.
+- A missing function is drawn dashed and added on the click, without touching the rest of the script.
+- A link under the mouse lights up: a click shows its function, a right click unlinks it.
+- A chip's menu shows the function, renames it (in the script and every widget), puts it back beside the form, unlinks it from every widget and inserts ready-made lines: write to the log, enable or disable a widget, set a widget's value, write or switch on a memory record of the open table.
+- Widgets bound to a memory record show it as a pill left of their form, dashed when the open table lacks it.
+- Run Script runs the linked script. The script pane completes the form's widgets after `w.`, and for `w.<name>.update(`, `get` and `set` it shows what that widget's kind takes, key by key.
+
+### Wires from the port
+
+The selected widget has a port beside its form. A wire dragged from it:
+
+| Onto | Does |
+| --- | --- |
+| a function chip | the widget's handler calls it |
+| a checkbox, combo or radio | the widget follows it (Enabled When) |
+| a modal form | a button opens it |
+| empty space | offers a new function, or one the script has that no widget calls yet |
+
+While dragging, a tooltip says what letting go will do.
+
+### Modal forms
+
+- A form file can hold modal forms (`modals`). The editor shows each as its own frame on the work surface.
+- A button's **Opens** names the modal it shows (drawn as an arrow to it), and **Closes** hides the window the button is in, without code.
+- Try flashes the modal a button opens.
+
+### Files
+
+- The editor saves form and handlers in one `.lua` script: the form is a table in it, shown in the script pane as one locked line and written out on saving.
+- Older `.form.lua` files with a linked script still open. File → Convert to One File moves the form into its script (the `.form.lua` file stays where it is).
+- Export Script into a script that already loads the form adds only the handler stubs it lacks and keeps the rest.
+- It can also export one standalone script with plain `manifold.ui` calls.
+
+## Autorun modules
+
+The Lua scripts in the `autorun` folder next to the program run at start. See [AUTORUN.md](AUTORUN.md).
+
+- Files in its root run as they are, like in Cheat Engine.
+- Modules live in `autorun\modules`, each a file or a folder with an `init.lua`, sorted into category folders.
+- A module's header names it and its version and says which modules it requires, so the order follows from that. A missing requirement or an error stops only that module.
+- `require` finds a module's own files, other modules by name and the shared `autorun\lib`.
+- Extensions → Modules lists everything with state, version, load time and errors, and switches, reloads and allows modules. Scripts use `manifold.module`.
+- A script that is new in the folder is held until it is allowed, and a script that writes into the folder is logged, so a table cannot plant one unseen.
+- The modules that come with the program: Godot 4 support for Structure Dissect and a signature maker. C++ RTTI is built into the program (see [C++ RTTI](#c-rtti)).
+
+Processes can be opened automatically when they start (Settings → Scripts).
+
+## Mono
+
+For Mono-based Unity games, those with `mono-2.0-bdwgc.dll` or `mono.dll`, in 64-bit and 32-bit.
+
+### What it reads
+
+- The classes, methods and field offsets are read from the runtime.
+- An address like `Assembly-CSharp:PlayerController:TakeDamage` resolves to the JIT-compiled code, so scripts and the Auto Assembler can target a method without an AOB scan.
+- Lua: `mono_isPresent`, `mono_enumClasses`, `mono_class_getMethods`, `mono_class_getFieldOffset` and `mono_getAddress` ([LUA-API.md](LUA-API.md#mono--net)).
+
+### How
+
+- No native DLL is injected. A small worker (x64 or x86 code) is written into an executable page and run on one thread attached to the Mono domain, and the `mono_*` functions are called through it.
+- To read the class list it loads a small managed dumper (`Managed/ManifoldDumper`, .NET 3.5, embedded in the program) into the game's root domain. The dumper walks every assembly on its own thread and hands Manifold the classes, fields and methods in one block.
+- Manifold checks samples of that block against the runtime, and reads the classes through the `mono_*` functions alone when the dumper cannot run.
+- A root domain cannot unload an assembly, so the dumper stays loaded until the game ends; only its data is freed.
+
+### Where
+
+- When the game has a Mono runtime, Extensions → Unity (Mono / IL2CPP) in the main window's title bar has the entries to load it, reload its classes and open the Mono window.
+- The Mono window's **Classes** tab lists the classes as a tree by assembly and namespace; a filter opens the groups that hold a match.
+- The **inspector** shows an object's static members in a section of their own below its instance members (the Statics switch hides them).
+- The **scene explorer** lists scenes and objects through Manifold's managed agent, which runs on the game's per-frame callback.
+
+## IL2CPP
+
+IL2CPP builds of Unity games, those with `GameAssembly.dll`, in 64-bit and 32-bit (a 32-bit game gets an x86 build of the worker).
+
+### What it reads
+
+- Through the `il2cpp_*` functions, with metadata calls only: classes, parents, methods with their parameter counts, and instance field offsets.
+- IL2CPP has no JIT, so every method already has its code in `GameAssembly.dll`. Loading reads all method addresses once (one call per class), so:
+  - `Class:Method` names resolve in addresses and the Auto Assembler;
+  - the memory viewer names the methods it shows;
+  - Structure Dissect names objects by their class.
+- The same Extensions → Unity menu, Mono window (Classes tab) and `mono_*` Lua functions serve both runtimes, as in Cheat Engine; `mono_isIl2Cpp()` tells them apart.
+
+### Scene explorer and inspector
+
+They work for IL2CPP too. An IL2CPP game cannot load a managed assembly, so a small native stub runs there instead of the managed agent:
+
+- Manifold points the `MethodInfo` of a per-frame Unity method at the stub: `UnitySynchronizationContext.ExecuteTasks`, else `BeforeRenderHelper.Invoke` or `Canvas.SendWillRenderCanvases`.
+- The stub runs a bounded batch of `il2cpp_runtime_invoke` calls per frame on the game's main thread and then goes on to the method itself. No game code is patched, and Shut Down sets the pointer back.
+- Objects the explorer shows are kept alive with GC handles, exceptions stay inside `il2cpp_runtime_invoke`, and field values are read straight from memory.
+- What a game's build has stripped (for example `Object.FindObjectsOfType`) is reported as missing instead of being called.
+- It starts only when you switch the explorer on in the Mono window. The setting that starts the explorer by itself applies to Mono games.
+
+## .NET
+
+.NET Framework and .NET 5 and later games (such as Terraria), 64-bit and 32-bit, read from outside the game: nothing runs inside it.
+
+- Manifold's .NET helper (`ManifoldClr.exe`, `ManifoldClr32.exe` for 32-bit games) reads the game through the runtime's own data access library.
+- Extensions → .NET loads the classes; the Mono / .NET window (`Ctrl+Alt+M`) lists them and inspects objects.
+- Static fields resolve as `Class:Field` and compiled methods as `Class:Method` in every address, so a pointer from a static field works in the address list.
+- The GC heap can be walked and the instances of a class listed. Objects move when the garbage collector runs; a path from a static field finds the object again each time.
+- Lua scripts use `manifold.dotnet` ([MANIFOLD-API.md](MANIFOLD-API.md#manifolddotnet)) and Cheat Engine's `getDotNetDataCollector`.
+
+## Unreal Engine
+
+Unreal Engine 4 and 5 games, 64-bit and 32-bit, are read without an SDK, game offsets or signatures.
+
+### Finding the engine
+
+The name table (FNamePool, or TNameEntryArray before 4.23), the object array and the reflection layout are found in the running game, read-only, in about a second, by itself when an Unreal game is opened.
+
+### In Structure Dissect
+
+- A new structure is named after the object's class and starts at the object.
+- The fields are the class's reflected properties with their real names, nested structs inline, bitfield bools as one-bit fields, and the native gaps in between.
+- Expanding an object pointer or a TArray fills that one the same way.
+
+### Types and symbols
+
+- The custom types `UE FName`, `UE FString` and `UE Object Index` show names, strings and weak references as text.
+- `<Type>_<Property>` symbols such as `Actor_RootComponent` (and `GObjects`, `FNamePool`, `GameEngine`) resolve in every session, so address list entries keep working after a game update.
+
+### The menu and window
+
+Extensions → Unreal Engine (`Ctrl+Alt+U`) has:
+
+- the status, start and shut down;
+- quick dissects of the engine, world, player controller and pawn;
+- the switches for each part;
+- a window with every class, struct and enum, their properties, functions, live instances and enum values, a search over all property names (`.name`), and "who owns this address".
+
+### Lua
+
+Scripts use `manifold.unreal` (status, configure, fields, offsets, owner, walk, dump, ...). `manifold.unreal.configure` takes addresses, layout offsets or search patterns for a game the search does not find.
+
+An old `Manifold-UE.lua` in the `autorun` folder is skipped.
+
+## C++ RTTI
+
+Class names from the run-time type information of programs built with MSVC or clang-cl, 64-bit and 32-bit, read-only and without an index of the whole game.
+
+### In Structure Dissect
+
+- A new structure and an expanded pointer are named after the object's class, and an address at a base class part moves to the object's start.
+- After the guess, pointer fields are labelled: `vftable`, `vftable (Base)`, `Class*`, `vbtable`, and `virtual N` in a virtual function table.
+- A member object with a table of another class becomes an embedded structure named after that class.
+
+### Symbols and inheritance
+
+- `<Class>::vftable` and `<Class>::vftable@<Base>` symbols resolve in every session, so a table finds a class again after a game update.
+- Single, multiple and virtual inheritance are read, also an object that starts with its virtual base table.
+
+### Menu and Lua
+
+- Extensions → C++ RTTI shows what was seen and turns the dissect stage off.
+- `manifold.rtti` has the class of an address, the owner of an address, base classes, virtual function tables, the instances of a class and the name demangler.
+
+### Limits
+
+- RTTI never answers for an object the Unreal tool or a Godot script claims.
+- Unreal Engine games are built without RTTI, and GCC builds use another format; there it finds nothing.
+
+## Logs and error codes
+
+### Log window
+
+- Long and multi-line messages (Lua tracebacks included) wrap instead of being cut off.
+- Repeats in a row show as one entry with a count.
+- The list filters by level, area and text, with counters for warnings and errors that filter with one click.
+- Below the list the picked entry is shown in full: the message as selectable text, the time to the millisecond, how long after the entry before it, the thread and the source line, and what an `ME-` code in it means.
+- Entries can be picked with Ctrl and Shift and copied as text (Ctrl+C).
+- Everything is also written to `Manifold-Engine.log`, with milliseconds.
+
+### Error codes
+
+Every failure ends in a code like `ME-1006`; hovering it shows the cause and what helps. The list is in [ERRORS.md](ERRORS.md) and in the program (Help → Error Codes).
+
+A crash writes a minidump and a short report into `crashes`.
+
+## Keyboard shortcuts
+
+- Every window's features have shortcuts: the same keys as Cheat Engine 7.5 where it has one (Ctrl+M memory viewer, Ctrl+Alt+A Auto Assembler, F5/F6 what accesses/writes, Ctrl+B browse, Ctrl+D disassemble, Ctrl+G go to, F7/F8/F9 stepping, Ctrl+I code injection template and so on) and own keys for the rest.
+- Menus, context menus and button tooltips show them.
+- Keys of the focused window win, so one key can mean the right thing in each window.
+- Settings → Keyboard changes any of them: record new keys, add a second shortcut, remove or reset. It warns when two commands of one window share keys. Changes go into `configs\Manifold-Engine.ini` under `[Shortcuts]`.
+- The default list is in [SHORTCUTS.md](SHORTCUTS.md), the current one in the program (Help → Keyboard Shortcuts, F1).
 
 ## Use
 
+### Opening processes and tables
+
 - Many games run with administrator rights or protect their memory; start the program as administrator (Help → Restart as Administrator) when a process cannot be opened. Protected processes and anti-cheat systems cannot be opened at all.
-- Dropping a `.CT` file on the main window opens it, with the usual question when the current table has unsaved changes; holding Shift while dropping merges it into the current table instead. This works from Explorer also when the program runs as administrator. Only one table is taken per drop. Files dropped onto the Table files window are added to the table instead.
-- Session backups: while there are changes that are not saved, the address list, the structures, the table script and everything else a `.CT` holds are written to `backups` next to the program, every 5 minutes and once more when the program closes, and only when something changed since the last backup. This also happens without a table file. Each session has a folder of its own, named after the table file, or after the opened process when there is no table file, or `session` without either, and each backup is a normal `.CT` named after its time (`2026-11-20_04-15-30.CT`). The 20 newest per folder are kept; only files with such a name are ever removed. File → Backups lists the newest backups of the current session, opens any other one, writes one at once and opens the folder. An opened backup is an unsaved table without a file name, so Save asks where to put it. When a run ended without closing properly and left unsaved changes, the next start offers its last backup. Settings → Scripts → Backups turns this off and sets the time between backups, the number of versions and the folder. Not part of a backup: scan results, and script text in an open editor that was not applied yet.
-- `Manifold-Engine.exe game.CT --process=game.exe` opens a table and a process at start; `--table=game.CT` names the table as an option. `--open=` opens windows at start, several separated by commas: `memory`, `hex`, `structure`, `script`, `lua`, `mono`, `unreal`, `log`, `settings`, `keyboard`, `appearance`, `symbols`, `regions`, `tablefiles`, `patches`, `dissect`, `asmsearch`, `bytes`, `pointerscan`, `staticpointers`, `writehistory`, `comments`, `recorddebug` (`recorddebug:<ID>` on that record, `recorddebug:check`, `:trace`, `:internals` on that tab), `flowgraph`, `opcodes`, `templates` (`templates:<Id>` opens it at that template), `shortcuts`, `processes`, `about`, and for the profiler window `profiler`, `breakdown`, `threads`, `checks` and `appinfo`. An option the program does not know is ignored.
-- Shortcuts: F1 lists all of them. The main window has the table, process and window menus (File, Edit, Process, Table, View, Tools, Help); code, memory and debugger tools sit in the memory viewer's own menus, as in Cheat Engine.
-- Next to the program: `configs` holds the settings (`Manifold-Engine.ini`), the window layout (`Manifold-Engine.layout.ini`) and what scripts store with `getSettings` (`Manifold-Engine.scripts.ini`); `tables` is where the dialogs to open and save tables start, `sounds` takes sound files that replace the built-in ones, `autorun` and `templates` hold scripts and templates, `crashes` the crash reports, `backups` the session backups, `logs` the log of this run and of the one before (`Manifold-Engine.log`, `Manifold-Engine.previous.log`). The first start of a new version moves these files out of the program folder into `configs` and `logs` (and copies the settings and layout of the earlier Manifold CheatEngine name) and renames `Tables` and `Sounds` to `tables` and `sounds`; a file that already exists in the new place is never replaced.
+- Dropping a `.CT` file on the main window opens it, with the usual question when the current table has unsaved changes. Holding Shift while dropping merges it into the current table instead.
+  - This works from Explorer also when the program runs as administrator.
+  - Only one table is taken per drop.
+  - Files dropped onto the Table Files window are added to the table instead.
+- Scripts that only run Lua, such as one that starts the game, work without an opened process. Scripts that need the game say so when they are turned on.
+
+### Menus and modes
+
+- The main window has the table, process and window menus (File, Edit, Process, Table, View, Tools, Help). Code, memory and debugger tools sit in the memory viewer's own menus, as in Cheat Engine.
+- F1 lists all shortcuts.
 - View → Compact Mode shows only the address list, without the scanner.
 - View → Release Mode is for using a finished table: the address list shows only Active, Description and Value, the Tools menu and the technical menu entries are gone (Edit keeps only Settings), a double click turns a script on or off, and messages leave out their error codes. The same menu switches it back.
-- Scripts that only run Lua, such as one that starts the game, work without an opened process. Scripts that need the game say so when they are turned on.
-- When the program closes while scripts are active in the game, it asks whether to turn them off first, so nothing stays behind in the game. Settings → Scripts can make that choice permanent.
-- A table from someone else cannot run code by itself. Its Lua script runs only when you allow it (Settings → Scripts: ask, always, never). Until you allowed it or turned a script on yourself, the table's hotkeys cannot turn scripts on or off; hotkeys that set or change a value work at once, and while the question about the Lua script is open no hotkey fires. A hotkey on the left or right mouse button alone, with more than five keys or with an unknown key is dropped when the table is read. Tables nested deeper than 32 groups lose the levels below, a file inside a table may unpack to 256 MB at most (512 MB for all of them), and Check in a Lua script window compiles the script without running any of it. Check and Save in an Auto Assembler window run the script's `{$lua}` parts and Lua-made commands the way Cheat Engine does (with `syntaxcheck` set) only once the table's scripts are allowed; before that they only compile the Lua parts, and the result says so. Nothing a script does outside the game goes unseen: when a script starts a program (`shellExecute`, `createProcess`, `runCommand`, `os.execute`, `io.popen`), injects a DLL (`injectDLL`, or `loadlibrary` in the Auto Assembler) or sets a user environment variable, the log gets a warning in the area *Script* with the command and the script line it came from.
-- Settings → General → Diagnostics turns on the profiler. Help → Profiler and Diagnostics (`Ctrl+Shift+F12`, also without the profiler) shows the frame graph, the breakdown of a frame (engine tick, Lua timers and tasks, every window, drawing, waiting for the display), the program's threads with their processor use, checks of the setup and environment (rights, writable folder, graphics driver, a window drawn on one graphics card but shown on another, frames that miss the display's refresh, overlays hooking the program, hypervisor, microcode, memory, Lua timers) and app info; Copy report and Save report put all of it into one text. `Manifold-Engine.exe --profile-report=report.txt --profile-seconds=10` measures for that long, writes the report and closes; `--open=profiler`, `breakdown`, `threads`, `checks` or `appinfo` opens the window on that tab at start.
+
+### Command line
+
+`Manifold-Engine.exe game.CT --process=game.exe` opens a table and a process at start; `--table=game.CT` names the table as an option.
+
+`--open=` opens windows at start, several separated by commas:
+
+| Names | Opens |
+| --- | --- |
+| `memory`, `hex`, `structure`, `dissect`, `flowgraph`, `opcodes` | code and memory tools |
+| `script`, `lua`, `templates` (`templates:<Id>` at that template) | script editors |
+| `mono`, `unreal` | engine windows |
+| `pointerscan`, `staticpointers`, `asmsearch`, `bytes`, `patches`, `writehistory`, `comments` | search and history |
+| `tablefiles`, `recorddebug` (`recorddebug:<ID>`, `recorddebug:check`, `:trace`, `:internals`) | the table |
+| `symbols`, `regions`, `processes` | process |
+| `log`, `settings`, `keyboard`, `appearance`, `shortcuts`, `about` | program |
+| `profiler`, `breakdown`, `threads`, `checks`, `appinfo` | the profiler window on that tab |
+
+An option the program does not know is ignored.
+
+### Folders next to the program
+
+| Folder | Holds |
+| --- | --- |
+| `configs` | the settings (`Manifold-Engine.ini`), the window layout (`Manifold-Engine.layout.ini`) and what scripts store with `getSettings` (`Manifold-Engine.scripts.ini`) |
+| `tables` | where the dialogs to open and save tables start |
+| `sounds` | sound files that replace the built-in ones |
+| `autorun`, `templates` | scripts and templates |
+| `crashes` | crash reports |
+| `backups` | session backups |
+| `logs` | the log of this run and of the one before (`Manifold-Engine.log`, `Manifold-Engine.previous.log`) |
+
+The first start of a new version moves these files out of the program folder into `configs` and `logs` (and copies the settings and layout of the earlier Manifold CheatEngine name), and renames `Tables` and `Sounds` to `tables` and `sounds`. A file that already exists in the new place is never replaced.
+
+### Session backups
+
+While there are changes that are not saved, everything a `.CT` holds (the address list, the structures, the table script and the rest) is written to `backups` next to the program.
+
+- Every 5 minutes and once more when the program closes, and only when something changed since the last backup. This also happens without a table file.
+- Each session has a folder of its own, named after the table file, or after the opened process when there is no table file, or `session` without either.
+- Each backup is a normal `.CT` named after its time (`2026-11-20_04-15-30.CT`).
+- The 20 newest per folder are kept; only files with such a name are ever removed.
+- File → Backups lists the newest backups of the current session, opens any other one, writes one at once and opens the folder.
+- An opened backup is an unsaved table without a file name, so Save asks where to put it.
+- When a run ended without closing properly and left unsaved changes, the next start offers its last backup.
+- Settings → Scripts → Backups turns this off and sets the time between backups, the number of versions and the folder.
+- Not part of a backup: scan results, and script text in an open editor that was not applied yet.
+
+### Closing
+
+When the program closes while scripts are active in the game, it asks whether to turn them off first, so nothing stays behind in the game. Settings → Scripts can make that choice permanent.
+
+### Tables from someone else
+
+A table from someone else cannot run code by itself.
+
+- Its Lua script runs only when you allow it (Settings → Scripts: ask, always, never).
+- Until you allowed it or turned a script on yourself, the table's hotkeys cannot turn scripts on or off. Hotkeys that set or change a value work at once, and while the question about the Lua script is open no hotkey fires.
+- A hotkey on the left or right mouse button alone, with more than five keys or with an unknown key is dropped when the table is read.
+- Tables nested deeper than 32 groups lose the levels below. A file inside a table may unpack to 256 MB at most (512 MB for all of them).
+- Check in a Lua script window compiles the script without running any of it.
+- Check and Save in an Auto Assembler window run the script's `{$lua}` parts and Lua-made commands the way Cheat Engine does (with `syntaxcheck` set) only once the table's scripts are allowed. Before that they only compile the Lua parts, and the result says so.
+- Nothing a script does outside the game goes unseen. The log gets a warning in the area *Script* with the command and the script line it came from when a script:
+  - starts a program (`shellExecute`, `createProcess`, `runCommand`, `os.execute`, `io.popen`),
+  - injects a DLL (`injectDLL`, or `loadlibrary` in the Auto Assembler),
+  - sets a user environment variable.
+
+### Profiler and diagnostics
+
+Settings → General → Diagnostics turns on the profiler. Help → Profiler and Diagnostics (`Ctrl+Shift+F12`, also without the profiler) shows:
+
+- the frame graph;
+- the breakdown of a frame: engine tick, Lua timers and tasks, every window, drawing, waiting for the display;
+- the program's threads with their processor use;
+- checks of the setup and environment: rights, writable folder, graphics driver, a window drawn on one graphics card but shown on another, frames that miss the display's refresh, overlays hooking the program, hypervisor, microcode, memory, Lua timers;
+- app info.
+
+Then:
+
+- Copy Report and Save Report put all of it into one text.
+- `Manifold-Engine.exe --profile-report=report.txt --profile-seconds=10` measures for that long, writes the report and closes.
+- `--open=profiler`, `breakdown`, `threads`, `checks` or `appinfo` opens the window on that tab at start.

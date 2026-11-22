@@ -58,13 +58,52 @@ Scripts run on the program's main thread: in the Lua engine window (Ctrl+L), in 
 
 ## Address list
 
-`getAddressList()` and the global `AddressList` return the table's list: `Count`, `SelCount`, `[index]` and `MemoryRecord[index]` (0-based, all records in tree order), `getMemoryRecord(i)`, `getMemoryRecordByDescription(text)`, `getMemoryRecordByID(id)`, `createMemoryRecord()`, `getSelectedRecords()`, `SelectedRecord`, `setSelectedRecord(record)`, `disableAllWithoutExecute()`, `refresh()`.
+### The list
+
+`getAddressList()` and the global `AddressList` return the table's list:
+
+- `Count`, `SelCount`.
+- `[index]` and `MemoryRecord[index]`: 0-based, all records in tree order.
+- Lookups: `getMemoryRecord(i)`, `getMemoryRecordByDescription(text)`, `getMemoryRecordByID(id)`.
+- `createMemoryRecord()`.
+- The selection: `getSelectedRecords()`, `SelectedRecord`, `setSelectedRecord(record)`.
+- `disableAllWithoutExecute()`, `refresh()`.
 
 Set `OnDescriptionChange`, `OnAddressChange`, `OnTypeChange`, `OnValueChange` or `OnAutoAssemblerEdit` to `function(addresslist, memrec)`. They run before the matching editor opens; return true to keep the editor closed.
 
-A memory record has the fields `ID`, `Index`, `Description`, `Address`, `AddressString`, `CurrentAddress`, `Type`/`VarType` (`vtByte` .. `vtCustom`), `CustomTypeName`, `Value`, `NumericalValue`, `Active`, `Script`, `Count`, `Child[i]`, `[index]`, `Parent`, `IsGroupHeader`, `IsAddressGroupHeader`, `ShowAsHex`, `ShowAsSigned`, `Color`, `Options` (`"[moHideChildren,...]"`), `Collapsed`, `DontSave`, `Async`, `AllowIncrease`, `AllowDecrease`, `OffsetCount`, `Offset[i]` and `OffsetText[i]` (last offset first, like Cheat Engine), `String.Size`, `String.Unicode`, `Aob.Size`, `Binary.Startbit`, `Binary.Size`, `DropDownList` (a string list of `value:description` lines), `DropDownLinked`, `DropDownLinkedMemrec`, `DropDownReadOnly`, `DropDownDescriptionOnly`, `DropDownCount`, `DropDownValue[i]`, `DropDownDescription[i]`, `HotkeyCount`, `Hotkey[i]`, `Selected`, and the methods `delete()`, `setValue(v)`, `getValue()`, `setActive(on)`, `disableWithoutExecute()`, `getAddress()`, `setAddress(text, offsets)`, `getOffset(i)`, `setOffset(i, v)`, `appendToEntry(parent)`, `getChild(i)`, `getHotkey(i)`, `getHotkeyByID(id)`, `createHotkey(keys, action, value, description)`. Every field also has a `getX()`/`setX(v)` pair.
+### Memory records
 
-Fields a script sets that are not listed here stay on the record, so `memrec.MyFlag = true` works. Records have the events `OnActivate(memrec, before, currentstate)` (return false while `before` is true to stop the change), `OnDeactivate`, `OnGetDisplayValue(memrec, text)` (return `true, newText`), `OnValueChanged(memrec, old, new)` and `OnDestroy()`. The global functions `onMemRecPreExecute(memrec, newstate)` and `onMemRecPostExecute(memrec, newstate, succeeded)` run around every activation.
+Every field also has a `getX()`/`setX(v)` pair. Fields a script sets that are not listed here stay on the record, so `memrec.MyFlag = true` works.
+
+| Group | Fields |
+| --- | --- |
+| Identity | `ID`, `Index`, `Description`, `Selected` |
+| Address | `Address`, `AddressString`, `CurrentAddress`, `OffsetCount`, `Offset[i]` and `OffsetText[i]` (last offset first, like Cheat Engine) |
+| Type and value | `Type`/`VarType` (`vtByte` .. `vtCustom`), `CustomTypeName`, `Value`, `NumericalValue`, `String.Size`, `String.Unicode`, `Aob.Size`, `Binary.Startbit`, `Binary.Size` |
+| State | `Active`, `Script`, `Async`, `AllowIncrease`, `AllowDecrease`, `DontSave` |
+| Tree | `Count`, `Child[i]`, `[index]`, `Parent`, `IsGroupHeader`, `IsAddressGroupHeader`, `Options` (`"[moHideChildren,...]"`), `Collapsed` |
+| Display | `ShowAsHex`, `ShowAsSigned`, `Color` |
+| Drop-down list | `DropDownList` (a string list of `value:description` lines), `DropDownLinked`, `DropDownLinkedMemrec`, `DropDownReadOnly`, `DropDownDescriptionOnly`, `DropDownCount`, `DropDownValue[i]`, `DropDownDescription[i]` |
+| Hotkeys | `HotkeyCount`, `Hotkey[i]` |
+
+Methods:
+
+- Value and state: `getValue()`, `setValue(v)`, `setActive(on)`, `disableWithoutExecute()`, `delete()`.
+- Address: `getAddress()`, `setAddress(text, offsets)`, `getOffset(i)`, `setOffset(i, v)`.
+- Tree: `appendToEntry(parent)`, `getChild(i)`.
+- Hotkeys: `getHotkey(i)`, `getHotkeyByID(id)`, `createHotkey(keys, action, value, description)`.
+
+Events:
+
+- `OnActivate(memrec, before, currentstate)`: return false while `before` is true to stop the change.
+- `OnDeactivate`.
+- `OnGetDisplayValue(memrec, text)`: return `true, newText`.
+- `OnValueChanged(memrec, old, new)`.
+- `OnDestroy()`.
+
+The global functions `onMemRecPreExecute(memrec, newstate)` and `onMemRecPostExecute(memrec, newstate, succeeded)` run around every activation.
+
+### Record hotkeys
 
 A record hotkey has `ID`, `Description`, `Keys`, `Action` (`mrhToggleActivation` .. `mrhDecreaseValue`), `Value`, `Owner`, `doHotkey()`, `getKeys()`, `setKeys(...)`, `destroy()`.
 
@@ -110,7 +149,14 @@ Inside a thread, a table script or a form event, `sleep(ms)` and `processMessage
 
 ## Interface and helpers
 
-`print(...)`, `showMessage(text)`, `messageDialog(text, type, buttons...)` (returns `mrYes`, `mrNo`, `mrOk`, `mrCancel`), `inputQuery(caption, prompt, default)` (text or nil), `sleep(ms)`, `getTickCount()`, `isKeyPressed(vk)`, `showMemoryViewer(address)`, `showStructureDissect(address)`, `getCheatEngineDir()`, `getAutorunPath()`, `getCEVersion()`, `getManifoldVersion()`, `inMainThread()`, `synchronize(f, ...)`, `queue(f, ...)`, `intToHex(value, digits)`.
+| Area | Functions |
+| --- | --- |
+| Messages | `print(...)`, `showMessage(text)`, `messageDialog(text, type, buttons...)` (returns `mrYes`, `mrNo`, `mrOk`, `mrCancel`), `inputQuery(caption, prompt, default)` (text or nil) |
+| Windows | `showMemoryViewer(address)`, `showStructureDissect(address)` |
+| Time and keys | `sleep(ms)`, `getTickCount()`, `isKeyPressed(vk)` |
+| Program | `getCheatEngineDir()`, `getAutorunPath()`, `getCEVersion()`, `getManifoldVersion()` |
+| Threads | `inMainThread()`, `synchronize(f, ...)`, `queue(f, ...)` |
+| Text | `intToHex(value, digits)` |
 
 Byte tables: `byteTableToString`, `byteTableToWideString`, `stringToByteTable`, `wideStringToByteTable`, `wordToByteTable`, `dwordToByteTable`, `qwordToByteTable`, `floatToByteTable`, `doubleToByteTable`, `byteTableToWord`, `byteTableToDword`, `byteTableToQword`, `byteTableToFloat`, `byteTableToDouble`.
 
@@ -120,66 +166,226 @@ Key codes: `VK_F1`..`VK_F24`, `VK_0`..`VK_9`, `VK_A`..`VK_Z`, `VK_NUMPAD0`..`VK_
 
 ## Cheat Engine compatibility
 
-Tables and autorun scripts written for Cheat Engine 7.5 run here. Beyond the functions above, the program provides:
+Tables and autorun scripts written for Cheat Engine 7.5 run here. Beyond the functions above, the program provides what follows.
+
+### Language and globals
 
 - All constants of Cheat Engine's `defines.lua` (`vt*`, `so*`, `rt*`, `fsm*`, `mrh*`, `mr*`, `cl*`, `al*`, `bs*`, `ss*` and the rest).
-- Member names in any case (`memrec.description` is `memrec.Description`), and methods called with a dot or a colon (`stream.readByte()` and `stream:readByte()`). Old `class_method` globals such as `memoryrecord_getDescription(mr)` or `component_getComponent(c, i)` call the method.
+- Member names in any case (`memrec.description` is `memrec.Description`), and methods called with a dot or a colon (`stream.readByte()` and `stream:readByte()`).
+- Old `class_method` globals such as `memoryrecord_getDescription(mr)` or `component_getComponent(c, i)` call the method.
 - The globals `process` (the module name of the opened process; `manifold.process.name()` reads the same name when it is called), `memrec` and `syntaxcheck` inside `{$lua}` blocks and Auto Assembler commands, `MainForm` and `AddressList`.
 - Reads, writes and `enumModules()` without an opened process give nil, false or an empty table instead of an error.
 - Module names with dashes in addresses: `Game-Win64-Shipping.exe+10` and `Game-Win64-Shipping+10`.
-- Table files: `findTableFile(name)`, `createTableFile(name, path)`, with `Name`, `Stream`, `getData()`, `saveToFile(path)`, `delete()`. Files attached to a table are kept when it is saved.
-- Streams: `createMemoryStream()`, `createStringStream(text)`, `createFileStream(path)` with `Size`, `Position`, `Memory`, `DataString`, `read(n)`, `write(bytes)`, `readByte` .. `readQword`, `writeByte` .. `writeQword`, `readString`, `writeString`, `readAnsiString`, `writeAnsiString`, `copyFrom`, `loadFromFile`, `saveToFile`, `clear`.
-- Calls into the open process: `executeCode(address, parameter)` for one parameter, `executeCodeEx(callmethod, timeout, address, ...)` for up to 32 parameters and `executeMethod(callmethod, timeout, address, instance, ...)` for a method of an object. `callmethod` is 0 for stdcall and 1 for cdecl (64-bit code has one convention); `timeout` is in milliseconds, `nil` waits without limit and 0 does not wait. A parameter is a number, a text (passed as a pointer to it), or `{type=, value=}` with type 0 integer, 1 float, 2 double, 3 text, 4 wide text. The instance is a number or `{regnr=0..15, classinstance=}` to pass it in another register than ECX. Both return the integer result, or `nil` and the reason.
-- `getUniqueAOB(address)` returns a byte pattern that occurs once in the process and the offset from the match to the address; branch targets and RIP-relative or relocated addresses are `??`, so the pattern survives a restart of the game.
-- Memory of the program itself: `readByteLocal` .. `readDoubleLocal`, `readStringLocal`, `readBytesLocal`, the matching `write*Local` functions, `executeCodeLocal(address, parameter)`, `executeCodeLocalEx(address, ...)`, and `getAddress(name, true)` for exports of loaded system DLLs (`"kernel32.GetTickCount"`).
-- Auto Assembler commands from Lua: `registerAutoAssemblerCommand(name, function(parameters, syntaxcheck))` returns the text that replaces the line, or `nil, error`. `unregisterAutoAssemblerCommand(name)`.
-- Custom types: `registerCustomTypeLua(name, bytecount, bytesToValue, valueToBytes, isFloat, isString)`, `getCustomType(name)`, `getCustomTypeList()`. Records and structure elements whose type is a custom type read, show and write through the two functions. With `isString` the first one returns text and the second one receives it.
-- Structures: `getStructureCount()`, `getStructure(i)`, `createStructure(name)`, `createStructureForm(address, group, name)` (`name` selects that structure), with `Name`, `Size`, `Count`, `Element[i]`, `getElement(i)`, `getElementByOffset(o)`, `addElement()`, `autoGuess(address, offset, size)` (fills `size` bytes from `offset` on the way Structure Dissect guesses, replacing the elements in that range), `addToGlobalStructureList()`, `removeFromGlobalStructureList()`, `destroy()`, and elements with `Offset`, `Name`, `Vartype`, `Bytesize`, `ChildStruct`, `DisplayMethod`, `CustomType`, `CustomTypeName`.
-- Structure Dissect callbacks: `registerStructureNameLookup(function(address) return name, start end)` names a new structure and may move its start; it is also asked when a pointer is expanded, and a structure of that name is then reused. `registerStructureDissectOverride(function(structure, address) return true end)` fills a new structure instead of the guess. Both return an ID for `unregisterStructureNameLookup(id)` and `unregisterStructureDissectOverride(id)`. They run in the background like a thread, spread over frames, so a slow lookup does not hold the window: Structure Dissect opens at once and fills in the name and the fields when the callback returns.
-- Symbol lookup callbacks: `registerSymbolLookupCallback(function(name) return address end, location)` resolves names the program does not know. With `slStart` the function is asked before anything else, with any other location (`slFailure` is the default) only when every other lookup failed. It is called on the Lua thread only, and not again while one of these functions runs. Returns an ID for `unregisterSymbolLookupCallback(id)`.
-- Scanning from Lua: `createMemScan()` with `firstScan`, `nextScan`, `waitTillDone`, `setOnlyOneResult`, `getOnlyResult`, `FoundList`, and `createFoundList(memscan)` with `Count`, `Address[i]`, `Value[i]`.
-  - `firstScan` takes `vtAll` (the types ticked under Settings → Scanner → Types for All), `vtGrouped` (the value is a group like `4:100 f:1.5 d:*`, see the README) and `vtCustom` (set `memscan.CustomType` to a custom type or its name first).
-  - `saveCurrentResults(name)` keeps the current results under a name and `getSavedResultList()` returns the names. `nextScan` compares with saved results when its 10th argument (after `ispercentagescan`) is such a name.
-- Files and system: `lfs` (`attributes`, `dir`, `mkdir`, `rmdir`, `currentdir`, `chdir`, `touch`), `getFileList`, `getDirectoryList`, `extractFileName`, `extractFileNameWithoutExt`, `extractFilePath`, `extractFileExt`, `getFileVersion`, `md5file`, `md5memory`, `stringToMD5String`, `writeToClipboard`, `readFromClipboard`, `getInternet()` with `getURL(url)` and `postURL(url, data)`, `shellExecute(command, parameters, folder, show)` (also spelled `ShellExecute`), `getScreenWidth`, `getScreenHeight`, `getWorkAreaWidth`, `getWorkAreaHeight`, `getScreenDPI`, `getMousePos`, `getTempFolder`, `cheatEngineIs64Bit`, `pause`, `unpause`, `closeCE`, `enumMemoryRegions`, `inModule`, `inSystemModule`, `deleteAllRegisteredSymbols`.
 - The string helpers `split` (the parts as several values), `startsWith` and `endsWith`.
-- Stored settings: `getSettings(path)` returns an object whose `Value[name]` reads and writes text, `""` when nothing is stored. Cheat Engine keeps these in the registry; here they go into `configs\Manifold-Engine.scripts.ini` next to the program, one section per path.
-- Input and sound: `setMousePos(x, y)`, `mouse_event(flags, x, y, data, extra)`, `keyDown(vk)`, `keyUp(vk)`, `doKeyPress(vk)` (holds the key 50 ms; inside `createThread` the thread waits instead of the program), `getPixel(x, y)`, `beep()`, `playSound(stream or tablefile or path, wait)` (WAV), `speak(text, wait or flags)` and `speakEnglish(text, wait)` (Windows speech, in order, one after the other), `getXBox360ControllerState(id)` with Cheat Engine's fields, `setXBox360ControllerVibration(id, left, right)`.
-- System: `getSystemMetrics(index)`, `getCPUCount()`, `cpuid(eax, ecx)` (`EAX`..`EDX`, also lower case), `getOperatingSystem()` (0), `targetIsX86()`, `targetIsArm()`, `targetIsAndroid()`, `getPointerSize()` (of the opened process, 8 without one), `getCheatEngineFileVersion()` (7.5.0.7431, the version the API follows), `getUserRegistryEnvironmentVariable(name)` / `setUserRegistryEnvironmentVariable(name, value)`, `sendMessage(hwnd, msg, wparam, lparam)`, `outputDebugString(text)`, `invertColor(color)`, `fileExists(path)`, `deleteFile(path)` (files only), `runCommand(exe, parameters or {list}, folder)` (output and exit code, waits for the program), `createProcess(path, parameters, debug)` (starts and opens the process; `debug` attaches the debugger afterwards, `breakonentrypoint` is not supported), `getOpenedProcessHandle()`.
-- Lists: `getProcesslist([strings])`, `getWindowlist([strings])` (a table `pid → {captions}` without a list), `getThreadlist([list])` (thread IDs of the opened process); with a string list they fill it in Cheat Engine's `%08X-name` / `%X` form.
-- Conversions: `ansiToUtf8`, `utf8ToAnsi`, `byteTableToExtended`, `extendedToByteTable` (80-bit floats), `signExtend(value, bit)`, `readShortInteger`/`writeShortInteger` (8 bit), `convertKeyComboToString(keys)` (like the hotkey list), `shortCutToText(shortcut)` and `textToShortCut(text)` (Lazarus shortcut numbers: key + `0x2000` Shift, `0x4000` Ctrl, `0x8000` Alt).
-- Memory: `copyMemory(source, size, destination, method)` (0 target to target, 1 target to Manifold, 2 Manifold to target, 3 inside Manifold; without a destination it allocates one and returns it), `compareMemory(a, b, size, method)` (`true`, or `false` and the offset of the first difference), `setMemoryProtection(address, size, {R=, W=, X=})`, `readRegionFromFile(file, address)`, `writeRegionToFile(file, address, size)`, `allocateSharedMemoryLocal(name, size)`, `createRemoteThread(address, parameter)`.
-- Code and symbols: `assemble(line, address)` returns the bytes of one instruction (or `nil, error`), `setAssemblerMode(0 or 1)` makes it assemble 32- or 64-bit code; `getComment(address)`, `setComment(address, text)`, `getHeader(address)`, `setHeader(address, text)` share the memory viewer's comments; `getSymbolInfo(name)` (`modulename`, `searchkey`, `address`, `size`), `enumRegisteredSymbols()` (`symbolname`, `address`), `errorOnLookupFailure(state)` (when false, `getAddress` returns 0 for unknown names; returns the old state), `reinitializeSymbolhandler()` (reads the module list again), `getRTTIClassName(address)` (the MSVC class name of an object, `Namespace::Class`).
-- Tables: `loadTable(file or stream, merge)` (with `merge` at once, otherwise on the next frame, so a script can replace the table it runs in; a file that does not exist returns `nil` and the reason at once, and a stream's content is taken at the call, so the stream may be destroyed right after), `saveTable(file or stream)`. `sendMessage` waits at most five seconds for the other window and returns 0 when it does not answer.
-- Objects: `createRef(...)`, `getRef(id)`, `destroyRef(id)`; `setGlobalVariable`/`getGlobalVariable`; `createCriticalSection`, `createEvent(manualReset, signalled)` (`waitFor(timeout)` returns `wrSignaled` or `wrTimeout`), `createSemaphore(count)`, `createMultiReadExclusiveWriteSynchronizer()`. Scripts share one Lua state, so these only wait inside `createThread`; elsewhere a wait that cannot succeed returns at once. `createThreadSuspended(f, ...)` starts on `thread.resume()`, `createThreadNewState(script)` runs the script as a thread in the same state. `createDisassembler()`, `getDefaultDisassembler()` and `getVisibleDisassembler()` give an object whose `disassemble(address)` returns the line and fills `LastDisassembleData` (`address`, `opcode`, `parameters`, `bytes`, `isJump`, `isCall`, `isRet`, `isConditionalJump`, `parameterValue` of jumps and calls); disassemble overrides are not called.
-- Scripts and windows: `getNextAllocNumber(script)`, `translateID(id, text)` (returns the text), `loadModule(path)` (injects the DLL), `createAutoAssemblerForm(script)` (opens an Auto Assembler window with the script), `createMemoryView()` (the memory viewer), `createClass(name)` and `createComponentClass(name, owner)` (`"TButton"`, `"TStringList"` and the other classes), `getPropertyList(class)`.
-- `getAutoAttachList()`: names added to it are opened as soon as such a process runs and none is open, as with Cheat Engine's auto attach. The list lasts for the session and is not added to the settings.
 
-[CE-COMPAT.md](CE-COMPAT.md) lists the rest of Cheat Engine's functions: some exist without an effect (for example `waitForExports`, `setProgressState`, `hideAllCEWindows`, stand-ins from `getSettingsForm` and `getFreezeTimer`, placeholder controls such as `createCalendar`), the others are not available (kernel driver, DBVM, compilers, SQL, XML and a few more). Calling one of those does nothing, returns nil (or false or an id, as listed), and writes one warning per function to the Lua output, with the script and line. They are not real globals, so `rawget(_G, name)` stays nil for scripts that check before they call. The documentation panel of the Lua engine window marks both kinds.
+### Table files and streams
+
+- Table files: `findTableFile(name)`, `createTableFile(name, path)`, with `Name`, `Stream`, `getData()`, `saveToFile(path)`, `delete()`. Files attached to a table are kept when it is saved.
+- Streams: `createMemoryStream()`, `createStringStream(text)`, `createFileStream(path)`.
+  - Properties: `Size`, `Position`, `Memory`, `DataString`.
+  - Methods: `read(n)`, `write(bytes)`, `readByte` .. `readQword`, `writeByte` .. `writeQword`, `readString`, `writeString`, `readAnsiString`, `writeAnsiString`, `copyFrom`, `loadFromFile`, `saveToFile`, `clear`.
+- Tables: `loadTable(file or stream, merge)` and `saveTable(file or stream)`.
+  - With `merge` the table loads at once, otherwise on the next frame, so a script can replace the table it runs in.
+  - A file that does not exist returns `nil` and the reason at once.
+  - A stream's content is taken at the call, so the stream may be destroyed right after.
+
+### Calls into the open process
+
+| Function | |
+| --- | --- |
+| `executeCode(address, parameter)` | one parameter |
+| `executeCodeEx(callmethod, timeout, address, ...)` | up to 32 parameters |
+| `executeMethod(callmethod, timeout, address, instance, ...)` | a method of an object |
+
+- `callmethod` is 0 for stdcall and 1 for cdecl (64-bit code has one convention).
+- `timeout` is in milliseconds; `nil` waits without limit and 0 does not wait.
+- A parameter is a number, a text (passed as a pointer to it), or `{type=, value=}` with type 0 integer, 1 float, 2 double, 3 text, 4 wide text.
+- The instance is a number, or `{regnr=0..15, classinstance=}` to pass it in another register than ECX.
+- They return the integer result, or `nil` and the reason.
+
+### Memory
+
+- `copyMemory(source, size, destination, method)`: method 0 target to target, 1 target to Manifold, 2 Manifold to target, 3 inside Manifold. Without a destination it allocates one and returns it.
+- `compareMemory(a, b, size, method)`: `true`, or `false` and the offset of the first difference.
+- `setMemoryProtection(address, size, {R=, W=, X=})`, `readRegionFromFile(file, address)`, `writeRegionToFile(file, address, size)`, `allocateSharedMemoryLocal(name, size)`, `createRemoteThread(address, parameter)`.
+- Memory of the program itself: `readByteLocal` .. `readDoubleLocal`, `readStringLocal`, `readBytesLocal`, the matching `write*Local` functions, `executeCodeLocal(address, parameter)`, `executeCodeLocalEx(address, ...)`, and `getAddress(name, true)` for exports of loaded system DLLs (`"kernel32.GetTickCount"`).
+- `getUniqueAOB(address)` returns a byte pattern that occurs once in the process and the offset from the match to the address. Branch targets and RIP-relative or relocated addresses are `??`, so the pattern survives a restart of the game.
+
+### Code and symbols
+
+- `assemble(line, address)` returns the bytes of one instruction (or `nil, error`); `setAssemblerMode(0 or 1)` makes it assemble 32- or 64-bit code.
+- `getComment(address)`, `setComment(address, text)`, `getHeader(address)`, `setHeader(address, text)` share the memory viewer's comments.
+- `getSymbolInfo(name)` (`modulename`, `searchkey`, `address`, `size`) and `enumRegisteredSymbols()` (`symbolname`, `address`).
+- `errorOnLookupFailure(state)`: when false, `getAddress` returns 0 for unknown names. Returns the old state.
+- `reinitializeSymbolhandler()` reads the module list again.
+- `getRTTIClassName(address)`: the MSVC class name of an object, `Namespace::Class`.
+- Disassemblers: `createDisassembler()`, `getDefaultDisassembler()` and `getVisibleDisassembler()` give an object whose `disassemble(address)` returns the line and fills `LastDisassembleData` (`address`, `opcode`, `parameters`, `bytes`, `isJump`, `isCall`, `isRet`, `isConditionalJump`, `parameterValue` of jumps and calls). Disassemble overrides are not called.
+- **Symbol lookup callbacks**: `registerSymbolLookupCallback(function(name) return address end, location)` resolves names the program does not know.
+  - With `slStart` the function is asked before anything else; with any other location (`slFailure` is the default) only when every other lookup failed.
+  - It is called on the Lua thread only, and not again while one of these functions runs.
+  - Returns an ID for `unregisterSymbolLookupCallback(id)`.
+
+### Auto Assembler commands and custom types
+
+- `registerAutoAssemblerCommand(name, function(parameters, syntaxcheck))` returns the text that replaces the line, or `nil, error`; `unregisterAutoAssemblerCommand(name)` removes it.
+- `registerCustomTypeLua(name, bytecount, bytesToValue, valueToBytes, isFloat, isString)`, `getCustomType(name)`, `getCustomTypeList()`.
+  - Records and structure elements whose type is a custom type read, show and write through the two functions.
+  - With `isString` the first one returns text and the second one receives it.
+
+### Structures
+
+- `getStructureCount()`, `getStructure(i)`, `createStructure(name)`, `createStructureForm(address, group, name)` (`name` selects that structure).
+- A structure has `Name`, `Size`, `Count`, `Element[i]`, `getElement(i)`, `getElementByOffset(o)`, `addElement()`, `addToGlobalStructureList()`, `removeFromGlobalStructureList()`, `destroy()`, and `autoGuess(address, offset, size)`, which fills `size` bytes from `offset` on the way Structure Dissect guesses, replacing the elements in that range.
+- An element has `Offset`, `Name`, `Vartype`, `Bytesize`, `ChildStruct`, `DisplayMethod`, `CustomType`, `CustomTypeName`.
+
+**Structure Dissect callbacks**:
+
+- `registerStructureNameLookup(function(address) return name, start end)` names a new structure and may move its start. It is also asked when a pointer is expanded, and a structure of that name is then reused.
+- `registerStructureDissectOverride(function(structure, address) return true end)` fills a new structure instead of the guess.
+- Both return an ID for `unregisterStructureNameLookup(id)` and `unregisterStructureDissectOverride(id)`.
+- They run in the background like a thread, spread over frames, so a slow lookup does not hold the window: Structure Dissect opens at once and fills in the name and the fields when the callback returns.
+
+### Scanning
+
+- `createMemScan()` with `firstScan`, `nextScan`, `waitTillDone`, `setOnlyOneResult`, `getOnlyResult`, `FoundList`, and `createFoundList(memscan)` with `Count`, `Address[i]`, `Value[i]`.
+- `firstScan` takes `vtAll` (the types ticked under Settings → Scanner → Types for All), `vtGrouped` (the value is a group like `4:100 f:1.5 d:*`, see [Grouped](FEATURES.md#grouped)) and `vtCustom` (set `memscan.CustomType` to a custom type or its name first).
+- `saveCurrentResults(name)` keeps the current results under a name and `getSavedResultList()` returns the names. `nextScan` compares with saved results when its 10th argument (after `ispercentagescan`) is such a name.
+
+### Files, system and processes
+
+| Area | Functions |
+| --- | --- |
+| Files | `lfs` (`attributes`, `dir`, `mkdir`, `rmdir`, `currentdir`, `chdir`, `touch`), `getFileList`, `getDirectoryList`, `extractFileName`, `extractFileNameWithoutExt`, `extractFilePath`, `extractFileExt`, `getFileVersion`, `fileExists(path)`, `deleteFile(path)` (files only), `getTempFolder` |
+| Hashes | `md5file`, `md5memory`, `stringToMD5String` |
+| Clipboard and internet | `writeToClipboard`, `readFromClipboard`, `getInternet()` with `getURL(url)` and `postURL(url, data)` |
+| Screen | `getScreenWidth`, `getScreenHeight`, `getWorkAreaWidth`, `getWorkAreaHeight`, `getScreenDPI`, `getMousePos`, `getSystemMetrics(index)` |
+| Programs | `shellExecute(command, parameters, folder, show)` (also spelled `ShellExecute`), `runCommand(exe, parameters or {list}, folder)` (output and exit code, waits for the program), `createProcess(path, parameters, debug)` (starts and opens the process; `debug` attaches the debugger afterwards, `breakonentrypoint` is not supported) |
+| The opened process | `pause`, `unpause`, `enumMemoryRegions`, `inModule`, `inSystemModule`, `deleteAllRegisteredSymbols`, `getOpenedProcessHandle()`, `getPointerSize()` (of the opened process, 8 without one), `targetIsX86()`, `targetIsArm()`, `targetIsAndroid()` |
+| The program | `cheatEngineIs64Bit`, `closeCE`, `getCheatEngineFileVersion()` (7.5.0.7431, the version the API follows), `getOperatingSystem()` (0) |
+| Machine | `getCPUCount()`, `cpuid(eax, ecx)` (`EAX`..`EDX`, also lower case) |
+| Windows | `getUserRegistryEnvironmentVariable(name)` / `setUserRegistryEnvironmentVariable(name, value)`, `sendMessage(hwnd, msg, wparam, lparam)` (waits at most five seconds for the other window and returns 0 when it does not answer), `outputDebugString(text)` |
+| Lists | `getProcesslist([strings])`, `getWindowlist([strings])` (a table `pid → {captions}` without a list), `getThreadlist([list])` (thread IDs of the opened process); with a string list they fill it in Cheat Engine's `%08X-name` / `%X` form |
+| Auto attach | `getAutoAttachList()`: names added to it are opened as soon as such a process runs and none is open, as with Cheat Engine's auto attach. The list lasts for the session and is not added to the settings |
+
+**Stored settings**: `getSettings(path)` returns an object whose `Value[name]` reads and writes text, `""` when nothing is stored. Cheat Engine keeps these in the registry; here they go into `configs\Manifold-Engine.scripts.ini` next to the program, one section per path.
+
+### Input and sound
+
+- Mouse: `setMousePos(x, y)`, `mouse_event(flags, x, y, data, extra)`, `getPixel(x, y)`.
+- Keys: `keyDown(vk)`, `keyUp(vk)`, `doKeyPress(vk)` (holds the key 50 ms; inside `createThread` the thread waits instead of the program).
+- Sound: `beep()`, `playSound(stream or tablefile or path, wait)` (WAV), `speak(text, wait or flags)` and `speakEnglish(text, wait)` (Windows speech, in order, one after the other).
+- Controllers: `getXBox360ControllerState(id)` with Cheat Engine's fields, `setXBox360ControllerVibration(id, left, right)`.
+
+### Conversions
+
+- `ansiToUtf8`, `utf8ToAnsi`.
+- `byteTableToExtended`, `extendedToByteTable` (80-bit floats).
+- `signExtend(value, bit)`, `readShortInteger`/`writeShortInteger` (8 bit), `invertColor(color)`.
+- `convertKeyComboToString(keys)` (like the hotkey list), `shortCutToText(shortcut)` and `textToShortCut(text)` (Lazarus shortcut numbers: key + `0x2000` Shift, `0x4000` Ctrl, `0x8000` Alt).
+
+### Objects and threads
+
+- References: `createRef(...)`, `getRef(id)`, `destroyRef(id)`; `setGlobalVariable`/`getGlobalVariable`.
+- Synchronisation: `createCriticalSection`, `createEvent(manualReset, signalled)` (`waitFor(timeout)` returns `wrSignaled` or `wrTimeout`), `createSemaphore(count)`, `createMultiReadExclusiveWriteSynchronizer()`. Scripts share one Lua state, so these only wait inside `createThread`; elsewhere a wait that cannot succeed returns at once.
+- Threads: `createThreadSuspended(f, ...)` starts on `thread.resume()`, and `createThreadNewState(script)` runs the script as a thread in the same state.
+
+### Scripts and windows
+
+- `getNextAllocNumber(script)`, `translateID(id, text)` (returns the text).
+- `loadModule(path)` injects the DLL.
+- `createAutoAssemblerForm(script)` opens an Auto Assembler window with the script; `createMemoryView()` is the memory viewer.
+- `createClass(name)` and `createComponentClass(name, owner)` (`"TButton"`, `"TStringList"` and the other classes), `getPropertyList(class)`.
+
+### What is missing
+
+[CE-COMPAT.md](CE-COMPAT.md) lists the rest of Cheat Engine's functions:
+
+- Some exist without an effect, for example `waitForExports`, `setProgressState`, `hideAllCEWindows`, stand-ins from `getSettingsForm` and `getFreezeTimer`, and placeholder controls such as `createCalendar`.
+- The others are not available: kernel driver, DBVM, compilers, SQL, XML and a few more. Calling one of those does nothing, returns nil (or false or an id, as listed), and writes one warning per function to the Lua output, with the script and line. They are not real globals, so `rawget(_G, name)` stays nil for scripts that check before they call.
+
+The documentation panel of the Lua engine window marks both kinds.
 
 ### Forms
 
-The form functions of Cheat Engine exist: `createForm`, `createLabel`, `createEdit`, `createMemo`, `createButton`, `createCheckBox`, `createComboBox`, `createListBox`, `createListView`, `createTreeView`, `createPanel`, `createGroupBox`, `createRadioGroup`, `createImage`, `createPaintBox`, `createSplitter`, `createProgressBar`, `createTrackBar`, `createMainMenu`, `createPopupMenu`, `createMenuItem`, `createImageList`, `createBitmap`, `createPNG`, `createPicture`, `createStringlist`, `createFont`, the dialogs, `getMainForm()`, `getLuaEngine()`, `getMemoryViewForm()`, `getForm(i)`, `getFormCount()`, `getApplication()`, `registerFormAddNotification`, `setMethodProperty`, `inheritsFromObject` and the other `inheritsFrom*` checks.
+The form functions of Cheat Engine exist:
 
-Their objects behave like Cheat Engine's: properties, string lists, menus, list and tree items, canvases, owners and parents, `findComponentByName`, events. `tostring(object)` gives the class and a number unique to the object (`TPanel: 0000000010000A40`), so modules can key tables by it. The main form has Cheat Engine's menu, and its Table menu lists the table's files when clicked.
+- Controls: `createForm`, `createLabel`, `createEdit`, `createMemo`, `createButton`, `createCheckBox`, `createComboBox`, `createListBox`, `createListView`, `createTreeView`, `createPanel`, `createGroupBox`, `createRadioGroup`, `createImage`, `createPaintBox`, `createSplitter`, `createProgressBar`, `createTrackBar`.
+- Menus: `createMainMenu`, `createPopupMenu`, `createMenuItem`.
+- Resources: `createImageList`, `createBitmap`, `createPNG`, `createPicture`, `createStringlist`, `createFont`, and the dialogs.
+- Lookups: `getMainForm()`, `getLuaEngine()`, `getMemoryViewForm()`, `getForm(i)`, `getFormCount()`, `getApplication()`.
+- Others: `registerFormAddNotification`, `setMethodProperty`, `inheritsFromObject` and the other `inheritsFrom*` checks.
 
-Forms made with `createForm` are drawn as their own windows. Controls are laid out the way Lazarus does it: `Align` (`alTop`, `alBottom`, `alLeft`, `alRight`, `alClient`), `BorderSpacing` (`Around` plus each side), `Constraints`, the bevel of panels, and `AutoSize` for labels, edits, combo boxes and check boxes. Among controls with the same `Align` and the same position, the one that was added or aligned last comes first, so alTop panels created in a loop end up in reverse order, as in Cheat Engine. Scripts read the resulting `Left`, `Top`, `Width` and `Height`, and the layout follows when the window is resized.
+Their objects behave like Cheat Engine's: properties, string lists, menus, list and tree items, canvases, owners and parents, `findComponentByName`, events.
 
-Drawn are labels (colour, `Font` name, size, colour and bold, `Alignment`, `Layout`, `WordWrap`), panels (colour, bevel, caption), buttons, toggle and check boxes, edits (`TextHint`, `PasswordChar`, `ReadOnly`, `BorderStyle`), memos, list boxes, combo boxes, group boxes, splitters (dragging resizes the control next to them) tree views (nodes, expanding, selection, the arrow keys, `Home`, `End` and `Enter`) and list views (`vsReport` with columns, their `Width`, `Alignment` and `Visible`, `GridLines`, `CheckBoxes`, `ShowColumnHeaders` and sub-items; the other styles as a plain list), which fire `OnSelectItem`, `OnChange`, `OnItemChecked` and `OnColumnClick`. A form's `Menu` appears as its menu bar, and a control's `PopupMenu` (or its parent's) opens on a right click, with `OnPopup` first. `OnClick`, `OnDblClick`, `OnChange`, `OnSelectionChange`, `OnSelectionChanged`, `OnMouseEnter`, `OnMouseLeave`, `OnMoved` and `OnClose` fire as in Cheat Engine, and `Cursor = crHandPoint` shows the hand. Paint boxes and images draw what scripts paint on their `Canvas`: `line`, `moveTo`/`lineTo`, `rect`, `fillRect`, `frameRect`, `ellipse`, `roundRect`, `polygon`, `polyline`, `setPixel`, `textOut` (on an opaque box unless `Brush.Style` is `bsClear`), `clear`, `draw` and `stretchDraw` of a bitmap, with `Pen` (colour, width, `psClear`), `Brush` (colour, `bsClear`) and `Font`. The calls are recorded and replayed by the graphics card every frame, so a bitmap filled in a timer and drawn in `OnPaint` costs no copy. `OnPaint` runs when the paint box is shown, resized or asked to with `repaint()`/`invalidate()`; an opaque `fillRect` from the top left corner that covers the last frame starts a new one. Paint boxes and other controls also get `OnMouseDown`, `OnMouseUp` (button, x, y), `OnMouseMove` (x, y), `OnMouseWheelUp`/`OnMouseWheelDown` (or `OnMouseWheel`) and `OnResize`, and a form with `OnKeyDown` gets the virtual key code while it has the focus.
+- `tostring(object)` gives the class and a number unique to the object (`TPanel: 0000000010000A40`), so modules can key tables by it.
+- The main form has Cheat Engine's menu, and its Table menu lists the table's files when clicked.
+
+#### Layout
+
+Forms made with `createForm` are drawn as their own windows. Controls are laid out the way Lazarus does it:
+
+- `Align` (`alTop`, `alBottom`, `alLeft`, `alRight`, `alClient`), `BorderSpacing` (`Around` plus each side), `Constraints`, the bevel of panels, and `AutoSize` for labels, edits, combo boxes and check boxes.
+- Among controls with the same `Align` and the same position, the one that was added or aligned last comes first, so alTop panels created in a loop end up in reverse order, as in Cheat Engine.
+- Scripts read the resulting `Left`, `Top`, `Width` and `Height`, and the layout follows when the window is resized.
+
+#### Controls that are drawn
+
+| Control | What is honoured |
+| --- | --- |
+| Labels | colour, `Font` name, size, colour and bold, `Alignment`, `Layout`, `WordWrap` |
+| Panels | colour, bevel, caption |
+| Buttons, toggle and check boxes | |
+| Edits | `TextHint`, `PasswordChar`, `ReadOnly`, `BorderStyle` |
+| Memos, list boxes, combo boxes, group boxes | |
+| Splitters | dragging resizes the control next to them |
+| Tree views | nodes, expanding, selection, the arrow keys, `Home`, `End` and `Enter` |
+| List views | `vsReport` with columns, their `Width`, `Alignment` and `Visible`, `GridLines`, `CheckBoxes`, `ShowColumnHeaders` and sub-items; the other styles as a plain list. They fire `OnSelectItem`, `OnChange`, `OnItemChecked` and `OnColumnClick` |
+| Paint boxes, images | what scripts paint on their `Canvas` (below) |
 
 Other controls (page controls, track bars) keep their place as a marked empty box, and the log names them once.
 
-By default these windows take the look of the rest of the program: the colours, fonts and font sizes that scripts set are left out (what they paint on a canvas keeps its colours), and panels and group boxes are drawn as cards. Settings → Scripts → "Script Windows in App Style" turns this off and draws them with the script's own colours and fonts. `showModal()` does not open a window yet.
+#### Menus and events
+
+- A form's `Menu` appears as its menu bar, and a control's `PopupMenu` (or its parent's) opens on a right click, with `OnPopup` first.
+- `OnClick`, `OnDblClick`, `OnChange`, `OnSelectionChange`, `OnSelectionChanged`, `OnMouseEnter`, `OnMouseLeave`, `OnMoved` and `OnClose` fire as in Cheat Engine, and `Cursor = crHandPoint` shows the hand.
+- Paint boxes and other controls also get `OnMouseDown`, `OnMouseUp` (button, x, y), `OnMouseMove` (x, y), `OnMouseWheelUp`/`OnMouseWheelDown` (or `OnMouseWheel`) and `OnResize`.
+- A form with `OnKeyDown` gets the virtual key code while it has the focus.
+
+#### Canvas
+
+- Drawing: `line`, `moveTo`/`lineTo`, `rect`, `fillRect`, `frameRect`, `ellipse`, `roundRect`, `polygon`, `polyline`, `setPixel`, `textOut` (on an opaque box unless `Brush.Style` is `bsClear`), `clear`, `draw` and `stretchDraw` of a bitmap.
+- With `Pen` (colour, width, `psClear`), `Brush` (colour, `bsClear`) and `Font`.
+- The calls are recorded and replayed by the graphics card every frame, so a bitmap filled in a timer and drawn in `OnPaint` costs no copy.
+- `OnPaint` runs when the paint box is shown, resized or asked to with `repaint()`/`invalidate()`. An opaque `fillRect` from the top left corner that covers the last frame starts a new one.
+
+#### Look
+
+By default these windows take the look of the rest of the program: the colours, fonts and font sizes that scripts set are left out (what they paint on a canvas keeps its colours), and panels and group boxes are drawn as cards. Settings → Scripts → "Script Windows in App Style" turns this off and draws them with the script's own colours and fonts.
+
+`showModal()` does not open a window yet.
+
+#### The memory viewer form
 
 The memory viewer is `getMemoryViewForm()`:
 
 - `DisassemblerView.SelectedAddress` is the selected instruction of the memory viewer used last; setting it moves that viewer there without raising it.
 - `HexadecimalView.Address` moves the hex view; `SelectionStart` and `SelectionStop` mark a range of bytes.
 - `show()` and `bringToFront()` open or raise the viewer, and `Visible` says whether one is open.
-- Menu items added to the `debuggerpopup` menu appear at the end of the disassembler's context menu; its `OnPopup` runs before the menu opens. Root items added to the form's `Menu` appear in the viewer's menu bar after Tools, with their sub-items. `Caption` (`-` is a separator), `Visible`, `Enabled`, `Checked`, `AutoCheck`, `Shortcut` and `OnClick` are honoured; a root item's `OnClick` runs when its menu opens, as in Cheat Engine.
-- The same goes for `MainForm.Menu`: root items that scripts add appear in the main window's Extensions menu, and items added to Cheat Engine's own menus (`MainForm.miFile`, `miEdit`, `miTable`, `miHelp`) appear at the end of Manifold's File, Edit, Table and Help menus. Their shortcuts work in the main window unless one of its own commands uses the same keys.
-- The `Shortcut` of a menu bar item works while the memory viewer has the focus. When the key is one of the viewer's own keys that Cheat Engine 7.5 also uses, the viewer's command keeps it and the log says so; over the viewer's other keys (such as `Ctrl+Shift+F` for Find assembly code) the script's item wins, as it would in Cheat Engine.
+- Menu items added to the `debuggerpopup` menu appear at the end of the disassembler's context menu; its `OnPopup` runs before the menu opens.
+- Root items added to the form's `Menu` appear in the viewer's menu bar after Tools, with their sub-items. `Caption` (`-` is a separator), `Visible`, `Enabled`, `Checked`, `AutoCheck`, `Shortcut` and `OnClick` are honoured; a root item's `OnClick` runs when its menu opens, as in Cheat Engine.
+- The `Shortcut` of a menu bar item works while the memory viewer has the focus. When the key is one of the viewer's own keys that Cheat Engine 7.5 also uses, the viewer's command keeps it and the log says so. Over the viewer's other keys (such as `Ctrl+Shift+F` for Find Assembly Code) the script's item wins, as it would in Cheat Engine.
 
-The Lua engine is `getLuaEngine()`: `cbShowOnPrint.Checked` (and `State`) is the window's *Show on print* switch. Setting it from a script, as many tables do to keep the window closed, lasts until the program closes; the saved setting stays as the user left it.
+#### The main form
+
+The same goes for `MainForm.Menu`:
+
+- Root items that scripts add appear in the main window's Extensions menu.
+- Items added to Cheat Engine's own menus (`MainForm.miFile`, `miEdit`, `miTable`, `miHelp`) appear at the end of Manifold's File, Edit, Table and Help menus.
+- Their shortcuts work in the main window unless one of its own commands uses the same keys.
+
+#### The Lua engine form
+
+The Lua engine is `getLuaEngine()`: `cbShowOnPrint.Checked` (and `State`) is the window's *Show on Print* switch. Setting it from a script, as many tables do to keep the window closed, lasts until the program closes; the saved setting stays as the user left it.
 
 ## Mono / .NET
 

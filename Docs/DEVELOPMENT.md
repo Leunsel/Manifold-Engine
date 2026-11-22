@@ -29,7 +29,13 @@ The program is x64-only. Every x64 build also builds the in-process debugger age
 
 The MSVC compiler (`v143`) cannot build the program: the direct system call stubs in `Source/Syscalls/Syscall.h` are naked functions with inline assembly, which only clang-cl compiles. `Tools/gen_projects.py --msvc` writes such projects all the same, for trying parts of the code with MSVC.
 
-Before compiling, the projects run `Tools/embed_lua.py`, `Tools/embed_templates.py`, `Tools/embed_modules.py` and `Tools/gen_buildinfo.py` with the Python on PATH; a script that fails stops the build. The last one writes the commit into the build, so the log, Help → About and the diagnostics report show the version with it, like `0.1.0 (3e90571)`; a `+` after the commit means the working tree had uncommitted changes. The `ManagedDumper` project builds `Managed` with `dotnet` and writes `Source/Generated/ManagedDumperImage.cpp`, the one generated source that is not committed, because it holds the built assembly. The build warns when a tool is missing:
+### Generated sources
+
+- Before compiling, the projects run `Tools/embed_lua.py`, `Tools/embed_templates.py`, `Tools/embed_modules.py` and `Tools/gen_buildinfo.py` with the Python on PATH. A script that fails stops the build.
+- `gen_buildinfo.py` writes the commit into the build, so the log, Help → About and the diagnostics report show the version with it, like `0.1.0 (3e90571)`. A `+` after the commit means the working tree had uncommitted changes.
+- The `ManagedDumper` project builds `Managed` with `dotnet` and writes `Source/Generated/ManagedDumperImage.cpp`. It is the one generated source that is not committed, because it holds the built assembly.
+
+The build warns when a tool is missing:
 
 | Warning | Meaning |
 | --- | --- |
@@ -67,11 +73,29 @@ A test run keeps its settings, its log (`logs\Manifold-Engine.log`) and a crash 
 
 `--crash-check` crashes the tests program on purpose, to see that the dump is written.
 
-Some checks need a real game, a long run or a special situation and are not part of the default run or of CI. Each is started with its own option: `--debugger-check` (with `--veh` for the in-process debugger), `--watch-arm-check`, `--watch-stress`, `--mono-check`, `--mono-dump`, `--unity-dump`, `--il2cpp-check`, `--unreal-check`, `--disasm-check`, `--function-search-check` (with `--gaps` it looks at the code between the unwind entries of every loaded System32 DLL, and `--dump` prints the cases it got wrong or could not find), `--relay-check`, `--pointer-scan-bench --process=<name or id>` (builds the pointer map of a running process, searches three times, rescans, and prints the times, the pointer and path counts and the memory used; `--address=`, `--level=`, `--offset=`, `--results=`, `--threads=`, `--readonly`, `--mapped`, `--system` and `--any-offset` set the scan), and `--compat` to run a cheat table without a window. With the environment variable `MANIFOLD_TEMPLATE_CHECK` set to a folder of templates, the `templates` suite also generates each of them for an instruction of the tests program itself, prints whether the result assembles and writes it into `_rendered` there; this prints only and fails nothing.
+### Checks outside the default run
+
+Some checks need a real game, a long run or a special situation and are not part of the default run or of CI. Each is started with its own option:
+
+| Option | Notes |
+| --- | --- |
+| `--debugger-check` | with `--veh` for the in-process debugger |
+| `--watch-arm-check`, `--watch-stress` | |
+| `--mono-check`, `--mono-dump`, `--unity-dump`, `--il2cpp-check` | |
+| `--unreal-check`, `--disasm-check`, `--relay-check` | |
+| `--function-search-check` | with `--gaps` it looks at the code between the unwind entries of every loaded System32 DLL, and `--dump` prints the cases it got wrong or could not find |
+| `--pointer-scan-bench --process=<name or id>` | builds the pointer map of a running process, searches three times, rescans, and prints the times, the pointer and path counts and the memory used; `--address=`, `--level=`, `--offset=`, `--results=`, `--threads=`, `--readonly`, `--mapped`, `--system` and `--any-offset` set the scan |
+| `--compat` | runs a cheat table without a window |
+
+With the environment variable `MANIFOLD_TEMPLATE_CHECK` set to a folder of templates, the `templates` suite also generates each of them for an instruction of the tests program itself, prints whether the result assembles and writes it into `_rendered` there. This prints only and fails nothing.
 
 ## Working on the code
 
-- **Line endings and style**: the repository keeps text files with LF (`.gitattributes`; solution, project and batch files keep CRLF), and `.editorconfig` tells editors to use UTF-8, LF and four spaces. `.clang-format` describes the code style. `python Tools/format_changed.py` shows how clang-format would format the lines changed since `HEAD` and touches nothing; `--commit`, `--staged` and file names narrow it down, `--apply` writes the result. Only changed lines are formatted, so the rest of the code stays as it is. One place where clang-format differs from the existing code: it puts the braces of a lambda assigned to a variable at the level of the statement.
+- **Line endings**: the repository keeps text files with LF (`.gitattributes`; solution, project and batch files keep CRLF), and `.editorconfig` tells editors to use UTF-8, LF and four spaces.
+- **Style**: `.clang-format` describes the code style.
+  - `python Tools/format_changed.py` shows how clang-format would format the lines changed since `HEAD` and touches nothing; `--commit`, `--staged` and file names narrow it down, `--apply` writes the result.
+  - Only changed lines are formatted, so the rest of the code stays as it is.
+  - One place where clang-format differs from the existing code: it puts the braces of a lambda assigned to a variable at the level of the statement.
 - **Commands and shortcuts** are defined once in `Source/App/Commands.cpp`; a window asks `Pressed(Command::…)` and shows the keys with `CommandItem`.
 - **Cheat Engine API docs**: `Source/Lua/Docs/CheatEngine.txt` lists the classes, functions, methods and properties of Cheat Engine 7.5's Lua API with descriptions written for this project; `python Tools/gen_lua_docs.py` turns it into `Source/Generated/LuaDocs.cpp` for the documentation panel, and `Tools/gen_projects.py` runs it too, so CI notices a `LuaDocs.cpp` that was not regenerated.
 - **Live install**: `Build\x64\Release` is build output that every build replaces. `Tools\Install.ps1` copies a build into `Install` in the main checkout (or into `-Destination`), and the program there keeps its `configs`, `tables`, `sounds`, `templates`, `logs` and `crashes` apart from the build. The first install copies those folders from `Build\x64\Release` (or `-AdoptFrom`) and leaves the originals in place; later installs replace only the program files, add Autorun modules that are newer, and refuse while that copy of the program runs.
