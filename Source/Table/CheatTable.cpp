@@ -753,6 +753,16 @@ namespace Manifold::Table
         LoadedTable table;
         if (!ParseTable(text, table))
             return {};
+        // ∑ Records from the clipboard get new IDs when they are pasted; the IDs they had are no table file's, so the Address
+        //   List Debug window must not report them as renumbered.
+        const std::function<void(MemoryRecord&)> forget = [&](MemoryRecord& record)
+            {
+                record.FileId = -1;
+                for (auto& child : record.Children)
+                    forget(*child);
+            };
+        for (auto& record : table.Records)
+            forget(*record);
         return std::move(table.Records);
     }
 }

@@ -9,6 +9,9 @@
 #include "Table/RecordCheck.h"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -216,6 +219,63 @@ local s = getAddressList().getMemoryRecordByID(99)
             CHECK(copy->FileId == -1);
         }
 
+        void LoadKeepsFileIds()
+        {
+            const char* xml = R"(<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry><ID>0</ID><Description>"Player"</Description><GroupHeader>1</GroupHeader>
+      <CheatEntries>
+        <CheatEntry><ID>1</ID><Description>"Health"</Description><VariableType>4 Bytes</VariableType><Address>00400000</Address></CheatEntry>
+        <CheatEntry><ID>2</ID><Description>"Mode"</Description><VariableType>4 Bytes</VariableType><Address>00400004</Address></CheatEntry>
+        <CheatEntry><ID>2</ID><Description>"Difficulty"</Description><VariableType>4 Bytes</VariableType><Address>00400008</Address></CheatEntry>
+      </CheatEntries>
+    </CheatEntry>
+    <CheatEntry><ID>5</ID><Description>"Script A"</Description><VariableType>Auto Assembler Script</VariableType><AssemblerScript>[ENABLE]
+[DISABLE]
+</AssemblerScript></CheatEntry>
+    <CheatEntry><ID>6</ID><Description>"Script B"</Description><VariableType>Auto Assembler Script</VariableType><AssemblerScript>[ENABLE]
+[DISABLE]
+</AssemblerScript></CheatEntry>
+  </CheatEntries>
+</CheatTable>)";
+            const std::filesystem::path file = std::filesystem::temp_directory_path() / ("manifold-ids-" + std::to_string(::GetCurrentProcessId()) + ".CT");
+            {
+                std::ofstream out(file, std::ios::binary);
+                out << xml;
+            }
+            Settings settings;
+            Engine engine(settings);
+            engine.Lua().Run("__manifoldHeadless = true", "headless");
+            const Status loaded = engine.Tables().LoadTable(file, false);
+            std::error_code ignored;
+            std::filesystem::remove(file, ignored);
+            CHECK_MSG(loaded.Ok(), loaded.Text);
+            Table::AddressList& list = engine.Table();
+            const auto idOf = [&](const char* name) { const Table::MemoryRecord* record = list.FindByDescription(name); return record ? record->Id : -100; };
+            CHECK_EQ(idOf("Player"), 0);
+            CHECK_EQ(idOf("Health"), 1);
+            CHECK_EQ(idOf("Mode"), 2);
+            CHECK_EQ(idOf("Script A"), 5);
+            CHECK_EQ(idOf("Script B"), 6);
+            CHECK_MSG(idOf("Difficulty") == 7, "the duplicate got " + std::to_string(idOf("Difficulty")));
+            std::string result;
+            const Status found = engine.Lua().RunWithResult("return getAddressList().getMemoryRecordByID(0).Description", "id 0", result);
+            CHECK_MSG(found.Ok() && result == "Player", found.Text + result);
+
+            std::size_t renumbered = 0;
+            for (const RecordIssue& issue : Table::CheckRecords(list))
+                renumbered += issue.Check == "id";
+            CHECK_EQ(renumbered, std::size_t(1));
+
+            Table::MemoryRecord& made = list.AddValue("Made in Code", "00400010", Scan::ValueType::FourBytes);
+            CHECK(made.Id > 7);
+
+            const std::string copied = Table::RecordsToXml({ list.FindByDescription("Health") });
+            std::vector<std::unique_ptr<Table::MemoryRecord>> pasted = Table::RecordsFromXml(copied);
+            CHECK(pasted.size() == 1 && pasted.front()->FileId == -1);
+        }
+
         void PointerChain()
         {
             Settings settings;
@@ -343,6 +403,7 @@ local s = getAddressList().getMemoryRecordByID(99)
         References();
         StaticChecks();
         Renumbered();
+        LoadKeepsFileIds();
         PointerChain();
         Trace();
         return Totals().Failures - before;

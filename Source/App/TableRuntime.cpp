@@ -593,6 +593,17 @@ namespace Manifold
                     m_table.Files.push_back(std::move(file));
             }
         }
+        // ∑ Every ID of the file is noted before the first record goes in. Add notes one tree at a time, so a record that had to
+        //   be renumbered (an ID given twice) used to take the next free number, which a later record of the file still had; that
+        //   one moved on in turn, and one duplicate renumbered the rest of the table.
+        const std::function<void(const Table::MemoryRecord&)> noteIds = [&](const Table::MemoryRecord& record)
+            {
+                m_table.NoteId(record.Id);
+                for (const auto& child : record.Children)
+                    noteIds(*child);
+            };
+        for (const auto& record : loaded.Records)
+            noteIds(*record);
         for (auto& record : loaded.Records)
             m_table.Add(std::move(record));
         const std::function<void(Table::MemoryRecord&)> fix = [&](Table::MemoryRecord& record)
