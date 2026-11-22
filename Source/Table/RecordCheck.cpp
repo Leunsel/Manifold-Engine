@@ -1,6 +1,7 @@
 #include "Table/RecordCheck.h"
 
 #include "Core/Text.h"
+#include "Table/RecordPath.h"
 
 #include <algorithm>
 #include <cctype>
@@ -24,6 +25,14 @@ namespace Manifold::Table
         std::size_t SkipSpaces(std::string_view text, std::size_t at)
         {
             while (at < text.size() && (text[at] == ' ' || text[at] == '\t'))
+                ++at;
+            return at;
+        }
+
+        // Spaces, tabs and line breaks, for table literals that span lines.
+        std::size_t SkipBlank(std::string_view text, std::size_t at)
+        {
+            while (at < text.size() && (text[at] == ' ' || text[at] == '\t' || text[at] == '\r' || text[at] == '\n'))
                 ++at;
             return at;
         }
@@ -222,7 +231,32 @@ namespace Manifold::Table
                 reference.Function = std::string(code.substr(at, name.size()));
                 reference.Line = static_cast<int>(std::count(code.begin(), code.begin() + static_cast<std::ptrdiff_t>(at), '\n')) + 1;
                 std::size_t end = next;
-                if (auto text = StringLiteral(code, end))
+                if (lookup[0] == 'm' && parenthesis && end < code.size() && code[end] == '{')
+                {
+                    // ∑ A path is a table of string literals; anything else in it (a variable, a call) makes it no literal lookup.
+                    std::vector<std::string> steps;
+                    std::size_t at2 = SkipBlank(code, end + 1);
+                    bool literal = true;
+                    while (at2 < code.size() && code[at2] != '}')
+                    {
+                        auto step = StringLiteral(code, at2);
+                        if (!step)
+                        {
+                            literal = false;
+                            break;
+                        }
+                        steps.push_back(std::move(*step));
+                        at2 = SkipBlank(code, at2);
+                        if (at2 < code.size() && (code[at2] == ',' || code[at2] == ';'))
+                            at2 = SkipBlank(code, at2 + 1);
+                    }
+                    if (!literal || steps.empty() || at2 >= code.size())
+                        continue;
+                    reference.Path = std::move(steps);
+                    reference.Target = PathText(reference.Path);
+                    end = at2 + 1;
+                }
+                else if (auto text = StringLiteral(code, end))
                 {
                     reference.Target = std::move(*text);
                     reference.ById = false;
@@ -256,7 +290,13 @@ namespace Manifold::Table
                 {
                     reference.FromRecord = from;
                     reference.Where = where;
-                    if (reference.ById)
+                    if (!reference.Path.empty())
+                    {
+                        const std::vector<MemoryRecord*> matches = FindByPath(list, reference.Path);
+                        reference.TargetId = matches.size() == 1 ? matches.front()->Id : -1;
+                        reference.Matches = static_cast<int>(matches.size());
+                    }
+                    else if (reference.ById)
                     {
                         const auto id = ParseDecimal(reference.Target);
                         const MemoryRecord* target = id && *id >= 0 && *id <= kMaxRecordId ? list.FindById(static_cast<int>(*id)) : nullptr;
@@ -404,6 +444,26 @@ namespace Manifold::Table
             }
         }
 
+        // ∑ Records with the same full path are real duplicates (a group pasted twice): no lookup can tell them apart. Only the
+        //   topmost of a duplicated tree is reported; the records below it share its problem.
+        std::map<std::vector<std::string>, std::vector<const MemoryRecord*>> byPath;
+        for (const MemoryRecord* record : records)
+            byPath[RecordPath(*record)].push_back(record);
+        for (const auto& [path, same] : byPath)
+        {
+            if (same.size() < 2)
+                continue;
+            const MemoryRecord* parent = same.front()->Parent;
+            if (parent && byPath[RecordPath(*parent)].size() > 1)
+                continue;
+            std::vector<std::string> ids;
+            for (const MemoryRecord* record : same)
+                ids.push_back(std::to_string(record->Id));
+            for (const MemoryRecord* record : same)
+                issue(record->Id, IssueLevel::Warning, "path", Format("%zu records have the path %s (IDs %s), so no lookup by name or path can tell them apart.", same.size(),
+                    Quoted(PathText(path)).c_str(), Join(ids, ", ").c_str()));
+        }
+
         for (const auto& [keyId, users] : hotkeyUsers)
         {
             if (users.size() < 2)
@@ -427,6 +487,15 @@ namespace Manifold::Table
         for (const RecordReference& reference : FindRecordReferences(list))
         {
             const std::string at = reference.Where + ", line " + std::to_string(reference.Line);
+            if (!reference.Path.empty())
+            {
+                if (reference.Matches == 0)
+                    issue(reference.FromRecord, IssueLevel::Warning, "lua-reference", "Lua in the " + at + " looks for the path " + Quoted(reference.Target) + ", which is not in the table.");
+                else if (reference.Matches > 1)
+                    issue(reference.FromRecord, IssueLevel::Warning, "lua-reference", Format("Lua in the %s looks for the path %s, which %d records have; the lookup fails with ME-6011.",
+                        at.c_str(), Quoted(reference.Target).c_str(), reference.Matches));
+                continue;
+            }
             if (reference.TargetId < 0)
             {
                 std::string text = "Lua in the " + at + " looks for " + (reference.ById ? "ID " + reference.Target : "record " + Quoted(reference.Target)) + " (" + reference.Function +

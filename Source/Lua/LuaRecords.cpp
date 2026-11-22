@@ -8,6 +8,7 @@
 #include "Lua/LuaEngine.h"
 #include "Scan/ValueType.h"
 #include "Table/AddressList.h"
+#include "Table/RecordPath.h"
 
 #include "lua.hpp"
 
@@ -115,6 +116,77 @@ namespace Manifold::Lua
             if (!record)
                 return PushFailure(state, ErrorCode::TableRecordNotFound, shown);
             lua_pushinteger(state, record->Id);
+            return 1;
+        }
+
+        // ∑ One record or an error: none is ME-6008, several are ME-6011 with the count, so a script never gets "the first of
+        //   three" without knowing.
+        int PushOne(lua_State* state, const std::vector<MemoryRecord*>& found, const std::string& shown)
+        {
+            if (found.empty())
+                return PushFailure(state, ErrorCode::TableRecordNotFound, shown);
+            if (found.size() > 1)
+                return PushFailure(state, ErrorCode::TableRecordAmbiguous, shown + " (" + std::to_string(found.size()) + " records)");
+            lua_pushinteger(state, found.front()->Id);
+            return 1;
+        }
+
+        std::vector<std::string> PathArgument(lua_State* state, int index)
+        {
+            luaL_checktype(state, index, LUA_TTABLE);
+            std::vector<std::string> path;
+            const lua_Integer count = static_cast<lua_Integer>(lua_rawlen(state, index));
+            for (lua_Integer step = 1; step <= count; ++step)
+            {
+                lua_rawgeti(state, index, step);
+                if (lua_type(state, -1) != LUA_TSTRING)
+                    luaL_error(state, "step %d of the path is a %s, not a description", static_cast<int>(step), luaL_typename(state, -1));
+                path.emplace_back(lua_tostring(state, -1));
+                lua_pop(state, 1);
+            }
+            if (path.empty())
+                luaL_error(state, "the path is empty");
+            return path;
+        }
+
+        // findPath(path, fromId?, identity?) -> id, or nil, code, message
+        int RecordFindPath(lua_State* state)
+        {
+            const std::vector<std::string> path = PathArgument(state, 1);
+            MemoryRecord* from = nullptr;
+            if (!lua_isnoneornil(state, 2))
+            {
+                from = Find(state, 2);
+                if (!from)
+                    return Gone(state, 2);
+            }
+            Table::AddressList& table = Owner(state).Table();
+            return PushOne(state, Table::FindByPath(table, path, from), "\"" + Table::PathText(path) + "\"" + (from ? " below \"" + from->Description + "\"" : std::string()));
+        }
+
+        // findBelow(id, identity, description) -> id, or nil, code, message
+        int RecordFindBelow(lua_State* state)
+        {
+            MemoryRecord* from = Find(state, 1);
+            if (!from)
+                return Gone(state, 1);
+            const std::string description = luaL_checkstring(state, 3);
+            return PushOne(state, Table::FindBelow(*from, description), "\"" + description + "\" below \"" + from->Description + "\"");
+        }
+
+        int RecordPathOf(lua_State* state)
+        {
+            MemoryRecord* record = Find(state, 1);
+            if (!record)
+                return Gone(state, 1);
+            const std::vector<std::string> path = Table::RecordPath(*record);
+            lua_createtable(state, static_cast<int>(path.size()), 0);
+            lua_Integer index = 1;
+            for (const std::string& step : path)
+            {
+                lua_pushlstring(state, step.data(), step.size());
+                lua_rawseti(state, -2, index++);
+            }
             return 1;
         }
 
@@ -403,6 +475,9 @@ namespace Manifold::Lua
         static const luaL_Reg functions[] = {
             { "recordIdentity", &RecordIdentity },
             { "recordFind", &RecordFind },
+            { "recordFindPath", &RecordFindPath },
+            { "recordFindBelow", &RecordFindBelow },
+            { "recordPath", &RecordPathOf },
             { "recordAll", &RecordAll },
             { "recordSelected", &RecordSelected },
             { "recordChildren", &RecordChildren },

@@ -7,6 +7,7 @@
 #include "Lua/LuaEngine.h"
 #include "Table/CheatTable.h"
 #include "Table/RecordCheck.h"
+#include "Table/RecordPath.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -276,6 +277,82 @@ local s = getAddressList().getMemoryRecordByID(99)
             CHECK(pasted.size() == 1 && pasted.front()->FileId == -1);
         }
 
+        void Paths()
+        {
+            Settings settings;
+            Engine engine(settings);
+            Lua::LuaEngine& lua = engine.Lua();
+            lua.Run("__manifoldHeadless = true", "headless");
+            Table::AddressList& list = engine.Table();
+
+            // The shape of the owner's tables: every script has its own "Multiplier:" and "[Debug]" below it.
+            Table::MemoryRecord& scripts = list.AddGroup("[CET : Scripts] ()->");
+            Table::MemoryRecord& fire = list.AddScript("Fire Rate : Multiplier ()->", "[ENABLE]\n[DISABLE]\n", &scripts);
+            Table::MemoryRecord& fireMultiplier = list.AddValue("Multiplier:", "00400000", Scan::ValueType::Float, &fire);
+            Table::MemoryRecord& fireDebug = list.AddGroup("[Debug] ()->", &fire);
+            Table::MemoryRecord& fireHealth = list.AddValue("[0020] Health", "00400010", Scan::ValueType::FourBytes, &fireDebug);
+            Table::MemoryRecord& reload = list.AddScript("Reload Speed : Multiplier ()->", "[ENABLE]\n[DISABLE]\n", &scripts);
+            Table::MemoryRecord& reloadMultiplier = list.AddValue("Multiplier:", "00400020", Scan::ValueType::Float, &reload);
+            Table::MemoryRecord& reloadType = list.AddGroup("Type:", &reload);
+            Table::MemoryRecord& typeMultiplier = list.AddValue("Multiplier:", "00400030", Scan::ValueType::Float, &reloadType);
+            Table::MemoryRecord& lists = list.AddGroup("[CET : Lists] ()->");
+            Table::MemoryRecord& twinA = list.AddGroup("listECrabIslandType", &lists);
+            Table::MemoryRecord& twinB = list.AddGroup("listECrabIslandType", &lists);
+            Table::MemoryRecord& twinChild = list.AddValue("Value", "00400040", Scan::ValueType::FourBytes, &twinA);
+            list.AddValue("Value", "00400044", Scan::ValueType::FourBytes, &twinB);
+
+            CHECK((Table::RecordPath(fireHealth) == std::vector<std::string>{ "[CET : Scripts] ()->", "Fire Rate : Multiplier ()->", "[Debug] ()->", "[0020] Health" }));
+            CHECK(Table::FindByPath(list, Table::RecordPath(fireMultiplier)) == std::vector<Table::MemoryRecord*>{ &fireMultiplier });
+            CHECK(Table::FindByPath(list, Table::RecordPath(twinChild)).size() == 2);
+            CHECK(Table::FindByPath(list, { "Multiplier:" }, &reload) == std::vector<Table::MemoryRecord*>{ &reloadMultiplier });
+            CHECK(Table::FindByPath(list, { "Nope" }).empty() && Table::FindByPath(list, {}).empty());
+            CHECK(Table::FindBelow(reload, "Multiplier:").size() == 2);
+            CHECK(Table::FindBelow(fire, "Multiplier:") == std::vector<Table::MemoryRecord*>{ &fireMultiplier });
+            CHECK(Table::PathText({ "A", "", "B" }) == "A › (no description) › B");
+
+            const auto lookup = [&](const char* name, const std::string& code, const std::string& expected)
+                {
+                    std::string result;
+                    const Status status = lua.RunWithResult(code, name, result);
+                    CHECK_MSG(status.Ok() && result == expected, std::string(name) + ": " + (status.Ok() ? result : status.Text));
+                };
+            lookup("path", "local r = manifold.record.find({ '[CET : Scripts] ()->', 'Reload Speed : Multiplier ()->', 'Type:', 'Multiplier:' }) return tostring(r.id)",
+                std::to_string(typeMultiplier.Id));
+            lookup("path missing", "local r, e = manifold.record.find({ '[CET : Scripts] ()->', 'Nope' }) return tostring(r) .. ' ' .. e.code", "nil ME-6008");
+            lookup("path ambiguous", "local r, e = manifold.record.find({ '[CET : Lists] ()->', 'listECrabIslandType', 'Value' }) return tostring(r) .. ' ' .. e.code .. ' ' .. tostring(e.message:find('2 records', 1, true) ~= nil)",
+                "nil ME-6011 true");
+            lookup("below", "local s = manifold.record.find({ '[CET : Scripts] ()->', 'Fire Rate : Multiplier ()->' }) return tostring(s.find('Multiplier:').id) .. ' ' .. tostring(s.find('[0020] Health').id)",
+                std::to_string(fireMultiplier.Id) + " " + std::to_string(fireHealth.Id));
+            lookup("below ambiguous", "local s = manifold.record.find({ '[CET : Scripts] ()->', 'Reload Speed : Multiplier ()->' }) local r, e = s.find('Multiplier:') return tostring(r) .. ' ' .. e.code",
+                "nil ME-6011");
+            lookup("below path", "local s = manifold.record.find({ '[CET : Scripts] ()->', 'Reload Speed : Multiplier ()->' }) return tostring(s.find({ 'Multiplier:' }).id) .. ' ' .. tostring(s.find({ 'Type:', 'Multiplier:' }).id)",
+                std::to_string(reloadMultiplier.Id) + " " + std::to_string(typeMultiplier.Id));
+            lookup("path round trip", "local r = manifold.record.find(" + std::to_string(fireHealth.Id) + ") return tostring(manifold.record.find(r.path()) == r) .. ' ' .. #r.path()", "true 4");
+            lookup("empty path raises", "local ok, e = pcall(manifold.record.find, {}) return tostring(ok) .. ' ' .. tostring((type(e) == 'table' and e.message or tostring(e)):find('the path is empty', 1, true) ~= nil)", "false true");
+            lookup("bad step raises", "local ok = pcall(manifold.record.find, { 'a', 3 }) return tostring(ok)", "false");
+            lookup("api version", "return tostring(manifold.apiVersion >= 21 and manifold.has('record.find'))", "true");
+
+            list.TableLuaScript =
+                "local a = manifold.record.find({ '[CET : Scripts] ()->', 'Fire Rate : Multiplier ()->', 'Multiplier:' })\n"
+                "local b = manifold.record.find({\n  '[CET : Lists] ()->',\n  'listECrabIslandType',\n  'Value'\n})\n"
+                "local c = manifold.record.find({ '[CET : Scripts] ()->', 'Gone' })\n"
+                "local d = manifold.record.find({ '[CET : Scripts] ()->', name })\n";
+            const std::vector<Table::RecordReference> references = Table::FindRecordReferences(list);
+            CHECK_MSG(references.size() == 3, std::to_string(references.size()));
+            if (references.size() == 3)
+            {
+                CHECK(references[0].Path.size() == 3 && references[0].TargetId == fireMultiplier.Id && references[0].Matches == 1);
+                CHECK(references[1].Line == 2 && references[1].Matches == 2 && references[1].TargetId == -1);
+                CHECK(references[2].Line == 7 && references[2].Matches == 0);
+            }
+            const std::vector<RecordIssue> issues = Table::CheckRecords(list);
+            CHECK(Has(issues, Table::kTableLevel, "lua-reference", IssueLevel::Warning, "ME-6011"));
+            CHECK(Has(issues, Table::kTableLevel, "lua-reference", IssueLevel::Warning, "Gone"));
+            CHECK(Has(issues, twinA.Id, "path", IssueLevel::Warning, "2 records") && Has(issues, twinB.Id, "path", IssueLevel::Warning));
+            CHECK_MSG(Of(issues, twinChild.Id, "path").empty(), "the children of duplicated groups are not reported again");
+            CHECK(Of(issues, fireMultiplier.Id, "path").empty() && Of(issues, typeMultiplier.Id, "path").empty());
+        }
+
         void PointerChain()
         {
             Settings settings;
@@ -404,6 +481,7 @@ local s = getAddressList().getMemoryRecordByID(99)
         StaticChecks();
         Renumbered();
         LoadKeepsFileIds();
+        Paths();
         PointerChain();
         Trace();
         return Totals().Failures - before;

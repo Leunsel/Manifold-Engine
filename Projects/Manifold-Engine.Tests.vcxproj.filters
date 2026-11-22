@@ -333,6 +333,9 @@
     <ClCompile Include="..\Source\Table\RecordCheck.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Table\RecordPath.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\RttiStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>

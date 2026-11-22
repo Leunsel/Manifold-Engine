@@ -38,9 +38,11 @@ namespace Manifold::Table
         std::string Where;         // "Lua script of the table", "script", "On Activate", "file helpers.lua"
         int Line = 0;
         std::string Function;
-        std::string Target;        // the description or the id as written
+        std::string Target;        // the description or the id as written, or the path for messages
         bool ById = false;
-        int TargetId = -1;         // the record found, -1 when none
+        std::vector<std::string> Path;  // manifold.record.find({ "Group", "Name" }): the steps; empty for a description or an id
+        int TargetId = -1;         // the record found, -1 when none (or, for a path, when several match)
+        int Matches = 0;           // for a path: how many records are at its end
     };
 
     struct CheckHooks

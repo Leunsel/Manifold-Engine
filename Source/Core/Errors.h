@@ -108,6 +108,7 @@
     X(TableRecordNotFound, 6008) \
     X(TableRecordGone, 6009) \
     X(TableRecordNoValue, 6010) \
+    X(TableRecordAmbiguous, 6011) \
     X(LuaSyntax, 7001) \
     X(LuaRuntime, 7002) \
     X(LuaAutorunFailed, 7003) \

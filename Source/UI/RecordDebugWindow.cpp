@@ -5,6 +5,7 @@
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Lua/LuaEngine.h"
+#include "Table/RecordPath.h"
 #include "UI/Fonts.h"
 #include "UI/Theme.h"
 #include "UI/UiScale.h"
@@ -916,6 +917,27 @@ namespace Manifold::UI
             for (const Table::MemoryRecord* at = record.Parent; at; at = at->Parent)
                 ++depth;
             Property("Parent", record.Parent ? Format("%s (ID %d)", Name(*record.Parent).c_str(), record.Parent->Id) : std::string("(top level)"));
+            {
+                const std::vector<std::string> path = Table::RecordPath(record);
+                const std::size_t same = Table::FindByPath(list, path).size();
+                Property("Path", Table::PathText(path) + (same > 1 ? Format("  (%zu records have it)", same) : std::string()), same > 1 ? ManifoldTheme::Warning : ManifoldTheme::Text);
+                std::string lua = "manifold.record.find({ ";
+                for (std::size_t i = 0; i < path.size(); ++i)
+                {
+                    std::string quoted = "\"";
+                    for (const char c : path[i])
+                        quoted += c == '"' || c == '\\' ? std::string("\\") + c : c == '\n' ? std::string("\\n") : std::string(1, c);
+                    lua += (i ? ", " : "") + quoted + "\"";
+                }
+                lua += " })";
+                if (ImGui::BeginPopupContextItem("##pathmenu"))
+                {
+                    if (ImGui::MenuItem(ICON_FA_COPY "  Copy as Lua"))
+                        ImGui::SetClipboardText(lua.c_str());
+                    ImGui::EndPopup();
+                }
+                ItemTooltip("Right-click: Copy as Lua, the manifold.record.find call that finds this record by its path.");
+            }
             const auto& siblings = list.SiblingsOf(record);
             Property("Position", Format("%d of %zu, depth %d", list.IndexOf(record) + 1, siblings.size(), depth));
             if (!record.Children.empty())
@@ -1205,6 +1227,7 @@ namespace Manifold::UI
         if (record.FileId >= 0 && record.FileId != record.Id)
             text += Format("  ID in the file: %d\n", record.FileId);
         text += "  Parent: " + (record.Parent ? Format("\"%s\" (ID %d)", record.Parent->Description.c_str(), record.Parent->Id) : std::string("top level")) + "\n";
+        text += "  Path: " + Table::PathText(Table::RecordPath(record)) + "\n";
         if (record.Kind == RecordKind::Value)
             text += "  Type: " + TypeOf(record) + "\n";
         text += std::string("  State: ") + (record.Active ? "on" : "off") + "\n";
