@@ -167,6 +167,7 @@ namespace Manifold::UI
         std::map<int, Frame> m_frames;
         std::vector<std::pair<ImVec2, ImVec2>> m_grips;
         int m_gripWindow = 0;
+        bool m_frameMoved = false; // a title drag or grip drag has changed something (one undo step, none for a click)
         bool m_gripping = false;
         int m_overlayWindow = 0;
         int m_flashWindow = 0;
@@ -188,6 +189,8 @@ namespace Manifold::UI
         // (an older .form.lua) the handlers live in a linked script.
         bool m_oneFile = true;
         std::string m_fileDisk; // one file: the whole file as last read or written
+        bool m_crlf = false;    // one file: the file had CRLF line ends / a UTF-8 BOM; writing keeps them
+        bool m_bom = false;
         double m_lockNoteUntil = 0.0;
         std::filesystem::path m_scriptPath;
         std::uint64_t m_scriptStamp = 0;
@@ -207,6 +210,8 @@ namespace Manifold::UI
         float m_outlineWidth = 0.0f;
         int m_outlineRows = 0;
         ImVec2 m_menuSpacing = ImVec2(8.0f, 4.0f);
+        int m_renameNode = 0;       // the widget whose name field is being typed into
+        std::string m_renameFrom;   // its name when typing started
 
         std::deque<Lua::FormDocument> m_undo;
         std::deque<Lua::FormDocument> m_redo;

@@ -69,7 +69,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 22 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 23 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -2325,6 +2325,8 @@ return M
                 bindTwinA = R.create({ description = "Bind Twin", address = ("%X"):format(probeValue) })
                 bindTwinB = R.create({ description = "Bind Twin", address = ("%X"):format(probeValue) })
                 bindNumber = R.create({ description = "Bind Number", address = ("%X"):format(probeValue) })
+                bindMode = R.create({ description = "Bind Mode", address = ("%X"):format(probeValue) })
+                bindHex = R.create({ description = "Bind Hex", address = ("%X"):format(probeValue) })
                 bindClicks = 0
                 bindWindow, bindWidgets = manifold.ui.form.build({ form = 1, title = "Bind Probe", children = {
                     { kind = "checkbox", name = "god", label = "God", style = "switch", record = "Bind Switch" },
@@ -2334,12 +2336,15 @@ return M
                     { kind = "slider", name = "lost", record = "No Such Record" },
                     { kind = "slider", name = "guarded", record = "Bind Number", enabledWhen = "god" },
                     { kind = "number", name = "twin", record = "Bind Twin" },
+                    { kind = "input", name = "typed", record = "Bind Number" },
+                    { kind = "combo", name = "mode", items = { "Off", "Multiplier" }, record = "Bind Mode" },
+                    { kind = "number", name = "hexed", integer = true, record = "Bind Hex" },
                   } }, { flipped = function() bindClicks = bindClicks + 1 end })
                 local w = bindWidgets
                 if w.god.get() ~= false then return "checkbox starts as the record" end
                 if w.amount.get() ~= 77 then return "number shows the value: " .. tostring(w.amount.get()) end
                 if w.shown.get() ~= "77" then return "text shows the value: " .. tostring(w.shown.get()) end
-                bindIds = { god = w.god.id, flip = w.flip.id, amount = w.amount.id, shown = w.shown.id, lost = w.lost.id, guarded = w.guarded.id, twin = w.twin.id }
+                bindIds = { god = w.god.id, flip = w.flip.id, amount = w.amount.id, shown = w.shown.id, lost = w.lost.id, guarded = w.guarded.id, twin = w.twin.id, typed = w.typed.id, mode = w.mode.id, hexed = w.hexed.id }
 
                 local function raises(fn, needle)
                   local ok, failure = pcall(fn)
@@ -2355,9 +2360,9 @@ return M
             std::map<std::string, int> ids;
             {
                 std::string result;
-                engine.Lua().RunWithResult("return ('%d %d %d %d %d %d %d'):format(bindIds.god, bindIds.flip, bindIds.amount, bindIds.shown, bindIds.lost, bindIds.guarded, bindIds.twin)", "bind ids", result);
+                engine.Lua().RunWithResult("return ('%d %d %d %d %d %d %d %d %d %d'):format(bindIds.god, bindIds.flip, bindIds.amount, bindIds.shown, bindIds.lost, bindIds.guarded, bindIds.twin, bindIds.typed, bindIds.mode, bindIds.hexed)", "bind ids", result);
                 std::istringstream read(result);
-                for (const char* name : { "god", "flip", "amount", "shown", "lost", "guarded", "twin" })
+                for (const char* name : { "god", "flip", "amount", "shown", "lost", "guarded", "twin", "typed", "mode", "hexed" })
                     read >> ids[name];
             }
             const auto node = [&](const char* name) { return model.Find(ids[name]); };
@@ -2385,14 +2390,48 @@ return M
             g_probeValue = 42; // the game changes the value
             engine.Lua().Tick(10000.5);
             CHECK(node("god") && !node("god")->Bool);
+            CHECK(node("guarded") && !node("guarded")->Enabled); // a rule follows a switch its record turned off
             CHECK(node("amount") && node("amount")->Number == 42.0);
             CHECK(node("shown") && node("shown")->Text == "42");
+
+            // an input writes on Enter and then follows the record again
+            if (Lua::UiNode* typed = model.Find(ids["typed"]))
+                typed->String = "300";
+            model.Post({ ids["typed"], "submit", { std::string("300") } });
+            engine.Lua().Tick(10000.6);
+            CHECK_EQ(g_probeValue, 300);
+            g_probeValue = 301;
+            engine.Lua().Tick(10000.8);
+            CHECK(node("typed") && node("typed")->String == "301");
 
             // the button switches the record, then the script's own handler runs
             model.Post({ ids["flip"], "click", {} });
             engine.Lua().Tick(10001.0);
             engine.Lua().Tick(10001.5);
             CHECK(node("god") && node("god")->Bool);
+            CHECK(node("guarded") && node("guarded")->Enabled);
+
+            // a drop-down record shows its entry in a combo; a hex record gives the number, not the hex text read as decimal
+            for (Table::MemoryRecord* record : engine.Table().Flatten())
+            {
+                if (record->Description == "Bind Mode")
+                    record->DropDown = { { "0", "Off" }, { "1", "Multiplier" } };
+                if (record->Description == "Bind Hex")
+                    record->ShowHex = true;
+            }
+            g_probeValue = 1;
+            engine.Lua().Tick(10002.0);
+            CHECK(node("mode") && node("mode")->Selected == 2);
+            g_probeValue = 255;
+            engine.Lua().Tick(10002.5);
+            CHECK(node("hexed") && node("hexed")->Number == 255.0);
+            LuaCheck(engine, "record binding hex", R"LUA(
+                local value, text = bindHex.getValue()
+                if value ~= 255 or not text:upper():find("FF$") then return "hex getValue " .. tostring(value) .. " " .. tostring(text) end
+                bindMode.setValue(0)
+                local number, shown, entry = bindMode.getValue()
+                if number ~= 0 or entry ~= "Off" then return "drop-down getValue " .. tostring(number) .. " " .. tostring(shown) .. " " .. tostring(entry) end
+                return "ok")LUA");
             LuaCheck(engine, "record binding button", R"LUA(
                 if not bindSwitch.isActive() then return "the button did not switch the record" end
                 if bindClicks ~= 1 then return "the script's onClick ran " .. bindClicks .. " times" end
@@ -2402,6 +2441,8 @@ return M
                 bindNumber.remove()
                 bindTwinA.remove()
                 bindTwinB.remove()
+                bindMode.remove()
+                bindHex.remove()
                 return "ok")LUA");
             CHECK(!FindWindow(model, "Bind Probe"));
             g_probeValue = keptValue;
@@ -2421,6 +2462,46 @@ return M
             CHECK_MSG(Lua::FormLoad(saved, loaded, error, &notes) && notes.empty(), error);
             CHECK(Lua::FormSave(loaded) == saved);
             CHECK(Lua::FormCanBind(Lua::UiKind::Slider) && !Lua::FormCanBind(Lua::UiKind::Section));
+
+            // a UTF-8 BOM in front of a form file is no error
+            CHECK_MSG(Lua::FormLoad("\xEF\xBB\xBF" + saved, loaded, error, &notes), error);
+            // open = false on the main window survives a save
+            {
+                Lua::FormDocument hidden = Lua::NewForm("Hidden");
+                Lua::FormSetProp(*hidden.Model.Find(hidden.Window), "open", "false");
+                const std::string text = Lua::FormSave(hidden);
+                CHECK(text.find("open = false") != std::string::npos);
+                Lua::FormDocument back;
+                CHECK(Lua::FormLoad(text, back, error, &notes) && !back.Model.Find(back.Window)->Open);
+            }
+            // checks that used to pass the editor and fail when the form ran
+            {
+                Lua::FormDocument checked = Lua::NewForm("Checked");
+                const int button = Lua::FormAdd(checked, Lua::UiKind::Button, checked.Window);
+                checked.Model.Find(button)->Icon = "no-such-icon-name";
+                const int text = Lua::FormAdd(checked, Lua::UiKind::Text, checked.Window);
+                checked.Model.Find(text)->Color = "#12345";
+                const int combo = Lua::FormAdd(checked, Lua::UiKind::Combo, checked.Window);
+                Lua::FormSetProp(*checked.Model.Find(combo), "multi", "true");
+                checked.Meta[combo].Record = "Ammo";
+                const int mode = Lua::FormAdd(checked, Lua::UiKind::Combo, checked.Window);
+                checked.Meta[mode].Name = "mode";
+                Lua::FormSetProp(*checked.Model.Find(mode), "items", "Off\nOn");
+                const int follower = Lua::FormAdd(checked, Lua::UiKind::Slider, checked.Window);
+                checked.Meta[follower].EnabledWhen = "mode = 2";
+                const std::vector<Lua::FormProblem> problems = Lua::FormProblems(checked);
+                const auto has = [&](const char* needle) { return std::any_of(problems.begin(), problems.end(), [&](const Lua::FormProblem& p) { return p.Text.find(needle) != std::string::npos; }); };
+                CHECK(has("is no Font Awesome icon name") && has("must be #RRGGBB or #RRGGBBAA") && has("cannot show a memory record"));
+                CHECK(!has("has no item \"2\"")); // an item number is fine
+                checked.Model.Find(mode)->Selected = 2;
+                Lua::FormApplyRules(checked);
+                CHECK(checked.Model.Find(follower)->Enabled);
+                checked.Model.Find(mode)->Selected = 1;
+                Lua::FormApplyRules(checked);
+                CHECK(!checked.Model.Find(follower)->Enabled);
+            }
+            // converting a script leaves platform.load alone
+            CHECK(Lua::FormConvertScript("local x = platform.load(\"a\")\n").empty());
         }
 
         void SnakeExample(Engine& engine)

@@ -1299,7 +1299,8 @@ namespace Manifold::UI
         {
             ImGuiContext& g = *GImGui;
             ImGuiWindow* window = ImGui::GetCurrentWindow();
-            if ((flags & ImGuiWindowFlags_NoTitleBar) || window->DockIsActive || g.HoveredWindow != window || g.HoveredId != 0 || g.HoveredIdPreviousFrame != 0 ||
+            // a window with a fixed or automatic size keeps it: no maximising either
+            if ((flags & (ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize)) || window->DockIsActive || g.HoveredWindow != window || g.HoveredId != 0 || g.HoveredIdPreviousFrame != 0 ||
                 g.IO.MouseClickedCount[0] != 2 || !ImGui::IsMouseClicked(ImGuiMouseButton_Left))
                 return;
             const ImRect bar = window->TitleBarRect();

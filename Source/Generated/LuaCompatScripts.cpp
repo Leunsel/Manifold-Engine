@@ -5215,7 +5215,7 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 22
+local API_VERSION = 23
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -6096,7 +6096,7 @@ do
       info = { returns = "table", doc = "What the record is: `{ id, description, kind, active, children, hotkeys, parent, comment }`, `kind` being `value`, `script` or `group`; a value record adds `type` (`byte`, `2bytes`, `4bytes`, `8bytes`, `float`, `double`, `string`, `bytes`, `binary`, `pointer` or its custom type's name), `address` (the expression as written), `offsets` (how many pointer offsets), `resolved` (the address it points to now, when it resolves) and `hex`." },
       getDescription = { returns = "string", doc = "The record's description, as the address list shows it." },
       setDescription = { params = { { name = "description", type = "string" } }, returns = "boolean", doc = "Changes the record's description." },
-      getValue = { returns = "value", doc = "Reads the record's value: a number for number types shown as numbers (an integer for the integer types), otherwise the text as the address list shows it (hex, a drop-down entry, a string, bytes). The text comes second in either case. `nil` and an error when the address does not resolve or cannot be read; `ME-6010` for scripts and groups." },
+      getValue = { returns = "value", doc = "Reads the record's value: a number for the number types (an integer for the integer types, also when the address list shows it as hex or as a drop-down entry), otherwise the text as the address list shows it (a string, bytes). The text as the address list shows it comes second, and third the description of the drop-down entry the value matches, when the record has a drop-down list. `nil` and an error when the address does not resolve or cannot be read; `ME-6010` for scripts and groups." },
       setValue = { params = { { name = "value", type = "number|string" } }, returns = "boolean", doc = "Writes the record's value, as typing it into the address list does: a number, or a text in the record's own form (hex digits for a hex record, a drop-down entry's value or description, a string). A frozen record keeps the new value. `nil` and an error when it cannot be written." },
       isActive = { returns = "boolean", doc = "Whether the record is switched on: an enabled script, a frozen value, an active group." },
       setActive = { params = { { name = "active", type = "boolean" } }, returns = "boolean", doc = "Switches the record on or off, as its box in the address list does: a script runs its `[ENABLE]` or `[DISABLE]` part, a value freezes or thaws, a group follows its options for its children. Inside a script's coroutine with asynchronous activation on, it waits for the activation without blocking the program. `nil` and the script's error when it fails." },
@@ -6132,12 +6132,12 @@ do
       local function method(name, body)
         bind(proxy, prefix .. "." .. name, members, name, METHODS[name], body, RECORD_DOC .. name)
       end
-      method("info", function()
+)MLUA"),
+            std::string_view(R"MLUA(      method("info", function()
         return failure(native.recordInfo(id, identity))
       end)
       method("getDescription", function()
-)MLUA"),
-            std::string_view(R"MLUA(        local info, code, message = native.recordInfo(id, identity)
+        local info, code, message = native.recordInfo(id, identity)
         if not info then
           return result(nil, code, message)
         end
@@ -6147,11 +6147,11 @@ do
         return failure(native.recordSetDescription(id, identity, description))
       end)
       method("getValue", function()
-        local value, text, message = native.recordGet(id, identity)
+        local value, text, entry = native.recordGet(id, identity)
         if value == nil then
-          return result(nil, text, message)
+          return result(nil, text, entry) -- on failure: nil, code, message
         end
-        return value, text
+        return value, text, entry
       end)
       method("setValue", function(value)
         return failure(native.recordSet(id, identity, value))
@@ -6464,7 +6464,8 @@ local function keyedRegistry(add, remove)
       byKey[key] = nil
       keyOf[id] = nil
     end
-    local owned = ownerOf[id]
+)MLUA"),
+            std::string_view(R"MLUA(    local owned = ownerOf[id]
     if owned then
       ownerOf[id] = nil
       disown(owned[1], owned[2])
@@ -6472,8 +6473,7 @@ local function keyedRegistry(add, remove)
     return removed
   end
   local function register(fn, options)
-)MLUA"),
-            std::string_view(R"MLUA(    local key = options and options.key
+    local key = options and options.key
     if key ~= nil and byKey[key] ~= nil then
       drop(byKey[key])
     end
@@ -6753,10 +6753,10 @@ end)
 define(unreal, "start", {
   params = { { name = "options", type = "table", optional = true, keys = { wait = "boolean" } } },
   returns = "true, or nil, error",
-  doc = "Resolves the opened process again, in any process, not only one that looks like Unreal. It runs in the background and the `unrealReady` event follows; with `options.wait` it resolves before it returns and gives the error when it fails. After `stop` this is what turns the tool on again.",
-}, function(options)
 )MLUA"),
-            std::string_view(R"MLUA(  return result(native.unrealStart((options or EMPTY).wait == true))
+            std::string_view(R"MLUA(  doc = "Resolves the opened process again, in any process, not only one that looks like Unreal. It runs in the background and the `unrealReady` event follows; with `options.wait` it resolves before it returns and gives the error when it fails. After `stop` this is what turns the tool on again.",
+}, function(options)
+  return result(native.unrealStart((options or EMPTY).wait == true))
 end)
 
 define(unreal, "stop", {
@@ -7027,9 +7027,9 @@ define(unreal, "walk", {
     { name = "root", type = "string", optional = true },
   },
   returns = "address, expression, field, or nil, error",
-  doc = "Follows properties by name from an object: `walk(manifold.unreal.pawn(), { \"RootComponent\", \"RelativeLocation\" })`. Object properties are followed, structs entered, and `Name[i]` picks a TArray element. Gives the address of the last step, an address expression from `root` (the object's address by default) with offset symbols, such as `[GameEngine+GameEngine_GameViewport]+...`, and the last field.",
 )MLUA"),
-            std::string_view(R"MLUA(}, function(object, steps, root)
+            std::string_view(R"MLUA(  doc = "Follows properties by name from an object: `walk(manifold.unreal.pawn(), { \"RootComponent\", \"RelativeLocation\" })`. Object properties are followed, structs entered, and `Name[i]` picks a TArray element. Gives the address of the last step, an address expression from `root` (the object's address by default) with offset symbols, such as `[GameEngine+GameEngine_GameViewport]+...`, and the last field.",
+}, function(object, steps, root)
   return many(native.unrealWalk(object, steps, root))
 end)
 
@@ -7522,12 +7522,12 @@ end
 local UI_COLORS = {
   "accent", "accentHovered", "success", "warning", "error", "text", "label", "muted", "changed",
   "page", "card", "cardBorder", "surface", "border", "rowSeparator", "frame", "button", "popup", "sidebar", "titleBar",
-  "addressText", "bytesText", "codeKeyword", "codeRegister", "codeNumber", "codeString", "codeComment", "codeSection", "codeLabel",
+  "addressText", "bytesText", "codeKeyword", "codeRegister", "codeNumber", "codeString", "codeComment", "codeUserComment", "codeSection", "codeLabel",
   "flowJump", "flowCall", "flowReturn", "breakpoint", "currentLine", "shadow",
 }
 local UI_COLOR_SET = {}
 for _, name in ipairs(UI_COLORS) do
-  UI_COLOR_SET[name] = true
+  UI_COLOR_SET[name:lower()] = true
 end
 
 local UI_HANDLER_BITS = { onClick = 1, onChange = 2, onSelect = 4, onActivate = 8, onMenu = 16, onHover = 32, onSubmit = 64, onClose = 128, onView = 256, onKey = 512 }
@@ -7623,7 +7623,7 @@ local function checkColor(path, name, value)
   if value == nil then
     return
   end
-  if not UI_COLOR_SET[value] and not value:match("^#%x%x%x%x%x%x$") and not value:match("^#%x%x%x%x%x%x%x%x$") then
+  if not UI_COLOR_SET[value:lower()] and not value:match("^#%x%x%x%x%x%x$") and not value:match("^#%x%x%x%x%x%x%x%x$") then
     misuse(("%s: %s %q is no theme colour (%s) and no #RRGGBB or #RRGGBBAA"):format(path, name, value, table.concat(UI_COLORS, ", ")))
   end
 end
@@ -7683,11 +7683,11 @@ local function handlerBits(options)
       bits = bits | bit
     end
   end
-  return bits
+)MLUA"),
+            std::string_view(R"MLUA(  return bits
 end
 
-)MLUA"),
-            std::string_view(R"MLUA(local function props(options)
+local function props(options)
   local copy = {}
   for key, value in pairs(options) do
     if type(value) ~= "function" then
@@ -8059,7 +8059,7 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
     "- `text` (`text`, `color`, `wrap`, `mono`), `heading` (`text`, `icon`), `separator` (`text` puts a caption into the line), `spacer`.",
     "- `button`: `text`, `icon`, `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through.",
-    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
+    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `integer`, `format`), `combo` (`label`, `items`, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
@@ -8078,9 +8078,9 @@ local WIDGET_METHOD_DOCS = {
   get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a colour's `#RRGGBB`, a number, the chosen combo, radio or table row's number (a combo with `multi` returns the list of chosen numbers), the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
   set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
   draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
-  getView = { returns = "table", doc = "A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom." },
 )MLUA"),
-            std::string_view(R"MLUA(  setView = { params = { { name = "view", type = "table", keys = { x = "number", y = "number", scale = "number" } } }, returns = "boolean", doc = "Moves or zooms a canvas's view." },
+            std::string_view(R"MLUA(  getView = { returns = "table", doc = "A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom." },
+  setView = { params = { { name = "view", type = "table", keys = { x = "number", y = "number", scale = "number" } } }, returns = "boolean", doc = "Moves or zooms a canvas's view." },
 }
 for _, name in ipairs({ "add", "clear", "remove", "update", "get", "set", "draw", "getView", "setView" }) do
   native.docDefine(nil, WIDGET_DOC .. name, WIDGET_METHOD_DOCS[name])
@@ -8345,10 +8345,10 @@ end
 -- hides it), `links.modals` the form's modals by name (`opens` shows one).
 local function fillForm(path, made, members, children, resolve, folder, links)
   -- `links.wiring` (shared by the form's windows) holds the enabledWhen rules
-  -- by the name of the widget they listen to; `refresh(name)` applies them
-  local wiring = links.wiring
 )MLUA"),
-            std::string_view(R"MLUA(  if wiring and not wiring.refresh then
+            std::string_view(R"MLUA(  -- by the name of the widget they listen to; `refresh(name)` applies them
+  local wiring = links.wiring
+  if wiring and not wiring.refresh then
     wiring.refresh = function(name)
       local list = wiring.rules[name]
       local source = rawget(members, name)
@@ -8390,19 +8390,27 @@ local function fillForm(path, made, members, children, resolve, folder, links)
     -- whose record is not in the table is disabled until it is.
     wiring.binds = wiring.binds or {}
     wiring.missing = wiring.missing or {}
-    local function shownValue(bind, value, text)
+    local function shownValue(bind, value, text, entry)
       if bind.kind == "number" or bind.kind == "slider" then
         return type(value) == "number" and value or tonumber(text)
       end
       if bind.kind == "combo" or bind.kind == "radio" then
+        -- an item names a drop-down entry by its description, or the value as shown
         for index, item in ipairs(bind.items or {}) do
-          if item == text or tostring(item) == tostring(value) then
+          local named = tostring(item)
+          if (entry ~= nil and named == entry) or named == text or named == tostring(value) then
             return index
           end
         end
         return nil
       end
       return text
+    end
+    -- a source of enabledWhen rules that a record just set: its rules follow
+    local function followRules(bind)
+      if bind.name and wiring.rules[bind.name] then
+        wiring.refresh(bind.name)
+      end
     end
     wiring.bindRefresh = function(windowHandle)
       for _, bind in ipairs(wiring.binds) do
@@ -8424,26 +8432,31 @@ local function fillForm(path, made, members, children, resolve, folder, links)
             if bind.rule then
               wiring.refresh(bind.rule)
             else
-              pcall(bind.handle.update, { enabled = found })
+              pcall(bind.handle.update, { enabled = found and bind.enabled })
             end
             bind.last = nil
           end
           if record and bind.kind == "checkbox" then
-            local active = record.isActive()
-            if active ~= nil and active ~= bind.last then
-              bind.last = active
-              pcall(bind.handle.set, active)
+            -- while its own switch is still being carried out, the record is not asked
+            if not native.recordPending(record.id, native.recordIdentity()) then
+              local active = record.isActive()
+              if active ~= nil and active ~= bind.last then
+                bind.last = active
+                pcall(bind.handle.set, active)
+                followRules(bind)
+              end
             end
           elseif record and bind.kind ~= "button" then
-            local value, text = record.getValue()
+            local value, text, entry = record.getValue()
             if value ~= nil then
-              local shown = shownValue(bind, value, text)
+              local shown = shownValue(bind, value, text, entry)
               local ok, current = pcall(bind.handle.get)
-              -- an input the user is typing into differs from what it last showed: leave it
-              local typing = bind.kind == "input" and ok and bind.last ~= nil and current ~= bind.last
+              -- a field the user is typing into differs from what it last showed: leave it
+              local typing = (bind.kind == "input" or bind.kind == "number") and ok and bind.last ~= nil and current ~= bind.last
               if not typing and shown ~= nil and (shown ~= bind.last or current ~= shown) then
                 bind.last = shown
                 pcall(bind.handle.set, shown)
+                followRules(bind)
               end
             end
           end
@@ -8455,26 +8468,32 @@ local function fillForm(path, made, members, children, resolve, folder, links)
       local ok, problem
       if not record then
         ok, problem = nil, missing
-      elseif bind.kind == "checkbox" then
-        ok, problem = record.setActive(value)
-      elseif bind.kind == "button" then
-        ok, problem = record.toggle()
-        ok = ok ~= nil or nil
+      elseif bind.kind == "checkbox" or bind.kind == "button" then
+        -- like a click on the record's box: queued, so a long script does not freeze the program
+        local wanted = value
+        if bind.kind == "button" then
+          wanted = not record.isActive()
+        end
+        ok, problem = native.recordRequestActive(record.id, native.recordIdentity(), wanted)
+        if ok ~= nil and bind.kind == "checkbox" then
+          bind.last = value
+        end
       elseif bind.kind == "combo" or bind.kind == "radio" then
         local item = bind.items and bind.items[value]
         if item ~= nil then
           ok, problem = record.setValue(tostring(item))
+          bind.last = value
         else
           ok = true
         end
       else
         ok, problem = record.setValue(value)
+        -- what the field shows now is what was written: it follows the record again
+        bind.last = value
       end
       if ok == nil then
         emit("warning", "manifold.ui", ("%s could not change the record %s: %s"):format(bind.label, tostring(bind.record), tostring(problem)))
         bind.last = nil
-      else
-        bind.last = bind.kind == "checkbox" and value or bind.last
       end
     end
     -- after the form's windows are filled: each window with bound widgets refreshes them
@@ -8525,7 +8544,7 @@ local function fillForm(path, made, members, children, resolve, folder, links)
       end
       local bind
       if wiring and child.record ~= nil then
-        bind = { record = child.record, kind = child.kind, items = child.items, window = links.window, label = label }
+        bind = { record = child.record, kind = child.kind, items = child.items, window = links.window, label = label, name = child.name, enabled = child.enabled ~= false }
         if child.enabledWhen ~= nil then
           bind.rule = formWhen(child.enabledWhen).source
         end
@@ -8617,6 +8636,7 @@ local function readFormFile(file, folder, block)
   if not text then
     return nil, shown, message
   end
+  text = text:gsub("^\239\187\191", "") -- a UTF-8 BOM is no Lua
   if block then
     -- ∑ a script that holds its form: only the "local form = { ... }" table counts
     text = native.uiFormBlock(text)
@@ -8632,7 +8652,8 @@ local function readFormFile(file, folder, block)
   if not ok or type(spec) ~= "table" then
     return nil, "ME-7014", ok and (shown .. " does not return a table") or tostring(spec)
   end
-  return spec, shown
+)MLUA"),
+            std::string_view(R"MLUA(  return spec, shown
 end
 
 local function reloadForm(watch, start)
@@ -8648,7 +8669,10 @@ local function reloadForm(watch, start)
     return
   end
   local function windowUpdate(title, options)
-    local update = { title = title }
+    -- ∑ an option the file no longer sets goes back to its default: only
+    -- sending the keys that are there kept the old value until the next run
+    local update = { title = title, icon = "", interval = 0, minWidth = 0, minHeight = 0, maxWidth = 0, maxHeight = 0,
+      resizable = true, autoSize = false, scrollbar = true, topmost = false }
     for key in pairs(WINDOW_UPDATE_KEYS) do
       if key ~= "title" and options[key] ~= nil then
         update[key] = options[key]
@@ -8675,8 +8699,7 @@ local function reloadForm(watch, start)
   end
   local values = {}
   for name, handle in pairs(watch.members) do
-)MLUA"),
-            std::string_view(R"MLUA(    if FORM_VALUE_KINDS[handle.kind] then
+    if FORM_VALUE_KINDS[handle.kind] then
       local ok, value = pcall(handle.get)
       if ok and value ~= nil then
         values[name] = { kind = handle.kind, value = value }
@@ -8851,7 +8874,8 @@ native.docDefine(nil, "manifold.ui.dialog.Dialog", {
   doc = "The dialog functions return at once; the dialog shows on top of the program and calls `onClose` with the answer when the user is done.",
 })
 native.docDefine(nil, "manifold.ui.dialog.Dialog.close", { returns = "boolean", doc = "Closes the dialog without an answer; `onClose` is not called." })
-native.docDefine(nil, "manifold.ui.dialog.Dialog.id", { kind = "field", type = "integer", doc = "The dialog's number." })
+)MLUA"),
+            std::string_view(R"MLUA(native.docDefine(nil, "manifold.ui.dialog.Dialog.id", { kind = "field", type = "integer", doc = "The dialog's number." })
 
 local dialog = subarea(ui, "dialog", "Dialogs on top of the program. They do not block the script: each takes `onClose`, which gets the answer, or nil when the user cancelled.")
 
@@ -8887,8 +8911,7 @@ define(dialog, "input", {
   returns = "dialog",
   doc = "Asks for a line of text, starting from `value`. `onClose(text)` gets the text, or nil.",
 }, function(text, options)
-)MLUA"),
-            std::string_view(R"MLUA(  options = options or {}
+  options = options or {}
   return openDialog("input", { text = text, title = options.title, value = options.value }, options.onClose)
 end)
 
@@ -9126,7 +9149,8 @@ define(status, "add", {
   returns = "entry",
   doc = "Adds a status entry. Options: `icon`, `tooltip`, `color` (a theme name), `onClick(entry)`.",
 }, function(text, options)
-  return addEntry("status", STATUS_KEYS, { text = text }, options)
+)MLUA"),
+            std::string_view(R"MLUA(  return addEntry("status", STATUS_KEYS, { text = text }, options)
 end)
 
 local image = subarea(ui, "image", "Pictures for `image` widgets and canvas drawings.")
@@ -9163,8 +9187,7 @@ native.docDefine(nil, "manifold.ui.image.Image", { kind = "class", title = "Imag
 native.docDefine(nil, "manifold.ui.image.Image.remove", { returns = "boolean", doc = "Frees the picture; widgets and drawings that show it go blank." })
 native.docDefine(nil, "manifold.ui.image.Image.id", { kind = "field", type = "integer", doc = "The image's number." })
 native.docDefine(nil, "manifold.ui.image.Image.width", { kind = "field", type = "integer", doc = "Width in pixels." })
-)MLUA"),
-            std::string_view(R"MLUA(native.docDefine(nil, "manifold.ui.image.Image.height", { kind = "field", type = "integer", doc = "Height in pixels." })
+native.docDefine(nil, "manifold.ui.image.Image.height", { kind = "field", type = "integer", doc = "Height in pixels." })
 
 define(ui, "getMode", {
   returns = "table",
@@ -9437,7 +9460,8 @@ debug.getregistry()["Manifold.UiTick"] = function(now)
     if entry then
       if event.name == "dialog" then
         uiEntries[event.target] = nil
-        forget(entry.owner, entry.id)
+)MLUA"),
+            std::string_view(R"MLUA(        forget(entry.owner, entry.id)
         if entry.onDialog then
           callHandler(entry.onDialog, table.unpack(event, 1, event.n))
         end
@@ -9481,8 +9505,7 @@ This file is generated from the API itself (`Manifold-Engine.Tests.exe --manifol
 
 local RULES = [[
 ## Schema
-)MLUA"),
-            std::string_view(R"MLUA(
+
 1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`. An area may group its functions into sub-areas one level down (`manifold.ui.window`, `manifold.ui.dialog`).
 2. **Names.** Areas are lower-case nouns. Functions are lowerCamelCase: a lookup without side effects is named after what it returns (`process.module`, `log.channel`), everything else starts with a verb (`open`, `read`, `create`). Predicates start with `is` or `has` and return a boolean. Settings come in `get…`/`set…` pairs. The five log functions are named after their level. Constants are lowerCamelCase fields. There are no aliases and no capitalised duplicates.
 3. **Calls use a dot.** `manifold.log.info("ready")`, never `manifold.log:info("ready")`. No function takes `self`, and the objects the API returns (channels) work the same way. A colon call raises an error that says so.

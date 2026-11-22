@@ -203,7 +203,9 @@ namespace Manifold::UI
                 }
                 return false;
             };
-        ImGuiWindowFlags flags = window.Dock && !window.Topmost ? 0 : ImGuiWindowFlags_NoDocking;
+        // ∑ a docked window takes the dock's size, so a fixed or automatic size
+        // (and topmost) keeps the window floating, like it keeps its size
+        ImGuiWindowFlags flags = window.Dock && !window.Topmost && window.Resizable && !window.AutoSize ? 0 : ImGuiWindowFlags_NoDocking;
         if (wantsKeys(window))
             flags |= ImGuiWindowFlags_NoNavInputs;
         if (!window.Resizable)
@@ -847,6 +849,19 @@ namespace Manifold::UI
         }
         case UiKind::Number:
         {
+            // ∑ typing 250 must not report 2 and 25 first (a bound record would
+            // write each into the game): keystrokes wait until the field is
+            // left or Enter is pressed; the +/- buttons report at once
+            const bool stepped = node.Integer || node.Hex || node.Step > 0.0;
+            ImGuiID textId = 0;
+            if (stepped)
+            {
+                ImGui::PushID(label.c_str());
+                textId = ImGui::GetID("");
+                ImGui::PopID();
+            }
+            else
+                textId = ImGui::GetID(label.c_str());
             bool changed = false;
             if (node.Integer || node.Hex)
             {
@@ -865,6 +880,7 @@ namespace Manifold::UI
                 if (changed)
                     node.Number = value;
             }
+            const bool typing = ImGui::GetActiveID() == textId && textId != 0;
             if (changed)
             {
                 if (node.HasMin)
@@ -872,6 +888,14 @@ namespace Manifold::UI
                 if (node.HasMax)
                     node.Number = std::min(node.Number, node.Max);
                 Model().Touch(node);
+                if (typing)
+                    node.PendingChange = true;
+                else if (node.Handlers & H::Change)
+                    Post(node.Id, "change", { node.Number });
+            }
+            if (!typing && node.PendingChange)
+            {
+                node.PendingChange = false;
                 if (node.Handlers & H::Change)
                     Post(node.Id, "change", { node.Number });
             }

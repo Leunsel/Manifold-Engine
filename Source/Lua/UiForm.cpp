@@ -1,5 +1,6 @@
 #include "Lua/UiForm.h"
 
+#include "Core/IconNames.h"
 #include "Core/Text.h"
 #include "Lua/LuaUi.h"
 
@@ -53,6 +54,7 @@ namespace Manifold::Lua
             { "scrollbar", T::Bool, "Shows a scroll bar when the widgets do not fit." },
             { "topmost", T::Bool, "Stays above other windows while floating; it does not dock." },
             { "position", T::Choice, "Where the window opens the first time.", "default|center|mouse" },
+            { "open", T::Bool, "Shown when the script runs; off creates it hidden until the script calls show()." },
         };
 
         constexpr FormProp kRow[] = {
@@ -640,6 +642,13 @@ namespace Manifold::Lua
             char buffer[64];
             const auto done = std::to_chars(buffer, buffer + sizeof(buffer), value);
             return std::string(buffer, done.ptr);
+        }
+
+        bool HexColor(std::string_view text)
+        {
+            if (text.size() != 7 && text.size() != 9)
+                return false;
+            return text.front() == '#' && std::all_of(text.begin() + 1, text.end(), [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; });
         }
 
         bool ParseNumber(std::string_view text, double& value)
@@ -2300,7 +2309,7 @@ namespace Manifold::Lua
     {
         // ∑ form.load("X.form.lua", ...) becomes form.build(form, ...) and the
         // form's line goes below "local ui = manifold.ui" (or on top).
-        static const std::regex kLoad(R"(form(\s*)\.(\s*)load(\s*)\((\s*)(?:"[^"\n]*"|'[^'\n]*'))");
+        static const std::regex kLoad(R"(\bform(\s*)\.(\s*)load(\s*)\((\s*)(?:"[^"\n]*"|'[^'\n]*'))");
         std::string text(script);
         std::smatch call;
         if (!std::regex_search(text, call, kLoad))
@@ -2836,8 +2845,20 @@ namespace Manifold::Lua
                 problems.push_back({ id, kind + ": has no items" });
             if ((node->Kind == UiKind::Combo || node->Kind == UiKind::Radio) && node->Selected > static_cast<int>(node->Items.size()))
                 problems.push_back({ id, kind + ": value " + std::to_string(node->Selected) + " is past the last item" });
-            if (node->Kind == UiKind::Color && !node->String.empty() && node->String.front() != '#')
+            if (node->Kind == UiKind::Color && !node->String.empty() && !HexColor(node->String))
                 problems.push_back({ id, "Color: the value must be #RRGGBB or #RRGGBBAA" });
+            if (!node->Icon.empty() && IconGlyph(node->Icon).empty())
+                problems.push_back({ id, kind + ": \"" + node->Icon + "\" is no Font Awesome icon name; pick one with the button beside Icon" });
+            for (const std::string* colour : { &node->Color, &node->Background })
+            {
+                if (!colour->empty() && colour->front() == '#' && !HexColor(*colour))
+                    problems.push_back({ id, kind + ": colour \"" + *colour + "\" must be #RRGGBB or #RRGGBBAA" });
+            }
+            if (node->Kind == UiKind::Combo && node->Multi)
+            {
+                if (const FormMeta* meta = MetaOf(form, id); meta && !meta->Record.empty())
+                    problems.push_back({ id, kind + ": a combo that ticks several items cannot show a memory record; switch Multi off or unbind it" });
+            }
             if (node->Kind == UiKind::Window && node->Title.empty())
                 problems.push_back({ id, "Window: has no title" });
             if (const FormMeta* meta = MetaOf(form, id); meta && !meta->Opens.empty())
@@ -2864,7 +2885,9 @@ namespace Manifold::Lua
                 {
                     for (const std::string& value : rule->Values)
                     {
-                        if (std::find(source->Items.begin(), source->Items.end(), value) == source->Items.end())
+                        double number = 0.0;
+                        const bool itemNumber = ParseNumber(value, number) && number >= 1.0 && number <= static_cast<double>(source->Items.size());
+                        if (!itemNumber && std::find(source->Items.begin(), source->Items.end(), value) == source->Items.end())
                             problems.push_back({ id, kind + ": Enabled When: \"" + rule->Source + "\" has no item \"" + value + "\"" });
                     }
                 }
@@ -2974,7 +2997,8 @@ namespace Manifold::Lua
             for (const int item : chosen)
             {
                 if (item >= 1 && item <= static_cast<int>(source->Items.size()) &&
-                    std::find(rule.Values.begin(), rule.Values.end(), source->Items[static_cast<std::size_t>(item - 1)]) != rule.Values.end())
+                    (std::find(rule.Values.begin(), rule.Values.end(), source->Items[static_cast<std::size_t>(item - 1)]) != rule.Values.end() ||
+                     std::find(rule.Values.begin(), rule.Values.end(), std::to_string(item)) != rule.Values.end()))
                     on = true;
             }
         }
@@ -3079,7 +3103,7 @@ namespace Manifold::Lua
                     writer.Line(3, "title = " + Quote(modal->Title) + ",");
                     for (const auto& [key, literal] : NodeFields(*modal))
                     {
-                        if (key != "title" && key != "dock" && key != "topmost" && key != "position")
+                        if (key != "title" && key != "dock" && key != "topmost" && key != "position" && key != "open")
                             writer.Line(3, key + " = " + literal + ",");
                     }
                     if (const FormMeta* meta = MetaOf(form, id))
@@ -3137,6 +3161,8 @@ namespace Manifold::Lua
             return false;
         }
         bool ok = false;
+        if (text.size() >= 3 && text.substr(0, 3) == "\xEF\xBB\xBF")
+            text.remove_prefix(3); // a UTF-8 BOM is no Lua
         if (luaL_loadbufferx(state, text.data(), text.size(), "=form", "t") != LUA_OK)
             error = lua_tostring(state, -1);
         else
@@ -3190,6 +3216,25 @@ namespace Manifold::Lua
             out += writer.Stubs(true);
             out += (modals ? "window, w, modals = ui.form.load(" : "window, w = ui.form.load(") + Quote(formFile.empty() ? std::string_view("Form.form.lua") : formFile) + ", handlers)\n";
             return out;
+        }
+        {
+            // ∑ what only manifold.ui.form.build does: said, not dropped silently
+            bool rules = false;
+            bool records = false;
+            for (const auto& [id, meta] : form.Meta)
+            {
+                rules = rules || !meta.EnabledWhen.empty();
+                records = records || !meta.Record.empty();
+            }
+            if (rules || records)
+            {
+                out += "-- This script builds the window with plain manifold.ui calls, which leave out what\n";
+                out += "-- manifold.ui.form.build does for a form:";
+                out += rules ? " enabledWhen rules" : "";
+                out += rules && records ? " and" : "";
+                out += records ? " memory record bindings (record = ...)" : "";
+                out += ".\n-- Save the form as one file (File > Save Form) to keep them.\n\n";
+            }
         }
         out += modals ? "local window\nlocal w = {}\nlocal modals = {}\n\n" : "local window\nlocal w = {}\n\n";
         out += writer.Stubs(false);

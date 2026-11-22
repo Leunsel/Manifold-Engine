@@ -303,7 +303,9 @@ namespace Manifold::Lua
             if (bytes.empty())
                 return PushFailure(state, ErrorCode::ReadFailed, engine.Tables().AddressHex(record->ResolvedAddress));
             const std::string text = engine.FormatRecord(*record, bytes);
-            const bool numeric = record->CustomTypeName.empty() && !record->ShowHex && engine.DropDownOf(*record).empty() &&
+            // ∑ the number is the value itself, also when the address list shows it
+            // as hex or as a drop-down entry; the text is what it shows
+            const bool numeric = record->CustomTypeName.empty() &&
                                  (record->Type == Scan::ValueType::Byte || record->Type == Scan::ValueType::TwoBytes || record->Type == Scan::ValueType::FourBytes ||
                                   record->Type == Scan::ValueType::EightBytes || record->Type == Scan::ValueType::Float || record->Type == Scan::ValueType::Double);
             const std::optional<double> number = numeric ? Scan::AsDouble(record->Type, bytes, record->ShowSigned) : std::nullopt;
@@ -314,6 +316,15 @@ namespace Manifold::Lua
             else
                 lua_pushlstring(state, text.data(), text.size());
             lua_pushlstring(state, text.data(), text.size());
+            // the drop-down entry the value matches, by its description
+            for (const Table::DropDownEntry& entry : engine.DropDownOf(*record))
+            {
+                if (EqualsNoCase(text, entry.Text) || EqualsNoCase(text, entry.Value + " : " + entry.Text))
+                {
+                    lua_pushlstring(state, entry.Text.data(), entry.Text.size());
+                    return 3;
+                }
+            }
             return 2;
         }
 
@@ -387,6 +398,35 @@ namespace Manifold::Lua
             if (!status)
                 return PushFailure(state, status);
             lua_pushboolean(state, 1);
+            return 1;
+        }
+
+        // ∑ a form's switch or button: like a click on the record's box, queued
+        // when activation runs in the background (a long [ENABLE] does not
+        // freeze the program), and noted as a switch by hand
+        int RecordRequestActive(lua_State* state)
+        {
+            MemoryRecord* record = Find(state, 1);
+            if (!record)
+                return Gone(state, 1);
+            const bool wanted = lua_toboolean(state, 3) != 0;
+            Engine& engine = Owner(state);
+            if (engine.Async() && !engine.InsideActivation())
+                engine.RequestActive(*record, wanted, false);
+            else
+            {
+                const Status status = engine.SetActive(*record, wanted, false);
+                if (!status)
+                    return PushFailure(state, status);
+            }
+            lua_pushboolean(state, 1);
+            return 1;
+        }
+
+        int RecordPending(lua_State* state)
+        {
+            MemoryRecord* record = Find(state, 1);
+            lua_pushboolean(state, record && Owner(state).ActivationPending(record->Id) ? 1 : 0);
             return 1;
         }
 
@@ -503,6 +543,8 @@ namespace Manifold::Lua
             { "recordSet", &RecordSet },
             { "recordSetActive", &RecordSetActive },
             { "recordIsActive", &RecordIsActive },
+            { "recordRequestActive", &RecordRequestActive },
+            { "recordPending", &RecordPending },
             { "recordSetDescription", &RecordSetDescription },
             { "recordAddress", &RecordAddress },
             { "recordCreate", &RecordCreate },

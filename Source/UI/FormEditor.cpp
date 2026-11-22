@@ -264,7 +264,7 @@ namespace Manifold::UI
         int GroupOf(std::string_view key, UiKind kind)
         {
             static constexpr std::string_view kWindowKeys[] = { "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "resizable", "autoSize", "scrollbar",
-                "topmost", "position", "dock", "opacity", "inactiveOpacity", "interval" };
+                "topmost", "position", "dock", "opacity", "inactiveOpacity", "interval", "open" };
             if (kind == UiKind::Window)
                 for (std::string_view entry : kWindowKeys)
                     if (entry == key)
@@ -335,6 +335,57 @@ namespace Manifold::UI
             }
             out = Trim(out);
             return out.empty() ? std::string("Form") : out;
+        }
+
+        // why a name is no Lua name, so the message says how to fix it
+        std::string NameError(const std::string& name)
+        {
+            const bool plain = !name.empty() && !std::isdigit(static_cast<unsigned char>(name[0])) &&
+                               std::all_of(name.begin(), name.end(), [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; });
+            if (plain)
+                return "\"" + name + "\" is a Lua keyword; pick another name, like " + name + "Value";
+            return "A name is letters, digits and _, and does not start with a digit";
+        }
+
+        // ∑ A script as the editor works on it: LF line ends, no UTF-8 BOM. What
+        // the file had is kept and put back when the file is written.
+        struct FileText
+        {
+            std::string Text;
+            bool Crlf = false;
+            bool Bom = false;
+        };
+
+        FileText PlainText(std::string_view raw)
+        {
+            FileText out;
+            if (raw.size() >= 3 && raw.substr(0, 3) == "\xEF\xBB\xBF")
+            {
+                out.Bom = true;
+                raw.remove_prefix(3);
+            }
+            out.Crlf = raw.find("\r\n") != std::string_view::npos;
+            out.Text.reserve(raw.size());
+            for (std::size_t i = 0; i < raw.size(); ++i)
+            {
+                if (raw[i] == '\r' && i + 1 < raw.size() && raw[i + 1] == '\n')
+                    continue;
+                out.Text.push_back(raw[i]);
+            }
+            return out;
+        }
+
+        std::string FileBytes(const std::string& text, bool crlf, bool bom)
+        {
+            std::string out = bom ? std::string("\xEF\xBB\xBF") : std::string();
+            out.reserve(text.size() + text.size() / 20 + 3);
+            for (const char c : text)
+            {
+                if (c == '\n' && crlf)
+                    out.push_back('\r');
+                out.push_back(c);
+            }
+            return out;
         }
 
         // ∑ What a widget of the open form holds, for get/set in the script pane.
@@ -597,6 +648,8 @@ namespace Manifold::UI
         m_path = std::move(path);
         m_oneFile = oneFile;
         m_fileDisk.clear();
+        m_crlf = false;
+        m_bom = false;
         m_undo.clear();
         m_redo.clear();
         m_lastSource = 0;
@@ -613,7 +666,8 @@ namespace Manifold::UI
         {
             // the script is part of the document from the start, saved or not
             m_form.Script.clear();
-            if (!Lua::FormViewIntact(m_form.ScriptText))
+            // only a new document gets a generated script: an opened one is never replaced
+            if (m_form.ScriptText.empty())
                 m_form.ScriptText = Lua::FormScript(m_form, Lua::FormScriptStyle::OneFile);
             m_form.ScriptLoaded = true;
             m_scriptDisk = m_form.ScriptText;
@@ -684,16 +738,34 @@ namespace Manifold::UI
         std::vector<std::string> warnings;
         const std::string name = WideToUtf8(path.filename().wstring());
         const bool formFile = name.size() > 9 && EqualsNoCase(std::string_view(name).substr(name.size() - 9), ".form.lua");
-        if (!(formFile ? Lua::FormLoad(text, form, error, &warnings) : Lua::FormLoadScript(text, form, error, &warnings)))
+        // ∑ the editor works on LF text without a BOM; the file keeps its own
+        // line ends and BOM when it is written back (see SaveScript)
+        const FileText plain = PlainText(text);
+        if (!(formFile ? Lua::FormLoad(plain.Text, form, error, &warnings) : Lua::FormLoadScript(plain.Text, form, error, &warnings)))
         {
             m_engine.Notify(LogLevel::Error, name + ": " + error);
             return false;
         }
+        std::string view;
         if (!formFile)
-            form.ScriptText = Lua::FormScriptView(text);
+        {
+            view = Lua::FormScriptView(plain.Text);
+            if (!Lua::FormViewIntact(view))
+            {
+                // never replace a script the editor cannot read back exactly
+                m_engine.Notify(LogLevel::Error, name + " already holds the line \"local form = " + std::string(Lua::kFormStandIn) +
+                                                     "\" that the Form Editor shows in place of the form, so it was not opened. Remove that line in a script window and open it again.");
+                return false;
+            }
+            form.ScriptText = view;
+        }
         Reset(std::move(form), path, !formFile);
         if (!formFile)
+        {
             m_fileDisk = text;
+            m_crlf = plain.Crlf;
+            m_bom = plain.Bom;
+        }
         for (const std::string& warning : warnings)
             m_engine.Notify(LogLevel::Warning, WideToUtf8(path.filename().wstring()) + ": " + warning);
         Show();
@@ -928,8 +1000,11 @@ namespace Manifold::UI
                 m_engine.Notify(status);
             return;
         }
-        // an unsaved one-file form runs as it stands, with its handlers
-        const std::string code = m_oneFile ? Lua::FormComposeScript(m_form.ScriptText, m_form).value_or(std::string()) : Lua::FormScript(m_form, Lua::FormScriptStyle::Standalone);
+        // an unsaved one-file form runs as it stands, with its handlers; an older
+        // form without a script is built from its table, so modals, rules and
+        // record bindings work (a standalone script would leave them out)
+        const std::string code = m_oneFile ? Lua::FormComposeScript(m_form.ScriptText, m_form).value_or(std::string())
+                                           : Lua::FormBlockText(m_form, "form") + "manifold.ui.form.build(form)\n";
         const Status status = m_engine.Lua().Run(code, kRunChunk);
         if (!status)
             m_engine.Notify(status);
@@ -1789,10 +1864,10 @@ namespace Manifold::UI
         ImGui::SameLine();
         if (ImGui::Button(ICON_FA_PLAY "  Run Script"))
             RunScript();
+        ItemTooltip("Runs the script in Manifold's Lua engine, so the real window opens. Running it again replaces that window.");
         ImGui::SameLine();
         if (IconButton(ICON_FA_CROSSHAIRS, "Bring the form back to the top left of the work surface"))
             m_pan = ImVec2(Px(-m_form.CanvasX + 40.0f), Px(-m_form.CanvasY + 30.0f));
-        ItemTooltip("Runs the script in Manifold's Lua engine, so the real window opens. Running it again replaces that window.");
         if (const std::filesystem::path script = LinkedScript(); !script.empty() && !m_oneFile)
         {
             ImGui::SameLine();
@@ -2142,7 +2217,7 @@ namespace Manifold::UI
             ImGui::InvisibleButton("##formtitle", ImVec2(size.x, titleHeight));
             if (ImGui::IsItemActivated())
             {
-                Remember();
+                m_frameMoved = false;
                 if (!m_trying)
                     Select(id);
             }
@@ -2150,6 +2225,10 @@ namespace Manifold::UI
                 ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
             if (ImGui::IsItemActive() && (ImGui::GetIO().MouseDelta.x != 0.0f || ImGui::GetIO().MouseDelta.y != 0.0f))
             {
+                // an undo step only for a real move, not for a click that selects
+                if (!m_frameMoved)
+                    Remember();
+                m_frameMoved = true;
                 SetFramePlace(id, ImVec2(place.x + ImGui::GetIO().MouseDelta.x / Px(1.0f), place.y + ImGui::GetIO().MouseDelta.y / Px(1.0f)));
                 Changed();
             }
@@ -2216,7 +2295,7 @@ namespace Manifold::UI
             {
                 m_gripping = true;
                 m_gripWindow = id;
-                Remember();
+                m_frameMoved = false;
                 ImGui::SetActiveID(gripId, ImGui::GetCurrentWindow());
             }
             if (m_gripping && m_gripWindow == id)
@@ -2226,6 +2305,9 @@ namespace Manifold::UI
                     ImGui::KeepAliveID(gripId);
                     if (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)
                     {
+                        if (!m_frameMoved)
+                            Remember(); // only when the size really changes
+                        m_frameMoved = true;
                         if (UiNode* edited = m_form.Model.Find(id))
                         {
                             const float scale = Px(1.0f);
@@ -2808,7 +2890,7 @@ namespace Manifold::UI
                 Changed();
             }
             if (!name.empty() && !Lua::FormIsIdentifier(name))
-                TextWithError("Letters, digits and _ only, not starting with a digit", ManifoldTheme::Error);
+                TextWithError(NameError(name), ManifoldTheme::Error);
             return;
         }
         if (node.Kind == UiKind::Window)
@@ -2834,15 +2916,28 @@ namespace Manifold::UI
         if (InputTextWithHint("##name", "no name", name, ImGuiInputTextFlags_CharsNoBlank))
         {
             Remember(ImGui::GetItemID());
-            const std::string old = m_form.Meta[node.Id].Name;
             m_form.Meta[node.Id].Name = name;
-            // widgets that follow this one (Enabled When) follow the new name
-            if (Lua::FormIsIdentifier(name))
-                Lua::FormRenameReferences(m_form, old, name);
             Changed();
         }
+        // ∑ widgets that follow this one (Enabled When) follow the new name once
+        // typing ends: renaming on every keystroke lost the link when the field
+        // was emptied first, and passed through other widgets' names on the way
+        if (ImGui::IsItemActivated())
+        {
+            m_renameNode = node.Id;
+            m_renameFrom = name;
+        }
+        if (ImGui::IsItemDeactivated() && m_renameNode == node.Id)
+        {
+            if (Lua::FormIsIdentifier(name) && name != m_renameFrom && Lua::FormFindNamed(m_form, m_renameFrom) == 0)
+            {
+                Lua::FormRenameReferences(m_form, m_renameFrom, name);
+                Changed();
+            }
+            m_renameNode = 0;
+        }
         if (!name.empty() && !Lua::FormIsIdentifier(name))
-            TextWithError("Letters, digits and _ only, not starting with a digit", ManifoldTheme::Error);
+            TextWithError(NameError(name), ManifoldTheme::Error);
     }
 
     void FormEditorWindow::PropertyRow(UiNode& node, const Lua::FormProp& prop)
@@ -3237,7 +3332,7 @@ namespace Manifold::UI
             {
                 if (GroupOf(prop.Key, node->Kind) != group)
                     continue;
-                if (modalWindow && (prop.Key == "dock" || prop.Key == "topmost" || prop.Key == "position"))
+                if (modalWindow && (prop.Key == "dock" || prop.Key == "topmost" || prop.Key == "position" || prop.Key == "open"))
                     continue;
                 props.push_back(&prop);
                 if (!Lua::FormPropIsDefault(*node, prop.Key))
@@ -3324,7 +3419,7 @@ namespace Manifold::UI
                 ImGui::EndTable();
             }
         }
-        if (Lua::FormCanBind(node->Kind))
+        if (Lua::FormCanBind(node->Kind) && !(node->Kind == UiKind::Combo && node->Multi))
         {
             // ∑ record = ...: the widget shows and changes a memory record of the table
             ImGui::Spacing();
@@ -3764,18 +3859,32 @@ namespace Manifold::UI
         }
         if (m_problemsDialog.Begin())
         {
-            const std::vector<Lua::FormProblem> problems = Lua::FormProblems(m_form);
+            // the same list the toolbar counts (the editor adds checks against the open table)
+            const std::vector<Lua::FormProblem> problems = m_problems;
             ImGui::BeginChild("##problemlist", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing() - Px(8.0f)), ImGuiChildFlags_Borders);
             if (problems.empty())
                 Muted("No problems.");
+            bool picked = false;
             for (std::size_t i = 0; i < problems.size(); ++i)
             {
+                // wrapped, so a long text is read in full; a click shows the widget
                 ImGui::PushID(static_cast<int>(i));
-                if (ImGui::Selectable((std::string(ICON_FA_EXCLAMATION_TRIANGLE "  ") + problems[i].Text).c_str()))
+                const std::string text = std::string(ICON_FA_EXCLAMATION_TRIANGLE "  ") + problems[i].Text;
+                const float width = ImGui::GetContentRegionAvail().x;
+                const ImVec2 size = ImGui::CalcTextSize(text.c_str(), nullptr, false, width);
+                const ImVec2 at = ImGui::GetCursorScreenPos();
+                if (ImGui::Selectable("##problem", false, 0, ImVec2(width, size.y)))
+                {
                     Select(problems[i].Node);
+                    picked = true;
+                }
+                ItemTooltip("Click to select the widget");
+                ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(), ImGui::GetFontSize(), at, ImGui::GetColorU32(ManifoldTheme::Warning), text.c_str(), nullptr, width);
                 ImGui::PopID();
             }
             ImGui::EndChild();
+            if (picked)
+                m_problemsDialog.Close();
             if (m_problemsDialog.Buttons("Close", true, true, nullptr) != DialogChoice::None)
                 m_problemsDialog.Close();
             m_problemsDialog.End();
@@ -4088,13 +4197,17 @@ namespace Manifold::UI
                 return;
             Lua::FormDocument form;
             std::string error;
-            if (Dirty() || !Lua::FormLoadScript(text, form, error))
+            const FileText plain = PlainText(text);
+            const std::string view = Lua::FormScriptView(plain.Text);
+            if (Dirty() || !Lua::FormLoadScript(plain.Text, form, error) || !Lua::FormViewIntact(view))
             {
                 m_scriptConflict = true;
                 return;
             }
             Remember();
-            form.ScriptText = Lua::FormScriptView(text);
+            m_crlf = plain.Crlf;
+            m_bom = plain.Bom;
+            form.ScriptText = view;
             form.ScriptLoaded = true;
             form.CanvasX = m_form.CanvasX;
             form.CanvasY = m_form.CanvasY;
@@ -4169,19 +4282,20 @@ namespace Manifold::UI
                 m_engine.Notify(LogLevel::Error, "The script lost the form's line (local form = { ... }), so it was not written.");
                 return false;
             }
-            if (*file == m_fileDisk)
+            const std::string bytes = FileBytes(*file, m_crlf, m_bom);
+            if (bytes == m_fileDisk)
             {
                 m_dirty = false;
                 m_scriptDisk = m_form.ScriptText;
                 return true;
             }
             ScriptWindow* window = m_workspace.ScriptFile(m_path);
-            if (window && window->FileChanged() && window->Text() != *file)
+            if (window && window->FileChanged() && PlainText(window->Text()).Text != *file)
             {
                 m_engine.Notify(LogLevel::Warning, WideToUtf8(m_path.filename().wstring()) + " is open in a script window with other unsaved changes, so the form editor did not write it. Save or close that window first.");
                 return false;
             }
-            if (!WriteFile(m_path, *file))
+            if (!WriteFile(m_path, bytes))
             {
                 m_engine.Notify(LogLevel::Error, "Could not write " + WideToUtf8(m_path.wstring()));
                 return false;
@@ -4191,7 +4305,7 @@ namespace Manifold::UI
                 window->ReplaceText(*file);
                 window->SetFile(m_path);
             }
-            m_fileDisk = *file;
+            m_fileDisk = bytes;
             m_scriptDisk = m_form.ScriptText;
             m_scriptPath = m_path;
             m_scriptStamp = Lua::UiModel::FileStamp(WideToUtf8(m_path.wstring()));
@@ -4527,6 +4641,27 @@ namespace Manifold::UI
             m_selected = m_form.Window;
         m_hovered = 0;
         m_problems = Lua::FormProblems(m_form);
+        {
+            // theme colour names: the palette the program draws with
+            std::vector<int> stack = Lua::FormWindows(m_form);
+            while (!stack.empty())
+            {
+                const UiNode* node = m_form.Model.Find(stack.back());
+                stack.pop_back();
+                if (!node)
+                    continue;
+                stack.insert(stack.end(), node->Children.begin(), node->Children.end());
+                for (const std::string* colour : { &node->Color, &node->Background })
+                {
+                    if (colour->empty() || colour->front() == '#')
+                        continue;
+                    const bool known = std::any_of(std::begin(ManifoldTheme::kPalette), std::end(ManifoldTheme::kPalette),
+                        [&](const ManifoldTheme::PaletteColor& entry) { return EqualsNoCase(entry.Name, *colour); });
+                    if (!known)
+                        m_problems.push_back({ node->Id, std::string(Lua::FormKindTitle(node->Kind)) + ": \"" + *colour + "\" is no theme colour; pick one with the swatch, or write #RRGGBB" });
+                }
+            }
+        }
         // bindings that the open table cannot resolve to one record
         for (const auto& [id, meta] : m_form.Meta)
         {
