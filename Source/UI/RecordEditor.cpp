@@ -136,10 +136,10 @@ namespace Manifold::UI
             Status error;
             if (written.front() == '+' || written.front() == '-')
             {
-                Table::MemoryRecord* parent = record.Parent;
+                Table::MemoryRecord* parent = Table::RelativeBase(record);
                 if (!parent)
                 {
-                    path.Problem = "An address that starts with + or - needs a parent record with an address.";
+                    path.Problem = "An address that starts with + or - needs a record with an address above it.";
                     return path;
                 }
                 engine.ResolveRecord(*parent);
