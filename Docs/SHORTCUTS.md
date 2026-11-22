@@ -323,3 +323,4 @@ While the Form Editor has the focus. Widget keys act on the selected widget and 
 | `F2` | Rename Widget | `FormRename` | Manifold |
 | `Alt+Left` | Select Parent | `FormSelectParent` | Manifold |
 | `Ctrl+F` | Find a Widget | `FormFind` | Manifold |
+| `Ctrl+A` | Select All in the Container | `FormSelectAll` | Manifold |

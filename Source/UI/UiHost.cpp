@@ -664,13 +664,18 @@ namespace Manifold::UI
         if (dim)
             ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * (node.Visible ? 0.5f : 0.35f));
         ++m_depth;
+        const float outerField = m_fieldWidth;
+        m_fieldWidth = 0.0f;
         ImGui::BeginGroup();
         DrawNodeBody(node);
         ImGui::EndGroup();
+        const float field = m_fieldWidth;
+        m_fieldWidth = outerField;
         --m_depth;
         if (dim)
             ImGui::PopStyleVar();
         m_design->Rects.push_back({ node.Id, m_depth, ImGui::GetItemRectMin(), ImGui::GetItemRectMax() });
+        m_design->Rects.back().FieldWidth = field;
     }
 
     void UiHost::DrawNodeBody(Lua::UiNode& node)
@@ -1071,6 +1076,7 @@ namespace Manifold::UI
         if (PlacedLabel(node.Kind) && node.Kind != UiKind::Radio)
         {
             fieldWidth = FieldLayout(node, side);
+            m_fieldWidth = fieldWidth;
             if (side == "left" || side == "above" || node.Label.empty())
                 label = Label(node, ""); // the label is drawn already
             if (!(node.Kind == UiKind::Input && node.Multiline))

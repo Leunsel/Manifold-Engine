@@ -250,6 +250,7 @@ namespace Manifold
             { FormRename, "FormRename", Scope::FormEditor, "Rename Widget", ImGuiKey_F2, 0, Own },
             { FormSelectParent, "FormSelectParent", Scope::FormEditor, "Select Parent", Alt | ImGuiKey_LeftArrow, 0, Own },
             { FormFind, "FormFind", Scope::FormEditor, "Find a Widget", Ctrl | ImGuiKey_F, 0, Own },
+            { FormSelectAll, "FormSelectAll", Scope::FormEditor, "Select All in the Container", Ctrl | ImGuiKey_A, 0, Own },
         };
 
         static_assert(std::size(kCommands) == static_cast<std::size_t>(Command::Count));

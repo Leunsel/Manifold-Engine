@@ -807,6 +807,151 @@ namespace Manifold::UI
 
     void FormEditorWindow::Select(int id)
     {
+        m_multi.clear();
+        m_deferSelect = 0;
+        Focus(id);
+    }
+
+    std::vector<int> FormEditorWindow::Selection() const
+    {
+        std::vector<int> ids;
+        for (const int id : m_multi)
+        {
+            if (const UiNode* node = m_form.Model.Find(id); node && node->Kind != UiKind::Window)
+                ids.push_back(id);
+        }
+        if (ids.size() > 1)
+            return ids;
+        return { m_selected };
+    }
+
+    bool FormEditorWindow::IsSelected(int id) const
+    {
+        const std::vector<int> ids = Selection();
+        return std::find(ids.begin(), ids.end(), id) != ids.end();
+    }
+
+    std::vector<int> FormEditorWindow::FormOrder() const
+    {
+        std::vector<int> order;
+        std::function<void(int)> visit = [&](int id) {
+            const UiNode* node = m_form.Model.Find(id);
+            if (!node)
+                return;
+            order.push_back(id);
+            for (const int child : node->Children)
+                visit(child);
+        };
+        for (const int window : Lua::FormWindows(m_form))
+            visit(window);
+        return order;
+    }
+
+    std::vector<int> FormEditorWindow::SelectionTops() const
+    {
+        const std::vector<int> chosen = Selection();
+        std::vector<int> tops;
+        for (const int id : FormOrder())
+        {
+            if (std::find(chosen.begin(), chosen.end(), id) == chosen.end())
+                continue;
+            const UiNode* node = m_form.Model.Find(id);
+            if (!node || node->Kind == UiKind::Window)
+                continue;
+            bool inside = false;
+            for (const int other : chosen)
+                inside = inside || (other != id && Within(id, other));
+            if (!inside)
+                tops.push_back(id);
+        }
+        return tops;
+    }
+
+    // ∑ Ctrl+click adds a widget to the selection or takes it out; a
+    // window never joins one (it holds all the others)
+    void FormEditorWindow::SelectToggle(int id)
+    {
+        const UiNode* node = m_form.Model.Find(id);
+        if (!node)
+            return;
+        if (node->Kind == UiKind::Window)
+        {
+            Select(id);
+            return;
+        }
+        std::vector<int> ids = Selection();
+        std::erase_if(ids, [&](int each) { const UiNode* item = m_form.Model.Find(each); return !item || item->Kind == UiKind::Window; });
+        const bool had = std::find(ids.begin(), ids.end(), id) != ids.end();
+        if (had)
+            std::erase(ids, id);
+        else
+            ids.push_back(id);
+        if (ids.empty())
+        {
+            Select(Lua::FormRootWindow(m_form, id));
+            return;
+        }
+        if (ids.size() == 1)
+        {
+            Select(ids.front());
+            return;
+        }
+        m_multi = ids;
+        Focus(had ? ids.back() : id);
+    }
+
+    // Shift+click in the outline: every row from the selected one to this one
+    void FormEditorWindow::SelectRange(int id)
+    {
+        const auto from = std::find(m_outlineOrder.begin(), m_outlineOrder.end(), m_selected);
+        const auto to = std::find(m_outlineOrder.begin(), m_outlineOrder.end(), id);
+        if (from == m_outlineOrder.end() || to == m_outlineOrder.end())
+        {
+            Select(id);
+            return;
+        }
+        std::vector<int> ids(std::min(from, to), std::max(from, to) + 1);
+        std::erase_if(ids, [&](int each) { const UiNode* item = m_form.Model.Find(each); return !item || item->Kind == UiKind::Window; });
+        if (ids.size() < 2)
+        {
+            Select(id);
+            return;
+        }
+        m_multi = ids;
+        Focus(id);
+    }
+
+    void FormEditorWindow::SelectMany(const std::vector<int>& ids)
+    {
+        std::vector<int> kept;
+        for (const int id : ids)
+        {
+            if (const UiNode* node = m_form.Model.Find(id); node && node->Kind != UiKind::Window)
+                kept.push_back(id);
+        }
+        if (kept.size() < 2)
+        {
+            Select(kept.empty() ? m_form.Window : kept.front());
+            return;
+        }
+        m_multi = kept;
+        m_deferSelect = 0;
+        Focus(kept.front());
+    }
+
+    // Ctrl+A: every widget of the container the selected one is in (or of a selected window)
+    void FormEditorWindow::SelectAllHere()
+    {
+        const UiNode* node = m_form.Model.Find(m_selected);
+        if (!node)
+            return;
+        const UiNode* holder = node->Kind == UiKind::Window ? node : m_form.Model.Find(node->Parent);
+        if (holder)
+            SelectMany(holder->Children);
+    }
+
+    void FormEditorWindow::Focus(int id)
+    {
         if (!m_form.Model.Find(id))
             id = m_form.Window;
         if (id != m_selected)
@@ -899,6 +1044,35 @@ namespace Manifold::UI
 
     void FormEditorWindow::Move(int delta)
     {
+        if (const std::vector<int> tops = SelectionTops(); tops.size() > 1)
+        {
+            // ∑ several widgets of one container move as a block, one step
+            const int parentId = m_form.Model.Find(tops.front())->Parent;
+            const UiNode* parent = m_form.Model.Find(parentId);
+            if (!parent || std::any_of(tops.begin(), tops.end(), [&](int id) { return m_form.Model.Find(id)->Parent != parentId; }))
+            {
+                m_engine.Notify(LogLevel::Warning, "Move Up and Move Down move widgets of one container; these are in several.");
+                return;
+            }
+            std::vector<int> indices;
+            for (const int id : tops)
+                indices.push_back(Lua::FormIndexOf(m_form, id));
+            const int low = *std::min_element(indices.begin(), indices.end());
+            const int high = *std::max_element(indices.begin(), indices.end());
+            if ((delta < 0 && low == 0) || (delta > 0 && high + 1 >= static_cast<int>(parent->Children.size())))
+                return;
+            Remember();
+            std::vector<int> order = tops;
+            if (delta > 0)
+                std::reverse(order.begin(), order.end());
+            for (const int id : order)
+            {
+                const int index = Lua::FormIndexOf(m_form, id);
+                Lua::FormMove(m_form, id, parentId, delta > 0 ? index + 2 : index - 1);
+            }
+            Changed();
+            return;
+        }
         const UiNode* node = m_form.Model.Find(m_selected);
         if (!node || node->Kind == UiKind::Window)
             return;
@@ -914,6 +1088,28 @@ namespace Manifold::UI
 
     void FormEditorWindow::Wrap(int id, UiKind kind)
     {
+        if (const std::vector<int> tops = SelectionTops(); tops.size() > 1 && IsSelected(id))
+        {
+            // ∑ several widgets of one container go into one new container, where the first was
+            const int parentId = m_form.Model.Find(tops.front())->Parent;
+            const UiNode* holder = m_form.Model.Find(parentId);
+            if (!holder || std::any_of(tops.begin(), tops.end(), [&](int each) { return m_form.Model.Find(each)->Parent != parentId; }))
+            {
+                m_engine.Notify(LogLevel::Warning, "Wrap In takes widgets of one container; these are in several.");
+                return;
+            }
+            if (!Lua::FormCanHold(holder->Kind, kind))
+                return;
+            Remember();
+            const int wrapper = Lua::FormAdd(m_form, kind, parentId, Lua::FormIndexOf(m_form, tops.front()));
+            for (const int child : std::vector<int>(m_form.Model.Find(wrapper)->Children))
+                Lua::FormRemove(m_form, child);
+            for (const int each : tops)
+                Lua::FormMove(m_form, each, wrapper, -1);
+            Changed();
+            Select(wrapper);
+            return;
+        }
         const UiNode* node = m_form.Model.Find(id);
         if (!node || node->Kind == UiKind::Window || node->Kind == UiKind::Tab)
             return;
@@ -933,14 +1129,35 @@ namespace Manifold::UI
 
     void FormEditorWindow::ChangeKind(int id, UiKind kind)
     {
+        // with several selected: every one of the same kind as this one changes
+        const UiNode* node = m_form.Model.Find(id);
+        if (!node)
+            return;
+        const UiKind from = node->Kind;
+        std::vector<int> ids{ id };
+        if (IsSelected(id) && Many())
+        {
+            ids.clear();
+            for (const int each : SelectionTops())
+            {
+                if (m_form.Model.Find(each)->Kind == from)
+                    ids.push_back(each);
+            }
+        }
         Remember();
-        if (!Lua::FormChangeKind(m_form, id, kind))
+        bool any = false;
+        for (const int each : ids)
+            any = Lua::FormChangeKind(m_form, each, kind) || any;
+        if (!any)
         {
             m_undo.pop_back();
             return;
         }
         Changed();
-        Select(id);
+        if (ids.size() > 1)
+            SelectMany(ids);
+        else
+            Select(id);
     }
 
     void FormEditorWindow::Unwrap(int id)
@@ -1067,6 +1284,22 @@ namespace Manifold::UI
 
     void FormEditorWindow::Delete()
     {
+        if (const std::vector<int> tops = SelectionTops(); tops.size() > 1)
+        {
+            const UiNode* first = m_form.Model.Find(tops.front());
+            const int parent = first->Parent;
+            const int index = Lua::FormIndexOf(m_form, tops.front());
+            Remember();
+            for (const int id : tops)
+                Lua::FormRemove(m_form, id);
+            Changed();
+            const UiNode* holder = m_form.Model.Find(parent);
+            if (holder && !holder->Children.empty())
+                Select(holder->Children[static_cast<std::size_t>(std::min(index, static_cast<int>(holder->Children.size()) - 1))]);
+            else
+                Select(parent);
+            return;
+        }
         if (m_selected == m_form.Window || !m_form.Model.Find(m_selected))
             return;
         if (m_form.Model.Find(m_selected)->Kind == UiKind::Window && !Lua::FormIsModal(m_form, m_selected))
@@ -1086,6 +1319,24 @@ namespace Manifold::UI
 
     void FormEditorWindow::Duplicate()
     {
+        if (const std::vector<int> tops = SelectionTops(); tops.size() > 1)
+        {
+            Remember();
+            std::vector<int> copies;
+            for (const int id : tops)
+            {
+                if (const int copy = Lua::FormDuplicate(m_form, id))
+                    copies.push_back(copy);
+            }
+            if (copies.empty())
+            {
+                m_undo.pop_back();
+                return;
+            }
+            Changed();
+            SelectMany(copies);
+            return;
+        }
         if (!m_form.Model.Find(m_selected) || m_form.Model.Find(m_selected)->Kind == UiKind::Window)
             return;
         Remember();
@@ -1430,9 +1681,10 @@ namespace Manifold::UI
         case Command::FormCopy: Copy(); break;
         case Command::FormCut: Cut(); break;
         case Command::FormPaste: Paste(); break;
-        case Command::FormRename: m_focusName = true; break;
+        case Command::FormRename: m_focusName = !Many(); break; // several selected have no one name
         case Command::FormSelectParent: SelectParent(); break;
         case Command::FormFind: m_focusOutlineFilter = true; break;
+        case Command::FormSelectAll: SelectAllHere(); break;
         default: break;
         }
     }
@@ -1448,7 +1700,7 @@ namespace Manifold::UI
                 RunCommand(command);
         }
         for (const Command command : { Command::FormUndo, Command::FormRedo, Command::FormDuplicate, Command::FormDelete, Command::FormMoveUp, Command::FormMoveDown, Command::FormCopy, Command::FormCut, Command::FormPaste,
-                 Command::FormRename, Command::FormSelectParent, Command::FormFind })
+                 Command::FormRename, Command::FormSelectParent, Command::FormFind, Command::FormSelectAll })
         {
             if (Pressed(command) && !typing && !m_trying)
                 RunCommand(command);
@@ -1848,7 +2100,28 @@ namespace Manifold::UI
                     m_collapsed.erase(id);
             }
             else if (!overEye)
+            {
+                // ∑ Ctrl adds or takes out, Shift takes the rows between; a press on
+                // one of several selected keeps them for a drag and selects it alone on release
+                const ImGuiIO& keys = ImGui::GetIO();
+                if (keys.KeyCtrl)
+                    SelectToggle(id);
+                else if (keys.KeyShift)
+                    SelectRange(id);
+                else if (Many() && IsSelected(id))
+                {
+                    Focus(id);
+                    m_deferSelect = id;
+                }
+                else
+                    Select(id);
+            }
+        }
+        if (ImGui::IsItemDeactivated() && m_deferSelect == id)
+        {
+            if (ImGui::GetIO().MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] < Px(6.0f) * Px(6.0f))
                 Select(id);
+            m_deferSelect = 0;
         }
         if (rowHovered && hasChildren && !overChevron && !overEye && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {
@@ -1867,7 +2140,8 @@ namespace Manifold::UI
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, m_menuSpacing);
         if (ImGui::BeginPopupContextItem("##menu"))
         {
-            Select(id);
+            if (!IsSelected(id))
+                Select(id);
             NodeMenu(id);
             ImGui::EndPopup();
         }
@@ -1876,7 +2150,10 @@ namespace Manifold::UI
         if (node->Kind != UiKind::Window && ImGui::BeginDragDropSource())
         {
             ImGui::SetDragDropPayload(kNodePayload, &id, sizeof(id));
-            ImGui::TextUnformatted(text.c_str());
+            if (Many() && IsSelected(id))
+                ImGui::Text(ICON_FA_LAYER_GROUP "  %d widgets", static_cast<int>(SelectionTops().size()));
+            else
+                ImGui::TextUnformatted(text.c_str());
             ImGui::EndDragDropSource();
         }
         ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -1918,24 +2195,30 @@ namespace Manifold::UI
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kNodePayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
             {
                 const int moving = *static_cast<const int*>(payload->Data);
-                if (moving != id && DropAt(id, where, parent, index))
+                if (moving != id && !(Many() && IsSelected(moving) && IsSelected(id)) && DropAt(id, where, parent, index))
                 {
                     FormDocument before = m_form;
-                    if (Lua::FormMove(m_form, moving, parent, index))
+                    std::vector<int> moved;
+                    if (MoveGroup(moving, parent, index, moved))
                     {
                         m_undo.push_back(std::move(before));
                         m_redo.clear();
                         m_lastSource = 0;
                         Changed();
-                        Select(moving);
+                        if (moved.size() > 1)
+                            SelectMany(moved);
+                        else
+                            Select(moving);
                     }
+                    else
+                        m_form = std::move(before);
                 }
             }
             ImGui::EndDragDropTarget();
         }
 
         // background: selection with an accent bar, hover a soft fill
-        const bool selected = id == m_selected;
+        const bool selected = id == m_selected || (Many() && IsSelected(id));
         const ImVec2 fillMin(rowMin.x + Px(3.0f), rowMin.y + Px(1.0f));
         const ImVec2 fillMax(right + pad - Px(3.0f), rowMax.y - Px(1.0f));
         if (selected)
@@ -2038,6 +2321,12 @@ namespace Manifold::UI
         const UiNode* node = m_form.Model.Find(id);
         if (!node)
             return;
+        if (Many() && IsSelected(id))
+        {
+            // the commands below take every selected widget
+            Muted(std::string(ICON_FA_LAYER_GROUP "  ") + std::to_string(SelectionTops().size()) + " widgets");
+            ImGui::Separator();
+        }
         const bool container = Lua::UiIsContainer(node->Kind);
         if (container && ImGui::BeginMenu(ICON_FA_PLUS "  Add Inside"))
         {
@@ -2998,6 +3287,25 @@ namespace Manifold::UI
         Select(id);
     }
 
+    // ∑ A dragged widget that is one of several selected takes the others
+    // along, in form order, to the drop place.
+    bool FormEditorWindow::MoveGroup(int moving, int parent, int index, std::vector<int>& moved)
+    {
+        moved = IsSelected(moving) && Many() ? SelectionTops() : std::vector<int>{ moving };
+        for (const int id : moved)
+        {
+            if (id == parent || Within(parent, id))
+                return false;
+        }
+        for (const int id : moved)
+        {
+            if (!Lua::FormMove(m_form, id, parent, index))
+                return false;
+            index = Lua::FormIndexOf(m_form, id) + 1;
+        }
+        return true;
+    }
+
     void FormEditorWindow::DropBeside(const ImGuiPayload* payload, const DropSpot& spot)
     {
         const UiNode* target = m_form.Model.Find(spot.Target);
@@ -3016,7 +3324,7 @@ namespace Manifold::UI
                 placed = Lua::FormAdd(m_form, static_cast<UiKind>(*static_cast<const int*>(payload->Data)), row, index);
             else if (payload->IsDataType(kRecordPayload) && payload->DataSize == sizeof(int))
                 placed = AddRecordWidget(row, index, *static_cast<const int*>(payload->Data));
-            else if (moving && Lua::FormMove(m_form, moving, row, index))
+            else if (std::vector<int> moved; moving && MoveGroup(moving, row, index, moved))
                 placed = moving;
         }
         if (!placed)
@@ -3056,10 +3364,11 @@ namespace Manifold::UI
             return;
         }
         const int moving = *static_cast<const int*>(payload->Data);
-        if (moving == spot.Target || Within(parent, moving))
+        if (moving == spot.Target || Within(parent, moving) || (IsSelected(spot.Target) && Many() && IsSelected(moving)))
             return;
         FormDocument before = m_form;
-        if (Lua::FormMove(m_form, moving, parent, index))
+        std::vector<int> moved;
+        if (MoveGroup(moving, parent, index, moved))
         {
             m_undo.push_back(std::move(before));
             if (m_undo.size() > kUndoLimit)
@@ -3067,8 +3376,13 @@ namespace Manifold::UI
             m_redo.clear();
             m_lastSource = 0;
             Changed();
-            Select(moving);
+            if (moved.size() > 1)
+                SelectMany(moved);
+            else
+                Select(moving);
         }
+        else
+            m_form = std::move(before);
     }
 
     void FormEditorWindow::PreviewOverlay(ImVec2 min, ImVec2 max, int window)
@@ -3108,14 +3422,23 @@ namespace Manifold::UI
                 OpenFirstHandler(pointed);
             else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload() && !onGrip)
             {
-                Select(pointed ? pointed : window);
+                if (pointed && io.KeyCtrl)
+                    SelectToggle(pointed);
+                else if (pointed && Many() && IsSelected(pointed))
+                {
+                    Focus(pointed);
+                    m_deferSelect = pointed; // a drag takes them all; a click without one selects it alone
+                }
+                else
+                    Select(pointed ? pointed : window);
                 m_pressNode = pointed;
                 m_pressing = true;
                 ImGui::SetActiveID(pick, ImGui::GetCurrentWindow());
             }
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
             {
-                Select(pointed ? pointed : window);
+                if (!(pointed && Many() && IsSelected(pointed)))
+                    Select(pointed ? pointed : window);
                 ImGui::OpenPopupEx(m_previewMenu); // the menu lives on the surface, not in this layer's id scope
             }
             if (pointed)
@@ -3129,6 +3452,9 @@ namespace Manifold::UI
             {
                 m_pressing = false;
                 m_pressNode = 0;
+                if (m_deferSelect && io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] < Px(6.0f) * Px(6.0f))
+                    Select(m_deferSelect);
+                m_deferSelect = 0;
                 if (ImGui::GetActiveID() == pick)
                     ImGui::ClearActiveID();
             }
@@ -3139,7 +3465,9 @@ namespace Manifold::UI
             {
                 const int node = m_pressNode;
                 ImGui::SetDragDropPayload(kNodePayload, &node, sizeof(node));
-                if (const UiNode* item = m_form.Model.Find(node))
+                if (Many() && IsSelected(node))
+                    ImGui::Text(ICON_FA_LAYER_GROUP "  %d widgets", static_cast<int>(SelectionTops().size()));
+                else if (const UiNode* item = m_form.Model.Find(node))
                     ImGui::Text("%s  %s", KindIcon(item->Kind), Caption(m_form, *item).c_str());
                 ImGui::EndDragDropSource();
             }
@@ -3221,6 +3549,14 @@ namespace Manifold::UI
             if (m_selected != window && mine(m_selected))
             {
                 outline(m_selected, accent, Px(2.0f));
+                if (Many())
+                {
+                    for (const int other : Selection())
+                    {
+                        if (other != m_selected && mine(other))
+                            outline(other, soft, Px(2.0f));
+                    }
+                }
                 if (const UiDesign::Rect* rect = RectOf(m_selected))
                     tags.push_back({ ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), label(m_selected), accent, 0.0f, m_selected });
             }
@@ -3532,9 +3868,21 @@ namespace Manifold::UI
             const float limit = std::max(at.x, at.x + (cellRight - ImGui::GetCursorPosX()) - (resettable ? side + ImGui::GetStyle().ItemInnerSpacing.x : 0.0f));
             const ImVec2 size = ImGui::CalcTextSize(title.c_str());
             ImGui::Dummy(ImVec2(std::min(size.x, limit - at.x), size.y));
-            ImGui::PushStyleColor(ImGuiCol_Text, changed ? ManifoldTheme::Text : ManifoldTheme::Label);
+            bool differs = false;
+            if (Many() && node.Id == m_selected)
+            {
+                const std::string mine = Lua::FormPropValue(node, prop.Key);
+                for (const int id : Selection())
+                {
+                    if (const UiNode* other = m_form.Model.Find(id); other && Lua::FormPropValue(*other, prop.Key) != mine)
+                        differs = true;
+                }
+            }
+            ImGui::PushStyleColor(ImGuiCol_Text, differs ? ManifoldTheme::Warning : changed ? ManifoldTheme::Text : ManifoldTheme::Label);
             ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(), at, ImVec2(limit, at.y + size.y), limit, title.c_str(), nullptr, &size);
             ImGui::PopStyleColor();
+            if (differs)
+                ItemTooltip("The selected widgets have different values here; this one shows the value of the one the outline marks. A change sets all of them.");
         }
         ItemTooltip((TitleCase(prop.Key) + " (" + std::string(prop.Key) + "): " + std::string(prop.Help) + (changed ? "\nChanged from the default." : "")).c_str());
         if (resettable)
@@ -3543,7 +3891,7 @@ namespace Manifold::UI
             if (IconButton(ICON_FA_UNDO, "Back to the default", false, side))
             {
                 Remember();
-                Lua::FormSetProp(node, prop.Key, Lua::FormPropDefault(node.Kind, prop.Key));
+                SetPropAll(node, prop.Key, Lua::FormPropDefault(node.Kind, prop.Key));
                 if (prop.Type == FormPropType::File)
                     m_badImages.clear();
                 Changed();
@@ -3879,10 +4227,10 @@ namespace Manifold::UI
             break;
         }
         }
-        if (edited && value != before)
+        if (edited && (value != before || Many()))
         {
             Remember(ImGui::GetID("##v"));
-            Lua::FormSetProp(node, prop.Key, value);
+            SetPropAll(node, prop.Key, value);
             if (prop.Type == FormPropType::File)
                 m_badImages.clear();
             Changed();
@@ -3914,8 +4262,9 @@ namespace Manifold::UI
             const bool fixed = shown == static_cast<int>(options.size()) - 1;
             if (fixed && mode != Fixed)
             {
+                // a field's width is the field alone, without the label beside or above it
                 const UiDesign::Rect* rect = RectOf(node.Id);
-                const float pixels = rect ? (height ? rect->Max.y - rect->Min.y : rect->Max.x - rect->Min.x) : 0.0f;
+                const float pixels = !rect ? 0.0f : height ? rect->Max.y - rect->Min.y : rect->FieldWidth > 0.0f ? rect->FieldWidth : rect->Max.x - rect->Min.x;
                 const int points = static_cast<int>(std::lround(pixels / std::max(Px(1.0f), 0.01f)));
                 value = std::to_string(points > 0 ? points : 100);
             }
@@ -3934,6 +4283,21 @@ namespace Manifold::UI
             edited = InputTextWithHint("##v", "points", value, ImGuiInputTextFlags_CharsScientific) || edited;
         }
         return edited;
+    }
+
+    void FormEditorWindow::SetPropAll(UiNode& node, std::string_view key, const std::string& value)
+    {
+        Lua::FormSetProp(node, key, value);
+        if (!Many() || node.Id != m_selected)
+            return;
+        for (const int id : Selection())
+        {
+            if (UiNode* other = m_form.Model.Find(id); other && other != &node)
+            {
+                Lua::FormSetProp(*other, key, value);
+                m_form.Model.Touch(*other);
+            }
+        }
     }
 
     void FormEditorWindow::HandlerRow(UiNode& node, const Lua::FormHandler& handler)
@@ -3996,15 +4360,48 @@ namespace Manifold::UI
                 return;
         }
         const bool modalWindow = Lua::FormIsModal(m_form, node->Id);
+        const std::vector<int> selection = Selection();
+        const bool many = selection.size() > 1;
+        // ∑ several selected: the options they all have, a change goes to every one
+        const auto common = [&](const Lua::FormProp& prop) {
+            // what tells widgets apart stays out: one label or list for all of them is hardly ever meant
+            static constexpr std::string_view kOwn[] = { "label", "text", "title", "items", "columns", "rows", "tree", "image" };
+            if (std::find(std::begin(kOwn), std::end(kOwn), prop.Key) != std::end(kOwn))
+                return false;
+            for (const int id : selection)
+            {
+                const UiNode* other = m_form.Model.Find(id);
+                const std::span<const Lua::FormProp> props = other ? Lua::FormProps(other->Kind) : std::span<const Lua::FormProp>();
+                if (std::none_of(props.begin(), props.end(), [&](const Lua::FormProp& each) { return each.Key == prop.Key && each.Type == prop.Type; }))
+                    return false;
+            }
+            return true;
+        };
         ImGui::PushFont(Fonts::Bold(), 0.0f);
-        if (modalWindow)
+        if (many)
+            ImGui::Text(ICON_FA_LAYER_GROUP "  %d Widgets", static_cast<int>(selection.size()));
+        else if (modalWindow)
             ImGui::TextUnformatted(ICON_FA_WINDOW_RESTORE "  Modal Form");
         else
             ImGui::Text("%s  %s", KindIcon(node->Kind), std::string(Lua::FormKindTitle(node->Kind)).c_str());
         ImGui::PopFont();
         ImGui::PushTextWrapPos(0.0f);
-        Muted(modalWindow ? std::string_view("A dialog in front of the program that blocks it until it is closed. A button opens it with Opens; the script with modals.<name>.show().")
-                          : Lua::FormKindHelp(node->Kind));
+        if (many)
+        {
+            std::map<std::string, int> kinds;
+            for (const int id : selection)
+            {
+                if (const UiNode* other = m_form.Model.Find(id))
+                    ++kinds[std::string(Lua::FormKindTitle(other->Kind))];
+            }
+            std::string list;
+            for (const auto& [kind, count] : kinds)
+                list += (list.empty() ? "" : ", ") + std::to_string(count) + " " + kind;
+            Muted(list + ". The options they all have are shown; a change goes to all of them, and an option in orange has different values now. Ctrl+click adds or takes out a widget.");
+        }
+        else
+            Muted(modalWindow ? std::string_view("A dialog in front of the program that blocks it until it is closed. A button opens it with Opens; the script with modals.<name>.show().")
+                              : Lua::FormKindHelp(node->Kind));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
         ImGui::BeginChild("##props", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None);
@@ -4028,7 +4425,7 @@ namespace Manifold::UI
             ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
             return true;
         };
-        if (beginTable("##identity"))
+        if (!many && beginTable("##identity"))
         {
             NameRow(*node);
             ImGui::EndTable();
@@ -4042,6 +4439,8 @@ namespace Manifold::UI
                 if (GroupOf(prop.Key, node->Kind) != group)
                     continue;
                 if (modalWindow && (prop.Key == "dock" || prop.Key == "topmost" || prop.Key == "position" || prop.Key == "open"))
+                    continue;
+                if (many && !common(prop))
                     continue;
                 props.push_back(&prop);
                 if (!Lua::FormPropIsDefault(*node, prop.Key))
@@ -4060,7 +4459,7 @@ namespace Manifold::UI
                 ImGui::EndTable();
             }
         }
-        const std::span<const Lua::FormHandler> handlers = Lua::FormHandlers(node->Kind);
+        const std::span<const Lua::FormHandler> handlers = many ? std::span<const Lua::FormHandler>() : Lua::FormHandlers(node->Kind);
         if (!handlers.empty())
         {
             ImGui::Spacing();
@@ -4073,7 +4472,7 @@ namespace Manifold::UI
                 ImGui::EndTable();
             }
         }
-        if (node->Kind == UiKind::Button)
+        if (node->Kind == UiKind::Button && !many)
         {
             ImGui::Spacing();
             if (GroupHeader(ICON_FA_WINDOW_RESTORE "  Opens and Closes###jumps", true) && beginTable("##jumptable"))
@@ -4128,7 +4527,7 @@ namespace Manifold::UI
                 ImGui::EndTable();
             }
         }
-        if (Lua::FormCanBind(node->Kind) && !(node->Kind == UiKind::Combo && node->Multi))
+        if (Lua::FormCanBind(node->Kind) && !(node->Kind == UiKind::Combo && node->Multi) && !many)
         {
             // ∑ record = ...: the widget shows and changes a memory record of the table
             ImGui::Spacing();
@@ -4256,10 +4655,16 @@ namespace Manifold::UI
             const std::string header = std::string(ICON_FA_TOGGLE_ON "  Enabled When") + (current.empty() ? "" : "  \xC2\xB7  " + current) + "###enabledwhen";
             const auto store = [&](const Lua::FormRule& changed) {
                 const std::string text = Lua::FormWhenText(changed);
-                if (text == current)
+                if (text == current && !many)
                     return;
                 Remember();
-                m_form.Meta[node->Id].EnabledWhen = text;
+                // several selected: all of them follow (except the widget they follow)
+                for (const int id : selection)
+                {
+                    const auto meta = m_form.Meta.find(id);
+                    if (changed.Source.empty() || meta == m_form.Meta.end() || meta->second.Name != changed.Source)
+                        m_form.Meta[id].EnabledWhen = text;
+                }
                 Changed();
             };
             if (GroupHeader(header.c_str(), !current.empty()) && beginTable("##whentable"))
@@ -4355,7 +4760,7 @@ namespace Manifold::UI
         const int nodeId = node->Id;
         for (const Lua::FormProblem& problem : problems)
         {
-            if (problem.Node != nodeId)
+            if (problem.Node != nodeId || many)
                 continue;
             if (!any)
             {
@@ -4664,6 +5069,8 @@ namespace Manifold::UI
             text = Lua::FormSave(m_form);
         else if (node->Kind == UiKind::Window)
             text = Lua::FormFragment(m_form, node->Children);
+        else if (Many())
+            text = Lua::FormFragment(m_form, SelectionTops());
         else
             text = Lua::FormFragment(m_form, { m_selected });
         ImGui::SetClipboardText(text.c_str());
@@ -4710,7 +5117,10 @@ namespace Manifold::UI
         }
         m_lastSource = 0;
         Changed();
-        Select(made.front());
+        if (made.size() > 1)
+            SelectMany(made);
+        else
+            Select(made.front());
         if (!error.empty())
             m_engine.Notify(LogLevel::Warning, "Some widgets were left out: " + error);
     }
@@ -5429,7 +5839,12 @@ namespace Manifold::UI
             std::string rule = name;
             if (followed->Kind != UiKind::Checkbox && !followed->Items.empty())
                 rule += " = " + followed->Items[static_cast<std::size_t>(std::clamp(followed->Selected, 1, static_cast<int>(followed->Items.size())) - 1)];
-            m_form.Meta[from].EnabledWhen = rule;
+            // the wire of one of several selected widgets makes all of them follow
+            for (const int each : IsSelected(from) && Many() ? SelectionTops() : std::vector<int>{ from })
+            {
+                if (each != target.Node)
+                    m_form.Meta[each].EnabledWhen = rule;
+            }
             Changed();
             m_engine.Notify(LogLevel::Info, "Enabled When: " + rule + ". Change the item in the Enabled When group.");
             break;

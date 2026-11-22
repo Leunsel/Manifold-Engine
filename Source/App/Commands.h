@@ -260,6 +260,7 @@ namespace Manifold
         FormRename,
         FormSelectParent,
         FormFind,
+        FormSelectAll,
 
         Count
     };

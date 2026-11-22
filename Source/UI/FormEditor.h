@@ -163,6 +163,18 @@ namespace Manifold::UI
         void Undo();
         void Redo();
         void Select(int id);
+        void Focus(int id); // makes it the selected widget the properties show, keeping a selection of several
+        std::vector<int> Selection() const;     // the selected widgets (one, or several)
+        std::vector<int> SelectionTops() const; // the same in form order, without widgets inside other selected ones
+        bool IsSelected(int id) const;
+        bool Many() const { return Selection().size() > 1; }
+        void SelectToggle(int id);
+        void SelectRange(int id);
+        void SelectMany(const std::vector<int>& ids);
+        void SelectAllHere();
+        std::vector<int> FormOrder() const;
+        bool MoveGroup(int moving, int parent, int index, std::vector<int>& moved);
+        void SetPropAll(Lua::UiNode& node, std::string_view key, const std::string& value);
         void Add(Lua::UiKind kind);
         void AddInto(Lua::UiKind kind, int parent, int index);
         bool DropAt(int target, Drop where, int& parent, int& index) const;
@@ -279,6 +291,8 @@ namespace Manifold::UI
         std::set<int> m_outlineMatches;
         std::vector<int> m_outlineOrder; // the rows as drawn last frame, for the arrow keys
         std::vector<int> m_outlineDrawn;
+        std::vector<int> m_multi;   // two or more: the selected widgets (m_selected is one of them)
+        int m_deferSelect = 0;      // pressed on one of several selected: it alone is selected on release, unless dragged
         int m_renameNode = 0;       // the widget whose name field is being typed into
         std::string m_renameFrom;   // its name when typing started
 

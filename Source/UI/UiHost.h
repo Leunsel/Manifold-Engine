@@ -26,6 +26,7 @@ namespace Manifold::UI
             int Depth = 0;
             ImVec2 Min;
             ImVec2 Max;
+            float FieldWidth = 0.0f; // a field with a label beside it: the field alone (what its width sets)
         };
 
         bool Picking = false;
@@ -109,6 +110,7 @@ namespace Manifold::UI
         // container's content stays within
         std::string m_labelPosition = "left";
         float m_labelWidth = 0.0f;
+        float m_fieldWidth = 0.0f; // the last field's own width (design mode notes it per widget)
         bool m_labelChosen = false; // a window or container set labelPosition
         float m_rowSlot = 0.0f;
         bool m_inRow = false;
