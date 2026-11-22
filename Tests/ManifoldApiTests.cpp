@@ -69,7 +69,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 17 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 18 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -2060,6 +2060,168 @@ return M
             std::filesystem::remove(folder, ignored);
         }
 
+        void UiFormRules(Engine& engine)
+        {
+            // The document: enabledWhen read, written, checked and played; switch style; multi combo.
+            const std::optional<Lua::FormRule> plain = Lua::FormParseWhen(" god ");
+            CHECK(plain && plain->Source == "god" && !plain->Negate && plain->Values.empty());
+            const std::optional<Lua::FormRule> negated = Lua::FormParseWhen("not god");
+            CHECK(negated && negated->Negate && Lua::FormWhenText(*negated) == "not god");
+            const std::optional<Lua::FormRule> listed = Lua::FormParseWhen("mode = Multiplier ,  No Damage");
+            CHECK(listed && listed->Values.size() == 2 && listed->Values[1] == "No Damage" && Lua::FormWhenText(*listed) == "mode = Multiplier, No Damage");
+            CHECK(!Lua::FormParseWhen("not mode = A") && !Lua::FormParseWhen("= A") && !Lua::FormParseWhen("mode =") && !Lua::FormParseWhen("2fast"));
+
+            Lua::FormDocument form = Lua::NewForm("Rules");
+            const int toggle = Lua::FormAdd(form, Lua::UiKind::Checkbox, form.Window);
+            form.Meta[toggle].Name = "god";
+            Lua::FormSetProp(*form.Model.Find(toggle), "style", "switch");
+            const int mode = Lua::FormAdd(form, Lua::UiKind::Combo, form.Window);
+            form.Meta[mode].Name = "mode";
+            Lua::FormSetProp(*form.Model.Find(mode), "items", "Default\nNo Damage\nMultiplier");
+            Lua::FormSetProp(*form.Model.Find(mode), "value", "1");
+            const int slider = Lua::FormAdd(form, Lua::UiKind::Slider, form.Window);
+            form.Meta[slider].Name = "factor";
+            form.Meta[slider].EnabledWhen = "mode = Multiplier";
+            const int other = Lua::FormAdd(form, Lua::UiKind::Slider, form.Window);
+            form.Meta[other].EnabledWhen = "god";
+            const int keep = Lua::FormAdd(form, Lua::UiKind::Combo, form.Window);
+            form.Meta[keep].Name = "keep";
+            Lua::FormSetProp(*form.Model.Find(keep), "items", "Ammo\nMoney");
+            Lua::FormSetProp(*form.Model.Find(keep), "multi", "true");
+            Lua::FormSetProp(*form.Model.Find(keep), "value", "2, 1");
+            CHECK(form.Model.Find(keep)->Chosen == std::vector<int>({ 1, 2 }) && Lua::FormPropValue(*form.Model.Find(keep), "value") == "1, 2");
+            CHECK_MSG(Lua::FormProblems(form).empty(), Lua::FormProblems(form).empty() ? std::string() : Lua::FormProblems(form).front().Text);
+
+            const std::string saved = Lua::FormSave(form);
+            CHECK(saved.find("style = \"switch\"") != std::string::npos);
+            CHECK(saved.find("enabledWhen = \"mode = Multiplier\"") != std::string::npos && saved.find("enabledWhen = \"god\"") != std::string::npos);
+            CHECK_MSG(saved.find("multi = true") != std::string::npos && saved.find("value = { 1, 2 }") != std::string::npos, saved);
+            Lua::FormDocument loaded;
+            std::string error;
+            std::vector<std::string> notes;
+            CHECK_MSG(Lua::FormLoad(saved, loaded, error, &notes) && notes.empty(), error + (notes.empty() ? std::string() : " / " + notes.front()));
+            CHECK(Lua::FormSave(loaded) == saved);
+
+            Lua::FormApplyRules(loaded);
+            CHECK(!loaded.Model.Find(Lua::FormFindNamed(loaded, "factor"))->Enabled);
+            loaded.Model.Find(Lua::FormFindNamed(loaded, "mode"))->Selected = 3;
+            loaded.Model.Find(Lua::FormFindNamed(loaded, "god"))->Bool = true;
+            Lua::FormApplyRules(loaded);
+            CHECK(loaded.Model.Find(Lua::FormFindNamed(loaded, "factor"))->Enabled);
+
+            Lua::FormDocument renamed = form;
+            Lua::FormRenameReferences(renamed, "mode", "damageMode");
+            CHECK(renamed.Meta[slider].EnabledWhen == "damageMode = Multiplier" && renamed.Meta[other].EnabledWhen == "god");
+            Lua::FormDocument broken = form;
+            broken.Meta[slider].EnabledWhen = "mode = Triple";
+            broken.Meta[other].EnabledWhen = "nobody";
+            const std::vector<Lua::FormProblem> problems = Lua::FormProblems(broken);
+            CHECK(std::any_of(problems.begin(), problems.end(), [](const Lua::FormProblem& p) { return p.Text.find("has no item \"Triple\"") != std::string::npos; }));
+            CHECK(std::any_of(problems.begin(), problems.end(), [](const Lua::FormProblem& p) { return p.Text.find("no widget has that name") != std::string::npos; }));
+
+            // a snippet pasted twice: the second copy's rule follows its own renamed switch
+            {
+                const std::span<const Lua::FormTemplate> snippets = Lua::FormTemplates();
+                const auto snippet = std::find_if(snippets.begin(), snippets.end(), [](const Lua::FormTemplate& t) { return t.Id == "switchslider"; });
+                CHECK(snippet != snippets.end());
+                if (snippet != snippets.end())
+                {
+                    Lua::FormDocument twice = Lua::NewForm("Twice");
+                    std::string pasteError;
+                    CHECK(Lua::FormPaste(twice, snippet->Text, twice.Window, -1, pasteError).size() == 2 && pasteError.empty());
+                    CHECK(Lua::FormPaste(twice, snippet->Text, twice.Window, -1, pasteError).size() == 2 && pasteError.empty());
+                    const int second = Lua::FormFindNamed(twice, "featureMultiplier1");
+                    CHECK(second > 0 && Lua::FormFindNamed(twice, "feature1") > 0 && twice.Meta[second].EnabledWhen == "feature1");
+                    CHECK(twice.Meta[Lua::FormFindNamed(twice, "featureMultiplier")].EnabledWhen == "feature");
+                    const Lua::UiNode* grid = second > 0 ? twice.Model.Find(second) : nullptr;
+                    CHECK(grid && Lua::FormDuplicate(twice, grid->Parent) > 0);
+                    CHECK_MSG(Lua::FormProblems(twice).empty(), Lua::FormProblems(twice).empty() ? std::string() : Lua::FormProblems(twice).front().Text);
+                }
+            }
+
+            // the Trainer template: loads clean and builds a working window
+            const std::span<const Lua::FormTemplate> templates = Lua::FormTemplates();
+            const auto trainer = std::find_if(templates.begin(), templates.end(), [](const Lua::FormTemplate& t) { return t.Id == "trainer"; });
+            CHECK(trainer != templates.end());
+            if (trainer != templates.end())
+            {
+                Lua::FormDocument made;
+                CHECK_MSG(Lua::FormLoad(trainer->Text, made, error, &notes) && notes.empty(), error);
+                CHECK_MSG(Lua::FormProblems(made).empty(), Lua::FormProblems(made).empty() ? std::string() : Lua::FormProblems(made).front().Text);
+                CHECK_MSG(engine.Lua().Run("local w = manifold.ui.form.build((function() " + std::string(trainer->Text) + " end)())\nw.remove()\n", "trainer template").Ok(), "the trainer template does not build");
+            }
+
+            // The runtime: switch style, multi combo, enabledWhen following the user's changes.
+            Lua::UiModel& model = engine.Lua().Ui();
+            LuaCheck(engine, "form rules", R"LUA(
+                ruleChanges = {}
+                local handlers = { keepChanged = function(value) ruleChanges[#ruleChanges + 1] = value end }
+                ruleWindow, ruleWidgets = manifold.ui.form.build({ form = 1, title = "Rules Probe", children = {
+                    { kind = "checkbox", name = "god", label = "God", style = "switch" },
+                    { kind = "combo", name = "mode", items = { "Default", "No Damage", "Multiplier" }, value = 1 },
+                    { kind = "slider", name = "factor", enabledWhen = "mode = Multiplier" },
+                    { kind = "slider", name = "guarded", enabledWhen = "not god" },
+                    { kind = "combo", name = "keep", items = { "Ammo", "Money" }, multi = true, value = { 2 }, onChange = "keepChanged" },
+                    { kind = "number", name = "money", enabledWhen = "keep = Money" },
+                  } }, handlers)
+                local w = ruleWidgets
+                local keep = w.keep.get()
+                if type(keep) ~= "table" or #keep ~= 1 or keep[1] ~= 2 then return "multi get" end
+                w.keep.set({ 1, 2, 2, 9 })
+                keep = w.keep.get()
+                if #keep ~= 2 or keep[1] ~= 1 or keep[2] ~= 2 then return "multi set keeps known items once: " .. #keep end
+                ruleIds = { god = w.god.id, mode = w.mode.id, factor = w.factor.id, guarded = w.guarded.id, keep = w.keep.id, money = w.money.id }
+                local function raises(fn, needle)
+                  local ok, problem = pcall(fn)
+                  if ok then return "no error for " .. needle end
+                  local text = type(problem) == "table" and problem.message or tostring(problem)
+                  if not text:find(needle, 1, true) then return "message lacks '" .. needle .. "': " .. text end
+                end
+                local failure = raises(function() manifold.ui.form.build({ form = 1, title = "Bad", children = { { kind = "slider", enabledWhen = "nobody" } } }) end, "no widget of the form has that name")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", children = { { kind = "text", name = "t" }, { kind = "slider", enabledWhen = "t" } } }) end, "it must be a checkbox, combo or radio")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", children = { { kind = "checkbox", name = "c" }, { kind = "slider", enabledWhen = "c = On" } } }) end, "which is on or off")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", children = { { kind = "slider", enabledWhen = 3 } } }) end, "must be a string")
+                if failure then return failure end
+                local styled = manifold.ui.window.create("Bad Style")
+                failure = raises(function() styled.add("checkbox", { style = "toggle" }) end, 'must be "checkbox" or "switch"')
+                styled.remove()
+                if failure then return failure end
+                return "ok")LUA");
+            CHECK(!FindWindow(model, "Bad"));
+            std::map<std::string, int> ids;
+            {
+                std::string result;
+                engine.Lua().RunWithResult("return ('%d %d %d %d %d %d'):format(ruleIds.god, ruleIds.mode, ruleIds.factor, ruleIds.guarded, ruleIds.keep, ruleIds.money)", "rule ids", result);
+                std::istringstream read(result);
+                for (const char* name : { "god", "mode", "factor", "guarded", "keep", "money" })
+                    read >> ids[name];
+            }
+            const auto enabled = [&](const char* name) { const Lua::UiNode* node = model.Find(ids[name]); return node && node->Enabled; };
+            CHECK(model.Find(ids["god"]) && model.Find(ids["god"])->Style == "switch");
+            CHECK(!enabled("factor") && enabled("guarded"));
+            // the user picks Multiplier and turns the switch on: what UiHost posts
+            if (Lua::UiNode* node = model.Find(ids["mode"]))
+                node->Selected = 3;
+            model.Post({ ids["mode"], "change", { 3.0 } });
+            if (Lua::UiNode* node = model.Find(ids["god"]))
+                node->Bool = true;
+            model.Post({ ids["god"], "change", { true } });
+            engine.Lua().Tick(9000.0);
+            CHECK(enabled("factor") && !enabled("guarded"));
+            // the multi combo sends its list as text; the handler gets a table
+            if (Lua::UiNode* node = model.Find(ids["keep"]))
+                node->Chosen = { 1 };
+            model.Post({ ids["keep"], "change", { std::string("1") } });
+            engine.Lua().Tick(9001.0);
+            CHECK(!enabled("money"));
+            LuaCheck(engine, "form rules changed", R"LUA(
+                local last = ruleChanges[#ruleChanges]
+                if type(last) ~= "table" or #last ~= 1 or last[1] ~= 1 then return "multi onChange got " .. tostring(last) end
+                ruleWindow.remove()
+                return "ok")LUA");
+            CHECK(!FindWindow(model, "Rules Probe"));
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -2209,6 +2371,7 @@ return M
         UiFormCanvas(engine);
         UiFormModals(engine);
         UiFormOneFile(engine);
+        UiFormRules(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

@@ -173,7 +173,10 @@ namespace Manifold::UI
         double m_flashUntil = 0.0;
         ImVec2 m_pan = ImVec2(0.0f, 0.0f);
         ImVec2 m_areaSize = ImVec2(0.0f, 0.0f);
-        ImDrawList* m_marks = nullptr; // layer above the form bodies, below popups (see Preview)
+        ImDrawList* m_marks = nullptr; // the marks layer of the frame being drawn (see PreviewFrame)
+        std::map<int, ImDrawList*> m_frameMarks;                 // per window: its frame's marks layer, this frame only
+        std::map<int, std::pair<ImVec2, ImVec2>> m_frameClips;   // per window: where its marks may draw
+        ImGuiID m_previewMenu = 0;
         std::string m_activeChip;
         std::string m_hoveredChip;
         bool m_chipDragged = false;
@@ -203,6 +206,7 @@ namespace Manifold::UI
         float m_outlineX = 0.0f;
         float m_outlineWidth = 0.0f;
         int m_outlineRows = 0;
+        ImVec2 m_menuSpacing = ImVec2(8.0f, 4.0f);
 
         std::deque<Lua::FormDocument> m_undo;
         std::deque<Lua::FormDocument> m_redo;

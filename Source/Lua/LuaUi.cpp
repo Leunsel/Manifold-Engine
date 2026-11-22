@@ -262,6 +262,30 @@ namespace Manifold::Lua
                 node.Number = lua_tonumber(state, index);
                 break;
             case UiKind::Combo:
+                if (node.Multi)
+                {
+                    // a list of item numbers (or one number, or nil for none)
+                    node.Chosen.clear();
+                    if (lua_istable(state, index))
+                    {
+                        const lua_Integer count = luaL_len(state, index);
+                        for (lua_Integer i = 1; i <= count && i <= 4096; ++i)
+                        {
+                            lua_geti(state, index, i);
+                            if (lua_isnumber(state, -1))
+                                node.Chosen.push_back(static_cast<int>(lua_tointeger(state, -1)));
+                            lua_pop(state, 1);
+                        }
+                    }
+                    else if (lua_isnumber(state, index))
+                        node.Chosen.push_back(static_cast<int>(lua_tointeger(state, index)));
+                    std::sort(node.Chosen.begin(), node.Chosen.end());
+                    node.Chosen.erase(std::unique(node.Chosen.begin(), node.Chosen.end()), node.Chosen.end());
+                    std::erase_if(node.Chosen, [&](int item) { return item < 1 || item > static_cast<int>(node.Items.size()); });
+                    break;
+                }
+                node.Selected = lua_isnumber(state, index) ? static_cast<int>(lua_tointeger(state, index)) : 0;
+                break;
             case UiKind::Radio:
             case UiKind::Table:
                 node.Selected = lua_isnumber(state, index) ? static_cast<int>(lua_tointeger(state, index)) : 0;
@@ -297,6 +321,17 @@ namespace Manifold::Lua
                     lua_pushnumber(state, node.Number);
                 break;
             case UiKind::Combo:
+                if (node.Multi)
+                {
+                    lua_createtable(state, static_cast<int>(node.Chosen.size()), 0);
+                    for (std::size_t i = 0; i < node.Chosen.size(); ++i)
+                    {
+                        lua_pushinteger(state, node.Chosen[i]);
+                        lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
+                    }
+                    break;
+                }
+                [[fallthrough]];
             case UiKind::Radio:
             case UiKind::Table:
                 if (node.Selected > 0)
@@ -376,6 +411,14 @@ namespace Manifold::Lua
             ReadBool(state, props, "dock", node.Dock);
             ReadBool(state, props, "horizontal", node.Horizontal);
             ReadBool(state, props, "alpha", node.Alpha);
+            if (node.Kind == UiKind::Combo && ReadBool(state, props, "multi", node.Multi))
+            {
+                // switching between one and several chosen items keeps the choice
+                if (node.Multi && node.Chosen.empty() && node.Selected > 0)
+                    node.Chosen = { node.Selected };
+                else if (!node.Multi && node.Selected == 0 && !node.Chosen.empty())
+                    node.Selected = node.Chosen.front();
+            }
             if (node.Kind == UiKind::Section)
                 ReadBool(state, props, "open", node.Open);
             ReadFloat(state, props, "width", node.Width);
@@ -433,6 +476,8 @@ namespace Manifold::Lua
                 node.Selected = 0;
             if ((node.Kind == UiKind::Combo || node.Kind == UiKind::Radio) && node.Selected > static_cast<int>(node.Items.size()))
                 node.Selected = 0;
+            if (node.Kind == UiKind::Combo)
+                std::erase_if(node.Chosen, [&](int item) { return item < 1 || item > static_cast<int>(node.Items.size()); });
         }
 
         int UiCreate(lua_State* state)

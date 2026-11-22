@@ -6,6 +6,7 @@
 #include "Core/Paths.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Lua/DocRecord.h"
 #include "Lua/LuaEngine.h"
 #include "Lua/UiFormImport.h"
 #include "UI/Fonts.h"
@@ -269,7 +270,7 @@ namespace Manifold::UI
                     if (entry == key)
                         return 4;
             static constexpr std::string_view kContent[] = { "text", "title", "label", "icon", "badge", "hint", "items", "menu", "rows", "image" };
-            static constexpr std::string_view kValue[] = { "value", "min", "max", "step", "integer", "hex", "format", "alpha" };
+            static constexpr std::string_view kValue[] = { "multi", "value", "min", "max", "step", "integer", "hex", "format", "alpha" };
             static constexpr std::string_view kBehaviour[] = { "visible", "enabled", "tooltip", "shortcut", "confirm", "readOnly", "maxLength", "focus" };
             for (std::string_view entry : kContent)
                 if (entry == key)
@@ -334,6 +335,95 @@ namespace Manifold::UI
             }
             out = Trim(out);
             return out.empty() ? std::string("Form") : out;
+        }
+
+        // ∑ What a widget of the open form holds, for get/set in the script pane.
+        std::string ValueText(const UiNode& widget)
+        {
+            const auto item = [&](int number) {
+                return number >= 1 && number <= static_cast<int>(widget.Items.size()) ? " (" + std::to_string(number) + " = \"" + widget.Items[static_cast<std::size_t>(number - 1)] + "\")" : std::string();
+            };
+            switch (widget.Kind)
+            {
+            case UiKind::Checkbox: return std::string(widget.Style == "switch" ? "a boolean: the switch is on" : "a boolean: the box is ticked");
+            case UiKind::Input: return "its text, a string";
+            case UiKind::Number:
+            case UiKind::Slider: return widget.Integer ? "a whole number" : "a number";
+            case UiKind::Combo:
+                if (widget.Multi)
+                    return "the list of the ticked items' numbers, like { 1, 3 }" + item(1) + "; an empty list for none";
+                return "the chosen item's number" + item(1) + ", or nil for none";
+            case UiKind::Radio: return "the chosen item's number" + item(1) + ", or nil for none";
+            case UiKind::Color: return "a colour as \"#RRGGBB\"";
+            case UiKind::Table: return "the selected row's number, or nil";
+            case UiKind::Tree: return "the selected item's id, or nil";
+            case UiKind::Progress: return "the fraction, 0 to 1";
+            default: return "its text";
+            }
+        }
+
+        std::string PropType(const Lua::FormProp& prop)
+        {
+            switch (prop.Type)
+            {
+            case FormPropType::Bool: return "boolean";
+            case FormPropType::Number: return "number";
+            case FormPropType::Integer: return "integer";
+            case FormPropType::Choice:
+            {
+                std::string out;
+                std::string_view choices = prop.Choices;
+                while (!choices.empty())
+                {
+                    const std::size_t bar = choices.find('|');
+                    out += (out.empty() ? "\"" : " | \"") + std::string(choices.substr(0, bar)) + "\"";
+                    choices = bar == std::string_view::npos ? std::string_view() : choices.substr(bar + 1);
+                }
+                return out;
+            }
+            case FormPropType::Color: return "colour";
+            case FormPropType::Icon: return "icon name";
+            case FormPropType::File: return "image";
+            case FormPropType::Items:
+            case FormPropType::Columns:
+            case FormPropType::Rows:
+            case FormPropType::Tree: return "table";
+            default: return "string";
+            }
+        }
+
+        // ∑ update/get/set of a named widget of the open form: the general
+        // text plus what this widget's kind takes, key by key
+        std::shared_ptr<const Lua::DocRecord> WidgetDoc(const Lua::DocRecord& base, const UiNode& widget, const std::string& name, const std::string& what)
+        {
+            auto record = std::make_shared<Lua::DocRecord>(base);
+            const std::string kind(Lua::FormKindTitle(widget.Kind));
+            if (what == "update")
+            {
+                std::vector<std::pair<std::string, std::string>> keys;
+                std::string list;
+                for (const Lua::FormProp& prop : Lua::FormProps(widget.Kind))
+                {
+                    keys.push_back({ std::string(prop.Key), PropType(prop) });
+                    list += "\n- `" + std::string(prop.Key) + "` (" + PropType(prop) + "): " + std::string(prop.Help);
+                }
+                for (const Lua::FormHandler& handler : Lua::FormHandlers(widget.Kind))
+                {
+                    keys.push_back({ std::string(handler.Key), "function" });
+                    list += "\n- `" + std::string(handler.Key) + "(" + std::string(handler.Params) + ")`: " + std::string(handler.Help);
+                }
+                record->Summary = "Changes options of `" + name + "` (" + kind + "). Pass only the keys to change; the others keep their values, and a new `value` does not call `onChange`. Example: `" + name +
+                                  ".update({ enabled = false })`.\n\nWhat a " + kind + " takes:" + list;
+                record->Text = record->Summary + "\n\n" + base.Text;
+                if (!record->Signatures.empty() && !record->Signatures.front().Params.empty())
+                    record->Signatures.front().Params.front().Keys = std::move(keys);
+            }
+            else
+            {
+                record->Summary = (what == "get" ? "The value of `" + name + "` (" + kind + "): " : "Sets the value of `" + name + "` (" + kind + "), without calling `onChange`: ") + ValueText(widget) + ".";
+                record->Text = record->Summary + "\n\n" + base.Text;
+            }
+            return record;
         }
     }
 
@@ -473,7 +563,17 @@ namespace Manifold::UI
                     std::string member;
                     const std::string owner = classOf(chain.substr(0, dot), member);
                     if (!owner.empty() && owner[0] != '*')
-                        return m_engine.Lua().ClassMember(owner, chain.substr(dot + 1));
+                    {
+                        std::shared_ptr<const Lua::DocRecord> record = m_engine.Lua().ClassMember(owner, chain.substr(dot + 1));
+                        // a widget of this form: its own options and value, not just the general text
+                        const std::string what = chain.substr(dot + 1);
+                        const std::string holder = chain.substr(0, dot);
+                        const std::size_t nameDot = holder.find_last_of('.');
+                        const UiNode* widget = m_form.Model.Find(Lua::FormFindNamed(m_form, nameDot == std::string::npos ? holder : holder.substr(nameDot + 1)));
+                        if (record && widget && owner == "manifold.ui.window.Widget" && (what == "update" || what == "get" || what == "set"))
+                            return WidgetDoc(*record, *widget, holder.substr(nameDot == std::string::npos ? 0 : nameDot + 1), what);
+                        return record;
+                    }
                 }
                 return baseDescribe(chain, method);
             };
@@ -1342,6 +1442,7 @@ namespace Manifold::UI
         // selection, indent guides per level (the selected container's guide
         // lit), a chevron that only folds, and the markers at the right edge.
         // Deep trees scroll sideways; a row is as wide as its text.
+        m_menuSpacing = ImGui::GetStyle().ItemSpacing;
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
         m_outlineX = ImGui::GetCursorScreenPos().x;
         m_outlineWidth = ImGui::GetContentRegionAvail().x;
@@ -1461,12 +1562,17 @@ namespace Manifold::UI
         }
         if (id == m_selected && m_scrollOutline && !ImGui::IsRectVisible(rowMin, rowMax))
             ImGui::SetScrollHereY(0.4f);
+        // ∑ the rows run with no item spacing, and a popup takes the spacing
+        // that holds when it begins: without the normal one, a menu entry's
+        // keys sit right against its text ("Delete Modal FormDel")
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, m_menuSpacing);
         if (ImGui::BeginPopupContextItem("##menu"))
         {
             Select(id);
             NodeMenu(id);
             ImGui::EndPopup();
         }
+        ImGui::PopStyleVar();
         const std::string text = std::string(KindIcon(node->Kind)) + "  " + Caption(m_form, *node);
         if (node->Kind != UiKind::Window && ImGui::BeginDragDropSource())
         {
@@ -1812,6 +1918,8 @@ namespace Manifold::UI
         FormDocument& form = m_trying ? m_try : m_form;
         if (!form.Model.Find(form.Window))
             return;
+        if (m_trying)
+            Lua::FormApplyRules(m_try); // Enabled When plays along while trying the form
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ManifoldTheme::Page);
         ImGui::BeginChild("##previewarea", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::PopStyleColor();
@@ -1856,30 +1964,22 @@ namespace Manifold::UI
                 for (float x = startX; x < areaMax.x; x += step)
                     draw->AddRectFilled(ImVec2(x - radius * 0.5f, y - radius * 0.5f), ImVec2(x + radius * 0.5f, y + radius * 0.5f), dot);
         }
-        // ∑ The marks on the forms (selection, hover, links, grips) must lie
-        // above the form bodies, which are child windows, but below popups,
-        // menus, tooltips and dialogs; the foreground list lies above all of
-        // those. So they go into an input-less child that ImGui draws after
-        // the bodies: it is begun first (its draw list lives through the
-        // frame) and its begin order is set past every other child.
-        ImGuiWindow* area = ImGui::GetCurrentWindow();
-        ImGuiWindow* marks = nullptr;
-        {
-            const ImVec2 cursorMax = area->DC.CursorMaxPos;
-            ImGui::SetCursorScreenPos(areaMin);
-            ImGui::BeginChild("##marks", m_areaSize, ImGuiChildFlags_None,
-                ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav);
-            marks = ImGui::GetCurrentWindow();
-            ImGui::EndChild();
-            area->DC.CursorMaxPos = cursorMax;
-            m_marks = marks->DrawList;
-            m_marks->PushClipRect(area->InnerClipRect.Min, area->InnerClipRect.Max, false);
-        }
+        // ∑ Each window is a frame of its own layer (see PreviewFrame); the
+        // one that holds the selection is drawn last, so it lies on top of
+        // the others with everything it has. Links and chips lie below the
+        // frames, on the work surface itself.
         m_frames.clear();
+        m_frameMarks.clear();
+        m_frameClips.clear();
         m_grips.clear();
         m_design.Rects.clear();
+        m_previewMenu = ImGui::GetID("##previewmenu");
         SyncImages(form);
-        for (const int window : Lua::FormWindows(form))
+        std::vector<int> windows = Lua::FormWindows(form);
+        const int front = Lua::FormRootWindow(form, m_trying && m_flashWindow && ImGui::GetTime() < m_flashUntil ? m_flashWindow : m_selected);
+        if (const auto at = std::find(windows.begin(), windows.end(), front); at != windows.end())
+            std::rotate(at, at + 1, windows.end());
+        for (const int window : windows)
             PreviewFrame(form, window, origin, areaMin, areaMax);
         if (m_trying)
             TryEvents(areaMin, areaMax);
@@ -1893,9 +1993,6 @@ namespace Manifold::UI
             NodeMenu(m_selected);
             ImGui::EndPopup();
         }
-        m_marks->PopClipRect();
-        m_marks = nullptr;
-        marks->BeginOrderWithinParent = SHRT_MAX;
         ImGui::EndChild();
     }
 
@@ -1972,6 +2069,35 @@ namespace Manifold::UI
         const ImVec2 frameMax(frameMin.x + size.x, frameMin.y + titleHeight + bodyHeight);
         m_frames[id] = Frame{ frameMin, frameMax, titleHeight };
         ImGui::PushID(id);
+        // ∑ The frame is a layer: an input-less child over the frame and its
+        // shadow holds the chrome, the title bar and the body are children of
+        // it, and its marks (outlines, tags, guides, grip) go into one more
+        // input-less child that is begun first, so its draw list lives through
+        // the frame, and ordered last, so it lies above the body. A frame begun
+        // later lies above all of it; clicks in the margin reach the surface.
+        ImGuiWindow* area = ImGui::GetCurrentWindow();
+        const ImVec2 cursorMax = area->DC.CursorMaxPos;
+        const float margin = Px(18.0f);
+        const ImVec2 outerMin(frameMin.x - margin, frameMin.y - margin);
+        const ImVec2 outerSize(frameMax.x - frameMin.x + margin * 2.0f, frameMax.y - frameMin.y + margin * 2.0f);
+        const ImGuiWindowFlags layer = ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
+                                       ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollWithMouse;
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        ImGui::SetCursorScreenPos(outerMin);
+        ImGui::BeginChild("##frame", outerSize, ImGuiChildFlags_None, layer);
+        ImGuiWindow* frameWindow = ImGui::GetCurrentWindow();
+        ImGui::SetCursorScreenPos(outerMin);
+        ImGui::BeginChild("##framemarks", outerSize, ImGuiChildFlags_None, layer);
+        ImGuiWindow* marksWindow = ImGui::GetCurrentWindow();
+        ImGui::EndChild();
+        ImGui::PopStyleVar();
+        const ImVec2 clipMin(std::max(outerMin.x, area->InnerClipRect.Min.x), std::max(outerMin.y, area->InnerClipRect.Min.y));
+        const ImVec2 clipMax(std::min(outerMin.x + outerSize.x, area->InnerClipRect.Max.x), std::min(outerMin.y + outerSize.y, area->InnerClipRect.Max.y));
+        m_marks = marksWindow->DrawList;
+        m_marks->PushClipRect(clipMin, ImVec2(std::max(clipMin.x, clipMax.x), std::max(clipMin.y, clipMax.y)), false);
+        m_frameMarks[id] = m_marks;
+        m_frameClips[id] = { clipMin, clipMax };
+        draw = frameWindow->DrawList;
         for (int i = 1; i <= 6; ++i)
         {
             const float grow = Px(static_cast<float>(i) * 2.0f);
@@ -2008,6 +2134,11 @@ namespace Manifold::UI
         }
         {
             ImGui::SetCursorScreenPos(frameMin);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            ImGui::BeginChild("##titlebar", ImVec2(size.x, titleHeight), ImGuiChildFlags_None,
+                ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollWithMouse);
+            ImGui::PopStyleVar();
+            ImGui::SetCursorScreenPos(frameMin);
             ImGui::InvisibleButton("##formtitle", ImVec2(size.x, titleHeight));
             if (ImGui::IsItemActivated())
             {
@@ -2025,6 +2156,7 @@ namespace Manifold::UI
             if (ImGui::IsItemHovered() && !ImGui::IsItemActive())
                 ImGui::SetTooltip("%s", modal ? "A modal form: it opens in front of the program and blocks it until it is closed.\nDrag the title to move it on the work surface; click it to select the modal."
                                               : "Drag the title to move the form on the work surface; click it to select the window.");
+            ImGui::EndChild();
         }
         ImGui::SetCursorScreenPos(ImVec2(frameMin.x, frameMin.y + titleHeight));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
@@ -2037,10 +2169,29 @@ namespace Manifold::UI
             m_tryHost->DrawContents(id, nullptr);
         else
         {
+            // ∑ widgets that follow another one (Enabled When) are drawn as
+            // the window starts: dimmed while the rule does not hold. Only for
+            // the drawing; the saved enabled option stays as it is.
+            std::vector<std::pair<int, bool>> held;
+            for (const auto& [node, meta] : m_form.Meta)
+            {
+                const std::optional<Lua::FormRule> rule = meta.EnabledWhen.empty() ? std::nullopt : Lua::FormParseWhen(meta.EnabledWhen);
+                UiNode* target = rule ? m_form.Model.Find(node) : nullptr;
+                if (target && target->Enabled && !Lua::FormRuleHolds(m_form, *rule))
+                {
+                    held.push_back({ node, target->Enabled });
+                    target->Enabled = false;
+                }
+            }
             UiDesign pass;
             pass.Picking = true;
             pass.ForceTab = m_design.ForceTab;
             m_host->DrawContents(id, &pass);
+            for (const auto& [node, enabled] : held)
+            {
+                if (UiNode* target = m_form.Model.Find(node))
+                    target->Enabled = enabled;
+            }
             m_design.ForceTab = pass.ForceTab;
             m_design.Rects.insert(m_design.Rects.end(), pass.Rects.begin(), pass.Rects.end());
         }
@@ -2110,18 +2261,23 @@ namespace Manifold::UI
                 marks->PopClipRect();
             }
         }
-        ImGui::PopID();
         if (!m_trying)
         {
             PreviewOverlay(bodyMin, bodyMax, id);
             if (window->MinWidth > 0.0f || window->MinHeight > 0.0f)
             {
+                // the minimum size, above the body (it used to lie under it)
+                ImDrawList* marks = Marks();
                 const ImVec2 least(frameMin.x + Px(window->MinWidth > 0.0f ? window->MinWidth : 160.0f), frameMin.y + Px(window->MinHeight > 0.0f ? window->MinHeight : 100.0f));
                 if (least.x < frameMax.x - 1.0f || least.y < frameMax.y - 1.0f)
                 {
-                    DashedRect(draw, frameMin, least, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.55f)), 1.0f, Px(5.0f), Px(4.0f));
-                    draw->AddText(ImVec2(least.x - ImGui::CalcTextSize("min").x - Px(3.0f), least.y - ImGui::GetTextLineHeight() - Px(1.0f)),
-                        ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.8f)), "min");
+                    const ImU32 guide = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.7f));
+                    DashedRect(marks, frameMin, least, guide, 1.0f, Px(5.0f), Px(4.0f));
+                    const char* text = "min";
+                    const ImVec2 textSize = ImGui::CalcTextSize(text);
+                    const ImVec2 tagMin(least.x - textSize.x - Px(8.0f), least.y - textSize.y - Px(3.0f));
+                    marks->AddRectFilled(tagMin, ImVec2(least.x - Px(1.0f), least.y - Px(1.0f)), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Page, 0.85f)), Px(3.0f));
+                    marks->AddText(ImVec2(tagMin.x + Px(4.0f), tagMin.y + Px(1.0f)), guide, text);
                 }
             }
         }
@@ -2136,6 +2292,11 @@ namespace Manifold::UI
                 ImGui::GetColorU32(ManifoldTheme::WithAlpha(modal ? ManifoldTheme::CodeLabel : ManifoldTheme::Accent, alpha)), Px(8.0f), 0, Px(2.0f));
             marks->PopClipRect();
         }
+        marksWindow->BeginOrderWithinParent = SHRT_MAX;
+        m_marks = nullptr;
+        ImGui::EndChild();
+        area->DC.CursorMaxPos = cursorMax;
+        ImGui::PopID();
     }
 
     // ∑ A button's opens = "<modal>" is drawn as an arrow from the button's
@@ -2143,7 +2304,8 @@ namespace Manifold::UI
     // the modal sits (beside or below).
     void FormEditorWindow::JumpLinks(ImVec2 areaMin, ImVec2 areaMax)
     {
-        ImDrawList* links = Marks();
+        // on the surface, below the frames; the dashed part inside the form on its own layer
+        ImDrawList* links = ImGui::GetWindowDrawList();
         for (const auto& [id, meta] : m_form.Meta)
         {
             if (meta.Opens.empty())
@@ -2220,7 +2382,8 @@ namespace Manifold::UI
                 links->AddText(ImVec2(labelMin.x + Px(6.0f), labelMin.y + Px(2.0f)), color, label.c_str());
             }
             links->PopClipRect();
-            if (strong)
+            ImDrawList* inner = m_frameMarks.count(root) ? m_frameMarks[root] : nullptr;
+            if (strong && inner)
             {
                 const ImVec2 innerMin(std::max(a.Min.x, areaMin.x), std::max(bodyTop, areaMin.y));
                 const ImVec2 innerMax(std::min(a.Max.x, areaMax.x), std::min(a.Max.y, areaMax.y));
@@ -2228,9 +2391,9 @@ namespace Manifold::UI
                 {
                     const ImVec2 from2 = beside ? ImVec2(port.x > widgetX ? rect->Max.x + Px(3.0f) : rect->Min.x - Px(3.0f), widgetY)
                                                 : ImVec2(widgetX, port.y > widgetY ? rect->Max.y + Px(3.0f) : rect->Min.y - Px(3.0f));
-                    links->PushClipRect(innerMin, innerMax, true);
-                    DashedLine(links, from2, port, ImGui::GetColorU32(ManifoldTheme::WithAlpha(tone, 0.6f)), 1.0f, Px(4.0f), Px(3.0f));
-                    links->PopClipRect();
+                    inner->PushClipRect(innerMin, innerMax, true);
+                    DashedLine(inner, from2, port, ImGui::GetColorU32(ManifoldTheme::WithAlpha(tone, 0.6f)), 1.0f, Px(4.0f), Px(3.0f));
+                    inner->PopClipRect();
                 }
             }
         }
@@ -2421,15 +2584,18 @@ namespace Manifold::UI
         const auto mine = [&](int node) { return node && Lua::FormRootWindow(m_form, node) == window; };
         // ∑ The form can be panned partly out of the work surface; the overlay
         // (marks layer) must stop at the surface's edge like the body does.
+        const auto clip = m_frameClips.count(window) ? m_frameClips[window] : std::pair<ImVec2, ImVec2>(min, max);
         {
-            const ImRect surface = ImGui::GetCurrentWindow()->InnerClipRect;
-            min = ImVec2(std::max(min.x, surface.Min.x), std::max(min.y, surface.Min.y));
-            max = ImVec2(std::min(max.x, surface.Max.x), std::min(max.y, surface.Max.y));
+            min = ImVec2(std::max(min.x, clip.first.x), std::max(min.y, clip.first.y));
+            max = ImVec2(std::min(max.x, clip.second.x), std::min(max.y, clip.second.y));
             max = ImVec2(std::max(max.x, min.x), std::max(max.y, min.y));
         }
         const ImGuiIO& io = ImGui::GetIO();
         const ImGuiID pick = ImGui::GetID("##previewpick");
-        const bool inside = ImGui::IsMouseHoveringRect(min, max) && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+        // ∑ called inside this frame's layer: the hovered window is one of its
+        // children only when no other frame lies on top of the mouse
+        const bool overMe = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+        const bool inside = ImGui::IsMouseHoveringRect(min, max) && overMe;
         int pointed = 0;
         if (inside)
         {
@@ -2455,7 +2621,7 @@ namespace Manifold::UI
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
             {
                 Select(pointed ? pointed : window);
-                ImGui::OpenPopup("##previewmenu");
+                ImGui::OpenPopupEx(m_previewMenu); // the menu lives on the surface, not in this layer's id scope
             }
             if (pointed)
                 m_hovered = pointed;
@@ -2499,6 +2665,8 @@ namespace Manifold::UI
             std::string text = std::string(KindIcon(node->Kind)) + " " + std::string(Lua::FormKindTitle(node->Kind));
             if (meta != m_form.Meta.end() && !meta->second.Name.empty())
                 text += "  " + meta->second.Name;
+            if (meta != m_form.Meta.end() && !meta->second.EnabledWhen.empty())
+                text += "  \xC2\xB7  " ICON_FA_TOGGLE_ON " " + meta->second.EnabledWhen;
             return text;
         };
         {
@@ -2533,7 +2701,7 @@ namespace Manifold::UI
         const ImGuiPayload* payload = ImGui::GetDragDropPayload();
         const bool dragging = payload && (payload->IsDataType(kKindPayload) || payload->IsDataType(kNodePayload));
         const ImU32 onAccent = ImGui::GetColorU32(ManifoldTheme::Page);
-        const ImRect area = ImGui::GetCurrentWindow()->InnerClipRect;
+        const ImRect area(clip.first, clip.second);
         struct PendingTag
         {
             ImVec2 Min;
@@ -2559,7 +2727,7 @@ namespace Manifold::UI
                     tags.push_back({ ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), label(m_selected), accent, 0.0f });
             }
         }
-        else if (ImGui::IsMouseHoveringRect(min, max))
+        else if (ImGui::IsMouseHoveringRect(min, max) && overMe)
         {
             const int moving = payload->IsDataType(kNodePayload) ? *static_cast<const int*>(payload->Data) : 0;
             const DropSpot spot = SpotAt(io.MousePos, moving);
@@ -2582,6 +2750,33 @@ namespace Manifold::UI
                 if (const ImGuiPayload* moved = ImGui::AcceptDragDropPayload(kNodePayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
                     DropPayload(moved, spot);
                 ImGui::EndDragDropTarget();
+            }
+        }
+        if (!dragging)
+        {
+            // ∑ Enabled When: a dashed elbow from the widget another one
+            // follows, while either of them is hovered or selected
+            const ImU32 ruleColor = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Success, 0.9f));
+            for (const auto& [id, meta] : m_form.Meta)
+            {
+                if (meta.EnabledWhen.empty() || !mine(id))
+                    continue;
+                const std::optional<Lua::FormRule> rule = Lua::FormParseWhen(meta.EnabledWhen);
+                const int source = rule ? Lua::FormFindNamed(m_form, rule->Source) : 0;
+                if (!source || !mine(source) || !(id == m_selected || id == m_hovered || source == m_selected || source == m_hovered))
+                    continue;
+                const UiDesign::Rect* a = RectOf(source);
+                const UiDesign::Rect* b = RectOf(id);
+                if (!a || !b)
+                    continue;
+                const float x = std::max(std::min(std::max(a->Max.x, b->Max.x) + Px(12.0f), max.x - Px(5.0f)), std::max(a->Max.x, b->Max.x) - Px(6.0f));
+                const ImVec2 from(std::min(a->Max.x + Px(2.0f), x), (a->Min.y + a->Max.y) * 0.5f);
+                const ImVec2 to(std::min(b->Max.x + Px(2.0f), x), (b->Min.y + b->Max.y) * 0.5f);
+                DashedLine(draw, from, ImVec2(x, from.y), ruleColor, Px(1.5f), Px(4.0f), Px(3.0f));
+                DashedLine(draw, ImVec2(x, from.y), ImVec2(x, to.y), ruleColor, Px(1.5f), Px(4.0f), Px(3.0f));
+                DashedLine(draw, ImVec2(x, to.y), to, ruleColor, Px(1.5f), Px(4.0f), Px(3.0f));
+                draw->AddCircleFilled(from, Px(3.0f), ruleColor);
+                draw->AddTriangleFilled(to, ImVec2(to.x + Px(7.0f), to.y - Px(4.5f)), ImVec2(to.x + Px(7.0f), to.y + Px(4.5f)), ruleColor);
             }
         }
         draw->PopClipRect();
@@ -2637,7 +2832,11 @@ namespace Manifold::UI
         if (InputTextWithHint("##name", "no name", name, ImGuiInputTextFlags_CharsNoBlank))
         {
             Remember(ImGui::GetItemID());
+            const std::string old = m_form.Meta[node.Id].Name;
             m_form.Meta[node.Id].Name = name;
+            // widgets that follow this one (Enabled When) follow the new name
+            if (Lua::FormIsIdentifier(name))
+                Lua::FormRenameReferences(m_form, old, name);
             Changed();
         }
         if (!name.empty() && !Lua::FormIsIdentifier(name))
@@ -2681,6 +2880,68 @@ namespace Manifold::UI
         const std::string before = Lua::FormPropValue(node, prop.Key);
         std::string value = before;
         bool edited = false;
+        const bool choice = (node.Kind == UiKind::Combo || node.Kind == UiKind::Radio) && prop.Key == "value";
+        if (choice && node.Kind == UiKind::Combo && node.Multi)
+        {
+            // ∑ the chosen items by name, ticked in a list that stays open
+            std::string preview;
+            for (const int item : node.Chosen)
+            {
+                if (item >= 1 && item <= static_cast<int>(node.Items.size()))
+                    preview += (preview.empty() ? "" : ", ") + node.Items[static_cast<std::size_t>(item - 1)];
+            }
+            if (ImGui::BeginCombo("##v", preview.empty() ? "None" : preview.c_str()))
+            {
+                std::vector<int> chosen = node.Chosen;
+                for (int i = 0; i < static_cast<int>(node.Items.size()); ++i)
+                {
+                    ImGui::PushID(i);
+                    bool on = std::find(chosen.begin(), chosen.end(), i + 1) != chosen.end();
+                    if (ImGui::Checkbox(node.Items[static_cast<std::size_t>(i)].c_str(), &on))
+                    {
+                        if (on)
+                            chosen.push_back(i + 1);
+                        else
+                            std::erase(chosen, i + 1);
+                        std::sort(chosen.begin(), chosen.end());
+                        value.clear();
+                        for (const int item : chosen)
+                            value += (value.empty() ? "" : ", ") + std::to_string(item);
+                        edited = true;
+                    }
+                    ImGui::PopID();
+                }
+                if (node.Items.empty())
+                    Muted("Add items first.");
+                ImGui::EndCombo();
+            }
+        }
+        else if (choice)
+        {
+            // ∑ the chosen item by name instead of its number
+            const int selected = node.Selected;
+            const char* preview = selected >= 1 && selected <= static_cast<int>(node.Items.size()) ? node.Items[static_cast<std::size_t>(selected - 1)].c_str() : "None";
+            if (ImGui::BeginCombo("##v", preview))
+            {
+                if (ImGui::Selectable("None", selected == 0))
+                {
+                    value = "0";
+                    edited = true;
+                }
+                for (int i = 0; i < static_cast<int>(node.Items.size()); ++i)
+                {
+                    ImGui::PushID(i);
+                    if (ImGui::Selectable(node.Items[static_cast<std::size_t>(i)].c_str(), selected == i + 1))
+                    {
+                        value = std::to_string(i + 1);
+                        edited = true;
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::EndCombo();
+            }
+        }
+        else
         switch (prop.Type)
         {
         case FormPropType::Bool:
@@ -3057,6 +3318,111 @@ namespace Manifold::UI
                     Remember();
                     m_form.Meta[node->Id].Closes = closes;
                     Changed();
+                }
+                ImGui::EndTable();
+            }
+        }
+        if (node->Kind != UiKind::Window)
+        {
+            // ∑ enabledWhen without typing: the widget to follow, then what of it
+            ImGui::Spacing();
+            const auto found = m_form.Meta.find(node->Id);
+            const std::string current = found == m_form.Meta.end() ? std::string() : found->second.EnabledWhen;
+            Lua::FormRule rule = Lua::FormParseWhen(current).value_or(Lua::FormRule{});
+            const UiNode* source = m_form.Model.Find(Lua::FormFindNamed(m_form, rule.Source));
+            const std::string header = std::string(ICON_FA_TOGGLE_ON "  Enabled When") + (current.empty() ? "" : "  \xC2\xB7  " + current) + "###enabledwhen";
+            const auto store = [&](const Lua::FormRule& changed) {
+                const std::string text = Lua::FormWhenText(changed);
+                if (text == current)
+                    return;
+                Remember();
+                m_form.Meta[node->Id].EnabledWhen = text;
+                Changed();
+            };
+            if (GroupHeader(header.c_str(), !current.empty()) && beginTable("##whentable"))
+            {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted("Follows");
+                ItemTooltip("enabledWhen: the widget is enabled only while this checkbox, switch, combo or radio says so; otherwise it is drawn dimmed and takes no input. No code needed.");
+                ImGui::TableSetColumnIndex(1);
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                const std::string preview = rule.Source.empty() ? std::string("nothing (always enabled)") : rule.Source;
+                if (ImGui::BeginCombo("##whensource", preview.c_str()))
+                {
+                    if (ImGui::Selectable("nothing (always enabled)", rule.Source.empty()))
+                        store(Lua::FormRule{});
+                    for (const auto& [id, meta] : m_form.Meta)
+                    {
+                        const UiNode* item = m_form.Model.Find(id);
+                        if (!item || id == node->Id || meta.Name.empty() ||
+                            (item->Kind != UiKind::Checkbox && item->Kind != UiKind::Combo && item->Kind != UiKind::Radio))
+                            continue;
+                        const std::string label = std::string(KindIcon(item->Kind)) + "  " + meta.Name;
+                        if (ImGui::Selectable(label.c_str(), meta.Name == rule.Source))
+                            store(Lua::FormRule{ meta.Name, false, {} });
+                    }
+                    ImGui::EndCombo();
+                }
+                if (source && source->Kind == UiKind::Checkbox)
+                {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextUnformatted("While");
+                    ImGui::TableSetColumnIndex(1);
+                    int state = rule.Negate ? 1 : 0;
+                    if (Segmented("##whenstate", &state, { "On", "Off" }, -1.0f))
+                    {
+                        Lua::FormRule changed = rule;
+                        changed.Negate = state == 1;
+                        store(changed);
+                    }
+                }
+                else if (source)
+                {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextUnformatted("Chosen");
+                    ItemTooltip("Enabled while one of the ticked items is chosen; with none ticked, while any item is chosen.");
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    std::string chosen;
+                    for (const std::string& value : rule.Values)
+                        chosen += (chosen.empty() ? "" : ", ") + value;
+                    if (ImGui::BeginCombo("##whenvalues", chosen.empty() ? "any item" : chosen.c_str()))
+                    {
+                        for (std::size_t i = 0; i < source->Items.size(); ++i)
+                        {
+                            ImGui::PushID(static_cast<int>(i));
+                            const std::string& item = source->Items[i];
+                            bool on = std::find(rule.Values.begin(), rule.Values.end(), item) != rule.Values.end();
+                            if (ImGui::Checkbox(item.c_str(), &on))
+                            {
+                                Lua::FormRule changed = rule;
+                                changed.Negate = false;
+                                std::erase(changed.Values, item);
+                                if (on)
+                                {
+                                    // keep the items' own order
+                                    std::vector<std::string> ordered;
+                                    for (const std::string& each : source->Items)
+                                    {
+                                        if (each == item || std::find(changed.Values.begin(), changed.Values.end(), each) != changed.Values.end())
+                                            ordered.push_back(each);
+                                    }
+                                    changed.Values = ordered;
+                                }
+                                store(changed);
+                            }
+                            ImGui::PopID();
+                        }
+                        if (source->Items.empty())
+                            Muted("That widget has no items yet.");
+                        ImGui::EndCombo();
+                    }
                 }
                 ImGui::EndTable();
             }
@@ -3817,6 +4183,9 @@ namespace Manifold::UI
         std::map<int, float> autoRows;
         std::map<std::string, std::pair<ImVec2, ImVec2>> rects;
         ImDrawList* draw = ImGui::GetWindowDrawList();
+        // chips above their links: both on the surface, below the frames
+        draw->ChannelsSplit(2);
+        draw->ChannelsSetCurrent(1);
         std::string hovered;
         for (const auto& [name, params] : functions)
         {
@@ -3888,9 +4257,11 @@ namespace Manifold::UI
         // edge at its own height (on the side its chip is on), and only the
         // part outside the form is drawn. A hovered or selected widget or chip
         // adds a faint dashed guide from the widget to its port.
-        ImDrawList* links = Marks();
+        draw->ChannelsSetCurrent(0);
+        ImDrawList* links = draw;
         for (const auto& [id, meta] : m_form.Meta)
         {
+            ImDrawList* inner = m_frameMarks.count(Lua::FormRootWindow(m_form, id)) ? m_frameMarks[Lua::FormRootWindow(m_form, id)] : nullptr;
             const auto frame = m_frames.find(Lua::FormRootWindow(m_form, id));
             if (frame == m_frames.end())
                 continue;
@@ -3931,18 +4302,19 @@ namespace Manifold::UI
                 links->AddCircleFilled(port, strong ? Px(3.5f) : Px(2.5f), color);
                 links->AddCircleFilled(to, strong ? Px(3.5f) : Px(2.5f), color);
                 links->PopClipRect();
-                if (strong && rect && innerMax.x > innerMin.x && innerMax.y > innerMin.y)
+                if (strong && rect && inner && innerMax.x > innerMin.x && innerMax.y > innerMin.y)
                 {
                     const float from = right ? rect->Max.x + Px(3.0f) : rect->Min.x - Px(3.0f);
                     if ((port.x - from) * out > Px(4.0f))
                     {
-                        links->PushClipRect(innerMin, innerMax, true);
-                        DashedLine(links, ImVec2(from, y), port, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.55f)), 1.0f, Px(4.0f), Px(3.0f));
-                        links->PopClipRect();
+                        inner->PushClipRect(innerMin, innerMax, true);
+                        DashedLine(inner, ImVec2(from, y), port, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.55f)), 1.0f, Px(4.0f), Px(3.0f));
+                        inner->PopClipRect();
                     }
                 }
             }
         }
+        draw->ChannelsMerge();
         if (!hovered.empty())
         {
             for (const auto& [id, meta] : m_form.Meta)

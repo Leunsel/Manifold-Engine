@@ -103,6 +103,7 @@ namespace Manifold::Lua
         constexpr FormProp kCheckbox[] = {
             { "label", T::String, "Text beside the box." },
             { "value", T::Bool, "Ticked at the start." },
+            { "style", T::Choice, "A box to tick, or a switch.", "checkbox|switch" },
         };
         constexpr FormProp kInput[] = {
             { "label", T::String, "Text beside the field." },
@@ -136,7 +137,8 @@ namespace Manifold::Lua
         constexpr FormProp kCombo[] = {
             { "label", T::String, "Text beside the box." },
             { "items", T::Items, "The choices, one per line." },
-            { "value", T::Integer, "Number of the chosen item at the start; 0 for none." },
+            { "multi", T::Bool, "Several items can be ticked; the value is then the list of their numbers." },
+            { "value", T::Integer, "The chosen item at the start (its number); none for nothing chosen." },
         };
         constexpr FormProp kRadio[] = {
             { "label", T::String, "Text beside the group." },
@@ -407,6 +409,78 @@ namespace Manifold::Lua
   },
 })FORM";
 
+        constexpr std::string_view kTrainer = R"FORM(return {
+  form = 1,
+  title = "Trainer",
+  icon = "gamepad",
+  width = 460,
+  height = 560,
+  key = "trainer",
+  children = {
+    {
+      kind = "section",
+      title = "Vitality",
+      icon = "heart",
+      collapsible = true,
+      children = {
+        { kind = "checkbox", name = "infiniteHealth", label = "Infinite Health", style = "switch", onChange = "infiniteHealthChanged" },
+        {
+          kind = "grid",
+          children = {
+            { kind = "text", text = "On Damage" },
+            { kind = "combo", name = "damageMode", items = { "Default", "No Damage", "Multiplier" }, value = 1, width = -1, enabledWhen = "not infiniteHealth", onChange = "damageModeChanged" },
+            { kind = "text", text = "Multiplier" },
+            { kind = "slider", name = "damageMultiplier", value = 0.5, max = 2, format = "%.2f x", width = -1, enabledWhen = "damageMode = Multiplier", onChange = "damageMultiplierChanged" },
+          },
+        },
+      },
+    },
+    {
+      kind = "section",
+      title = "Weapon",
+      icon = "crosshairs",
+      collapsible = true,
+      children = {
+        { kind = "checkbox", name = "noRecoil", label = "No Recoil", style = "switch", onChange = "noRecoilChanged" },
+        { kind = "checkbox", name = "noSpread", label = "No Spread", style = "switch", onChange = "noSpreadChanged" },
+        { kind = "separator" },
+        { kind = "checkbox", name = "fireRate", label = "Fire Rate Multiplier", style = "switch", onChange = "fireRateChanged" },
+        {
+          kind = "grid",
+          children = {
+            { kind = "text", text = "Multiplier" },
+            { kind = "slider", name = "fireRateMultiplier", value = 2, min = 1, max = 5, format = "%.1f x", width = -1, enabledWhen = "fireRate", onChange = "fireRateMultiplierChanged" },
+          },
+        },
+      },
+    },
+    {
+      kind = "section",
+      title = "Resources",
+      icon = "coins",
+      collapsible = true,
+      children = {
+        {
+          kind = "grid",
+          children = {
+            { kind = "text", text = "Keep Full" },
+            { kind = "combo", name = "keepFull", items = { "Ammo", "Grenades", "Money", "Stamina" }, multi = true, width = -1, onChange = "keepFullChanged" },
+            { kind = "text", text = "Money" },
+            { kind = "number", name = "money", value = 1000, step = 100, integer = true, width = -1, enabledWhen = "keepFull = Money", onChange = "moneyChanged" },
+          },
+        },
+      },
+    },
+    { kind = "separator" },
+    {
+      kind = "row",
+      children = {
+        { kind = "text", name = "status", text = "Not attached", color = "muted" },
+      },
+    },
+  },
+})FORM";
+
         constexpr std::string_view kLabelField = R"FORM(return {
   form = 1,
   fragment = true,
@@ -471,6 +545,39 @@ namespace Manifold::Lua
   },
 })FORM";
 
+        constexpr std::string_view kSwitchSlider = R"FORM(return {
+  form = 1,
+  fragment = true,
+  title = "",
+  children = {
+    { kind = "checkbox", name = "feature", label = "Enable Multiplier", style = "switch", onChange = "featureChanged" },
+    {
+      kind = "grid",
+      children = {
+        { kind = "text", text = "Multiplier" },
+        { kind = "slider", name = "featureMultiplier", value = 2, min = 1, max = 10, format = "%.1f x", width = -1, enabledWhen = "feature", onChange = "featureMultiplierChanged" },
+      },
+    },
+  },
+})FORM";
+
+        constexpr std::string_view kModeSlider = R"FORM(return {
+  form = 1,
+  fragment = true,
+  title = "",
+  children = {
+    {
+      kind = "grid",
+      children = {
+        { kind = "text", text = "Mode" },
+        { kind = "combo", name = "mode", items = { "Default", "Disabled", "Multiplier" }, value = 1, width = -1, onChange = "modeChanged" },
+        { kind = "text", text = "Multiplier" },
+        { kind = "slider", name = "modeMultiplier", value = 1, max = 5, format = "%.2f x", width = -1, enabledWhen = "mode = Multiplier", onChange = "modeMultiplierChanged" },
+      },
+    },
+  },
+})FORM";
+
         constexpr std::string_view kStatusLine = R"FORM(return {
   form = 1,
   fragment = true,
@@ -487,10 +594,13 @@ namespace Manifold::Lua
 })FORM";
 
         constexpr FormTemplate kTemplates[] = {
+            { "trainer", "Trainer", "Categories of switches; a combo picks a mode and enables its multiplier slider, a switch enables its own slider, and a combo ticks several resources.", false, kTrainer },
             { "tool", "Tool Window", "A section with labelled fields and Reset and Apply buttons.", false, kToolWindow },
             { "settings", "Settings Dialog", "Tabs with fields, Cancel and Save.", false, kSettingsDialog },
             { "browser", "List and Details", "A search field, a table and a details pane side by side.", false, kListDetails },
             { "cheats", "Cheat List", "Foldable sections of switches, a slider and a button.", false, kCheatList },
+            { "switchslider", "Switch with Slider", "A switch and a slider that is enabled only while the switch is on.", true, kSwitchSlider },
+            { "modeslider", "Mode with Slider", "A combo of modes and a slider that is enabled only while Multiplier is chosen.", true, kModeSlider },
             { "labelfield", "Label and Field", "A text and a field: one row of a grid.", true, kLabelField },
             { "okcancel", "OK and Cancel", "Two buttons at the right of a row.", true, kOkCancel },
             { "search", "Search Bar", "A search field with a Find button.", true, kSearchBar },
@@ -864,6 +974,8 @@ namespace Manifold::Lua
                     parts.push_back("opens = " + Quote(meta->Opens));
                 if (node.Kind == UiKind::Button && meta->Closes)
                     parts.push_back("closes = true");
+                if (!meta->EnabledWhen.empty())
+                    parts.push_back("enabledWhen = " + Quote(meta->EnabledWhen));
             }
             std::vector<const UiNode*> children;
             for (const int child : node.Children)
@@ -957,6 +1069,15 @@ namespace Manifold::Lua
                         lua_pop(State, 1);
                         continue;
                     }
+                    if (node.Kind != UiKind::Window && key == "enabledWhen")
+                    {
+                        if (lua_type(State, -1) == LUA_TSTRING && FormParseWhen(lua_tostring(State, -1)))
+                            meta.EnabledWhen = lua_tostring(State, -1);
+                        else
+                            Warn(Where(node.Kind, meta.Name) + ": enabledWhen must look like \"god\", \"not god\" or \"mode = Multiplier\" and was left out");
+                        lua_pop(State, 1);
+                        continue;
+                    }
                     if (FindHandler(node.Kind, key))
                     {
                         if (lua_type(State, -1) != LUA_TSTRING || !FormIsIdentifier(lua_tostring(State, -1)))
@@ -1026,7 +1147,7 @@ namespace Manifold::Lua
                 }
                 if (!ReadMeta(table, node, meta))
                     return false;
-                if (!meta.Name.empty() || !meta.Handlers.empty() || !meta.Opens.empty() || meta.Closes)
+                if (!meta.Name.empty() || !meta.Handlers.empty() || !meta.Opens.empty() || meta.Closes || !meta.EnabledWhen.empty())
                     Form.Meta[id] = std::move(meta);
                 return ReadChildren(table, id, depth);
             }
@@ -1585,7 +1706,33 @@ namespace Manifold::Lua
         return form.Model.Remove(node);
     }
 
-    int FormGraft(FormDocument& form, const FormDocument& from, int node, int parent, int index)
+    namespace
+    {
+        // ∑ grafted copies that got new names: rules among them follow the new names
+        void FollowRenames(FormDocument& form, int node, const std::map<std::string, std::string>& renames)
+        {
+            const UiNode* item = form.Model.Find(node);
+            if (!item)
+                return;
+            if (const auto meta = form.Meta.find(node); meta != form.Meta.end() && !meta->second.EnabledWhen.empty())
+            {
+                std::optional<FormRule> rule = FormParseWhen(meta->second.EnabledWhen);
+                if (rule)
+                {
+                    if (const auto renamed = renames.find(rule->Source); renamed != renames.end())
+                    {
+                        rule->Source = renamed->second;
+                        meta->second.EnabledWhen = FormWhenText(*rule);
+                    }
+                }
+            }
+            const std::vector<int> children = item->Children;
+            for (const int child : children)
+                FollowRenames(form, child, renames);
+        }
+    }
+
+    int FormGraft(FormDocument& form, const FormDocument& from, int node, int parent, int index, std::map<std::string, std::string>* renames)
     {
         const UiNode* source = from.Model.Find(node);
         const UiNode* holder = form.Model.Find(parent);
@@ -1615,11 +1762,16 @@ namespace Manifold::Lua
         {
             FormMeta fresh = *meta;
             if (!fresh.Name.empty())
+            {
+                const std::string wanted = fresh.Name;
                 fresh.Name = FormUniqueName(form, fresh.Name);
+                if (renames && fresh.Name != wanted)
+                    (*renames)[wanted] = fresh.Name;
+            }
             form.Meta[id] = std::move(fresh);
         }
         for (const int child : original.Children)
-            FormGraft(form, from, child, id, -1);
+            FormGraft(form, from, child, id, -1, renames);
         return id;
     }
 
@@ -1628,7 +1780,11 @@ namespace Manifold::Lua
         const UiNode* source = form.Model.Find(node);
         if (!source || node == form.Window)
             return 0;
-        return FormGraft(form, form, node, source->Parent, FormIndexOf(form, node) + 1);
+        std::map<std::string, std::string> renames;
+        const int copy = FormGraft(form, form, node, source->Parent, FormIndexOf(form, node) + 1, &renames);
+        if (copy && !renames.empty())
+            FollowRenames(form, copy, renames);
+        return copy;
     }
 
     std::string FormFragment(const FormDocument& form, const std::vector<int>& nodes)
@@ -1663,12 +1819,13 @@ namespace Manifold::Lua
             return made;
         }
         std::vector<std::string> refused;
+        std::map<std::string, std::string> renames;
         for (const int child : window->Children)
         {
             const UiNode* node = piece.Model.Find(child);
             if (!node)
                 continue;
-            const int id = FormGraft(form, piece, child, parent, index);
+            const int id = FormGraft(form, piece, child, parent, index, &renames);
             if (!id)
             {
                 refused.push_back(std::string(FormKindTitle(node->Kind)));
@@ -1677,6 +1834,11 @@ namespace Manifold::Lua
             made.push_back(id);
             if (index >= 0)
                 ++index;
+        }
+        if (!renames.empty())
+        {
+            for (const int id : made)
+                FollowRenames(form, id, renames);
         }
         if (!refused.empty())
         {
@@ -2295,7 +2457,8 @@ namespace Manifold::Lua
         if (key == "color") return node.Color;
         if (key == "wrap") return flag(node.Wrap);
         if (key == "mono") return flag(node.Mono);
-        if (key == "style") return node.Style.empty() ? std::string("default") : node.Style;
+        if (key == "style") return node.Style.empty() ? std::string(node.Kind == UiKind::Checkbox ? "checkbox" : "default") : node.Style;
+        if (key == "multi") return flag(node.Multi);
         if (key == "label") return node.Label;
         if (key == "hint") return node.Hint;
         if (key == "multiline") return flag(node.Multiline);
@@ -2377,6 +2540,14 @@ namespace Manifold::Lua
             case UiKind::Slider:
                 return NumberText(node.Number);
             case UiKind::Combo:
+                if (node.Multi)
+                {
+                    std::string list;
+                    for (const int item : node.Chosen)
+                        list += (list.empty() ? "" : ", ") + std::to_string(item);
+                    return list;
+                }
+                return std::to_string(node.Selected);
             case UiKind::Radio:
             case UiKind::Table:
                 return std::to_string(node.Selected);
@@ -2417,7 +2588,15 @@ namespace Manifold::Lua
         else if (key == "color") node.Color = Trim(text);
         else if (key == "wrap") node.Wrap = yes;
         else if (key == "mono") node.Mono = yes;
-        else if (key == "style") node.Style = value == "default" ? std::string() : text;
+        else if (key == "style") node.Style = value == "default" || value == "checkbox" ? std::string() : text;
+        else if (key == "multi")
+        {
+            if (yes && !node.Multi && node.Chosen.empty() && node.Selected > 0)
+                node.Chosen = { node.Selected };
+            else if (!yes && node.Multi && node.Selected == 0 && !node.Chosen.empty())
+                node.Selected = node.Chosen.front();
+            node.Multi = yes;
+        }
         else if (key == "label") node.Label = text;
         else if (key == "hint") node.Hint = text;
         else if (key == "multiline") node.Multiline = yes;
@@ -2503,6 +2682,25 @@ namespace Manifold::Lua
                 node.Number = numeric ? number : 0.0;
                 break;
             case UiKind::Combo:
+                if (node.Multi)
+                {
+                    // "1, 3": the chosen items' numbers
+                    node.Chosen.clear();
+                    std::string_view list = value;
+                    while (!list.empty())
+                    {
+                        const std::size_t comma = list.find(',');
+                        double item = 0.0;
+                        if (ParseNumber(list.substr(0, comma), item) && item >= 1.0)
+                            node.Chosen.push_back(static_cast<int>(item));
+                        list = comma == std::string_view::npos ? std::string_view() : list.substr(comma + 1);
+                    }
+                    std::sort(node.Chosen.begin(), node.Chosen.end());
+                    node.Chosen.erase(std::unique(node.Chosen.begin(), node.Chosen.end()), node.Chosen.end());
+                    break;
+                }
+                node.Selected = numeric ? std::max(0, static_cast<int>(number)) : 0;
+                break;
             case UiKind::Radio:
             case UiKind::Table:
                 node.Selected = numeric ? std::max(0, static_cast<int>(number)) : 0;
@@ -2522,6 +2720,8 @@ namespace Manifold::Lua
     {
         if (node.Kind == UiKind::Window && key == "title")
             return false;
+        if (node.Kind == UiKind::Combo && node.Multi && key == "value")
+            return node.Chosen.empty();
         return FormPropValue(node, key) == FormPropValue(Defaults(node.Kind), key);
     }
 
@@ -2536,6 +2736,8 @@ namespace Manifold::Lua
         if (!prop)
             return "nil";
         const std::string value = FormPropValue(node, key);
+        if (node.Kind == UiKind::Combo && node.Multi && key == "value")
+            return "{ " + value + " }";
         switch (prop->Type)
         {
         case T::Bool:
@@ -2630,6 +2832,27 @@ namespace Manifold::Lua
                 if (!known)
                     problems.push_back({ id, kind + ": opens \"" + meta->Opens + "\", but the form has no modal of that name" });
             }
+            if (const FormMeta* meta = MetaOf(form, id); meta && !meta->EnabledWhen.empty())
+            {
+                const std::optional<FormRule> rule = FormParseWhen(meta->EnabledWhen);
+                const UiNode* source = rule ? form.Model.Find(FormFindNamed(form, rule->Source)) : nullptr;
+                if (!rule)
+                    problems.push_back({ id, kind + ": Enabled When \"" + meta->EnabledWhen + "\" cannot be read" });
+                else if (!source)
+                    problems.push_back({ id, kind + ": Enabled When names \"" + rule->Source + "\", but no widget has that name" });
+                else if (source->Kind != UiKind::Checkbox && source->Kind != UiKind::Combo && source->Kind != UiKind::Radio)
+                    problems.push_back({ id, kind + ": Enabled When names \"" + rule->Source + "\", which is no checkbox, combo or radio" });
+                else if (!rule->Values.empty() && source->Kind == UiKind::Checkbox)
+                    problems.push_back({ id, kind + ": Enabled When: \"" + rule->Source + "\" is a checkbox, which is on or off" });
+                else
+                {
+                    for (const std::string& value : rule->Values)
+                    {
+                        if (std::find(source->Items.begin(), source->Items.end(), value) == source->Items.end())
+                            problems.push_back({ id, kind + ": Enabled When: \"" + rule->Source + "\" has no item \"" + value + "\"" });
+                    }
+                }
+            }
             for (const int child : node->Children)
                 visit(child);
         };
@@ -2640,6 +2863,122 @@ namespace Manifold::Lua
             visit(window);
         }
         return problems;
+    }
+
+    std::optional<FormRule> FormParseWhen(std::string_view text)
+    {
+        // the same reading as formWhen in Manifold.lua
+        std::string rest = Trim(text);
+        FormRule rule;
+        if (rest.size() > 4 && rest.compare(0, 3, "not") == 0 && (rest[3] == ' ' || rest[3] == '\t'))
+        {
+            rule.Negate = true;
+            rest = Trim(std::string_view(rest).substr(4));
+        }
+        std::size_t end = 0;
+        while (end < rest.size() && (std::isalnum(static_cast<unsigned char>(rest[end])) || rest[end] == '_'))
+            ++end;
+        rule.Source = rest.substr(0, end);
+        if (!FormIsIdentifier(rule.Source))
+            return std::nullopt;
+        rest = Trim(std::string_view(rest).substr(end));
+        if (rest.empty())
+            return rule;
+        if (rest.front() != '=' || rule.Negate)
+            return std::nullopt;
+        std::string_view list = std::string_view(rest).substr(1);
+        while (!list.empty())
+        {
+            const std::size_t comma = list.find(',');
+            const std::string item = Trim(list.substr(0, comma));
+            if (!item.empty())
+                rule.Values.push_back(item);
+            list = comma == std::string_view::npos ? std::string_view() : list.substr(comma + 1);
+        }
+        if (rule.Values.empty())
+            return std::nullopt;
+        return rule;
+    }
+
+    std::string FormWhenText(const FormRule& rule)
+    {
+        if (rule.Source.empty())
+            return {};
+        std::string text = (rule.Negate ? "not " : "") + rule.Source;
+        for (std::size_t i = 0; i < rule.Values.size(); ++i)
+            text += (i ? ", " : " = ") + rule.Values[i];
+        return text;
+    }
+
+    int FormFindNamed(const FormDocument& form, std::string_view name)
+    {
+        for (const auto& [id, meta] : form.Meta)
+        {
+            if (meta.Name == name && form.Model.Find(id))
+                return id;
+        }
+        return 0;
+    }
+
+    bool FormRuleHolds(const FormDocument& form, const FormRule& rule)
+    {
+        const UiNode* source = form.Model.Find(FormFindNamed(form, rule.Source));
+        if (!source)
+            return true;
+        std::vector<int> chosen;
+        if (source->Kind == UiKind::Combo && source->Multi)
+            chosen = source->Chosen;
+        else if ((source->Kind == UiKind::Combo || source->Kind == UiKind::Radio) && source->Selected > 0)
+            chosen = { source->Selected };
+        bool on = false;
+        if (source->Kind == UiKind::Checkbox)
+            on = source->Bool;
+        else if (rule.Values.empty())
+            on = !chosen.empty();
+        else
+        {
+            for (const int item : chosen)
+            {
+                if (item >= 1 && item <= static_cast<int>(source->Items.size()) &&
+                    std::find(rule.Values.begin(), rule.Values.end(), source->Items[static_cast<std::size_t>(item - 1)]) != rule.Values.end())
+                    on = true;
+            }
+        }
+        return rule.Negate ? !on : on;
+    }
+
+    void FormApplyRules(FormDocument& form)
+    {
+        for (const auto& [id, meta] : form.Meta)
+        {
+            if (meta.EnabledWhen.empty())
+                continue;
+            UiNode* target = form.Model.Find(id);
+            const std::optional<FormRule> rule = FormParseWhen(meta.EnabledWhen);
+            if (!target || !rule)
+                continue;
+            const bool enabled = FormRuleHolds(form, *rule);
+            if (target->Enabled != enabled)
+            {
+                target->Enabled = enabled;
+                ++target->Revision;
+            }
+        }
+    }
+
+    void FormRenameReferences(FormDocument& form, const std::string& from, const std::string& to)
+    {
+        if (from.empty() || from == to || !FormIsIdentifier(to))
+            return;
+        for (auto& [id, meta] : form.Meta)
+        {
+            std::optional<FormRule> rule = meta.EnabledWhen.empty() ? std::nullopt : FormParseWhen(meta.EnabledWhen);
+            if (rule && rule->Source == from)
+            {
+                rule->Source = to;
+                meta.EnabledWhen = FormWhenText(*rule);
+            }
+        }
     }
 
     std::string FormSave(const FormDocument& form)

@@ -778,7 +778,28 @@ namespace Manifold::UI
         case UiKind::Checkbox:
         {
             bool value = node.Bool;
-            if (ImGui::Checkbox(label.c_str(), &value))
+            bool flipped = false;
+            if (node.Style == "switch")
+            {
+                // a switch with its label beside it; a click on the label flips it too
+                flipped = ToggleSwitch("##switch", &value);
+                const std::size_t hidden = label.find("##");
+                const std::string shown = hidden == std::string::npos ? label : label.substr(0, hidden);
+                if (!shown.empty())
+                {
+                    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextUnformatted(shown.c_str());
+                    if (ImGui::IsItemClicked())
+                    {
+                        value = !value;
+                        flipped = true;
+                    }
+                }
+            }
+            else
+                flipped = ImGui::Checkbox(label.c_str(), &value);
+            if (flipped)
             {
                 node.Bool = value;
                 Model().Touch(node);
@@ -887,6 +908,45 @@ namespace Manifold::UI
         }
         case UiKind::Combo:
         {
+            if (node.Multi)
+            {
+                // ∑ several choices: a box per item, the list stays open while
+                // ticking; the preview names the chosen ones
+                std::string preview;
+                for (const int item : node.Chosen)
+                {
+                    if (item >= 1 && item <= static_cast<int>(node.Items.size()))
+                        preview += (preview.empty() ? "" : ", ") + node.Items[static_cast<std::size_t>(item - 1)];
+                }
+                if (ImGui::BeginCombo(label.c_str(), preview.empty() ? "None" : preview.c_str()))
+                {
+                    for (int i = 0; i < static_cast<int>(node.Items.size()); ++i)
+                    {
+                        ImGui::PushID(i);
+                        bool on = std::find(node.Chosen.begin(), node.Chosen.end(), i + 1) != node.Chosen.end();
+                        if (ImGui::Checkbox(node.Items[static_cast<std::size_t>(i)].c_str(), &on))
+                        {
+                            if (on)
+                                node.Chosen.push_back(i + 1);
+                            else
+                                std::erase(node.Chosen, i + 1);
+                            std::sort(node.Chosen.begin(), node.Chosen.end());
+                            Model().Touch(node);
+                            if (node.Handlers & H::Change)
+                            {
+                                // the list travels as text; the Lua side turns it into a table
+                                std::string list;
+                                for (const int item : node.Chosen)
+                                    list += (list.empty() ? "" : ",") + std::to_string(item);
+                                Post(node.Id, "change", { list });
+                            }
+                        }
+                        ImGui::PopID();
+                    }
+                    ImGui::EndCombo();
+                }
+                break;
+            }
             const char* preview = node.Selected > 0 && node.Selected <= static_cast<int>(node.Items.size()) ? node.Items[static_cast<std::size_t>(node.Selected - 1)].c_str() : "";
             if (ImGui::BeginCombo(label.c_str(), preview))
             {

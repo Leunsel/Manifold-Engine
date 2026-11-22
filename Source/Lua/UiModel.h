@@ -125,6 +125,8 @@ namespace Manifold::Lua
         bool Multiline = false;
         bool Password = false;
         int Selected = 0;
+        bool Multi = false;        // combo: several items can be chosen (Chosen, not Selected)
+        std::vector<int> Chosen;   // combo with Multi: the chosen items' numbers, ascending
         std::vector<std::string> Items;
         std::vector<UiColumn> Columns;
         std::vector<std::vector<std::string>> Rows;

@@ -48,6 +48,15 @@ namespace Manifold::Lua
         std::map<std::string, std::string> Handlers;
         std::string Opens;
         bool Closes = false;
+        std::string EnabledWhen; // "god", "not god" or "mode = Multiplier, Double" (see FormParseWhen)
+    };
+
+    // enabledWhen: the widget is enabled while another one says so.
+    struct FormRule
+    {
+        std::string Source;
+        bool Negate = false;
+        std::vector<std::string> Values; // empty: the source is on / has a choice
     };
 
     struct FormNode
@@ -141,7 +150,7 @@ namespace Manifold::Lua
     bool FormMove(FormDocument& form, int node, int parent, int index);
     bool FormRemove(FormDocument& form, int node);
     int FormDuplicate(FormDocument& form, int node);
-    int FormGraft(FormDocument& form, const FormDocument& from, int node, int parent, int index);
+    int FormGraft(FormDocument& form, const FormDocument& from, int node, int parent, int index, std::map<std::string, std::string>* renames = nullptr);
     std::string FormFragment(const FormDocument& form, const std::vector<int>& nodes);
     std::vector<int> FormPaste(FormDocument& form, std::string_view text, int parent, int index, std::string& error);
     std::span<const FormTemplate> FormTemplates();
@@ -168,6 +177,13 @@ namespace Manifold::Lua
     std::string FormPropLiteral(const UiNode& node, std::string_view key);
 
     std::vector<FormProblem> FormProblems(const FormDocument& form);
+
+    std::optional<FormRule> FormParseWhen(std::string_view text);
+    std::string FormWhenText(const FormRule& rule);
+    int FormFindNamed(const FormDocument& form, std::string_view name);
+    bool FormRuleHolds(const FormDocument& form, const FormRule& rule);
+    void FormApplyRules(FormDocument& form);
+    void FormRenameReferences(FormDocument& form, const std::string& from, const std::string& to);
 
     std::string FormSave(const FormDocument& form);
     bool FormLoad(std::string_view text, FormDocument& form, std::string& error, std::vector<std::string>* warnings = nullptr);
