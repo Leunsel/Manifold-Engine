@@ -1127,6 +1127,19 @@ namespace Manifold::Asm
                 }
             }
             request.operand_count = static_cast<ZyanU8>(slot);
+            // ∑ "push word 1234" has no other operand that sets the size, so the size word is the
+            //   only thing that says 66 68 (2 bytes on the stack) instead of a full-width push.
+            if (operands.size() == 1 && operands.front().Kind == OperandKind::Immediate && operands.front().SizeWritten)
+            {
+                switch (operands.front().Size)
+                {
+                case 1: request.operand_size_hint = ZYDIS_OPERAND_SIZE_HINT_8; break;
+                case 2: request.operand_size_hint = ZYDIS_OPERAND_SIZE_HINT_16; break;
+                case 4: request.operand_size_hint = ZYDIS_OPERAND_SIZE_HINT_32; break;
+                case 8: request.operand_size_hint = ZYDIS_OPERAND_SIZE_HINT_64; break;
+                default: return std::nullopt;
+                }
+            }
             if (memory.AddressSize32)
             {
                 request.address_size_hint = ZYDIS_ADDRESS_SIZE_HINT_32;
@@ -1640,10 +1653,14 @@ namespace Manifold::Asm
             return encoded;
         }
 
-        std::uint64_t WrappedTarget32(std::uint64_t target, std::uint64_t address)
+        // ∑ EIP wraps at 4 GB, so in 32-bit code every target is in reach of a rel32 branch. The
+        //   displacement counts from the end of the instruction, so the wrap is taken from there
+        //   (5 bytes for jmp/call, 6 for jcc); from the start, targets about 2 GB away were refused.
+        std::uint64_t WrappedTarget32(std::uint64_t target, std::uint64_t address, ZydisMnemonic mnemonic)
         {
-            const auto distance = static_cast<std::uint32_t>(target - address);
-            return address + static_cast<std::uint64_t>(static_cast<std::int64_t>(static_cast<std::int32_t>(distance)));
+            const std::uint64_t end = address + (mnemonic == ZYDIS_MNEMONIC_JMP || mnemonic == ZYDIS_MNEMONIC_CALL ? 5 : 6);
+            const auto distance = static_cast<std::uint32_t>(target - end);
+            return end + static_cast<std::uint64_t>(static_cast<std::int64_t>(static_cast<std::int32_t>(distance)));
         }
 
         std::vector<std::uint8_t> FarBranch(const Instruction& instruction, std::uint64_t target, const AssembleOptions& options)
@@ -1678,6 +1695,9 @@ namespace Manifold::Asm
             const bool farCapable = CanUseFarForm(mnemonic);
             const bool farAllowed = options.Is64Bit && options.AllowFarBranches && farCapable && instruction.Hint != BranchHint::Near;
             const BranchHint hint = options.LongBranches && instruction.Hint == BranchHint::None && !IsCounterBranch(mnemonic) ? BranchHint::Near : instruction.Hint;
+            // ∑ The far stub only stands in for a target that is out of reach. A line that cannot be
+            //   encoded at all (lock jmp, rep call) must fail instead of losing its prefix in a stub.
+            const bool encodable = EncodeRelative(mnemonic, instruction.Prefixes, hint, options.Address, options).has_value();
             if (instruction.Hint == BranchHint::Far)
             {
                 if (!options.Is64Bit || !farCapable)
@@ -1693,7 +1713,7 @@ namespace Manifold::Asm
                 {
                     destination = options.Address;
                 }
-                else if (farAllowed)
+                else if (farAllowed && encodable)
                 {
                     return FarBranch(instruction, 0, options);
                 }
@@ -1708,13 +1728,13 @@ namespace Manifold::Asm
                 {
                     Fail(AsmError::OutOfRange, "Target " + Hex(destination) + " is outside 32-bit memory.");
                 }
-                destination = WrappedTarget32(destination, options.Address);
+                destination = WrappedTarget32(destination, options.Address, mnemonic);
             }
             if (const std::optional<Encoded> encoded = EncodeRelative(mnemonic, instruction.Prefixes, hint, destination, options))
             {
                 return ToVector(*encoded);
             }
-            if (!target.Pending && instruction.Hint != BranchHint::Short && farAllowed)
+            if (!target.Pending && instruction.Hint != BranchHint::Short && farAllowed && encodable)
             {
                 return FarBranch(instruction, destination, options);
             }
@@ -2519,6 +2539,11 @@ namespace Manifold::Asm
                 }
                 for (const Operand& operand : operands)
                 {
+                    if (operand.Kind == OperandKind::Register && operand.SizeWritten &&
+                        ZydisRegisterGetWidth(Options.Is64Bit ? ZYDIS_MACHINE_MODE_LONG_64 : ZYDIS_MACHINE_MODE_LEGACY_32, operand.Register) != operand.Size * 8u)
+                    {
+                        Fail(AsmError::BadOperand, "The size word on " + Quoted(operand.Text) + " does not match the register.");
+                    }
                     if (operand.Kind != OperandKind::Pointer)
                     {
                         continue;
@@ -2536,12 +2561,20 @@ namespace Manifold::Asm
                         Fail(AsmError::OutOfRange, "The offset of " + Quoted(operand.Text) + " does not fit in 32 bits.");
                     }
                 }
-                const std::vector<SizedEncoding> results = CollectEncodings(instruction, Options);
+                // ∑ fstcw, fstsw, fstenv, fsave and friends are wait (9B) plus the fn form, so the fn
+                //   instruction starts one byte later. A RIP-relative operand counts from its end,
+                //   so it is encoded at that later address, or it would point one byte too far.
+                AssembleOptions placed = Options;
+                if (instruction.Info.WaitFirst)
+                {
+                    placed.Address += 1;
+                }
+                const std::vector<SizedEncoding> results = CollectEncodings(instruction, placed);
                 if (results.empty())
                 {
-                    FailWithDiagnosis(instruction, Options);
+                    FailWithDiagnosis(instruction, placed);
                 }
-                const Encoded chosen = ChooseEncoding(instruction, results, Options);
+                const Encoded chosen = ChooseEncoding(instruction, results, placed);
                 std::vector<std::uint8_t> bytes;
                 if (instruction.Info.WaitFirst)
                 {

@@ -30,6 +30,177 @@ namespace Manifold::Tests
         using namespace Manifold::Templates;
 
         volatile std::uint64_t g_mainModuleProbe[5] = {};
+        volatile std::uint8_t g_macroSource[32] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F };
+        volatile std::uint8_t g_macroTarget[8] = { 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8 };
+
+        std::vector<std::uint8_t> WrittenAt(const Asm::AaResult& result, std::uint64_t address, std::size_t size)
+        {
+            for (const Asm::AaWrite& write : result.Writes)
+            {
+                if (address >= write.Address && address + size <= write.Address + write.Bytes.size())
+                    return std::vector<std::uint8_t>(write.Bytes.begin() + static_cast<std::ptrdiff_t>(address - write.Address),
+                        write.Bytes.begin() + static_cast<std::ptrdiff_t>(address - write.Address + size));
+            }
+            return {};
+        }
+
+        // Each Auto Assembler macro the owner's tables use, run for real in this process, against what
+        // Cheat Engine does (autoassembler.pas line numbers in the messages).
+        void AutoAssemblerMacros(Engine& engine)
+        {
+            const std::string source = Hex(reinterpret_cast<std::uint64_t>(&g_macroSource[0]));
+            const std::string target = Hex(reinterpret_cast<std::uint64_t>(&g_macroTarget[0]));
+            const auto cave = [](const Asm::AaMemory& memory, const char* name) -> std::uint64_t {
+                for (const Asm::AaAllocation& allocation : memory.Allocations)
+                {
+                    if (EqualsNoCase(allocation.Name, name))
+                        return allocation.Address;
+                }
+                return 0;
+            };
+            const auto run = [&](const std::string& script, Asm::AaMemory& memory, bool check = false) {
+                return engine.AutoAssemble(script, Asm::AaSection::Whole, memory, check, "macro-test");
+            };
+            const auto release = [&](Asm::AaMemory& memory) {
+                for (const Asm::AaAllocation& allocation : memory.Allocations)
+                    engine.Process()->Free(allocation.Block);
+                memory.Allocations.clear();
+            };
+
+            {
+                // readmem sizes are decimal (StrToInt, 2455): 14 bytes, not 0x14
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run("alloc(cave,$100)\ncave:\nreadmem(" + source + ",14)\nreadmem(" + source + ",$4)\n", memory);
+                CHECK_MSG(result.Ok(), result.Error.Text);
+                const std::uint64_t at = cave(memory, "cave");
+                const std::vector<std::uint8_t> copied = WrittenAt(result, at, 18);
+                CHECK_EQ(copied.size(), std::size_t(18));
+                if (copied.size() == 18)
+                {
+                    for (std::size_t i = 0; i < 14; ++i)
+                        CHECK_EQ(copied[i], static_cast<std::uint8_t>(i));
+                    CHECK_EQ(copied[14], std::uint8_t(0));
+                    CHECK_EQ(copied[17], std::uint8_t(3));
+                }
+                release(memory);
+            }
+            {
+                // chained and positional defines (2004-2050); a define never changes a quoted string
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run("define(a,10)\ndefine(b,a+4)\ndefine(abc,1234)\nalloc(cave,$100)\ncave:\nmov eax,b\ndb 'abc',0\ndefine(a,20)\nmov eax,a\n", memory);
+                CHECK_MSG(result.Ok(), result.Error.Text);
+                const std::uint64_t at = cave(memory, "cave");
+                CHECK_EQ(HexBytes(WrittenAt(result, at, 14)), std::string("B8 14 00 00 00 61 62 63 00 B8 20 00 00 00"));
+                release(memory);
+            }
+            {
+                // @f/@b take every name: line (800-897), named labels and newmem: included; and a label
+                // used by the code needs no label() (getPotentialLabels, 708-731)
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run("alloc(cave,$100)\ncave:\ndec ecx\njnz @b\nje @f\ninc eax\nskip:\nret\n@@:\nnop\njmp @b\n", memory);
+                CHECK_MSG(result.Ok(), result.Error.Text);
+                const std::uint64_t at = cave(memory, "cave");
+                CHECK_EQ(HexBytes(WrittenAt(result, at, 16)), std::string("FF C9 75 FC 0F 84 02 00 00 00 FF C0 C3 90 EB FD"));
+                release(memory);
+            }
+            {
+                // a bare name: that nothing jumps to and that does not resolve is an unknown symbol on the
+                // real pass, never a label at the current address
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run("alloc(cave,$100)\ncave:\nnop\nNoSuchHook:\ndb 90\n", memory);
+                CHECK(!result.Ok());
+                CHECK(memory.Allocations.empty());
+            }
+            {
+                // an alloc without a near address joins the group of the one before (3359-3445)
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run("alloc(newmem,$100," + target + ")\nalloc(data,8)\nalloc(more,#16)\n", memory);
+                CHECK_MSG(result.Ok(), result.Error.Text);
+                CHECK_EQ(cave(memory, "data"), cave(memory, "newmem") + 0x100);
+                CHECK_EQ(cave(memory, "more"), cave(memory, "newmem") + 0x110);
+                release(memory);
+            }
+            {
+                // dealloc only frees what an earlier run allocated (2718-2758): the code written now
+                // stays in place and readable
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run("alloc(t,$10)\nt:\nret\ndealloc(t)\n", memory);
+                CHECK_MSG(result.Ok(), result.Error.Text);
+                const std::uint64_t at = cave(memory, "t");
+                std::uint8_t byte = 0;
+                CHECK(at != 0 && engine.Process()->ReadExact(at, &byte, 1) && byte == 0xC3);
+                Asm::AaMemory second = memory;
+                const Asm::AaResult freed = run("dealloc(t)\n", second);
+                CHECK_MSG(freed.Ok(), freed.Error.Text);
+                CHECK(second.Allocations.empty());
+                CHECK(!engine.Process()->ReadExact(at, &byte, 1));
+            }
+            {
+                // unregistersymbol runs before registersymbol (4278-4282), so the symbol stays
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run("alloc(macroPtr,8)\nregistersymbol(macroPtr)\nunregistersymbol(macroPtr)\n", memory);
+                CHECK_MSG(result.Ok(), result.Error.Text);
+                CHECK(engine.Symbols().Resolve("macroPtr").has_value());
+                engine.Symbols().Unregister("macroPtr");
+                release(memory);
+            }
+            {
+                // registersymbol of a name the script does not declare fails before anything is written
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run(target + ":\ndb 11\nregistersymbol(nothingHere)\n", memory);
+                CHECK(!result.Ok());
+                CHECK_EQ(g_macroTarget[0], std::uint8_t(0xA1));
+            }
+            {
+                // createthread of an address that does not resolve fails before anything is written
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run(target + ":\ndb 11\ncreatethread(nowhereToRun)\n", memory);
+                CHECK(!result.Ok());
+                CHECK_EQ(g_macroTarget[0], std::uint8_t(0xA1));
+            }
+            {
+                // a failed write puts back what was already written before the allocations are freed
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run("alloc(cave,$100)\ncave:\nret\n" + target + ":\ndb 11 22\n10:\ndb 90\n", memory);
+                CHECK(!result.Ok() && result.Error.Code == ErrorCode::AaWriteFailed);
+                CHECK_EQ(g_macroTarget[0], std::uint8_t(0xA1));
+                CHECK_EQ(g_macroTarget[1], std::uint8_t(0xA2));
+                CHECK(memory.Allocations.empty());
+            }
+            {
+                // align N [fill] (Assemblerunit.pas 4938), numbers in hex
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run("alloc(cave,$100)\ncave:\nnop\nalign 10 CC\nret\nalign 4\ndb 01\n", memory);
+                CHECK_MSG(result.Ok(), result.Error.Text);
+                const std::uint64_t at = cave(memory, "cave");
+                CHECK_EQ(HexBytes(WrittenAt(result, at, 21)), std::string("90 CC CC CC CC CC CC CC CC CC CC CC CC CC CC CC C3 00 00 00 01"));
+                release(memory);
+            }
+            {
+                // directives that change what the code means are refused, not dropped like comments
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run("alloc(cave,$100)\ncave:\n{$try}\nmov eax,[0]\n{$except}\nret\n", memory);
+                CHECK(!result.Ok() && result.Error.Text.find("{$try}") != std::string::npos);
+                CHECK(memory.Allocations.empty());
+                Asm::AaMemory commented;
+                const Asm::AaResult inComment = run("// {$try}\nalloc(cave,$100)\ncave:\nret\n", commented);
+                CHECK_MSG(inComment.Ok(), inComment.Error.Text);
+                release(commented);
+            }
+            {
+                // {$strict} turns implicit labels off
+                Asm::AaMemory memory;
+                const Asm::AaResult result = run("{$strict}\nalloc(cave,$100)\ncave:\njmp skip\nskip:\nret\n", memory);
+                CHECK(!result.Ok());
+            }
+            {
+                // a [DISABLE] part checked before its [ENABLE] part ran: names it registers are labels
+                Asm::AaMemory memory;
+                const Asm::AaResult result = engine.AutoAssemble("[ENABLE]\n[DISABLE]\nSomeHook:\nreadmem(z_SomeHook,6)\nunregistersymbol(*)\n", Asm::AaSection::Disable, memory, true, "check");
+                CHECK_MSG(result.Ok(), result.Error.Text);
+            }
+        }
 
         void WriteText(const std::filesystem::path& path, const std::string& text)
         {
@@ -484,6 +655,7 @@ namespace Manifold::Tests
             CHECK(!programCheck.Result.Ok() && programCheck.Result.Error.Code == ErrorCode::ExprUnknownSymbol);
             const Asm::AaResult badAssertPattern = engine.AutoAssemble("assert(10,ZZ)\n", true);
             CHECK(!badAssertPattern.Ok() && badAssertPattern.Error.Code == ErrorCode::ScanBadPattern);
+            AutoAssemblerMacros(engine);
             const Asm::AaResult unreadableReal = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreadmem(10,4)\n", false);
             CHECK(!unreadableReal.Ok() && unreadableReal.Error.Code == ErrorCode::AaReadMemFailed && unreadableReal.Line == 3);
             const Asm::AaResult unknownReal = engine.AutoAssemble("alloc(cave,$100)\ncave:\nreadmem(NoSuchSymbol,4)\n", false);
