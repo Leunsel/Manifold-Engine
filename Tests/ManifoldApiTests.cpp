@@ -2656,6 +2656,26 @@ return M
             for (const Lua::FormProblem& problem : Lua::FormProblems(broken))
                 left += problem.Text + "; ";
             CHECK_MSG(left.empty(), left);
+
+            // the script side of the node canvas: functions it defines, lines added to one
+            const std::string script =
+                "local window, w\n"
+                "local handlers = {}\n\n"
+                "function handlers.goldChanged(value, widget)\n"
+                "  print(value)\n"
+                "end\n\n"
+                "function handlers.applyClick(widget) end\n\n"
+                "local function helper()\n"
+                "end\n\n"
+                "window, w = ui.form.build(form, handlers)\n";
+            const std::vector<std::string> functions = Lua::FormScriptFunctions(script);
+            CHECK(functions == std::vector<std::string>({ "goldChanged", "applyClick", "helper" }));
+            const std::optional<std::string> added = Lua::FormAddLine(script, "goldChanged", "w.speed.update({ enabled = true })");
+            CHECK_MSG(added && added->find("  print(value)\n  w.speed.update({ enabled = true })\nend\n") != std::string::npos, added ? *added : std::string("nothing"));
+            const std::optional<std::string> opened = Lua::FormAddLine(script, "applyClick", "manifold.log.info(\"applyClick was called\")");
+            CHECK_MSG(opened && opened->find("function handlers.applyClick(widget)\n  manifold.log.info(\"applyClick was called\")\nend") != std::string::npos, opened ? *opened : std::string("nothing"));
+            CHECK(!Lua::FormAddLine(script, "missing", "x()"));
+            CHECK(Lua::FormLuaString("a\"b\\c") == "\"a\\\"b\\\\c\"");
         }
 
         void SnakeExample(Engine& engine)

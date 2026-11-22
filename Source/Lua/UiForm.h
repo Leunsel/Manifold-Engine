@@ -186,6 +186,12 @@ namespace Manifold::Lua
     std::optional<FormFunction> FormFindFunction(std::string_view script, std::string_view name);
     std::string FormFunctionBody(std::string_view script, std::string_view name);
     std::optional<std::string> FormReplaceBody(std::string_view script, std::string_view name, std::string_view body);
+    // the functions a script defines (function name(...) and function handlers.name(...)), in order
+    std::vector<std::string> FormScriptFunctions(std::string_view script);
+    // adds a line at the end of a function's body, indented like its body
+    std::optional<std::string> FormAddLine(std::string_view script, std::string_view name, std::string_view line);
+    // a Lua string literal for a text
+    std::string FormLuaString(std::string_view text);
     int FormIndexOf(const FormDocument& form, int node);
     int FormAddModal(FormDocument& form, std::string_view base = "dialog");
     bool FormIsModal(const FormDocument& form, int node);

@@ -2190,6 +2190,65 @@ namespace Manifold::Lua
         return text;
     }
 
+    std::vector<std::string> FormScriptFunctions(std::string_view script)
+    {
+        static const std::regex kDefinition(R"((^|\n)[ \t]*(?:local[ \t]+)?function[ \t]+(?:handlers[ \t]*\.[ \t]*)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\()");
+        std::vector<std::string> names;
+        const std::string text(script);
+        for (auto it = std::sregex_iterator(text.begin(), text.end(), kDefinition); it != std::sregex_iterator(); ++it)
+        {
+            const std::string name = (*it)[2].str();
+            if (std::find(names.begin(), names.end(), name) == names.end())
+                names.push_back(name);
+        }
+        return names;
+    }
+
+    std::optional<std::string> FormAddLine(std::string_view script, std::string_view name, std::string_view line)
+    {
+        const std::optional<FormFunction> found = FormFindFunction(script, name);
+        if (!found || found->End < 3)
+            return std::nullopt;
+        const std::size_t endWord = found->End - 3;
+        const std::size_t lineStart = script.rfind('\n', endWord == 0 ? 0 : endWord - 1);
+        const std::string indent = found->Indent + "  ";
+        // ∑ "end" on a line of its own: the new line goes right above it;
+        // a one-line function ("function f() end") is opened up first
+        const bool own = lineStart != std::string_view::npos && Trim(script.substr(lineStart + 1, endWord - lineStart - 1)).empty() && lineStart >= found->HeaderEnd;
+        if (own)
+        {
+            std::string text(script.substr(0, lineStart + 1));
+            text += indent;
+            text += line;
+            text += "\n";
+            text += script.substr(lineStart + 1);
+            return text;
+        }
+        std::string body = Trim(std::string(script.substr(found->BodyBegin, endWord - found->BodyBegin)));
+        std::string lines;
+        if (!body.empty())
+            lines += indent + body + "\n";
+        lines += indent + std::string(line) + "\n";
+        return FormReplaceBody(script, name, lines);
+    }
+
+    std::string FormLuaString(std::string_view text)
+    {
+        std::string out = "\"";
+        for (const char c : text)
+        {
+            if (c == '\\' || c == '"')
+                out += '\\';
+            if (c == '\n')
+            {
+                out += "\\n";
+                continue;
+            }
+            out += c;
+        }
+        return out + "\"";
+    }
+
     int FormFunctionLine(std::string_view script, std::string_view name)
     {
         const std::optional<FormFunction> found = FormFindFunction(script, name);

@@ -2274,6 +2274,11 @@ namespace Manifold::UI
             }
             if (ImGui::IsWindowHovered() && io.MouseWheelH != 0.0f)
                 m_pan.x += io.MouseWheelH * Px(60.0f);
+            if (!m_trying && ImGui::IsItemHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right) && ImGui::GetMouseDragDelta(ImGuiMouseButton_Right).x == 0.0f)
+            {
+                m_wireDrop = ImVec2((io.MousePos.x - areaMin.x - m_pan.x) / Px(1.0f), (io.MousePos.y - areaMin.y - m_pan.y) / Px(1.0f));
+                ImGui::OpenPopup("##surfacemenu");
+            }
         }
         const ImVec2 origin(areaMin.x + m_pan.x, areaMin.y + m_pan.y);
         {
@@ -2308,7 +2313,10 @@ namespace Manifold::UI
         else
         {
             JumpLinks(areaMin, areaMax);
+            RecordPills(areaMin, areaMax);
             FunctionChips(origin, areaMin, areaMax);
+            Wires(origin, areaMin, areaMax);
+            SurfaceMenus(origin);
         }
         if (ImGui::BeginPopup("##previewmenu"))
         {
@@ -3322,34 +3330,64 @@ namespace Manifold::UI
             float leader = 0.0f; // the frame edge a tag in the margin points at
             if (!box)
             {
-                const float y = std::clamp(selMin.y, min.y, std::max(min.y, max.y - size.y));
+                // ∑ in the margin the tag keeps off record pills, function
+                // chips and the wire port too, moving up or down a line or two
                 const float margin = Px(12.0f);
-                const ImRect left(ImVec2(min.x - margin - size.x, y), ImVec2(min.x - margin, y + size.y));
-                const ImRect right(ImVec2(max.x + margin, y), ImVec2(max.x + margin + size.x, y + size.y));
                 const auto free = [&](const ImRect& candidate) {
-                    if (candidate.Min.x < surface.Min.x + gap || candidate.Max.x > surface.Max.x - gap)
+                    if (candidate.Min.x < surface.Min.x + gap || candidate.Max.x > surface.Max.x - gap || candidate.Min.y < surface.Min.y || candidate.Max.y > surface.Max.y)
                         return false;
-                    for (const ImRect& other : placed)
+                    std::vector<ImRect> obstacles(placed.begin(), placed.end());
+                    for (const auto& [a, b] : m_pillRects)
+                        obstacles.emplace_back(a, b);
+                    for (const auto& [name, chip] : m_chipRects)
+                        obstacles.emplace_back(ImVec2(chip.first.x - gap, chip.first.y - gap), ImVec2(chip.second.x + gap, chip.second.y + gap));
+                    obstacles.emplace_back(m_portRect.first, m_portRect.second);
+                    for (const ImRect& other : obstacles)
                     {
                         if (other.Overlaps(candidate))
                             return false;
                     }
                     return true;
                 };
-                if (free(left))
+                for (const float shift : { 0.0f, -1.0f, 1.0f, -2.0f, 2.0f })
                 {
-                    box = left;
-                    leader = min.x;
+                    const float y = std::clamp(selMin.y + shift * (size.y + gap * 2.0f), min.y, std::max(min.y, max.y - size.y));
+                    const ImRect left(ImVec2(min.x - margin - size.x, y), ImVec2(min.x - margin, y + size.y));
+                    const ImRect right(ImVec2(max.x + margin + Px(20.0f), y), ImVec2(max.x + margin + Px(20.0f) + size.x, y + size.y));
+                    if (free(left))
+                    {
+                        box = left;
+                        leader = min.x;
+                    }
+                    else if (free(right))
+                    {
+                        box = right;
+                        leader = max.x;
+                    }
+                    if (box)
+                        break;
                 }
-                else if (free(right))
+                // still nothing: above or below the form's frame, where the surface is empty
+                if (const auto frame = m_frames.find(window); !box && frame != m_frames.end())
                 {
-                    box = right;
-                    leader = max.x;
+                    const float x = std::clamp(selMin.x, surface.Min.x + gap, std::max(surface.Min.x + gap, surface.Max.x - gap - size.x));
+                    for (const float y : { frame->second.Min.y - size.y - gap * 3.0f, frame->second.Max.y + gap * 3.0f })
+                    {
+                        const ImRect candidate(ImVec2(x, y), ImVec2(x + size.x, y + size.y));
+                        if (free(candidate))
+                        {
+                            box = candidate;
+                            break;
+                        }
+                    }
                 }
             }
             float alpha = 1.0f;
             if (!box)
             {
+                // the selected widget is named in the path above the preview and in the properties
+                if (tag.Node == m_selected)
+                    continue;
                 const ImVec2 at(leftX, selMin.y - size.y - gap >= min.y ? selMin.y - size.y - gap : selMin.y + gap);
                 box = ImRect(at, ImVec2(at.x + size.x, at.y + size.y));
                 alpha = 0.6f;
@@ -4981,6 +5019,7 @@ namespace Manifold::UI
 
     void FormEditorWindow::FunctionChips(ImVec2 origin, ImVec2 areaMin, ImVec2 areaMax)
     {
+        m_chipRects.clear();
         const std::vector<std::pair<std::string, std::string>> functions = Lua::FormHandlerList(m_form);
         if (functions.empty())
             return;
@@ -5051,10 +5090,18 @@ namespace Manifold::UI
             }
             if (ImGui::IsItemDeactivated() && !m_chipDragged)
                 ShowFunction(name);
+            const bool chipMenu = over && ImGui::IsMouseReleased(ImGuiMouseButton_Right);
+            if (chipMenu)
+            {
+                m_chipMenu = name;
+                m_chipRename = name;
+            }
             if (over && !ImGui::IsItemActive())
-                ImGui::SetTooltip("%s", present ? "Click to show the function in the script below; drag to move the chip."
-                                                : linked ? "Not in the script yet: click to add it." : "Click to create the script that holds the handlers.");
+                ImGui::SetTooltip("%s", present ? "Click to show the function in the script below; drag to move the chip; right-click for actions, renaming and unlinking."
+                                                : linked ? "Not in the script yet: click to add it; right-click for more." : "Click to create the script that holds the handlers.");
             ImGui::PopID();
+            if (chipMenu)
+                ImGui::OpenPopup("##chipmenu"); // outside the chip's id scope, where SurfaceMenus looks for it
             const bool active = name == m_activeChip;
             const ImVec4 family = ManifoldTheme::CodeKeyword;
             draw->AddRectFilled(ImVec2(min.x + 2.0f, min.y + 3.0f), ImVec2(max.x + 2.0f, max.y + 3.0f), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Shadow, 0.25f)), height * 0.5f);
@@ -5072,6 +5119,7 @@ namespace Manifold::UI
                 draw->AddText(ImVec2(max.x - Px(12.0f) - ImGui::CalcTextSize(ICON_FA_PLUS).x, textY), ImGui::GetColorU32(ManifoldTheme::Muted), ICON_FA_PLUS);
         }
         m_hoveredChip = hovered;
+        m_chipRects = rects;
 
         // ∑ Links never cross the form: each widget gets a port on the form's
         // edge at its own height (on the side its chip is on), and only the
@@ -5079,6 +5127,31 @@ namespace Manifold::UI
         // adds a faint dashed guide from the widget to its port.
         draw->ChannelsSetCurrent(0);
         ImDrawList* links = draw;
+        // ∑ a link under the mouse lights up: a click shows the function, a
+        // right click offers to unlink it (only on the bare surface, not
+        // through a form or a chip)
+        const bool surfaceHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && hovered.empty() && !ImGui::IsMouseDown(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload();
+        bool linkTaken = false;
+        const auto nearCurve = [&](ImVec2 p0, ImVec2 p1, ImVec2 p2, ImVec2 p3) {
+            const ImVec2 mouse = io.MousePos;
+            ImVec2 last = p0;
+            for (int i = 1; i <= 24; ++i)
+            {
+                const float t = static_cast<float>(i) / 24.0f;
+                const float u = 1.0f - t;
+                const ImVec2 point(u * u * u * p0.x + 3.0f * u * u * t * p1.x + 3.0f * u * t * t * p2.x + t * t * t * p3.x,
+                                   u * u * u * p0.y + 3.0f * u * u * t * p1.y + 3.0f * u * t * t * p2.y + t * t * t * p3.y);
+                const ImVec2 segment(point.x - last.x, point.y - last.y);
+                const float length = segment.x * segment.x + segment.y * segment.y;
+                const float along = length > 0.0f ? std::clamp(((mouse.x - last.x) * segment.x + (mouse.y - last.y) * segment.y) / length, 0.0f, 1.0f) : 0.0f;
+                const float dx = mouse.x - (last.x + segment.x * along);
+                const float dy = mouse.y - (last.y + segment.y * along);
+                if (dx * dx + dy * dy < Px(5.0f) * Px(5.0f))
+                    return true;
+                last = point;
+            }
+            return false;
+        };
         for (const auto& [id, meta] : m_form.Meta)
         {
             ImDrawList* inner = m_frameMarks.count(Lua::FormRootWindow(m_form, id)) ? m_frameMarks[Lua::FormRootWindow(m_form, id)] : nullptr;
@@ -5114,11 +5187,29 @@ namespace Manifold::UI
                 }
                 const ImVec2 port(edge, y);
                 const ImVec2 to(right ? chipMin.x : chipMax.x, (chipMin.y + chipMax.y) * 0.5f);
-                const bool strong = name == hovered || name == m_activeChip || id == m_selected || id == m_hovered;
-                const ImU32 color = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, strong ? 0.95f : 0.35f));
                 const float bend = std::max(Px(30.0f), std::abs(to.x - port.x) * 0.45f);
+                const ImVec2 c1(port.x + bend * out, port.y);
+                const ImVec2 c2(to.x - bend * out, to.y);
+                const bool overLink = surfaceHovered && !linkTaken && nearCurve(port, c1, c2, to);
+                if (overLink)
+                {
+                    linkTaken = true;
+                    const UiNode* source = m_form.Model.Find(id);
+                    const std::string widget = !meta.Name.empty() ? meta.Name : source ? std::string(Lua::FormKindTitle(source->Kind)) : std::string("widget");
+                    ImGui::SetTooltip("%s", (widget + "." + key + " calls " + name + "\nClick to show the function; right-click to unlink it.").c_str());
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                        ShowFunction(name);
+                    if (ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+                    {
+                        m_linkMenu = LinkRef{ id, key, name };
+                        ImGui::OpenPopup("##linkmenu");
+                    }
+                }
+                const bool strong = overLink || name == hovered || name == m_activeChip || id == m_selected || id == m_hovered;
+                const ImU32 color = ImGui::GetColorU32(ManifoldTheme::WithAlpha(overLink ? ManifoldTheme::Text : ManifoldTheme::Accent, strong ? 0.95f : 0.35f));
                 links->PushClipRect(areaMin, areaMax, true);
-                links->AddBezierCubic(port, ImVec2(port.x + bend * out, port.y), ImVec2(to.x - bend * out, to.y), to, color, strong ? Px(2.0f) : Px(1.2f));
+                links->AddBezierCubic(port, c1, c2, to, color, overLink ? Px(3.0f) : strong ? Px(2.0f) : Px(1.2f));
                 links->AddCircleFilled(port, strong ? Px(3.5f) : Px(2.5f), color);
                 links->AddCircleFilled(to, strong ? Px(3.5f) : Px(2.5f), color);
                 links->PopClipRect();
@@ -5146,6 +5237,599 @@ namespace Manifold::UI
                 }
             }
         }
+    }
+
+    // ∑ What a wire from a widget's port connects to under the mouse: a
+    // function chip, a checkbox, combo or radio to follow, a modal form for
+    // a button to open, or empty space (a menu of new and unused functions).
+    FormEditorWindow::WireTarget FormEditorWindow::WireTargetAt(int from, ImVec2 mouse) const
+    {
+        WireTarget target;
+        const UiNode* source = m_form.Model.Find(from);
+        if (!source)
+            return target;
+        const bool handlers = !Lua::FormHandlers(source->Kind).empty();
+        for (const auto& [name, rect] : m_chipRects)
+        {
+            if (mouse.x >= rect.first.x && mouse.y >= rect.first.y && mouse.x < rect.second.x && mouse.y < rect.second.y)
+            {
+                target.Function = name;
+                target.Kind = handlers ? WireKind::Chip : WireKind::None;
+                target.Why = handlers ? "Its handler calls " + name + "." : std::string(Lua::FormKindTitle(source->Kind)) + " has no handlers.";
+                return target;
+            }
+        }
+        const UiDesign::Rect* best = nullptr;
+        for (const UiDesign::Rect& rect : m_design.Rects)
+        {
+            if (mouse.x < rect.Min.x || mouse.y < rect.Min.y || mouse.x >= rect.Max.x || mouse.y >= rect.Max.y)
+                continue;
+            if (!best || rect.Depth > best->Depth)
+                best = &rect;
+        }
+        for (const auto& [window, frame] : m_frames)
+        {
+            if (mouse.x < frame.Min.x || mouse.y < frame.Min.y || mouse.x >= frame.Max.x || mouse.y >= frame.Max.y)
+                continue;
+            const UiNode* over = best ? m_form.Model.Find(best->Node) : nullptr;
+            if (over && over->Id != from && !Within(over->Id, from) && Lua::FormRootWindow(m_form, over->Id) == window && over->Kind != UiKind::Window)
+            {
+                target.Node = over->Id;
+                if (over->Kind == UiKind::Checkbox || over->Kind == UiKind::Combo || over->Kind == UiKind::Radio)
+                {
+                    target.Kind = WireKind::Rule;
+                    target.Why = "Enabled only while this " + Lower(std::string(Lua::FormKindTitle(over->Kind))) + (over->Kind == UiKind::Checkbox ? " is on." : " shows its current item.");
+                }
+                else
+                    target.Why = "A widget can follow a checkbox, combo or radio, not a " + Lower(std::string(Lua::FormKindTitle(over->Kind))) + ".";
+                return target;
+            }
+            if (Lua::FormIsModal(m_form, window) && window != Lua::FormRootWindow(m_form, from))
+            {
+                target.Node = window;
+                target.Kind = source->Kind == UiKind::Button ? WireKind::Opens : WireKind::None;
+                target.Why = source->Kind == UiKind::Button ? "A click opens this modal form." : "Only a button opens a modal form.";
+                return target;
+            }
+            target.Why = "Drop it on a function chip, a checkbox, combo or radio, a modal form or empty space.";
+            return target;
+        }
+        target.Kind = handlers ? WireKind::Space : WireKind::None;
+        target.Why = handlers ? "A new function, or one the script has." : std::string(Lua::FormKindTitle(source->Kind)) + " has no handlers.";
+        return target;
+    }
+
+    void FormEditorWindow::ConnectWire(int from, const WireTarget& target)
+    {
+        UiNode* source = m_form.Model.Find(from);
+        if (!source)
+            return;
+        switch (target.Kind)
+        {
+        case WireKind::Chip:
+        {
+            // the first handler without a function takes it, else the first
+            const std::span<const Lua::FormHandler> handlers = Lua::FormHandlers(source->Kind);
+            std::string key(handlers.front().Key);
+            const auto meta = m_form.Meta.find(from);
+            for (const Lua::FormHandler& handler : handlers)
+            {
+                const auto found = meta == m_form.Meta.end() ? std::map<std::string, std::string>::const_iterator() : meta->second.Handlers.find(std::string(handler.Key));
+                if (meta == m_form.Meta.end() || found == meta->second.Handlers.end() || found->second.empty())
+                {
+                    key = std::string(handler.Key);
+                    break;
+                }
+            }
+            Remember();
+            m_form.Meta[from].Handlers[key] = target.Function;
+            Changed();
+            break;
+        }
+        case WireKind::Rule:
+        {
+            const UiNode* followed = m_form.Model.Find(target.Node);
+            if (!followed)
+                return;
+            Remember();
+            std::string& name = m_form.Meta[target.Node].Name;
+            if (name.empty())
+                name = Lua::FormUniqueName(m_form, Lua::UiKindName(followed->Kind));
+            std::string rule = name;
+            if (followed->Kind != UiKind::Checkbox && !followed->Items.empty())
+                rule += " = " + followed->Items[static_cast<std::size_t>(std::clamp(followed->Selected, 1, static_cast<int>(followed->Items.size())) - 1)];
+            m_form.Meta[from].EnabledWhen = rule;
+            Changed();
+            m_engine.Notify(LogLevel::Info, "Enabled When: " + rule + ". Change the item in the Enabled When group.");
+            break;
+        }
+        case WireKind::Opens:
+            Remember();
+            m_form.Meta[from].Opens = Lua::FormModalName(m_form, target.Node);
+            Changed();
+            break;
+        case WireKind::Space:
+            m_wireNode = from;
+            ImGui::OpenPopup("##wiremenu");
+            break;
+        case WireKind::None:
+            break;
+        }
+    }
+
+    // ∑ The selected widget gets a port beside its form: dragging from it
+    // draws a wire, and letting go connects what lies under the mouse.
+    void FormEditorWindow::Wires(ImVec2 origin, ImVec2 areaMin, ImVec2 areaMax)
+    {
+        const ImGuiIO& io = ImGui::GetIO();
+        m_portRect = {};
+        const UiNode* node = m_form.Model.Find(m_selected);
+        if (!node || node->Kind == UiKind::Window)
+            return;
+        const auto frame = m_frames.find(Lua::FormRootWindow(m_form, m_selected));
+        const UiDesign::Rect* rect = RectOf(m_selected);
+        if (frame == m_frames.end() || !rect)
+            return;
+        const float bodyTop = frame->second.Min.y + frame->second.Title;
+        const float y = std::clamp((rect->Min.y + rect->Max.y) * 0.5f, bodyTop + Px(8.0f), std::max(bodyTop + Px(8.0f), frame->second.Max.y - Px(8.0f)));
+        const float radius = Px(7.0f);
+        const ImVec2 center(frame->second.Max.x + Px(16.0f), y);
+        ImGui::SetCursorScreenPos(ImVec2(center.x - radius, center.y - radius));
+        ImGui::InvisibleButton("##wireport", ImVec2(radius * 2.0f, radius * 2.0f));
+        m_portRect = { ImVec2(frame->second.Max.x, center.y - radius), ImVec2(center.x + radius, center.y + radius) };
+        const bool over = ImGui::IsItemHovered();
+        const bool active = ImGui::IsItemActive();
+        const bool dragged = active && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 2.0f);
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const ImU32 accent = ImGui::GetColorU32(ManifoldTheme::Accent);
+        draw->PushClipRect(areaMin, areaMax, true);
+        DashedLine(draw, ImVec2(frame->second.Max.x + Px(2.0f), y), ImVec2(center.x - radius, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.6f)), 1.0f, Px(3.0f), Px(2.0f));
+        draw->AddCircleFilled(center, radius, ImGui::GetColorU32(over || active ? ManifoldTheme::Accent : ManifoldTheme::Card));
+        draw->AddCircle(center, radius, accent, 0, Px(1.5f));
+        const ImU32 mark = ImGui::GetColorU32(over || active ? ManifoldTheme::Page : ManifoldTheme::Accent);
+        draw->AddLine(ImVec2(center.x - radius * 0.45f, y), ImVec2(center.x + radius * 0.45f, y), mark, Px(1.5f));
+        draw->AddLine(ImVec2(center.x, y - radius * 0.45f), ImVec2(center.x, y + radius * 0.45f), mark, Px(1.5f));
+        draw->PopClipRect();
+        if (over && !active)
+            ImGui::SetTooltip("Drag to connect this widget:\n- onto a function chip: its handler calls it\n- onto a checkbox, combo or radio: it is enabled only while that one says so\n- onto a modal form: this button opens it\n- onto empty space: a new function, or one the script already has");
+        if (over || active)
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        if (dragged)
+        {
+            const WireTarget target = WireTargetAt(m_selected, io.MousePos);
+            // the wire is drawn over the forms while it is dragged, so it can reach into them
+            ImDrawList* top = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
+            top->PushClipRect(areaMin, areaMax, true);
+            const ImU32 color = ImGui::GetColorU32(target.Kind == WireKind::None ? ManifoldTheme::Muted : ManifoldTheme::Accent);
+            const float bend = std::max(Px(30.0f), std::abs(io.MousePos.x - center.x) * 0.45f);
+            top->AddBezierCubic(center, ImVec2(center.x + bend, center.y), ImVec2(io.MousePos.x - bend, io.MousePos.y), io.MousePos, color, Px(2.0f));
+            top->AddCircleFilled(io.MousePos, Px(4.0f), color);
+            if (target.Kind == WireKind::Chip)
+            {
+                const auto chip = m_chipRects.find(target.Function);
+                if (chip != m_chipRects.end())
+                    top->AddRect(chip->second.first, chip->second.second, accent, Px(12.0f), 0, Px(2.0f));
+            }
+            else if (target.Node)
+            {
+                if (const UiDesign::Rect* hit = RectOf(target.Node))
+                    top->AddRect(hit->Min, hit->Max, color, Px(3.0f), 0, Px(2.0f));
+                else if (const auto modal = m_frames.find(target.Node); modal != m_frames.end())
+                    top->AddRect(modal->second.Min, modal->second.Max, color, Px(6.0f), 0, Px(2.0f));
+            }
+            top->PopClipRect();
+            ImGui::SetTooltip("%s", target.Why.c_str());
+        }
+        if (ImGui::IsItemDeactivated() && io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] > Px(4.0f) * Px(4.0f))
+        {
+            const WireTarget target = WireTargetAt(m_selected, io.MousePos);
+            m_wireDrop = ImVec2((io.MousePos.x - origin.x) / Px(1.0f), (io.MousePos.y - origin.y) / Px(1.0f));
+            ConnectWire(m_selected, target);
+        }
+    }
+
+    // ∑ Widgets bound to a memory record show it as a pill left of their
+    // form, at their height, linked to the form's edge; the pill tells
+    // whether the open table has the record.
+    void FormEditorWindow::RecordPills(ImVec2 areaMin, ImVec2 areaMax)
+    {
+        m_pillRects.clear();
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        for (const auto& [window, frame] : m_frames)
+        {
+            struct Pill
+            {
+                int Node;
+                float Y;
+                std::string Text;
+                bool Found;
+                std::string Tip;
+            };
+            std::vector<Pill> pills;
+            for (const auto& [id, meta] : m_form.Meta)
+            {
+                if (meta.Record.empty() || Lua::FormRootWindow(m_form, id) != window)
+                    continue;
+                const UiDesign::Rect* rect = RectOf(id);
+                if (!rect)
+                    continue;
+                Table::MemoryRecord* record = meta.RecordById ? m_engine.Table().FindById(std::atoi(meta.Record.c_str())) : m_engine.Table().FindByDescription(meta.Record);
+                const int twins = meta.RecordById || !record ? 0 : m_engine.Table().CountByDescription(meta.Record);
+                const bool found = record && twins <= 1;
+                std::string tip = std::string("Bound to ") + (meta.RecordById ? "record #" + meta.Record : "\"" + meta.Record + "\"") + "\n";
+                if (twins > 1)
+                    tip += std::to_string(twins) + " records have this description: the widget stays disabled until it names one.";
+                else if (record)
+                    tip += std::string(record->Kind == Table::RecordKind::Script ? "A script" : record->Kind == Table::RecordKind::Group ? "A group" : "A value") + " of the open table" +
+                           (record->Kind == Table::RecordKind::Value && !record->ValueText.empty() ? ", now " + record->ValueText : std::string()) + ".";
+                else
+                    tip += m_engine.Table().Count() == 0 ? "No table is open; it is looked up when the form runs." : "Not in the open table: the widget stays disabled until it is.";
+                tip += "\nClick to select the widget; right-click to unbind it.";
+                pills.push_back({ id, (rect->Min.y + rect->Max.y) * 0.5f, std::string(ICON_FA_LINK "  ") + (meta.RecordById ? "#" + meta.Record : meta.Record), found, tip });
+            }
+            std::sort(pills.begin(), pills.end(), [](const Pill& a, const Pill& b) { return a.Y < b.Y; });
+            const float height = ImGui::GetTextLineHeight() + Px(6.0f);
+            const float bodyTop = frame.Min.y + frame.Title;
+            float lowest = -FLT_MAX;
+            // a pill that does not fit left of the form shows only its icon (the tooltip has the rest)
+            const float room = frame.Min.x - Px(18.0f) - areaMin.x - Px(4.0f);
+            for (const Pill& pill : pills)
+            {
+                float width = std::min(ImGui::CalcTextSize(pill.Text.c_str()).x + Px(16.0f), Px(220.0f));
+                const bool compact = width > room;
+                if (compact)
+                    width = ImGui::CalcTextSize(ICON_FA_LINK).x + Px(14.0f);
+                const float y = std::clamp(pill.Y, bodyTop + height * 0.5f, std::max(bodyTop + height * 0.5f, frame.Max.y - height * 0.5f));
+                const float top = std::max(y - height * 0.5f, lowest + Px(4.0f));
+                const ImVec2 min(frame.Min.x - Px(18.0f) - width, top);
+                const ImVec2 max(min.x + width, top + height);
+                lowest = max.y;
+                m_pillRects.push_back({ min, max });
+                ImGui::PushID(pill.Node);
+                ImGui::SetCursorScreenPos(min);
+                ImGui::InvisibleButton("##pill", ImVec2(width, height));
+                const bool over = ImGui::IsItemHovered();
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+                    Select(pill.Node);
+                const bool pillMenu = over && ImGui::IsMouseReleased(ImGuiMouseButton_Right);
+                if (pillMenu)
+                    m_pillMenu = pill.Node;
+                if (over)
+                {
+                    ImGui::SetTooltip("%s", pill.Tip.c_str());
+                    m_hovered = pill.Node;
+                }
+                ImGui::PopID();
+                if (pillMenu)
+                    ImGui::OpenPopup("##pillmenu");
+                const ImVec4 tone = pill.Found ? ManifoldTheme::CodeLabel : ManifoldTheme::Warning;
+                const bool lit = over || pill.Node == m_selected;
+                draw->PushClipRect(areaMin, areaMax, true);
+                const float mid = (min.y + max.y) * 0.5f;
+                draw->AddLine(ImVec2(max.x, mid), ImVec2(frame.Min.x, std::clamp(pill.Y, bodyTop, frame.Max.y)), ImGui::GetColorU32(ManifoldTheme::WithAlpha(tone, lit ? 0.9f : 0.45f)), lit ? Px(1.6f) : 1.0f);
+                draw->AddCircleFilled(ImVec2(frame.Min.x, std::clamp(pill.Y, bodyTop, frame.Max.y)), Px(2.5f), ImGui::GetColorU32(ManifoldTheme::WithAlpha(tone, 0.9f)));
+                draw->AddRectFilled(min, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(tone, lit ? 0.30f : 0.16f)), height * 0.5f);
+                if (pill.Found)
+                    draw->AddRect(min, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(tone, lit ? 0.9f : 0.5f)), height * 0.5f, 0, 1.0f);
+                else
+                    DashedRect(draw, min, max, ImGui::GetColorU32(ManifoldTheme::WithAlpha(tone, 0.8f)), 1.0f, Px(4.0f), Px(3.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, tone);
+                if (compact)
+                    draw->AddText(ImVec2(min.x + Px(7.0f), min.y + Px(3.0f)), ImGui::GetColorU32(tone), ICON_FA_LINK);
+                else
+                    ImGui::RenderTextEllipsis(draw, ImVec2(min.x + Px(8.0f), min.y + Px(3.0f)), ImVec2(max.x - Px(6.0f), max.y), max.x - Px(6.0f), pill.Text.c_str(), nullptr, nullptr);
+                ImGui::PopStyleColor();
+                draw->PopClipRect();
+            }
+        }
+    }
+
+    std::vector<std::string> FormEditorWindow::UnusedFunctions() const
+    {
+        std::vector<std::string> unused;
+        if (!m_form.ScriptLoaded)
+            return unused;
+        const std::vector<std::pair<std::string, std::string>> used = Lua::FormHandlerList(m_form);
+        for (const std::string& name : Lua::FormScriptFunctions(m_form.ScriptText))
+        {
+            if (std::none_of(used.begin(), used.end(), [&](const auto& entry) { return entry.first == name; }))
+                unused.push_back(name);
+        }
+        return unused;
+    }
+
+    void FormEditorWindow::RenameFunction(const std::string& from, const std::string& to)
+    {
+        if (to == from)
+            return;
+        if (!Lua::FormIsIdentifier(to))
+        {
+            m_engine.Notify(LogLevel::Warning, to + " is no Lua function name.");
+            return;
+        }
+        const std::vector<std::pair<std::string, std::string>> used = Lua::FormHandlerList(m_form);
+        if (Lua::FormFunctionLine(m_form.ScriptText, to) > 0 || std::any_of(used.begin(), used.end(), [&](const auto& entry) { return entry.first == to; }))
+        {
+            m_engine.Notify(LogLevel::Warning, to + " is taken already.");
+            return;
+        }
+        Remember();
+        for (auto& [id, meta] : m_form.Meta)
+        {
+            for (auto& [key, function] : meta.Handlers)
+            {
+                if (function == from)
+                    function = to;
+            }
+        }
+        if (m_form.ScriptLoaded)
+            m_form.ScriptText = Lua::FormRenameIdentifier(m_form.ScriptText, from, to);
+        if (const auto place = m_form.Nodes.find(from); place != m_form.Nodes.end())
+        {
+            m_form.Nodes[to] = place->second;
+            m_form.Nodes.erase(from);
+        }
+        if (m_activeChip == from)
+            m_activeChip = to;
+        m_scriptEditor.KeepCursor = true;
+        Changed();
+    }
+
+    void FormEditorWindow::UnlinkFunction(const std::string& name)
+    {
+        Remember();
+        for (auto& [id, meta] : m_form.Meta)
+            std::erase_if(meta.Handlers, [&](const auto& entry) { return entry.second == name; });
+        m_form.Nodes.erase(name);
+        Changed();
+        m_engine.Notify(LogLevel::Info, name + " is no longer called by any widget; the function stays in the script.");
+    }
+
+    void FormEditorWindow::InsertAction(const std::string& function, const std::string& line)
+    {
+        EnsureScript();
+        if (Lua::FormFunctionLine(m_form.ScriptText, function) == 0)
+            AddFunctions(function);
+        const std::optional<std::string> text = Lua::FormAddLine(m_form.ScriptText, function, line);
+        if (!text)
+        {
+            m_engine.Notify(LogLevel::Warning, function + " is not in the script, so nothing was added.");
+            return;
+        }
+        Remember();
+        m_form.ScriptText = *text;
+        ShowFunction(function);
+    }
+
+    // ∑ Ready-made lines for a handler: they use the names the form has
+    // (w.<name>) and the records of the open table, so nothing is typed by hand.
+    void FormEditorWindow::ActionMenu(const std::string& function)
+    {
+        if (ImGui::MenuItem(ICON_FA_TERMINAL "  Write to the Log"))
+            InsertAction(function, "manifold.log.info(" + Lua::FormLuaString(function + " was called") + ")");
+        std::vector<std::pair<std::string, const UiNode*>> named;
+        for (const auto& [id, meta] : m_form.Meta)
+        {
+            if (!meta.Name.empty() && m_form.Model.Find(id) && m_form.Model.Find(id)->Kind != UiKind::Window)
+                named.push_back({ meta.Name, m_form.Model.Find(id) });
+        }
+        std::sort(named.begin(), named.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        if (ImGui::BeginMenu(ICON_FA_TOGGLE_ON "  Enable or Disable a Widget", !named.empty()))
+        {
+            for (const auto& [name, node] : named)
+            {
+                if (ImGui::MenuItem((std::string(KindIcon(node->Kind)) + "  " + name).c_str()))
+                    InsertAction(function, "w." + name + ".update({ enabled = true })");
+            }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu(ICON_FA_PEN "  Set a Widget's Value", !named.empty()))
+        {
+            for (const auto& [name, node] : named)
+            {
+                const char* value = node->Kind == UiKind::Checkbox ? "true" : node->Kind == UiKind::Input || node->Kind == UiKind::Text ? "\"\"" : node->Kind == UiKind::Color ? "\"#FFFFFF\"" : "1";
+                if (ImGui::MenuItem((std::string(KindIcon(node->Kind)) + "  " + name).c_str()))
+                    InsertAction(function, node->Kind == UiKind::Text || node->Kind == UiKind::Heading ? "w." + name + ".update({ text = \"\" })" : "w." + name + ".set(" + value + ")");
+            }
+            ImGui::EndMenu();
+        }
+        const auto recordMenu = [&](const char* label, bool values, const char* call) {
+            if (!ImGui::BeginMenu(label, m_engine.Table().Count() > 0))
+                return;
+            int shown = 0;
+            for (Table::MemoryRecord* record : m_engine.Table().Flatten())
+            {
+                if ((record->Kind == Table::RecordKind::Value) != values)
+                    continue;
+                const bool unique = !record->Description.empty() && m_engine.Table().CountByDescription(record->Description) == 1;
+                const std::string label = (record->Description.empty() ? std::string("(no description)") : record->Description) + (unique ? std::string() : "  #" + std::to_string(record->Id));
+                ImGui::PushID(record->Id);
+                if (ImGui::MenuItem(label.c_str()))
+                    InsertAction(function, "manifold.record.find(" + (unique ? Lua::FormLuaString(record->Description) : std::to_string(record->Id)) + ")." + call);
+                ImGui::PopID();
+                ++shown;
+            }
+            if (shown == 0)
+                Muted(values ? "The open table has no value records." : "The open table has no scripts or groups.");
+            ImGui::EndMenu();
+        };
+        recordMenu(ICON_FA_HASHTAG "  Write a Memory Record", true, "setValue(1)");
+        recordMenu(ICON_FA_CODE "  Switch a Memory Record On", false, "setActive(true)");
+    }
+
+    void FormEditorWindow::ShowEverything()
+    {
+        // ∑ pans so the forms and chips fit, or start at the top left when they are bigger
+        ImVec2 low(FLT_MAX, FLT_MAX);
+        ImVec2 high(-FLT_MAX, -FLT_MAX);
+        const auto take = [&](ImVec2 a, ImVec2 b) {
+            low = ImVec2(std::min(low.x, a.x), std::min(low.y, a.y));
+            high = ImVec2(std::max(high.x, b.x), std::max(high.y, b.y));
+        };
+        for (const auto& [window, frame] : m_frames)
+            take(frame.Min, frame.Max);
+        for (const auto& [name, rect] : m_chipRects)
+            take(rect.first, rect.second);
+        for (const auto& [a, b] : m_pillRects)
+            take(a, b);
+        if (low.x > high.x)
+            return;
+        const ImVec2 size(high.x - low.x, high.y - low.y);
+        const float margin = Px(24.0f);
+        const ImVec2 target(size.x + margin * 2.0f < m_areaSize.x ? (m_areaSize.x - size.x) * 0.5f : margin,
+                            size.y + margin * 2.0f < m_areaSize.y ? (m_areaSize.y - size.y) * 0.5f : margin);
+        const ImVec2 areaMin(m_surfaceMin.x, m_surfaceMin.y);
+        m_pan.x += areaMin.x + target.x - low.x;
+        m_pan.y += areaMin.y + target.y - low.y;
+    }
+
+    void FormEditorWindow::SurfaceMenus(ImVec2 origin)
+    {
+        (void)origin;
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, m_menuSpacing);
+        if (ImGui::BeginPopup("##linkmenu"))
+        {
+            const UiNode* node = m_form.Model.Find(m_linkMenu.Node);
+            const auto meta = m_form.Meta.find(m_linkMenu.Node);
+            const std::string widget = meta != m_form.Meta.end() && !meta->second.Name.empty() ? meta->second.Name : node ? std::string(Lua::FormKindTitle(node->Kind)) : std::string("widget");
+            Muted(widget + "." + m_linkMenu.Key + "  " ICON_FA_LONG_ARROW_ALT_RIGHT "  " + m_linkMenu.Function);
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_CODE "  Show the Function"))
+                ShowFunction(m_linkMenu.Function);
+            if (ImGui::MenuItem(ICON_FA_UNLINK "  Unlink"))
+            {
+                Remember();
+                m_form.Meta[m_linkMenu.Node].Handlers.erase(m_linkMenu.Key);
+                Changed();
+            }
+            ItemTooltip("The widget stops calling the function; the function stays in the script.");
+            ImGui::EndPopup();
+        }
+        if (ImGui::BeginPopup("##chipmenu"))
+        {
+            const std::string name = m_chipMenu;
+            const bool present = m_form.ScriptLoaded && Lua::FormFunctionLine(m_form.ScriptText, name) > 0;
+            if (ImGui::MenuItem(present ? ICON_FA_CODE "  Show the Function" : ICON_FA_PLUS "  Add the Function"))
+                ShowFunction(name);
+            if (ImGui::BeginMenu(ICON_FA_MAGIC "  Insert Action"))
+            {
+                ActionMenu(name);
+                ImGui::EndMenu();
+            }
+            ImGui::Separator();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(ICON_FA_PEN "  Rename");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(Px(180.0f));
+            if (InputTextWithHint("##rename", "function name", m_chipRename, ImGuiInputTextFlags_CharsNoBlank | ImGuiInputTextFlags_EnterReturnsTrue))
+            {
+                RenameFunction(name, m_chipRename);
+                ImGui::CloseCurrentPopup();
+            }
+            ItemTooltip("Enter renames the function in the script and in every widget that calls it.");
+            ImGui::Separator();
+            if (m_form.Nodes.count(name) && ImGui::MenuItem(ICON_FA_UNDO "  Put Back Beside the Form"))
+            {
+                Remember();
+                m_form.Nodes.erase(name);
+                Changed();
+            }
+            if (ImGui::MenuItem(ICON_FA_UNLINK "  Unlink From Every Widget"))
+                UnlinkFunction(name);
+            ItemTooltip("No widget calls it any more; the function stays in the script.");
+            ImGui::EndPopup();
+        }
+        if (ImGui::BeginPopup("##pillmenu"))
+        {
+            if (ImGui::MenuItem(ICON_FA_MOUSE_POINTER "  Select the Widget"))
+                Select(m_pillMenu);
+            if (ImGui::MenuItem(ICON_FA_UNLINK "  Unbind the Record"))
+            {
+                Remember();
+                m_form.Meta[m_pillMenu].Record.clear();
+                m_form.Meta[m_pillMenu].RecordById = false;
+                Changed();
+            }
+            ImGui::EndPopup();
+        }
+        if (ImGui::BeginPopup("##wiremenu"))
+        {
+            UiNode* node = m_form.Model.Find(m_wireNode);
+            if (!node)
+                ImGui::CloseCurrentPopup();
+            else
+            {
+                const std::vector<std::string> unused = UnusedFunctions();
+                const std::vector<std::pair<std::string, std::string>> used = Lua::FormHandlerList(m_form);
+                for (const Lua::FormHandler& handler : Lua::FormHandlers(node->Kind))
+                {
+                    const std::string key(handler.Key);
+                    SectionLabel((key + "  (" + std::string(handler.Params) + ")").c_str());
+                    std::string base = m_form.Meta.count(node->Id) && !m_form.Meta[node->Id].Name.empty() ? m_form.Meta[node->Id].Name : std::string(Lua::UiKindName(node->Kind));
+                    std::string fresh = base + key.substr(2);
+                    for (int n = 2; Lua::FormFunctionLine(m_form.ScriptText, fresh) > 0 || std::any_of(used.begin(), used.end(), [&](const auto& entry) { return entry.first == fresh; }); ++n)
+                        fresh = base + key.substr(2) + std::to_string(n);
+                    ImGui::PushID(key.c_str());
+                    if (ImGui::MenuItem((std::string(ICON_FA_PLUS "  New Function ") + fresh).c_str()))
+                    {
+                        Remember();
+                        m_form.Meta[node->Id].Handlers[key] = fresh;
+                        m_form.Nodes[fresh] = Lua::FormNode{ m_wireDrop.x, m_wireDrop.y, false };
+                        Changed();
+                        ShowFunction(fresh);
+                    }
+                    const auto pick = [&](const std::string& name) {
+                        if (ImGui::MenuItem((std::string(ICON_FA_BOLT "  ") + name).c_str()))
+                        {
+                            Remember();
+                            m_form.Meta[node->Id].Handlers[key] = name;
+                            if (!m_form.Nodes.count(name))
+                                m_form.Nodes[name] = Lua::FormNode{ m_wireDrop.x, m_wireDrop.y, false };
+                            Changed();
+                        }
+                    };
+                    for (const std::string& name : unused)
+                        pick(name);
+                    for (const auto& [name, params] : used)
+                    {
+                        if (params == handler.Params)
+                            pick(name);
+                    }
+                    ImGui::PopID();
+                }
+            }
+            ImGui::EndPopup();
+        }
+        if (ImGui::BeginPopup("##surfacemenu"))
+        {
+            if (ImGui::MenuItem(ICON_FA_EXPAND "  Show Everything"))
+                ShowEverything();
+            if (ImGui::MenuItem(ICON_FA_CROSSHAIRS "  Back to the Form"))
+                m_pan = ImVec2(Px(-m_form.CanvasX + 40.0f), Px(-m_form.CanvasY + 30.0f));
+            if (ImGui::MenuItem(ICON_FA_MAGNET "  Put Function Chips Back", nullptr, false, !m_form.Nodes.empty()))
+            {
+                Remember();
+                m_form.Nodes.clear();
+                Changed();
+            }
+            ItemTooltip("Every chip goes back beside the form that calls it, one below the other.");
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_WINDOW_RESTORE "  Add Modal Form"))
+                AddModal();
+            const std::vector<std::string> unused = UnusedFunctions();
+            if (ImGui::BeginMenu(ICON_FA_BOLT "  Functions No Widget Calls", !unused.empty()))
+            {
+                for (const std::string& name : unused)
+                {
+                    if (ImGui::MenuItem(name.c_str()))
+                        ShowFunction(name);
+                }
+                ImGui::EndMenu();
+            }
+            ItemTooltip(unused.empty() ? "Every function of the script is called by a widget, or the script has none." : "Functions of the script that no widget calls: click one to show it. Drag a wire from a widget's port to give it one.");
+            ImGui::EndPopup();
+        }
+        ImGui::PopStyleVar();
     }
 
     void FormEditorWindow::ImportFile()

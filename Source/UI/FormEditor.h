@@ -111,6 +111,32 @@ namespace Manifold::UI
         void OpenLinked(int line = 0);
         void OpenHandler(Lua::UiNode& node, const Lua::FormHandler& handler);
         void FunctionChips(ImVec2 origin, ImVec2 areaMin, ImVec2 areaMax);
+        enum class WireKind
+        {
+            None,
+            Chip,  // the handler calls this function
+            Rule,  // the widget follows this checkbox, combo or radio (Enabled When)
+            Opens, // the button opens this modal
+            Space, // a new or unused function, picked from a menu
+        };
+        struct WireTarget
+        {
+            WireKind Kind = WireKind::None;
+            int Node = 0;
+            std::string Function;
+            std::string Why; // what a release does, or why it does nothing
+        };
+        WireTarget WireTargetAt(int from, ImVec2 mouse) const;
+        void Wires(ImVec2 origin, ImVec2 areaMin, ImVec2 areaMax);
+        void ConnectWire(int from, const WireTarget& target);
+        void RecordPills(ImVec2 areaMin, ImVec2 areaMax);
+        void SurfaceMenus(ImVec2 origin);
+        void ActionMenu(const std::string& function);
+        void InsertAction(const std::string& function, const std::string& line);
+        void RenameFunction(const std::string& from, const std::string& to);
+        void UnlinkFunction(const std::string& name);
+        std::vector<std::string> UnusedFunctions() const;
+        void ShowEverything();
         void EnsureScript();
         bool SaveScript();
         bool ScriptDirty() const;
@@ -224,6 +250,21 @@ namespace Manifold::UI
         float m_outlineWidth = 0.0f;
         int m_outlineRows = 0;
         ImVec2 m_menuSpacing = ImVec2(8.0f, 4.0f);
+        std::map<std::string, std::pair<ImVec2, ImVec2>> m_chipRects; // this frame's function chips
+        struct LinkRef
+        {
+            int Node = 0;
+            std::string Key;
+            std::string Function;
+        };
+        LinkRef m_linkMenu;           // the link a right click opened its menu for
+        std::string m_chipMenu;       // the chip a right click opened its menu for
+        std::string m_chipRename;     // the rename field in the chip menu
+        int m_pillMenu = 0;           // the widget whose record pill opened its menu
+        int m_wireNode = 0;           // a wire dropped on empty space: from this widget...
+        ImVec2 m_wireDrop;            // ...at this surface point (points)
+        std::vector<std::pair<ImVec2, ImVec2>> m_pillRects; // last frame's record pills (tags keep off them)
+        std::pair<ImVec2, ImVec2> m_portRect;               // last frame's wire port beside the selected widget
         std::string m_outlineFilter;
         bool m_focusOutlineFilter = false;
         bool m_focusName = false;
