@@ -375,12 +375,20 @@ namespace Manifold::Lua
             ReadString(state, props, "position", node.Position);
             ReadString(state, props, "key", node.Key);
             ReadString(state, props, "shortcut", node.Shortcut);
-            if (ReadString(state, props, "hotkey", node.Hotkey))
-            {
-                node.HotkeyKeys = Table::ParseKeysText(node.Hotkey);
-                node.Hotkey = node.HotkeyKeys.empty() ? std::string() : Table::KeysText(node.HotkeyKeys);
-                node.HotkeyDown = true; // a key held while the widget appears does not fire
-            }
+            // a key held while the widget appears does not fire (held = true)
+            const auto readKey = [&](const char* name, std::string& text, std::vector<int>& keys, bool& held) {
+                if (!ReadString(state, props, name, text))
+                    return;
+                keys = Table::ParseKeysText(text);
+                text = keys.empty() ? std::string() : Table::KeysText(keys);
+                held = true;
+            };
+            readKey("hotkey", node.Hotkey, node.HotkeyKeys, node.HotkeyDown);
+            readKey("hotkeyIncrease", node.HotkeyMore, node.HotkeyMoreKeys, node.HotkeyMoreHeld);
+            readKey("hotkeyNext", node.HotkeyMore, node.HotkeyMoreKeys, node.HotkeyMoreHeld);
+            readKey("hotkeyDecrease", node.HotkeyLess, node.HotkeyLessKeys, node.HotkeyLessHeld);
+            readKey("hotkeyPrevious", node.HotkeyLess, node.HotkeyLessKeys, node.HotkeyLessHeld);
+            ReadNumber(state, props, "hotkeyStep", node.HotkeyStep);
             ReadString(state, props, "confirm", node.Confirm);
             ReadFloat(state, props, "minWidth", node.MinWidth);
             ReadFloat(state, props, "minHeight", node.MinHeight);
@@ -695,6 +703,82 @@ namespace Manifold::Lua
                 return 0;
             const std::string text = Table::KeysText(keys);
             lua_pushlstring(state, text.data(), text.size());
+            return 1;
+        }
+
+        // a table's rows as lists of cell texts, and its column titles
+        int UiRows(lua_State* state)
+        {
+            const UiNode* node = Model(state).Find(static_cast<int>(luaL_checkinteger(state, 1)));
+            if (!node)
+                return 0;
+            lua_createtable(state, static_cast<int>(node->Rows.size()), 0);
+            for (std::size_t row = 0; row < node->Rows.size(); ++row)
+            {
+                lua_createtable(state, static_cast<int>(node->Rows[row].size()), 0);
+                for (std::size_t cell = 0; cell < node->Rows[row].size(); ++cell)
+                {
+                    lua_pushlstring(state, node->Rows[row][cell].data(), node->Rows[row][cell].size());
+                    lua_rawseti(state, -2, static_cast<lua_Integer>(cell + 1));
+                }
+                lua_rawseti(state, -2, static_cast<lua_Integer>(row + 1));
+            }
+            lua_createtable(state, static_cast<int>(node->Columns.size()), 0);
+            for (std::size_t column = 0; column < node->Columns.size(); ++column)
+            {
+                lua_pushlstring(state, node->Columns[column].Title.data(), node->Columns[column].Title.size());
+                lua_rawseti(state, -2, static_cast<lua_Integer>(column + 1));
+            }
+            return 2;
+        }
+
+        void PushTreeItems(lua_State* state, const std::vector<UiTreeItem>& items)
+        {
+            lua_createtable(state, static_cast<int>(items.size()), 0);
+            for (std::size_t i = 0; i < items.size(); ++i)
+            {
+                const UiTreeItem& item = items[i];
+                lua_createtable(state, 0, 5);
+                lua_pushlstring(state, item.Id.data(), item.Id.size());
+                lua_setfield(state, -2, "id");
+                lua_pushlstring(state, item.Text.data(), item.Text.size());
+                lua_setfield(state, -2, "text");
+                if (!item.Icon.empty())
+                {
+                    lua_pushlstring(state, item.Icon.data(), item.Icon.size());
+                    lua_setfield(state, -2, "icon");
+                }
+                if (item.Open)
+                {
+                    lua_pushboolean(state, 1);
+                    lua_setfield(state, -2, "open");
+                }
+                if (!item.Children.empty())
+                {
+                    PushTreeItems(state, item.Children);
+                    lua_setfield(state, -2, "children");
+                }
+                lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
+            }
+        }
+
+        // a combo's or radio's items, or a tree's items as { id, text, icon, open, children }
+        int UiItems(lua_State* state)
+        {
+            const UiNode* node = Model(state).Find(static_cast<int>(luaL_checkinteger(state, 1)));
+            if (!node)
+                return 0;
+            if (node->Kind == UiKind::Tree)
+            {
+                PushTreeItems(state, node->Tree);
+                return 1;
+            }
+            lua_createtable(state, static_cast<int>(node->Items.size()), 0);
+            for (std::size_t i = 0; i < node->Items.size(); ++i)
+            {
+                lua_pushlstring(state, node->Items[i].data(), node->Items[i].size());
+                lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
+            }
             return 1;
         }
 
@@ -1045,6 +1129,8 @@ namespace Manifold::Lua
             { "uiDue", &UiDue },
             { "uiBindsDue", &UiBindsDue },
             { "uiHotkeyText", &UiHotkeyText },
+            { "uiRows", &UiRows },
+            { "uiItems", &UiItems },
             { "uiTakeEvents", &UiTakeEvents },
             { "uiPost", &UiPost },
             { "uiForgetOwner", &UiForgetOwner },

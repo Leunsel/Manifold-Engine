@@ -71,7 +71,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 25 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 26 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -2808,6 +2808,121 @@ return M
             CHECK(Lua::FormProblems(form).empty());
         }
 
+        void UiValueKeys(Engine& engine)
+        {
+            using Lua::UiKind;
+            // keys that move a slider or number by a step and choose the next or previous item
+            Lua::UiModel& model = engine.Lua().Ui();
+            LuaCheck(engine, "value keys", R"LUA(
+                local w = manifold.ui.window.create("Value Keys Probe", {})
+                valueChanges = {}
+                local function note(name) return function(value) valueChanges[#valueChanges + 1] = name .. "=" .. tostring(value) end end
+                valueKeys = {
+                  speed = w.add("slider", { label = "Speed", min = 0, max = 2, value = 1.75, hotkeyIncrease = "F6", hotkeyDecrease = "f5", hotkeyStep = 0.5, onChange = note("speed") }).id,
+                  lives = w.add("number", { label = "Lives", integer = true, max = 3, value = 3, hotkeyIncrease = "F7", onChange = note("lives") }).id,
+                  mode = w.add("combo", { label = "Mode", items = { "Off", "Slow", "Fast" }, value = 3, hotkeyNext = "F8", hotkeyPrevious = "F9", onChange = note("mode") }).id,
+                }
+                valueWindow = w
+                local ok, problem = pcall(function() w.add("slider", { label = "x", hotkeyStep = 0 }) end)
+                if ok then return "hotkeyStep 0 was accepted" end
+                ok, problem = pcall(function() w.add("combo", { label = "x", items = { "a" }, hotkeyNext = "Hyper" }) end)
+                if ok then return "hotkeyNext Hyper was accepted" end
+                local text = type(problem) == "table" and problem.message or tostring(problem)
+                if not text:find("hotkeyNext", 1, true) then return "message: " .. text end
+                return "ok")LUA");
+            std::map<std::string, int> ids;
+            {
+                std::string result;
+                engine.Lua().RunWithResult("return ('%d %d %d'):format(valueKeys.speed, valueKeys.lives, valueKeys.mode)", "value key ids", result);
+                std::istringstream read(result);
+                for (const char* name : { "speed", "lives", "mode" })
+                    read >> ids[name];
+            }
+            const Lua::UiNode* speed = model.Find(ids["speed"]);
+            CHECK(speed && speed->HotkeyMore == "F6" && speed->HotkeyLess == "F5" && speed->HotkeyStep == 0.5);
+            std::set<std::vector<int>> held;
+            const auto press = [&](const std::vector<int>& keys, bool& down) {
+                const bool now = held.count(keys) != 0;
+                const bool pressed = now && !down;
+                down = now;
+                return pressed;
+            };
+            const auto tap = [&](std::set<std::vector<int>> keys) {
+                held.clear();
+                model.PollHotkeys(press);
+                held = std::move(keys);
+                model.PollHotkeys(press);
+            };
+            tap({ { VK_F6 }, { VK_F7 }, { VK_F8 } }); // speed 1.75 -> 2 (the top), lives stays 3 (its max), mode 3 -> 1
+            CHECK(speed->Number == 2.0);
+            CHECK(model.Find(ids["lives"])->Number == 3.0);
+            CHECK(model.Find(ids["mode"])->Selected == 1);
+            engine.Lua().Tick(2.0e9); // a tick between presses, as in the program (one tick reports a widget's last change)
+            tap({ { VK_F6 } }); // at the top: nothing
+            tap({ { VK_F5 }, { VK_F9 } }); // speed 2 -> 1.5, mode 1 -> 3
+            CHECK(speed->Number == 1.5);
+            CHECK(model.Find(ids["mode"])->Selected == 3);
+            engine.Lua().Tick(2.0e9 + 1.0);
+            LuaCheck(engine, "value key events", R"LUA(
+                local seen = table.concat(valueChanges, " ")
+                if seen ~= "speed=2 mode=1 speed=1.5 mode=3" then return "changes: " .. seen end
+                valueWindow.remove()
+                return "ok")LUA");
+
+            // a table's rows, one at a time
+            LuaCheck(engine, "table rows", R"LUA(
+                local w = manifold.ui.window.create("Rows Probe", {})
+                local list = w.add("table", { columns = { "Name", "Value" }, rows = { { "a", "1" }, { "b", "2" } } })
+                local rows, columns = list.getRows()
+                if #rows ~= 2 or rows[2][1] ~= "b" or columns[2] ~= "Value" then return "getRows" end
+                if list.getRow() ~= nil then return "getRow without a selection" end
+                list.set(1)
+                local row = list.getRow()
+                if not row or row[1] ~= "a" or row[2] ~= "1" then return "getRow selected" end
+                if list.getRow(2)[2] ~= "2" or list.getRow(9) ~= nil then return "getRow(n)" end
+                list.addRow({ "c", 3 })
+                list.addRow({ "first", true }, 1)
+                list.setRow(2, { "x", "9" })
+                list.removeRow(3)
+                rows = list.getRows()
+                local flat = {}
+                for _, cells in ipairs(rows) do flat[#flat + 1] = table.concat(cells, ":") end
+                if table.concat(flat, " ") ~= "first:true x:9 c:3" then return "edits: " .. table.concat(flat, " ") end
+                local ok = pcall(function() list.removeRow(9) end)
+                if ok then return "removeRow(9) was accepted" end
+                local combo = w.add("combo", { items = { "Off", "On" } })
+                local items = combo.getItems()
+                if #items ~= 2 or items[2] ~= "On" then return "combo getItems" end
+                ok = pcall(function() combo.getRows() end)
+                if ok then return "combo.getRows was accepted" end
+                local tree = w.add("tree", { items = { { id = "root", text = "Root", open = true, children = { { id = "leaf", text = "Leaf" } } } } })
+                local nodes = tree.getItems()
+                if nodes[1].id ~= "root" or not nodes[1].open or nodes[1].children[1].text ~= "Leaf" then return "tree getItems" end
+                w.remove()
+                return "ok")LUA");
+
+            // the editor: the keys are options, a key twice is a problem
+            Lua::FormDocument form = Lua::NewForm("Keys");
+            const int slider = Lua::FormAdd(form, UiKind::Slider, form.Window);
+            const int box = Lua::FormAdd(form, UiKind::Checkbox, form.Window);
+            const int combo = Lua::FormAdd(form, UiKind::Combo, form.Window);
+            Lua::FormSetProp(*form.Model.Find(slider), "hotkeyIncrease", "f2");
+            Lua::FormSetProp(*form.Model.Find(slider), "hotkeyStep", "0.25");
+            Lua::FormSetProp(*form.Model.Find(box), "hotkey", "F2");
+            Lua::FormSetProp(*form.Model.Find(combo), "hotkeyNext", "F3");
+            CHECK(Lua::FormPropValue(*form.Model.Find(slider), "hotkeyIncrease") == "F2" && Lua::FormPropValue(*form.Model.Find(slider), "hotkeyStep") == "0.25");
+            std::vector<Lua::FormProblem> problems = Lua::FormProblems(form);
+            CHECK_MSG(problems.size() == 1 && problems.front().Fix == Lua::FormFix::ClearHotkey, std::to_string(problems.size()));
+            if (!problems.empty())
+            {
+                CHECK(Lua::FormApplyFix(form, problems.front()));
+                CHECK(Lua::FormProblems(form).empty());
+            }
+            const std::string saved = Lua::FormSave(form);
+            CHECK(saved.find("hotkeyNext = \"F3\"") != std::string::npos && saved.find("hotkeyStep = 0.25") != std::string::npos);
+            CHECK_MSG(engine.Lua().Run("local w = manifold.ui.form.build((function() " + saved.substr(saved.find("return {")) + " end)())\nw.remove()\n", "value keys form").Ok(), saved);
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -2963,6 +3078,7 @@ return M
         UiLayoutOptions(engine);
         UiFormEditing();
         UiTrainer(engine);
+        UiValueKeys(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

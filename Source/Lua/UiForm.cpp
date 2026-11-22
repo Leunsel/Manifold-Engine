@@ -144,6 +144,9 @@ namespace Manifold::Lua
             { "format", T::String, "printf format for decimals, like %.2f." },
             { "focus", T::Bool, "The cursor is in this field when the window opens." },
             { "labelPosition", T::Choice, "Where the label goes: left of the field (in the container's label column), above it, or right of it; default follows the container.", "default|left|above|right" },
+            { "hotkeyIncrease", T::Hotkey, "A key that moves it up by Hotkey Step from anywhere, also while the game has the focus; like F6." },
+            { "hotkeyDecrease", T::Hotkey, "A key that moves it down by Hotkey Step from anywhere, also while the game has the focus; like F5." },
+            { "hotkeyStep", T::Number, "How far one press moves it; empty for its step, else 1." },
         };
         constexpr FormProp kSlider[] = {
             { "label", T::String, "Text beside the slider." },
@@ -154,6 +157,9 @@ namespace Manifold::Lua
             { "integer", T::Bool, "Whole numbers only." },
             { "format", T::String, "printf format, like %.1f x." },
             { "labelPosition", T::Choice, "Where the label goes: left of the field (in the container's label column), above it, or right of it; default follows the container.", "default|left|above|right" },
+            { "hotkeyIncrease", T::Hotkey, "A key that moves it up by Hotkey Step from anywhere, also while the game has the focus; like F6." },
+            { "hotkeyDecrease", T::Hotkey, "A key that moves it down by Hotkey Step from anywhere, also while the game has the focus; like F5." },
+            { "hotkeyStep", T::Number, "How far one press moves it; empty for its step, else 1." },
         };
         constexpr FormProp kCombo[] = {
             { "label", T::String, "Text beside the box." },
@@ -162,6 +168,8 @@ namespace Manifold::Lua
             { "value", T::Integer, "The chosen item at the start (its number); none for nothing chosen." },
             { "hint", T::String, "Grey text while nothing is chosen." },
             { "labelPosition", T::Choice, "Where the label goes: left of the field (in the container's label column), above it, or right of it; default follows the container.", "default|left|above|right" },
+            { "hotkeyNext", T::Hotkey, "A key that chooses the next item from anywhere, also while the game has the focus (after the last comes the first)." },
+            { "hotkeyPrevious", T::Hotkey, "A key that chooses the previous item from anywhere, also while the game has the focus." },
         };
         constexpr FormProp kRadio[] = {
             { "label", T::String, "Text beside the group." },
@@ -169,6 +177,8 @@ namespace Manifold::Lua
             { "value", T::Integer, "Number of the chosen item at the start; 0 for none." },
             { "horizontal", T::Bool, "Places the choices in one line." },
             { "labelPosition", T::Choice, "Where the label goes: left of the field (in the container's label column), above it, or right of it; default follows the container.", "default|left|above|right" },
+            { "hotkeyNext", T::Hotkey, "A key that chooses the next item from anywhere, also while the game has the focus (after the last comes the first)." },
+            { "hotkeyPrevious", T::Hotkey, "A key that chooses the previous item from anywhere, also while the game has the focus." },
         };
         constexpr FormProp kColor[] = {
             { "label", T::String, "Text beside the colour." },
@@ -2596,6 +2606,9 @@ namespace Manifold::Lua
         if (key == "scroll") return flag(node.Scroll);
         if (key == "shortcut") return node.Shortcut;
         if (key == "hotkey") return node.Hotkey;
+        if (key == "hotkeyIncrease" || key == "hotkeyNext") return node.HotkeyMore;
+        if (key == "hotkeyDecrease" || key == "hotkeyPrevious") return node.HotkeyLess;
+        if (key == "hotkeyStep") return node.HotkeyStep > 0.0 ? NumberText(node.HotkeyStep) : std::string();
         if (key == "confirm") return node.Confirm;
         if (key == "readOnly") return flag(node.ReadOnly);
         if (key == "maxLength") return std::to_string(node.MaxLength);
@@ -2745,12 +2758,18 @@ namespace Manifold::Lua
         else if (key == "gap") node.Gap = numeric ? std::max(0.0f, real) : -1.0f;
         else if (key == "scroll") node.Scroll = yes;
         else if (key == "shortcut") node.Shortcut = Trim(text);
-        else if (key == "hotkey")
+        else if (key == "hotkey" || key == "hotkeyIncrease" || key == "hotkeyNext" || key == "hotkeyDecrease" || key == "hotkeyPrevious")
         {
             // written the way the program writes keys; text that names no key stays, so the problems list can show it
-            node.HotkeyKeys = Table::ParseKeysText(text);
-            node.Hotkey = node.HotkeyKeys.empty() ? Trim(text) : Table::KeysText(node.HotkeyKeys);
+            const bool more = key == "hotkeyIncrease" || key == "hotkeyNext";
+            const bool less = key == "hotkeyDecrease" || key == "hotkeyPrevious";
+            std::vector<int>& keys = more ? node.HotkeyMoreKeys : less ? node.HotkeyLessKeys : node.HotkeyKeys;
+            std::string& shown = more ? node.HotkeyMore : less ? node.HotkeyLess : node.Hotkey;
+            keys = Table::ParseKeysText(text);
+            shown = keys.empty() ? Trim(text) : Table::KeysText(keys);
         }
+        else if (key == "hotkeyStep")
+            node.HotkeyStep = numeric && real > 0.0f ? static_cast<double>(real) : 0.0;
         else if (key == "confirm") node.Confirm = text;
         else if (key == "readOnly") node.ReadOnly = yes;
         else if (key == "maxLength") node.MaxLength = numeric ? std::clamp(static_cast<int>(number), 0, 1048576) : 0;
@@ -2955,14 +2974,32 @@ namespace Manifold::Lua
                 if (const FormMeta* meta = MetaOf(form, id); meta && !meta->Record.empty())
                     problems.push_back({ id, kind + ": a combo that ticks several items cannot show a memory record; switch Multi off or unbind it", FormFix::MultiOff });
             }
-            if (!node->Hotkey.empty())
             {
-                if (node->HotkeyKeys.empty())
-                    problems.push_back({ id, kind + ": hotkey \"" + node->Hotkey + "\" names no key; write it like F1 or Ctrl+F2, or press it in the Hotkey field", FormFix::ClearHotkey });
-                else if (node->Kind == UiKind::Button && !node->Confirm.empty())
-                    problems.push_back({ id, kind + ": a hotkey cannot answer the confirm question, so it does nothing on this button", FormFix::ClearHotkey });
-                else if (const auto [at, fresh] = hotkeys.emplace(node->Hotkey, id); !fresh)
-                    problems.push_back({ id, kind + ": " + node->Hotkey + " is the hotkey of another widget too; one press would switch both", FormFix::ClearHotkey });
+                // ∑ every key of the widget: a text that names no key, a key that
+                // another widget (or this one) has too, a button that asks first
+                const bool cycles = node->Kind == UiKind::Combo || node->Kind == UiKind::Radio;
+                const struct
+                {
+                    const char* Key;
+                    const std::string* Text;
+                    const std::vector<int>* Keys;
+                } keys[] = {
+                    { "hotkey", &node->Hotkey, &node->HotkeyKeys },
+                    { cycles ? "hotkeyNext" : "hotkeyIncrease", &node->HotkeyMore, &node->HotkeyMoreKeys },
+                    { cycles ? "hotkeyPrevious" : "hotkeyDecrease", &node->HotkeyLess, &node->HotkeyLessKeys },
+                };
+                for (const auto& entry : keys)
+                {
+                    if (entry.Text->empty())
+                        continue;
+                    const std::string field(entry.Key);
+                    if (entry.Keys->empty())
+                        problems.push_back({ id, kind + ": " + field + " \"" + *entry.Text + "\" names no key; write it like F1 or Ctrl+F2, or press it in the field", FormFix::ClearHotkey, field });
+                    else if (node->Kind == UiKind::Button && !node->Confirm.empty())
+                        problems.push_back({ id, kind + ": a hotkey cannot answer the confirm question, so it does nothing on this button", FormFix::ClearHotkey, field });
+                    else if (const auto [at, fresh] = hotkeys.emplace(*entry.Text, id); !fresh)
+                        problems.push_back({ id, kind + ": " + *entry.Text + " is a hotkey of another widget too (or twice of this one); one press would do both", FormFix::ClearHotkey, field });
+                }
             }
             if (node->Kind == UiKind::Window && node->Title.empty())
                 problems.push_back({ id, "Window: has no title", FormFix::Title });
@@ -3233,8 +3270,7 @@ namespace Manifold::Lua
             form.Meta[node->Id].EnabledWhen.clear();
             break;
         case FormFix::ClearHotkey:
-            node->Hotkey.clear();
-            node->HotkeyKeys.clear();
+            FormSetProp(*node, problem.Detail.empty() ? std::string_view("hotkey") : std::string_view(problem.Detail), "");
             break;
         case FormFix::ModalName:
         {

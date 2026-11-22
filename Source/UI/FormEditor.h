@@ -278,7 +278,8 @@ namespace Manifold::UI
         std::string m_chipMenu;       // the chip a right click opened its menu for
         std::string m_chipRename;     // the rename field in the chip menu
         int m_pillMenu = 0;           // the widget whose record pill opened its menu
-        int m_captureNode = 0;        // the widget whose Hotkey field waits for keys
+        int m_captureNode = 0;        // the widget whose Hotkey field waits for keys...
+        std::string m_captureProp;    // ...and which of its hotkey fields
         std::set<int> m_captureDown;  // keys that were down already when it started (not taken)
         int m_wireNode = 0;           // a wire dropped on empty space: from this widget...
         ImVec2 m_wireDrop;            // ...at this surface point (points)

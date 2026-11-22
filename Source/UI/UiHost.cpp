@@ -1076,6 +1076,17 @@ namespace Manifold::UI
         if (PlacedLabel(node.Kind) && node.Kind != UiKind::Radio)
         {
             fieldWidth = FieldLayout(node, side);
+            // ∑ the keys that move it sit after the field, inside its line
+            if (node.Kind != UiKind::Radio && (!node.HotkeyLess.empty() || !node.HotkeyMore.empty()))
+            {
+                float caps = 0.0f;
+                for (const std::string* key : { &node.HotkeyLess, &node.HotkeyMore })
+                {
+                    if (!key->empty())
+                        caps += ImGui::CalcTextSize(key->c_str()).x + ImGui::CalcTextSize("+ ").x + Px(10.0f) + ImGui::GetStyle().ItemInnerSpacing.x;
+                }
+                fieldWidth = std::max(Px(40.0f), fieldWidth - caps - ImGui::GetStyle().ItemInnerSpacing.x);
+            }
             m_fieldWidth = fieldWidth;
             if (side == "left" || side == "above" || node.Label.empty())
                 label = Label(node, ""); // the label is drawn already
@@ -1392,6 +1403,27 @@ namespace Manifold::UI
         default:
             ImGui::TextUnformatted(node.Text.c_str());
             break;
+        }
+        if (node.Kind != UiKind::Radio && (!node.HotkeyLess.empty() || !node.HotkeyMore.empty()))
+        {
+            const bool cycles = node.Kind == UiKind::Combo;
+            const std::pair<const std::string*, const char*> caps[] = { { &node.HotkeyLess, cycles ? "< " : "- " }, { &node.HotkeyMore, cycles ? "> " : "+ " } };
+            for (const auto& [key, sign] : caps)
+            {
+                if (key->empty())
+                    continue;
+                const std::string text = sign + *key;
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+                const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+                const ImVec2 at = ImGui::GetCursorScreenPos();
+                const float top = at.y + (ImGui::GetFrameHeight() - size.y) * 0.5f - Px(1.0f);
+                ImGui::Dummy(ImVec2(size.x + Px(10.0f), ImGui::GetFrameHeight()));
+                ImDrawList* draw = ImGui::GetWindowDrawList();
+                draw->AddRect(ImVec2(at.x, top), ImVec2(at.x + size.x + Px(10.0f), top + size.y + Px(2.0f)), ImGui::GetColorU32(ImGuiCol_TextDisabled), Px(3.0f));
+                draw->AddText(ImVec2(at.x + Px(5.0f), top + Px(1.0f)), ImGui::GetColorU32(ImGuiCol_TextDisabled), text.c_str());
+                if (node.Tooltip.empty())
+                    ItemTooltip((std::string(key == &node.HotkeyMore ? (cycles ? "Next item: " : "Up: ") : (cycles ? "Previous item: " : "Down: ")) + *key + ", from anywhere while this window is open").c_str());
+            }
         }
     }
 

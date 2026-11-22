@@ -3,6 +3,7 @@
 #include "Core/Text.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <limits>
 
@@ -265,6 +266,7 @@ namespace Manifold::Lua
     void UiModel::PollHotkeys(const std::function<bool(const std::vector<int>&, bool&)>& pressed)
     {
         std::vector<int> fired;
+        std::vector<std::pair<int, int>> moved; // a number, slider, combo or radio: +1 or -1
         std::function<void(int, bool)> walk = [&](int id, bool enabled) {
             UiNode* node = Find(id);
             if (!node)
@@ -276,6 +278,11 @@ namespace Manifold::Lua
                 if (pressed(node->HotkeyKeys, node->HotkeyDown) && on && node->Visible)
                     fired.push_back(id);
             }
+            const bool stepper = node->Kind == UiKind::Number || node->Kind == UiKind::Slider || (node->Kind == UiKind::Combo && !node->Multi) || node->Kind == UiKind::Radio;
+            if (stepper && !node->HotkeyMoreKeys.empty() && pressed(node->HotkeyMoreKeys, node->HotkeyMoreHeld) && on && node->Visible)
+                moved.push_back({ id, 1 });
+            if (stepper && !node->HotkeyLessKeys.empty() && pressed(node->HotkeyLessKeys, node->HotkeyLessHeld) && on && node->Visible)
+                moved.push_back({ id, -1 });
             for (const int child : std::vector<int>(node->Children))
                 walk(child, on);
         };
@@ -298,6 +305,45 @@ namespace Manifold::Lua
             }
             else if (node->Confirm.empty() && (node->Handlers & UiHandler::Click))
                 Post(UiEvent{ id, "click", {} });
+        }
+        for (const auto& [id, direction] : moved)
+        {
+            UiNode* node = Find(id);
+            if (!node)
+                continue;
+            if (node->Kind == UiKind::Number || node->Kind == UiKind::Slider)
+            {
+                // ∑ one press moves it by hotkeyStep (else its step, else 1), within min and max
+                const double step = node->HotkeyStep > 0.0 ? node->HotkeyStep : node->Step > 0.0 ? node->Step : 1.0;
+                double value = node->Number + direction * step;
+                if (node->Kind == UiKind::Slider || node->HasMin)
+                    value = std::max(value, node->Min);
+                if (node->Kind == UiKind::Slider || node->HasMax)
+                    value = std::min(value, node->Max);
+                value = node->Integer ? std::round(value) : std::round(value * 1.0e9) / 1.0e9; // no 0.30000000000000004
+                if (value == node->Number)
+                    continue;
+                node->Number = value;
+                Touch(*node);
+                if (node->Handlers & UiHandler::Change)
+                    Post(UiEvent{ id, "change", { value } });
+            }
+            else
+            {
+                // the next or the previous item, round the end
+                const int count = static_cast<int>(node->Items.size());
+                if (count == 0)
+                    continue;
+                int chosen = node->Selected + direction;
+                if (chosen < 1)
+                    chosen = count;
+                if (chosen > count)
+                    chosen = 1;
+                node->Selected = chosen;
+                Touch(*node);
+                if (node->Handlers & UiHandler::Change)
+                    Post(UiEvent{ id, "change", { static_cast<double>(chosen) } });
+            }
         }
     }
 

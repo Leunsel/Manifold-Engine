@@ -175,6 +175,13 @@ namespace Manifold::Lua
         std::string Hotkey;               // checkbox/button: keys that switch or click it from anywhere ("F1")
         std::vector<int> HotkeyKeys;      // Hotkey as virtual keys, empty when it names none
         bool HotkeyDown = false;
+        std::string HotkeyMore;           // number/slider: hotkeyIncrease; combo/radio: hotkeyNext
+        std::vector<int> HotkeyMoreKeys;
+        bool HotkeyMoreHeld = false;
+        std::string HotkeyLess;           // number/slider: hotkeyDecrease; combo/radio: hotkeyPrevious
+        std::vector<int> HotkeyLessKeys;
+        bool HotkeyLessHeld = false;
+        double HotkeyStep = 0.0;          // number/slider: how far one press moves it; 0: its step, else 1
         std::string Confirm;
         bool ReadOnly = false;
         int MaxLength = 0;

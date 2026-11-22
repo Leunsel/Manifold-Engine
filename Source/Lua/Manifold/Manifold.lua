@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 25
+local API_VERSION = 26
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -2339,10 +2339,10 @@ local WIDGET_KEYS = {
   button = withCommon({ text = "string", icon = "string", style = "string", shortcut = "string", hotkey = "string", confirm = "string", onClick = "function" }),
   checkbox = withCommon({ label = "string", value = "boolean", style = "string", hotkey = "string", onChange = "function" }),
   input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", readOnly = "boolean", maxLength = "integer", focus = "boolean", labelPosition = "string", onChange = "function", onSubmit = "function" }),
-  number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", focus = "boolean", labelPosition = "string", onChange = "function" }),
-  slider = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", format = "string", labelPosition = "string", onChange = "function" }),
-  combo = withCommon({ label = "string", items = "table", value = "choice", multi = "boolean", hint = "string", labelPosition = "string", onChange = "function" }),
-  radio = withCommon({ label = "string", items = "table", value = "integer", horizontal = "boolean", labelPosition = "string", onChange = "function" }),
+  number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", focus = "boolean", labelPosition = "string", hotkeyIncrease = "string", hotkeyDecrease = "string", hotkeyStep = "number", onChange = "function" }),
+  slider = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", format = "string", labelPosition = "string", hotkeyIncrease = "string", hotkeyDecrease = "string", hotkeyStep = "number", onChange = "function" }),
+  combo = withCommon({ label = "string", items = "table", value = "choice", multi = "boolean", hint = "string", labelPosition = "string", hotkeyNext = "string", hotkeyPrevious = "string", onChange = "function" }),
+  radio = withCommon({ label = "string", items = "table", value = "integer", horizontal = "boolean", labelPosition = "string", hotkeyNext = "string", hotkeyPrevious = "string", onChange = "function" }),
   color = withCommon({ label = "string", value = "string", alpha = "boolean", labelPosition = "string", onChange = "function" }),
   table = withCommon({ columns = "table", rows = "table", value = "integer", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
   tree = withCommon({ items = "table", value = "string", menu = "table", onSelect = "function", onActivate = "function", onMenu = "function" }),
@@ -2442,8 +2442,14 @@ local function checkOptions(path, keys, options)
   elseif options.style ~= nil and not BUTTON_STYLES[options.style] then
     misuse(('%s: options.style must be one of "default", "accent", "danger", got %q'):format(path, options.style))
   end
-  if options.hotkey ~= nil and options.hotkey ~= "" and not native.uiHotkeyText(options.hotkey) then
-    misuse(('%s: options.hotkey %q names no key; write it like "F1", "Ctrl+F2" or "Shift+Num 1"'):format(path, options.hotkey))
+  for _, key in ipairs({ "hotkey", "hotkeyIncrease", "hotkeyDecrease", "hotkeyNext", "hotkeyPrevious" }) do
+    local text = options[key]
+    if text ~= nil and text ~= "" and not native.uiHotkeyText(text) then
+      misuse(('%s: options.%s %q names no key; write it like "F1", "Ctrl+F2" or "Shift+Num 1"'):format(path, key, text))
+    end
+  end
+  if options.hotkeyStep ~= nil and options.hotkeyStep <= 0 then
+    misuse(("%s: options.hotkeyStep must be above 0, got %s"):format(path, tostring(options.hotkeyStep)))
   end
   if options.labelPosition ~= nil and options.labelPosition ~= "left" and options.labelPosition ~= "above" and options.labelPosition ~= "right" then
     misuse(('%s: options.labelPosition must be "left", "above" or "right", got %q'):format(path, options.labelPosition))
@@ -2644,6 +2650,87 @@ widgetObject = function(entry)
     end
     return result(native.uiDraw(entry.id, prepared, options and options.append))
   end)
+  -- ∑ a table's rows and a combo's, radio's or tree's items, to read and to change one at a time
+  local function rowsOf(name)
+    if entry.kind ~= "table" then
+      misuse(("%s.%s: only a table has rows"):format(prefix, name))
+    end
+    if not liveEntry(entry) then
+      return nil
+    end
+    return (native.uiRows(entry.id))
+  end
+  local function rowIndex(name, rows, row, past)
+    if math.type(row) ~= "integer" or row < 1 or row > #rows + (past and 1 or 0) then
+      misuse(("%s.%s: row must be 1 to %d, got %s"):format(prefix, name, #rows + (past and 1 or 0), tostring(row)))
+    end
+  end
+  local function cellsOf(name, cells)
+    local copy = {}
+    for index, cell in ipairs(cells) do
+      if type(cell) ~= "string" and type(cell) ~= "number" and type(cell) ~= "boolean" then
+        misuse(("%s.%s: cell %d must be a string, number or boolean, got %s"):format(prefix, name, index, kindOf(cell)))
+      end
+      copy[index] = tostring(cell)
+    end
+    return copy
+  end
+  method("getRows", {}, function()
+    local rows = rowsOf("getRows")
+    if not rows then
+      return gone("table")
+    end
+    local _, columns = native.uiRows(entry.id)
+    return rows, columns
+  end)
+  method("getRow", { params = { { name = "row", type = "integer", optional = true } } }, function(row)
+    local rows = rowsOf("getRow")
+    if not rows then
+      return gone("table")
+    end
+    row = row or native.uiGet(entry.id)
+    if row == nil then
+      return nil
+    end
+    return rows[row]
+  end)
+  method("addRow", { params = { { name = "cells", type = "table" }, { name = "row", type = "integer", optional = true } } }, function(cells, row)
+    local rows = rowsOf("addRow")
+    if not rows then
+      return gone("table")
+    end
+    row = row or #rows + 1
+    rowIndex("addRow", rows, row, true)
+    table.insert(rows, row, cellsOf("addRow", cells))
+    return updateEntry(prefix .. ".addRow", entry, WIDGET_KEYS.table, { rows = rows })
+  end)
+  method("setRow", { params = { { name = "row", type = "integer" }, { name = "cells", type = "table" } } }, function(row, cells)
+    local rows = rowsOf("setRow")
+    if not rows then
+      return gone("table")
+    end
+    rowIndex("setRow", rows, row)
+    rows[row] = cellsOf("setRow", cells)
+    return updateEntry(prefix .. ".setRow", entry, WIDGET_KEYS.table, { rows = rows })
+  end)
+  method("removeRow", { params = { { name = "row", type = "integer" } } }, function(row)
+    local rows = rowsOf("removeRow")
+    if not rows then
+      return gone("table")
+    end
+    rowIndex("removeRow", rows, row)
+    table.remove(rows, row)
+    return updateEntry(prefix .. ".removeRow", entry, WIDGET_KEYS.table, { rows = rows })
+  end)
+  method("getItems", {}, function()
+    if entry.kind ~= "combo" and entry.kind ~= "radio" and entry.kind ~= "tree" then
+      misuse(prefix .. ".getItems: only a combo, radio or tree has items")
+    end
+    if not liveEntry(entry) then
+      return gone(entry.kind)
+    end
+    return native.uiItems(entry.id)
+  end)
   method("getView", {}, function()
     if entry.kind ~= "canvas" then
       misuse(prefix .. ".getView: only a canvas has a view")
@@ -2843,7 +2930,7 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
     "- `text` (`text`, `color`, `wrap`, `mono`, `bold`, `size` in points, `align` = `left`, `center` or `right` for text that does not wrap), `heading` (`text`, `icon`, `color`, `size`, `align`), `separator` (`text` puts a caption into the line), `spacer`.",
     "- `button`: `text`, `icon` (an icon without text makes an icon button), `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through; `hotkey` (like `F5` or `Ctrl+F2`) clicks it from anywhere, also while the game has the focus, as long as its window is open (not a button with `confirm`).",
-    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch; `hotkey` like `F1` or `Ctrl+F2` switches it from anywhere, also while the game has the focus, as long as its window is open and the box is enabled, and shows the key beside it), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
+    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch; `hotkey` like `F1` or `Ctrl+F2` switches it from anywhere, also while the game has the focus, as long as its window is open and the box is enabled, and shows the key beside it), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click; a `number` or `slider` takes `hotkeyIncrease` and `hotkeyDecrease`, keys that move it by `hotkeyStep` (else its `step`, else 1) from anywhere while its window is open, within `min` and `max`), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line; a `combo` or `radio` takes `hotkeyNext` and `hotkeyPrevious`, keys that choose the next or previous item, round the end), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
@@ -2864,8 +2951,14 @@ local WIDGET_METHOD_DOCS = {
   draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
   getView = { returns = "table", doc = "A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom." },
   setView = { params = { { name = "view", type = "table", keys = { x = "number", y = "number", scale = "number" } } }, returns = "boolean", doc = "Moves or zooms a canvas's view." },
+  getRows = { returns = "table", doc = "A table's rows, each a list of its cells' texts, and as a second value the column titles. Example: `local rows, columns = w.list.getRows()`, `rows[2][1]` is the first cell of the second row." },
+  getRow = { params = { { name = "row", type = "integer", optional = true, text = "The row's number; the selected row when left out." } }, returns = "table", doc = "One row of a table as a list of its cells' texts, or nil when there is no such row or nothing is selected. `w.list.getRow()` reads the selected row." },
+  addRow = { params = { { name = "cells", type = "table", text = "The cells' texts; numbers and booleans are written as text." }, { name = "row", type = "integer", optional = true, text = "Where it goes; the end when left out." } }, returns = "boolean", doc = "Adds a row to a table, at the end or before `row`." },
+  setRow = { params = { { name = "row", type = "integer" }, { name = "cells", type = "table" } }, returns = "boolean", doc = "Replaces a row of a table." },
+  removeRow = { params = { { name = "row", type = "integer" } }, returns = "boolean", doc = "Removes a row of a table; the rows after it move up." },
+  getItems = { returns = "table", doc = "A combo's or radio's items as a list of texts (`get` gives the chosen one's number), or a tree's items as tables with `id`, `text`, `icon`, `open` and `children`." },
 }
-for _, name in ipairs({ "add", "clear", "remove", "update", "get", "set", "draw", "getView", "setView" }) do
+for _, name in ipairs({ "add", "clear", "remove", "update", "get", "set", "draw", "getView", "setView", "getRows", "getRow", "addRow", "setRow", "removeRow", "getItems" }) do
   native.docDefine(nil, WIDGET_DOC .. name, WIDGET_METHOD_DOCS[name])
 end
 native.docDefine(nil, WIDGET_DOC .. "id", { kind = "field", type = "integer", doc = "The widget's number." })

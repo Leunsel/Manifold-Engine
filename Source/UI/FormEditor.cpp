@@ -4158,7 +4158,7 @@ namespace Manifold::UI
         {
             // ∑ click, then press the keys: the first key that goes down,
             // with Ctrl, Shift and Alt as they are held; Escape gives up
-            const bool capturing = m_captureNode == node.Id;
+            const bool capturing = m_captureNode == node.Id && m_captureProp == prop.Key;
             const float button = ImGui::GetFrameHeight();
             const std::string face = capturing ? std::string(ICON_FA_KEYBOARD "  Press the keys (Esc gives up)")
                                    : value.empty()  ? std::string(ICON_FA_KEYBOARD "  None: click, then press keys")
@@ -4169,6 +4169,7 @@ namespace Manifold::UI
             if (ImGui::Button((face + "##capture").c_str(), ImVec2(value.empty() || capturing ? -FLT_MIN : -(button + ImGui::GetStyle().ItemInnerSpacing.x), 0.0f)))
             {
                 m_captureNode = capturing ? 0 : node.Id;
+                m_captureProp = std::string(prop.Key);
                 m_captureDown.clear();
                 for (int key = 8; key <= 254; ++key)
                 {
@@ -6569,11 +6570,20 @@ namespace Manifold::UI
                         if (!node)
                             continue;
                         stack.insert(stack.end(), node->Children.begin(), node->Children.end());
-                        std::vector<int> keys = node->HotkeyKeys;
-                        std::sort(keys.begin(), keys.end());
-                        if (const auto found = tableKeys.find(keys); !keys.empty() && found != tableKeys.end())
-                            m_problems.push_back({ node->Id, std::string(Lua::FormKindTitle(node->Kind)) + ": " + node->Hotkey + " is the hotkey of the record \"" + found->second +
-                                                                 "\" in the open table too; one press would switch it twice", Lua::FormFix::ClearHotkey });
+                        const bool cycles = node->Kind == UiKind::Combo || node->Kind == UiKind::Radio;
+                        const std::tuple<const char*, const std::string*, const std::vector<int>*> fields[] = {
+                            { "hotkey", &node->Hotkey, &node->HotkeyKeys },
+                            { cycles ? "hotkeyNext" : "hotkeyIncrease", &node->HotkeyMore, &node->HotkeyMoreKeys },
+                            { cycles ? "hotkeyPrevious" : "hotkeyDecrease", &node->HotkeyLess, &node->HotkeyLessKeys },
+                        };
+                        for (const auto& [field, text, held] : fields)
+                        {
+                            std::vector<int> keys = *held;
+                            std::sort(keys.begin(), keys.end());
+                            if (const auto found = tableKeys.find(keys); !keys.empty() && found != tableKeys.end())
+                                m_problems.push_back({ node->Id, std::string(Lua::FormKindTitle(node->Kind)) + ": " + *text + " is the hotkey of the record \"" + found->second +
+                                                                     "\" in the open table too; one press would do both", Lua::FormFix::ClearHotkey, field });
+                        }
                     }
                 }
             }
