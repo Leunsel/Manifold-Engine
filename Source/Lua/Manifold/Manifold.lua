@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 18
+local API_VERSION = 19
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -861,7 +861,202 @@ define(memory, "isReadable", {
   return native.isReadable(address)
 end)
 
-local errors = area("error", "Error objects and protected calls. An error object is `{ code, message, where, traceback }`; `tostring` gives `where: message (code)`.")
+-- ∑ manifold.record lives in its own function: Manifold.lua's main chunk is
+-- close to Lua's limit of 200 locals, and these locals end with it.
+do
+  local function recordArea()
+    local record = area("record", "The memory records of the open cheat table: the address list. A record is found by its id or its description and comes back as a record object; scripts and groups are switched on and off, value records also read and write their value as the address list does (its type, hex display and drop-down list apply). A record object stays bound to its record: when the record is deleted or the table is replaced (new, opened, restored), its functions return `nil` and an `ME-6009` error.")
+    local RECORD_DOC = "manifold.record.Record."
+    local cache = setmetatable({}, { __mode = "v" })
+    local identities = setmetatable({}, { __mode = "k" })
+    local KINDS = { value = true, script = true, group = true }
+
+    native.docDefine(nil, "manifold.record.Record", {
+      kind = "class",
+      title = "Record objects",
+      doc = "`find`, `all`, `selected` and `create` return record objects: dot calls only, read-only, unknown names raise. Two objects of the same record are the same object.",
+    })
+    local METHODS = {
+      info = { returns = "table", doc = "What the record is: `{ id, description, kind, active, children, hotkeys, parent, comment }`, `kind` being `value`, `script` or `group`; a value record adds `type` (`byte`, `2bytes`, `4bytes`, `8bytes`, `float`, `double`, `string`, `bytes`, `binary`, `pointer` or its custom type's name), `address` (the expression as written), `offsets` (how many pointer offsets), `resolved` (the address it points to now, when it resolves) and `hex`." },
+      getDescription = { returns = "string", doc = "The record's description, as the address list shows it." },
+      setDescription = { params = { { name = "description", type = "string" } }, returns = "boolean", doc = "Changes the record's description." },
+      getValue = { returns = "value", doc = "Reads the record's value: a number for number types shown as numbers (an integer for the integer types), otherwise the text as the address list shows it (hex, a drop-down entry, a string, bytes). The text comes second in either case. `nil` and an error when the address does not resolve or cannot be read; `ME-6010` for scripts and groups." },
+      setValue = { params = { { name = "value", type = "number|string" } }, returns = "boolean", doc = "Writes the record's value, as typing it into the address list does: a number, or a text in the record's own form (hex digits for a hex record, a drop-down entry's value or description, a string). A frozen record keeps the new value. `nil` and an error when it cannot be written." },
+      isActive = { returns = "boolean", doc = "Whether the record is switched on: an enabled script, a frozen value, an active group." },
+      setActive = { params = { { name = "active", type = "boolean" } }, returns = "boolean", doc = "Switches the record on or off, as its box in the address list does: a script runs its `[ENABLE]` or `[DISABLE]` part, a value freezes or thaws, a group follows its options for its children. Inside a script's coroutine with asynchronous activation on, it waits for the activation without blocking the program. `nil` and the script's error when it fails." },
+      toggle = { returns = "boolean", doc = "Switches the record to the other state and returns the new one; `nil` and an error when that fails." },
+      getAddress = { returns = "integer", doc = "The address the record's value is at now (pointers followed). `nil` and an error when it does not resolve; `ME-6010` for scripts and groups." },
+      children = { returns = "table", doc = "The records directly below this one, in the address list's order." },
+      parent = { returns = "record", doc = "The record this one is below, or nil at the top level." },
+      remove = { returns = "boolean", doc = "Deletes the record and the records below it from the table, switching it off first when it is on." },
+    }
+    for _, name in ipairs({ "info", "getDescription", "setDescription", "getValue", "setValue", "isActive", "setActive", "toggle", "getAddress", "children", "parent", "remove" }) do
+      native.docDefine(nil, RECORD_DOC .. name, METHODS[name])
+    end
+    native.docDefine(nil, RECORD_DOC .. "id", { kind = "field", type = "integer", doc = "The record's id, the number Cheat Engine tables store with it." })
+
+    local recordObject
+    local function failure(value, code, message)
+      if value == nil then
+        return result(nil, code, message)
+      end
+      return value
+    end
+
+    recordObject = function(id)
+      local identity = native.recordIdentity()
+      local key = identity .. ":" .. id
+      if cache[key] then
+        return cache[key]
+      end
+      local prefix = ("record(%d)"):format(id)
+      local proxy, members = strict(prefix)
+      local function method(name, body)
+        bind(proxy, prefix .. "." .. name, members, name, METHODS[name], body, RECORD_DOC .. name)
+      end
+      method("info", function()
+        return failure(native.recordInfo(id, identity))
+      end)
+      method("getDescription", function()
+        local info, code, message = native.recordInfo(id, identity)
+        if not info then
+          return result(nil, code, message)
+        end
+        return info.description
+      end)
+      method("setDescription", function(description)
+        return failure(native.recordSetDescription(id, identity, description))
+      end)
+      method("getValue", function()
+        local value, text, message = native.recordGet(id, identity)
+        if value == nil then
+          return result(nil, text, message)
+        end
+        return value, text
+      end)
+      method("setValue", function(value)
+        return failure(native.recordSet(id, identity, value))
+      end)
+      method("isActive", function()
+        return failure(native.recordIsActive(id, identity))
+      end)
+      method("setActive", function(active)
+        return failure(native.recordSetActive(id, identity, active))
+      end)
+      method("toggle", function()
+        local active, code, message = native.recordIsActive(id, identity)
+        if active == nil then
+          return result(nil, code, message)
+        end
+        local done, failed, why = native.recordSetActive(id, identity, not active)
+        if not done then
+          return result(nil, failed, why)
+        end
+        return (native.recordIsActive(id, identity))
+      end)
+      method("getAddress", function()
+        return failure(native.recordAddress(id, identity))
+      end)
+      method("children", function()
+        local ids, code, message = native.recordChildren(id, identity)
+        if not ids then
+          return result(nil, code, message)
+        end
+        local list = {}
+        for index, child in ipairs(ids) do
+          list[index] = recordObject(child)
+        end
+        return list
+      end)
+      method("parent", function()
+        local info, code, message = native.recordInfo(id, identity)
+        if not info then
+          return result(nil, code, message)
+        end
+        return info.parent and recordObject(info.parent) or nil
+      end)
+      method("remove", function()
+        return failure(native.recordRemove(id, identity))
+      end)
+      rawset(members, "id", id)
+      cache[key] = proxy
+      identities[proxy] = identity
+      return proxy
+    end
+
+    local function objects(ids)
+      local list = {}
+      for index, id in ipairs(ids) do
+        list[index] = recordObject(id)
+      end
+      return list
+    end
+
+    define(record, "find", {
+      params = { { name = "record", type = "integer|string" } },
+      returns = "record",
+      doc = "The record with this id, or the first one with this description (as written in the address list). `nil` and an `ME-6008` error when there is none.",
+    }, function(key)
+      local id, code, message = native.recordFind(key)
+      if not id then
+        return result(nil, code, message)
+      end
+      return recordObject(id)
+    end)
+
+    define(record, "all", {
+      returns = "table",
+      doc = "Every record of the table, groups and their children included, in the address list's order from top to bottom.",
+    }, function()
+      return objects(native.recordAll())
+    end)
+
+    define(record, "selected", {
+      returns = "table",
+      doc = "The records selected in the address list, in the order they were selected.",
+    }, function()
+      return objects(native.recordSelected())
+    end)
+
+    define(record, "create", {
+      params = { { name = "options", type = "table", keys = { kind = "string", description = "string", address = "string", type = "string", script = "string", parent = "any" } } },
+      returns = "record",
+      doc = "Adds a record at the end of the table, or below `options.parent` (a record object or id). `kind` is `value` (the default), `script` or `group`; a value record takes `address` (an address expression, like in the address list) and `type` (as `info` names them; `4bytes` by default), a script record takes `script` (Auto Assembler text with `[ENABLE]` and `[DISABLE]`).",
+    }, function(options)
+      local kind = options.kind or "value"
+      if not KINDS[kind] then
+        misuse(('manifold.record.create: options.kind must be "value", "script" or "group", got %q'):format(tostring(kind)))
+      end
+      if options.type ~= nil and kind ~= "value" then
+        misuse("manifold.record.create: options.type is for value records")
+      end
+      if options.script ~= nil and kind ~= "script" then
+        misuse("manifold.record.create: options.script is for script records")
+      end
+      local parentId, parentIdentity
+      if options.parent ~= nil then
+        if math.type(options.parent) == "integer" then
+          parentId, parentIdentity = options.parent, native.recordIdentity()
+        elseif identities[options.parent] then
+          parentId, parentIdentity = options.parent.id, identities[options.parent]
+        else
+          misuse("manifold.record.create: options.parent must be a record object or a record id, got " .. kindOf(options.parent))
+        end
+      end
+      local ok, id, code, message = pcall(native.recordCreate, kind, options.description or "", kind == "script" and options.script or options.address, options.type, parentId, parentIdentity)
+      if not ok then
+        misuse("manifold.record.create: " .. tostring(id))
+      end
+      if not id then
+        return result(nil, code, message)
+      end
+      return recordObject(id)
+    end)
+  end
+  recordArea()
+end
+
+local errors = area("error","Error objects and protected calls. An error object is `{ code, message, where, traceback }`; `tostring` gives `where: message (code)`.")
 
 local function fromRaised(problem, traceback)
   if isError(problem) then

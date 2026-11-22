@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 18 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 19 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -109,6 +109,37 @@ Typed reads and writes in the opened process. Types: `i8` `u8` `i16` `u16` `i32`
 | `manifold.memory.write(address, type, value, options?)` | true, or nil, error | Writes one value. A `string` ends with a zero unless `options.terminate` is false. |
 | `manifold.memory.scan(pattern, options?)` | list of integers, or nil, error | Finds a byte pattern such as `"48 8B 05 ?? ?? ?? ??"` (`??` is any byte) in the whole process, or only in `options.module`. `options.executable` and `options.writable` set to true keep only such memory, set to false only memory without it, and left out take both. `options.alignment` keeps addresses divisible by it; `options.limit` (1 to 1000000, default 100000) stops after that many hits. The list is in address order, so with a limit it holds the lowest hits. No hit is an empty list, not an error. |
 | `manifold.memory.isReadable(address)` | boolean | Whether the page at the address can be read. False without a process or for an address that does not resolve. |
+
+## manifold.record
+
+The memory records of the open cheat table: the address list. A record is found by its id or its description and comes back as a record object; scripts and groups are switched on and off, value records also read and write their value as the address list does (its type, hex display and drop-down list apply). A record object stays bound to its record: when the record is deleted or the table is replaced (new, opened, restored), its functions return `nil` and an `ME-6009` error.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.record.find(record)` | record | The record with this id, or the first one with this description (as written in the address list). `nil` and an `ME-6008` error when there is none. |
+| `manifold.record.all()` | table | Every record of the table, groups and their children included, in the address list's order from top to bottom. |
+| `manifold.record.selected()` | table | The records selected in the address list, in the order they were selected. |
+| `manifold.record.create(options)` | record | Adds a record at the end of the table, or below `options.parent` (a record object or id). `kind` is `value` (the default), `script` or `group`; a value record takes `address` (an address expression, like in the address list) and `type` (as `info` names them; `4bytes` by default), a script record takes `script` (Auto Assembler text with `[ENABLE]` and `[DISABLE]`). |
+
+### Record objects
+
+`find`, `all`, `selected` and `create` return record objects: dot calls only, read-only, unknown names raise. Two objects of the same record are the same object.
+
+| Name | Returns | |
+| --- | --- | --- |
+| `record.info()` | table | What the record is: `{ id, description, kind, active, children, hotkeys, parent, comment }`, `kind` being `value`, `script` or `group`; a value record adds `type` (`byte`, `2bytes`, `4bytes`, `8bytes`, `float`, `double`, `string`, `bytes`, `binary`, `pointer` or its custom type's name), `address` (the expression as written), `offsets` (how many pointer offsets), `resolved` (the address it points to now, when it resolves) and `hex`. |
+| `record.getDescription()` | string | The record's description, as the address list shows it. |
+| `record.setDescription(description)` | boolean | Changes the record's description. |
+| `record.getValue()` | value | Reads the record's value: a number for number types shown as numbers (an integer for the integer types), otherwise the text as the address list shows it (hex, a drop-down entry, a string, bytes). The text comes second in either case. `nil` and an error when the address does not resolve or cannot be read; `ME-6010` for scripts and groups. |
+| `record.setValue(value)` | boolean | Writes the record's value, as typing it into the address list does: a number, or a text in the record's own form (hex digits for a hex record, a drop-down entry's value or description, a string). A frozen record keeps the new value. `nil` and an error when it cannot be written. |
+| `record.isActive()` | boolean | Whether the record is switched on: an enabled script, a frozen value, an active group. |
+| `record.setActive(active)` | boolean | Switches the record on or off, as its box in the address list does: a script runs its `[ENABLE]` or `[DISABLE]` part, a value freezes or thaws, a group follows its options for its children. Inside a script's coroutine with asynchronous activation on, it waits for the activation without blocking the program. `nil` and the script's error when it fails. |
+| `record.toggle()` | boolean | Switches the record to the other state and returns the new one; `nil` and an error when that fails. |
+| `record.getAddress()` | integer | The address the record's value is at now (pointers followed). `nil` and an error when it does not resolve; `ME-6010` for scripts and groups. |
+| `record.children()` | table | The records directly below this one, in the address list's order. |
+| `record.parent()` | record | The record this one is below, or nil at the top level. |
+| `record.remove()` | boolean | Deletes the record and the records below it from the table, switching it off first when it is on. |
+| `record.id` | integer | The record's id, the number Cheat Engine tables store with it. |
 
 ## manifold.error
 

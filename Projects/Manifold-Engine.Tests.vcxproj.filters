@@ -264,6 +264,9 @@
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaRecords.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>

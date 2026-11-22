@@ -11,6 +11,7 @@
 #include "Lua/LuaModules.h"
 #include "Lua/LuaUi.h"
 #include "Lua/LuaDotNet.h"
+#include "Lua/LuaRecords.h"
 #include "Lua/LuaRtti.h"
 #include "Lua/LuaUnreal.h"
 #include "Scan/Scanner.h"
@@ -853,6 +854,7 @@ namespace Manifold::Lua
             RegisterRttiNatives(state, -1);
             RegisterDotNetNatives(state, -1);
             RegisterModuleNatives(state, -1);
+            RegisterRecordNatives(state, -1);
             if (lua_pcall(state, 1, 1, 0) != LUA_OK)
             {
                 std::string message = lua_tostring(state, -1) ? lua_tostring(state, -1) : "";

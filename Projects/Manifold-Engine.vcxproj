@@ -191,6 +191,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Lua\LuaModules.cpp" />
     <ClCompile Include="..\Source\Lua\LuaMono.cpp" />
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaRecords.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRtti.cpp" />
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp" />
@@ -373,6 +374,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Lua\LuaDotNet.h" />
     <ClInclude Include="..\Source\Lua\LuaEngine.h" />
     <ClInclude Include="..\Source\Lua\LuaModules.h" />
+    <ClInclude Include="..\Source\Lua\LuaRecords.h" />
     <ClInclude Include="..\Source\Lua\LuaRtti.h" />
     <ClInclude Include="..\Source\Lua\LuaSnapshot.h" />
     <ClInclude Include="..\Source\Lua\LuaUi.h" />

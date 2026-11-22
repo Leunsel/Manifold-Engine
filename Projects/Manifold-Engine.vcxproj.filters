@@ -276,6 +276,9 @@
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaRecords.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -808,6 +811,9 @@
       <Filter>Source\Lua</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Lua\LuaModules.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaRecords.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Lua\LuaRtti.h">

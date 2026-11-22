@@ -69,7 +69,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 18 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 19 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -346,6 +346,84 @@ namespace Manifold::Tests
                 local opened, badId = manifold.process.open(0x100000004)
                 if opened ~= nil or badId.code ~= "ME-1001" or manifold.process.isOpen() then return "pid range " .. tostring(badId) end
                 return "ok")LUA");
+        }
+
+        void RecordApi(Engine& engine)
+        {
+            // manifold.record against this test process: value, float, script, group, errors.
+            // The probes are shared with the tests after this one: put them back at the end.
+            const std::int32_t keptValue = g_probeValue;
+            const float keptFloat = g_probeFloat;
+            g_probeValue = 77;
+            g_probeFloat = 1.5f;
+            LuaCheck(engine, "record api", R"LUA(
+                if not manifold.process.isOpen() then
+                  local info, problem = manifold.process.open(probePid)
+                  if not info then return "open " .. tostring(problem) end
+                end
+                local R = manifold.record
+                local value = R.create({ description = "Probe Value", address = ("%X"):format(probeValue), type = "4bytes" })
+                if R.find("Probe Value") ~= value or R.find(value.id) ~= value then return "find returns the same object" end
+                local read, text = value.getValue()
+                if read ~= 77 or math.type(read) ~= "integer" or text ~= "77" then return "getValue " .. tostring(read) .. " " .. tostring(text) end
+                if value.getAddress() ~= probeValue then return "getAddress" end
+                local ok, problem = value.setValue(1234)
+                if not ok then return "setValue " .. tostring(problem) end
+                if manifold.memory.read(probeValue, "i32") ~= 1234 then return "setValue did not write" end
+                local info = value.info()
+                if info.kind ~= "value" or info.type ~= "4bytes" or info.description ~= "Probe Value" or info.resolved ~= probeValue or info.active then return "info" end
+                value.setDescription("Probe Renamed")
+                if value.getDescription() ~= "Probe Renamed" or R.find("Probe Renamed") ~= value then return "description" end
+
+                local float = R.create({ description = "Probe Float", address = ("%X"):format(probeFloat), type = "float" })
+                if float.getValue() ~= 1.5 then return "float " .. tostring(float.getValue()) end
+                float.setValue(2.25)
+                if manifold.memory.read(probeFloat, "float") ~= 2.25 then return "float setValue" end
+                if float.info().type ~= "float" then return "float type" end
+
+                local group = R.create({ kind = "group", description = "Probe Group" })
+                local script = R.create({ kind = "script", description = "Probe Script", script = "[ENABLE]\n[DISABLE]\n", parent = group })
+                local child = R.create({ description = "Probe Child", address = ("%X"):format(probeValue), parent = group.id })
+                local children = group.children()
+                if #children ~= 2 or children[1] ~= script or children[2] ~= child or child.parent() ~= group or value.parent() ~= nil then return "children / parent" end
+                if script.isActive() then return "script starts off" end
+                local switched, why = script.setActive(true)
+                if not switched or not script.isActive() then return "setActive " .. tostring(why) end
+                if script.toggle() ~= false or script.isActive() then return "toggle" end
+                local none, noValue = script.getValue()
+                if none ~= nil or noValue.code ~= "ME-6010" then return "script value " .. tostring(noValue) end
+                local missing, notFound = R.find("No Such Record")
+                if missing ~= nil or notFound.code ~= "ME-6008" then return "find missing " .. tostring(notFound) end
+                local count = 0
+                for _, each in ipairs(R.all()) do
+                  if each == value or each == float or each == group or each == script or each == child then count = count + 1 end
+                end
+                if count ~= 5 then return "all " .. count end
+                if type(R.selected()) ~= "table" then return "selected" end
+
+                local function raises(fn, needle)
+                  local okay, failure = pcall(fn)
+                  if okay then return "no error for " .. needle end
+                  local message = type(failure) == "table" and failure.message or tostring(failure)
+                  if not message:find(needle, 1, true) then return "message lacks '" .. needle .. "': " .. message end
+                end
+                local failed = raises(function() R.create({ kind = "folder" }) end, 'options.kind must be "value", "script" or "group"')
+                  or raises(function() R.create({ type = "huge" }) end, "unknown record type huge")
+                  or raises(function() R.create({ kind = "group", type = "4bytes" }) end, "options.type is for value records")
+                  or raises(function() R.find({}) end, "manifold.record.find")
+                  or raises(function() value.setValue({}) end, "setValue")
+                if failed then return failed end
+
+                if not group.remove() then return "remove" end
+                local gone, goneWhy = child.getValue()
+                if gone ~= nil or goneWhy.code ~= "ME-6009" then return "gone " .. tostring(goneWhy) end
+                if R.find("Probe Child") then return "child still found" end
+                value.remove()
+                float.remove()
+                return "ok")LUA");
+            CHECK_EQ(g_probeValue, 1234);
+            g_probeValue = keptValue;
+            g_probeFloat = keptFloat;
         }
 
         void OwnProcess(Engine& engine)
@@ -2355,6 +2433,7 @@ return M
         Errors(engine);
         WithoutProcess(engine);
         OwnProcess(engine);
+        RecordApi(engine);
         Version2(engine);
         Assist(engine);
         DocApi(engine);

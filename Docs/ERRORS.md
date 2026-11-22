@@ -130,6 +130,9 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-6005 | Entry … of the table is damaged and was skipped. | An entry misses required parts or has values that do not parse. | Check that entry in a text editor. |
 | ME-6006 | The table was written by a newer version (…). | Parts of it may be unknown to this version and are kept as they are. | Usually fine. Check the records that do not work. |
 | ME-6007 | The backup could not be written to …. | The backups folder is not writable or the disk is full. | Pick another folder in Settings, under Scripts, or turn the backups off there. |
+| ME-6008 | There is no memory record …. | No record of the open table has that id or description. | Check the spelling; descriptions are matched as they are written in the address list. manifold.record.all lists the records. |
+| ME-6009 | The memory record … is gone. | The record was deleted, or the table was replaced by a new, opened or restored one. | Find the record again with manifold.record.find. |
+| ME-6010 | The memory record … has no value. | Scripts and groups are switched on and off; only value records have an address and a value. | Use setActive for scripts and groups. |
 
 ## Lua
 

@@ -5211,11 +5211,11 @@ end
 setmetatable(_G, globalMeta)
 )MLUA"),
         };
-        constexpr std::array<std::string_view, 15> kManifold0 = {
+        constexpr std::array<std::string_view, 16> kManifold0 = {
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 18
+local API_VERSION = 19
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -6077,7 +6077,203 @@ define(memory, "isReadable", {
   return native.isReadable(address)
 end)
 
-local errors = area("error", "Error objects and protected calls. An error object is `{ code, message, where, traceback }`; `tostring` gives `where: message (code)`.")
+-- ∑ manifold.record lives in its own function: Manifold.lua's main chunk is
+-- close to Lua's limit of 200 locals, and these locals end with it.
+do
+  local function recordArea()
+    local record = area("record", "The memory records of the open cheat table: the address list. A record is found by its id or its description and comes back as a record object; scripts and groups are switched on and off, value records also read and write their value as the address list does (its type, hex display and drop-down list apply). A record object stays bound to its record: when the record is deleted or the table is replaced (new, opened, restored), its functions return `nil` and an `ME-6009` error.")
+    local RECORD_DOC = "manifold.record.Record."
+    local cache = setmetatable({}, { __mode = "v" })
+    local identities = setmetatable({}, { __mode = "k" })
+    local KINDS = { value = true, script = true, group = true }
+
+    native.docDefine(nil, "manifold.record.Record", {
+      kind = "class",
+      title = "Record objects",
+      doc = "`find`, `all`, `selected` and `create` return record objects: dot calls only, read-only, unknown names raise. Two objects of the same record are the same object.",
+    })
+    local METHODS = {
+      info = { returns = "table", doc = "What the record is: `{ id, description, kind, active, children, hotkeys, parent, comment }`, `kind` being `value`, `script` or `group`; a value record adds `type` (`byte`, `2bytes`, `4bytes`, `8bytes`, `float`, `double`, `string`, `bytes`, `binary`, `pointer` or its custom type's name), `address` (the expression as written), `offsets` (how many pointer offsets), `resolved` (the address it points to now, when it resolves) and `hex`." },
+      getDescription = { returns = "string", doc = "The record's description, as the address list shows it." },
+      setDescription = { params = { { name = "description", type = "string" } }, returns = "boolean", doc = "Changes the record's description." },
+      getValue = { returns = "value", doc = "Reads the record's value: a number for number types shown as numbers (an integer for the integer types), otherwise the text as the address list shows it (hex, a drop-down entry, a string, bytes). The text comes second in either case. `nil` and an error when the address does not resolve or cannot be read; `ME-6010` for scripts and groups." },
+      setValue = { params = { { name = "value", type = "number|string" } }, returns = "boolean", doc = "Writes the record's value, as typing it into the address list does: a number, or a text in the record's own form (hex digits for a hex record, a drop-down entry's value or description, a string). A frozen record keeps the new value. `nil` and an error when it cannot be written." },
+      isActive = { returns = "boolean", doc = "Whether the record is switched on: an enabled script, a frozen value, an active group." },
+      setActive = { params = { { name = "active", type = "boolean" } }, returns = "boolean", doc = "Switches the record on or off, as its box in the address list does: a script runs its `[ENABLE]` or `[DISABLE]` part, a value freezes or thaws, a group follows its options for its children. Inside a script's coroutine with asynchronous activation on, it waits for the activation without blocking the program. `nil` and the script's error when it fails." },
+      toggle = { returns = "boolean", doc = "Switches the record to the other state and returns the new one; `nil` and an error when that fails." },
+      getAddress = { returns = "integer", doc = "The address the record's value is at now (pointers followed). `nil` and an error when it does not resolve; `ME-6010` for scripts and groups." },
+      children = { returns = "table", doc = "The records directly below this one, in the address list's order." },
+      parent = { returns = "record", doc = "The record this one is below, or nil at the top level." },
+      remove = { returns = "boolean", doc = "Deletes the record and the records below it from the table, switching it off first when it is on." },
+    }
+    for _, name in ipairs({ "info", "getDescription", "setDescription", "getValue", "setValue", "isActive", "setActive", "toggle", "getAddress", "children", "parent", "remove" }) do
+      native.docDefine(nil, RECORD_DOC .. name, METHODS[name])
+    end
+    native.docDefine(nil, RECORD_DOC .. "id", { kind = "field", type = "integer", doc = "The record's id, the number Cheat Engine tables store with it." })
+
+    local recordObject
+    local function failure(value, code, message)
+      if value == nil then
+        return result(nil, code, message)
+      end
+      return value
+    end
+
+    recordObject = function(id)
+      local identity = native.recordIdentity()
+      local key = identity .. ":" .. id
+      if cache[key] then
+        return cache[key]
+      end
+      local prefix = ("record(%d)"):format(id)
+      local proxy, members = strict(prefix)
+      local function method(name, body)
+        bind(proxy, prefix .. "." .. name, members, name, METHODS[name], body, RECORD_DOC .. name)
+      end
+      method("info", function()
+        return failure(native.recordInfo(id, identity))
+      end)
+      method("getDescription", function()
+        local info, code, message = native.recordInfo(id, identity)
+        if not info then
+          return result(nil, code, message)
+        end
+        return info.description
+      end)
+      method("setDescription", function(description)
+        return failure(native.recordSetDescription(id, identity, description))
+      end)
+      method("getValue", function()
+        local value, text, message = native.recordGet(id, identity)
+        if value == nil then
+          return result(nil, text, message)
+        end
+        return value, text
+      end)
+      method("setValue", function(value)
+        return failure(native.recordSet(id, identity, value))
+      end)
+      method("isActive", function()
+        return failure(native.recordIsActive(id, identity))
+      end)
+)MLUA"),
+            std::string_view(R"MLUA(      method("setActive", function(active)
+        return failure(native.recordSetActive(id, identity, active))
+      end)
+      method("toggle", function()
+        local active, code, message = native.recordIsActive(id, identity)
+        if active == nil then
+          return result(nil, code, message)
+        end
+        local done, failed, why = native.recordSetActive(id, identity, not active)
+        if not done then
+          return result(nil, failed, why)
+        end
+        return (native.recordIsActive(id, identity))
+      end)
+      method("getAddress", function()
+        return failure(native.recordAddress(id, identity))
+      end)
+      method("children", function()
+        local ids, code, message = native.recordChildren(id, identity)
+        if not ids then
+          return result(nil, code, message)
+        end
+        local list = {}
+        for index, child in ipairs(ids) do
+          list[index] = recordObject(child)
+        end
+        return list
+      end)
+      method("parent", function()
+        local info, code, message = native.recordInfo(id, identity)
+        if not info then
+          return result(nil, code, message)
+        end
+        return info.parent and recordObject(info.parent) or nil
+      end)
+      method("remove", function()
+        return failure(native.recordRemove(id, identity))
+      end)
+      rawset(members, "id", id)
+      cache[key] = proxy
+      identities[proxy] = identity
+      return proxy
+    end
+
+    local function objects(ids)
+      local list = {}
+      for index, id in ipairs(ids) do
+        list[index] = recordObject(id)
+      end
+      return list
+    end
+
+    define(record, "find", {
+      params = { { name = "record", type = "integer|string" } },
+      returns = "record",
+      doc = "The record with this id, or the first one with this description (as written in the address list). `nil` and an `ME-6008` error when there is none.",
+    }, function(key)
+      local id, code, message = native.recordFind(key)
+      if not id then
+        return result(nil, code, message)
+      end
+      return recordObject(id)
+    end)
+
+    define(record, "all", {
+      returns = "table",
+      doc = "Every record of the table, groups and their children included, in the address list's order from top to bottom.",
+    }, function()
+      return objects(native.recordAll())
+    end)
+
+    define(record, "selected", {
+      returns = "table",
+      doc = "The records selected in the address list, in the order they were selected.",
+    }, function()
+      return objects(native.recordSelected())
+    end)
+
+    define(record, "create", {
+      params = { { name = "options", type = "table", keys = { kind = "string", description = "string", address = "string", type = "string", script = "string", parent = "any" } } },
+      returns = "record",
+      doc = "Adds a record at the end of the table, or below `options.parent` (a record object or id). `kind` is `value` (the default), `script` or `group`; a value record takes `address` (an address expression, like in the address list) and `type` (as `info` names them; `4bytes` by default), a script record takes `script` (Auto Assembler text with `[ENABLE]` and `[DISABLE]`).",
+    }, function(options)
+      local kind = options.kind or "value"
+      if not KINDS[kind] then
+        misuse(('manifold.record.create: options.kind must be "value", "script" or "group", got %q'):format(tostring(kind)))
+      end
+      if options.type ~= nil and kind ~= "value" then
+        misuse("manifold.record.create: options.type is for value records")
+      end
+      if options.script ~= nil and kind ~= "script" then
+        misuse("manifold.record.create: options.script is for script records")
+      end
+      local parentId, parentIdentity
+      if options.parent ~= nil then
+        if math.type(options.parent) == "integer" then
+          parentId, parentIdentity = options.parent, native.recordIdentity()
+        elseif identities[options.parent] then
+          parentId, parentIdentity = options.parent.id, identities[options.parent]
+        else
+          misuse("manifold.record.create: options.parent must be a record object or a record id, got " .. kindOf(options.parent))
+        end
+      end
+      local ok, id, code, message = pcall(native.recordCreate, kind, options.description or "", kind == "script" and options.script or options.address, options.type, parentId, parentIdentity)
+      if not ok then
+        misuse("manifold.record.create: " .. tostring(id))
+      end
+      if not id then
+        return result(nil, code, message)
+      end
+      return recordObject(id)
+    end)
+  end
+  recordArea()
+end
+
+local errors = area("error","Error objects and protected calls. An error object is `{ code, message, where, traceback }`; `tostring` gives `where: message (code)`.")
 
 local function fromRaised(problem, traceback)
   if isError(problem) then
@@ -6266,8 +6462,7 @@ local ceNameUnlookup = rawget(_G, "unregisterStructureNameLookup")
 local ceDissector = rawget(_G, "registerStructureDissectOverride")
 local ceUndissector = rawget(_G, "unregisterStructureDissectOverride")
 
-)MLUA"),
-            std::string_view(R"MLUA(local symbol = area("symbol", "Symbols that address expressions, the disassembler and Auto Assembler scripts know. A registered symbol belongs to the opened process: closing it or opening another one removes it, so a module registers its symbols again from a `processOpened` handler or when it resolves.")
+local symbol = area("symbol", "Symbols that address expressions, the disassembler and Auto Assembler scripts know. A registered symbol belongs to the opened process: closing it or opening another one removes it, so a module registers its symbols again from a `processOpened` handler or when it resolves.")
 
 define(symbol, "register", {
   params = {
@@ -6305,7 +6500,8 @@ end, ceSymbolUnlookup)
 define(symbol, "addResolver", {
   params = { { name = "resolver", type = "function" }, KEY_OPTION },
   returns = "id",
-  doc = "Calls `resolver(name)` for a name that is neither a module, an export nor a registered symbol; it returns an address or nil. Resolvers are asked in the order they were added, and the first address wins. An error in a resolver is logged once." .. KEY_TEXT,
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Calls `resolver(name)` for a name that is neither a module, an export nor a registered symbol; it returns an address or nil. Resolvers are asked in the order they were added, and the first address wins. An error in a resolver is logged once." .. KEY_TEXT,
 }, function(resolver, options)
   return addSymbolResolver(resolver, options)
 end)
@@ -6539,8 +6735,7 @@ define(unreal, "configure", {
     } },
   },
   returns = "true, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Changes how the tool works; keys that are left out keep their value, and the settings last until the program closes, so an autorun script sets them once. `autoStart` (true): resolve when an Unreal game is opened. `dissect`, `names`, `symbols`, `types` (all true): Structure Dissect fields, structure names, the `<Type>_<Property>` and `GObjects` symbols, the custom types. For a game the search does not find: `namePool` (the FNamePool, or with `legacyNames = true` the TNameEntryArray of UE 4.22 and older) and `objectArray` (FUObjectArray or its ObjObjects) as addresses or expressions, `layout` as a table of offsets that replace what the probes find (`index`, `class`, `name`, `outer`, `super`, `childProperties`, `structSize`, `children`, `childNext`, `functionFlags`, `fField`, `fieldClass`, `fieldName`, `next`, `offset`, `size`, `extra`, `itemSize`, `itemOffset`), and `patterns = { names = {...}, objects = {...} }` searched before the built-in search. " .. PATTERN_TEXT .. " `false` clears an address, the layout or the patterns. A change to the addresses, layout or patterns applies at the next `start`.",
+  doc = "Changes how the tool works; keys that are left out keep their value, and the settings last until the program closes, so an autorun script sets them once. `autoStart` (true): resolve when an Unreal game is opened. `dissect`, `names`, `symbols`, `types` (all true): Structure Dissect fields, structure names, the `<Type>_<Property>` and `GObjects` symbols, the custom types. For a game the search does not find: `namePool` (the FNamePool, or with `legacyNames = true` the TNameEntryArray of UE 4.22 and older) and `objectArray` (FUObjectArray or its ObjObjects) as addresses or expressions, `layout` as a table of offsets that replace what the probes find (`index`, `class`, `name`, `outer`, `super`, `childProperties`, `structSize`, `children`, `childNext`, `functionFlags`, `fField`, `fieldClass`, `fieldName`, `next`, `offset`, `size`, `extra`, `itemSize`, `itemOffset`), and `patterns = { names = {...}, objects = {...} }` searched before the built-in search. " .. PATTERN_TEXT .. " `false` clears an address, the layout or the patterns. A change to the addresses, layout or patterns applies at the next `start`.",
 }, function(options)
   return result(native.unrealConfigure(options))
 end)
@@ -6554,7 +6749,8 @@ end)
 
 define(unreal, "layout", {
   returns = "table of offsets, or nil, error",
-  doc = "The layout the tool found: the object array items (`itemSize`, `itemOffset`, `chunked`), UObject (`index`, `class`, `name`, `outer`), UStruct (`super`, `childProperties`, `structSize`, `children`, `childNext`, `functionFlags`) and the properties (`fField`, `fieldClass`, `fieldName`, `next`, `offset`, `size`, `extra`, `component` 4 or 8 for float or double vectors). The keys are the ones `configure{ layout = ... }` takes.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "The layout the tool found: the object array items (`itemSize`, `itemOffset`, `chunked`), UObject (`index`, `class`, `name`, `outer`), UStruct (`super`, `childProperties`, `structSize`, `children`, `childNext`, `functionFlags`) and the properties (`fField`, `fieldClass`, `fieldName`, `next`, `offset`, `size`, `extra`, `component` 4 or 8 for float or double vectors). The keys are the ones `configure{ layout = ... }` takes.",
 }, function()
   return result(native.unrealLayout())
 end)
@@ -6809,8 +7005,7 @@ end)
 define(unreal, "claims", {
   params = { { name = "address", type = "any" } },
   returns = "boolean",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Whether the tool names the address itself (a live object or a remembered array), for other dissect scripts that step aside for Unreal objects. Never raises, false before it is ready.",
+  doc = "Whether the tool names the address itself (a live object or a remembered array), for other dissect scripts that step aside for Unreal objects. Never raises, false before it is ready.",
 }, function(address)
   return native.unrealClaims(address) == true
 end)
@@ -6828,7 +7023,8 @@ end)
 define(rtti, "object", {
   params = { { name = "address", type = "address" } },
   returns = "`{ address, start, offset, class, decorated, vtable, module, viaVirtualBase }` or nil, or nil, error",
-  doc = "The object whose virtual function table pointer is stored at the address. `start` is where the complete object starts, which is below the address when it holds a base class's table pointer; `viaVirtualBase` says the object starts with a virtual base table and was found through it.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "The object whose virtual function table pointer is stored at the address. `start` is where the complete object starts, which is below the address when it holds a base class's table pointer; `viaVirtualBase` says the object starts with a virtual base table and was found through it.",
 }, function(address)
   return many(native.rttiObject(address))
 end)
@@ -7005,8 +7201,7 @@ define(dotnet, "load", {
   returns = "true, or nil, error",
   doc = "Starts the .NET helper and reads the classes of the opened process's .NET runtime, unless that is done already. Takes a moment for a large game. `ME-4101` when the process has no .NET runtime, `ME-4104` when a Mono or IL2CPP runtime is loaded instead, `ME-4103` when the helper fails.",
 }, function()
-)MLUA"),
-            std::string_view(R"MLUA(  return result(native.dotnetLoad())
+  return result(native.dotnetLoad())
 end)
 
 define(dotnet, "unload", {
@@ -7046,7 +7241,8 @@ define(dotnet, "classes", {
 end)
 
 define(dotnet, "class", {
-  params = { { name = "name", type = "string" } },
+)MLUA"),
+            std::string_view(R"MLUA(  params = { { name = "name", type = "string" } },
   returns = "`{ name, namespace, image, parent, handle, module, token, generic, fields, statics, methods }` or nil, or nil, error",
   doc = "A class with its members. `fields` lists the instance fields declared by the class (not its parents') as `{ name, type, typeCode, offset, valueSize, typeHandle }`, the offset counted from the object's start; `statics` lists the static fields as `{ name, type, typeCode, address }`, without `address` while the runtime has made no storage for it; `methods` lists `{ name, address, handle, token, params, static }`, `address` only for a method the runtime has compiled. nil when no class has the name.",
 }, function(name)
@@ -7230,8 +7426,7 @@ define(doc, "find", {
   if options.limit ~= nil and options.limit < 0 then
     misuse("manifold.doc.find: options.limit must be 0 or more")
   end
-)MLUA"),
-            std::string_view(R"MLUA(  return docResult(native.docFind(query, options.limit or 50, options.kind or ""))
+  return docResult(native.docFind(query, options.limit or 50, options.kind or ""))
 end)
 
 define(doc, "annotations", {
@@ -7274,7 +7469,8 @@ do
   end)
 end
 
-local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
+)MLUA"),
+            std::string_view(R"MLUA(local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
 
 local function subarea(parent, name, summary)
   local path = parent.path .. "." .. name
@@ -7499,8 +7695,7 @@ local function addTo(path, parentEntry, kind, options)
     misuse(('%s: argument 1 (kind) must be one of "%s", got %q'):format(path, table.concat(WIDGET_KINDS, '", "'), kind))
   end
   if parentEntry.kind ~= "window" and not CONTAINERS[parentEntry.kind] then
-)MLUA"),
-            std::string_view(R"MLUA(    misuse(("%s: a %s holds no widgets; add to a window, row, column, grid, section, tab or split"):format(path, parentEntry.kind))
+    misuse(("%s: a %s holds no widgets; add to a window, row, column, grid, section, tab or split"):format(path, parentEntry.kind))
   end
   if parentEntry.kind == "tabs" and kind ~= "tab" then
     misuse(path .. ": tabs hold tab widgets only")
@@ -7549,7 +7744,8 @@ local WIDGET_DOC = "manifold.ui.window.Widget."
 
 widgetObject = function(entry)
   local prefix = ("widget(%s %d)"):format(entry.kind, entry.id)
-  local proxy, members = strict(prefix)
+)MLUA"),
+            std::string_view(R"MLUA(  local proxy, members = strict(prefix)
   local function method(name, spec, body)
     bind(proxy, prefix .. "." .. name, members, name, spec, body, WIDGET_DOC .. name)
   end
@@ -7773,8 +7969,7 @@ define(window, "create", {
     key = options.key,
     position = options.position,
     x = options.x,
-)MLUA"),
-            std::string_view(R"MLUA(    y = options.y,
+    y = options.y,
   }
   for _, key in ipairs(WINDOW_FLAG_KEYS) do
     props[key] = options[key]
@@ -7802,7 +7997,8 @@ local WINDOW_METHOD_DOCS = {
   add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `grid`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `radio`, `color`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object)." },
   clear = { returns = "boolean", doc = "Removes every widget of the window." },
   remove = { returns = "boolean", doc = "Removes the window and its widgets for good." },
-  update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, opacity (`opacity`, `inactiveOpacity`), size limits and behaviour (`minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `resizable`, `autoSize`, `scrollbar`, `topmost`, `modal`), update interval or handlers." },
+)MLUA"),
+            std::string_view(R"MLUA(  update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, opacity (`opacity`, `inactiveOpacity`), size limits and behaviour (`minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `resizable`, `autoSize`, `scrollbar`, `topmost`, `modal`), update interval or handlers." },
   show = { returns = "boolean", doc = "Shows the window again after the user or `hide` closed it." },
   hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
   focus = { returns = "boolean", doc = "Shows the window and brings it to the front." },
@@ -7895,8 +8091,7 @@ local callFormHandler
 
 local FORM_VALUE_KINDS = { checkbox = true, input = true, number = true, slider = true, combo = true, radio = true, color = true, table = true, tree = true, progress = true }
 
-)MLUA"),
-            std::string_view(R"MLUA(local function formResolver(path, handlers)
+local function formResolver(path, handlers)
   return function(where, key, value)
     if type(value) ~= "string" then
       misuse(("%s: %s.%s must be the name of a handler, got %s"):format(path, where, key, kindOf(value)))
@@ -7940,7 +8135,8 @@ local function formHeader(path, spec, handlers)
     misuse(("%s: the form is from a newer Manifold (form = %d)"):format(path, spec.form))
   end
   if type(spec.title) ~= "string" then
-    misuse(("%s: form.title must be a string, got %s"):format(path, kindOf(spec.title)))
+)MLUA"),
+            std::string_view(R"MLUA(    misuse(("%s: form.title must be a string, got %s"):format(path, kindOf(spec.title)))
   end
   local resolve = formResolver(path, handlers)
   return formWindowOptions(path, spec, "form", resolve, FORM_SKIP.file), resolve
@@ -8198,8 +8394,7 @@ local function buildForm(path, spec, handlers, folder)
   local wiring = { rules = {}, items = {} }
   local ok, problem = pcall(function()
     for _, modal in ipairs(modals) do
-)MLUA"),
-            std::string_view(R"MLUA(      local handle = rawget(window.members, "create")(modal.spec.title, modal.options)
+      local handle = rawget(window.members, "create")(modal.spec.title, modal.options)
       windows[#windows + 1] = handle
       rawset(modalMembers, modal.name, handle)
     end
@@ -8246,7 +8441,8 @@ end
 
 local function reloadForm(watch, start)
   if start then
-    watch.entry = uiEntries[watch.window.id]
+)MLUA"),
+            std::string_view(R"MLUA(    watch.entry = uiEntries[watch.window.id]
     watch.entry.onFormReload = function()
       reloadForm(watch)
     end
@@ -8447,8 +8643,7 @@ native.docDefine(nil, "manifold.ui.dialog.Dialog", {
   doc = "The dialog functions return at once; the dialog shows on top of the program and calls `onClose` with the answer when the user is done.",
 })
 native.docDefine(nil, "manifold.ui.dialog.Dialog.close", { returns = "boolean", doc = "Closes the dialog without an answer; `onClose` is not called." })
-)MLUA"),
-            std::string_view(R"MLUA(native.docDefine(nil, "manifold.ui.dialog.Dialog.id", { kind = "field", type = "integer", doc = "The dialog's number." })
+native.docDefine(nil, "manifold.ui.dialog.Dialog.id", { kind = "field", type = "integer", doc = "The dialog's number." })
 
 local dialog = subarea(ui, "dialog", "Dialogs on top of the program. They do not block the script: each takes `onClose`, which gets the answer, or nil when the user cancelled.")
 
@@ -8485,7 +8680,8 @@ define(dialog, "input", {
   doc = "Asks for a line of text, starting from `value`. `onClose(text)` gets the text, or nil.",
 }, function(text, options)
   options = options or {}
-  return openDialog("input", { text = text, title = options.title, value = options.value }, options.onClose)
+)MLUA"),
+            std::string_view(R"MLUA(  return openDialog("input", { text = text, title = options.title, value = options.value }, options.onClose)
 end)
 
 define(dialog, "choose", {
@@ -8722,8 +8918,7 @@ define(status, "add", {
   returns = "entry",
   doc = "Adds a status entry. Options: `icon`, `tooltip`, `color` (a theme name), `onClick(entry)`.",
 }, function(text, options)
-)MLUA"),
-            std::string_view(R"MLUA(  return addEntry("status", STATUS_KEYS, { text = text }, options)
+  return addEntry("status", STATUS_KEYS, { text = text }, options)
 end)
 
 local image = subarea(ui, "image", "Pictures for `image` widgets and canvas drawings.")
@@ -8760,7 +8955,8 @@ native.docDefine(nil, "manifold.ui.image.Image", { kind = "class", title = "Imag
 native.docDefine(nil, "manifold.ui.image.Image.remove", { returns = "boolean", doc = "Frees the picture; widgets and drawings that show it go blank." })
 native.docDefine(nil, "manifold.ui.image.Image.id", { kind = "field", type = "integer", doc = "The image's number." })
 native.docDefine(nil, "manifold.ui.image.Image.width", { kind = "field", type = "integer", doc = "Width in pixels." })
-native.docDefine(nil, "manifold.ui.image.Image.height", { kind = "field", type = "integer", doc = "Height in pixels." })
+)MLUA"),
+            std::string_view(R"MLUA(native.docDefine(nil, "manifold.ui.image.Image.height", { kind = "field", type = "integer", doc = "Height in pixels." })
 
 define(ui, "getMode", {
   returns = "table",
@@ -9033,8 +9229,7 @@ debug.getregistry()["Manifold.UiTick"] = function(now)
     if entry then
       if event.name == "dialog" then
         uiEntries[event.target] = nil
-)MLUA"),
-            std::string_view(R"MLUA(        forget(entry.owner, entry.id)
+        forget(entry.owner, entry.id)
         if entry.onDialog then
           callHandler(entry.onDialog, table.unpack(event, 1, event.n))
         end
@@ -9072,7 +9267,8 @@ local RULES = [[
 ## Schema
 
 1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`. An area may group its functions into sub-areas one level down (`manifold.ui.window`, `manifold.ui.dialog`).
-2. **Names.** Areas are lower-case nouns. Functions are lowerCamelCase: a lookup without side effects is named after what it returns (`process.module`, `log.channel`), everything else starts with a verb (`open`, `read`, `create`). Predicates start with `is` or `has` and return a boolean. Settings come in `get…`/`set…` pairs. The five log functions are named after their level. Constants are lowerCamelCase fields. There are no aliases and no capitalised duplicates.
+)MLUA"),
+            std::string_view(R"MLUA(2. **Names.** Areas are lower-case nouns. Functions are lowerCamelCase: a lookup without side effects is named after what it returns (`process.module`, `log.channel`), everything else starts with a verb (`open`, `read`, `create`). Predicates start with `is` or `has` and return a boolean. Settings come in `get…`/`set…` pairs. The five log functions are named after their level. Constants are lowerCamelCase fields. There are no aliases and no capitalised duplicates.
 3. **Calls use a dot.** `manifold.log.info("ready")`, never `manifold.log:info("ready")`. No function takes `self`, and the objects the API returns (channels) work the same way. A colon call raises an error that says so.
 4. **Arguments.** Required arguments come first, optional ones after them, and settings go into one `options` table at the end. A `?` after a name marks it optional. A missing, extra or wrongly typed argument and an unknown option key raise `ME-7007`, naming the function and the argument. Addresses are integers or address expressions such as `"game.exe+10"`.
 5. **Results.** A function that can fail while the script runs (no process, unreadable memory, unknown symbol) returns its value on success, or `true` when it has none, and `nil, error` on failure. It does not raise for those. Predicates never fail.
