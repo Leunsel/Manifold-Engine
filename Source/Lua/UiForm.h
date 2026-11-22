@@ -105,7 +105,22 @@ namespace Manifold::Lua
     {
         Standalone,
         FormFile,
+        OneFile, // the script as the editor shows it: the form table as kFormStandIn
     };
+
+    // A form kept inside its script: "local <Name> = { form = 1, ... }".
+    struct FormBlock
+    {
+        std::size_t Begin = 0; // the "local"
+        std::size_t End = 0;   // just after the closing brace
+        std::size_t Table = 0; // the opening brace
+        std::string Name;
+        int Line = 1;          // line of the opening brace
+    };
+
+    // What the editor shows in place of the form table: it builds an empty
+    // table, so the script stays valid Lua for highlighting and completion.
+    inline constexpr std::string_view kFormStandIn = "{ --[[ edited on the canvas ]] }";
 
     struct FormProblem
     {
@@ -156,5 +171,15 @@ namespace Manifold::Lua
 
     std::string FormSave(const FormDocument& form);
     bool FormLoad(std::string_view text, FormDocument& form, std::string& error, std::vector<std::string>* warnings = nullptr);
+
+    // One file: the form lives in its script as a block the editor owns.
+    std::string FormBlockText(const FormDocument& form, std::string_view name);
+    std::optional<FormBlock> FormFindBlock(std::string_view script);
+    std::string FormBlockChunk(std::string_view script);
+    bool FormLoadScript(std::string_view script, FormDocument& form, std::string& error, std::vector<std::string>* warnings = nullptr);
+    std::string FormScriptView(std::string_view script);
+    bool FormViewIntact(std::string_view view);
+    std::optional<std::string> FormComposeScript(std::string_view view, const FormDocument& form);
+    std::string FormConvertScript(std::string_view script);
     std::string FormScript(const FormDocument& form, FormScriptStyle style, std::string_view formFile = {});
 }

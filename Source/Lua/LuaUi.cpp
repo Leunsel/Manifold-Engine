@@ -8,6 +8,7 @@
 #include "Lua/LuaApi.h"
 #include "Lua/LuaArgs.h"
 #include "Lua/LuaEngine.h"
+#include "Lua/UiForm.h"
 #include "Lua/UiModel.h"
 
 #include "lua.hpp"
@@ -711,6 +712,23 @@ namespace Manifold::Lua
             return 2;
         }
 
+        // The form table a script holds ("local form = { form = 1, ... }") as
+        // "return { ... }", padded to the script's own line numbers; nil when
+        // the script holds none.
+        int UiFormBlock(lua_State* state)
+        {
+            std::size_t size = 0;
+            const char* text = luaL_checklstring(state, 1, &size);
+            const std::string chunk = FormBlockChunk(std::string_view(text, size));
+            if (chunk.empty())
+            {
+                lua_pushnil(state);
+                return 1;
+            }
+            lua_pushlstring(state, chunk.data(), chunk.size());
+            return 1;
+        }
+
         int UiWatchFile(lua_State* state)
         {
             const int window = static_cast<int>(luaL_checkinteger(state, 1));
@@ -937,6 +955,7 @@ namespace Manifold::Lua
             { "uiForgetOwner", &UiForgetOwner },
             { "uiImageLoad", &UiImageLoad },
             { "uiFormRead", &UiFormRead },
+            { "uiFormBlock", &UiFormBlock },
             { "uiWatch", &UiWatchFile },
             { "uiUnwatch", &UiUnwatchFile },
             { "uiImageRemove", &UiImageRemove },

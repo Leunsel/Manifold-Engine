@@ -22,8 +22,9 @@ namespace Manifold
 namespace Manifold::UI
 {
     // Lays out a manifold.ui window by hand and writes the Lua around it: the
-    // layout goes to a .form.lua file that manifold.ui.form.load builds, or
-    // into a script that builds the window with plain manifold.ui calls.
+    // form lives in its script as a table that manifold.ui.form.build makes
+    // the window from, next to the handlers' code (one file). Older forms in
+    // a .form.lua file with a linked script still open and can be converted.
     class FormEditorWindow : public ToolWindowBase
     {
     public:
@@ -130,7 +131,9 @@ namespace Manifold::UI
         void ToggleTry();
         void RunScript();
 
-        void Reset(Lua::FormDocument form, std::filesystem::path path);
+        void Reset(Lua::FormDocument form, std::filesystem::path path, bool oneFile);
+        void ConvertToOneFile();
+        void ExportStandalone();
         void AskThen(Pending pending);
         void DoPending();
         bool Save(bool as);
@@ -176,6 +179,13 @@ namespace Manifold::UI
         bool m_chipDragged = false;
         std::map<std::string, ImVec2> m_chipPlaces;
         std::string m_scriptDisk;
+        // ∑ One file: m_path is the script itself, holding the form as
+        // "local form = { ... }"; ScriptText shows that table as
+        // Lua::kFormStandIn, and saving puts the table back. Otherwise
+        // (an older .form.lua) the handlers live in a linked script.
+        bool m_oneFile = true;
+        std::string m_fileDisk; // one file: the whole file as last read or written
+        double m_lockNoteUntil = 0.0;
         std::filesystem::path m_scriptPath;
         std::uint64_t m_scriptStamp = 0;
         double m_nextScriptPoll = 0.0;

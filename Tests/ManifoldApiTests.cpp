@@ -69,7 +69,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 16 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 17 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -1939,6 +1939,127 @@ return M
             CHECK(!FindWindow(model, "Sure?") && !FindWindow(model, "Main"));
         }
 
+        void UiFormOneFile(Engine& engine)
+        {
+            // The document: the form as a table in its script, the editor's view of it, and back.
+            constexpr std::size_t npos = std::string::npos;
+            Lua::FormDocument form = SampleForm();
+            const std::string view = Lua::FormScript(form, Lua::FormScriptStyle::OneFile);
+            CHECK(Lua::FormViewIntact(view));
+            CHECK(view.find("window, w = ui.form.build(form, handlers)") != npos);
+            CHECK(view.find("function handlers.speedChanged(") != npos);
+            const std::optional<std::string> file = Lua::FormComposeScript(view, form);
+            CHECK(file.has_value());
+            if (!file)
+                return;
+            CHECK(file->find(std::string(Lua::kFormStandIn)) == npos);
+            CHECK(file->find("local form = {\n  form = 1,\n") != npos);
+            CHECK(file->find("script =") == npos && file->find("fragment") == npos);
+            const std::optional<Lua::FormBlock> block = Lua::FormFindBlock(*file);
+            CHECK(block && block->Name == "form" && block->Line == 4);
+            Lua::FormDocument loaded;
+            std::string error;
+            std::vector<std::string> notes;
+            CHECK_MSG(Lua::FormLoadScript(*file, loaded, error, &notes) && notes.empty(), error + (notes.empty() ? std::string() : " / " + notes.front()));
+            CHECK(Lua::FormSave(loaded) == Lua::FormSave(form));
+            CHECK(Lua::FormScriptView(*file) == view);
+            CHECK(Lua::FormComposeScript(Lua::FormScriptView(*file), loaded) == *file);
+
+            // own code around the table is kept; look-alikes are not the form
+            const std::string own = "local ui = manifold.ui\nlocal other = { form = \"x}\" }\n--[[ local form = { form = 1 } ]]\n" + *file + "\nprint('done') -- }\n";
+            const std::optional<Lua::FormBlock> ownBlock = Lua::FormFindBlock(own);
+            CHECK(ownBlock && ownBlock->Line == 7);
+            const std::string ownView = Lua::FormScriptView(own);
+            CHECK(Lua::FormViewIntact(ownView) && ownView.find("local other = { form = \"x}\" }") != npos && ownView.find("print('done') -- }") != npos);
+            CHECK(Lua::FormComposeScript(ownView, loaded) == own);
+            {
+                // float fields come out as written: 0.4, not 0.4000000059604645
+                Lua::FormDocument fraction = Lua::NewForm("Fraction");
+                const int bar = Lua::FormAdd(fraction, Lua::UiKind::Progress, fraction.Window);
+                Lua::FormSetProp(*fraction.Model.Find(bar), "value", "0.4");
+                const std::string text = Lua::FormSave(fraction);
+                CHECK_MSG(text.find("value = 0.4") != npos && text.find("0.4000") == npos, text);
+            }
+            CHECK(!Lua::FormViewIntact(view + "\nlocal again = " + std::string(Lua::kFormStandIn) + "\n"));
+            CHECK(!Lua::FormViewIntact("local ui = manifold.ui\n"));
+            CHECK(!Lua::FormComposeScript("print(1)\n", form).has_value());
+            Lua::FormDocument none;
+            CHECK(!Lua::FormLoadScript("local x = { 1, 2 }\n", none, error) && error.find("no form table") != npos);
+            CHECK(!Lua::FormLoadScript("local ui = manifold.ui\n\nlocal form = { form = 1, title = = }\n", none, error) && error.find(":3:") != npos);
+
+            // stubs go above form.build in the view
+            const Lua::FormMerge merge = Lua::FormMergeScript("local ui = manifold.ui\nlocal form = " + std::string(Lua::kFormStandIn) + "\nlocal window, w\nlocal handlers = {}\n\nwindow, w = ui.form.build(form, handlers)\n", form);
+            CHECK(merge.Anchored && !merge.Added.empty() && Lua::FormViewIntact(merge.Text));
+            CHECK(merge.Text.find("function handlers.speedChanged(") < merge.Text.find("ui.form.build("));
+
+            // an older script that loads a .form.lua file
+            const std::string old = "local ui = manifold.ui\n\nlocal window, w\nlocal handlers = {}\n\nfunction handlers.godChanged(value, widget)\n    print(value)\nend\n\nwindow, w = ui.form.load(\"Player.form.lua\", handlers, { reload = false })\n";
+            const std::string converted = Lua::FormConvertScript(old);
+            CHECK_MSG(Lua::FormViewIntact(converted), converted);
+            CHECK(converted.find("window, w = ui.form.build(form, handlers, { reload = false })") != npos);
+            CHECK(converted.find("    print(value)\nend\n") != npos);
+            CHECK(converted.rfind("local ui = manifold.ui\n\n-- The form", 0) == 0);
+            CHECK(Lua::FormConvertScript("print('no form here')\n").empty());
+
+            // The runtime: the script builds its window from its own table, and saving the file rebuilds it.
+            Lua::UiModel& model = engine.Lua().Ui();
+            const std::filesystem::path folder = std::filesystem::temp_directory_path() / ("manifold-form-onefile-" + std::to_string(::GetCurrentProcessId()));
+            std::error_code ignored;
+            std::filesystem::create_directories(folder, ignored);
+            const std::filesystem::path scriptFile = folder / "Trainer.lua";
+            const auto write = [](const std::filesystem::path& path, std::string_view text) { std::ofstream(path, std::ios::binary | std::ios::trunc) << text; };
+            Lua::FormDocument trainer = Lua::NewForm("One File");
+            trainer.Key = "one file probe";
+            const int box = Lua::FormAdd(trainer, Lua::UiKind::Checkbox, trainer.Window);
+            trainer.Meta[box].Name = "god";
+            trainer.Meta[box].Handlers["onChange"] = "godChanged";
+            const int button = Lua::FormAdd(trainer, Lua::UiKind::Button, trainer.Window);
+            trainer.Meta[button].Name = "go";
+            trainer.Meta[button].Handlers["onClick"] = "goClicked";
+            std::string script = Lua::FormComposeScript(Lua::FormScript(trainer, Lua::FormScriptStyle::OneFile), trainer).value_or(std::string());
+            script = Lua::FormReplaceBody(script, "goClicked", "    oneFileClicks = (oneFileClicks or 0) + 1\n").value_or(script);
+            script += "oneFileWindow, oneFileWidgets = window, w\n"
+                      "local extraForm = { form = 1, title = \"One File Extra\", children = {} }\n"
+                      "oneFileExtra = ui.form.build(extraForm)\n";
+            write(scriptFile, script);
+            const Status ran = engine.Lua().RunFile(scriptFile);
+            CHECK_MSG(ran.Ok(), ran.Text + "\n" + script);
+            const std::string shown = WideToUtf8(scriptFile.wstring());
+            CHECK_EQ(model.Watching(shown), 1);
+            const Lua::UiNode* probe = FindWindow(model, "One File");
+            CHECK(probe && probe->Children.size() == 2 && FindWindow(model, "One File Extra"));
+
+            trainer.Model.Find(trainer.Window)->Title = "One File Two";
+            Lua::FormAdd(trainer, Lua::UiKind::Text, trainer.Window);
+            const std::string saved = Lua::FormComposeScript(Lua::FormScriptView(script), trainer).value_or(std::string());
+            CHECK(saved.find("oneFileClicks = (oneFileClicks or 0) + 1") != npos);
+            write(scriptFile, saved);
+            engine.Lua().Tick(8000.0);
+            probe = FindWindow(model, "One File Two");
+            CHECK(probe && probe->Children.size() == 3);
+            CHECK(!FindWindow(model, "One File") && FindWindow(model, "One File Extra"));
+            int go = 0;
+            {
+                std::string result;
+                engine.Lua().RunWithResult("return tostring(oneFileWidgets.go.id)", "one file ids", result);
+                go = static_cast<int>(ParseDecimal(result).value_or(0));
+            }
+            CHECK(go > 0);
+            model.Post({ go, "click", {} });
+            engine.Lua().Tick(8001.0);
+            LuaCheck(engine, "one file reload", R"LUA(
+                if not oneFileWindow.isOpen() then return "window closed" end
+                if oneFileWidgets.go.kind ~= "button" then return "widgets table" end
+                if oneFileClicks ~= 1 then return "the script's handler ran " .. tostring(oneFileClicks) .. " times" end
+                return "ok")LUA");
+
+            CHECK(engine.Lua().Run("", "@" + shown).Ok());
+            CHECK(!FindWindow(model, "One File Two") && !FindWindow(model, "One File Extra"));
+            CHECK_EQ(model.Watching(shown), 0);
+            std::filesystem::remove(scriptFile, ignored);
+            std::filesystem::remove(folder, ignored);
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -2087,6 +2208,7 @@ return M
         UiFormLinks(engine);
         UiFormCanvas(engine);
         UiFormModals(engine);
+        UiFormOneFile(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 16
+local API_VERSION = 17
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -2879,10 +2879,17 @@ local function buildForm(path, spec, handlers, folder)
   return made, widgets, members, modalTable, modalMembers
 end
 
-local function readFormFile(file, folder)
+local function readFormFile(file, folder, block)
   local text, shown, message = native.uiFormRead(file, folder)
   if not text then
     return nil, shown, message
+  end
+  if block then
+    -- ∑ a script that holds its form: only the "local form = { ... }" table counts
+    text = native.uiFormBlock(text)
+    if not text then
+      return nil, "ME-7014", shown .. " holds no form table (local form = { form = 1, ... })"
+    end
   end
   local chunk, problem = load(text, "@" .. shown, "t", {})
   if not chunk then
@@ -2895,7 +2902,15 @@ local function readFormFile(file, folder)
   return spec, shown
 end
 
-local function reloadForm(watch)
+local function reloadForm(watch, start)
+  if start then
+    watch.entry = uiEntries[watch.window.id]
+    watch.entry.onFormReload = function()
+      reloadForm(watch)
+    end
+    native.uiWatch(watch.window.id, watch.file)
+    return
+  end
   if uiEntries[watch.window.id] ~= watch.entry then
     return
   end
@@ -2909,7 +2924,7 @@ local function reloadForm(watch)
     return update
   end
 
-  local spec, shown, message = readFormFile(watch.file)
+  local spec, shown, message = readFormFile(watch.file, nil, watch.block)
   local options, modals
   if spec then
     local ok, checked, list = pcall(checkForm, "manifold.ui.form.load", spec, watch.handlers)
@@ -3001,15 +3016,28 @@ define(form, "build", {
   params = {
     { name = "form", type = "table" },
     { name = "handlers", type = "table", optional = true },
+    { name = "options", type = "table", optional = true, keys = { reload = "boolean", onReload = "function" } },
   },
   returns = "window",
-  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like." .. " `modals` lists modal forms: window tables like the form itself with a `name`, each made as a modal window (`modal = true`) that waits hidden; `modals.<name>.show()` opens it. A button's `opens = \"<name>\"` opens that modal when clicked and `closes = true` hides the window it is in; both run before the button's `onClick`." .. " The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty.",
-}, function(spec, handlers)
+  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like." .. " `modals` lists modal forms: window tables like the form itself with a `name`, each made as a modal window (`modal = true`) that waits hidden; `modals.<name>.show()` opens it. A button's `opens = \"<name>\"` opens that modal when clicked and `closes = true` hides the window it is in; both run before the button's `onClick`." .. " The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty." .. " A script file that holds its form as `local form = { form = 1, ... }` (as the Form Editor writes it) gets a live reload like `load`: saving the script rebuilds the window's widgets from the table in the file, with the same handlers; the handlers' own code changes only when the script runs again. `options.reload = false` switches that off, `options.onReload(window, widgets, modals)` runs after each rebuild.",
+}, function(spec, handlers, options)
+  options = options or {}
   local info = callerFrame()
   local source = info and info.source or ""
-  local folder = source:sub(1, 1) == "@" and source:sub(2):match("^(.*[\\/])") or nil
-  local made, widgets, _, modals = buildForm("manifold.ui.form.build", spec, handlers, folder)
-  return made, widgets, modals
+  local file = source:sub(1, 1) == "@" and source:sub(2) or nil
+  local folder = file and file:match("^(.*[\\/])") or nil
+  local made, widgets, members, modalTable, modalMembers = buildForm("manifold.ui.form.build", spec, handlers, folder)
+  if file and options.reload ~= false then
+    -- ∑ only when the file's form table is this form (a script may build others)
+    local text = native.uiFormRead(file)
+    local chunk = text and native.uiFormBlock(text)
+    chunk = chunk and load(chunk, "=form", "t", {})
+    local ok, found = pcall(chunk or error)
+    if ok and type(found) == "table" and found.title == spec.title then
+      reloadForm({ window = made, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = file, block = true, handlers = handlers, folder = folder, onReload = options.onReload }, true)
+    end
+  end
+  return made, widgets, modalTable
 end)
 
 define(form, "load", {
@@ -3032,12 +3060,7 @@ define(form, "load", {
   local formFolder = shown:match("^(.*[\\/])")
   local made, widgets, members, modalTable, modalMembers = buildForm("manifold.ui.form.load", spec, handlers, formFolder)
   if options.reload ~= false then
-    local entry = uiEntries[made.id]
-    local watch = { window = made, entry = entry, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = shown, handlers = handlers, folder = formFolder, onReload = options.onReload }
-    entry.onFormReload = function()
-      reloadForm(watch)
-    end
-    native.uiWatch(made.id, shown)
+    reloadForm({ window = made, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = shown, handlers = handlers, folder = formFolder, onReload = options.onReload }, true)
   end
   return made, widgets, modalTable
 end)

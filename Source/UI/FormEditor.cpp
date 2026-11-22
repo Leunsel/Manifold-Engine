@@ -486,15 +486,17 @@ namespace Manifold::UI
         const int row = Lua::FormAdd(form, UiKind::Row, form.Window);
         form.Model.Find(row)->Align = "right";
         Lua::FormAdd(form, UiKind::Button, row);
-        Reset(std::move(form), {});
+        Reset(std::move(form), {}, true);
     }
 
     FormEditorWindow::~FormEditorWindow() = default;
 
-    void FormEditorWindow::Reset(Lua::FormDocument form, std::filesystem::path path)
+    void FormEditorWindow::Reset(Lua::FormDocument form, std::filesystem::path path, bool oneFile)
     {
         m_form = std::move(form);
         m_path = std::move(path);
+        m_oneFile = oneFile;
+        m_fileDisk.clear();
         m_undo.clear();
         m_redo.clear();
         m_lastSource = 0;
@@ -507,6 +509,20 @@ namespace Manifold::UI
         m_scriptConflict = false;
         m_chipPlaces.clear();
         m_pan = ImVec2(0.0f, 0.0f);
+        if (m_oneFile)
+        {
+            // the script is part of the document from the start, saved or not
+            m_form.Script.clear();
+            if (!Lua::FormViewIntact(m_form.ScriptText))
+                m_form.ScriptText = Lua::FormScript(m_form, Lua::FormScriptStyle::OneFile);
+            m_form.ScriptLoaded = true;
+            m_scriptDisk = m_form.ScriptText;
+            m_scriptPath = m_path;
+            m_scriptStamp = m_path.empty() ? 0 : Lua::UiModel::FileStamp(WideToUtf8(m_path.wstring()));
+            m_nextScriptPoll = 0.0;
+        }
+        else
+            m_form.ScriptLoaded = false;
         ++m_revision;
     }
 
@@ -532,6 +548,8 @@ namespace Manifold::UI
 
     std::string FormEditorWindow::ScriptFileName() const
     {
+        if (!m_path.empty() && m_oneFile)
+            return WideToUtf8(m_path.filename().wstring());
         if (!m_path.empty())
             return FormStem(m_path) + ".lua";
         const UiNode* window = m_form.Model.Find(m_form.Window);
@@ -542,8 +560,11 @@ namespace Manifold::UI
     {
         if (m_codeRevision != m_revision || m_codeStyle != m_style)
         {
-            const std::string file = m_path.empty() ? FormStem(ScriptFileName()) + ".form.lua" : WideToUtf8(m_path.filename().wstring());
-            m_code = Lua::FormScript(m_form, m_style == 0 ? Lua::FormScriptStyle::Standalone : Lua::FormScriptStyle::FormFile, file);
+            const std::string file = m_path.empty() || m_oneFile ? FormStem(ScriptFileName()) + ".form.lua" : WideToUtf8(m_path.filename().wstring());
+            if (m_style == 2)
+                m_code = Lua::FormComposeScript(Lua::FormScript(m_form, Lua::FormScriptStyle::OneFile), m_form).value_or(std::string());
+            else
+                m_code = Lua::FormScript(m_form, m_style == 0 ? Lua::FormScriptStyle::Standalone : Lua::FormScriptStyle::FormFile, file);
             m_codeRevision = m_revision;
             m_codeStyle = m_style;
         }
@@ -561,12 +582,18 @@ namespace Manifold::UI
         Lua::FormDocument form;
         std::string error;
         std::vector<std::string> warnings;
-        if (!Lua::FormLoad(text, form, error, &warnings))
+        const std::string name = WideToUtf8(path.filename().wstring());
+        const bool formFile = name.size() > 9 && EqualsNoCase(std::string_view(name).substr(name.size() - 9), ".form.lua");
+        if (!(formFile ? Lua::FormLoad(text, form, error, &warnings) : Lua::FormLoadScript(text, form, error, &warnings)))
         {
-            m_engine.Notify(LogLevel::Error, WideToUtf8(path.filename().wstring()) + ": " + error);
+            m_engine.Notify(LogLevel::Error, name + ": " + error);
             return false;
         }
-        Reset(std::move(form), path);
+        if (!formFile)
+            form.ScriptText = Lua::FormScriptView(text);
+        Reset(std::move(form), path, !formFile);
+        if (!formFile)
+            m_fileDisk = text;
         for (const std::string& warning : warnings)
             m_engine.Notify(LogLevel::Warning, WideToUtf8(path.filename().wstring()) + ": " + warning);
         Show();
@@ -801,7 +828,8 @@ namespace Manifold::UI
                 m_engine.Notify(status);
             return;
         }
-        const std::string code = Lua::FormScript(m_form, Lua::FormScriptStyle::Standalone);
+        // an unsaved one-file form runs as it stands, with its handlers
+        const std::string code = m_oneFile ? Lua::FormComposeScript(m_form.ScriptText, m_form).value_or(std::string()) : Lua::FormScript(m_form, Lua::FormScriptStyle::Standalone);
         const Status status = m_engine.Lua().Run(code, kRunChunk);
         if (!status)
             m_engine.Notify(status);
@@ -825,7 +853,7 @@ namespace Manifold::UI
         switch (pending)
         {
         case Pending::New:
-            Reset(Lua::NewForm("New Form"), {});
+            Reset(Lua::NewForm("New Form"), {}, true);
             break;
         case Pending::Open:
             Open();
@@ -835,7 +863,7 @@ namespace Manifold::UI
             m_open = false;
             break;
         case Pending::Import:
-            Reset(std::move(m_pendingImport), {});
+            Reset(std::move(m_pendingImport), {}, true);
             m_dirty = true;
             m_notesDialog.Open();
             break;
@@ -846,7 +874,7 @@ namespace Manifold::UI
             if (Lua::FormLoad(m_pendingTemplate, form, error))
             {
                 form.Fragment = false;
-                Reset(std::move(form), {});
+                Reset(std::move(form), {}, true);
             }
             else
                 m_engine.Notify(LogLevel::Error, "The template could not be read: " + error);
@@ -861,12 +889,44 @@ namespace Manifold::UI
     void FormEditorWindow::Open()
     {
         const std::filesystem::path folder = m_path.empty() ? Paths::AutorunFolder() : m_path.parent_path();
-        if (const auto path = m_workspace.OpenFileDialog({ { L"Manifold forms (*.form.lua)", L"*.form.lua" }, { L"Lua files (*.lua)", L"*.lua" }, { L"All files", L"*.*" } }, folder))
+        if (const auto path = m_workspace.OpenFileDialog({ { L"Forms and their scripts (*.lua)", L"*.lua" }, { L"All files", L"*.*" } }, folder))
             OpenFile(*path);
     }
 
     bool FormEditorWindow::Save(bool as)
     {
+        if (m_oneFile)
+        {
+            std::filesystem::path path = m_path;
+            if (as || path.empty())
+            {
+                std::error_code ignored;
+                std::filesystem::create_directories(Paths::AutorunFolder(), ignored);
+                const std::filesystem::path folder = m_path.empty() ? Paths::AutorunFolder() : m_path.parent_path();
+                const auto chosen = m_workspace.SaveFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" } }, WideToUtf8((folder / Utf8ToWide(FormStem(ScriptFileName()) + ".lua")).wstring()), L"lua");
+                if (!chosen)
+                    return false;
+                path = *chosen;
+                // a ".form.lua" name would make it open as an old form file
+                path.replace_filename(Utf8ToWide(FormStem(path) + ".lua"));
+            }
+            if (path != m_path)
+            {
+                m_path = path;
+                m_scriptPath = path;
+                m_fileDisk.clear();
+            }
+            const bool wasDirty = m_dirty;
+            m_dirty = true; // a form change alone must still be written
+            if (!SaveScript())
+            {
+                m_dirty = wasDirty;
+                return false;
+            }
+            ++m_revision;
+            m_engine.Notify(LogLevel::Success, "Saved " + WideToUtf8(path.filename().wstring()));
+            return true;
+        }
         std::filesystem::path path = m_path;
         if (as || path.empty())
         {
@@ -892,8 +952,96 @@ namespace Manifold::UI
         return true;
     }
 
+    void FormEditorWindow::ExportStandalone()
+    {
+        std::error_code ignored;
+        std::filesystem::create_directories(Paths::AutorunFolder(), ignored);
+        const std::filesystem::path folder = m_path.empty() ? Paths::AutorunFolder() : m_path.parent_path();
+        const auto chosen = m_workspace.SaveFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" } },
+            WideToUtf8((folder / Utf8ToWide(FormStem(ScriptFileName()) + " Standalone.lua")).wstring()), L"lua");
+        if (!chosen)
+            return;
+        std::error_code same;
+        if (!m_path.empty() && (std::filesystem::path(*chosen).lexically_normal() == m_path.lexically_normal() || std::filesystem::equivalent(*chosen, m_path, same)))
+        {
+            m_engine.Notify(LogLevel::Warning, "That is the form's own script; a standalone script would replace it. Export it to another file.");
+            return;
+        }
+        if (!WriteFile(*chosen, Lua::FormScript(m_form, Lua::FormScriptStyle::Standalone)))
+        {
+            m_engine.Notify(LogLevel::Error, "Could not write " + WideToUtf8(chosen->wstring()));
+            return;
+        }
+        m_engine.Notify(LogLevel::Success, "Exported " + WideToUtf8(chosen->filename().wstring()) + ": it builds the window with plain manifold.ui calls and no longer opens in the Form Editor.");
+    }
+
+    // ∑ An older form (.form.lua + a script that loads it) becomes one file:
+    // the script gets the form's table in place of form.load("..."); the
+    // .form.lua file stays on disk as it is, nothing is deleted.
+    void FormEditorWindow::ConvertToOneFile()
+    {
+        if (m_oneFile)
+            return;
+        std::filesystem::path target = LinkedScript();
+        std::error_code missing;
+        std::string view;
+        if (!target.empty() && std::filesystem::exists(target, missing))
+        {
+            EnsureScript();
+            if (m_form.ScriptLoaded)
+                view = Lua::FormConvertScript(m_form.ScriptText);
+            if (view.empty())
+            {
+                m_engine.Notify(LogLevel::Warning, WideToUtf8(target.filename().wstring()) + " does not load the form with manifold.ui.form.load, so it was left alone; choose a new script for the form.");
+                target.clear();
+            }
+        }
+        if (target.empty())
+        {
+            const std::filesystem::path folder = m_path.empty() ? Paths::AutorunFolder() : m_path.parent_path();
+            const auto chosen = m_workspace.SaveFileDialog({ { L"Lua scripts (*.lua)", L"*.lua" } }, WideToUtf8((folder / Utf8ToWide(FormStem(ScriptFileName()) + ".lua")).wstring()), L"lua");
+            if (!chosen)
+                return;
+            target = *chosen;
+            target.replace_filename(Utf8ToWide(FormStem(target) + ".lua"));
+            view = Lua::FormScript(m_form, Lua::FormScriptStyle::OneFile);
+        }
+        // pictures: form.load took them relative to the form file, build takes them relative to the script
+        bool pictures = false;
+        if (!m_path.empty() && m_path.parent_path().lexically_normal() != target.parent_path().lexically_normal())
+        {
+            std::vector<int> stack = Lua::FormWindows(m_form);
+            while (!stack.empty())
+            {
+                const UiNode* node = m_form.Model.Find(stack.back());
+                stack.pop_back();
+                if (!node)
+                    continue;
+                pictures = pictures || (!node->Source.empty() && std::filesystem::path(Utf8ToWide(node->Source)).is_relative());
+                stack.insert(stack.end(), node->Children.begin(), node->Children.end());
+            }
+        }
+        const std::filesystem::path old = m_path;
+        Lua::FormDocument form = Lua::CopyForm(m_form);
+        form.ScriptText = view;
+        Reset(std::move(form), target, true);
+        if (!Save(false))
+            return;
+        std::string note = "The form now lives in " + WideToUtf8(target.filename().wstring()) + ".";
+        if (!old.empty())
+            note += " " + WideToUtf8(old.filename().wstring()) + " was left as it is; the script no longer reads it.";
+        if (pictures)
+            note += " Its pictures are now looked up next to the script; move them there or give their full paths.";
+        m_engine.Notify(LogLevel::Success, note);
+    }
+
     void FormEditorWindow::Export()
     {
+        if (m_oneFile)
+        {
+            ExportStandalone();
+            return;
+        }
         const bool withFile = m_style == 1;
         if (withFile && (m_path.empty() || Dirty()) && !Save(false))
             return;
@@ -1019,12 +1167,27 @@ namespace Manifold::UI
                 RunCommand(Command::FormSave);
             if (CommandItem(ICON_FA_SAVE "  Save Form As...", Command::FormSaveAs))
                 RunCommand(Command::FormSaveAs);
-            if (CommandItem(ICON_FA_FILE_EXPORT "  Export Script...", Command::FormExport))
+            if (CommandItem(m_oneFile ? ICON_FA_FILE_EXPORT "  Export Standalone Script..." : ICON_FA_FILE_EXPORT "  Export Script...", Command::FormExport))
                 RunCommand(Command::FormExport);
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_SHAPES "  Save as Template..."))
                 SaveAsTemplate();
             ImGui::Separator();
+            if (m_oneFile)
+            {
+                if (ImGui::MenuItem(ICON_FA_FILE_CODE "  Open in Script Window", nullptr, false, !m_path.empty()))
+                    OpenLinked();
+                ItemTooltip("Opens the form's script in a script window, with the form's table written out.");
+                ImGui::Separator();
+            }
+            else
+            {
+                if (ImGui::MenuItem(ICON_FA_COMPRESS_ALT "  Convert to One File..."))
+                    ConvertToOneFile();
+                ItemTooltip("Moves the form into its script, so form and handlers live in one .lua file. The .form.lua file stays as it is.");
+                ImGui::Separator();
+            }
+            if (!m_oneFile)
             {
                 const std::filesystem::path script = LinkedScript();
                 if (ImGui::MenuItem(ICON_FA_LINK "  Link Script..."))
@@ -1524,7 +1687,7 @@ namespace Manifold::UI
         if (IconButton(ICON_FA_CROSSHAIRS, "Bring the form back to the top left of the work surface"))
             m_pan = ImVec2(Px(-m_form.CanvasX + 40.0f), Px(-m_form.CanvasY + 30.0f));
         ItemTooltip("Runs the script in Manifold's Lua engine, so the real window opens. Running it again replaces that window.");
-        if (const std::filesystem::path script = LinkedScript(); !script.empty())
+        if (const std::filesystem::path script = LinkedScript(); !script.empty() && !m_oneFile)
         {
             ImGui::SameLine();
             ImGui::AlignTextToFramePadding();
@@ -1541,9 +1704,11 @@ namespace Manifold::UI
             {
                 ImGui::SameLine();
                 ImGui::AlignTextToFramePadding();
-                const std::string text = std::string(ICON_FA_SYNC "  Live in ") + std::to_string(live) + (live == 1 ? " Window" : " Windows") + (m_dirty ? " (save to update)" : "");
-                ImGui::TextColored(m_dirty ? ManifoldTheme::Warning : ManifoldTheme::Success, "%s", text.c_str());
-                ItemTooltip("A running script loaded this file with manifold.ui.form.load. Saving it rebuilds that window right away, with the script's handlers; widgets that keep their name keep their value.");
+                const bool pending = m_dirty || (m_oneFile && ScriptDirty());
+                const std::string text = std::string(ICON_FA_SYNC "  Live in ") + std::to_string(live) + (live == 1 ? " Window" : " Windows") + (pending ? " (save to update)" : "");
+                ImGui::TextColored(pending ? ManifoldTheme::Warning : ManifoldTheme::Success, "%s", text.c_str());
+                ItemTooltip(m_oneFile ? "This script is running and built its window from the form. Saving rebuilds that window right away; widgets that keep their name keep their value. Changed handler code takes effect when the script runs again."
+                                      : "A running script loaded this file with manifold.ui.form.load. Saving it rebuilds that window right away, with the script's handlers; widgets that keep their name keep their value.");
             }
         }
         const std::vector<Lua::FormProblem>& problems = m_problems;
@@ -2931,13 +3096,13 @@ namespace Manifold::UI
         else
         {
             ImGui::SameLine();
-            Segmented("##style", &m_style, { "Standalone", "Script + Form File" }, Px(240.0f));
-            ItemTooltip("Standalone: one script that builds the window with manifold.ui calls.\nScript + Form File: the layout stays in the .form.lua file, the script loads it with manifold.ui.form.load, so the layout can be changed here again later without touching the code.");
+            Segmented("##style", &m_style, { "Standalone", "Script + Form File", "One File" }, Px(360.0f));
+            ItemTooltip("Standalone: one script that builds the window with manifold.ui calls.\nScript + Form File: the layout in a .form.lua file that the script loads with manifold.ui.form.load (the older way).\nOne File: the script holds the form as a table and builds it with manifold.ui.form.build; this is how the Form Editor saves.");
             ImGui::SameLine();
             if (IconButton(ICON_FA_COPY, "Copy the generated code"))
                 ImGui::SetClipboardText(Code().c_str());
             ImGui::SameLine();
-            if (IconButton(ICON_FA_FILE_EXPORT, "Export Script... (writes or updates a script file)"))
+            if (IconButton(ICON_FA_FILE_EXPORT, m_oneFile ? "Export Standalone Script... (plain manifold.ui calls, no form table)" : "Export Script... (writes or updates a script file)"))
                 Export();
             std::string code = Code();
             CodeEditor("##formcode", code, Language::Lua, ImVec2(0.0f, 0.0f), m_codeEditor);
@@ -2948,7 +3113,7 @@ namespace Manifold::UI
     void FormEditorWindow::ScriptPane()
     {
         const std::filesystem::path script = LinkedScript();
-        if (script.empty())
+        if (script.empty() && !m_oneFile)
         {
             ImGui::Spacing();
             ImGui::PushTextWrapPos(0.0f);
@@ -2972,8 +3137,21 @@ namespace Manifold::UI
         ImGui::SameLine();
         if (IconButton(ICON_FA_EXTERNAL_LINK_ALT, "Open the script in a script window (saves it first)"))
         {
-            SaveScript();
-            OpenLinked(m_scriptEditor.CursorLine);
+            int line = m_scriptEditor.CursorLine;
+            if (m_oneFile)
+            {
+                // the window shows the form's table written out, the pane one line for it
+                const std::size_t standIn = m_form.ScriptText.find(Lua::kFormStandIn);
+                const int at = standIn == std::string::npos ? 0 : 1 + static_cast<int>(std::count(m_form.ScriptText.begin(), m_form.ScriptText.begin() + static_cast<std::ptrdiff_t>(standIn), '\n'));
+                if (at > 0 && line > at)
+                {
+                    const std::string block = Lua::FormBlockText(m_form, "form");
+                    line += static_cast<int>(std::count(block.begin(), block.end(), '\n')) - 1;
+                }
+            }
+            else
+                SaveScript();
+            OpenLinked(line);
         }
         if (m_scriptConflict)
         {
@@ -2981,11 +3159,32 @@ namespace Manifold::UI
             ImGui::AlignTextToFramePadding();
             ImGui::TextColored(ManifoldTheme::Warning, ICON_FA_EXCLAMATION_TRIANGLE "  Changed on disk too; saving keeps this version");
         }
+        else if (m_oneFile && ImGui::GetTime() < m_lockNoteUntil)
+        {
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextColored(ManifoldTheme::Warning, ICON_FA_LOCK "  The form's line stays");
+            ItemTooltip("The line \"local form = { ... }\" stands for the form on the canvas, so it cannot be removed here. Change the form on the canvas; saving writes its table into the script.");
+        }
+        else if (m_oneFile)
+        {
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            Muted(ICON_FA_INFO_CIRCLE "  One file");
+            ItemTooltip("Form and handlers live in this one script. The line \"local form = { ... }\" stands for the form on the canvas; saving writes the form's table there, and manifold.ui.form.build makes the window from it.");
+        }
         std::string text = m_form.ScriptText;
         if (CodeEditor("##scriptcode", text, Language::Lua, ImVec2(0.0f, 0.0f), m_scriptEditor) && text != m_form.ScriptText)
         {
-            Remember(ImGui::GetID("##scriptcode"));
-            m_form.ScriptText = std::move(text);
+            // ∑ one file: the form's line is locked; an edit that removes or
+            // doubles it is dropped (the editor shows the old text again)
+            if (m_oneFile && !Lua::FormViewIntact(text))
+                m_lockNoteUntil = ImGui::GetTime() + 4.0;
+            else
+            {
+                Remember(ImGui::GetID("##scriptcode"));
+                m_form.ScriptText = std::move(text);
+            }
         }
     }
 
@@ -3309,6 +3508,8 @@ namespace Manifold::UI
 
     std::filesystem::path FormEditorWindow::LinkedScript() const
     {
+        if (m_oneFile)
+            return m_path.empty() ? std::filesystem::path() : m_path.lexically_normal();
         if (m_form.Script.empty())
             return {};
         std::filesystem::path script(Utf8ToWide(m_form.Script));
@@ -3343,6 +3544,8 @@ namespace Manifold::UI
 
     void FormEditorWindow::OpenLinked(int line)
     {
+        if (m_oneFile && (m_path.empty() || Dirty()) && !Save(false))
+            return;
         const std::filesystem::path script = LinkedScript();
         if (script.empty())
             return;
@@ -3381,6 +3584,45 @@ namespace Manifold::UI
 
     void FormEditorWindow::EnsureScript()
     {
+        if (m_oneFile)
+        {
+            // ∑ the file changed elsewhere (a script window, another editor):
+            // without own edits here, take its form and code; else warn
+            if (m_path.empty())
+                return;
+            const double now = ImGui::GetTime();
+            if (now < m_nextScriptPoll)
+                return;
+            m_nextScriptPoll = now + 0.5;
+            const std::uint64_t stamp = Lua::UiModel::FileStamp(WideToUtf8(m_path.wstring()));
+            if (stamp == 0 || stamp == m_scriptStamp)
+                return;
+            m_scriptStamp = stamp;
+            std::string text;
+            if (!ReadFile(m_path, text) || text == m_fileDisk)
+                return;
+            Lua::FormDocument form;
+            std::string error;
+            if (Dirty() || !Lua::FormLoadScript(text, form, error))
+            {
+                m_scriptConflict = true;
+                return;
+            }
+            Remember();
+            form.ScriptText = Lua::FormScriptView(text);
+            form.ScriptLoaded = true;
+            form.CanvasX = m_form.CanvasX;
+            form.CanvasY = m_form.CanvasY;
+            m_form = std::move(form);
+            m_scriptDisk = m_form.ScriptText;
+            m_fileDisk = text;
+            m_scriptConflict = false;
+            m_scriptEditor.KeepCursor = true;
+            if (!m_form.Model.Find(m_selected))
+                m_selected = m_form.Window;
+            ++m_revision;
+            return;
+        }
         const std::filesystem::path script = LinkedScript();
         if (script.empty())
         {
@@ -3432,6 +3674,46 @@ namespace Manifold::UI
 
     bool FormEditorWindow::SaveScript()
     {
+        if (m_oneFile)
+        {
+            if (m_path.empty())
+                return true;
+            const std::optional<std::string> file = Lua::FormComposeScript(m_form.ScriptText, m_form);
+            if (!file)
+            {
+                m_engine.Notify(LogLevel::Error, "The script lost the form's line (local form = { ... }), so it was not written.");
+                return false;
+            }
+            if (*file == m_fileDisk)
+            {
+                m_dirty = false;
+                m_scriptDisk = m_form.ScriptText;
+                return true;
+            }
+            ScriptWindow* window = m_workspace.ScriptFile(m_path);
+            if (window && window->FileChanged() && window->Text() != *file)
+            {
+                m_engine.Notify(LogLevel::Warning, WideToUtf8(m_path.filename().wstring()) + " is open in a script window with other unsaved changes, so the form editor did not write it. Save or close that window first.");
+                return false;
+            }
+            if (!WriteFile(m_path, *file))
+            {
+                m_engine.Notify(LogLevel::Error, "Could not write " + WideToUtf8(m_path.wstring()));
+                return false;
+            }
+            if (window)
+            {
+                window->ReplaceText(*file);
+                window->SetFile(m_path);
+            }
+            m_fileDisk = *file;
+            m_scriptDisk = m_form.ScriptText;
+            m_scriptPath = m_path;
+            m_scriptStamp = Lua::UiModel::FileStamp(WideToUtf8(m_path.wstring()));
+            m_scriptConflict = false;
+            m_dirty = false;
+            return true;
+        }
         if (!m_form.ScriptLoaded || m_scriptPath.empty() || m_form.ScriptText == m_scriptDisk)
             return true;
         ScriptWindow* window = m_workspace.ScriptFile(m_scriptPath);
@@ -3474,7 +3756,7 @@ namespace Manifold::UI
         }
         if (!merge.Anchored)
         {
-            m_engine.Notify(LogLevel::Warning, WideToUtf8(m_scriptPath.filename().wstring()) + " neither loads the form nor creates its window, so no function was added; write them yourself.");
+            m_engine.Notify(LogLevel::Warning, (m_scriptPath.empty() ? std::string("The script") : WideToUtf8(m_scriptPath.filename().wstring())) + " neither builds the form nor creates its window, so no function was added; write them yourself.");
             return false;
         }
         if (merge.Added.empty())
@@ -3489,7 +3771,7 @@ namespace Manifold::UI
     {
         std::filesystem::path script = LinkedScript();
         std::error_code missing;
-        if (script.empty() || !std::filesystem::exists(script, missing))
+        if (!m_oneFile && (script.empty() || !std::filesystem::exists(script, missing)))
         {
             m_style = 1;
             Export();
@@ -3748,6 +4030,8 @@ namespace Manifold::UI
         }
         Menu();
         Shortcuts();
+        if (m_oneFile && !m_trying)
+            EnsureScript(); // the script is the form's file: watch it even with the code pane hidden
         if (!m_form.Model.Find(m_selected))
             m_selected = m_form.Window;
         m_hovered = 0;

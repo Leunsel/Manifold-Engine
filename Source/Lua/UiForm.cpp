@@ -520,6 +520,18 @@ namespace Manifold::Lua
             return std::string(buffer, done.ptr);
         }
 
+        // ∑ a float field (width, opacity, a progress fraction) is written as
+        // the shortest text that reads back as the same float: 0.4, not
+        // 0.4000000059604645
+        std::string NumberText(float value)
+        {
+            if (std::isfinite(value) && std::floor(value) == value && std::fabs(value) < 1.0e7f)
+                return std::to_string(static_cast<long long>(value));
+            char buffer[64];
+            const auto done = std::to_chars(buffer, buffer + sizeof(buffer), value);
+            return std::string(buffer, done.ptr);
+        }
+
         bool ParseNumber(std::string_view text, double& value)
         {
             const std::string trimmed = Trim(text);
@@ -1979,6 +1991,153 @@ namespace Manifold::Lua
         return 1 + static_cast<int>(std::count(script.begin(), script.begin() + static_cast<std::ptrdiff_t>(found->Begin), '\n'));
     }
 
+    namespace
+    {
+        constexpr std::string_view kBlockComment = "-- The form, kept by the Form Editor; ui.form.build makes the window from it.";
+
+        struct StandIn
+        {
+            std::size_t Begin = 0;
+            std::size_t End = 0;
+            std::string Name;
+        };
+
+        std::vector<StandIn> FindStandIns(std::string_view view)
+        {
+            using W = LuaToken::Type;
+            const std::vector<LuaToken> tokens = Tokenize(view);
+            std::vector<StandIn> found;
+            for (std::size_t i = 0; i + 4 < tokens.size(); ++i)
+            {
+                if (Is(tokens, i, W::Word, "local") && tokens[i + 1].Kind == W::Word && Is(tokens, i + 2, W::Symbol, "=") && Is(tokens, i + 3, W::Symbol, "{") && Is(tokens, i + 4, W::Symbol, "}") &&
+                    view.substr(tokens[i + 3].Begin, tokens[i + 4].End - tokens[i + 3].Begin) == kFormStandIn)
+                    found.push_back({ tokens[i].Begin, tokens[i + 4].End, std::string(tokens[i + 1].Text) });
+            }
+            return found;
+        }
+    }
+
+    std::optional<FormBlock> FormFindBlock(std::string_view script)
+    {
+        using W = LuaToken::Type;
+        const std::vector<LuaToken> tokens = Tokenize(script);
+        for (std::size_t i = 0; i + 3 < tokens.size(); ++i)
+        {
+            if (!(Is(tokens, i, W::Word, "local") && tokens[i + 1].Kind == W::Word && Is(tokens, i + 2, W::Symbol, "=") && Is(tokens, i + 3, W::Symbol, "{")))
+                continue;
+            if (i > 0 && Is(tokens, i - 1, W::Symbol, "."))
+                continue;
+            // ∑ the table's own closing brace, and a "form = <version>" key at its top level
+            int depth = 0;
+            bool marked = false;
+            std::size_t at = i + 3;
+            for (; at < tokens.size(); ++at)
+            {
+                const LuaToken& token = tokens[at];
+                if (token.Kind == W::Symbol && (token.Text == "{" || token.Text == "(" || token.Text == "["))
+                    ++depth;
+                else if (token.Kind == W::Symbol && (token.Text == "}" || token.Text == ")" || token.Text == "]"))
+                {
+                    if (--depth == 0)
+                        break;
+                }
+                else if (depth == 1 && Is(tokens, at, W::Word, "form") && Is(tokens, at + 1, W::Symbol, "=") &&
+                         (Is(tokens, at - 1, W::Symbol, "{") || Is(tokens, at - 1, W::Symbol, ",") || Is(tokens, at - 1, W::Symbol, ";")))
+                {
+                    // the version number (numbers are no tokens: look at the text)
+                    std::size_t value = tokens[at + 1].End;
+                    while (value < script.size() && (script[value] == ' ' || script[value] == '\t'))
+                        ++value;
+                    marked = marked || (value < script.size() && std::isdigit(static_cast<unsigned char>(script[value])));
+                }
+            }
+            if (at >= tokens.size())
+                return std::nullopt;
+            if (!marked)
+            {
+                i = at;
+                continue;
+            }
+            FormBlock block;
+            block.Begin = tokens[i].Begin;
+            block.Table = tokens[i + 3].Begin;
+            block.End = tokens[at].End;
+            block.Name = std::string(tokens[i + 1].Text);
+            block.Line = 1 + static_cast<int>(std::count(script.begin(), script.begin() + static_cast<std::ptrdiff_t>(block.Table), '\n'));
+            return block;
+        }
+        return std::nullopt;
+    }
+
+    std::string FormBlockChunk(std::string_view script)
+    {
+        const std::optional<FormBlock> block = FormFindBlock(script);
+        if (!block)
+            return {};
+        // padded, so errors name the script's own line numbers
+        return std::string(static_cast<std::size_t>(block->Line - 1), '\n') + "return " + std::string(script.substr(block->Table, block->End - block->Table));
+    }
+
+    bool FormLoadScript(std::string_view script, FormDocument& form, std::string& error, std::vector<std::string>* warnings)
+    {
+        const std::string chunk = FormBlockChunk(script);
+        if (chunk.empty())
+        {
+            form = NewForm({});
+            error = "the script holds no form table (local form = { form = 1, title = ..., children = { ... } })";
+            return false;
+        }
+        if (!FormLoad(chunk, form, error, warnings))
+            return false;
+        form.Script.clear();
+        form.Fragment = false;
+        return true;
+    }
+
+    std::string FormScriptView(std::string_view script)
+    {
+        const std::optional<FormBlock> block = FormFindBlock(script);
+        if (!block)
+            return std::string(script);
+        return std::string(script.substr(0, block->Begin)) + "local " + block->Name + " = " + std::string(kFormStandIn) + std::string(script.substr(block->End));
+    }
+
+    bool FormViewIntact(std::string_view view)
+    {
+        return FindStandIns(view).size() == 1;
+    }
+
+    std::optional<std::string> FormComposeScript(std::string_view view, const FormDocument& form)
+    {
+        const std::vector<StandIn> found = FindStandIns(view);
+        if (found.size() != 1)
+            return std::nullopt;
+        std::string block = FormBlockText(form, found.front().Name);
+        while (!block.empty() && block.back() == '\n')
+            block.pop_back();
+        return std::string(view.substr(0, found.front().Begin)) + block + std::string(view.substr(found.front().End));
+    }
+
+    std::string FormConvertScript(std::string_view script)
+    {
+        // ∑ form.load("X.form.lua", ...) becomes form.build(form, ...) and the
+        // form's line goes below "local ui = manifold.ui" (or on top).
+        static const std::regex kLoad(R"(form(\s*)\.(\s*)load(\s*)\((\s*)(?:"[^"\n]*"|'[^'\n]*'))");
+        std::string text(script);
+        std::smatch call;
+        if (!std::regex_search(text, call, kLoad))
+            return {};
+        text.replace(static_cast<std::size_t>(call.position(0)), static_cast<std::size_t>(call.length(0)), "form.build(form");
+        const std::string line = std::string(kBlockComment) + "\nlocal form = " + std::string(kFormStandIn) + "\n";
+        static const std::regex kUi(R"((^|\n)local\s+ui\s*=\s*manifold\.ui[ \t]*\r?\n)");
+        std::smatch ui;
+        if (std::regex_search(text, ui, kUi))
+            text.insert(static_cast<std::size_t>(ui.position(0) + ui.length(0)), "\n" + line);
+        else
+            text.insert(0, line + "\n");
+        return text;
+    }
+
     int FormIndexOf(const FormDocument& form, int node)
     {
         const UiNode* item = form.Model.Find(node);
@@ -2485,11 +2644,25 @@ namespace Manifold::Lua
 
     std::string FormSave(const FormDocument& form)
     {
+        return FormBlockText(form, {});
+    }
+
+    // ∑ One writer for both homes of a form: a .form.lua file returns the
+    // table, a script holds it as "local form = { ... }" (no script link and
+    // no fragment flag there: the script is the form's file).
+    std::string FormBlockText(const FormDocument& form, std::string_view name)
+    {
+        const bool block = !name.empty();
         Writer writer;
-        writer.Line(0, "-- Manifold form: made with the Form Editor. manifold.ui.form.load builds the window from it.");
-        writer.Line(0, "return {");
+        if (block)
+            writer.Line(0, "local " + std::string(name) + " = {");
+        else
+        {
+            writer.Line(0, "-- Manifold form: made with the Form Editor. manifold.ui.form.load builds the window from it.");
+            writer.Line(0, "return {");
+        }
         writer.Line(1, "form = 1,");
-        if (form.Fragment)
+        if (form.Fragment && !block)
             writer.Line(1, "fragment = true,");
         const UiNode* window = form.Model.Find(form.Window);
         if (window)
@@ -2502,7 +2675,7 @@ namespace Manifold::Lua
             }
             if (!form.Key.empty())
                 writer.Line(1, "key = " + Quote(form.Key) + ",");
-            if (!form.Script.empty())
+            if (!form.Script.empty() && !block)
                 writer.Line(1, "script = " + Quote(form.Script) + ",");
             if (const FormMeta* meta = MetaOf(form, form.Window))
             {
@@ -2630,6 +2803,14 @@ namespace Manifold::Lua
         }
         const bool modals = FormWindows(form).size() > 1;
         std::string out = "local ui = manifold.ui\n\n";
+        if (style == FormScriptStyle::OneFile)
+        {
+            out += std::string(kBlockComment) + "\nlocal form = " + std::string(kFormStandIn) + "\n\n";
+            out += modals ? "local window, w, modals\nlocal handlers = {}\n\n" : "local window, w\nlocal handlers = {}\n\n";
+            out += writer.Stubs(true);
+            out += modals ? "window, w, modals = ui.form.build(form, handlers)\n" : "window, w = ui.form.build(form, handlers)\n";
+            return out;
+        }
         if (style == FormScriptStyle::FormFile)
         {
             out += modals ? "local window, w, modals\nlocal handlers = {}\n\n" : "local window, w\nlocal handlers = {}\n\n";
