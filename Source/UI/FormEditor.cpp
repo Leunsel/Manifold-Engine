@@ -1691,6 +1691,25 @@ namespace Manifold::UI
                 for (float x = startX; x < areaMax.x; x += step)
                     draw->AddRectFilled(ImVec2(x - radius * 0.5f, y - radius * 0.5f), ImVec2(x + radius * 0.5f, y + radius * 0.5f), dot);
         }
+        // ∑ The marks on the forms (selection, hover, links, grips) must lie
+        // above the form bodies, which are child windows, but below popups,
+        // menus, tooltips and dialogs; the foreground list lies above all of
+        // those. So they go into an input-less child that ImGui draws after
+        // the bodies: it is begun first (its draw list lives through the
+        // frame) and its begin order is set past every other child.
+        ImGuiWindow* area = ImGui::GetCurrentWindow();
+        ImGuiWindow* marks = nullptr;
+        {
+            const ImVec2 cursorMax = area->DC.CursorMaxPos;
+            ImGui::SetCursorScreenPos(areaMin);
+            ImGui::BeginChild("##marks", m_areaSize, ImGuiChildFlags_None,
+                ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav);
+            marks = ImGui::GetCurrentWindow();
+            ImGui::EndChild();
+            area->DC.CursorMaxPos = cursorMax;
+            m_marks = marks->DrawList;
+            m_marks->PushClipRect(area->InnerClipRect.Min, area->InnerClipRect.Max, false);
+        }
         m_frames.clear();
         m_grips.clear();
         m_design.Rects.clear();
@@ -1709,7 +1728,15 @@ namespace Manifold::UI
             NodeMenu(m_selected);
             ImGui::EndPopup();
         }
+        m_marks->PopClipRect();
+        m_marks = nullptr;
+        marks->BeginOrderWithinParent = SHRT_MAX;
         ImGui::EndChild();
+    }
+
+    ImDrawList* FormEditorWindow::Marks() const
+    {
+        return m_marks ? m_marks : ImGui::GetWindowDrawList();
     }
 
     ImVec2 FormEditorWindow::FramePlace(int window) const
@@ -1908,14 +1935,14 @@ namespace Manifold::UI
             if (grippable)
             {
                 const ImU32 color = ImGui::GetColorU32(held ? ManifoldTheme::Accent : over ? ManifoldTheme::Text : ManifoldTheme::Muted);
-                ImDrawList* foreground = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
-                foreground->PushClipRect(areaMin, areaMax, true);
+                ImDrawList* marks = Marks();
+                marks->PushClipRect(areaMin, areaMax, true);
                 for (int i = 1; i <= 3; ++i)
                 {
                     const float inset = Px(4.0f) * static_cast<float>(i);
-                    foreground->AddLine(ImVec2(frameMax.x - inset, frameMax.y - 2.0f), ImVec2(frameMax.x - 2.0f, frameMax.y - inset), color, 1.5f);
+                    marks->AddLine(ImVec2(frameMax.x - inset, frameMax.y - 2.0f), ImVec2(frameMax.x - 2.0f, frameMax.y - inset), color, 1.5f);
                 }
-                foreground->PopClipRect();
+                marks->PopClipRect();
             }
         }
         ImGui::PopID();
@@ -1937,12 +1964,12 @@ namespace Manifold::UI
         const bool flash = m_flashWindow == id && ImGui::GetTime() < m_flashUntil;
         if ((!m_trying && m_selected == id) || flash)
         {
-            ImDrawList* foreground = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
-            foreground->PushClipRect(areaMin, areaMax, true);
+            ImDrawList* marks = Marks();
+            marks->PushClipRect(areaMin, areaMax, true);
             const float alpha = flash ? 0.5f + 0.5f * std::sin(static_cast<float>(ImGui::GetTime()) * 12.0f) : 0.9f;
-            foreground->AddRect(ImVec2(frameMin.x - Px(3.0f), frameMin.y - Px(3.0f)), ImVec2(frameMax.x + Px(3.0f), frameMax.y + Px(3.0f)),
+            marks->AddRect(ImVec2(frameMin.x - Px(3.0f), frameMin.y - Px(3.0f)), ImVec2(frameMax.x + Px(3.0f), frameMax.y + Px(3.0f)),
                 ImGui::GetColorU32(ManifoldTheme::WithAlpha(modal ? ManifoldTheme::CodeLabel : ManifoldTheme::Accent, alpha)), Px(8.0f), 0, Px(2.0f));
-            foreground->PopClipRect();
+            marks->PopClipRect();
         }
     }
 
@@ -1951,7 +1978,7 @@ namespace Manifold::UI
     // the modal sits (beside or below).
     void FormEditorWindow::JumpLinks(ImVec2 areaMin, ImVec2 areaMax)
     {
-        ImDrawList* links = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
+        ImDrawList* links = Marks();
         for (const auto& [id, meta] : m_form.Meta)
         {
             if (meta.Opens.empty())
@@ -2228,7 +2255,7 @@ namespace Manifold::UI
         m_overlayWindow = window;
         const auto mine = [&](int node) { return node && Lua::FormRootWindow(m_form, node) == window; };
         // ∑ The form can be panned partly out of the work surface; the overlay
-        // (foreground list) must stop at the surface's edge like the body does.
+        // (marks layer) must stop at the surface's edge like the body does.
         {
             const ImRect surface = ImGui::GetCurrentWindow()->InnerClipRect;
             min = ImVec2(std::max(min.x, surface.Min.x), std::max(min.y, surface.Min.y));
@@ -2291,7 +2318,7 @@ namespace Manifold::UI
                 ImGui::EndDragDropSource();
             }
         }
-        ImDrawList* draw = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
+        ImDrawList* draw = Marks();
         draw->PushClipRect(min, max, true);
         const ImU32 accent = ImGui::GetColorU32(ManifoldTheme::Accent);
         const ImU32 soft = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.45f));
@@ -3579,7 +3606,7 @@ namespace Manifold::UI
         // edge at its own height (on the side its chip is on), and only the
         // part outside the form is drawn. A hovered or selected widget or chip
         // adds a faint dashed guide from the widget to its port.
-        ImDrawList* links = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
+        ImDrawList* links = Marks();
         for (const auto& [id, meta] : m_form.Meta)
         {
             const auto frame = m_frames.find(Lua::FormRootWindow(m_form, id));

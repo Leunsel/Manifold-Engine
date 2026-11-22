@@ -68,6 +68,7 @@ namespace Manifold::UI
         ImVec2 FramePlace(int window) const;
         void SetFramePlace(int window, ImVec2 place);
         void JumpLinks(ImVec2 areaMin, ImVec2 areaMax);
+        ImDrawList* Marks() const;
         void TryEvents(ImVec2 areaMin, ImVec2 areaMax);
         void AddModal(int opener = 0);
         struct DropSpot
@@ -169,6 +170,7 @@ namespace Manifold::UI
         double m_flashUntil = 0.0;
         ImVec2 m_pan = ImVec2(0.0f, 0.0f);
         ImVec2 m_areaSize = ImVec2(0.0f, 0.0f);
+        ImDrawList* m_marks = nullptr; // layer above the form bodies, below popups (see Preview)
         std::string m_activeChip;
         std::string m_hoveredChip;
         bool m_chipDragged = false;
