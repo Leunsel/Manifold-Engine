@@ -162,6 +162,7 @@ namespace Manifold::Lua
         bool AutoSize = false;
         bool Scrollbar = true;
         bool Topmost = false;
+        bool Modal = false;
         std::string Position;
         float PosX = 0.0f;
         float PosY = 0.0f;

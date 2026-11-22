@@ -347,6 +347,7 @@ namespace Manifold::Lua
             ReadBool(state, props, "autoSize", node.AutoSize);
             ReadBool(state, props, "scrollbar", node.Scrollbar);
             ReadBool(state, props, "topmost", node.Topmost);
+            ReadBool(state, props, "modal", node.Modal);
             ReadBool(state, props, "readOnly", node.ReadOnly);
             ReadBool(state, props, "scroll", node.Scroll);
             if (ReadBool(state, props, "focus", node.Focus))

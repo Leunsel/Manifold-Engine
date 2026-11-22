@@ -360,6 +360,7 @@ namespace Manifold::UI
             const auto classOf = [this](const std::string& chain, std::string& member) -> std::string {
                 std::string windowName = "window";
                 std::string widgetsName = "w";
+                std::string modalsName = "modals";
                 {
                     // `window, w = ui.form.load(` / `local win, widgets = manifold.ui.form.build(`
                     const std::string& text = m_form.ScriptText;
@@ -381,7 +382,14 @@ namespace Manifold::UI
                         if (comma == std::string::npos)
                             continue;
                         const std::string first = Trim(std::string_view(head).substr(0, comma));
-                        const std::string second = Trim(std::string_view(head).substr(comma + 1));
+                        std::string second = Trim(std::string_view(head).substr(comma + 1));
+                        if (const std::size_t more = second.find(','); more != std::string::npos)
+                        {
+                            const std::string third = Trim(std::string_view(second).substr(more + 1));
+                            second = Trim(std::string_view(second).substr(0, more));
+                            if (Lua::FormIsIdentifier(third))
+                                modalsName = third;
+                        }
                         if (Lua::FormIsIdentifier(first))
                             windowName = first;
                         if (Lua::FormIsIdentifier(second))
@@ -391,6 +399,11 @@ namespace Manifold::UI
                 }
                 member.clear();
                 if (chain == windowName)
+                    return "manifold.ui.window.Window";
+                if (chain == modalsName)
+                    return "*modals";
+                if (chain.size() > modalsName.size() + 1 && chain.compare(0, modalsName.size() + 1, modalsName + ".") == 0 &&
+                    Lua::FormIsIdentifier(chain.substr(modalsName.size() + 1)))
                     return "manifold.ui.window.Window";
                 if (chain == "widget")
                     return "manifold.ui.window.Widget";
@@ -415,12 +428,25 @@ namespace Manifold::UI
             m_assist.Complete = [this, base, classOf](const std::string& chain, const std::string& prefix, bool method) {
                 std::string member;
                 const std::string owner = classOf(chain, member);
+                if (owner == "*modals")
+                {
+                    std::vector<CodeSuggestion> names;
+                    for (const int modal : m_form.Modals)
+                    {
+                        const std::string name = Lua::FormModalName(m_form, modal);
+                        const UiNode* node = m_form.Model.Find(modal);
+                        if (name.empty() || name.compare(0, prefix.size(), prefix) != 0)
+                            continue;
+                        names.push_back({ name, "object", "  Modal", "Modal form \"" + (node ? node->Title : name) + "\": a window object (show, hide, ...).", nullptr });
+                    }
+                    return names;
+                }
                 if (owner == "*widgets" && member.empty())
                 {
                     std::vector<CodeSuggestion> names;
                     for (const auto& [id, meta] : m_form.Meta)
                     {
-                        if (meta.Name.empty() || id == m_form.Window || meta.Name.compare(0, prefix.size(), prefix) != 0)
+                        if (meta.Name.empty() || id == m_form.Window || Lua::FormIsModal(m_form, id) || meta.Name.compare(0, prefix.size(), prefix) != 0)
                             continue;
                         const UiNode* node = m_form.Model.Find(id);
                         const std::string kind = node ? std::string(Lua::FormKindTitle(node->Kind)) : std::string("Widget");
@@ -725,6 +751,8 @@ namespace Manifold::UI
     {
         if (m_selected == m_form.Window || !m_form.Model.Find(m_selected))
             return;
+        if (m_form.Model.Find(m_selected)->Kind == UiKind::Window && !Lua::FormIsModal(m_form, m_selected))
+            return;
         const UiNode* node = m_form.Model.Find(m_selected);
         const int parent = node->Parent;
         const int index = Lua::FormIndexOf(m_form, m_selected);
@@ -740,7 +768,7 @@ namespace Manifold::UI
 
     void FormEditorWindow::Duplicate()
     {
-        if (m_selected == m_form.Window)
+        if (!m_form.Model.Find(m_selected) || m_form.Model.Find(m_selected)->Kind == UiKind::Window)
             return;
         Remember();
         const int copy = Lua::FormDuplicate(m_form, m_selected);
@@ -1028,7 +1056,9 @@ namespace Manifold::UI
             if (CommandItem(ICON_FA_REDO "  Redo", Command::FormRedo, false, !m_redo.empty()))
                 Redo();
             ImGui::Separator();
-            const bool widget = m_selected != m_form.Window;
+            const UiNode* chosen = m_form.Model.Find(m_selected);
+            const bool widget = chosen && chosen->Kind != UiKind::Window;
+            const bool deletable = widget || Lua::FormIsModal(m_form, m_selected);
             if (CommandItem(ICON_FA_CUT "  Cut", Command::FormCut, false, widget))
                 Cut();
             if (CommandItem(ICON_FA_COPY "  Copy", Command::FormCopy))
@@ -1043,7 +1073,7 @@ namespace Manifold::UI
             if (CommandItem(ICON_FA_ARROW_DOWN "  Move Down", Command::FormMoveDown, false, widget))
                 Move(1);
             ImGui::Separator();
-            if (DangerCommandItem(ICON_FA_TRASH "  Delete", Command::FormDelete, widget))
+            if (DangerCommandItem(ICON_FA_TRASH "  Delete", Command::FormDelete, deletable))
                 Delete();
             ImGui::EndMenu();
         }
@@ -1142,61 +1172,150 @@ namespace Manifold::UI
     void FormEditorWindow::Outline()
     {
         SectionLabel("Outline");
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ManifoldTheme::Surface);
         ImGui::BeginChild("##outline", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
-        // ∑ Deep trees: a narrower indent, and rows as wide as their text so
-        // the list scrolls sideways instead of cutting the names off.
-        ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, Px(13.0f));
-        OutlineNode(m_form.Window, 0);
+        ImGui::PopStyleColor();
+        // ∑ Own rows instead of ImGui tree nodes: full-width hover and
+        // selection, indent guides per level (the selected container's guide
+        // lit), a chevron that only folds, and the markers at the right edge.
+        // Deep trees scroll sideways; a row is as wide as its text.
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+        m_outlineX = ImGui::GetCursorScreenPos().x;
+        m_outlineWidth = ImGui::GetContentRegionAvail().x;
+        m_outlineRows = 0;
+        std::vector<int> path;
+        OutlineNode(m_form.Window, 0, path);
+        for (const int modal : m_form.Modals)
+        {
+            ImGui::Dummy(ImVec2(0.0f, Px(4.0f)));
+            OutlineNode(modal, 0, path);
+        }
         ImGui::PopStyleVar();
+        ImGui::Dummy(ImVec2(0.0f, Px(6.0f)));
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + Px(8.0f));
+        ImGui::PushStyleColor(ImGuiCol_TextLink, ManifoldTheme::Muted);
+        if (ImGui::TextLink(ICON_FA_PLUS "  Modal Form"))
+            AddModal();
+        ImGui::PopStyleColor();
+        ItemTooltip("Adds a modal form to this file: a dialog that opens in front of the program. A button opens it with Opens, the script with modals.<name>.show().");
+        if (m_form.Model.Find(m_form.Window) && m_form.Model.Find(m_form.Window)->Children.empty())
+        {
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + Px(10.0f));
+            ImGui::PushTextWrapPos(0.0f);
+            Muted("Drag widgets from Add onto the window, or onto the preview.");
+            ImGui::PopTextWrapPos();
+        }
         ImGui::EndChild();
         m_scrollOutline = false;
     }
 
-    void FormEditorWindow::OutlineNode(int id, int depth)
+    void FormEditorWindow::OutlineNode(int id, int depth, std::vector<int>& path)
     {
         UiNode* node = m_form.Model.Find(id);
         if (!node)
             return;
         ImGui::PushID(id);
         const bool container = Lua::UiIsContainer(node->Kind);
-        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_FramePadding |
-                                   ImGuiTreeNodeFlags_DrawLinesToNodes;
-        if (node->Children.empty())
-            flags |= ImGuiTreeNodeFlags_Leaf;
-        if (id == m_selected)
-            flags |= ImGuiTreeNodeFlags_Selected;
-        const std::string text = std::string(KindIcon(node->Kind)) + "  " + Caption(m_form, *node);
-        ImGui::PushStyleColor(ImGuiCol_TreeLines, ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.45f));
-        const bool open = ImGui::TreeNodeEx("##node", flags);
-        ImGui::PopStyleColor();
+        const bool hasChildren = !node->Children.empty();
+        if (m_scrollOutline && hasChildren && m_collapsed.count(id))
+        {
+            // the selection moved inside a folded container: open the way to it
+            for (const UiNode* walk = m_form.Model.Find(m_selected); walk; walk = m_form.Model.Find(walk->Parent))
+            {
+                if (walk->Parent == id)
+                {
+                    m_collapsed.erase(id);
+                    break;
+                }
+            }
+        }
+        const bool open = hasChildren && !m_collapsed.count(id);
+        const float indent = Px(15.0f);
+        const float rowHeight = ImGui::GetFrameHeight() + Px(1.0f);
+        const float pad = Px(6.0f);
+        const float x0 = m_outlineX;
+        const float y0 = ImGui::GetCursorScreenPos().y;
+        const float chevronX = x0 + pad + indent * static_cast<float>(depth);
+        const float iconX = chevronX + indent;
+        const float alpha = node->Visible ? 1.0f : 0.45f;
+
+        const auto meta = m_form.Meta.find(id);
+        const std::string name = meta == m_form.Meta.end() ? std::string() : meta->second.Name;
+        const bool modalRoot = Lua::FormIsModal(m_form, id);
+        std::string detail = Caption(m_form, *node);
+        {
+            const std::string title(Lua::FormKindTitle(node->Kind));
+            detail = detail.size() > title.size() ? Trim(std::string_view(detail).substr(title.size())) : std::string();
+        }
+        const std::string kind = modalRoot ? std::string("Modal") : std::string(Lua::FormKindTitle(node->Kind));
+        if (!name.empty() && detail.rfind(name, 0) == 0)
+            detail = Trim(std::string_view(detail).substr(name.size()));
+        const std::string first = name.empty() ? kind : name;
+        const std::string second = name.empty() ? detail : (detail.empty() ? kind : kind + "  " + detail);
+        const float textX = iconX + Px(21.0f);
+        const float firstWidth = ImGui::CalcTextSize(first.c_str()).x;
+        const float textWidth = firstWidth + (second.empty() ? 0.0f : Px(8.0f) + ImGui::CalcTextSize(second.c_str()).x);
+        // room only for the markers this row can show: the eye (hover or
+        // hidden), a problem, handlers; long rows push them past the text
+        const float slot = rowHeight * 0.85f;
+        const bool hasHandlers = meta != m_form.Meta.end() && !meta->second.Handlers.empty();
+        const float markers = (node->Kind != UiKind::Window ? rowHeight : 0.0f) + (m_problemNodes.count(id) ? slot : 0.0f) + (hasHandlers ? slot : 0.0f);
+        const float visibleRight = ImGui::GetCurrentWindow()->InnerClipRect.Max.x;
+        const float right = std::max(visibleRight - pad, textX + firstWidth + Px(10.0f) + markers);
+        const float rowWidth = std::max(m_outlineWidth, right + pad - x0);
+
+        ImGui::SetCursorScreenPos(ImVec2(x0, y0));
+        ImGui::SetNextItemAllowOverlap();
+        ImGui::InvisibleButton("##row", ImVec2(rowWidth, rowHeight), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
         const ImVec2 rowMin = ImGui::GetItemRectMin();
         const ImVec2 rowMax = ImGui::GetItemRectMax();
         const bool rowHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenOverlappedByItem);
-        const float eyeSide = rowMax.y - rowMin.y;
-        const ImVec2 eyeMin(rowMax.x - eyeSide, rowMin.y);
-        const bool overEye = node->Kind != UiKind::Window && rowHovered && ImGui::IsMouseHoveringRect(eyeMin, rowMax);
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen() && !overEye)
-            Select(id);
-        if (id == m_selected && m_scrollOutline)
-            ImGui::SetScrollHereY(0.5f);
-        if (ImGui::IsItemHovered())
+        const ImVec2 mouse = ImGui::GetIO().MousePos;
+        const ImVec2 eyeMin(right - rowHeight, rowMin.y);
+        const ImVec2 eyeMax(right, rowMax.y);
+        const bool overEye = node->Kind != UiKind::Window && rowHovered && mouse.x >= eyeMin.x && mouse.x < eyeMax.x;
+        const bool overChevron = hasChildren && rowHovered && mouse.x >= chevronX - Px(2.0f) && mouse.x < chevronX + indent;
+        if (rowHovered)
             m_hovered = id;
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+        {
+            if (overChevron)
+            {
+                if (open)
+                    m_collapsed.insert(id);
+                else
+                    m_collapsed.erase(id);
+            }
+            else if (!overEye)
+                Select(id);
+        }
+        if (rowHovered && hasChildren && !overChevron && !overEye && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+        {
+            if (open)
+                m_collapsed.insert(id);
+            else
+                m_collapsed.erase(id);
+        }
+        if (id == m_selected && m_scrollOutline && !ImGui::IsRectVisible(rowMin, rowMax))
+            ImGui::SetScrollHereY(0.4f);
         if (ImGui::BeginPopupContextItem("##menu"))
         {
             Select(id);
             NodeMenu(id);
             ImGui::EndPopup();
         }
+        const std::string text = std::string(KindIcon(node->Kind)) + "  " + Caption(m_form, *node);
         if (node->Kind != UiKind::Window && ImGui::BeginDragDropSource())
         {
             ImGui::SetDragDropPayload(kNodePayload, &id, sizeof(id));
             ImGui::TextUnformatted(text.c_str());
             ImGui::EndDragDropSource();
         }
+        ImDrawList* draw = ImGui::GetWindowDrawList();
         if (ImGui::BeginDragDropTarget())
         {
-            const ImRect rect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-            const float y = ImGui::GetIO().MousePos.y;
+            const ImRect rect(ImVec2(textX - Px(24.0f), rowMin.y), ImVec2(right + pad - Px(2.0f), rowMax.y));
+            const float y = mouse.y;
             const float band = rect.GetHeight() * 0.3f;
             Drop where = Drop::Inside;
             if (node->Kind != UiKind::Window)
@@ -1206,22 +1325,22 @@ namespace Manifold::UI
                 else if (y > rect.Max.y - band || !container)
                     where = Drop::After;
             }
-            ImDrawList* draw = ImGui::GetWindowDrawList();
             const ImU32 accent = ImGui::GetColorU32(ManifoldTheme::Accent);
             if (where == Drop::Inside)
-                draw->AddRect(rect.Min, rect.Max, accent, Px(3.0f), 0, Px(2.0f));
+                draw->AddRect(rect.Min, rect.Max, accent, Px(4.0f), 0, Px(2.0f));
             else
             {
                 const float line = where == Drop::Before ? rect.Min.y : rect.Max.y;
                 draw->AddLine(ImVec2(rect.Min.x, line), ImVec2(rect.Max.x, line), accent, Px(2.0f));
+                draw->AddCircleFilled(ImVec2(rect.Min.x, line), Px(3.0f), accent);
             }
             int parent = 0;
             int index = -1;
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kKindPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
             {
-                const UiKind kind = static_cast<UiKind>(*static_cast<const int*>(payload->Data));
+                const UiKind kindDropped = static_cast<UiKind>(*static_cast<const int*>(payload->Data));
                 if (DropAt(id, where, parent, index))
-                    AddInto(kind, parent, index);
+                    AddInto(kindDropped, parent, index);
             }
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kNodePayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
             {
@@ -1241,73 +1360,96 @@ namespace Manifold::UI
             }
             ImGui::EndDragDropTarget();
         }
+
+        // background: selection with an accent bar, hover a soft fill
+        const bool selected = id == m_selected;
+        const ImVec2 fillMin(rowMin.x + Px(3.0f), rowMin.y + Px(1.0f));
+        const ImVec2 fillMax(right + pad - Px(3.0f), rowMax.y - Px(1.0f));
+        if (selected)
         {
-            ImDrawList* draw = ImGui::GetWindowDrawList();
-            const float x = rowMin.x + ImGui::GetTreeNodeToLabelSpacing();
-            const float y = rowMin.y + (rowMax.y - rowMin.y - ImGui::GetTextLineHeight()) * 0.5f;
-            const float alpha = node->Visible ? 1.0f : 0.45f;
-            const auto meta = m_form.Meta.find(id);
-            const std::string name = meta == m_form.Meta.end() ? std::string() : meta->second.Name;
-            const std::string kind(Lua::FormKindTitle(node->Kind));
-            std::string detail = Caption(m_form, *node);
-            detail = detail.size() > kind.size() ? Trim(std::string_view(detail).substr(kind.size())) : std::string();
-            if (!name.empty() && detail.rfind(name, 0) == 0)
-                detail = Trim(std::string_view(detail).substr(name.size()));
-            const std::string first = name.empty() ? kind : name;
-            const std::string second = name.empty() ? detail : (detail.empty() ? kind : kind + "  " + detail);
-            float at = x;
-            draw->AddText(ImVec2(at, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(FamilyColor(FamilyOf(node->Kind)), alpha)), KindIcon(node->Kind));
-            at += Px(20.0f);
-            const float right = rowMax.x - ImGui::GetFrameHeight() * 2.6f;
-            {
-                const float textWidth = ImGui::CalcTextSize(first.c_str()).x + (second.empty() ? 0.0f : Px(8.0f) + ImGui::CalcTextSize(second.c_str()).x);
-                const float need = at + textWidth + ImGui::GetFrameHeight() * 2.6f + ImGui::GetStyle().FramePadding.x;
-                ImGuiWindow* outline = ImGui::GetCurrentWindow();
-                outline->DC.CursorMaxPos.x = std::max(outline->DC.CursorMaxPos.x, need);
-                if (rowHovered && !overEye && at + textWidth > right && !ImGui::IsMouseDragging(ImGuiMouseButton_Left))
-                    ImGui::SetTooltip("%s%s%s", first.c_str(), second.empty() ? "" : "  ", second.c_str());
-            }
-            draw->PushClipRect(ImVec2(at, rowMin.y), ImVec2(std::max(at, right), rowMax.y), true);
-            draw->AddText(ImVec2(at, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Text, alpha)), first.c_str());
-            at += ImGui::CalcTextSize(first.c_str()).x + Px(8.0f);
-            if (!second.empty())
-                draw->AddText(ImVec2(at, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, alpha)), second.c_str());
-            draw->PopClipRect();
-            const float side = eyeSide;
-            float marker = eyeMin.x;
-            if (node->Kind != UiKind::Window)
-            {
-                if (!node->Visible || rowHovered)
-                {
-                    const char* glyph = node->Visible ? ICON_FA_EYE : ICON_FA_EYE_SLASH;
-                    const ImVec2 glyphSize = ImGui::CalcTextSize(glyph);
-                    draw->AddText(ImVec2(marker + (side - glyphSize.x) * 0.5f, y), ImGui::GetColorU32(overEye ? ManifoldTheme::Text : ManifoldTheme::Muted), glyph);
-                }
-                if (overEye)
-                {
-                    ImGui::SetTooltip("%s", node->Visible ? "Hide it at the start (visible = false)" : "Show it at the start");
-                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-                    {
-                        Remember();
-                        node->Visible = !node->Visible;
-                        Changed();
-                    }
-                }
-            }
-            marker -= side * 0.8f;
-            if (m_problemNodes.count(id))
-            {
-                draw->AddText(ImVec2(marker, y), ImGui::GetColorU32(ManifoldTheme::Warning), ICON_FA_EXCLAMATION_TRIANGLE);
-                marker -= side * 0.8f;
-            }
-            if (meta != m_form.Meta.end() && !meta->second.Handlers.empty())
-                draw->AddText(ImVec2(marker, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.8f)), ICON_FA_BOLT);
+            draw->AddRectFilled(fillMin, fillMax, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.16f)), Px(4.0f));
+            draw->AddRectFilled(ImVec2(fillMin.x, fillMin.y + Px(3.0f)), ImVec2(fillMin.x + Px(3.0f), fillMax.y - Px(3.0f)), ImGui::GetColorU32(ManifoldTheme::Accent), Px(1.5f));
         }
+        else if (rowHovered || id == m_hovered)
+            draw->AddRectFilled(fillMin, fillMax, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.06f)), Px(4.0f));
+
+        // indent guides: one per level, the one of the selected container lit
+        for (std::size_t level = 0; level < path.size(); ++level)
+        {
+            const float gx = std::floor(x0 + pad + indent * static_cast<float>(level) + indent * 0.5f) + 0.5f;
+            const bool lit = path[level] == m_selected;
+            draw->AddLine(ImVec2(gx, rowMin.y), ImVec2(gx, rowMax.y),
+                ImGui::GetColorU32(lit ? ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.7f) : ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.22f)), 1.0f);
+        }
+
+        const float y = rowMin.y + (rowHeight - ImGui::GetTextLineHeight()) * 0.5f;
+        if (hasChildren)
+        {
+            const char* chevron = open ? ICON_FA_CHEVRON_DOWN : ICON_FA_CHEVRON_RIGHT;
+            const float scale = 0.72f;
+            const float size = ImGui::GetFontSize() * scale;
+            const ImVec2 glyph = ImGui::CalcTextSize(chevron);
+            draw->AddText(ImGui::GetFont(), size, ImVec2(chevronX + (indent - glyph.x * scale) * 0.5f, rowMin.y + (rowHeight - size) * 0.5f),
+                ImGui::GetColorU32(overChevron ? ManifoldTheme::Text : ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.9f)), chevron);
+        }
+        draw->AddText(ImVec2(iconX, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(modalRoot ? ManifoldTheme::CodeLabel : FamilyColor(FamilyOf(node->Kind)), alpha)),
+            modalRoot ? ICON_FA_WINDOW_RESTORE : KindIcon(node->Kind));
+        const float textRight = right - markers;
+        draw->PushClipRect(ImVec2(textX, rowMin.y), ImVec2(std::max(textX, textRight), rowMax.y), true);
+        draw->AddText(ImVec2(textX, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(selected ? ManifoldTheme::Text : ManifoldTheme::Label, alpha)), first.c_str());
+        if (!second.empty())
+            draw->AddText(ImVec2(textX + firstWidth + Px(8.0f), y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, alpha * 0.9f)), second.c_str());
+        draw->PopClipRect();
+        if (rowHovered && !overEye && !overChevron && textX + textWidth > textRight && !ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+            ImGui::SetTooltip("%s%s%s", first.c_str(), second.empty() ? "" : "  ", second.c_str());
+
+        // markers, right to left: eye (on hover or when hidden), problem, handlers
+        float marker = node->Kind != UiKind::Window ? eyeMin.x : right;
+        if (node->Kind != UiKind::Window)
+        {
+            if (!node->Visible || rowHovered)
+            {
+                const char* glyph = node->Visible ? ICON_FA_EYE : ICON_FA_EYE_SLASH;
+                const ImVec2 glyphSize = ImGui::CalcTextSize(glyph);
+                draw->AddText(ImVec2(eyeMin.x + (rowHeight - glyphSize.x) * 0.5f, y), ImGui::GetColorU32(overEye ? ManifoldTheme::Text : ManifoldTheme::Muted), glyph);
+            }
+            if (overEye)
+            {
+                ImGui::SetTooltip("%s", node->Visible ? "Hide it at the start (visible = false)" : "Show it at the start");
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    Remember();
+                    node->Visible = !node->Visible;
+                    Changed();
+                }
+            }
+        }
+        if (m_problemNodes.count(id))
+        {
+            marker -= slot;
+            draw->AddText(ImVec2(marker, y), ImGui::GetColorU32(ManifoldTheme::Warning), ICON_FA_EXCLAMATION_TRIANGLE);
+        }
+        if (hasHandlers)
+        {
+            marker -= slot;
+            const bool lit = !m_hoveredChip.empty() && [&] {
+                for (const auto& [key, handler] : meta->second.Handlers)
+                {
+                    if (handler == m_hoveredChip)
+                        return true;
+                }
+                return false;
+            }();
+            draw->AddText(ImVec2(marker, y), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, lit ? 1.0f : 0.7f)), ICON_FA_BOLT);
+        }
+        ++m_outlineRows;
+        ImGui::SetCursorScreenPos(ImVec2(x0, rowMax.y));
         if (open)
         {
+            path.push_back(id);
             for (const int child : std::vector<int>(node->Children))
-                OutlineNode(child, depth + 1);
-            ImGui::TreePop();
+                OutlineNode(child, depth + 1, path);
+            path.pop_back();
         }
         ImGui::PopID();
     }
@@ -1334,6 +1476,11 @@ namespace Manifold::UI
         {
             if (CommandItem(ICON_FA_PASTE "  Paste", Command::FormPaste))
                 Paste();
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_WINDOW_RESTORE "  Add Modal Form"))
+                AddModal();
+            if (Lua::FormIsModal(m_form, id) && DangerCommandItem(ICON_FA_TRASH "  Delete Modal Form", Command::FormDelete))
+                Delete();
             return;
         }
         if (node->Kind != UiKind::Tab && ImGui::BeginMenu(ICON_FA_LAYER_GROUP "  Wrap In"))
@@ -1354,6 +1501,8 @@ namespace Manifold::UI
             Paste();
         if (CommandItem(ICON_FA_CLONE "  Duplicate", Command::FormDuplicate))
             Duplicate();
+        if (node->Kind == UiKind::Button && ImGui::MenuItem(ICON_FA_WINDOW_RESTORE "  Open a New Modal Form"))
+            AddModal(id);
         if (CommandItem(ICON_FA_ARROW_UP "  Move Up", Command::FormMoveUp))
             Move(-1);
         if (CommandItem(ICON_FA_ARROW_DOWN "  Move Down", Command::FormMoveDown))
@@ -1496,8 +1645,7 @@ namespace Manifold::UI
     {
         Toolbar();
         FormDocument& form = m_trying ? m_try : m_form;
-        const UiNode* window = form.Model.Find(form.Window);
-        if (!window)
+        if (!form.Model.Find(form.Window))
             return;
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ManifoldTheme::Page);
         ImGui::BeginChild("##previewarea", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
@@ -1508,8 +1656,8 @@ namespace Manifold::UI
         m_areaSize = ImVec2(areaMax.x - areaMin.x, areaMax.y - areaMin.y);
         {
             // ∑ The work surface: dragging empty space (or the middle button
-            // anywhere, or the wheel) moves the view; the form and the function
-            // chips sit on it at their own places.
+            // anywhere, or the wheel) moves the view; the forms and the
+            // function chips sit on it at their own places.
             const ImGuiIO& io = ImGui::GetIO();
             ImGui::SetCursorScreenPos(areaMin);
             ImGui::SetNextItemAllowOverlap();
@@ -1543,6 +1691,80 @@ namespace Manifold::UI
                 for (float x = startX; x < areaMax.x; x += step)
                     draw->AddRectFilled(ImVec2(x - radius * 0.5f, y - radius * 0.5f), ImVec2(x + radius * 0.5f, y + radius * 0.5f), dot);
         }
+        m_frames.clear();
+        m_grips.clear();
+        m_design.Rects.clear();
+        SyncImages(form);
+        for (const int window : Lua::FormWindows(form))
+            PreviewFrame(form, window, origin, areaMin, areaMax);
+        if (m_trying)
+            TryEvents(areaMin, areaMax);
+        else
+        {
+            JumpLinks(areaMin, areaMax);
+            FunctionChips(origin, areaMin, areaMax);
+        }
+        if (ImGui::BeginPopup("##previewmenu"))
+        {
+            NodeMenu(m_selected);
+            ImGui::EndPopup();
+        }
+        ImGui::EndChild();
+    }
+
+    ImVec2 FormEditorWindow::FramePlace(int window) const
+    {
+        if (window == m_form.Window || !Lua::FormIsModal(m_form, window))
+            return ImVec2(m_form.CanvasX, m_form.CanvasY);
+        const std::string name = Lua::FormModalName(m_form, window);
+        if (const auto stored = m_form.ModalNodes.find(name); stored != m_form.ModalNodes.end())
+            return ImVec2(stored->second.X, stored->second.Y);
+        // ∑ a modal without a place stacks below the main form
+        const auto height = [&](int id) {
+            const UiNode* node = m_form.Model.Find(id);
+            return node && node->Height > 0.0f ? node->Height : 200.0f;
+        };
+        float y = m_form.CanvasY + height(m_form.Window) + 70.0f;
+        for (const int modal : m_form.Modals)
+        {
+            if (modal == window)
+                break;
+            const auto stored = m_form.ModalNodes.find(Lua::FormModalName(m_form, modal));
+            if (stored == m_form.ModalNodes.end())
+                y += height(modal) + 60.0f;
+        }
+        return ImVec2(m_form.CanvasX, y);
+    }
+
+    void FormEditorWindow::SetFramePlace(int window, ImVec2 place)
+    {
+        if (window == m_form.Window)
+        {
+            m_form.CanvasX = place.x;
+            m_form.CanvasY = place.y;
+        }
+        else
+        {
+            const std::string name = Lua::FormModalName(m_form, window);
+            if (name.empty())
+                return;
+            m_form.ModalNodes[name] = Lua::FormNode{ place.x, place.y, false };
+        }
+        if (m_trying)
+        {
+            m_try.CanvasX = m_form.CanvasX;
+            m_try.CanvasY = m_form.CanvasY;
+            m_try.ModalNodes = m_form.ModalNodes;
+        }
+    }
+
+    void FormEditorWindow::PreviewFrame(FormDocument& form, int id, ImVec2 origin, ImVec2 areaMin, ImVec2 areaMax)
+    {
+        const UiNode* window = form.Model.Find(id);
+        if (!window)
+            return;
+        const bool modal = Lua::FormIsModal(form, id);
+        ImDrawList* draw = ImGui::GetWindowDrawList();
         const auto limit = [](float value, float low, float high) {
             if (high > 0.0f)
                 value = std::min(value, high);
@@ -1551,48 +1773,66 @@ namespace Manifold::UI
         const float pointsWidth = limit(window->Width > 0.0f ? window->Width : 420.0f, window->MinWidth > 0.0f ? window->MinWidth : 160.0f, window->MaxWidth);
         const float pointsHeight = limit(window->Height > 0.0f ? window->Height : 320.0f, window->MinHeight > 0.0f ? window->MinHeight : 100.0f, window->MaxHeight);
         const ImVec2 size(Px(pointsWidth), Px(pointsHeight));
-        const ImVec2 frameMin(origin.x + Px(m_form.CanvasX), origin.y + Px(m_form.CanvasY));
+        const ImVec2 place = FramePlace(id);
+        const ImVec2 frameMin(origin.x + Px(place.x), origin.y + Px(place.y));
         const float titleHeight = ImGui::GetFrameHeight() + Px(4.0f);
         const float bodyHeight = std::max(Px(40.0f), size.y - titleHeight);
+        const ImVec2 frameMax(frameMin.x + size.x, frameMin.y + titleHeight + bodyHeight);
+        m_frames[id] = Frame{ frameMin, frameMax, titleHeight };
+        ImGui::PushID(id);
         for (int i = 1; i <= 6; ++i)
         {
             const float grow = Px(static_cast<float>(i) * 2.0f);
-            draw->AddRectFilled(ImVec2(frameMin.x - grow, frameMin.y - grow + Px(3.0f)), ImVec2(frameMin.x + size.x + grow, frameMin.y + titleHeight + bodyHeight + grow + Px(3.0f)),
+            draw->AddRectFilled(ImVec2(frameMin.x - grow, frameMin.y - grow + Px(3.0f)), ImVec2(frameMax.x + grow, frameMax.y + grow + Px(3.0f)),
                 ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Shadow, 0.10f)), Px(8.0f) + grow);
         }
-        draw->AddRectFilled(frameMin, ImVec2(frameMin.x + size.x, frameMin.y + titleHeight), ImGui::GetColorU32(ManifoldTheme::TitleBar), Px(6.0f), ImDrawFlags_RoundCornersTop);
+        draw->AddRectFilled(frameMin, ImVec2(frameMax.x, frameMin.y + titleHeight), ImGui::GetColorU32(ManifoldTheme::TitleBar), Px(6.0f), ImDrawFlags_RoundCornersTop);
+        if (modal)
+            draw->AddRectFilled(frameMin, ImVec2(frameMax.x, frameMin.y + Px(2.0f)), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::CodeLabel, 0.9f)), Px(6.0f), ImDrawFlags_RoundCornersTop);
         const std::string title = UiHost::IconText(window->Icon, window->Title.empty() ? std::string("Script") : window->Title);
         const float textY = frameMin.y + (titleHeight - ImGui::GetTextLineHeight()) * 0.5f;
         draw->AddText(ImVec2(frameMin.x + Px(10.0f), textY), ImGui::GetColorU32(ManifoldTheme::Text), title.c_str());
+        float titleRight = frameMin.x + Px(10.0f) + ImGui::CalcTextSize(title.c_str()).x;
+        if (modal)
+        {
+            // a pill with the modal's name: what modals.<name> and opens use
+            const std::string pill = std::string(ICON_FA_WINDOW_RESTORE " ") + Lua::FormModalName(form, id);
+            const ImVec2 pillSize = ImGui::CalcTextSize(pill.c_str());
+            const ImVec2 pillMin(titleRight + Px(10.0f), frameMin.y + (titleHeight - pillSize.y) * 0.5f - Px(1.0f));
+            const ImVec2 pillMax(pillMin.x + pillSize.x + Px(12.0f), pillMin.y + pillSize.y + Px(2.0f));
+            draw->AddRectFilled(pillMin, pillMax, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::CodeLabel, 0.18f)), pillSize.y);
+            draw->AddText(ImVec2(pillMin.x + Px(6.0f), pillMin.y + Px(1.0f)), ImGui::GetColorU32(ManifoldTheme::CodeLabel), pill.c_str());
+            titleRight = pillMax.x;
+        }
         {
             const ImVec2 closeSize = ImGui::CalcTextSize(ICON_FA_TIMES);
-            const float closeX = frameMin.x + size.x - Px(12.0f) - closeSize.x;
+            const float closeX = frameMax.x - Px(12.0f) - closeSize.x;
             draw->AddText(ImVec2(closeX, textY), ImGui::GetColorU32(ManifoldTheme::Muted), ICON_FA_TIMES);
             char dimensions[48];
             std::snprintf(dimensions, sizeof(dimensions), "%d x %d%s", static_cast<int>(pointsWidth), static_cast<int>(pointsHeight), window->Resizable ? "" : "  fixed");
             const float dimensionsWidth = ImGui::CalcTextSize(dimensions).x;
-            draw->AddText(ImVec2(closeX - Px(14.0f) - dimensionsWidth, textY), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.8f)), dimensions);
+            if (closeX - Px(14.0f) - dimensionsWidth > titleRight + Px(8.0f))
+                draw->AddText(ImVec2(closeX - Px(14.0f) - dimensionsWidth, textY), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Muted, 0.8f)), dimensions);
         }
         {
             ImGui::SetCursorScreenPos(frameMin);
             ImGui::InvisibleButton("##formtitle", ImVec2(size.x, titleHeight));
             if (ImGui::IsItemActivated())
+            {
                 Remember();
+                if (!m_trying)
+                    Select(id);
+            }
             if (ImGui::IsItemHovered() || ImGui::IsItemActive())
                 ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
             if (ImGui::IsItemActive() && (ImGui::GetIO().MouseDelta.x != 0.0f || ImGui::GetIO().MouseDelta.y != 0.0f))
             {
-                m_form.CanvasX += ImGui::GetIO().MouseDelta.x / Px(1.0f);
-                m_form.CanvasY += ImGui::GetIO().MouseDelta.y / Px(1.0f);
-                if (m_trying)
-                {
-                    m_try.CanvasX = m_form.CanvasX;
-                    m_try.CanvasY = m_form.CanvasY;
-                }
+                SetFramePlace(id, ImVec2(place.x + ImGui::GetIO().MouseDelta.x / Px(1.0f), place.y + ImGui::GetIO().MouseDelta.y / Px(1.0f)));
                 Changed();
             }
             if (ImGui::IsItemHovered() && !ImGui::IsItemActive())
-                ImGui::SetTooltip("Drag the title to move the form on the work surface.");
+                ImGui::SetTooltip("%s", modal ? "A modal form: it opens in front of the program and blocks it until it is closed.\nDrag the title to move it on the work surface; click it to select the modal."
+                                              : "Drag the title to move the form on the work surface; click it to select the window.");
         }
         ImGui::SetCursorScreenPos(ImVec2(frameMin.x, frameMin.y + titleHeight));
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
@@ -1601,24 +1841,25 @@ namespace Manifold::UI
         ImGui::PopStyleColor(2);
         const ImVec2 bodyMin = ImGui::GetWindowPos();
         const ImVec2 bodyMax(bodyMin.x + ImGui::GetWindowWidth(), bodyMin.y + ImGui::GetWindowHeight());
-        SyncImages(form);
         if (m_trying)
-        {
-            m_tryHost->DrawContents(m_try.Window, nullptr);
-            m_try.Model.TakeEvents();
-        }
+            m_tryHost->DrawContents(id, nullptr);
         else
         {
-            m_design.Picking = true;
-            m_host->DrawContents(m_form.Window, &m_design);
+            UiDesign pass;
+            pass.Picking = true;
+            pass.ForceTab = m_design.ForceTab;
+            m_host->DrawContents(id, &pass);
+            m_design.ForceTab = pass.ForceTab;
+            m_design.Rects.insert(m_design.Rects.end(), pass.Rects.begin(), pass.Rects.end());
         }
-        const ImVec2 frameMax(frameMin.x + size.x, frameMin.y + titleHeight + bodyHeight);
         const bool grippable = !m_trying && window->Resizable && !window->AutoSize;
         const float grip = Px(16.0f);
-        m_gripMin = grippable ? ImVec2(frameMax.x - grip, frameMax.y - grip) : ImVec2(0.0f, 0.0f);
-        m_gripMax = grippable ? frameMax : ImVec2(0.0f, 0.0f);
+        const ImVec2 gripMin = ImVec2(frameMax.x - grip, frameMax.y - grip);
+        if (grippable)
+            m_grips.push_back({ gripMin, frameMax });
         ImGui::EndChild();
-        if (grippable || m_gripping)
+        const bool mine = m_gripping && m_gripWindow == id;
+        if (grippable || mine)
         {
             // ∑ No item: an item at the body's corner would grow the body's
             // content and give it a scroll bar right under the grip. The grip
@@ -1626,42 +1867,47 @@ namespace Manifold::UI
             // the tool window does not move along.
             const ImGuiID gripId = ImGui::GetID("##sizegrip");
             const ImGuiIO& io = ImGui::GetIO();
-            const bool over = grippable && ImGui::IsMouseHoveringRect(m_gripMin, m_gripMax) &&
+            const bool over = grippable && ImGui::IsMouseHoveringRect(gripMin, frameMax) &&
                               ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-            if (over && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload())
+            if (over && !m_gripping && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload())
             {
                 m_gripping = true;
+                m_gripWindow = id;
                 Remember();
                 ImGui::SetActiveID(gripId, ImGui::GetCurrentWindow());
             }
-            if (m_gripping)
+            if (m_gripping && m_gripWindow == id)
             {
                 if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
                 {
                     ImGui::KeepAliveID(gripId);
                     if (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)
                     {
-                        UiNode* edited = m_form.Model.Find(m_form.Window);
-                        const float scale = Px(1.0f);
-                        edited->Width = limit(std::round(pointsWidth + io.MouseDelta.x / scale), edited->MinWidth > 0.0f ? edited->MinWidth : 160.0f, edited->MaxWidth);
-                        edited->Height = limit(std::round(pointsHeight + io.MouseDelta.y / scale), edited->MinHeight > 0.0f ? edited->MinHeight : 100.0f, edited->MaxHeight);
-                        Changed();
+                        if (UiNode* edited = m_form.Model.Find(id))
+                        {
+                            const float scale = Px(1.0f);
+                            edited->Width = limit(std::round(pointsWidth + io.MouseDelta.x / scale), edited->MinWidth > 0.0f ? edited->MinWidth : 160.0f, edited->MaxWidth);
+                            edited->Height = limit(std::round(pointsHeight + io.MouseDelta.y / scale), edited->MinHeight > 0.0f ? edited->MinHeight : 100.0f, edited->MaxHeight);
+                            Changed();
+                        }
                     }
                 }
                 else
                 {
                     m_gripping = false;
+                    m_gripWindow = 0;
                     if (ImGui::GetActiveID() == gripId)
                         ImGui::ClearActiveID();
                 }
             }
-            if (over || m_gripping)
+            const bool held = m_gripping && m_gripWindow == id;
+            if (over || held)
                 ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
-            if (over && !m_gripping)
+            if (over && !held)
                 ImGui::SetTooltip("Drag to try other sizes; the window keeps to its minimum and maximum.");
             if (grippable)
             {
-                const ImU32 color = ImGui::GetColorU32(m_gripping ? ManifoldTheme::Accent : over ? ManifoldTheme::Text : ManifoldTheme::Muted);
+                const ImU32 color = ImGui::GetColorU32(held ? ManifoldTheme::Accent : over ? ManifoldTheme::Text : ManifoldTheme::Muted);
                 ImDrawList* foreground = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
                 foreground->PushClipRect(areaMin, areaMax, true);
                 for (int i = 1; i <= 3; ++i)
@@ -1672,22 +1918,188 @@ namespace Manifold::UI
                 foreground->PopClipRect();
             }
         }
+        ImGui::PopID();
         if (!m_trying)
         {
-            PreviewOverlay(bodyMin, bodyMax);
+            PreviewOverlay(bodyMin, bodyMax, id);
             if (window->MinWidth > 0.0f || window->MinHeight > 0.0f)
             {
                 const ImVec2 least(frameMin.x + Px(window->MinWidth > 0.0f ? window->MinWidth : 160.0f), frameMin.y + Px(window->MinHeight > 0.0f ? window->MinHeight : 100.0f));
                 if (least.x < frameMax.x - 1.0f || least.y < frameMax.y - 1.0f)
                 {
-                    DashedRect(ImGui::GetWindowDrawList(), frameMin, least, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.55f)), 1.0f, Px(5.0f), Px(4.0f));
-                    ImGui::GetWindowDrawList()->AddText(ImVec2(least.x - ImGui::CalcTextSize("min").x - Px(3.0f), least.y - ImGui::GetTextLineHeight() - Px(1.0f)),
+                    DashedRect(draw, frameMin, least, ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.55f)), 1.0f, Px(5.0f), Px(4.0f));
+                    draw->AddText(ImVec2(least.x - ImGui::CalcTextSize("min").x - Px(3.0f), least.y - ImGui::GetTextLineHeight() - Px(1.0f)),
                         ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.8f)), "min");
                 }
             }
-            FunctionChips(origin, areaMin, areaMax, frameMin, frameMax, titleHeight);
         }
-        ImGui::EndChild();
+        // the selected window, or the one a click in Try just opened
+        const bool flash = m_flashWindow == id && ImGui::GetTime() < m_flashUntil;
+        if ((!m_trying && m_selected == id) || flash)
+        {
+            ImDrawList* foreground = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
+            foreground->PushClipRect(areaMin, areaMax, true);
+            const float alpha = flash ? 0.5f + 0.5f * std::sin(static_cast<float>(ImGui::GetTime()) * 12.0f) : 0.9f;
+            foreground->AddRect(ImVec2(frameMin.x - Px(3.0f), frameMin.y - Px(3.0f)), ImVec2(frameMax.x + Px(3.0f), frameMax.y + Px(3.0f)),
+                ImGui::GetColorU32(ManifoldTheme::WithAlpha(modal ? ManifoldTheme::CodeLabel : ManifoldTheme::Accent, alpha)), Px(8.0f), 0, Px(2.0f));
+            foreground->PopClipRect();
+        }
+    }
+
+    // ∑ A button's opens = "<modal>" is drawn as an arrow from the button's
+    // port on its form's edge to the modal's title; the side follows where
+    // the modal sits (beside or below).
+    void FormEditorWindow::JumpLinks(ImVec2 areaMin, ImVec2 areaMax)
+    {
+        ImDrawList* links = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
+        for (const auto& [id, meta] : m_form.Meta)
+        {
+            if (meta.Opens.empty())
+                continue;
+            int target = 0;
+            for (const int modal : m_form.Modals)
+            {
+                if (Lua::FormModalName(m_form, modal) == meta.Opens)
+                    target = modal;
+            }
+            const int root = Lua::FormRootWindow(m_form, id);
+            const auto from = m_frames.find(root);
+            const auto to = m_frames.find(target);
+            const UiDesign::Rect* rect = RectOf(id);
+            if (!target || target == root || from == m_frames.end() || to == m_frames.end() || !rect)
+                continue;
+            const Frame& a = from->second;
+            const Frame& b = to->second;
+            const ImVec2 ca((a.Min.x + a.Max.x) * 0.5f, (a.Min.y + a.Max.y) * 0.5f);
+            const ImVec2 cb((b.Min.x + b.Max.x) * 0.5f, (b.Min.y + b.Max.y) * 0.5f);
+            const bool beside = b.Min.x > a.Max.x || b.Max.x < a.Min.x;
+            const float bodyTop = a.Min.y + a.Title;
+            ImVec2 port;
+            ImVec2 end;
+            ImVec2 outA;
+            ImVec2 outB;
+            const float widgetX = std::clamp((rect->Min.x + rect->Max.x) * 0.5f, a.Min.x + Px(10.0f), a.Max.x - Px(10.0f));
+            const float widgetY = std::clamp((rect->Min.y + rect->Max.y) * 0.5f, bodyTop + Px(8.0f), std::max(bodyTop + Px(8.0f), a.Max.y - Px(8.0f)));
+            if (beside)
+            {
+                const bool right = cb.x > ca.x;
+                port = ImVec2(right ? a.Max.x : a.Min.x, widgetY);
+                end = ImVec2(right ? b.Min.x : b.Max.x, b.Min.y + b.Title * 0.5f);
+                const float bend = std::max(Px(40.0f), std::abs(end.x - port.x) * 0.45f);
+                outA = ImVec2(port.x + (right ? bend : -bend), port.y);
+                outB = ImVec2(end.x + (right ? -bend : bend), end.y);
+            }
+            else
+            {
+                const bool down = cb.y > ca.y;
+                port = ImVec2(widgetX, down ? a.Max.y : a.Min.y);
+                end = ImVec2(std::clamp(widgetX, b.Min.x + Px(20.0f), b.Max.x - Px(20.0f)), down ? b.Min.y : b.Max.y);
+                const float bend = std::max(Px(30.0f), std::abs(end.y - port.y) * 0.45f);
+                outA = ImVec2(port.x, port.y + (down ? bend : -bend));
+                outB = ImVec2(end.x, end.y + (down ? -bend : bend));
+            }
+            const bool strong = id == m_selected || id == m_hovered || target == m_selected;
+            const ImVec4 tone = ManifoldTheme::CodeLabel;
+            const ImU32 color = ImGui::GetColorU32(ManifoldTheme::WithAlpha(tone, strong ? 0.95f : 0.45f));
+            links->PushClipRect(areaMin, areaMax, true);
+            links->AddBezierCubic(port, outA, outB, end, color, strong ? Px(2.0f) : Px(1.4f));
+            links->AddCircleFilled(port, strong ? Px(3.5f) : Px(2.5f), color);
+            {
+                // arrow head along the curve's last tangent
+                ImVec2 dir(end.x - outB.x, end.y - outB.y);
+                const float length = std::sqrt(dir.x * dir.x + dir.y * dir.y);
+                if (length > 0.0f)
+                {
+                    dir = ImVec2(dir.x / length, dir.y / length);
+                    const float head = Px(strong ? 9.0f : 7.0f);
+                    const ImVec2 side(-dir.y, dir.x);
+                    links->AddTriangleFilled(end, ImVec2(end.x - dir.x * head + side.x * head * 0.5f, end.y - dir.y * head + side.y * head * 0.5f),
+                        ImVec2(end.x - dir.x * head - side.x * head * 0.5f, end.y - dir.y * head - side.y * head * 0.5f), color);
+                }
+            }
+            if (strong)
+            {
+                const std::string label = std::string(ICON_FA_WINDOW_RESTORE "  opens ") + meta.Opens;
+                const ImVec2 at((port.x + end.x) * 0.5f, (port.y + end.y) * 0.5f);
+                const ImVec2 labelSize = ImGui::CalcTextSize(label.c_str());
+                const ImVec2 labelMin(at.x - labelSize.x * 0.5f - Px(6.0f), at.y - labelSize.y * 0.5f - Px(2.0f));
+                links->AddRectFilled(labelMin, ImVec2(labelMin.x + labelSize.x + Px(12.0f), labelMin.y + labelSize.y + Px(4.0f)), ImGui::GetColorU32(ManifoldTheme::Page), Px(4.0f));
+                links->AddRect(labelMin, ImVec2(labelMin.x + labelSize.x + Px(12.0f), labelMin.y + labelSize.y + Px(4.0f)), color, Px(4.0f));
+                links->AddText(ImVec2(labelMin.x + Px(6.0f), labelMin.y + Px(2.0f)), color, label.c_str());
+            }
+            links->PopClipRect();
+            if (strong)
+            {
+                const ImVec2 innerMin(std::max(a.Min.x, areaMin.x), std::max(bodyTop, areaMin.y));
+                const ImVec2 innerMax(std::min(a.Max.x, areaMax.x), std::min(a.Max.y, areaMax.y));
+                if (innerMax.x > innerMin.x && innerMax.y > innerMin.y)
+                {
+                    const ImVec2 from2 = beside ? ImVec2(port.x > widgetX ? rect->Max.x + Px(3.0f) : rect->Min.x - Px(3.0f), widgetY)
+                                                : ImVec2(widgetX, port.y > widgetY ? rect->Max.y + Px(3.0f) : rect->Min.y - Px(3.0f));
+                    links->PushClipRect(innerMin, innerMax, true);
+                    DashedLine(links, from2, port, ImGui::GetColorU32(ManifoldTheme::WithAlpha(tone, 0.6f)), 1.0f, Px(4.0f), Px(3.0f));
+                    links->PopClipRect();
+                }
+            }
+        }
+    }
+
+    // ∑ Try has no script behind it, so the editor plays what a form file
+    // does itself: a click on a button that opens a modal flashes that
+    // modal's frame and brings it into view.
+    void FormEditorWindow::TryEvents(ImVec2 areaMin, ImVec2 areaMax)
+    {
+        for (const Lua::UiEvent& event : m_try.Model.TakeEvents())
+        {
+            if (event.Name != "click")
+                continue;
+            const auto meta = m_try.Meta.find(event.Target);
+            if (meta == m_try.Meta.end())
+                continue;
+            int target = 0;
+            if (!meta->second.Opens.empty())
+            {
+                for (const int modal : m_try.Modals)
+                {
+                    if (Lua::FormModalName(m_try, modal) == meta->second.Opens)
+                        target = modal;
+                }
+            }
+            else if (meta->second.Closes)
+                target = Lua::FormRootWindow(m_try, event.Target);
+            const auto frame = m_frames.find(target);
+            if (!target || frame == m_frames.end())
+                continue;
+            m_flashWindow = target;
+            m_flashUntil = ImGui::GetTime() + (meta->second.Opens.empty() ? 0.6 : 1.4);
+            const Frame& f = frame->second;
+            if (!meta->second.Opens.empty() && (f.Min.x < areaMin.x || f.Min.y < areaMin.y || f.Max.x > areaMax.x || f.Max.y > areaMax.y))
+            {
+                m_pan.x += (areaMin.x + areaMax.x) * 0.5f - (f.Min.x + f.Max.x) * 0.5f;
+                m_pan.y += (areaMin.y + areaMax.y) * 0.5f - (f.Min.y + f.Max.y) * 0.5f;
+            }
+        }
+    }
+
+    void FormEditorWindow::AddModal(int opener)
+    {
+        Remember();
+        const int id = Lua::FormAddModal(m_form);
+        if (!id)
+        {
+            m_undo.pop_back();
+            return;
+        }
+        if (const UiNode* button = m_form.Model.Find(opener); button && button->Kind == UiKind::Button)
+            m_form.Meta[opener].Opens = Lua::FormModalName(m_form, id);
+        Changed();
+        Select(id);
+        if (const auto frame = m_frames.find(m_form.Window); frame != m_frames.end())
+        {
+            // bring the new modal into view
+            const ImVec2 place = FramePlace(id);
+            m_pan.y = std::min(m_pan.y, -Px(place.y) + Px(30.0f));
+        }
     }
 
     const UiDesign::Rect* FormEditorWindow::RectOf(int id) const
@@ -1719,10 +2131,13 @@ namespace Manifold::UI
                 continue;
             if (moving && Within(rect.Node, moving))
                 continue;
+            if (m_overlayWindow && Lua::FormRootWindow(m_form, rect.Node) != m_overlayWindow)
+                continue;
             if (!best || rect.Depth > best->Depth || (rect.Depth == best->Depth && (rect.Max.x - rect.Min.x) * (rect.Max.y - rect.Min.y) < (best->Max.x - best->Min.x) * (best->Max.y - best->Min.y)))
                 best = &rect;
         }
-        DropSpot spot{ m_form.Window, Drop::Inside };
+        const int window = m_overlayWindow ? m_overlayWindow : m_form.Window;
+        DropSpot spot{ window, Drop::Inside };
         if (!best)
             return spot;
         const UiNode* node = m_form.Model.Find(best->Node);
@@ -1808,8 +2223,10 @@ namespace Manifold::UI
         }
     }
 
-    void FormEditorWindow::PreviewOverlay(ImVec2 min, ImVec2 max)
+    void FormEditorWindow::PreviewOverlay(ImVec2 min, ImVec2 max, int window)
     {
+        m_overlayWindow = window;
+        const auto mine = [&](int node) { return node && Lua::FormRootWindow(m_form, node) == window; };
         // ∑ The form can be panned partly out of the work surface; the overlay
         // (foreground list) must stop at the surface's edge like the body does.
         {
@@ -1827,23 +2244,25 @@ namespace Manifold::UI
             int depth = -1;
             for (const UiDesign::Rect& rect : m_design.Rects)
             {
-                if (io.MousePos.x >= rect.Min.x && io.MousePos.y >= rect.Min.y && io.MousePos.x < rect.Max.x && io.MousePos.y < rect.Max.y && rect.Depth > depth)
+                if (io.MousePos.x >= rect.Min.x && io.MousePos.y >= rect.Min.y && io.MousePos.x < rect.Max.x && io.MousePos.y < rect.Max.y && rect.Depth > depth && mine(rect.Node))
                 {
                     pointed = rect.Node;
                     depth = rect.Depth;
                 }
             }
-            const bool onGrip = io.MousePos.x >= m_gripMin.x && io.MousePos.y >= m_gripMin.y && io.MousePos.x < m_gripMax.x && io.MousePos.y < m_gripMax.y;
+            bool onGrip = false;
+            for (const auto& [gripMin, gripMax] : m_grips)
+                onGrip = onGrip || (io.MousePos.x >= gripMin.x && io.MousePos.y >= gripMin.y && io.MousePos.x < gripMax.x && io.MousePos.y < gripMax.y);
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::GetDragDropPayload() && !onGrip)
             {
-                Select(pointed ? pointed : m_form.Window);
+                Select(pointed ? pointed : window);
                 m_pressNode = pointed;
                 m_pressing = true;
                 ImGui::SetActiveID(pick, ImGui::GetCurrentWindow());
             }
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
             {
-                Select(pointed ? pointed : m_form.Window);
+                Select(pointed ? pointed : window);
                 ImGui::OpenPopup("##previewmenu");
             }
             if (pointed)
@@ -1861,7 +2280,7 @@ namespace Manifold::UI
                     ImGui::ClearActiveID();
             }
         }
-        if (m_pressing && m_pressNode && m_pressNode != m_form.Window && ImGui::IsMouseDragging(ImGuiMouseButton_Left, Px(6.0f)))
+        if (m_pressing && m_pressNode && mine(m_pressNode) && m_pressNode != window && ImGui::IsMouseDragging(ImGuiMouseButton_Left, Px(6.0f)))
         {
             if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceExtern))
             {
@@ -1871,11 +2290,6 @@ namespace Manifold::UI
                     ImGui::Text("%s  %s", KindIcon(item->Kind), Caption(m_form, *item).c_str());
                 ImGui::EndDragDropSource();
             }
-        }
-        if (ImGui::BeginPopup("##previewmenu"))
-        {
-            NodeMenu(m_selected);
-            ImGui::EndPopup();
         }
         ImDrawList* draw = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
         draw->PushClipRect(min, max, true);
@@ -1904,7 +2318,7 @@ namespace Manifold::UI
             for (const UiDesign::Rect& rect : m_design.Rects)
             {
                 const UiNode* node = m_form.Model.Find(rect.Node);
-                if (!node)
+                if (!node || !mine(rect.Node))
                     continue;
                 const UiNode* parent = m_form.Model.Find(node->Parent);
                 if (Lua::UiIsContainer(node->Kind))
@@ -1938,7 +2352,7 @@ namespace Manifold::UI
         std::vector<PendingTag> tags;
         if (!dragging)
         {
-            if (m_hovered && m_hovered != m_selected)
+            if (m_hovered && m_hovered != m_selected && mine(m_hovered))
             {
                 if (const UiDesign::Rect* rect = RectOf(m_hovered))
                 {
@@ -1946,7 +2360,7 @@ namespace Manifold::UI
                     tags.push_back({ ImVec2(rect->Min.x - 2.0f, rect->Min.y - 2.0f), label(m_hovered), ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.55f)), rect->Max.x + 2.0f });
                 }
             }
-            if (m_selected != m_form.Window)
+            if (m_selected != window && mine(m_selected))
             {
                 outline(m_selected, accent, Px(2.0f));
                 if (const UiDesign::Rect* rect = RectOf(m_selected))
@@ -1965,11 +2379,11 @@ namespace Manifold::UI
                     DashedRect(draw, rect->Min, rect->Max, soft, Px(1.5f), Px(5.0f), Px(3.0f));
                 }
             }
-            if (spot.Target == m_form.Window)
+            if (spot.Target == window)
                 draw->AddRect(min, max, accent, 0.0f, 0, Px(2.0f));
             else
                 DrawSpot(draw, spot);
-            if (ImGui::BeginDragDropTargetCustom(ImRect(min, max), ImGui::GetID("##previewdrop")))
+            if (ImGui::BeginDragDropTargetCustom(ImRect(min, max), ImGui::GetID(("##previewdrop" + std::to_string(window)).c_str())))
             {
                 if (const ImGuiPayload* kind = ImGui::AcceptDragDropPayload(kKindPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
                     DropPayload(kind, spot);
@@ -1990,6 +2404,24 @@ namespace Manifold::UI
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         ImGui::AlignTextToFramePadding();
+        if (node.Kind == UiKind::Window && Lua::FormIsModal(m_form, node.Id))
+        {
+            ImGui::TextUnformatted("Name");
+            ItemTooltip("The modal's name: modals.<name> in the script, and what a button's Opens names.");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            std::string name = Lua::FormModalName(m_form, node.Id);
+            const std::string before = name;
+            if (InputTextWithHint("##modalname", "name", name, ImGuiInputTextFlags_CharsNoBlank) && name != before && Lua::FormIsIdentifier(name))
+            {
+                Remember(ImGui::GetItemID());
+                Lua::FormRenameModal(m_form, node.Id, name);
+                Changed();
+            }
+            if (!name.empty() && !Lua::FormIsIdentifier(name))
+                TextWithError("Letters, digits and _ only, not starting with a digit", ManifoldTheme::Error);
+            return;
+        }
         if (node.Kind == UiKind::Window)
         {
             ImGui::TextUnformatted("Key");
@@ -2315,11 +2747,16 @@ namespace Manifold::UI
             if (!node)
                 return;
         }
+        const bool modalWindow = Lua::FormIsModal(m_form, node->Id);
         ImGui::PushFont(Fonts::Bold(), 0.0f);
-        ImGui::Text("%s  %s", KindIcon(node->Kind), std::string(Lua::FormKindTitle(node->Kind)).c_str());
+        if (modalWindow)
+            ImGui::TextUnformatted(ICON_FA_WINDOW_RESTORE "  Modal Form");
+        else
+            ImGui::Text("%s  %s", KindIcon(node->Kind), std::string(Lua::FormKindTitle(node->Kind)).c_str());
         ImGui::PopFont();
         ImGui::PushTextWrapPos(0.0f);
-        Muted(Lua::FormKindHelp(node->Kind));
+        Muted(modalWindow ? std::string_view("A dialog in front of the program that blocks it until it is closed. A button opens it with Opens; the script with modals.<name>.show().")
+                          : Lua::FormKindHelp(node->Kind));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
         ImGui::BeginChild("##props", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None);
@@ -2344,6 +2781,8 @@ namespace Manifold::UI
             for (const Lua::FormProp& prop : Lua::FormProps(node->Kind))
             {
                 if (GroupOf(prop.Key, node->Kind) != group)
+                    continue;
+                if (modalWindow && (prop.Key == "dock" || prop.Key == "topmost" || prop.Key == "position"))
                     continue;
                 props.push_back(&prop);
                 if (!Lua::FormPropIsDefault(*node, prop.Key))
@@ -2372,6 +2811,61 @@ namespace Manifold::UI
                 ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
                 for (const Lua::FormHandler& handler : handlers)
                     HandlerRow(*node, handler);
+                ImGui::EndTable();
+            }
+        }
+        if (node->Kind == UiKind::Button)
+        {
+            ImGui::Spacing();
+            if (GroupHeader(ICON_FA_WINDOW_RESTORE "  Opens and Closes###jumps", true) && beginTable("##jumptable"))
+            {
+                Lua::FormMeta& meta = m_form.Meta[node->Id];
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted("Opens");
+                ItemTooltip("opens: the modal form this button shows when clicked (before its onClick).");
+                ImGui::TableSetColumnIndex(1);
+                const float button = ImGui::GetFrameHeight();
+                ImGui::SetNextItemWidth(-(button + ImGui::GetStyle().ItemInnerSpacing.x));
+                if (ImGui::BeginCombo("##opens", meta.Opens.empty() ? "nothing" : meta.Opens.c_str()))
+                {
+                    if (ImGui::Selectable("nothing", meta.Opens.empty()) && !meta.Opens.empty())
+                    {
+                        Remember();
+                        m_form.Meta[node->Id].Opens.clear();
+                        Changed();
+                    }
+                    for (const int modal : m_form.Modals)
+                    {
+                        const std::string name = Lua::FormModalName(m_form, modal);
+                        const UiNode* window = m_form.Model.Find(modal);
+                        const std::string label = name + (window && !window->Title.empty() ? "  \xC2\xB7  " + window->Title : std::string());
+                        if (ImGui::Selectable(label.c_str(), meta.Opens == name) && meta.Opens != name)
+                        {
+                            Remember();
+                            m_form.Meta[node->Id].Opens = name;
+                            Changed();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+                if (IconButton(ICON_FA_PLUS "##newmodal", "A new modal form that this button opens", false, button))
+                    AddModal(node->Id);
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted("Closes");
+                ItemTooltip("closes: hides the window this button is in, like OK or Cancel in a dialog.");
+                ImGui::TableSetColumnIndex(1);
+                bool closes = m_form.Meta[node->Id].Closes;
+                if (ToggleSwitch("##closes", &closes))
+                {
+                    Remember();
+                    m_form.Meta[node->Id].Closes = closes;
+                    Changed();
+                }
                 ImGui::EndTable();
             }
         }
@@ -2622,18 +3116,26 @@ namespace Manifold::UI
             for (const int child : std::vector<int>(node->Children))
                 visit(child);
         };
-        visit(form.Window);
+        for (const int window : Lua::FormWindows(form))
+            visit(window);
     }
 
     void FormEditorWindow::Copy()
     {
-        const std::string text = m_selected == m_form.Window ? Lua::FormSave(m_form) : Lua::FormFragment(m_form, { m_selected });
+        const UiNode* node = m_form.Model.Find(m_selected);
+        std::string text;
+        if (m_selected == m_form.Window || !node)
+            text = Lua::FormSave(m_form);
+        else if (node->Kind == UiKind::Window)
+            text = Lua::FormFragment(m_form, node->Children);
+        else
+            text = Lua::FormFragment(m_form, { m_selected });
         ImGui::SetClipboardText(text.c_str());
     }
 
     void FormEditorWindow::Cut()
     {
-        if (m_selected == m_form.Window)
+        if (!m_form.Model.Find(m_selected) || m_form.Model.Find(m_selected)->Kind == UiKind::Window)
             return;
         Copy();
         Delete();
@@ -2751,6 +3253,10 @@ namespace Manifold::UI
             }
             ImGui::EndMenu();
         }
+        ImGui::Separator();
+        if (ImGui::MenuItem(ICON_FA_WINDOW_RESTORE "  Modal Form"))
+            AddModal();
+        ItemTooltip("A dialog in the same form file that opens in front of the program; a button opens it with Opens.");
         ImGui::EndMenu();
     }
 
@@ -2978,7 +3484,7 @@ namespace Manifold::UI
         m_activeChip = name;
     }
 
-    void FormEditorWindow::FunctionChips(ImVec2 origin, ImVec2 areaMin, ImVec2 areaMax, ImVec2 frameMin, ImVec2 frameMax, float titleHeight)
+    void FormEditorWindow::FunctionChips(ImVec2 origin, ImVec2 areaMin, ImVec2 areaMax)
     {
         const std::vector<std::pair<std::string, std::string>> functions = Lua::FormHandlerList(m_form);
         if (functions.empty())
@@ -2988,8 +3494,18 @@ namespace Manifold::UI
         const ImGuiIO& io = ImGui::GetIO();
         const float height = ImGui::GetFrameHeight() + Px(2.0f);
         const float gapY = Px(10.0f);
-        float autoY = m_form.CanvasY;
-        const float autoX = m_form.CanvasX + (frameMax.x - frameMin.x) / Px(1.0f) + 56.0f;
+        // ∑ a chip without a place sits right of the form (or modal) whose
+        // widget names it, one below the other
+        std::map<std::string, int> owner;
+        for (const auto& [id, meta] : m_form.Meta)
+        {
+            for (const auto& [key, handler] : meta.Handlers)
+            {
+                if (!owner.count(handler))
+                    owner[handler] = Lua::FormRootWindow(m_form, id);
+            }
+        }
+        std::map<int, float> autoRows;
         std::map<std::string, std::pair<ImVec2, ImVec2>> rects;
         ImDrawList* draw = ImGui::GetWindowDrawList();
         std::string hovered;
@@ -3000,8 +3516,13 @@ namespace Manifold::UI
                 place = ImVec2(stored->second.X, stored->second.Y);
             else
             {
-                place = ImVec2(autoX, autoY);
-                autoY += (height + gapY) / Px(1.0f);
+                const int root = owner.count(name) ? owner[name] : m_form.Window;
+                const auto frame = m_frames.find(root);
+                const ImVec2 at = FramePlace(root);
+                const float width = frame == m_frames.end() ? 420.0f : (frame->second.Max.x - frame->second.Min.x) / Px(1.0f);
+                float& row = autoRows[root];
+                place = ImVec2(at.x + width + 56.0f, at.y + row);
+                row += (height + gapY) / Px(1.0f);
             }
             m_chipPlaces[name] = place;
             const bool present = linked && Lua::FormFunctionLine(m_form.ScriptText, name) > 0;
@@ -3059,12 +3580,19 @@ namespace Manifold::UI
         // part outside the form is drawn. A hovered or selected widget or chip
         // adds a faint dashed guide from the widget to its port.
         ImDrawList* links = ImGui::GetForegroundDrawList(ImGui::GetWindowViewport());
-        const float bodyTop = frameMin.y + titleHeight;
-        const ImVec2 innerMin(std::max(frameMin.x, areaMin.x), std::max(bodyTop, areaMin.y));
-        const ImVec2 innerMax(std::min(frameMax.x, areaMax.x), std::min(frameMax.y, areaMax.y));
-        const float formCenter = (frameMin.x + frameMax.x) * 0.5f;
         for (const auto& [id, meta] : m_form.Meta)
         {
+            const auto frame = m_frames.find(Lua::FormRootWindow(m_form, id));
+            if (frame == m_frames.end())
+                continue;
+            const ImVec2 frameMin = frame->second.Min;
+            const ImVec2 frameMax = frame->second.Max;
+            const float titleHeight = frame->second.Title;
+            const float bodyTop = frameMin.y + titleHeight;
+            const ImVec2 innerMin(std::max(frameMin.x, areaMin.x), std::max(bodyTop, areaMin.y));
+            const ImVec2 innerMax(std::min(frameMax.x, areaMax.x), std::min(frameMax.y, areaMax.y));
+            const float formCenter = (frameMin.x + frameMax.x) * 0.5f;
+            const bool isWindow = m_form.Model.Find(id) && m_form.Model.Find(id)->Kind == UiKind::Window;
             for (const auto& [key, name] : meta.Handlers)
             {
                 const auto chip = rects.find(name);
@@ -3077,7 +3605,7 @@ namespace Manifold::UI
                 const float out = right ? 1.0f : -1.0f;
                 const UiDesign::Rect* rect = nullptr;
                 float y = frameMin.y + titleHeight * 0.5f;
-                if (id != m_form.Window)
+                if (!isWindow)
                 {
                     rect = m_trying ? nullptr : RectOf(id);
                     if (!rect)
@@ -3112,7 +3640,7 @@ namespace Manifold::UI
             {
                 for (const auto& [key, name] : meta.Handlers)
                 {
-                    if (name == hovered && id != m_form.Window)
+                    if (name == hovered && m_form.Model.Find(id) && m_form.Model.Find(id)->Kind != UiKind::Window)
                         m_hovered = id;
                 }
             }

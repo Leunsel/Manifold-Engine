@@ -12,6 +12,8 @@
 #include "UI/Widgets.h"
 #include "UI/Workspace.h"
 
+#include "imgui_internal.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -155,11 +157,22 @@ namespace Manifold::UI
     void UiHost::Draw()
     {
         Lua::UiModel& model = Model();
+        CloseModals();
         for (const int id : model.Windows())
         {
-            if (Lua::UiNode* node = model.Find(id); node && node->Open)
-                DrawWindow(*node);
+            Lua::UiNode* node = model.Find(id);
+            if (!node || !node->Open)
+                continue;
+            if (node->Modal)
+            {
+                if (std::find(m_modals.begin(), m_modals.end(), id) == m_modals.end())
+                    m_modals.push_back(id);
+                continue;
+            }
+            DrawWindow(*node);
         }
+        if (!m_modals.empty())
+            DrawModal(0);
         DrawDialogs();
         PruneTextures();
     }
@@ -216,6 +229,9 @@ namespace Manifold::UI
         }
         if (visible)
         {
+            // a modal opens over the script window the user works in
+            if (m_modals.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+                m_modalViewport = ImGui::GetWindowViewport()->ID;
             ImGui::PushID(id);
             DrawChildren(window, false);
             ImGui::PopID();
@@ -231,6 +247,111 @@ namespace Manifold::UI
                     Post(id, "close");
             }
         }
+    }
+
+    // ∑ Modal windows are ImGui modal popups. A modal opened while another
+    // is up is begun inside it (ImGui stacks popups by nesting), so they are
+    // drawn as a chain in the order they opened. A modal the script hides or
+    // removes is closed in ImGui's popup stack too, or it would linger there.
+    void UiHost::CloseModals()
+    {
+        ImGuiContext& g = *ImGui::GetCurrentContext();
+        for (std::size_t i = 0; i < m_modals.size(); ++i)
+        {
+            const Lua::UiNode* node = Model().Find(m_modals[i]);
+            if (node && node->Open && node->Modal)
+                continue;
+            if (const auto known = m_modalIds.find(m_modals[i]); known != m_modalIds.end())
+            {
+                for (int level = 0; level < g.OpenPopupStack.Size; ++level)
+                {
+                    if (g.OpenPopupStack[level].PopupId == known->second)
+                    {
+                        ImGui::ClosePopupToLevel(level, true);
+                        break;
+                    }
+                }
+                m_modalIds.erase(known);
+            }
+            // the ones opened from it go with it
+            for (std::size_t j = i + 1; j < m_modals.size(); ++j)
+            {
+                if (Lua::UiNode* later = Model().Find(m_modals[j]); later && later->Open)
+                {
+                    later->Open = false;
+                    Model().Touch(*later);
+                    if (later->Handlers & H::Close)
+                        Post(later->Id, "close");
+                }
+                m_modalIds.erase(m_modals[j]);
+            }
+            m_modals.resize(i);
+            break;
+        }
+    }
+
+    bool UiHost::DrawModal(std::size_t index)
+    {
+        if (index >= m_modals.size())
+            return false;
+        Lua::UiNode* found = Model().Find(m_modals[index]);
+        if (!found)
+            return false;
+        Lua::UiNode& window = *found;
+        const int id = window.Id;
+        const std::string popup = "manifold.ui.modal." + std::to_string(id);
+        const std::string hashed = "###" + popup;
+        if (!ImGui::IsPopupOpen(hashed.c_str()))
+        {
+            ImGui::OpenPopup(hashed.c_str());
+            m_modalIds[id] = ImGui::GetID(hashed.c_str());
+        }
+        if (window.FocusRequest)
+            window.FocusRequest = false;
+        const auto limit = [](float value, float low, float high) {
+            if (high > 0.0f)
+                value = std::min(value, high);
+            return std::max(value, low);
+        };
+        const ImVec2 minimum(window.MinWidth > 0.0f ? window.MinWidth : 160.0f, window.MinHeight > 0.0f ? window.MinHeight : 80.0f);
+        const ImVec2 size(limit(window.Width > 0.0f ? window.Width : 360.0f, minimum.x, window.MaxWidth), limit(window.Height > 0.0f ? window.Height : 200.0f, minimum.y, window.MaxHeight));
+        ImGuiWindowFlags flags = ImGuiWindowFlags_NoDocking;
+        if (!window.Resizable)
+            flags |= ImGuiWindowFlags_NoResize;
+        if (window.AutoSize)
+            flags |= ImGuiWindowFlags_AlwaysAutoResize;
+        if (!window.Scrollbar)
+            flags |= ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+        if (!window.AutoSize)
+            ImGui::SetNextWindowSizeConstraints(Px(minimum.x, minimum.y), ImVec2(window.MaxWidth > 0.0f ? Px(window.MaxWidth) : FLT_MAX, window.MaxHeight > 0.0f ? Px(window.MaxHeight) : FLT_MAX));
+        bool open = true;
+        const std::string_view glyph = IconGlyph(window.Icon);
+        const std::string title = window.Title.empty() ? std::string("Script") : window.Title;
+        const ImGuiID viewport = m_modalViewport && ImGui::FindViewportByID(m_modalViewport) ? m_modalViewport : 0;
+        const bool visible = BeginModal(popup.c_str(), glyph.empty() ? ICON_FA_WINDOW_RESTORE : std::string(glyph).c_str(), title.c_str(), window.AutoSize ? ImVec2(0.0f, 0.0f) : size, &open, viewport, flags);
+        if (visible)
+        {
+            ImGui::PushID(id);
+            DrawChildren(window, false);
+            ImGui::PopID();
+            const bool top = index + 1 >= m_modals.size();
+            if (top && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::IsAnyItemActive())
+                open = false;
+            if (open)
+                DrawModal(index + 1);
+            EndModal();
+        }
+        if (!open)
+        {
+            if (Lua::UiNode* again = Model().Find(id))
+            {
+                again->Open = false;
+                Model().Touch(*again);
+                if (again->Handlers & H::Close)
+                    Post(id, "close");
+            }
+        }
+        return visible;
     }
 
     void UiHost::DrawContents(int window, UiDesign* design)

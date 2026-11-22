@@ -69,7 +69,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 15 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 16 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -1811,6 +1811,134 @@ return M
                 return "ok")LUA");
         }
 
+        void UiFormModals(Engine& engine)
+        {
+            // The document: a modal with a closing button, a button that opens it, save, load, problems, code.
+            Lua::FormDocument form = SampleForm();
+            const int modal = Lua::FormAddModal(form, "confirm");
+            CHECK(modal > 0 && Lua::FormIsModal(form, modal) && Lua::FormModalName(form, modal) == "confirm");
+            CHECK_EQ(Lua::FormWindows(form).size(), std::size_t(2));
+            int opener = 0;
+            for (const auto& [id, meta] : form.Meta)
+            {
+                if (meta.Name == "save")
+                    opener = id;
+            }
+            CHECK(opener > 0);
+            form.Meta[opener].Opens = "confirm";
+            form.ModalNodes["confirm"] = { 500.0f, 400.0f, false };
+            CHECK(Lua::FormProblems(form).empty());
+            const std::string saved = Lua::FormSave(form);
+            CHECK(saved.find("modals = {") != std::string::npos);
+            CHECK(saved.find("name = \"confirm\"") != std::string::npos);
+            CHECK(saved.find("opens = \"confirm\"") != std::string::npos);
+            CHECK(saved.find("closes = true") != std::string::npos);
+            Lua::FormDocument loaded;
+            std::string error;
+            std::vector<std::string> notes;
+            CHECK_MSG(Lua::FormLoad(saved, loaded, error, &notes) && notes.empty(), error + (notes.empty() ? std::string() : " / " + notes.front()));
+            CHECK_EQ(loaded.Modals.size(), std::size_t(1));
+            if (loaded.Modals.size() == 1)
+            {
+                const int again = loaded.Modals.front();
+                CHECK(Lua::FormModalName(loaded, again) == "confirm" && loaded.Model.Find(again)->Modal);
+                CHECK(Lua::FormRootWindow(loaded, loaded.Model.Find(again)->Children.back()) == again);
+            }
+            CHECK(loaded.ModalNodes.count("confirm") && loaded.ModalNodes["confirm"].Y == 400.0f);
+            bool opens = false;
+            bool closes = false;
+            for (const auto& [id, meta] : loaded.Meta)
+            {
+                opens = opens || meta.Opens == "confirm";
+                closes = closes || meta.Closes;
+            }
+            CHECK(opens && closes);
+            CHECK(Lua::FormSave(loaded) == saved);
+
+            Lua::FormDocument renamed = loaded;
+            CHECK(Lua::FormRenameModal(renamed, renamed.Modals.front(), "sure"));
+            CHECK(Lua::FormSave(renamed).find("opens = \"sure\"") != std::string::npos && renamed.ModalNodes.count("sure"));
+            Lua::FormDocument broken = loaded;
+            for (auto& [id, meta] : broken.Meta)
+            {
+                if (meta.Opens == "confirm")
+                    meta.Opens = "missing";
+            }
+            const std::vector<Lua::FormProblem> problems = Lua::FormProblems(broken);
+            CHECK(std::any_of(problems.begin(), problems.end(), [](const Lua::FormProblem& p) { return p.Text.find("no modal of that name") != std::string::npos; }));
+            Lua::FormDocument removed = loaded;
+            CHECK(Lua::FormRemove(removed, removed.Modals.front()) && removed.Modals.empty() && removed.ModalNodes.empty());
+            CHECK(Lua::FormSave(removed).find("opens =") == std::string::npos);
+
+            const std::string withFile = Lua::FormScript(loaded, Lua::FormScriptStyle::FormFile, "Player.form.lua");
+            CHECK(withFile.find("window, w, modals = ui.form.load(\"Player.form.lua\", handlers)") != std::string::npos);
+            const std::string standalone = Lua::FormScript(loaded, Lua::FormScriptStyle::Standalone);
+            CHECK(standalone.find("modals.confirm = ui.window.create(\"Dialog\", { modal = true, open = false") != std::string::npos);
+            CHECK(standalone.find("modals.confirm.hide() end") != std::string::npos);
+            CHECK(standalone.find("modals.confirm.show() saveClicked(widget) end") != std::string::npos);
+            CHECK_MSG(engine.Lua().Run(standalone + "\nfor _, made in pairs(modals) do made.remove() end\nwindow.remove()\n", "form modal standalone").Ok(), standalone);
+
+            // The runtime: modal windows wait hidden, opens / closes work, wrong forms raise.
+            Lua::UiModel& model = engine.Lua().Ui();
+            LuaCheck(engine, "form modals", R"LUA(
+                modalClicks = 0
+                local handlers = { saveClicked = function() modalClicks = modalClicks + 1 end }
+                modalWindow, modalWidgets, modalTable = manifold.ui.form.build({ form = 1, title = "Main", children = {
+                    { kind = "button", name = "save", text = "Save", onClick = "saveClicked", opens = "confirm" },
+                  }, modals = {
+                    { name = "confirm", title = "Sure?", width = 300, children = {
+                      { kind = "text", text = "Really?" },
+                      { kind = "button", name = "yes", text = "Yes", closes = true },
+                    } },
+                  } }, handlers)
+                if not modalTable.confirm or modalTable.confirm.kind ~= "window" then return "no modal table" end
+                if modalTable.confirm.isOpen() then return "the modal opened on its own" end
+                if modalWidgets.yes.kind ~= "button" then return "modal widgets missing" end
+                modalSave, modalYes = modalWidgets.save.id, modalWidgets.yes.id
+                local function raises(fn, needle)
+                  local ok, problem = pcall(fn)
+                  if ok then return "no error for " .. needle end
+                  local text = type(problem) == "table" and problem.message or tostring(problem)
+                  if not text:find(needle, 1, true) then return "message lacks '" .. needle .. "': " .. text end
+                end
+                local failure = raises(function() manifold.ui.form.build({ form = 1, title = "Bad", children = { { kind = "button", opens = "nope" } } }) end, "must name one of the form's modals")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", children = { { kind = "text", closes = true } } }) end, "only a button opens or closes")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", modals = { { name = "a", title = "A" }, { name = "a", title = "B" } } }) end, "two modal forms are named")
+                  or raises(function() manifold.ui.form.build({ form = 1, title = "Bad", modal = true }) end, "form.modal is not a window option")
+                if failure then return failure end
+                return "ok")LUA");
+            CHECK(!FindWindow(model, "Bad"));
+            const Lua::UiNode* sure = FindWindow(model, "Sure?");
+            CHECK(sure && sure->Modal && !sure->Open);
+            int save = 0;
+            int yes = 0;
+            {
+                std::string result;
+                engine.Lua().RunWithResult("return tostring(modalSave) .. ' ' .. tostring(modalYes)", "form modal ids", result);
+                const std::size_t space = result.find(' ');
+                if (space != std::string::npos)
+                {
+                    save = static_cast<int>(ParseDecimal(result.substr(0, space)).value_or(0));
+                    yes = static_cast<int>(ParseDecimal(result.substr(space + 1)).value_or(0));
+                }
+            }
+            CHECK(save > 0 && yes > 0);
+            model.Post({ save, "click", {} });
+            engine.Lua().Tick(7000.0);
+            sure = FindWindow(model, "Sure?");
+            CHECK(sure && sure->Open);
+            model.Post({ yes, "click", {} });
+            engine.Lua().Tick(7001.0);
+            sure = FindWindow(model, "Sure?");
+            CHECK(sure && !sure->Open);
+            LuaCheck(engine, "form modals clicked", R"LUA(
+                if modalClicks ~= 1 then return "onClick ran " .. tostring(modalClicks) .. " times" end
+                modalTable.confirm.remove()
+                modalWindow.remove()
+                return "ok")LUA");
+            CHECK(!FindWindow(model, "Sure?") && !FindWindow(model, "Main"));
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -1958,6 +2086,7 @@ return M
         UiWindowOptions(engine);
         UiFormLinks(engine);
         UiFormCanvas(engine);
+        UiFormModals(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

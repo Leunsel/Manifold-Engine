@@ -60,10 +60,16 @@ namespace Manifold::UI
         void Breadcrumb();
         void PaletteTile(Lua::UiKind kind, float width);
         void Outline();
-        void OutlineNode(int id, int depth);
+        void OutlineNode(int id, int depth, std::vector<int>& path);
         void NodeMenu(int id);
         void Preview();
-        void PreviewOverlay(ImVec2 min, ImVec2 max);
+        void PreviewOverlay(ImVec2 min, ImVec2 max, int window);
+        void PreviewFrame(Lua::FormDocument& form, int window, ImVec2 origin, ImVec2 areaMin, ImVec2 areaMax);
+        ImVec2 FramePlace(int window) const;
+        void SetFramePlace(int window, ImVec2 place);
+        void JumpLinks(ImVec2 areaMin, ImVec2 areaMax);
+        void TryEvents(ImVec2 areaMin, ImVec2 areaMax);
+        void AddModal(int opener = 0);
         struct DropSpot
         {
             int Target = 0;
@@ -89,7 +95,7 @@ namespace Manifold::UI
         void LinkScript();
         void OpenLinked(int line = 0);
         void OpenHandler(Lua::UiNode& node, const Lua::FormHandler& handler);
-        void FunctionChips(ImVec2 origin, ImVec2 areaMin, ImVec2 areaMax, ImVec2 frameMin, ImVec2 frameMax, float titleHeight);
+        void FunctionChips(ImVec2 origin, ImVec2 areaMin, ImVec2 areaMax);
         void EnsureScript();
         bool SaveScript();
         bool ScriptDirty() const;
@@ -148,9 +154,19 @@ namespace Manifold::UI
         int m_lastTab = 0;
         int m_pressNode = 0;
         bool m_pressing = false;
-        ImVec2 m_gripMin = ImVec2(0.0f, 0.0f);
-        ImVec2 m_gripMax = ImVec2(0.0f, 0.0f);
+        struct Frame
+        {
+            ImVec2 Min;
+            ImVec2 Max;
+            float Title = 0.0f;
+        };
+        std::map<int, Frame> m_frames;
+        std::vector<std::pair<ImVec2, ImVec2>> m_grips;
+        int m_gripWindow = 0;
         bool m_gripping = false;
+        int m_overlayWindow = 0;
+        int m_flashWindow = 0;
+        double m_flashUntil = 0.0;
         ImVec2 m_pan = ImVec2(0.0f, 0.0f);
         ImVec2 m_areaSize = ImVec2(0.0f, 0.0f);
         std::string m_activeChip;
@@ -171,6 +187,10 @@ namespace Manifold::UI
         std::vector<Lua::FormProblem> m_problems;
         std::set<int> m_problemNodes;
         bool m_scrollOutline = false;
+        std::set<int> m_collapsed;
+        float m_outlineX = 0.0f;
+        float m_outlineWidth = 0.0f;
+        int m_outlineRows = 0;
 
         std::deque<Lua::FormDocument> m_undo;
         std::deque<Lua::FormDocument> m_redo;

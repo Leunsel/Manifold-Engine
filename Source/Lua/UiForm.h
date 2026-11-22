@@ -46,6 +46,8 @@ namespace Manifold::Lua
     {
         std::string Name;
         std::map<std::string, std::string> Handlers;
+        std::string Opens;
+        bool Closes = false;
     };
 
     struct FormNode
@@ -77,6 +79,8 @@ namespace Manifold::Lua
         float CanvasX = 40.0f;
         float CanvasY = 30.0f;
         std::map<std::string, FormNode> Nodes;
+        std::vector<int> Modals;
+        std::map<std::string, FormNode> ModalNodes;
         std::string ScriptText;
         bool ScriptLoaded = false;
     };
@@ -133,6 +137,12 @@ namespace Manifold::Lua
     std::string FormFunctionBody(std::string_view script, std::string_view name);
     std::optional<std::string> FormReplaceBody(std::string_view script, std::string_view name, std::string_view body);
     int FormIndexOf(const FormDocument& form, int node);
+    int FormAddModal(FormDocument& form, std::string_view base = "dialog");
+    bool FormIsModal(const FormDocument& form, int node);
+    int FormRootWindow(const FormDocument& form, int node);
+    std::string FormModalName(const FormDocument& form, int window);
+    bool FormRenameModal(FormDocument& form, int window, const std::string& name);
+    std::vector<int> FormWindows(const FormDocument& form);
     std::string FormUniqueName(const FormDocument& form, std::string_view base, int except = 0);
     bool FormIsIdentifier(std::string_view name);
 

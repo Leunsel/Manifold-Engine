@@ -848,6 +848,10 @@ namespace Manifold::Lua
                     if (found != meta->Handlers.end() && !found->second.empty())
                         parts.push_back(std::string(handler.Key) + " = " + Quote(found->second));
                 }
+                if (node.Kind == UiKind::Button && !meta->Opens.empty())
+                    parts.push_back("opens = " + Quote(meta->Opens));
+                if (node.Kind == UiKind::Button && meta->Closes)
+                    parts.push_back("closes = true");
             }
             std::vector<const UiNode*> children;
             for (const int child : node.Children)
@@ -920,8 +924,24 @@ namespace Manifold::Lua
                         continue;
                     }
                     const std::string key = lua_tostring(State, -2);
-                    if (key == "name" || key == "kind" || key == "children" || key == "form" || (node.Kind == UiKind::Window && (key == "key" || key == "fragment" || key == "script" || key == "editor")))
+                    if (key == "name" || key == "kind" || key == "children" || key == "form" ||
+                        (node.Kind == UiKind::Window && (key == "key" || key == "fragment" || key == "script" || key == "editor" || key == "modals")))
                     {
+                        lua_pop(State, 1);
+                        continue;
+                    }
+                    if (node.Kind == UiKind::Button && key == "opens")
+                    {
+                        if (lua_type(State, -1) == LUA_TSTRING && FormIsIdentifier(lua_tostring(State, -1)))
+                            meta.Opens = lua_tostring(State, -1);
+                        else
+                            Warn(Where(node.Kind, meta.Name) + ": opens must name a modal form and was left out");
+                        lua_pop(State, 1);
+                        continue;
+                    }
+                    if (node.Kind == UiKind::Button && key == "closes")
+                    {
+                        meta.Closes = lua_toboolean(State, -1) != 0;
                         lua_pop(State, 1);
                         continue;
                     }
@@ -994,7 +1014,7 @@ namespace Manifold::Lua
                 }
                 if (!ReadMeta(table, node, meta))
                     return false;
-                if (!meta.Name.empty() || !meta.Handlers.empty())
+                if (!meta.Name.empty() || !meta.Handlers.empty() || !meta.Opens.empty() || meta.Closes)
                     Form.Meta[id] = std::move(meta);
                 return ReadChildren(table, id, depth);
             }
@@ -1050,6 +1070,26 @@ namespace Manifold::Lua
                     const int at = lua_gettop(State);
                     Form.CanvasX = Number(State, at, "x", Form.CanvasX);
                     Form.CanvasY = Number(State, at, "y", Form.CanvasY);
+                }
+                lua_pop(State, 1);
+                if (lua_getfield(State, editor, "modals") == LUA_TTABLE)
+                {
+                    const int modals = lua_gettop(State);
+                    lua_pushnil(State);
+                    while (lua_next(State, modals))
+                    {
+                        if (lua_type(State, -2) == LUA_TSTRING && lua_istable(State, -1) && Form.ModalNodes.size() < 256)
+                        {
+                            const int at = lua_gettop(State);
+                            FormNode node;
+                            node.X = Number(State, at, "x", 0.0f);
+                            node.Y = Number(State, at, "y", 0.0f);
+                            const std::string name = lua_tostring(State, -2);
+                            if (FormIsIdentifier(name))
+                                Form.ModalNodes[name] = node;
+                        }
+                        lua_pop(State, 1);
+                    }
                 }
                 lua_pop(State, 1);
                 if (lua_getfield(State, editor, "nodes") == LUA_TTABLE)
@@ -1115,7 +1155,66 @@ namespace Manifold::Lua
                     return false;
                 if (!meta.Handlers.empty())
                     Form.Meta[Form.Window] = std::move(meta);
-                return ReadChildren(table, Form.Window, 0);
+                if (!ReadChildren(table, Form.Window, 0))
+                    return false;
+                return ReadModals(table);
+            }
+
+            // ∑ modals = { { name = "confirm", title = "...", <window options>, children = {...} }, ... }
+            bool ReadModals(int table)
+            {
+                const int type = lua_getfield(State, table, "modals");
+                if (type == LUA_TNIL)
+                {
+                    lua_pop(State, 1);
+                    return true;
+                }
+                if (type != LUA_TTABLE)
+                {
+                    lua_pop(State, 1);
+                    Error = "modals must be a list of modal forms";
+                    return false;
+                }
+                const int list = lua_gettop(State);
+                const lua_Integer count = static_cast<lua_Integer>(lua_rawlen(State, list));
+                for (lua_Integer i = 1; i <= count && i <= 64; ++i)
+                {
+                    if (lua_rawgeti(State, list, i) != LUA_TTABLE)
+                    {
+                        lua_pop(State, 2);
+                        Error = "every modal form must be a table with a name and a title";
+                        return false;
+                    }
+                    const int at = lua_gettop(State);
+                    lua_getfield(State, at, "name");
+                    const std::string name = lua_type(State, -1) == LUA_TSTRING ? lua_tostring(State, -1) : std::string();
+                    lua_pop(State, 1);
+                    if (!FormIsIdentifier(name))
+                    {
+                        lua_pop(State, 2);
+                        Error = "modal form " + std::to_string(i) + ": the name must be a Lua name";
+                        return false;
+                    }
+                    const int id = Form.Model.Create(UiKind::Window, 0, {});
+                    UiNode& window = *Form.Model.Find(id);
+                    ApplyUiProps(State, at, window);
+                    window.Handlers = 0;
+                    window.Modal = true;
+                    FormMeta meta;
+                    meta.Name = name;
+                    bool ok = ReadMeta(at, window, meta);
+                    Form.Meta[id] = std::move(meta);
+                    Form.Modals.push_back(id);
+                    ok = ok && ReadChildren(at, id, 0);
+                    lua_pop(State, 1);
+                    if (!ok)
+                    {
+                        lua_pop(State, 1);
+                        return false;
+                    }
+                }
+                lua_pop(State, 1);
+                return true;
             }
         };
 
@@ -1127,6 +1226,7 @@ namespace Manifold::Lua
             std::map<std::string, int> Counters;
             std::vector<std::pair<std::string, std::string_view>> Functions;
             std::set<std::string> Seen;
+            std::string CurrentWindow = "window";
 
             std::string Variable(const UiNode& node)
             {
@@ -1171,15 +1271,31 @@ namespace Manifold::Lua
                     else
                         parts.push_back(key + " = " + literal);
                 }
-                if (node.Kind == UiKind::Window && !Form.Key.empty())
+                if (node.Id == Form.Window && !Form.Key.empty())
                     parts.push_back("key = " + Quote(Form.Key));
                 if (const FormMeta* meta = MetaOf(Form, node.Id))
                 {
+                    const bool jumps = node.Kind == UiKind::Button && (!meta->Opens.empty() || meta->Closes);
                     for (const FormHandler& handler : FormHandlers(node.Kind))
                     {
                         const auto found = meta->Handlers.find(std::string(handler.Key));
+                        if (jumps && handler.Key == "onClick")
+                            continue;
                         if (found != meta->Handlers.end() && !found->second.empty())
                             parts.push_back(std::string(handler.Key) + " = " + (handlersAsNames ? Quote(found->second) : found->second));
+                    }
+                    if (jumps)
+                    {
+                        // what opens / closes do in a form file, spelled out
+                        std::string body;
+                        if (meta->Closes)
+                            body += CurrentWindow + ".hide() ";
+                        if (!meta->Opens.empty())
+                            body += "modals." + meta->Opens + ".show() ";
+                        const auto click = meta->Handlers.find("onClick");
+                        if (click != meta->Handlers.end() && !click->second.empty())
+                            body += click->second + "(widget) ";
+                        parts.push_back("onClick = function(widget) " + body + "end");
                     }
                 }
                 if (parts.empty())
@@ -1434,6 +1550,17 @@ namespace Manifold::Lua
     {
         if (node == form.Window)
             return false;
+        if (FormIsModal(form, node))
+        {
+            const std::string name = FormModalName(form, node);
+            form.Modals.erase(std::remove(form.Modals.begin(), form.Modals.end(), node), form.Modals.end());
+            form.ModalNodes.erase(name);
+            for (auto& [id, meta] : form.Meta)
+            {
+                if (meta.Opens == name)
+                    meta.Opens.clear();
+            }
+        }
         std::function<void(int)> forget = [&](int id) {
             form.Meta.erase(id);
             if (const UiNode* item = form.Model.Find(id))
@@ -1556,8 +1683,11 @@ namespace Manifold::Lua
     std::vector<std::pair<std::string, std::string>> FormHandlerList(const FormDocument& form)
     {
         ScriptWriter writer{ form };
-        if (const UiNode* window = form.Model.Find(form.Window))
-            writer.Collect(*window);
+        for (const int id : FormWindows(form))
+        {
+            if (const UiNode* window = form.Model.Find(id))
+                writer.Collect(*window);
+        }
         std::vector<std::pair<std::string, std::string>> list;
         for (const auto& [name, params] : writer.Functions)
             list.push_back({ name, std::string(params) });
@@ -1857,6 +1987,90 @@ namespace Manifold::Lua
             return -1;
         const auto at = std::find(parent->Children.begin(), parent->Children.end(), node);
         return at == parent->Children.end() ? -1 : static_cast<int>(at - parent->Children.begin());
+    }
+
+    bool FormIsModal(const FormDocument& form, int node)
+    {
+        return std::find(form.Modals.begin(), form.Modals.end(), node) != form.Modals.end();
+    }
+
+    int FormRootWindow(const FormDocument& form, int node)
+    {
+        int root = 0;
+        for (const UiNode* up = form.Model.Find(node); up; up = form.Model.Find(up->Parent))
+            root = up->Id;
+        return root;
+    }
+
+    std::string FormModalName(const FormDocument& form, int window)
+    {
+        if (!FormIsModal(form, window))
+            return {};
+        const FormMeta* meta = MetaOf(form, window);
+        return meta ? meta->Name : std::string();
+    }
+
+    std::vector<int> FormWindows(const FormDocument& form)
+    {
+        std::vector<int> windows{ form.Window };
+        for (const int modal : form.Modals)
+        {
+            if (form.Model.Find(modal))
+                windows.push_back(modal);
+        }
+        return windows;
+    }
+
+    int FormAddModal(FormDocument& form, std::string_view base)
+    {
+        const int id = form.Model.Create(UiKind::Window, 0, {});
+        if (!id)
+            return 0;
+        UiNode& window = *form.Model.Find(id);
+        window.Title = "Dialog";
+        window.Width = 340.0f;
+        window.Height = 170.0f;
+        window.Modal = true;
+        form.Meta[id].Name = FormUniqueName(form, base, id);
+        form.Modals.push_back(id);
+        if (const int text = FormAdd(form, UiKind::Text, id))
+        {
+            form.Model.Find(text)->Text = "Text of the dialog.";
+            form.Model.Find(text)->Wrap = true;
+        }
+        if (const int row = FormAdd(form, UiKind::Row, id))
+        {
+            form.Model.Find(row)->Align = "right";
+            if (const int button = FormAdd(form, UiKind::Button, row))
+            {
+                form.Model.Find(button)->Text = "Close";
+                form.Meta[button].Name = FormUniqueName(form, "btnClose", button);
+                form.Meta[button].Closes = true;
+            }
+        }
+        return id;
+    }
+
+    bool FormRenameModal(FormDocument& form, int window, const std::string& name)
+    {
+        if (!FormIsModal(form, window) || !FormIsIdentifier(name))
+            return false;
+        const std::string old = FormModalName(form, window);
+        if (old == name)
+            return true;
+        form.Meta[window].Name = name;
+        for (auto& [id, meta] : form.Meta)
+        {
+            if (meta.Opens == old)
+                meta.Opens = name;
+        }
+        if (const auto place = form.ModalNodes.find(old); place != form.ModalNodes.end())
+        {
+            const FormNode moved = place->second;
+            form.ModalNodes.erase(place);
+            form.ModalNodes[name] = moved;
+        }
+        return true;
     }
 
     std::string FormUniqueName(const FormDocument& form, std::string_view base, int except)
@@ -2249,10 +2463,23 @@ namespace Manifold::Lua
                 problems.push_back({ id, "Color: the value must be #RRGGBB or #RRGGBBAA" });
             if (node->Kind == UiKind::Window && node->Title.empty())
                 problems.push_back({ id, "Window: has no title" });
+            if (const FormMeta* meta = MetaOf(form, id); meta && !meta->Opens.empty())
+            {
+                bool known = false;
+                for (const int modal : form.Modals)
+                    known = known || FormModalName(form, modal) == meta->Opens;
+                if (!known)
+                    problems.push_back({ id, kind + ": opens \"" + meta->Opens + "\", but the form has no modal of that name" });
+            }
             for (const int child : node->Children)
                 visit(child);
         };
-        visit(form.Window);
+        for (const int window : FormWindows(form))
+        {
+            if (FormIsModal(form, window) && FormModalName(form, window).empty())
+                problems.push_back({ window, "Modal: has no name" });
+            visit(window);
+        }
         return problems;
     }
 
@@ -2293,10 +2520,53 @@ namespace Manifold::Lua
                     SaveNode(form, *item, 2, writer);
             }
             writer.Line(1, "},");
-            if (form.CanvasX != 40.0f || form.CanvasY != 30.0f || !form.Nodes.empty())
+            if (!form.Modals.empty())
+            {
+                writer.Line(1, "modals = {");
+                for (const int id : form.Modals)
+                {
+                    const UiNode* modal = form.Model.Find(id);
+                    if (!modal)
+                        continue;
+                    writer.Line(2, "{");
+                    writer.Line(3, "name = " + Quote(FormModalName(form, id)) + ",");
+                    writer.Line(3, "title = " + Quote(modal->Title) + ",");
+                    for (const auto& [key, literal] : NodeFields(*modal))
+                    {
+                        if (key != "title" && key != "dock" && key != "topmost" && key != "position")
+                            writer.Line(3, key + " = " + literal + ",");
+                    }
+                    if (const FormMeta* meta = MetaOf(form, id))
+                    {
+                        for (const FormHandler& handler : kWindowHandlers)
+                        {
+                            const auto found = meta->Handlers.find(std::string(handler.Key));
+                            if (found != meta->Handlers.end() && !found->second.empty())
+                                writer.Line(3, std::string(handler.Key) + " = " + Quote(found->second) + ",");
+                        }
+                    }
+                    writer.Line(3, "children = {");
+                    for (const int child : modal->Children)
+                    {
+                        if (const UiNode* item = form.Model.Find(child))
+                            SaveNode(form, *item, 4, writer);
+                    }
+                    writer.Line(3, "},");
+                    writer.Line(2, "},");
+                }
+                writer.Line(1, "},");
+            }
+            if (form.CanvasX != 40.0f || form.CanvasY != 30.0f || !form.Nodes.empty() || !form.ModalNodes.empty())
             {
                 writer.Line(1, "editor = {");
                 writer.Line(2, "form = { x = " + NumberText(std::round(form.CanvasX)) + ", y = " + NumberText(std::round(form.CanvasY)) + " },");
+                if (!form.ModalNodes.empty())
+                {
+                    writer.Line(2, "modals = {");
+                    for (const auto& [name, node] : form.ModalNodes)
+                        writer.Line(3, name + " = { x = " + NumberText(std::round(node.X)) + ", y = " + NumberText(std::round(node.Y)) + " },");
+                    writer.Line(2, "},");
+                }
                 if (!form.Nodes.empty())
                 {
                     writer.Line(2, "nodes = {");
@@ -2353,19 +2623,39 @@ namespace Manifold::Lua
         const UiNode* window = form.Model.Find(form.Window);
         if (!window)
             return {};
-        writer.Collect(*window);
+        for (const int id : FormWindows(form))
+        {
+            if (const UiNode* each = form.Model.Find(id))
+                writer.Collect(*each);
+        }
+        const bool modals = FormWindows(form).size() > 1;
         std::string out = "local ui = manifold.ui\n\n";
         if (style == FormScriptStyle::FormFile)
         {
-            out += "local window, w\nlocal handlers = {}\n\n";
+            out += modals ? "local window, w, modals\nlocal handlers = {}\n\n" : "local window, w\nlocal handlers = {}\n\n";
             out += writer.Stubs(true);
-            out += "window, w = ui.form.load(" + Quote(formFile.empty() ? std::string_view("Form.form.lua") : formFile) + ", handlers)\n";
+            out += (modals ? "window, w, modals = ui.form.load(" : "window, w = ui.form.load(") + Quote(formFile.empty() ? std::string_view("Form.form.lua") : formFile) + ", handlers)\n";
             return out;
         }
-        out += "local window\nlocal w = {}\n\n";
+        out += modals ? "local window\nlocal w = {}\nlocal modals = {}\n\n" : "local window\nlocal w = {}\n\n";
         out += writer.Stubs(false);
+        // modals first: the main window's buttons may open them
+        for (const int id : form.Modals)
+        {
+            const UiNode* modal = form.Model.Find(id);
+            const std::string name = FormModalName(form, id);
+            if (!modal || name.empty())
+                continue;
+            writer.CurrentWindow = "modals." + name;
+            std::string options = writer.Options(*modal, false);
+            options = options.empty() ? std::string("{ modal = true, open = false }") : "{ modal = true, open = false, " + options.substr(2);
+            writer.Body += writer.CurrentWindow + " = ui.window.create(" + Quote(modal->Title) + ", " + options + ")\n";
+            writer.Build(*modal, writer.CurrentWindow);
+            writer.Body += "\n";
+        }
+        writer.CurrentWindow = "window";
         const std::string options = writer.Options(*window, false);
-        writer.Body = "window = ui.window.create(" + Quote(window->Title) + (options.empty() ? std::string() : ", " + options) + ")\n";
+        writer.Body += "window = ui.window.create(" + Quote(window->Title) + (options.empty() ? std::string() : ", " + options) + ")\n";
         writer.Build(*window, "window");
         return out + writer.Body;
     }

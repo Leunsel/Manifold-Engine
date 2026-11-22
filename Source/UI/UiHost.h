@@ -72,6 +72,8 @@ namespace Manifold::UI
 
         Lua::UiModel& Model();
         void DrawWindow(Lua::UiNode& window);
+        bool DrawModal(std::size_t index);
+        void CloseModals();
         void DrawChildren(const Lua::UiNode& node, bool row);
         void DrawNode(Lua::UiNode& node);
         void DrawSection(Lua::UiNode& node);
@@ -105,6 +107,9 @@ namespace Manifold::UI
         std::map<int, CanvasState> m_canvases;
         std::uint64_t m_textureGeneration = 0;
         int m_openDialog = 0;
+        std::vector<int> m_modals;
+        std::map<int, ImGuiID> m_modalIds;
+        ImGuiID m_modalViewport = 0;
         std::string m_dialogText;
         int m_dialogChoice = 0;
         ImGuiID m_treePopup = 0;

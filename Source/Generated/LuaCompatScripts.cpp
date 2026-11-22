@@ -5215,7 +5215,7 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 15
+local API_VERSION = 16
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -7645,12 +7645,12 @@ widgetObject = function(entry)
 end
 
 local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open = "boolean", dock = "boolean", interval = "number", key = "string", opacity = "number", inactiveOpacity = "number",
-  minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean",
+  minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean", modal = "boolean",
   position = "string", x = "number", y = "number", onClose = "function", onUpdate = "function" }
 local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", opacity = "number", inactiveOpacity = "number",
-  minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean",
+  minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean", modal = "boolean",
   onClose = "function", onUpdate = "function" }
-local WINDOW_FLAG_KEYS = { "minWidth", "minHeight", "maxWidth", "maxHeight", "resizable", "autoSize", "scrollbar", "topmost" }
+local WINDOW_FLAG_KEYS = { "minWidth", "minHeight", "maxWidth", "maxHeight", "resizable", "autoSize", "scrollbar", "topmost", "modal" }
 local WINDOW_POSITIONS = { center = true, mouse = true }
 local WINDOW_DOC = "manifold.ui.window.Window."
 local windowKeys = {}
@@ -7739,7 +7739,7 @@ define(window, "create", {
     { name = "options", type = "table", optional = true, keys = WINDOW_KEYS },
   },
   returns = "window",
-  doc = "Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `opacity` (0.1 to 1, while the window has the focus) and `inactiveOpacity` (while another window has it; default `opacity`): without them the user's window opacity settings apply, and only a floating window can be see-through, a docked one stays opaque; `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one, and it keeps its place, size and dock spot from one run to the next. Size and behaviour: `minWidth`, `minHeight`, `maxWidth`, `maxHeight` (points) limit what the user can drag it to, `resizable = false` fixes the size, `autoSize = true` fits the window to its widgets, `scrollbar = false` hides the scroll bar, `topmost = true` keeps a floating window above other windows (it does not dock). `position` places it the first time: `\"center\"` (of the main window) or `\"mouse\"`; `x` and `y` (points from the main window's corner) place it exactly.",
+  doc = "Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `opacity` (0.1 to 1, while the window has the focus) and `inactiveOpacity` (while another window has it; default `opacity`): without them the user's window opacity settings apply, and only a floating window can be see-through, a docked one stays opaque; `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one, and it keeps its place, size and dock spot from one run to the next. Size and behaviour: `minWidth`, `minHeight`, `maxWidth`, `maxHeight` (points) limit what the user can drag it to, `resizable = false` fixes the size, `autoSize = true` fits the window to its widgets, `scrollbar = false` hides the scroll bar, `topmost = true` keeps a floating window above other windows (it does not dock). `modal = true` shows the window as a dialog in front of the program: the rest of the program waits until it is closed (its close button, Escape or `hide`), a modal opened from a modal stacks on top of it, and closing one closes the ones opened from it; with `open = false` it waits for `show`. `position` places it the first time: `\"center\"` (of the main window) or `\"mouse\"`; `x` and `y` (points from the main window's corner) place it exactly.",
 }, function(title, options)
   options = options or {}
   checkIcon("manifold.ui.window.create", options.icon)
@@ -7776,7 +7776,8 @@ define(window, "create", {
   if options.open == false then
     native.uiShow(id, false, false)
   end
-  local entry = { id = id, kind = "window", owner = owner, children = {}, title = title, key = options.key, onClose = options.onClose, onUpdate = options.onUpdate }
+)MLUA"),
+            std::string_view(R"MLUA(  local entry = { id = id, kind = "window", owner = owner, children = {}, title = title, key = options.key, onClose = options.onClose, onUpdate = options.onUpdate }
   uiEntries[id] = entry
   entry.handle = windowObject(entry)
   if options.key then
@@ -7789,14 +7790,13 @@ end)
 native.docDefine(nil, "manifold.ui.window.Window", {
   kind = "class",
   title = "Window objects",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "`manifold.ui.window.create` returns a window object: dot calls only, read-only, unknown names raise. A call on a window that is gone (removed, or its script ran again) returns `nil, error` with code `ME-7010`.",
+  doc = "`manifold.ui.window.create` returns a window object: dot calls only, read-only, unknown names raise. A call on a window that is gone (removed, or its script ran again) returns `nil, error` with code `ME-7010`.",
 })
 local WINDOW_METHOD_DOCS = {
   add = { params = { { name = "kind", type = "string" }, { name = "options", type = "table", optional = true } }, returns = "widget", doc = "Adds a widget at the end of the window and returns its handle. `kind` is one of `row`, `column`, `grid`, `section`, `tabs`, `split`, `text`, `heading`, `separator`, `spacer`, `button`, `checkbox`, `input`, `number`, `slider`, `combo`, `radio`, `color`, `table`, `tree`, `progress`, `image`, `canvas`; the options depend on it (see the widget object)." },
   clear = { returns = "boolean", doc = "Removes every widget of the window." },
   remove = { returns = "boolean", doc = "Removes the window and its widgets for good." },
-  update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, opacity (`opacity`, `inactiveOpacity`), size limits and behaviour (`minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `resizable`, `autoSize`, `scrollbar`, `topmost`), update interval or handlers." },
+  update = { params = { { name = "options", type = "table", keys = WINDOW_UPDATE_KEYS } }, returns = "boolean", doc = "Changes the title, icon, opacity (`opacity`, `inactiveOpacity`), size limits and behaviour (`minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `resizable`, `autoSize`, `scrollbar`, `topmost`, `modal`), update interval or handlers." },
   show = { returns = "boolean", doc = "Shows the window again after the user or `hide` closed it." },
   hide = { returns = "boolean", doc = "Hides the window; `show` brings it back with its widgets." },
   focus = { returns = "boolean", doc = "Shows the window and brings it to the front." },
@@ -7844,23 +7844,20 @@ native.docDefine(nil, WIDGET_DOC .. "id", { kind = "field", type = "integer", do
 native.docDefine(nil, WIDGET_DOC .. "kind", { kind = "field", type = "string", doc = "The kind it was added as." })
 
 local form = subarea(ui, "form", "Windows described by a table, as the Form Editor (Tools > Form Editor) saves them in a `.form.lua` file. The table holds the layout and the names of the handlers; the script keeps the code and passes its handler functions in.")
-local FORM_NODE_KEYS = { kind = true, name = true, children = true }
+local FORM_NODE_KEYS = { kind = true, name = true, children = true, opens = true, closes = true }
+-- ∑ Manifold.lua's main chunk is close to Lua's limit of 200 locals: new
+-- form helpers live in tables or inside the functions that use them.
+local FORM_SKIP = {
+  file = { form = true, title = true, children = true, script = true, fragment = true, editor = true, modals = true },
+  modal = { name = true, title = true, children = true },
+}
 local formImageLoad
 local callFormHandler
 
 local FORM_VALUE_KINDS = { checkbox = true, input = true, number = true, slider = true, combo = true, radio = true, color = true, table = true, tree = true, progress = true }
 
-local function formHeader(path, spec, handlers)
-  if math.type(spec.form) ~= "integer" then
-    misuse(path .. ": the table has no form = 1, so it is no form")
-  end
-  if spec.form > 1 then
-    misuse(("%s: the form is from a newer Manifold (form = %d)"):format(path, spec.form))
-  end
-  if type(spec.title) ~= "string" then
-    misuse(("%s: form.title must be a string, got %s"):format(path, kindOf(spec.title)))
-  end
-  local function resolve(where, key, value)
+local function formResolver(path, handlers)
+  return function(where, key, value)
     if type(value) ~= "string" then
       misuse(("%s: %s.%s must be the name of a handler, got %s"):format(path, where, key, kindOf(value)))
     end
@@ -7873,23 +7870,40 @@ local function formHeader(path, spec, handlers)
     end
     return handler
   end
+end
+
+local function formWindowOptions(path, spec, where, resolve, skip)
   local options = {}
   for key, value in pairs(spec) do
-    if key ~= "form" and key ~= "title" and key ~= "children" and key ~= "script" and key ~= "fragment" and key ~= "editor" then
-      if not WINDOW_KEYS[key] then
-        misuse(("%s: form.%s is not a window option (known options: %s)"):format(path, tostring(key), table.concat(sortedNames(WINDOW_KEYS), ", ")))
+    if not skip[key] then
+      if not WINDOW_KEYS[key] or key == "modal" then
+        misuse(("%s: %s.%s is not a window option (known options: %s)"):format(path, where, tostring(key), table.concat(sortedNames(WINDOW_KEYS), ", ")))
       end
       if UI_HANDLER_BITS[key] then
-        options[key] = resolve("form", key, value)
+        options[key] = resolve(where, key, value)
       else
         options[key] = value
       end
     end
   end
   if options.position ~= nil and not WINDOW_POSITIONS[options.position] then
-    misuse(('%s: form.position must be "center" or "mouse", got %s'):format(path, tostring(options.position)))
+    misuse(('%s: %s.position must be "center" or "mouse", got %s'):format(path, where, tostring(options.position)))
   end
-  return options, resolve
+  return options
+end
+
+local function formHeader(path, spec, handlers)
+  if math.type(spec.form) ~= "integer" then
+    misuse(path .. ": the table has no form = 1, so it is no form")
+  end
+  if spec.form > 1 then
+    misuse(("%s: the form is from a newer Manifold (form = %d)"):format(path, spec.form))
+  end
+  if type(spec.title) ~= "string" then
+    misuse(("%s: form.title must be a string, got %s"):format(path, kindOf(spec.title)))
+  end
+  local resolve = formResolver(path, handlers)
+  return formWindowOptions(path, spec, "form", resolve, FORM_SKIP.file), resolve
 end
 
 local function formWidget(path, child, at, resolve)
@@ -7906,7 +7920,8 @@ local function formWidget(path, child, at, resolve)
   local keys = WIDGET_KEYS[child.kind]
   local copy = {}
   for key, value in pairs(child) do
-    if not FORM_NODE_KEYS[key] then
+)MLUA"),
+            std::string_view(R"MLUA(    if not FORM_NODE_KEYS[key] then
       if keys and UI_HANDLER_BITS[key] and keys[key] then
         copy[key] = resolve(label, key, value)
       else
@@ -7922,6 +7937,46 @@ end
 -- wrong file keeps the window as it was.
 local function checkForm(path, spec, handlers)
   local options, resolve = formHeader(path, spec, handlers)
+  -- ∑ The modal forms of a form file: a list of window tables with a `name`.
+  -- Each becomes a modal window that waits hidden for `show` (or a button's
+  -- `opens`); `name` keys them in the third table that load and build return.
+  local function formModals()
+    local list = {}
+    if spec.modals == nil then
+      return list
+    end
+    if type(spec.modals) ~= "table" then
+      misuse(("%s: form.modals must be a list of modal forms, got %s"):format(path, kindOf(spec.modals)))
+    end
+    local seen = {}
+    for index, modal in ipairs(spec.modals) do
+      local where = ("form.modals[%d]"):format(index)
+      if type(modal) ~= "table" then
+        misuse(("%s: %s must be a table, got %s"):format(path, where, kindOf(modal)))
+      end
+      if type(modal.name) ~= "string" or not modal.name:match("^[%a_][%w_]*$") then
+        misuse(("%s: %s.name must be a Lua name, got %s"):format(path, where, tostring(modal.name)))
+      end
+      if seen[modal.name] then
+        misuse(("%s: two modal forms are named %q"):format(path, modal.name))
+      end
+      seen[modal.name] = true
+      if type(modal.title) ~= "string" then
+        misuse(("%s: %s.title must be a string, got %s"):format(path, where, kindOf(modal.title)))
+      end
+      local options = formWindowOptions(path, modal, ("modal %q"):format(modal.name), resolve, FORM_SKIP.modal)
+      options.modal = true
+      options.open = false
+      options.dock = nil
+      list[#list + 1] = { name = modal.name, spec = modal, options = options, where = where }
+    end
+    return list
+  end
+  local modals = formModals()
+  local modalNames = {}
+  for _, modal in ipairs(modals) do
+    modalNames[modal.name] = true
+  end
   local names = {}
   local function walk(parentKind, list, where, depth)
     if list == nil then
@@ -7934,8 +7989,7 @@ local function checkForm(path, spec, handlers)
       misuse(path .. ": the form nests deeper than 32 levels")
     end
     for index, child in ipairs(list) do
-)MLUA"),
-            std::string_view(R"MLUA(      local copy, label = formWidget(path, child, ("%s.children[%d]"):format(where, index), resolve)
+      local copy, label = formWidget(path, child, ("%s.children[%d]"):format(where, index), resolve)
       local keys = WIDGET_KEYS[child.kind]
       if not keys then
         misuse(('%s: %s: kind must be one of "%s", got %q'):format(path, label, table.concat(WIDGET_KINDS, '", "'), child.kind))
@@ -7955,6 +8009,17 @@ local function checkForm(path, spec, handlers)
         end
         names[child.name] = true
       end
+      if child.opens ~= nil or child.closes ~= nil then
+        if child.kind ~= "button" then
+          misuse(("%s: %s: only a button opens or closes a window"):format(path, label))
+        end
+        if child.opens ~= nil and (type(child.opens) ~= "string" or not modalNames[child.opens]) then
+          misuse(("%s: %s.opens must name one of the form's modals, got %s"):format(path, label, tostring(child.opens)))
+        end
+        if child.closes ~= nil and type(child.closes) ~= "boolean" then
+          misuse(("%s: %s.closes must be a boolean, got %s"):format(path, label, kindOf(child.closes)))
+        end
+      end
       if child.kind == "image" and type(copy.image) == "string" then
         copy.image = nil
       end
@@ -7963,11 +8028,15 @@ local function checkForm(path, spec, handlers)
     end
   end
   walk("window", spec.children, "form", 1)
-  return options
+  for _, modal in ipairs(modals) do
+    walk("window", modal.spec.children, modal.where, 1)
+  end
+  return options, modals
 end
 
-local function fillForm(path, made, members, spec, handlers, folder)
-  local _, resolve = formHeader(path, spec, handlers)
+-- `links.window` is the window the widgets go into (a button's `closes`
+-- hides it), `links.modals` the form's modals by name (`opens` shows one).
+local function fillForm(path, made, members, children, resolve, folder, links)
   local function add(parent, list, where)
     for index, child in ipairs(list or {}) do
       local copy, label = formWidget(path, child, ("%s.children[%d]"):format(where, index), resolve)
@@ -7978,6 +8047,24 @@ local function fillForm(path, made, members, spec, handlers, folder)
         end
         copy.image = formImageLoad(file)
       end
+      if child.kind == "button" and (child.opens or child.closes) then
+        local original = copy.onClick
+        local opens, closes = child.opens, child.closes
+        copy.onClick = function(widget)
+          if closes then
+            links.window.hide()
+          end
+          if opens then
+            local modal = rawget(links.modals, opens)
+            if modal then
+              modal.show()
+            end
+          end
+          if original then
+            return original(widget)
+          end
+        end
+      end
       local handle = parent.add(child.kind, copy)
       if child.name then
         rawset(members, child.name, handle)
@@ -7985,19 +8072,35 @@ local function fillForm(path, made, members, spec, handlers, folder)
       add(handle, child.children, label)
     end
   end
-  add(made, spec.children, "form")
+  add(made, children, "form")
 end
 
 local function buildForm(path, spec, handlers, folder)
-  local options = checkForm(path, spec, handlers)
+  local options, modals = checkForm(path, spec, handlers)
+  local resolve = formResolver(path, handlers)
   local made = rawget(window.members, "create")(spec.title, options)
   local widgets, members = strict(("form(%q).widgets"):format(spec.title))
-  local ok, problem = pcall(fillForm, path, made, members, spec, handlers, folder)
+  local modalTable, modalMembers = strict(("form(%q).modals"):format(spec.title))
+  local windows = { made }
+  local ok, problem = pcall(function()
+    for _, modal in ipairs(modals) do
+      local handle = rawget(window.members, "create")(modal.spec.title, modal.options)
+      windows[#windows + 1] = handle
+      rawset(modalMembers, modal.name, handle)
+    end
+    fillForm(path, made, members, spec.children, resolve, folder, { window = made, modals = modalMembers })
+    for _, modal in ipairs(modals) do
+      local handle = rawget(modalMembers, modal.name)
+      fillForm(path, handle, members, modal.spec.children, resolve, folder, { window = handle, modals = modalMembers })
+    end
+  end)
   if not ok then
-    made.remove()
+    for _, made in ipairs(windows) do
+      made.remove()
+    end
     error(problem, 0)
   end
-  return made, widgets, members
+  return made, widgets, members, modalTable, modalMembers
 end
 
 local function readFormFile(file, folder)
@@ -8020,12 +8123,22 @@ local function reloadForm(watch)
   if uiEntries[watch.window.id] ~= watch.entry then
     return
   end
+  local function windowUpdate(title, options)
+    local update = { title = title }
+    for key in pairs(WINDOW_UPDATE_KEYS) do
+      if key ~= "title" and options[key] ~= nil then
+        update[key] = options[key]
+      end
+    end
+    return update
+  end
+
   local spec, shown, message = readFormFile(watch.file)
-  local options
+  local options, modals
   if spec then
-    local ok, checked = pcall(checkForm, "manifold.ui.form.load", spec, watch.handlers)
+    local ok, checked, list = pcall(checkForm, "manifold.ui.form.load", spec, watch.handlers)
     if ok then
-      options = checked
+      options, modals = checked, list
     else
       message = isError(checked) and rawget(checked, "message") or tostring(checked)
     end
@@ -8053,14 +8166,43 @@ local function reloadForm(watch)
     rawset(watch.members, name, nil)
   end
   watch.window.clear()
-  local update = { title = spec.title }
-  for key in pairs(WINDOW_UPDATE_KEYS) do
-    if key ~= "title" and options[key] ~= nil then
-      update[key] = options[key]
+  watch.window.update(windowUpdate(spec.title, options))
+  -- modals: kept by name (cleared and refilled), new ones made, dropped ones removed
+  local wanted = {}
+  for _, modal in ipairs(modals) do
+    wanted[modal.name] = modal
+  end
+  local existing = {}
+  for name in pairs(watch.modals) do
+    existing[#existing + 1] = name
+  end
+  for _, name in ipairs(existing) do
+    if not wanted[name] then
+      local handle = rawget(watch.modals, name)
+      rawset(watch.modals, name, nil)
+      handle.remove()
     end
   end
-  watch.window.update(update)
-  local ok, failure = pcall(fillForm, "manifold.ui.form.load", watch.window, watch.members, spec, watch.handlers, watch.folder)
+  local resolve = formResolver("manifold.ui.form.load", watch.handlers)
+  local ok, failure = pcall(function()
+    for _, modal in ipairs(modals) do
+      local handle = rawget(watch.modals, modal.name)
+      if handle and uiEntries[handle.id] then
+        handle.clear()
+        local update = windowUpdate(modal.spec.title, modal.options)
+        update.modal = true
+        handle.update(update)
+      else
+        handle = rawget(window.members, "create")(modal.spec.title, modal.options)
+        rawset(watch.modals, modal.name, handle)
+      end
+    end
+    fillForm("manifold.ui.form.load", watch.window, watch.members, spec.children, resolve, watch.folder, { window = watch.window, modals = watch.modals })
+    for _, modal in ipairs(modals) do
+      local handle = rawget(watch.modals, modal.name)
+      fillForm("manifold.ui.form.load", handle, watch.members, modal.spec.children, resolve, watch.folder, { window = handle, modals = watch.modals })
+    end
+  end)
   for name, saved in pairs(values) do
     local handle = rawget(watch.members, name)
     if handle and handle.kind == saved.kind then
@@ -8073,11 +8215,11 @@ local function reloadForm(watch)
   end
   emit("info", "manifold.ui", "Reloaded " .. watch.file)
   if watch.onReload then
-    callFormHandler(watch.onReload, watch.window, watch.widgets)
+    callFormHandler(watch.onReload, watch.window, watch.widgets, watch.modalTable)
   end
 end
 
-local FORM_RETURNS = "`window, widgets`: the window object, and a read-only table of the widgets that have a `name`, by name (an unknown name raises)."
+local FORM_RETURNS = "`window, widgets, modals`: the window object, a read-only table of the widgets that have a `name`, by name (the modals' widgets included; an unknown name raises), and a read-only table of the modal windows by name."
 
 define(form, "build", {
   params = {
@@ -8085,13 +8227,14 @@ define(form, "build", {
     { name = "handlers", type = "table", optional = true },
   },
   returns = "window",
-  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like. The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like." .. " `modals` lists modal forms: window tables like the form itself with a `name`, each made as a modal window (`modal = true`) that waits hidden; `modals.<name>.show()` opens it. A button's `opens = \"<name>\"` opens that modal when clicked and `closes = true` hides the window it is in; both run before the button's `onClick`." .. " The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty.",
 }, function(spec, handlers)
   local info = callerFrame()
   local source = info and info.source or ""
   local folder = source:sub(1, 1) == "@" and source:sub(2):match("^(.*[\\/])") or nil
-  local made, widgets = buildForm("manifold.ui.form.build", spec, handlers, folder)
-  return made, widgets
+  local made, widgets, _, modals = buildForm("manifold.ui.form.build", spec, handlers, folder)
+  return made, widgets, modals
 end)
 
 define(form, "load", {
@@ -8101,7 +8244,7 @@ define(form, "load", {
     { name = "options", type = "table", optional = true, keys = { reload = "boolean", onReload = "function" } },
   },
   returns = "window",
-  doc = "Reads a `.form.lua` file and builds its window like `build`; returns " .. FORM_RETURNS .. " A relative path starts at the folder of the calling script (at the program folder for code without a file). Returns nil and an `ME-7014` error when the file cannot be read or does not return a table; a wrong form raises like `build`. Picture files of `image` widgets are relative to the form file's folder. Live reload: while the window is open, saving the file (in the Form Editor or elsewhere) rebuilds its widgets in the same window, with the same handlers; the window and the `widgets` table stay the same objects, widgets that keep their name and kind keep their value, and a wrong file only logs a warning. `options.reload = false` switches that off; `options.onReload(window, widgets)` runs after each rebuild, to fill what the script put in (table rows, tree items, drawings).",
+  doc = "Reads a `.form.lua` file and builds its window like `build`; returns " .. FORM_RETURNS .. " A relative path starts at the folder of the calling script (at the program folder for code without a file). Returns nil and an `ME-7014` error when the file cannot be read or does not return a table; a wrong form raises like `build`. Picture files of `image` widgets are relative to the form file's folder. Live reload: while the window is open, saving the file (in the Form Editor or elsewhere) rebuilds its widgets in the same window, with the same handlers; the window, the `widgets` and `modals` tables stay the same objects (a modal keeps its window by name), widgets that keep their name and kind keep their value, and a wrong file only logs a warning. `options.reload = false` switches that off; `options.onReload(window, widgets, modals)` runs after each rebuild, to fill what the script put in (table rows, tree items, drawings).",
 }, function(path, handlers, options)
   options = options or {}
   local info = callerFrame()
@@ -8112,16 +8255,16 @@ define(form, "load", {
     return result(nil, shown, message)
   end
   local formFolder = shown:match("^(.*[\\/])")
-  local made, widgets, members = buildForm("manifold.ui.form.load", spec, handlers, formFolder)
+  local made, widgets, members, modalTable, modalMembers = buildForm("manifold.ui.form.load", spec, handlers, formFolder)
   if options.reload ~= false then
     local entry = uiEntries[made.id]
-    local watch = { window = made, entry = entry, widgets = widgets, members = members, file = shown, handlers = handlers, folder = formFolder, onReload = options.onReload }
+    local watch = { window = made, entry = entry, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = shown, handlers = handlers, folder = formFolder, onReload = options.onReload }
     entry.onFormReload = function()
       reloadForm(watch)
     end
     native.uiWatch(made.id, shown)
   end
-  return made, widgets
+  return made, widgets, modalTable
 end)
 
 local function plainObject(entry, prefix, docPrefix, methods, fields)
@@ -8217,8 +8360,7 @@ end)
 local FILE_KEYS = { title = "string", filters = "table", name = "string", onClose = "function" }
 local FILE_TEXT = " `filters` is a list of `{ \"Lua scripts\", \"*.lua\" }` pairs; `onClose(path)` gets the full path, or nil."
 
-)MLUA"),
-            std::string_view(R"MLUA(local function flatFilters(path, filters)
+local function flatFilters(path, filters)
   if filters == nil then
     return nil
   end
@@ -8325,7 +8467,8 @@ define(notice, "show", {
 end)
 
 native.docDefine(nil, "manifold.ui.notice.Notice", { kind = "class", title = "Notice objects", doc = "`manifold.ui.notice.show` returns a notice object." })
-native.docDefine(nil, "manifold.ui.notice.Notice.update", { params = { { name = "options", type = "table", keys = { text = "string", level = "string", progress = "number", sticky = "boolean" } } }, returns = "boolean", doc = "Changes the text, level, progress or stickiness, and shows the notice for its full time again." })
+)MLUA"),
+            std::string_view(R"MLUA(native.docDefine(nil, "manifold.ui.notice.Notice.update", { params = { { name = "options", type = "table", keys = { text = "string", level = "string", progress = "number", sticky = "boolean" } } }, returns = "boolean", doc = "Changes the text, level, progress or stickiness, and shows the notice for its full time again." })
 native.docDefine(nil, "manifold.ui.notice.Notice.remove", { returns = "boolean", doc = "Takes the notice down." })
 native.docDefine(nil, "manifold.ui.notice.Notice.isShown", { returns = "boolean", doc = "Whether the notice is still up." })
 native.docDefine(nil, "manifold.ui.notice.Notice.id", { kind = "field", type = "integer", doc = "The notice's number." })
@@ -8486,8 +8629,7 @@ define(ui, "setMode", {
   native.setUiMode(mode.release, mode.compact)
 end)
 
-)MLUA"),
-            std::string_view(R"MLUA(local theme = subarea(ui, "theme", "The names `manifold.ui` takes for colours and icons.")
+local theme = subarea(ui, "theme", "The names `manifold.ui` takes for colours and icons.")
 
 define(theme, "colors", {
   returns = "table",
@@ -8638,7 +8780,8 @@ end
 rawset(_G, "require", moduleRequire)
 pcall(native.docBind, moduleRequire, "require")
 
-local moduleArea = area("module", "The autorun modules: the scripts in the `autorun` folder and the modules in `autorun\\modules`. A module is named by the `NAME` line of its header, or by its file or folder name. Extensions > Modules shows the same list. [AUTORUN.md](AUTORUN.md) describes the folder layout, the header and what `require` finds.")
+)MLUA"),
+            std::string_view(R"MLUA(local moduleArea = area("module", "The autorun modules: the scripts in the `autorun` folder and the modules in `autorun\\modules`. A module is named by the `NAME` line of its header, or by its file or folder name. Extensions > Modules shows the same list. [AUTORUN.md](AUTORUN.md) describes the folder layout, the header and what `require` finds.")
 
 local MODULE_INFO = "a table with `name`, `version`, `author`, `description`, `category`, `kind` (`loose`, `file` or `folder`), `origin` (`shipped` or `user`), `state` (`loaded`, `disabled`, `failed`, `blocked`, `held`, `superseded`, `builtIn` or `pending`), `reason`, `enabled`, `changed`, `path` (the module's folder), `entry` (its entry file), `dataPath` (its folder under `autorun\\data`), `loadTime` in milliseconds and `requires` (a list of `{ name, version }`)"
 
@@ -8777,8 +8920,7 @@ local RULES = [[
 3. **Calls use a dot.** `manifold.log.info("ready")`, never `manifold.log:info("ready")`. No function takes `self`, and the objects the API returns (channels) work the same way. A colon call raises an error that says so.
 4. **Arguments.** Required arguments come first, optional ones after them, and settings go into one `options` table at the end. A `?` after a name marks it optional. A missing, extra or wrongly typed argument and an unknown option key raise `ME-7007`, naming the function and the argument. Addresses are integers or address expressions such as `"game.exe+10"`.
 5. **Results.** A function that can fail while the script runs (no process, unreadable memory, unknown symbol) returns its value on success, or `true` when it has none, and `nil, error` on failure. It does not raise for those. Predicates never fail.
-)MLUA"),
-            std::string_view(R"MLUA(6. **Errors.** An error is a table `{ code, message, where, traceback }`: `code` is the `ME-` code from [ERRORS.md](ERRORS.md) or a script's own code, `message` the text, `where` the script line that made the call (`chunk:line`), `traceback` the stack when `manifold.error.try` caught it. `tostring(error)` gives `where: message (code)`. Using the API the wrong way (rules 3 and 4, unknown names) raises such an error instead of returning it.
+6. **Errors.** An error is a table `{ code, message, where, traceback }`: `code` is the `ME-` code from [ERRORS.md](ERRORS.md) or a script's own code, `message` the text, `where` the script line that made the call (`chunk:line`), `traceback` the stack when `manifold.error.try` caught it. `tostring(error)` gives `where: message (code)`. Using the API the wrong way (rules 3 and 4, unknown names) raises such an error instead of returning it.
 7. **Strict tables.** Reading a name that does not exist raises `ME-7007` with the nearest name (`manifold.log.warn` → `manifold.log.warning`), and every table is read-only. `manifold.has("log.channel")` tests for a name without raising.
 8. **Versions.** `manifold.apiVersion` grows when functions are added. Existing names keep their meaning.
 
