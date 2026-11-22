@@ -244,9 +244,12 @@ namespace Manifold::Tests
         CHECK_EQ(tree.Scenes.size(), 3u);
         if (tree.Scenes.size() != 3)
             return;
-        CHECK(tree.Scenes[0].Name == "Main" && tree.Scenes[0].Handle == 0x10 && tree.Scenes[0].Active && tree.Scenes[0].BuildIndex == 0 &&
+        // The alternative fake has Unity 6000.6's stripped scene API (no
+        // SceneManager.GetSceneAt, no Scene.GetRootGameObjects): the scenes
+        // come from the walk over all Transforms, without build indices.
+        CHECK(tree.Scenes[0].Name == "Main" && tree.Scenes[0].Handle == 0x10 && tree.Scenes[0].Active && tree.Scenes[0].BuildIndex == (alt ? -1 : 0) &&
               tree.Scenes[0].RootCount == 3 && tree.Scenes[0].Loaded);
-        CHECK(tree.Scenes[1].Name == "Additive" && tree.Scenes[1].Handle == 0x20 && !tree.Scenes[1].Active && tree.Scenes[1].BuildIndex == 1 &&
+        CHECK(tree.Scenes[1].Name == "Additive" && tree.Scenes[1].Handle == 0x20 && !tree.Scenes[1].Active && tree.Scenes[1].BuildIndex == (alt ? -1 : 1) &&
               tree.Scenes[1].RootCount == 2);
         CHECK(tree.Scenes[2].DontDestroy);
 
@@ -275,6 +278,27 @@ namespace Manifold::Tests
             {
                 CHECK_MSG(inspection->Error.empty(), inspection->Error);
                 CHECK(inspection->GameObject && inspection->GameObject->Components.size() == 2 && inspection->GameObject->Components[1].Class == "Game.Health");
+            }
+            // The walk serves the other scenes too, DontDestroyOnLoad by the
+            // handle of its probe object.
+            CHECK(Act(unity, [&] { unity.ExpandScene(1); }));
+            CHECK(Act(unity, [&] { unity.ExpandScene(2); }));
+            tree = unity.Tree();
+            CHECK_MSG(unity.State().Error.empty(), unity.State().Error);
+            CHECK(tree.Scenes[1].RootsLoaded && tree.Scenes[1].Roots.size() == 2u && NodeNamed(tree, "Crowd") >= 0);
+            CHECK(tree.Scenes[2].RootsLoaded && tree.Scenes[2].Handle == 0x30 && tree.Scenes[2].Roots.size() == 1u && NodeNamed(tree, "Services") >= 0);
+            CHECK_EQ(counter("g_il2cppProbesLive"), 0);
+            // The search through FindObjectsByType(Type, FindObjectsInactive):
+            // Exclude leaves the 3 inactive Transforms out, Include (no
+            // Resources.FindObjectsOfTypeAll here) has them.
+            for (const bool hidden : { false, true })
+            {
+                unity.Search({ "UnityEngine.Transform", "", hidden });
+                Until([&] { return unity.SearchResult().Done; }, 15000);
+                const Target::UnitySearchResult found = unity.SearchResult();
+                CHECK_MSG(found.Error.empty(), found.Error);
+                CHECK_EQ(found.Hits.size(), hidden ? 3012u : 3009u);
+                CHECK_EQ(counter("g_il2cppFinder"), hidden ? 13 : 3);
             }
             // Shut down while the game's main thread does not come by: the
             // helper thread gives the GC handles back instead.
@@ -517,8 +541,10 @@ namespace Manifold::Tests
         CHECK_MSG(found.Error.empty(), found.Error);
         CHECK(found.Total == 3009 && found.Hits.size() == 3009 && !found.HeapScan);
         CHECK(std::all_of(found.Hits.begin(), found.Hits.end(), [](const Target::UnityHit& hit) { return hit.Class == "UnityEngine.Transform" && hit.Object != 0; }));
+        CHECK_EQ(counter("g_il2cppFinder"), 1);
         found = search("Transform", "", true);
         CHECK_EQ(found.Hits.size(), 3012u);
+        CHECK_EQ(counter("g_il2cppFinder"), 12);
         found = search("UnityEngine.Transform", "enemy", true);
         CHECK(found.Total == 3012 && found.Hits.size() == 2);
         found = search("Game.Health", "", false);

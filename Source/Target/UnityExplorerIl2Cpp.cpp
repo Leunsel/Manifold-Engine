@@ -42,6 +42,47 @@ namespace Manifold::Target
         constexpr const char* kApplicationClass = "UnityEngine.Application";
         constexpr const char* kStripped = " (stripped from this build, or another Unity version)";
 
+        // Unity's object finders by version: 6000.6 has no FindObjectsOfType
+        // any more and its two-argument FindObjectsByType takes a
+        // FindObjectsInactive, where 2021.3 to 6000.0 took a FindObjectsSortMode
+        // there. Every shape starts with the Type; the search fills the rest by
+        // parameter type. Tried in this order, the first one the build kept wins.
+        constexpr const char* kFindInactive = "UnityEngine.FindObjectsInactive";
+        constexpr const char* kFindSortMode = "UnityEngine.FindObjectsSortMode";
+        struct FinderShape
+        {
+            const char* Class;
+            const char* Method;
+            const char* Parameters[3];
+            std::size_t Count;
+        };
+        constexpr FinderShape kActiveFinders[] = {
+            { kObjectClass, "FindObjectsOfType", { "System.Type" }, 1 },
+            { kObjectClass, "FindObjectsByType", { "System.Type", kFindInactive }, 2 },
+            { kObjectClass, "FindObjectsByType", { "System.Type", kFindInactive, kFindSortMode }, 3 },
+            { kObjectClass, "FindObjectsByType", { "System.Type", kFindSortMode }, 2 },
+            { kObjectClass, "FindObjectsOfType", { "System.Type", "System.Boolean" }, 2 },
+        };
+        // Resources.FindObjectsOfTypeAll also lists assets; the fallbacks after
+        // it find inactive scene objects only.
+        constexpr FinderShape kHiddenFinders[] = {
+            { "UnityEngine.Resources", "FindObjectsOfTypeAll", { "System.Type" }, 1 },
+            { kObjectClass, "FindObjectsByType", { "System.Type", kFindInactive }, 2 },
+            { kObjectClass, "FindObjectsByType", { "System.Type", kFindInactive, kFindSortMode }, 3 },
+            { kObjectClass, "FindObjectsOfType", { "System.Type", "System.Boolean" }, 2 },
+        };
+        // The walk over every Transform for scene roots: scene objects first,
+        // Resources.FindObjectsOfTypeAll last (its assets have no valid scene
+        // and drop out by their handle).
+        constexpr FinderShape kSceneFinders[] = {
+            { kObjectClass, "FindObjectsByType", { "System.Type", kFindInactive }, 2 },
+            { kObjectClass, "FindObjectsByType", { "System.Type", kFindInactive, kFindSortMode }, 3 },
+            { kObjectClass, "FindObjectsOfType", { "System.Type", "System.Boolean" }, 2 },
+            { "UnityEngine.Resources", "FindObjectsOfTypeAll", { "System.Type" }, 1 },
+        };
+        constexpr std::size_t kMaxWalked = 100000;
+        constexpr const char* kDontDestroyName = "DontDestroyOnLoad";
+
         struct HookCandidate
         {
             const char* Class;
@@ -64,6 +105,15 @@ namespace Manifold::Target
         std::string Name;
         bool Active = false;
         int ChildCount = 0;
+    };
+
+    // One scene found by the root walk (Il2WalkRoots).
+    struct UnityExplorer::Il2SceneRoots
+    {
+        std::int32_t Handle = 0;
+        std::vector<std::uint64_t> GameObjects;
+        int Slot = 0;           // the boxed Scene, held when described
+        std::string Name;
     };
 
     struct UnityExplorer::Il2Recipe
@@ -330,6 +380,11 @@ namespace Manifold::Target
     // The frame stub and held objects
 
     std::uint64_t UnityExplorer::Il2Method(std::string_view className, std::string_view name, std::initializer_list<const char*> parameters)
+    {
+        return Il2Method(className, name, std::span<const char* const>(parameters.begin(), parameters.size()));
+    }
+
+    std::uint64_t UnityExplorer::Il2Method(std::string_view className, std::string_view name, std::span<const char* const> parameters)
     {
         std::string key = std::string(className) + "::" + std::string(name) + "(";
         for (const char* parameter : parameters)
@@ -980,6 +1035,127 @@ namespace Manifold::Target
         return Status::Success();
     }
 
+    // The scenes of a build that stripped SceneManager.sceneCount/GetSceneAt or
+    // Scene.GetRootGameObjects (Unity 6000.6 drops them when the game itself
+    // never calls them): every Transform without a parent is a root, and its
+    // GameObject's scene says where it belongs. Roots without a valid scene
+    // (assets, HideAndDontSave objects) drop out; scenes come sorted by
+    // handle. With describe, each scene's boxed Scene is held in group and its
+    // name read.
+    Status UnityExplorer::Il2WalkRoots(bool describe, int group, std::vector<Il2SceneRoots>& scenes)
+    {
+        using Arg = Il2Recipe::Arg;
+        scenes.clear();
+        const std::uint64_t transformClass = FindClass(kTransformClass);
+        const std::uint64_t getParent = Il2Method(kTransformClass, "get_parent", {});
+        const std::uint64_t getGameObject = Il2Method(kComponentClass, "get_gameObject", {});
+        const std::uint64_t getScene = Il2Method(kGameObjectClass, "get_scene", {});
+        const std::uint64_t getName = Il2Method(kSceneClass, "get_name", {});
+        if (!transformClass || !getParent || !getGameObject || !getScene)
+            return Status::Fail(ErrorCode::MonoCallFailed, std::string("this game's build has none of SceneManager.GetSceneAt, Scene.GetRootGameObjects, "
+                                                                       "and one of Transform.parent, Component.gameObject or GameObject.scene is missing too") + kStripped);
+        std::size_t total = 0;
+        std::vector<std::uint64_t> transforms;
+        const Status found = Il2FindObjects(transformClass, true, false, kMaxWalked, transforms, total);
+        const auto done = [&](Status status)
+            {
+                Il2Release(kScratchGroup);
+                return status;
+            };
+        if (!found)
+            return done(found);
+        if (total > transforms.size())
+            LOG_WARN("Unity", "The scene walk looked at the first " + std::to_string(transforms.size()) + " of " + std::to_string(total) + " Transforms only");
+
+        // Which Transforms have no parent.
+        std::vector<std::uint64_t> roots;
+        std::size_t next = 0;
+        while (next < transforms.size())
+        {
+            if (Aborted())
+                return done(Status::Fail(ErrorCode::MonoCallFailed, "cancelled"));
+            Il2Recipe recipe(*this);
+            std::vector<std::pair<std::uint64_t, Il2Recipe::Invoked>> plans;
+            while (next < transforms.size() && recipe.Batch.Fits(4, 64))
+            {
+                const std::uint64_t transform = transforms[next++];
+                if (transform)
+                    plans.emplace_back(transform, recipe.Invoke(getParent, Arg::Object(transform)));
+            }
+            if (const Status ran = Il2Run(recipe, kListWait); !ran)
+                return done(ran);
+            for (const auto& [transform, parent] : plans)
+            {
+                if (parent.Call >= 0 && !recipe.Exception(parent) && !recipe.Result(parent.Call))
+                    roots.push_back(transform);
+            }
+        }
+
+        // Each root's GameObject and scene handle.
+        std::map<std::int32_t, Il2SceneRoots> byHandle;
+        next = 0;
+        while (next < roots.size())
+        {
+            if (Aborted())
+                return done(Status::Fail(ErrorCode::MonoCallFailed, "cancelled"));
+            Il2Recipe recipe(*this);
+            struct Plan
+            {
+                Il2Recipe::Invoked GameObject;
+                Il2Recipe::Invoked Scene;
+                std::uint64_t Handle = 0;
+            };
+            std::vector<Plan> plans;
+            while (next < roots.size() && recipe.Batch.Fits(8, 128))
+            {
+                Plan plan;
+                plan.GameObject = recipe.Invoke(getGameObject, Arg::Object(roots[next++]));
+                plan.Scene = recipe.Invoke(getScene, Arg::Of(plan.GameObject.Call));
+                plan.Handle = recipe.Unbox(plan.Scene.Call, 4);
+                plans.push_back(plan);
+            }
+            if (const Status ran = Il2Run(recipe, kListWait); !ran)
+                return done(ran);
+            for (const Plan& plan : plans)
+            {
+                const std::uint64_t gameObject = recipe.Returned(plan.GameObject) ? recipe.Result(plan.GameObject.Call) : 0;
+                if (!gameObject || !recipe.Returned(plan.Scene) || recipe.Exception(plan.Scene))
+                    continue;
+                const std::int32_t handle = recipe.Number<std::int32_t>(plan.Handle);
+                if (handle == 0)
+                    continue;
+                Il2SceneRoots& scene = byHandle[handle];
+                scene.Handle = handle;
+                scene.GameObjects.push_back(gameObject);
+            }
+        }
+        for (auto& [handle, scene] : byHandle)
+            scenes.push_back(std::move(scene));
+        if (!describe || scenes.empty())
+            return done(Status::Success());
+
+        // One boxed Scene per scene, through its first root, and its name.
+        Il2Recipe recipe(*this);
+        std::vector<std::pair<int, std::uint64_t>> plans;
+        for (const Il2SceneRoots& scene : scenes)
+        {
+            const Il2Recipe::Invoked boxed = recipe.Invoke(getScene, Arg::Object(scene.GameObjects.front()));
+            const int kept = recipe.Hold(Arg::Of(boxed.Call));
+            const std::uint64_t name = getName ? recipe.Chars(recipe.Invoke(getName, recipe.This(Arg::Of(boxed.Call))).Call, kNameChars) : 0;
+            plans.emplace_back(kept, name);
+        }
+        if (const Status ran = Il2Run(recipe, kCallWait); !ran)
+            return done(ran);
+        Il2Keep(recipe, group);
+        for (std::size_t i = 0; i < scenes.size(); ++i)
+        {
+            const auto [kept, name] = plans[i];
+            scenes[i].Slot = kept >= 0 ? recipe.Holds[static_cast<std::size_t>(kept)].Slot : 0;
+            scenes[i].Name = recipe.TextAt(name);
+        }
+        return done(Status::Success());
+    }
+
     void UnityExplorer::Il2ReadScenes()
     {
         using Arg = Il2Recipe::Arg;
@@ -993,70 +1169,102 @@ namespace Manifold::Target
         const std::uint64_t getCount = Il2Method(kSceneManagerClass, "get_sceneCount", {});
         const std::uint64_t getAt = Il2Method(kSceneManagerClass, "GetSceneAt", { "System.Int32" });
         const std::uint64_t getActive = Il2Method(kSceneManagerClass, "GetActiveScene", {});
-        if (!getCount || !getAt)
-            return Fail(std::string("Could not read the scenes: this game's build has no SceneManager.sceneCount or GetSceneAt") + kStripped);
         if (!m_il2->BoxedThis)
             return Fail("Could not read the scenes: Manifold could not find out how this IL2CPP version passes a struct to its own methods");
-
-        Il2Recipe first(*this);
-        const std::uint64_t countCell = first.Unbox(first.Invoke(getCount, Arg::Null()).Call, 4);
-        const std::uint64_t activeCell = first.Unbox(first.Invoke(getActive, Arg::Null()).Call, 4);
-        if (const Status ran = Il2Run(first, kCallWait); !ran)
-            return Fail("Could not read the scenes: " + ran.Text);
-        const std::size_t count = static_cast<std::size_t>(std::clamp(first.Number<std::int32_t>(countCell), 0, static_cast<std::int32_t>(kMaxScenes)));
-        const std::int32_t active = first.Number<std::int32_t>(activeCell);
-
-        const std::uint64_t getName = Il2Method(kSceneClass, "get_name", {});
-        const std::uint64_t getBuildIndex = Il2Method(kSceneClass, "get_buildIndex", {});
-        const std::uint64_t getRootCount = Il2Method(kSceneClass, "get_rootCount", {});
-        const std::uint64_t getLoaded = Il2Method(kSceneClass, "get_isLoaded", {});
-        struct Plan
-        {
-            int Scene = -1;
-            std::uint64_t Handle = 0;
-            std::uint64_t Name = 0;
-            std::uint64_t BuildIndex = 0;
-            std::uint64_t RootCount = 0;
-            std::uint64_t Loaded = 0;
-        };
-        std::vector<Plan> plans;
-        Il2Recipe second(*this);
-        for (std::size_t i = 0; i < count; ++i)
-        {
-            const std::int32_t index = static_cast<std::int32_t>(i);
-            const Arg scene = Arg::Of(second.Invoke(getAt, Arg::Null(), { second.Bytes(&index, sizeof(index)) }).Call);
-            const Arg self = second.This(scene);
-            Plan plan;
-            plan.Scene = second.Hold(scene);
-            plan.Handle = second.Unbox(scene.Call, 4);
-            plan.Name = second.Chars(second.Invoke(getName, self).Call, kNameChars);
-            plan.BuildIndex = second.Unbox(second.Invoke(getBuildIndex, self).Call, 4);
-            plan.RootCount = second.Unbox(second.Invoke(getRootCount, self).Call, 4);
-            plan.Loaded = second.Unbox(second.Invoke(getLoaded, self).Call, 1);
-            plans.push_back(plan);
-        }
-        if (!plans.empty())
-        {
-            if (const Status ran = Il2Run(second, kCallWait); !ran)
-                return Fail("Could not read the scenes: " + ran.Text);
-            Il2Keep(second, kTreeGroup);
-        }
         UnityTree tree;
         tree.Read = true;
-        for (const Plan& plan : plans)
+        if (!getCount || !getAt || !Il2Method(kSceneClass, "GetRootGameObjects", {}))
         {
-            UnityScene scene;
-            scene.Slot = plan.Scene >= 0 ? second.Holds[static_cast<std::size_t>(plan.Scene)].Slot : 0;
-            scene.Handle = second.Number<std::int32_t>(plan.Handle);
-            scene.Name = second.TextAt(plan.Name);
-            scene.BuildIndex = second.Number<std::int32_t>(plan.BuildIndex, -1);
-            scene.RootCount = second.Number<std::int32_t>(plan.RootCount, -1);
-            scene.Loaded = plan.Loaded ? second.Number<std::uint8_t>(plan.Loaded) != 0 : true;
-            scene.Active = scene.Handle == active;
-            if (scene.Name.empty())
-                scene.Name = "?";
-            if (scene.Slot)
-                tree.Scenes.push_back(std::move(scene));
+            // A stripped build: the scenes come from the root walk.
+            std::int32_t active = 0;
+            if (getActive)
+            {
+                Il2Recipe first(*this);
+                const std::uint64_t activeCell = first.Unbox(first.Invoke(getActive, Arg::Null()).Call, 4);
+                if (const Status ran = Il2Run(first, kCallWait); !ran)
+                    return Fail("Could not read the scenes: " + ran.Text);
+                active = first.Number<std::int32_t>(activeCell);
+            }
+            std::vector<Il2SceneRoots> found;
+            if (const Status walked = Il2WalkRoots(true, kTreeGroup, found); !walked)
+                return Fail("Could not read the scenes: " + walked.Text);
+            for (Il2SceneRoots& read : found)
+            {
+                // DontDestroyOnLoad has its own entry below.
+                if (read.Name == kDontDestroyName || (m_dontDestroyHandle && read.Handle == m_dontDestroyHandle))
+                    continue;
+                UnityScene scene;
+                scene.Slot = read.Slot;
+                scene.Handle = read.Handle;
+                scene.Name = read.Name.empty() ? std::string("?") : std::move(read.Name);
+                scene.BuildIndex = -1;
+                scene.RootCount = static_cast<int>(read.GameObjects.size());
+                scene.Loaded = true;
+                scene.Active = scene.Handle == active;
+                if (scene.Slot)
+                    tree.Scenes.push_back(std::move(scene));
+            }
+        }
+        else
+        {
+            Il2Recipe first(*this);
+            const std::uint64_t countCell = first.Unbox(first.Invoke(getCount, Arg::Null()).Call, 4);
+            const std::uint64_t activeCell = first.Unbox(first.Invoke(getActive, Arg::Null()).Call, 4);
+            if (const Status ran = Il2Run(first, kCallWait); !ran)
+                return Fail("Could not read the scenes: " + ran.Text);
+            const std::size_t count = static_cast<std::size_t>(std::clamp(first.Number<std::int32_t>(countCell), 0, static_cast<std::int32_t>(kMaxScenes)));
+            const std::int32_t active = first.Number<std::int32_t>(activeCell);
+
+            const std::uint64_t getName = Il2Method(kSceneClass, "get_name", {});
+            const std::uint64_t getBuildIndex = Il2Method(kSceneClass, "get_buildIndex", {});
+            const std::uint64_t getRootCount = Il2Method(kSceneClass, "get_rootCount", {});
+            const std::uint64_t getLoaded = Il2Method(kSceneClass, "get_isLoaded", {});
+            struct Plan
+            {
+                int Scene = -1;
+                std::uint64_t Handle = 0;
+                std::uint64_t Name = 0;
+                std::uint64_t BuildIndex = 0;
+                std::uint64_t RootCount = 0;
+                std::uint64_t Loaded = 0;
+            };
+            std::vector<Plan> plans;
+            Il2Recipe second(*this);
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                const std::int32_t index = static_cast<std::int32_t>(i);
+                const Arg scene = Arg::Of(second.Invoke(getAt, Arg::Null(), { second.Bytes(&index, sizeof(index)) }).Call);
+                const Arg self = second.This(scene);
+                Plan plan;
+                plan.Scene = second.Hold(scene);
+                plan.Handle = second.Unbox(scene.Call, 4);
+                plan.Name = second.Chars(second.Invoke(getName, self).Call, kNameChars);
+                plan.BuildIndex = second.Unbox(second.Invoke(getBuildIndex, self).Call, 4);
+                plan.RootCount = second.Unbox(second.Invoke(getRootCount, self).Call, 4);
+                plan.Loaded = second.Unbox(second.Invoke(getLoaded, self).Call, 1);
+                plans.push_back(plan);
+            }
+            if (!plans.empty())
+            {
+                if (const Status ran = Il2Run(second, kCallWait); !ran)
+                    return Fail("Could not read the scenes: " + ran.Text);
+                Il2Keep(second, kTreeGroup);
+            }
+            for (const Plan& plan : plans)
+            {
+                UnityScene scene;
+                scene.Slot = plan.Scene >= 0 ? second.Holds[static_cast<std::size_t>(plan.Scene)].Slot : 0;
+                scene.Handle = second.Number<std::int32_t>(plan.Handle);
+                scene.Name = second.TextAt(plan.Name);
+                scene.BuildIndex = second.Number<std::int32_t>(plan.BuildIndex, -1);
+                scene.RootCount = second.Number<std::int32_t>(plan.RootCount, -1);
+                scene.Loaded = plan.Loaded ? second.Number<std::uint8_t>(plan.Loaded) != 0 : true;
+                scene.Active = scene.Handle == active;
+                if (scene.Name.empty())
+                    scene.Name = "?";
+                if (scene.Slot)
+                    tree.Scenes.push_back(std::move(scene));
+            }
         }
         UnityScene dontDestroy;
         dontDestroy.Name = "DontDestroyOnLoad";
@@ -1156,23 +1364,40 @@ namespace Manifold::Target
         const std::uint64_t address = AddressOf(slot);
         if (!address)
             return finish("Manifold no longer holds this scene; read the scenes again");
-        const std::uint64_t getRoots = Il2Method(kSceneClass, "GetRootGameObjects", {});
-        if (!getRoots)
-            return finish(std::string("Could not read the scene's objects: this game's build has no Scene.GetRootGameObjects") + kStripped);
-
-        Il2Recipe first(*this);
-        const Il2Recipe::Invoked roots = first.Invoke(getRoots, first.This(Arg::Object(address)));
-        const int array = first.Hold(Arg::Of(roots.Call), kScratchGroup);
-        if (const Status ran = Il2Run(first, kListWait); !ran)
-            return finish("Could not read the scene's objects: " + ran.Text);
-        Il2Keep(first, kScratchGroup);
-        if (const std::uint64_t thrown = first.Exception(roots))
-        {
-            Il2Release(kScratchGroup);
-            return finish("Could not read the scene's objects: Scene.GetRootGameObjects " + Il2Thrown(thrown));
-        }
         std::size_t total = 0;
-        const std::vector<std::uint64_t> items = ReadArray(first.Address(array), kMaxChildren, &total);
+        std::vector<std::uint64_t> items;
+        if (const std::uint64_t getRoots = Il2Method(kSceneClass, "GetRootGameObjects", {}))
+        {
+            Il2Recipe first(*this);
+            const Il2Recipe::Invoked roots = first.Invoke(getRoots, first.This(Arg::Object(address)));
+            const int array = first.Hold(Arg::Of(roots.Call), kScratchGroup);
+            if (const Status ran = Il2Run(first, kListWait); !ran)
+                return finish("Could not read the scene's objects: " + ran.Text);
+            Il2Keep(first, kScratchGroup);
+            if (const std::uint64_t thrown = first.Exception(roots))
+            {
+                Il2Release(kScratchGroup);
+                return finish("Could not read the scene's objects: Scene.GetRootGameObjects " + Il2Thrown(thrown));
+            }
+            items = ReadArray(first.Address(array), kMaxChildren, &total);
+        }
+        else
+        {
+            // A stripped build: this scene's roots from the walk over all Transforms.
+            std::vector<Il2SceneRoots> found;
+            if (const Status walked = Il2WalkRoots(false, kScratchGroup, found); !walked)
+                return finish("Could not read the scene's objects: " + walked.Text);
+            for (Il2SceneRoots& read : found)
+            {
+                if (read.Handle == handle)
+                {
+                    total = read.GameObjects.size();
+                    if (read.GameObjects.size() > kMaxChildren)
+                        read.GameObjects.resize(kMaxChildren);
+                    items = std::move(read.GameObjects);
+                }
+            }
+        }
         std::vector<Il2Node> nodes;
         const Status listed = Il2Nodes(items, 0, 0, kTreeGroup, nodes);
         Il2Release(kScratchGroup);
@@ -1274,6 +1499,61 @@ namespace Manifold::Target
     // ---------------------------------------------------------------------
     // Search
 
+    // Calls the first object finder this build kept (see kActiveFinders) for
+    // klass; the array stays held in kScratchGroup until the caller releases it.
+    // assetsFirst prefers Resources.FindObjectsOfTypeAll for inactive objects.
+    Status UnityExplorer::Il2FindObjects(std::uint64_t klass, bool includeInactive, bool assetsFirst, std::size_t limit, std::vector<std::uint64_t>& items, std::size_t& total)
+    {
+        using Arg = Il2Recipe::Arg;
+        Il2CppExplorerState& state = *m_il2;
+        const std::span<const FinderShape> shapes = !includeInactive ? std::span<const FinderShape>(kActiveFinders)
+                                                    : assetsFirst  ? std::span<const FinderShape>(kHiddenFinders)
+                                                                   : std::span<const FinderShape>(kSceneFinders);
+        const FinderShape* shape = nullptr;
+        std::uint64_t find = 0;
+        for (const FinderShape& candidate : shapes)
+        {
+            find = Il2Method(candidate.Class, candidate.Method, std::span<const char* const>(candidate.Parameters, candidate.Count));
+            if (find)
+            {
+                shape = &candidate;
+                break;
+            }
+        }
+        const std::uint64_t type = Worker("il2cpp_class_get_type", klass).value_or(0);
+        if (!find || !type || !state.TypeGetObject)
+            return Status::Fail(ErrorCode::MonoCallFailed, std::string("this game's build has neither ") +
+                                                           (includeInactive && assetsFirst ? "Resources.FindObjectsOfTypeAll" : "Object.FindObjectsOfType") +
+                                                           " nor Object.FindObjectsByType" + kStripped);
+        if (includeInactive && assetsFirst && shape != &shapes.front())
+            LOG_INFO("Unity", "This game's build has no Resources.FindObjectsOfTypeAll; the search lists inactive objects through Object.FindObjectsByType, but no assets");
+        Il2Recipe first(*this);
+        const int typeObject = first.Batch.Call(state.TypeGetObject, type);
+        // FindObjectsInactive.Include = 1 / Exclude = 0, FindObjectsSortMode.None = 0.
+        const std::int32_t inactive = includeInactive ? 1 : 0;
+        const std::int32_t unsorted = 0;
+        std::vector<Arg> arguments{ Arg::Of(typeObject) };
+        for (std::size_t i = 1; i < shape->Count; ++i)
+        {
+            const std::string_view parameter = shape->Parameters[i];
+            if (parameter == kFindInactive)
+                arguments.push_back(first.Bytes(&inactive, sizeof(inactive)));
+            else if (parameter == kFindSortMode)
+                arguments.push_back(first.Bytes(&unsorted, sizeof(unsorted)));
+            else
+                arguments.push_back(first.Bytes(&includeInactive, 1));
+        }
+        const Il2Recipe::Invoked found = first.Invoke(find, Arg::Null(), arguments);
+        const int array = first.Hold(Arg::Of(found.Call), kScratchGroup);
+        if (const Status ran = Il2Run(first, kListWait); !ran)
+            return ran;
+        Il2Keep(first, kScratchGroup);
+        if (const std::uint64_t thrown = first.Exception(found))
+            return Status::Fail(ErrorCode::MonoCallFailed, std::string(shape->Class).substr(std::string_view("UnityEngine.").size()) + "." + shape->Method + " " + Il2Thrown(thrown));
+        items = ReadArray(first.Address(array), limit, &total);
+        return Status::Success();
+    }
+
     void UnityExplorer::Il2Search(const UnitySearch& request, std::uint64_t klass, UnitySearchResult& result)
     {
         using Arg = Il2Recipe::Arg;
@@ -1282,38 +1562,15 @@ namespace Manifold::Target
             result.Error = ready.Text;
             return;
         }
-        Il2CppExplorerState& state = *m_il2;
-        const std::uint64_t find = request.IncludeHidden ? Il2Method("UnityEngine.Resources", "FindObjectsOfTypeAll", { "System.Type" })
-                                                         : Il2Method(kObjectClass, "FindObjectsOfType", { "System.Type" });
-        const std::uint64_t findSorted = find || request.IncludeHidden ? 0 : Il2Method(kObjectClass, "FindObjectsByType", { "System.Type", "UnityEngine.FindObjectsSortMode" });
-        const std::uint64_t type = Worker("il2cpp_class_get_type", klass).value_or(0);
-        if ((!find && !findSorted) || !type || !state.TypeGetObject)
-        {
-            result.Error = std::string("This game's build has no ") + (request.IncludeHidden ? "Resources.FindObjectsOfTypeAll" : "Object.FindObjectsOfType") + kStripped +
-                           ", so its Unity objects cannot be listed";
-            return;
-        }
         Il2Release(kSearchGroup);
-        Il2Recipe first(*this);
-        const int typeObject = first.Batch.Call(state.TypeGetObject, type);
-        const std::int32_t unsorted = 0;
-        const Il2Recipe::Invoked found = find ? first.Invoke(find, Arg::Null(), { Arg::Of(typeObject) })
-                                              : first.Invoke(findSorted, Arg::Null(), { Arg::Of(typeObject), first.Bytes(&unsorted, sizeof(unsorted)) });
-        const int array = first.Hold(Arg::Of(found.Call), kScratchGroup);
-        if (const Status ran = Il2Run(first, kListWait); !ran)
-        {
-            result.Error = "The search failed: " + ran.Text;
-            return;
-        }
-        Il2Keep(first, kScratchGroup);
-        if (const std::uint64_t thrown = first.Exception(found))
+        std::size_t total = 0;
+        std::vector<std::uint64_t> items;
+        if (const Status found = Il2FindObjects(klass, request.IncludeHidden, true, kMaxSearched, items, total); !found)
         {
             Il2Release(kScratchGroup);
-            result.Error = "The search failed: it " + Il2Thrown(thrown);
+            result.Error = "The search failed: " + found.Text;
             return;
         }
-        std::size_t total = 0;
-        const std::vector<std::uint64_t> items = ReadArray(first.Address(array), kMaxSearched, &total);
         result.Total = total;
         const std::string filter = Lower(Trim(request.NameFilter));
         const std::uint64_t getName = Il2Method(kObjectClass, "get_name", {});

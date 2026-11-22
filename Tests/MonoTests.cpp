@@ -1031,8 +1031,8 @@ namespace Manifold::Tests
         }
 
         unity.ReadScenes();
-        if (!wait("scenes", [&] { return unity.Tree().Read; }, 20))
-            return 1;
+        // A build that stripped the scene API still gets its search tried.
+        const bool scenesRead = wait("scenes", [&] { return unity.Tree().Read; }, 20);
         Target::UnityTree tree = unity.Tree();
         std::printf("%zu scene(s):\n", tree.Scenes.size());
         int expandable = -1;
@@ -1044,7 +1044,7 @@ namespace Manifold::Tests
             if (expandable < 0 && scene.RootCount != 0 && !scene.DontDestroy)
                 expandable = s;
         }
-        if (expandable >= 0)
+        if (scenesRead && expandable >= 0)
         {
             unity.ExpandScene(expandable);
             wait("expand", [&] { return unity.Tree().Scenes[static_cast<std::size_t>(expandable)].RootsLoaded; }, 20);
@@ -1058,10 +1058,27 @@ namespace Manifold::Tests
             }
         }
 
+        const auto searched = [&]
+            {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+                while (!unity.SearchResult().Done && std::chrono::steady_clock::now() < deadline)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            };
         unity.Search({ searchClass, std::string(), false });
-        wait("search", [&] { return unity.SearchResult().Done; }, 30);
+        searched();
         const Target::UnitySearchResult result = unity.SearchResult();
         std::printf("search %s: %zu hit(s)%s\n", searchClass.c_str(), result.Hits.size(), result.HeapScan ? " (memory scan)" : "");
+        if (!result.Error.empty())
+            std::printf("  search error: %s\n", result.Error.c_str());
+        {
+            unity.Search({ searchClass, std::string(), true });
+            searched();
+            const Target::UnitySearchResult hidden = unity.SearchResult();
+            std::printf("search %s with inactive objects and assets: %zu hit(s)%s\n", searchClass.c_str(), hidden.Hits.size(),
+                hidden.Error.empty() ? "" : (", error: " + hidden.Error).c_str());
+            unity.Search({ searchClass, std::string(), false });
+            searched();
+        }
         std::uint64_t inspectObject = 0;
         for (std::size_t i = 0; i < result.Hits.size() && i < 8; ++i)
         {
@@ -1075,7 +1092,11 @@ namespace Manifold::Tests
         if (inspectObject)
         {
             const int id = unity.Inspect(inspectObject);
-            wait("inspect", [&] { const auto in = unity.Inspection(id); return in && !in->Loading; }, 20);
+            // Polled on the inspection itself: a scene error from a stripped
+            // build stays in the explorer's state and would end wait() at once.
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+            for (auto in = unity.Inspection(id); (!in || in->Loading) && std::chrono::steady_clock::now() < deadline; in = unity.Inspection(id))
+                std::this_thread::sleep_for(std::chrono::milliseconds(40));
             if (const auto inspection = unity.Inspection(id))
             {
                 std::printf("inspect %s -> %s\n", Hex(inspectObject).c_str(), inspection->Title.c_str());
@@ -1105,6 +1126,25 @@ namespace Manifold::Tests
                 }
                 if (!inspection->Error.empty())
                     std::printf("  note: %s\n", inspection->Error.c_str());
+                // A component's GameObject too, for its tag, scene and components.
+                if (inspection->Owner)
+                {
+                    const int ownerId = unity.Inspect(inspection->Owner);
+                    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+                    for (auto in = unity.Inspection(ownerId); (!in || in->Loading) && std::chrono::steady_clock::now() < until; in = unity.Inspection(ownerId))
+                        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+                    const auto owner = unity.Inspection(ownerId);
+                    if (owner && owner->GameObject)
+                    {
+                        const Target::UnityGameObject& go = *owner->GameObject;
+                        std::printf("owner GameObject \"%s\"  tag \"%s\"  active %d  scene \"%s\"  layer %d  parent \"%s\"  %zu component(s)\n",
+                            go.Name.c_str(), go.Tag.c_str(), go.ActiveInHierarchy, go.Scene.c_str(), go.Layer, go.ParentName.c_str(), go.Components.size());
+                        for (std::size_t i = 0; i < go.Components.size() && i < 12; ++i)
+                            std::printf("    %s%s\n", go.Components[i].Class.c_str(), go.Components[i].HasEnabled ? (go.Components[i].Enabled ? " [enabled]" : " [disabled]") : "");
+                    }
+                    if (owner && !owner->Error.empty())
+                        std::printf("  owner note: %s\n", owner->Error.c_str());
+                }
             }
         }
         std::printf("done; detaching (callback removed, runInBackground restored)\n");

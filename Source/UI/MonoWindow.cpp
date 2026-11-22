@@ -758,7 +758,7 @@ namespace Manifold::UI
         ImGui::SetNextItemWidth(-1.0f);
         start = InputTextWithHint("##searchname", "part of the object's name (Unity objects)", m_searchName, ImGuiInputTextFlags_EnterReturnsTrue) || start;
         ImGui::Checkbox("Inactive objects and assets too", &m_searchHidden);
-        ItemTooltip("Unity objects: Resources.FindObjectsOfTypeAll instead of Object.FindObjectsOfType. Other classes are always found by a memory scan.");
+        ItemTooltip("Unity objects: Resources.FindObjectsOfTypeAll instead of Object.FindObjectsOfType or FindObjectsByType, whichever the game's Unity version has. Other classes are always found by a memory scan.");
         ImGui::SameLine();
         ImGui::BeginDisabled(m_searchClass.empty());
         start = AccentButton(ICON_FA_SEARCH "  Search") || start;

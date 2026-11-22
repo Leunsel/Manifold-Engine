@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -439,10 +440,12 @@ namespace Manifold::Target
 
         struct Il2Recipe;
         struct Il2Node;
+        struct Il2SceneRoots;
         bool Il2() const;
         Status Il2EnsureHook();
         void Il2Shutdown(bool alive);
         std::uint64_t Il2Method(std::string_view className, std::string_view name, std::initializer_list<const char*> parameters);
+        std::uint64_t Il2Method(std::string_view className, std::string_view name, std::span<const char* const> parameters);
         Status Il2Run(Il2Recipe& recipe, std::chrono::milliseconds timeout, bool cancellable = true);
         void Il2Keep(Il2Recipe& recipe, int group);
         int Il2Register(std::uint64_t address, std::uint64_t handle, int group);
@@ -457,6 +460,8 @@ namespace Manifold::Target
         void Il2ExpandNode(int node);
         Status Il2DontDestroyScene(int& slot, int& handle);
         Status Il2Nodes(const std::vector<std::uint64_t>& gameObjects, std::uint64_t parentTransform, std::size_t children, int group, std::vector<Il2Node>& out);
+        Status Il2FindObjects(std::uint64_t klass, bool includeInactive, bool assetsFirst, std::size_t limit, std::vector<std::uint64_t>& items, std::size_t& total);
+        Status Il2WalkRoots(bool describe, int group, std::vector<Il2SceneRoots>& scenes);
         void Il2Search(const UnitySearch& request, std::uint64_t klass, UnitySearchResult& result);
         void Il2Inspect(UnityInspection& inspection, bool properties, int group);
         Status Il2Edit(const std::string& what, std::uint64_t method, std::uint64_t self, const std::vector<AgentArg>& arguments, bool valueType = false);

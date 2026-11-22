@@ -17,6 +17,11 @@ extern "C" __declspec(dllexport) volatile long g_il2cppProbesMade = 0;
 extern "C" __declspec(dllexport) volatile long g_il2cppProbesLive = 0;
 extern "C" __declspec(dllexport) volatile long g_il2cppRunInBackground = 0;
 extern "C" __declspec(dllexport) volatile long g_il2cppPaused = 0;
+// Which object finder the last search called: 1 Object.FindObjectsOfType,
+// 2 Resources.FindObjectsOfTypeAll, 3 FindObjectsByType(Type, FindObjectsInactive),
+// 4 FindObjectsByType(Type, FindObjectsInactive, FindObjectsSortMode); 10 is
+// added when the search asked for inactive objects.
+extern "C" __declspec(dllexport) volatile long g_il2cppFinder = 0;
 
 namespace
 {
@@ -359,6 +364,8 @@ namespace
         g_sceneStruct = AddClass(unity, g_unityClasses, "UnityEngine.SceneManagement", "Scene", valueType, 0x11, 4);
         FakeIl2CppClass* sceneManager = AddClass(unity, g_unityClasses, "UnityEngine.SceneManagement", "SceneManager", object, 0x12);
         FakeIl2CppClass* mode = AddClass(g_sceneGameImage, g_sceneGameClasses, "Game", "Mode", enumBase, 0x11, 4, true);
+        FakeIl2CppClass* findInactive = AddClass(unity, g_unityClasses, "UnityEngine", "FindObjectsInactive", enumBase, 0x11, 4, true);
+        FakeIl2CppClass* findSortMode = AddClass(unity, g_unityClasses, "UnityEngine", "FindObjectsSortMode", enumBase, 0x11, 4, true);
         g_healthClass = AddClass(g_sceneGameImage, g_sceneGameClasses, "Game", "Health", monoBehaviour, 0x12);
         g_gameObjectArray = AddArray(0, g_gameObjectClass, "GameObject[]");
         g_componentArray = AddArray(1, g_componentClass, "Component[]");
@@ -377,6 +384,8 @@ namespace
         const FakeIl2CppType* tScene = TypeOf(g_sceneStruct);
         const FakeIl2CppType* tMode = TypeOf(mode);
         mode->EnumBase = tInt;
+        findInactive->EnumBase = tInt;
+        findSortMode->EnumBase = tInt;
         g_healthClass->StaticData = g_healthStatics;
 
         AddField(g_int32Class, "m_value", tInt, sizeof(SceneObject));
@@ -405,45 +414,50 @@ namespace
         AddProperty(application, "unityVersion", getVersion, nullptr);
         AddProperty(application, "runInBackground", getBackground, setBackground);
 
-        AddMethod(sceneManager, "get_sceneCount", tInt, {}, {}, true, +[](void*, void**, void**) -> void* { return BoxInt(2); });
         AddMethod(sceneManager, "GetActiveScene", tScene, {}, {}, true, +[](void*, void**, void**) -> void* { return BoxScene(g_scenes[0].Handle); });
-        AddMethod(sceneManager, "GetSceneAt", tScene, { tInt }, { "index" }, true, +[](void*, void** params, void** exc) -> void*
-            {
-                const int index = *static_cast<int*>(params[0]);
-                if (index < 0 || index > 1)
-                    return SceneThrow(exc, g_invalidOperation);
-                return BoxScene(g_scenes[index].Handle);
-            });
         AddMethod(g_sceneStruct, "get_handle", tInt, {}, {}, false, +[](void* self, void**, void**) -> void* { return BoxInt(StructInt(self)); });
         AddMethod(g_sceneStruct, "get_name", tString, {}, {}, false, +[](void* self, void**, void** exc) -> void*
             {
                 const NativeScene* scene = SceneOf(self, exc);
                 return scene ? SceneText(scene->Name) : nullptr;
             });
-        AddMethod(g_sceneStruct, "get_buildIndex", tInt, {}, {}, false, +[](void* self, void**, void** exc) -> void*
-            {
-                const NativeScene* scene = SceneOf(self, exc);
-                return scene ? BoxInt(scene->BuildIndex) : nullptr;
-            });
-        AddMethod(g_sceneStruct, "get_rootCount", tInt, {}, {}, false, +[](void* self, void**, void** exc) -> void*
-            {
-                const NativeScene* scene = SceneOf(self, exc);
-                return scene ? BoxInt(static_cast<int>(scene->Roots.size())) : nullptr;
-            });
-        AddMethod(g_sceneStruct, "get_isLoaded", tBool, {}, {}, false, +[](void* self, void**, void** exc) -> void*
-            {
-                return SceneOf(self, exc) ? BoxBool(true) : nullptr;
-            });
-        AddMethod(g_sceneStruct, "GetRootGameObjects", TypeOf(g_gameObjectArray), {}, {}, false, +[](void* self, void**, void** exc) -> void*
-            {
-                const NativeScene* scene = SceneOf(self, exc);
-                if (!scene)
-                    return nullptr;
-                std::vector<void*> roots;
-                for (NativeObject* root : scene->Roots)
-                    roots.push_back(root->Wrapper);
-                return SceneList(g_gameObjectArray, roots);
-            });
+        // Moon Sweepers (Unity 6000.6) kept only these three: --il2cpp-alt has
+        // no scene list and no root list, the explorer walks the Transforms.
+        if (!g_sceneAlt)
+        {
+            AddMethod(sceneManager, "get_sceneCount", tInt, {}, {}, true, +[](void*, void**, void**) -> void* { return BoxInt(2); });
+            AddMethod(sceneManager, "GetSceneAt", tScene, { tInt }, { "index" }, true, +[](void*, void** params, void** exc) -> void*
+                {
+                    const int index = *static_cast<int*>(params[0]);
+                    if (index < 0 || index > 1)
+                        return SceneThrow(exc, g_invalidOperation);
+                    return BoxScene(g_scenes[index].Handle);
+                });
+            AddMethod(g_sceneStruct, "get_buildIndex", tInt, {}, {}, false, +[](void* self, void**, void** exc) -> void*
+                {
+                    const NativeScene* scene = SceneOf(self, exc);
+                    return scene ? BoxInt(scene->BuildIndex) : nullptr;
+                });
+            AddMethod(g_sceneStruct, "get_rootCount", tInt, {}, {}, false, +[](void* self, void**, void** exc) -> void*
+                {
+                    const NativeScene* scene = SceneOf(self, exc);
+                    return scene ? BoxInt(static_cast<int>(scene->Roots.size())) : nullptr;
+                });
+            AddMethod(g_sceneStruct, "get_isLoaded", tBool, {}, {}, false, +[](void* self, void**, void** exc) -> void*
+                {
+                    return SceneOf(self, exc) ? BoxBool(true) : nullptr;
+                });
+            AddMethod(g_sceneStruct, "GetRootGameObjects", TypeOf(g_gameObjectArray), {}, {}, false, +[](void* self, void**, void** exc) -> void*
+                {
+                    const NativeScene* scene = SceneOf(self, exc);
+                    if (!scene)
+                        return nullptr;
+                    std::vector<void*> roots;
+                    for (NativeObject* root : scene->Roots)
+                        roots.push_back(root->Wrapper);
+                    return SceneList(g_gameObjectArray, roots);
+                });
+        }
 
         const FakeMethodInfo* getName = AddMethod(g_objectClass, "get_name", tString, {}, {}, false, +[](void* self, void**, void** exc) -> void*
             {
@@ -494,10 +508,39 @@ namespace
                 return SceneList(g_objectArray, found);
             };
         static void* (*s_findAll)(void**, bool) = findAll;
-        AddMethod(g_objectClass, "FindObjectsOfType", TypeOf(g_objectArray), { tType }, { "type" }, true,
-            +[](void*, void** params, void**) -> void* { return s_findAll(params, false); });
-        AddMethod(resources, "FindObjectsOfTypeAll", TypeOf(g_objectArray), { tType }, { "type" }, true,
-            +[](void*, void** params, void**) -> void* { return s_findAll(params, true); });
+        if (!g_sceneAlt)
+        {
+            AddMethod(g_objectClass, "FindObjectsOfType", TypeOf(g_objectArray), { tType }, { "type" }, true,
+                +[](void*, void** params, void**) -> void* { g_il2cppFinder = 1; return s_findAll(params, false); });
+            AddMethod(resources, "FindObjectsOfTypeAll", TypeOf(g_objectArray), { tType }, { "type" }, true,
+                +[](void*, void** params, void**) -> void* { g_il2cppFinder = 12; return s_findAll(params, true); });
+        }
+        else
+        {
+            // Unity 6000.6 (Moon Sweepers): no FindObjectsOfType at all, the
+            // two-argument FindObjectsByType takes FindObjectsInactive, and
+            // generic overloads of the same name sit beside it. Resources.
+            // FindObjectsOfTypeAll is left out too, so the search for inactive
+            // objects takes the FindObjectsByType fallback.
+            const FakeIl2CppType* tInactive = TypeOf(findInactive);
+            const FakeIl2CppType* tSortMode = TypeOf(findSortMode);
+            AddMethod(g_objectClass, "FindObjectsByType", TypeOf(g_objectArray), { tType, tInactive, tSortMode }, { "type", "findObjectsInactive", "sortMode" }, true,
+                +[](void*, void** params, void**) -> void*
+                {
+                    const bool hidden = *static_cast<int*>(params[1]) == 1;
+                    g_il2cppFinder = hidden ? 14 : 4;
+                    return s_findAll(params, hidden);
+                });
+            AddMethod(g_objectClass, "FindObjectsByType", TypeOf(g_objectArray), { tType, tInactive }, { "type", "findObjectsInactive" }, true,
+                +[](void*, void** params, void**) -> void*
+                {
+                    const bool hidden = *static_cast<int*>(params[1]) == 1;
+                    g_il2cppFinder = hidden ? 13 : 3;
+                    return s_findAll(params, hidden);
+                });
+            AddMethod(g_objectClass, "FindObjectsByType", TypeOf(g_objectArray), { tSortMode }, { "sortMode" }, true, nullptr, true);
+            AddMethod(g_objectClass, "FindObjectsByType", TypeOf(g_objectArray), { tInactive }, { "findObjectsInactive" }, true, nullptr, true);
+        }
 
         AddMethod(g_gameObjectClass, ".ctor", tVoid, { tString }, { "name" }, false, +[](void* self, void** params, void**) -> void*
             {
