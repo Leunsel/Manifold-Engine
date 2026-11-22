@@ -1140,6 +1140,7 @@ namespace Manifold::Lua
                 m_engine.Notify(Status::Fail(ErrorCode::LuaRuntime, FirstLine(error)));
         }
 
+        m_ui.PollHotkeys([](const std::vector<int>& keys, bool& down) { return Table::KeysPressed(keys, down); });
         ResumeThreads(*this, m_state, now);
         TickUi(now);
         m_inTick = false;

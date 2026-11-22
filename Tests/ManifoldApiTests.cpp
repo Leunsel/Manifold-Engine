@@ -12,6 +12,7 @@
 #include "Lua/UiForm.h"
 #include "Lua/UiFormImport.h"
 #include "Table/CeForms.h"
+#include "Table/AddressList.h"
 #include "Table/CheatTable.h"
 #include "Lua/UiModel.h"
 
@@ -70,7 +71,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 24 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 25 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -2678,6 +2679,135 @@ return M
             CHECK(Lua::FormLuaString("a\"b\\c") == "\"a\\\"b\\\\c\"");
         }
 
+        void UiTrainer(Engine& engine)
+        {
+            using Lua::UiKind;
+            // keys as text, and back
+            CHECK(Table::ParseKeysText("F1") == std::vector<int>({ VK_F1 }));
+            CHECK(Table::ParseKeysText("ctrl+shift+f2") == std::vector<int>({ VK_CONTROL, VK_SHIFT, VK_F2 }));
+            CHECK(Table::ParseKeysText("Num 1") == std::vector<int>({ VK_NUMPAD1 }));
+            CHECK(Table::ParseKeysText("Alt+g") == std::vector<int>({ VK_MENU, 'G' }));
+            CHECK(Table::ParseKeysText("Ctrl").empty());
+            CHECK(Table::ParseKeysText("Ctrl+Bogus").empty());
+            CHECK(Table::ParseKeysText("").empty());
+            CHECK(Table::KeysText(Table::ParseKeysText("ctrl+f2")) == "Ctrl+F2");
+            CHECK(Table::ParseKeysText(Table::KeysText({ VK_CONTROL, VK_HOME })) == std::vector<int>({ VK_CONTROL, VK_HOME }));
+
+            // hotkey = ... on a checkbox and a button; a press switches and clicks like the mouse
+            Lua::UiModel& model = engine.Lua().Ui();
+            LuaCheck(engine, "hotkey keys", R"LUA(
+                local w = manifold.ui.window.create("Hotkey Probe", {})
+                hotkeyChanges, hotkeyClicks = 0, 0
+                hotkeyIds = {
+                  box = w.add("checkbox", { label = "God", hotkey = "ctrl+f2", onChange = function(value) hotkeyChanges = hotkeyChanges + 1 end }).id,
+                  off = w.add("checkbox", { label = "Off", hotkey = "F3", enabled = false, onChange = function() hotkeyChanges = hotkeyChanges + 100 end }).id,
+                  go = w.add("button", { text = "Go", hotkey = "F4", onClick = function() hotkeyClicks = hotkeyClicks + 1 end }).id,
+                  ask = w.add("button", { text = "Ask", hotkey = "F5", confirm = "Sure?", onClick = function() hotkeyClicks = hotkeyClicks + 100 end }).id,
+                }
+                hotkeyWindow = w
+                local ok, problem = pcall(function() w.add("checkbox", { label = "x", hotkey = "Ctrl+Bogus" }) end)
+                if ok then return "a hotkey that names no key was accepted" end
+                local text = type(problem) == "table" and problem.message or tostring(problem)
+                if not text:find("names no key", 1, true) then return "message: " .. text end
+                return "ok")LUA");
+            std::map<std::string, int> ids;
+            {
+                std::string result;
+                engine.Lua().RunWithResult("return ('%d %d %d %d'):format(hotkeyIds.box, hotkeyIds.off, hotkeyIds.go, hotkeyIds.ask)", "hotkey ids", result);
+                std::istringstream read(result);
+                for (const char* name : { "box", "off", "go", "ask" })
+                    read >> ids[name];
+            }
+            const Lua::UiNode* box = model.Find(ids["box"]);
+            CHECK(box && box->Hotkey == "Ctrl+F2" && box->HotkeyKeys == std::vector<int>({ VK_CONTROL, VK_F2 }));
+            // simulated keys: every hotkey goes down once (a key held when the widget appeared does not count)
+            std::set<std::vector<int>> held;
+            const auto press = [&](const std::vector<int>& keys, bool& down) {
+                const bool now = held.count(keys) != 0;
+                const bool pressed = now && !down;
+                down = now;
+                return pressed;
+            };
+            model.PollHotkeys(press);
+            held = { { VK_CONTROL, VK_F2 }, { VK_F3 }, { VK_F4 }, { VK_F5 } };
+            model.PollHotkeys(press);
+            model.PollHotkeys(press); // still held: nothing more
+            CHECK(box->Bool);
+            CHECK(!model.Find(ids["off"])->Bool);
+            engine.Lua().Tick(1.0e9);
+            LuaCheck(engine, "hotkey events", R"LUA(
+                if hotkeyChanges ~= 1 then return "changes " .. hotkeyChanges end
+                if hotkeyClicks ~= 1 then return "clicks " .. hotkeyClicks end
+                hotkeyWindow.remove()
+                return "ok")LUA");
+
+            // a trainer from records
+            using Info = Lua::FormRecordInfo;
+            Info god{ 2, "God Mode", Info::Type::Script };
+            god.Children.push_back(Info{ 3, "Damage Multiplier", Info::Type::Value });
+            god.Children.back().Integer = false;
+            Info gold{ 4, "Gold", Info::Type::Value };
+            gold.Hex = true;
+            Info mode{ 5, "Mode", Info::Type::Value };
+            mode.DropDown = { "Off", "Slow", "Fast" };
+            Info name{ 6, "Name", Info::Type::Value };
+            name.Text = true;
+            Info player{ 1, "Player", Info::Type::Group };
+            player.Children = { god, gold, mode, name };
+            Info speed{ 7, "Speed Hack", Info::Type::Script };
+            speed.TableHotkey = true;
+            Info twin{ 8, "Ammo", Info::Type::Script };
+            twin.Unique = false;
+            Lua::FormTrainerOptions options;
+            options.Title = "Probe Trainer";
+            options.TakenKeys = { "F1" };
+            Lua::FormTrainerResult made = Lua::FormFromRecords({ player, speed, twin }, options);
+            CHECK_MSG(made.Switches == 3 && made.Fields == 4 && made.Sections == 1 && made.Hotkeys == 2 && made.Skipped == 0,
+                std::to_string(made.Switches) + " " + std::to_string(made.Fields) + " " + std::to_string(made.Sections) + " " + std::to_string(made.Hotkeys));
+            Lua::FormDocument& trainer = made.Form;
+            const auto named = [&](const char* widget) { return trainer.Model.Find(Lua::FormFindNamed(trainer, widget)); };
+            CHECK(trainer.Model.Find(trainer.Window)->Title == "Probe Trainer");
+            CHECK(named("godMode") && named("godMode")->Kind == UiKind::Checkbox && named("godMode")->Style == "switch" && named("godMode")->Hotkey == "F2");
+            CHECK(named("speedHack") && named("speedHack")->Hotkey.empty());
+            CHECK(named("ammo") && named("ammo")->Hotkey == "F3" && trainer.Meta[Lua::FormFindNamed(trainer, "ammo")].RecordById && trainer.Meta[Lua::FormFindNamed(trainer, "ammo")].Record == "8");
+            CHECK(named("damageMultiplier") && named("damageMultiplier")->Kind == UiKind::Number && !named("damageMultiplier")->Integer);
+            CHECK(named("gold") && named("gold")->Hex && trainer.Meta[Lua::FormFindNamed(trainer, "gold")].Record == "Gold");
+            CHECK(named("mode") && named("mode")->Kind == UiKind::Combo && named("mode")->Items.size() == 3);
+            CHECK(named("name") && named("name")->Kind == UiKind::Input);
+            {
+                // the multiplier sits in a column that follows God Mode
+                const Lua::UiNode* multiplier = named("damageMultiplier");
+                const Lua::UiNode* column = multiplier ? trainer.Model.Find(multiplier->Parent) : nullptr;
+                CHECK(column && column->Kind == UiKind::Column && trainer.Meta[column->Id].EnabledWhen == "godMode");
+            }
+            CHECK(Lua::FormProblems(trainer).empty());
+            const std::string saved = Lua::FormSave(trainer);
+            CHECK(saved.find("hotkey = \"F2\"") != std::string::npos && saved.find("record = \"God Mode\"") != std::string::npos);
+            CHECK_MSG(engine.Lua().Run("local w = manifold.ui.form.build((function() " + saved.substr(saved.find("return {")) + " end)())\nw.remove()\n", "trainer form").Ok(), saved);
+            options.Values = false;
+            options.Hotkeys = false;
+            const Lua::FormTrainerResult switches = Lua::FormFromRecords({ player, speed }, options);
+            CHECK(switches.Switches == 2 && switches.Fields == 0 && switches.Hotkeys == 0);
+
+            // hotkey problems: a key twice, a button that asks first, a text that names no key
+            Lua::FormDocument form = Lua::NewForm("Keys");
+            const int a = Lua::FormAdd(form, UiKind::Checkbox, form.Window);
+            const int b = Lua::FormAdd(form, UiKind::Checkbox, form.Window);
+            const int c = Lua::FormAdd(form, UiKind::Button, form.Window);
+            const int d = Lua::FormAdd(form, UiKind::Checkbox, form.Window);
+            Lua::FormSetProp(*form.Model.Find(a), "hotkey", "f1");
+            Lua::FormSetProp(*form.Model.Find(b), "hotkey", "F1");
+            Lua::FormSetProp(*form.Model.Find(c), "hotkey", "F2");
+            Lua::FormSetProp(*form.Model.Find(c), "confirm", "Sure?");
+            Lua::FormSetProp(*form.Model.Find(d), "hotkey", "Hyper+Q");
+            CHECK(form.Model.Find(a)->Hotkey == "F1");
+            std::vector<Lua::FormProblem> problems = Lua::FormProblems(form);
+            CHECK_MSG(problems.size() == 3, std::to_string(problems.size()));
+            for (const Lua::FormProblem& problem : problems)
+                CHECK(problem.Fix == Lua::FormFix::ClearHotkey && Lua::FormApplyFix(form, problem));
+            CHECK(Lua::FormProblems(form).empty());
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -2832,6 +2962,7 @@ return M
         UiFormRules(engine);
         UiLayoutOptions(engine);
         UiFormEditing();
+        UiTrainer(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

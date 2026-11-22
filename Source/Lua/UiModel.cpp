@@ -262,6 +262,45 @@ namespace Manifold::Lua
         return true;
     }
 
+    void UiModel::PollHotkeys(const std::function<bool(const std::vector<int>&, bool&)>& pressed)
+    {
+        std::vector<int> fired;
+        std::function<void(int, bool)> walk = [&](int id, bool enabled) {
+            UiNode* node = Find(id);
+            if (!node)
+                return;
+            const bool on = enabled && node->Enabled;
+            if (!node->HotkeyKeys.empty() && (node->Kind == UiKind::Checkbox || node->Kind == UiKind::Button))
+            {
+                // every key set is asked each time, so a held key fires once, also when it was held while disabled
+                if (pressed(node->HotkeyKeys, node->HotkeyDown) && on && node->Visible)
+                    fired.push_back(id);
+            }
+            for (const int child : std::vector<int>(node->Children))
+                walk(child, on);
+        };
+        for (const int window : Windows())
+        {
+            if (const UiNode* node = Find(window); node && node->Open)
+                walk(window, true);
+        }
+        for (const int id : fired)
+        {
+            UiNode* node = Find(id);
+            if (!node)
+                continue;
+            if (node->Kind == UiKind::Checkbox)
+            {
+                node->Bool = !node->Bool;
+                Touch(*node);
+                if (node->Handlers & UiHandler::Change)
+                    Post(UiEvent{ id, "change", { node->Bool } });
+            }
+            else if (node->Confirm.empty() && (node->Handlers & UiHandler::Click))
+                Post(UiEvent{ id, "click", {} });
+        }
+    }
+
     void UiModel::Post(UiEvent event)
     {
         if (m_events.size() >= kMaxEvents)

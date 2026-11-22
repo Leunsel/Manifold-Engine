@@ -790,7 +790,10 @@ namespace Manifold::UI
         case UiKind::Button:
         {
             // an icon without text makes an icon button
-            const std::string label = Label(node, node.Text.empty() && !node.Icon.empty() ? IconText(node.Icon, "") : IconText(node.Icon, node.Text.empty() ? std::string("Button") : node.Text));
+            std::string caption = node.Text.empty() && !node.Icon.empty() ? IconText(node.Icon, "") : IconText(node.Icon, node.Text.empty() ? std::string("Button") : node.Text);
+            if (!node.Hotkey.empty() && node.Confirm.empty())
+                caption += "  (" + node.Hotkey + ")";
+            const std::string label = Label(node, caption);
             ImVec2 size(node.Width > 0.0f ? Px(node.Width) : (node.Width < 0.0f || m_cell ? (m_rowSlot > 0.0f ? m_rowSlot : -FLT_MIN) : 0.0f), node.Height > 0.0f ? Px(node.Height) : 0.0f);
             if (node.MinWidth > 0.0f || node.MaxWidth > 0.0f)
             {
@@ -1109,6 +1112,22 @@ namespace Manifold::UI
             }
             else
                 flipped = ImGui::Checkbox(label.c_str(), &value);
+            if (!node.Hotkey.empty())
+            {
+                // ∑ the key beside the box, like a trainer shows it
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x * 2.0f);
+                const ImVec2 size = ImGui::CalcTextSize(node.Hotkey.c_str());
+                const ImVec2 padding(Px(5.0f), Px(1.0f));
+                ImGui::AlignTextToFramePadding();
+                const ImVec2 at = ImGui::GetCursorScreenPos();
+                const float top = at.y + (ImGui::GetFrameHeight() - size.y) * 0.5f - padding.y;
+                ImGui::Dummy(ImVec2(size.x + padding.x * 2.0f, ImGui::GetFrameHeight()));
+                ImDrawList* draw = ImGui::GetWindowDrawList();
+                draw->AddRect(ImVec2(at.x, top), ImVec2(at.x + size.x + padding.x * 2.0f, top + size.y + padding.y * 2.0f), ImGui::GetColorU32(ImGuiCol_TextDisabled), Px(3.0f));
+                draw->AddText(ImVec2(at.x + padding.x, top + padding.y), ImGui::GetColorU32(ImGuiCol_TextDisabled), node.Hotkey.c_str());
+                if (node.Tooltip.empty())
+                    ItemTooltip(("Hotkey " + node.Hotkey + ": works from anywhere while this window is open").c_str());
+            }
             if (flipped)
             {
                 node.Bool = value;

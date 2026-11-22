@@ -468,7 +468,8 @@ namespace Manifold::UI
         m_unsavedDialog("formunsaved", ICON_FA_SAVE, "Unsaved Changes"),
         m_problemsDialog("formproblems", ICON_FA_EXCLAMATION_TRIANGLE, "Form Problems", ImVec2(560.0f, 320.0f)),
         m_importDialog("formimport", ICON_FA_FILE_IMPORT, "Import Cheat Engine Form", ImVec2(520.0f, 320.0f)),
-        m_notesDialog("formimportnotes", ICON_FA_FILE_IMPORT, "Import Notes", ImVec2(680.0f, 420.0f))
+        m_notesDialog("formimportnotes", ICON_FA_FILE_IMPORT, "Import Notes", ImVec2(680.0f, 420.0f)),
+        m_tableDialog("formfromtable", ICON_FA_TABLE, "New Trainer from the Table", ImVec2(520.0f, 330.0f))
     {
         m_host = std::make_unique<UiHost>(m_engine, workspace.Window(), &m_form.Model);
         m_tryHost = std::make_unique<UiHost>(m_engine, workspace.Window(), &m_try.Model);
@@ -1160,6 +1161,10 @@ namespace Manifold::UI
             m_dirty = true;
             m_notesDialog.Open();
             break;
+        case Pending::FromTable:
+            Reset(std::move(m_pendingImport), {}, true);
+            m_dirty = true;
+            break;
         case Pending::Template:
         {
             Lua::FormDocument form;
@@ -1434,6 +1439,8 @@ namespace Manifold::UI
 
     void FormEditorWindow::Shortcuts()
     {
+        if (m_captureNode)
+            return; // the keys go to the Hotkey field
         const bool typing = ImGui::GetIO().WantTextInput;
         for (const Command command : { Command::FormNew, Command::FormOpen, Command::FormSave, Command::FormSaveAs, Command::FormExport, Command::FormTry, Command::FormRun })
         {
@@ -1457,6 +1464,10 @@ namespace Manifold::UI
             if (CommandItem(ICON_FA_FILE "  New Form", Command::FormNew))
                 RunCommand(Command::FormNew);
             TemplateMenu();
+            if (ImGui::MenuItem(ICON_FA_TABLE "  New Trainer from the Table...", nullptr, false, m_engine.Table().Count() > 0))
+                m_tableDialog.Open();
+            ItemTooltip(m_engine.Table().Count() > 0 ? "A form with a switch for every script and a field for every value of the open table, bound to them and sorted into sections like the table's groups."
+                                                     : "Open a table first: the form is made from its records.");
             if (CommandItem(ICON_FA_FOLDER_OPEN "  Open Form...", Command::FormOpen))
                 RunCommand(Command::FormOpen);
             ImGui::Separator();
@@ -3795,6 +3806,78 @@ namespace Manifold::UI
         case FormPropType::String:
             edited = InputText("##v", value);
             break;
+        case FormPropType::Hotkey:
+        {
+            // ∑ click, then press the keys: the first key that goes down,
+            // with Ctrl, Shift and Alt as they are held; Escape gives up
+            const bool capturing = m_captureNode == node.Id;
+            const float button = ImGui::GetFrameHeight();
+            const std::string face = capturing ? std::string(ICON_FA_KEYBOARD "  Press the keys (Esc gives up)")
+                                   : value.empty()  ? std::string(ICON_FA_KEYBOARD "  None: click, then press keys")
+                                                    : std::string(ICON_FA_KEYBOARD "  ") + value;
+            ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true); // Space and Enter are keys to take, not clicks
+            if (capturing)
+                ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.35f));
+            if (ImGui::Button((face + "##capture").c_str(), ImVec2(value.empty() || capturing ? -FLT_MIN : -(button + ImGui::GetStyle().ItemInnerSpacing.x), 0.0f)))
+            {
+                m_captureNode = capturing ? 0 : node.Id;
+                m_captureDown.clear();
+                for (int key = 8; key <= 254; ++key)
+                {
+                    if (::GetAsyncKeyState(key) & 0x8000)
+                        m_captureDown.insert(key);
+                }
+            }
+            if (capturing)
+                ImGui::PopStyleColor();
+            ImGui::PopItemFlag();
+            ItemTooltip(prop.Help.data());
+            if (!value.empty() && !capturing)
+            {
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+                if (IconButton(ICON_FA_TIMES "##clearhotkey", "No hotkey", false, button))
+                {
+                    value.clear();
+                    edited = true;
+                }
+            }
+            if (capturing && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+            {
+                const auto down = [](int key) { return (::GetAsyncKeyState(key) & 0x8000) != 0; };
+                const auto modifier = [](int key) { return key == VK_CONTROL || key == VK_SHIFT || key == VK_MENU || (key >= VK_LSHIFT && key <= VK_RMENU) || key == VK_LWIN || key == VK_RWIN; };
+                if (down(VK_ESCAPE) && !m_captureDown.count(VK_ESCAPE))
+                    m_captureNode = 0;
+                else
+                {
+                    for (int key = 8; key <= 254; ++key)
+                    {
+                        const bool now = down(key);
+                        if (now && !m_captureDown.count(key) && !modifier(key) && key != VK_ESCAPE)
+                        {
+                            std::vector<int> keys;
+                            if (down(VK_CONTROL))
+                                keys.push_back(VK_CONTROL);
+                            if (down(VK_SHIFT))
+                                keys.push_back(VK_SHIFT);
+                            if (down(VK_MENU))
+                                keys.push_back(VK_MENU);
+                            keys.push_back(key);
+                            value = Table::KeysText(keys);
+                            edited = true;
+                            m_captureNode = 0;
+                            break;
+                        }
+                        if (now)
+                            m_captureDown.insert(key);
+                        else
+                            m_captureDown.erase(key);
+                    }
+                }
+            }
+            else if (capturing && !ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+                m_captureNode = 0; // another window took the focus: keys there are not for this field
+            break;
+        }
         }
         if (edited && value != before)
         {
@@ -4468,6 +4551,7 @@ namespace Manifold::UI
                 m_importDialog.Close();
             m_importDialog.End();
         }
+        TableDialog();
         if (m_notesDialog.Begin())
         {
             ImGui::TextWrapped("%d controls were converted. Pixel positions became rows, grids and splits, fonts and colours follow the theme, "
@@ -5664,6 +5748,103 @@ namespace Manifold::UI
         recordMenu(ICON_FA_CODE "  Switch a Memory Record On", false, "setActive(true)");
     }
 
+    // ∑ the open table as the generator sees it, and the keys its hotkeys use
+    std::vector<Lua::FormRecordInfo> FormEditorWindow::TableRecords(std::vector<std::string>& takenKeys) const
+    {
+        Table::AddressList& table = m_engine.Table();
+        std::function<Lua::FormRecordInfo(const Table::MemoryRecord&)> convert = [&](const Table::MemoryRecord& record) {
+            Lua::FormRecordInfo info;
+            info.Id = record.Id;
+            info.Description = record.Description;
+            info.Kind = record.Kind == Table::RecordKind::Script ? Lua::FormRecordInfo::Type::Script
+                      : record.Kind == Table::RecordKind::Group  ? Lua::FormRecordInfo::Type::Group
+                                                                 : Lua::FormRecordInfo::Type::Value;
+            info.Unique = !record.Description.empty() && table.CountByDescription(record.Description) == 1;
+            info.Integer = record.Type != Scan::ValueType::Float && record.Type != Scan::ValueType::Double;
+            info.Hex = record.ShowHex;
+            info.Text = record.Type == Scan::ValueType::String || record.Type == Scan::ValueType::ByteArray;
+            for (const Table::DropDownEntry& entry : record.DropDown)
+                info.DropDown.push_back(entry.Text.empty() ? entry.Value : entry.Text);
+            for (const Table::Hotkey& hotkey : record.Hotkeys)
+            {
+                takenKeys.push_back(Table::KeysText(hotkey.Keys));
+                info.TableHotkey = info.TableHotkey || hotkey.Action == Table::HotkeyAction::Toggle || hotkey.Action == Table::HotkeyAction::Activate || hotkey.Action == Table::HotkeyAction::Deactivate;
+            }
+            for (const auto& child : record.Children)
+                info.Children.push_back(convert(*child));
+            return info;
+        };
+        std::vector<Lua::FormRecordInfo> records;
+        for (Table::MemoryRecord* record : table.Flatten())
+        {
+            if (!record->Parent)
+                records.push_back(convert(*record));
+        }
+        return records;
+    }
+
+    void FormEditorWindow::TableDialog()
+    {
+        if (!m_tableDialog.Begin())
+            return;
+        std::vector<std::string> taken;
+        const std::vector<Lua::FormRecordInfo> records = TableRecords(taken);
+        Lua::FormTrainerOptions options = m_trainer;
+        options.TakenKeys = taken;
+        const Lua::FormTrainerResult preview = Lua::FormFromRecords(records, options);
+        ImGui::TextWrapped("%s", "Every script and group of the open table becomes a switch, every value a field, bound to its record: they show and change it without code. "
+                                 "The table's groups become sections, and what belongs to a script sits below its switch, enabled while it is on.");
+        ImGui::Spacing();
+        if (ImGui::BeginTable("##trainer", 2, ImGuiTableFlags_SizingStretchProp))
+        {
+            ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, Px(150.0f));
+            ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted("Title");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            InputTextWithHint("##title", "Trainer", m_trainer.Title);
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted("Value Fields");
+            ImGui::TableSetColumnIndex(1);
+            ToggleSwitch("##values", &m_trainer.Values);
+            ItemTooltip("Off: only the switches, for a trainer that turns cheats on and off.");
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted("Hotkeys F1 to F12");
+            ImGui::TableSetColumnIndex(1);
+            ToggleSwitch("##hotkeys", &m_trainer.Hotkeys);
+            ItemTooltip("The switches get F1, F2, ... in order; keys the table's own hotkeys use are skipped, and so are records the table already switches by a key.");
+            ImGui::EndTable();
+        }
+        ImGui::Spacing();
+        std::string summary = std::to_string(preview.Switches) + (preview.Switches == 1 ? " switch" : " switches") + ", " + std::to_string(preview.Fields) + (preview.Fields == 1 ? " field" : " fields") +
+                              ", " + std::to_string(preview.Sections) + (preview.Sections == 1 ? " section" : " sections");
+        if (preview.Hotkeys > 0)
+            summary += ", " + std::to_string(preview.Hotkeys) + (preview.Hotkeys == 1 ? " hotkey" : " hotkeys");
+        Muted(summary + ".");
+        if (preview.Skipped > 0)
+            TextWithError(std::to_string(preview.Skipped) + " records are left out: a form takes 400 widgets at most.", ManifoldTheme::Warning);
+        if (!taken.empty())
+            Muted("Hotkeys of the table stay where they are.");
+        const DialogChoice choice = m_tableDialog.Buttons("Create", preview.Switches + preview.Fields > 0, true, "Cancel");
+        if (choice == DialogChoice::Ok)
+        {
+            Lua::FormTrainerResult made = Lua::FormFromRecords(records, options);
+            m_pendingImport = std::move(made.Form);
+            m_tableDialog.Close();
+            AskThen(Pending::FromTable);
+        }
+        else if (choice == DialogChoice::Cancel)
+            m_tableDialog.Close();
+        m_tableDialog.End();
+    }
+
     void FormEditorWindow::ShowEverything()
     {
         // ∑ pans so the forms and chips fit, or start at the top left when they are bigger
@@ -5948,6 +6129,39 @@ namespace Manifold::UI
             if (const int twins = m_engine.Table().CountByDescription(meta.Record); twins > 1)
                 m_problems.push_back({ id, std::string(Lua::FormKindTitle(m_form.Model.Find(id)->Kind)) + ": " + std::to_string(twins) + " records of the open table are named \"" + meta.Record +
                                                "\"; bind it by id (pick it in Memory Record)" });
+        }
+        {
+            // ∑ a widget's hotkey that a record of the open table uses too:
+            // one press would switch the record twice (by the table and by the widget)
+            std::map<std::vector<int>, std::string> tableKeys;
+            m_engine.Table().ForEach([&](const Table::MemoryRecord& record) {
+                for (const Table::Hotkey& hotkey : record.Hotkeys)
+                {
+                    std::vector<int> keys = hotkey.Keys;
+                    std::sort(keys.begin(), keys.end());
+                    tableKeys.emplace(keys, record.Description);
+                }
+            });
+            if (!tableKeys.empty())
+            {
+                for (const int window : Lua::FormWindows(m_form))
+                {
+                    std::vector<int> stack{ window };
+                    while (!stack.empty())
+                    {
+                        const UiNode* node = m_form.Model.Find(stack.back());
+                        stack.pop_back();
+                        if (!node)
+                            continue;
+                        stack.insert(stack.end(), node->Children.begin(), node->Children.end());
+                        std::vector<int> keys = node->HotkeyKeys;
+                        std::sort(keys.begin(), keys.end());
+                        if (const auto found = tableKeys.find(keys); !keys.empty() && found != tableKeys.end())
+                            m_problems.push_back({ node->Id, std::string(Lua::FormKindTitle(node->Kind)) + ": " + node->Hotkey + " is the hotkey of the record \"" + found->second +
+                                                                 "\" in the open table too; one press would switch it twice", Lua::FormFix::ClearHotkey });
+                    }
+                }
+            }
         }
         m_problemNodes.clear();
         for (const Lua::FormProblem& problem : m_problems)

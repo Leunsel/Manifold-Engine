@@ -5215,7 +5215,7 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 24
+local API_VERSION = 25
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -7558,8 +7558,8 @@ local WIDGET_KEYS = {
   heading = withCommon({ text = "string", icon = "string", color = "string", align = "string", size = "number" }),
   separator = withCommon({ text = "string" }),
   spacer = withCommon({}),
-  button = withCommon({ text = "string", icon = "string", style = "string", shortcut = "string", confirm = "string", onClick = "function" }),
-  checkbox = withCommon({ label = "string", value = "boolean", style = "string", onChange = "function" }),
+  button = withCommon({ text = "string", icon = "string", style = "string", shortcut = "string", hotkey = "string", confirm = "string", onClick = "function" }),
+  checkbox = withCommon({ label = "string", value = "boolean", style = "string", hotkey = "string", onChange = "function" }),
   input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", readOnly = "boolean", maxLength = "integer", focus = "boolean", labelPosition = "string", onChange = "function", onSubmit = "function" }),
   number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", focus = "boolean", labelPosition = "string", onChange = "function" }),
   slider = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", format = "string", labelPosition = "string", onChange = "function" }),
@@ -7664,11 +7664,14 @@ local function checkOptions(path, keys, options)
   elseif options.style ~= nil and not BUTTON_STYLES[options.style] then
     misuse(('%s: options.style must be one of "default", "accent", "danger", got %q'):format(path, options.style))
   end
-  if options.labelPosition ~= nil and options.labelPosition ~= "left" and options.labelPosition ~= "above" and options.labelPosition ~= "right" then
-    misuse(('%s: options.labelPosition must be "left", "above" or "right", got %q'):format(path, options.labelPosition))
+  if options.hotkey ~= nil and options.hotkey ~= "" and not native.uiHotkeyText(options.hotkey) then
+    misuse(('%s: options.hotkey %q names no key; write it like "F1", "Ctrl+F2" or "Shift+Num 1"'):format(path, options.hotkey))
   end
 )MLUA"),
-            std::string_view(R"MLUA(  if options.align ~= nil and not ROW_ALIGNS[options.align] then
+            std::string_view(R"MLUA(  if options.labelPosition ~= nil and options.labelPosition ~= "left" and options.labelPosition ~= "above" and options.labelPosition ~= "right" then
+    misuse(('%s: options.labelPosition must be "left", "above" or "right", got %q'):format(path, options.labelPosition))
+  end
+  if options.align ~= nil and not ROW_ALIGNS[options.align] then
     misuse(('%s: options.align must be one of "left", "center", "right", got %q'):format(path, options.align))
   end
   if options.columns ~= nil and keys.columns == "integer" and (options.columns < 1 or options.columns > 16) then
@@ -8063,8 +8066,8 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
     "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it, `open = false` starts it folded.",
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
     "- `text` (`text`, `color`, `wrap`, `mono`, `bold`, `size` in points, `align` = `left`, `center` or `right` for text that does not wrap), `heading` (`text`, `icon`, `color`, `size`, `align`), `separator` (`text` puts a caption into the line), `spacer`.",
-    "- `button`: `text`, `icon` (an icon without text makes an icon button), `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through.",
-    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
+    "- `button`: `text`, `icon` (an icon without text makes an icon button), `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through; `hotkey` (like `F5` or `Ctrl+F2`) clicks it from anywhere, also while the game has the focus, as long as its window is open (not a button with `confirm`).",
+    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch; `hotkey` like `F1` or `Ctrl+F2` switches it from anywhere, also while the game has the focus, as long as its window is open and the box is enabled, and shows the key beside it), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
@@ -8077,11 +8080,11 @@ local WIDGET_METHOD_DOCS = {
   remove = { returns = "boolean", doc = "Removes the widget and everything in it." },
   update = { params = { { name = "options", type = "table", text = "Only the keys to change; the others keep their values." } }, returns = "boolean", doc = table.concat({
     "Changes options of the widget: the same keys `add` takes for its kind, handlers included, and nothing else (an unknown key raises and names the known ones). Keys that every widget takes: `visible`, `enabled` (false draws it dimmed and takes no input), `tooltip`, `width`, `height`, `minWidth`, `maxWidth`.",
-    "By kind: a `text` or `heading` takes `text`; a `button` `text`, `icon`, `style`; a `checkbox` `label`, `value`, `style`; an `input` `label`, `value`, `hint`, `readOnly`; a `number` or `slider` `label`, `value`, `min`, `max`, `format`; a `combo` or `radio` `items` and `value` (new items keep the chosen number while it exists); a `progress` `value` (0..1) and `text`; a `table` `columns`, `rows`, `value`; a `tree` `items`, `value`; a `section` or `tab` `title`, `icon`, `badge`. A new `value` does not call `onChange`.",
+)MLUA"),
+            std::string_view(R"MLUA(    "By kind: a `text` or `heading` takes `text`; a `button` `text`, `icon`, `style`; a `checkbox` `label`, `value`, `style`; an `input` `label`, `value`, `hint`, `readOnly`; a `number` or `slider` `label`, `value`, `min`, `max`, `format`; a `combo` or `radio` `items` and `value` (new items keep the chosen number while it exists); a `progress` `value` (0..1) and `text`; a `table` `columns`, `rows`, `value`; a `tree` `items`, `value`; a `section` or `tab` `title`, `icon`, `badge`. A new `value` does not call `onChange`.",
     "Example: `w.speed.update({ value = 2, enabled = god.get() })`, `w.status.update({ text = \"Attached\", color = \"success\" })`.",
   }, " ") },
-)MLUA"),
-            std::string_view(R"MLUA(  get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a colour's `#RRGGBB`, a number, the chosen combo, radio or table row's number (a combo with `multi` returns the list of chosen numbers), the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
+  get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a colour's `#RRGGBB`, a number, the chosen combo, radio or table row's number (a combo with `multi` returns the list of chosen numbers), the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
   set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
   draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
   getView = { returns = "table", doc = "A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom." },
@@ -8311,7 +8314,8 @@ local function checkForm(path, spec, handlers)
       end
       if child.opens ~= nil or child.closes ~= nil then
         if child.kind ~= "button" then
-          misuse(("%s: %s: only a button opens or closes a window"):format(path, label))
+)MLUA"),
+            std::string_view(R"MLUA(          misuse(("%s: %s: only a button opens or closes a window"):format(path, label))
         end
         if child.opens ~= nil and (type(child.opens) ~= "string" or not modalNames[child.opens]) then
           misuse(("%s: %s.opens must name one of the form's modals, got %s"):format(path, label, tostring(child.opens)))
@@ -8324,8 +8328,7 @@ local function checkForm(path, spec, handlers)
         copy.image = nil
       end
       checkOptions(path .. "(" .. child.kind .. ")", keys, copy)
-)MLUA"),
-            std::string_view(R"MLUA(      walk(child.kind, child.children, label, depth + 1)
+      walk(child.kind, child.children, label, depth + 1)
     end
   end
   walk("window", spec.children, "form", 1)
@@ -8605,7 +8608,8 @@ local function buildForm(path, spec, handlers, folder)
   local options, modals = checkForm(path, spec, handlers)
   local resolve = formResolver(path, handlers)
   local made = rawget(window.members, "create")(spec.title, options)
-  local widgets, members = strict(("form(%q).widgets"):format(spec.title))
+)MLUA"),
+            std::string_view(R"MLUA(  local widgets, members = strict(("form(%q).widgets"):format(spec.title))
   local modalTable, modalMembers = strict(("form(%q).modals"):format(spec.title))
   local windows = { made }
   local wiring = { rules = {}, items = {} }
@@ -8618,8 +8622,7 @@ local function buildForm(path, spec, handlers, folder)
     fillForm(path, made, members, spec.children, resolve, folder, { window = made, modals = modalMembers, wiring = wiring })
     for _, modal in ipairs(modals) do
       local handle = rawget(modalMembers, modal.name)
-)MLUA"),
-            std::string_view(R"MLUA(      fillForm(path, handle, members, modal.spec.children, resolve, folder, { window = handle, modals = modalMembers, wiring = wiring })
+      fillForm(path, handle, members, modal.spec.children, resolve, folder, { window = handle, modals = modalMembers, wiring = wiring })
     end
     for name in pairs(wiring.rules) do
       wiring.refresh(name)
@@ -8832,7 +8835,8 @@ define(form, "load", {
 }, function(path, handlers, options)
   options = options or {}
   local info = callerFrame()
-  local source = info and info.source or ""
+)MLUA"),
+            std::string_view(R"MLUA(  local source = info and info.source or ""
   local folder = source:sub(1, 1) == "@" and source:sub(2):match("^(.*[\\/])") or nil
   local spec, shown, message = readFormFile(path, folder)
   if not spec then
@@ -8846,8 +8850,7 @@ define(form, "load", {
   return made, widgets, modalTable
 end)
 
-)MLUA"),
-            std::string_view(R"MLUA(local function plainObject(entry, prefix, docPrefix, methods, fields)
+local function plainObject(entry, prefix, docPrefix, methods, fields)
   local proxy, members = strict(prefix)
   for name, spec in pairs(methods) do
     bind(proxy, prefix .. "." .. name, members, name, spec, spec.body, docPrefix .. name)
@@ -9114,7 +9117,8 @@ native.docDefine(nil, ENTRY_DOC .. "remove", { returns = "boolean", doc = "Takes
 native.docDefine(nil, ENTRY_DOC .. "id", { kind = "field", type = "integer", doc = "The entry's number." })
 
 local MENU_KEYS = { icon = "string", enabled = "boolean", checked = "boolean", onClick = "function" }
-local menu = subarea(ui, "menu", "Entries in the main window's Extensions menu, beside the menus of Cheat Engine scripts. The menu shows as soon as a script adds one.")
+)MLUA"),
+            std::string_view(R"MLUA(local menu = subarea(ui, "menu", "Entries in the main window's Extensions menu, beside the menus of Cheat Engine scripts. The menu shows as soon as a script adds one.")
 
 define(menu, "add", {
   params = {
@@ -9128,8 +9132,7 @@ define(menu, "add", {
   return addEntry("menu", MENU_KEYS, { path = path, text = text }, options)
 end)
 
-)MLUA"),
-            std::string_view(R"MLUA(local TOOLBAR_KEYS = { text = "string", tooltip = "string", enabled = "boolean", onClick = "function", icon = "string" }
+local TOOLBAR_KEYS = { text = "string", tooltip = "string", enabled = "boolean", onClick = "function", icon = "string" }
 local toolbar = subarea(ui, "toolbar", "Buttons in the main window's title bar, between the process and the Memory view button.")
 
 define(toolbar, "add", {
@@ -9414,7 +9417,8 @@ define(moduleArea, "enable", {
   returns = "true, or nil, error",
   doc = "Switches a module on, loads it now and remembers it for the next start. The error is the reason it did not load, as for `reload`.",
 }, function(name)
-  return result(native.moduleSetEnabled(name, true))
+)MLUA"),
+            std::string_view(R"MLUA(  return result(native.moduleSetEnabled(name, true))
 end)
 
 define(moduleArea, "disable", {
@@ -9428,8 +9432,7 @@ end)
 define(moduleArea, "onUnload", {
   params = { { name = "handler", type = "function" } },
   returns = "true, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Calls `handler()` when the calling module is unloaded: before it is reloaded, when it is switched off, and before all modules run again. The program removes what the module registered through `manifold` on its own; the handler takes down the rest, such as Cheat Engine menu items, forms and timers. Handlers run in reverse order. `ME-7011` when the caller is not an autorun module.",
+  doc = "Calls `handler()` when the calling module is unloaded: before it is reloaded, when it is switched off, and before all modules run again. The program removes what the module registered through `manifold` on its own; the handler takes down the rest, such as Cheat Engine menu items, forms and timers. Handlers run in reverse order. `ME-7011` when the caller is not an autorun module.",
 }, function(handler)
   local key = callerModule()
   if not key then

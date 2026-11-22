@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -171,6 +172,9 @@ namespace Manifold::Lua
         bool HasPos = false;
         std::string Key;
         std::string Shortcut;
+        std::string Hotkey;               // checkbox/button: keys that switch or click it from anywhere ("F1")
+        std::vector<int> HotkeyKeys;      // Hotkey as virtual keys, empty when it names none
+        bool HotkeyDown = false;
         std::string Confirm;
         bool ReadOnly = false;
         int MaxLength = 0;
@@ -315,6 +319,12 @@ namespace Manifold::Lua
 
         void ForgetOwner(std::string_view owner);
         void Reset();
+
+        // ∑ hotkeys of checkboxes and buttons in open windows: a press
+        // switches the box or clicks the button like the mouse does (onChange,
+        // onClick, record bindings, Enabled When). `pressed` tells whether keys
+        // went down since the last call (Table::KeysPressed in the program).
+        void PollHotkeys(const std::function<bool(const std::vector<int>&, bool&)>& pressed);
 
         void Watch(int window, std::string path);
         void Unwatch(int window);

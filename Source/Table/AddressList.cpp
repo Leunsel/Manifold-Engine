@@ -497,6 +497,79 @@ namespace Manifold::Table
         return text;
     }
 
+    std::vector<int> ParseKeysText(std::string_view text)
+    {
+        // ∑ parts split at '+', except a '+' that is the key itself
+        // ("Ctrl++", "Num +"): one that comes where a part is still empty or ends in a space
+        std::vector<std::string> parts;
+        std::string part;
+        for (const char c : text)
+        {
+            const std::string trimmed = Trim(part);
+            if (c == '+' && !trimmed.empty() && part.back() != ' ')
+            {
+                parts.push_back(trimmed);
+                part.clear();
+                continue;
+            }
+            part += c;
+        }
+        if (!Trim(part).empty())
+            parts.push_back(Trim(part));
+        std::vector<int> keys;
+        bool main = false;
+        for (const std::string& name : parts)
+        {
+            const std::string lower = Lower(name);
+            int key = 0;
+            if (lower == "ctrl" || lower == "control")
+                key = VK_CONTROL;
+            else if (lower == "shift")
+                key = VK_SHIFT;
+            else if (lower == "alt")
+                key = VK_MENU;
+            else if (lower.size() >= 2 && lower[0] == 'f' && std::all_of(lower.begin() + 1, lower.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }))
+            {
+                const int number = std::atoi(lower.c_str() + 1);
+                if (number >= 1 && number <= 24)
+                    key = VK_F1 + number - 1;
+            }
+            else if (lower.size() == 1 && std::isalnum(static_cast<unsigned char>(lower[0])))
+                key = std::toupper(static_cast<unsigned char>(lower[0]));
+            else if ((lower.rfind("num ", 0) == 0 || lower.rfind("numpad", 0) == 0) && std::isdigit(static_cast<unsigned char>(lower.back())) && Trim(lower.substr(lower[3] == ' ' ? 4 : 6)).size() == 1)
+                key = VK_NUMPAD0 + (lower.back() - '0');
+            else
+            {
+                static const std::pair<const char*, int> kNames[] = {
+                    { "space", VK_SPACE }, { "enter", VK_RETURN }, { "return", VK_RETURN }, { "tab", VK_TAB }, { "esc", VK_ESCAPE }, { "escape", VK_ESCAPE },
+                    { "backspace", VK_BACK }, { "insert", VK_INSERT }, { "ins", VK_INSERT }, { "delete", VK_DELETE }, { "del", VK_DELETE }, { "home", VK_HOME },
+                    { "end", VK_END }, { "pageup", VK_PRIOR }, { "page up", VK_PRIOR }, { "pgup", VK_PRIOR }, { "pagedown", VK_NEXT }, { "page down", VK_NEXT },
+                    { "pgdn", VK_NEXT }, { "up", VK_UP }, { "down", VK_DOWN }, { "left", VK_LEFT }, { "right", VK_RIGHT }, { "pause", VK_PAUSE },
+                    { "num +", VK_ADD }, { "num -", VK_SUBTRACT }, { "num *", VK_MULTIPLY }, { "num /", VK_DIVIDE }, { "num .", VK_DECIMAL },
+                };
+                for (const auto& [entry, code] : kNames)
+                {
+                    if (lower == entry)
+                        key = code;
+                }
+                // whatever KeysText writes for a key (the keyboard layout's own names) reads back
+                for (int code = 8; key == 0 && code <= 254; ++code)
+                {
+                    if (code != VK_LBUTTON && code != VK_RBUTTON && EqualsNoCase(KeysText({ code }), name))
+                        key = code;
+                }
+            }
+            if (key == 0)
+                return {};
+            if (std::find(keys.begin(), keys.end(), key) == keys.end())
+                keys.push_back(key);
+            main = main || (key != VK_CONTROL && key != VK_SHIFT && key != VK_MENU);
+        }
+        if (!main || keys.size() > static_cast<std::size_t>(kMaxHotkeyKeys))
+            return {};
+        return keys;
+    }
+
     namespace
     {
         struct OptionLabel

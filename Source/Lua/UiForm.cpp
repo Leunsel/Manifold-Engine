@@ -1,4 +1,5 @@
 #include "Lua/UiForm.h"
+#include "Table/AddressList.h"
 
 #include "Core/IconNames.h"
 #include "Core/Text.h"
@@ -113,11 +114,13 @@ namespace Manifold::Lua
             { "style", T::Choice, "Look of the button.", "default|accent|danger" },
             { "shortcut", T::String, "Keys that click it while its window has the focus, like Ctrl+S or F5." },
             { "confirm", T::String, "Asks this before the click goes through; empty for no question." },
+            { "hotkey", T::Hotkey, "A key that clicks it from anywhere, also while the game has the focus, as long as the window is open; like F5 or Ctrl+F2." },
         };
         constexpr FormProp kCheckbox[] = {
             { "label", T::String, "Text beside the box." },
             { "value", T::Bool, "Ticked at the start." },
             { "style", T::Choice, "A box to tick, or a switch.", "checkbox|switch" },
+            { "hotkey", T::Hotkey, "A key that switches it from anywhere, also while the game has the focus, as long as the window is open; like F1 or Ctrl+F2. Shown beside the box." },
         };
         constexpr FormProp kInput[] = {
             { "label", T::String, "Text beside the field." },
@@ -2592,6 +2595,7 @@ namespace Manifold::Lua
         if (key == "gap") return node.Gap < 0.0f ? std::string() : NumberText(node.Gap);
         if (key == "scroll") return flag(node.Scroll);
         if (key == "shortcut") return node.Shortcut;
+        if (key == "hotkey") return node.Hotkey;
         if (key == "confirm") return node.Confirm;
         if (key == "readOnly") return flag(node.ReadOnly);
         if (key == "maxLength") return std::to_string(node.MaxLength);
@@ -2741,6 +2745,12 @@ namespace Manifold::Lua
         else if (key == "gap") node.Gap = numeric ? std::max(0.0f, real) : -1.0f;
         else if (key == "scroll") node.Scroll = yes;
         else if (key == "shortcut") node.Shortcut = Trim(text);
+        else if (key == "hotkey")
+        {
+            // written the way the program writes keys; text that names no key stays, so the problems list can show it
+            node.HotkeyKeys = Table::ParseKeysText(text);
+            node.Hotkey = node.HotkeyKeys.empty() ? Trim(text) : Table::KeysText(node.HotkeyKeys);
+        }
         else if (key == "confirm") node.Confirm = text;
         else if (key == "readOnly") node.ReadOnly = yes;
         else if (key == "maxLength") node.MaxLength = numeric ? std::clamp(static_cast<int>(number), 0, 1048576) : 0;
@@ -2896,6 +2906,7 @@ namespace Manifold::Lua
     {
         std::vector<FormProblem> problems;
         std::map<std::string, int> names;
+        std::map<std::string, int> hotkeys;
         std::map<std::string, std::string> signatures;
         std::function<void(int)> visit = [&](int id) {
             const UiNode* node = form.Model.Find(id);
@@ -2944,6 +2955,15 @@ namespace Manifold::Lua
                 if (const FormMeta* meta = MetaOf(form, id); meta && !meta->Record.empty())
                     problems.push_back({ id, kind + ": a combo that ticks several items cannot show a memory record; switch Multi off or unbind it", FormFix::MultiOff });
             }
+            if (!node->Hotkey.empty())
+            {
+                if (node->HotkeyKeys.empty())
+                    problems.push_back({ id, kind + ": hotkey \"" + node->Hotkey + "\" names no key; write it like F1 or Ctrl+F2, or press it in the Hotkey field", FormFix::ClearHotkey });
+                else if (node->Kind == UiKind::Button && !node->Confirm.empty())
+                    problems.push_back({ id, kind + ": a hotkey cannot answer the confirm question, so it does nothing on this button", FormFix::ClearHotkey });
+                else if (const auto [at, fresh] = hotkeys.emplace(node->Hotkey, id); !fresh)
+                    problems.push_back({ id, kind + ": " + node->Hotkey + " is the hotkey of another widget too; one press would switch both", FormFix::ClearHotkey });
+            }
             if (node->Kind == UiKind::Window && node->Title.empty())
                 problems.push_back({ id, "Window: has no title", FormFix::Title });
             if (const FormMeta* meta = MetaOf(form, id); meta && !meta->Opens.empty())
@@ -2989,6 +3009,130 @@ namespace Manifold::Lua
         return problems;
     }
 
+    FormTrainerResult FormFromRecords(const std::vector<FormRecordInfo>& records, const FormTrainerOptions& options)
+    {
+        constexpr int kMaxWidgets = 400;
+        FormTrainerResult result;
+        FormDocument& form = result.Form;
+        form = NewForm(options.Title.empty() ? std::string("Trainer") : options.Title);
+        std::set<std::string> taken;
+        for (const std::string& key : options.TakenKeys)
+            taken.insert(Lower(key));
+        int nextKey = 1;
+        const auto freeKey = [&]() {
+            while (nextKey <= 12)
+            {
+                const std::string key = "F" + std::to_string(nextKey++);
+                if (!taken.count(Lower(key)))
+                    return key;
+            }
+            return std::string();
+        };
+        const auto label = [](const FormRecordInfo& info) { return info.Description.empty() ? "Record " + std::to_string(info.Id) : info.Description; };
+        std::function<void(int, const std::vector<FormRecordInfo>&, int)> build = [&](int parent, const std::vector<FormRecordInfo>& list, int depth) {
+            for (const FormRecordInfo& info : list)
+            {
+                if (result.Switches + result.Fields >= kMaxWidgets)
+                {
+                    ++result.Skipped;
+                    continue;
+                }
+                if (info.Kind == FormRecordInfo::Type::Group && !info.Children.empty())
+                {
+                    // a group: a collapsible section (deeper ones a plain column), dropped when nothing went in
+                    const bool section = depth < 2;
+                    const int holder = FormAdd(form, section ? UiKind::Section : UiKind::Column, parent);
+                    if (!holder)
+                        continue;
+                    if (section)
+                    {
+                        UiNode& node = *form.Model.Find(holder);
+                        node.Title = label(info);
+                        node.Collapsible = true;
+                        node.Open = true;
+                    }
+                    build(holder, info.Children, depth + 1);
+                    if (form.Model.Find(holder)->Children.empty())
+                        FormRemove(form, holder);
+                    else if (section)
+                        ++result.Sections;
+                    continue;
+                }
+                int made = 0;
+                if (info.Kind != FormRecordInfo::Type::Value)
+                {
+                    made = FormAdd(form, UiKind::Checkbox, parent);
+                    if (made)
+                    {
+                        UiNode& node = *form.Model.Find(made);
+                        node.Label = label(info);
+                        node.Style = "switch";
+                        if (options.Hotkeys && !info.TableHotkey)
+                        {
+                            if (const std::string key = freeKey(); !key.empty())
+                            {
+                                FormSetProp(node, "hotkey", key);
+                                ++result.Hotkeys;
+                            }
+                        }
+                        ++result.Switches;
+                    }
+                }
+                else if (options.Values)
+                {
+                    const UiKind kind = !info.DropDown.empty() ? UiKind::Combo : info.Text ? UiKind::Input : UiKind::Number;
+                    made = FormAdd(form, kind, parent);
+                    if (made)
+                    {
+                        UiNode& node = *form.Model.Find(made);
+                        node.Label = label(info);
+                        if (kind == UiKind::Combo)
+                        {
+                            node.Items = info.DropDown;
+                            node.Selected = 0;
+                            node.Hint = "As in the table"; // until the record's value picks an item
+                        }
+                        else if (kind == UiKind::Number)
+                        {
+                            node.Integer = info.Integer;
+                            node.Hex = info.Hex && info.Integer;
+                        }
+                        ++result.Fields;
+                    }
+                }
+                if (made)
+                {
+                    form.Meta[made].Name = FormNameFromText(form, label(info));
+                    const bool byDescription = info.Unique && !info.Description.empty();
+                    form.Meta[made].Record = byDescription ? info.Description : std::to_string(info.Id);
+                    form.Meta[made].RecordById = !byDescription;
+                }
+                if (!info.Children.empty())
+                {
+                    // ∑ what belongs to a record (a script's values): indented below
+                    // it, and enabled only while the script's switch is on
+                    const int row = FormAdd(form, UiKind::Row, parent);
+                    if (!row)
+                        continue;
+                    const int spacer = FormAdd(form, UiKind::Spacer, row);
+                    if (UiNode* gap = form.Model.Find(spacer))
+                        gap->Width = 18.0f;
+                    const int column = FormAdd(form, UiKind::Column, row);
+                    if (made && info.Kind != FormRecordInfo::Type::Value)
+                        form.Meta[column].EnabledWhen = form.Meta[made].Name;
+                    build(column, info.Children, depth + 1);
+                    if (form.Model.Find(column)->Children.empty())
+                        FormRemove(form, row);
+                }
+            }
+        };
+        build(form.Window, records, 0);
+        UiNode& window = *form.Model.Find(form.Window);
+        window.Width = 440.0f;
+        window.Height = std::clamp(90.0f + 32.0f * static_cast<float>(result.Switches + result.Fields) + 40.0f * static_cast<float>(result.Sections), 240.0f, 640.0f);
+        return result;
+    }
+
     std::string_view FormFixLabel(FormFix fix)
     {
         switch (fix)
@@ -3006,6 +3150,7 @@ namespace Manifold::Lua
         case FormFix::ClearOpens: return "Open Nothing";
         case FormFix::ClearRule: return "Remove Enabled When";
         case FormFix::ModalName: return "Give It a Name";
+        case FormFix::ClearHotkey: return "Remove the Hotkey";
         case FormFix::None: break;
         }
         return {};
@@ -3086,6 +3231,10 @@ namespace Manifold::Lua
             break;
         case FormFix::ClearRule:
             form.Meta[node->Id].EnabledWhen.clear();
+            break;
+        case FormFix::ClearHotkey:
+            node->Hotkey.clear();
+            node->HotkeyKeys.clear();
             break;
         case FormFix::ModalName:
         {

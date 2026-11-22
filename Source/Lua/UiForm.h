@@ -25,6 +25,7 @@ namespace Manifold::Lua
         Rows,
         Tree,
         File,
+        Hotkey,
     };
 
     struct FormProp
@@ -153,6 +154,7 @@ namespace Manifold::Lua
         ClearOpens,
         ClearRule,
         ModalName,
+        ClearHotkey,
     };
 
     struct FormProblem
@@ -207,6 +209,51 @@ namespace Manifold::Lua
     bool FormPropIsDefault(const UiNode& node, std::string_view key);
     std::string FormPropDefault(UiKind kind, std::string_view key);
     std::string FormPropLiteral(const UiNode& node, std::string_view key);
+
+    // A record of the open table as the trainer generator sees it (the Table
+    // library stays out of the form model).
+    struct FormRecordInfo
+    {
+        enum class Type : std::uint8_t
+        {
+            Value,
+            Script,
+            Group,
+        };
+        int Id = 0;
+        std::string Description;
+        Type Kind = Type::Value;
+        bool Unique = true;       // no other record has the description: bound by it, else by id
+        bool Integer = true;
+        bool Hex = false;
+        bool Text = false;        // a string or byte array: a text field
+        std::vector<std::string> DropDown;
+        bool TableHotkey = false; // the table switches it by a hotkey already
+        std::vector<FormRecordInfo> Children;
+    };
+
+    struct FormTrainerOptions
+    {
+        std::string Title = "Trainer";
+        bool Values = true;                 // value records become fields; off: only switches
+        bool Hotkeys = true;                // switches get F1, F2, ... (keys the table uses are skipped)
+        std::vector<std::string> TakenKeys; // hotkeys of the table, as Table::KeysText writes them
+    };
+
+    struct FormTrainerResult
+    {
+        FormDocument Form;
+        int Switches = 0;
+        int Fields = 0;
+        int Sections = 0;
+        int Hotkeys = 0;
+        int Skipped = 0; // past the widget limit
+    };
+
+    // A trainer from the records: groups become sections, scripts switches,
+    // values fields bound to them; what belongs to a script sits indented
+    // below its switch and is enabled while it is on.
+    FormTrainerResult FormFromRecords(const std::vector<FormRecordInfo>& records, const FormTrainerOptions& options);
 
     std::vector<FormProblem> FormProblems(const FormDocument& form);
     std::string_view FormFixLabel(FormFix fix);

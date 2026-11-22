@@ -240,6 +240,9 @@ namespace Manifold::Table
     bool UsableHotkeyKeys(const std::vector<int>& keys);
     bool KeysPressed(const std::vector<int>& keys, bool& wasDown);
     std::string KeysText(const std::vector<int>& keys);
+    // "F1", "Ctrl+Shift+G", "Num 1": the keys KeysText writes, back; empty when a
+    // part names no key or only modifiers are given
+    std::vector<int> ParseKeysText(std::string_view text);
 
     std::string DropDownText(const std::vector<DropDownEntry>& entries);
     std::vector<DropDownEntry> ParseDropDown(std::string_view text);

@@ -10,6 +10,7 @@
 #include "Lua/LuaEngine.h"
 #include "Lua/UiForm.h"
 #include "Lua/UiModel.h"
+#include "Table/AddressList.h"
 
 #include "lua.hpp"
 
@@ -374,6 +375,12 @@ namespace Manifold::Lua
             ReadString(state, props, "position", node.Position);
             ReadString(state, props, "key", node.Key);
             ReadString(state, props, "shortcut", node.Shortcut);
+            if (ReadString(state, props, "hotkey", node.Hotkey))
+            {
+                node.HotkeyKeys = Table::ParseKeysText(node.Hotkey);
+                node.Hotkey = node.HotkeyKeys.empty() ? std::string() : Table::KeysText(node.HotkeyKeys);
+                node.HotkeyDown = true; // a key held while the widget appears does not fire
+            }
             ReadString(state, props, "confirm", node.Confirm);
             ReadFloat(state, props, "minWidth", node.MinWidth);
             ReadFloat(state, props, "minHeight", node.MinHeight);
@@ -677,6 +684,17 @@ namespace Manifold::Lua
                 lua_pushinteger(state, id);
                 lua_rawseti(state, -2, index++);
             }
+            return 1;
+        }
+
+        // a hotkey as the program writes it ("Ctrl+F2"), or nil when it names no key
+        int UiHotkeyText(lua_State* state)
+        {
+            const std::vector<int> keys = Table::ParseKeysText(luaL_checkstring(state, 1));
+            if (keys.empty())
+                return 0;
+            const std::string text = Table::KeysText(keys);
+            lua_pushlstring(state, text.data(), text.size());
             return 1;
         }
 
@@ -1026,6 +1044,7 @@ namespace Manifold::Lua
             { "uiSetView", &UiSetView },
             { "uiDue", &UiDue },
             { "uiBindsDue", &UiBindsDue },
+            { "uiHotkeyText", &UiHotkeyText },
             { "uiTakeEvents", &UiTakeEvents },
             { "uiPost", &UiPost },
             { "uiForgetOwner", &UiForgetOwner },

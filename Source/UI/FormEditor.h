@@ -42,6 +42,7 @@ namespace Manifold::UI
             Close,
             Template,
             Import,
+            FromTable,
         };
 
         enum class Drop
@@ -137,6 +138,8 @@ namespace Manifold::UI
         void UnlinkFunction(const std::string& name);
         std::vector<std::string> UnusedFunctions() const;
         void ShowEverything();
+        std::vector<Lua::FormRecordInfo> TableRecords(std::vector<std::string>& takenKeys) const;
+        void TableDialog();
         void EnsureScript();
         bool SaveScript();
         bool ScriptDirty() const;
@@ -263,6 +266,8 @@ namespace Manifold::UI
         std::string m_chipMenu;       // the chip a right click opened its menu for
         std::string m_chipRename;     // the rename field in the chip menu
         int m_pillMenu = 0;           // the widget whose record pill opened its menu
+        int m_captureNode = 0;        // the widget whose Hotkey field waits for keys
+        std::set<int> m_captureDown;  // keys that were down already when it started (not taken)
         int m_wireNode = 0;           // a wire dropped on empty space: from this widget...
         ImVec2 m_wireDrop;            // ...at this surface point (points)
         std::vector<std::pair<ImVec2, ImVec2>> m_pillRects; // last frame's record pills (tags keep off them)
@@ -290,6 +295,8 @@ namespace Manifold::UI
         Dialog m_problemsDialog;
         Dialog m_importDialog;
         Dialog m_notesDialog;
+        Dialog m_tableDialog;
+        Lua::FormTrainerOptions m_trainer;
         std::vector<Table::CeFormEntry> m_importChoices;
         std::string m_importSource;
         int m_importChoice = 0;
