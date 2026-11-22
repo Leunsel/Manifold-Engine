@@ -27,6 +27,10 @@ namespace Manifold::ClrHelper
     constexpr GUID kIidSosDac = { 0x436F00F2, 0xB42A, 0x4B9F, { 0x87, 0x0C, 0xE7, 0x3D, 0xB6, 0x6A, 0xE9, 0x30 } };
     // .NET 9 and later keep statics per type; this one answers where they are.
     constexpr GUID kIidSosDac14 = { 0x9AA22ACA, 0x6DC6, 0x4A0C, { 0xB4, 0xE0, 0x70, 0xD2, 0x41, 0x6B, 0x98, 0x37 } };
+    // .NET 5 and later: the whole generation table, the pinned object heap's
+    // after the four DacpGcHeapDetails has room for (in the .NET 6, 8, 9 and
+    // 10 DACs, not in the .NET Framework's).
+    constexpr GUID kIidSosDac8 = { 0xC12F35A9, 0xE55C, 0x4520, { 0xA8, 0x94, 0xB3, 0xDC, 0x51, 0x65, 0xDF, 0xCE } };
 
     struct ClrDataTarget : IUnknown
     {
@@ -375,6 +379,18 @@ namespace Manifold::ClrHelper
         virtual Unused STDMETHODCALLTYPE GetCodeHeapList(ClrAddress, unsigned, void*, unsigned*) = 0;
         virtual Unused STDMETHODCALLTYPE TraverseVirtCallStubHeap(ClrAddress, int, void*) = 0;
         virtual HRESULT STDMETHODCALLTYPE GetUsefulGlobals(DacpUsefulGlobalsData* data) = 0;
+    };
+
+    // ISOSDacInterface8 (sospriv.idl): Wks for a workstation GC, Svr per heap.
+    struct SosDac8 : IUnknown
+    {
+        using Unused = HRESULT;
+        virtual HRESULT STDMETHODCALLTYPE GetNumberOfGenerations(unsigned* generations) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetGenerationTable(unsigned count, DacpGenerationData* data, unsigned* needed) = 0;
+        virtual Unused STDMETHODCALLTYPE GetFinalizationFillPointers(unsigned, ClrAddress*, unsigned*) = 0;
+        virtual HRESULT STDMETHODCALLTYPE GetGenerationTableSvr(ClrAddress heap, unsigned count, DacpGenerationData* data, unsigned* needed) = 0;
+        virtual Unused STDMETHODCALLTYPE GetFinalizationFillPointersSvr(ClrAddress, unsigned, ClrAddress*, unsigned*) = 0;
+        virtual Unused STDMETHODCALLTYPE GetAssemblyLoadContext(ClrAddress, ClrAddress*) = 0;
     };
 
     struct SosDac14 : IUnknown

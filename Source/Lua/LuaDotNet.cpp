@@ -158,7 +158,7 @@ namespace Manifold::Lua
             Engine& engine = Owner(state);
             MonoBridge& mono = engine.Mono();
             const bool loaded = engine.HasProcess() && mono.Present() && mono.IsClr();
-            lua_createtable(state, 0, 7);
+            lua_createtable(state, 0, 9);
             SetBoolean(state, "loaded", loaded);
             SetBoolean(state, "detected", engine.HasProcess() && MonoBridge::DetectRuntime(*engine.Process()) == Target::ManagedRuntime::Clr);
             if (loaded)
@@ -167,6 +167,11 @@ namespace Manifold::Lua
                 SetString(state, "module", mono.Module());
                 SetInteger(state, "classes", mono.ClassCount());
                 SetInteger(state, "pointerSize", static_cast<std::uint64_t>(engine.Process()->PointerSize()));
+                // Which game and which reading of its classes: a cache keyed on
+                // these is not mistaken for one of the game before a restart,
+                // which has the same module and often the same class count.
+                SetInteger(state, "processId", static_cast<std::uint64_t>(Raw(engine.Process()->Id())));
+                SetInteger(state, "generation", mono.Generation());
             }
             return 1;
         }

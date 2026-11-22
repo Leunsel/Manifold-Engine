@@ -18,10 +18,12 @@ end
 local byToken
 local generation
 
--- The classes by "module:token", rebuilt when the class list changes.
+-- The classes by "module:token", rebuilt when the class list changes. The
+-- process id and the generation (one per reading of the classes) tell a
+-- restarted game from the one before, whose module and count are the same.
 local function classByToken(api, module, token)
   local status = api.status()
-  local key = tostring(status.module) .. ":" .. tostring(status.classes)
+  local key = tostring(status.processId) .. ":" .. tostring(status.generation) .. ":" .. tostring(status.module) .. ":" .. tostring(status.classes)
   if not byToken or generation ~= key then
     byToken = {}
     for _, class in ipairs(api.classes() or {}) do

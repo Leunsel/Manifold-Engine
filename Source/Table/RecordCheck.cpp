@@ -383,7 +383,7 @@ namespace Manifold::Table
                     issue(id, IssueLevel::Warning, "dropdown-link", "The dropdown list links to the record itself.");
                 else
                 {
-                    const int named = CountWithDescription(list, link);
+                    const int named = list.CountByDescription(link);
                     if (named > 1)
                         issue(id, IssueLevel::Warning, "dropdown-link", Format("The dropdown list links to %s, which %d records are called; the first one (ID %d) is used.",
                             Quoted(link).c_str(), named, target->Id));
@@ -508,9 +508,16 @@ namespace Manifold::Table
                         at.c_str(), reference.Target.c_str(), RecordName(*moved->second).c_str(), moved->second->Id));
                 continue;
             }
-            if (const int named = CountWithDescription(list, reference.Target); named > 1)
-                issue(reference.FromRecord, IssueLevel::Warning, "lua-reference", Format("Lua in the %s looks for %s, which %d records are called; it gets the first one (ID %d).",
-                    at.c_str(), Quoted(reference.Target).c_str(), named, reference.TargetId));
+            // ∑ getMemoryRecordByDescription gets the first of them, as in Cheat Engine; manifold.record.find fails with ME-6011
+            //   (TableRecordAmbiguous) instead of guessing.
+            if (const int named = list.CountByDescription(reference.Target); named > 1)
+            {
+                const bool strict = EqualsNoCase(reference.Function, "manifold.record.find");
+                issue(reference.FromRecord, IssueLevel::Warning, "lua-reference",
+                    strict ? Format("Lua in the %s looks for %s, which %d records are called; the lookup fails with ME-6011.", at.c_str(), Quoted(reference.Target).c_str(), named)
+                           : Format("Lua in the %s looks for %s, which %d records are called; it gets the first one (ID %d).", at.c_str(), Quoted(reference.Target).c_str(), named,
+                                 reference.TargetId));
+            }
         }
 
         std::vector<RecordIssue> ordered;

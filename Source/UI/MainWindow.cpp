@@ -2360,14 +2360,12 @@ namespace Manifold::UI
             return;
         const auto remove = [this, ids]()
             {
+                // ∑ RemoveRecord switches off every script in the tree (not only the selected one) before it goes,
+                //   so no hook stays in the game; a record inside an already removed group is simply gone.
                 for (int id : ids)
                 {
-                    if (Table::MemoryRecord* record = m_engine.Table().FindById(id))
-                    {
-                        if (record->Active && record->Kind == Table::RecordKind::Script)
-                            m_workspace.Report(m_engine.SetActive(*record, false));
-                        m_engine.Table().Remove(*record);
-                    }
+                    if (m_engine.Table().FindById(id))
+                        m_workspace.Report(m_engine.RemoveRecord(id));
                 }
             };
         if (!ask)

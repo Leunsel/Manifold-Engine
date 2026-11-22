@@ -980,6 +980,8 @@ namespace Manifold::UI
     {
         std::vector<Table::FieldSpan> spans;
         std::vector<int> owners;
+        // ∑ Pointer fields can be stored 8 bytes wide; in a 32-bit game they cover 4, as drawn.
+        const int pointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8;
         for (std::size_t i = 0; i < m_rows.size(); ++i)
         {
             const Row& row = m_rows[i];
@@ -989,7 +991,7 @@ namespace Manifold::UI
                 const std::uint64_t at = FieldAddress(base, field.Offset);
                 if (!at)
                     continue;
-                spans.push_back({ at, static_cast<std::uint64_t>(std::max(1, field.Size)), row.Depth });
+                spans.push_back({ at, static_cast<std::uint64_t>(std::max(1, SizeOf(field.Type, pointerSize, field.Size))), row.Depth });
                 owners.push_back(static_cast<int>(i));
             }
         }
@@ -1539,7 +1541,7 @@ namespace Manifold::UI
         const int current = AnchorRow();
         int target = -1;
         if (moved)
-            target = current < 0 ? (moved->Delta > 0 ? 0 : count - 1) : (moved->Edge >= 0 ? moved->Edge : std::clamp(current + moved->Delta, 0, count - 1));
+            target = moved->Edge >= 0 ? moved->Edge : current < 0 ? (moved->Delta > 0 ? 0 : count - 1) : std::clamp(current + moved->Delta, 0, count - 1);
         if (current >= 0 && target < 0)
         {
             const Row row = m_rows[static_cast<std::size_t>(current)];

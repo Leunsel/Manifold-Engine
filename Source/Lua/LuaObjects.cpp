@@ -341,6 +341,21 @@ namespace Manifold::Lua
             return 1;
         }
 
+        int RemoveRecordFromLua(lua_State* state)
+        {
+            const int id = CheckRecord(state, 1).Id;
+            bool failed = false;
+            {
+                const Status removed = Owner(state).RemoveRecord(id, true);
+                failed = !removed;
+                if (failed)
+                    lua_pushstring(state, removed.Text.c_str());
+            }
+            if (failed)
+                return lua_error(state);
+            return 0;
+        }
+
         int RecordIndex(lua_State* state)
         {
             Table::MemoryRecord& record = CheckRecord(state, 1);
@@ -451,24 +466,11 @@ namespace Manifold::Lua
             if (key == "classname") { lua_pushstring(state, "TMemoryRecord"); return 1; }
 
             static const luaL_Reg kMethods[] = {
-                { "delete", [](lua_State* s) -> int
-                    {
-                        Table::MemoryRecord& target = CheckRecord(s, 1);
-                        if (target.Active)
-                            Owner(s).SetActive(target, false, true);
-                        const int id = target.Id;
-                        Owner(s).Table().Remove(target);
-                        EngineOf(s).RecordDestroyed(id);
-                        return 0;
-                    } },
-                { "destroy", [](lua_State* s) -> int
-                    {
-                        Table::MemoryRecord& target = CheckRecord(s, 1);
-                        const int id = target.Id;
-                        Owner(s).Table().Remove(target);
-                        EngineOf(s).RecordDestroyed(id);
-                        return 0;
-                    } },
+                // ∑ Both go through Engine::RemoveRecord: it switches off the scripts in the tree first (deepest first),
+                //   refuses while one of them is being switched, and fires ondestroy for every removed record. Removing an
+                //   active script without its [DISABLE] would leave its hook and memory in the game.
+                { "delete", &RemoveRecordFromLua },
+                { "destroy", &RemoveRecordFromLua },
                 { "getaddress", [](lua_State* s) -> int
                     {
                         Table::MemoryRecord& target = CheckRecord(s, 1);

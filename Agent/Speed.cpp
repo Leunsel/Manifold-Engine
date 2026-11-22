@@ -15,6 +15,9 @@ namespace
     constexpr std::uintptr_t kTickCount = kSharedData + 0x320;
     constexpr int kNestSlots = 32;
     constexpr LONG64 kRebaseAfter = 0x40000000;
+    constexpr int kSpinRounds = 4000;
+    constexpr int kYieldRounds = 4;
+    constexpr int kStalledSpins = 64;
 
     enum ClockId
     {
@@ -31,6 +34,13 @@ namespace
         volatile LONG Primed;
     };
 
+    // The last answer of a clock, on its own cache line: every hooked call
+    // raises it, and the readers of Base and Ref do not share the line.
+    struct alignas(64) LastAnswer
+    {
+        volatile LONG64 Value;
+    };
+
     struct SystemTime
     {
         ULONG Low;
@@ -43,9 +53,12 @@ namespace
 
     Block& g_block = ManifoldSpeed;
     Clock g_clocks[ClockCount] = {};
+    LastAnswer g_last[ClockCount] = {};
     volatile double g_speed = 1.0;
     volatile LONG g_sequence = 0;
     volatile LONG g_applying = 0;
+    volatile LONG g_applier = 0;
+    volatile LONG g_stalled = 0;
     volatile LONG g_nested = 0;
     volatile LONG g_nest[kNestSlots] = {};
     HANDLE g_wait = nullptr;
@@ -171,10 +184,38 @@ namespace
         return static_cast<LONG64>(static_cast<double>(delta) * speed);
     }
 
+    LONG64 Load64(volatile LONG64* value)
+    {
+#if defined(_M_X64)
+        return *value;
+#else
+        // A plain 64-bit read is two reads on x86 and can mix two values.
+        return _InterlockedCompareExchange64(value, 0, 0);
+#endif
+    }
+
+    // Raises the clock's last answer to value and returns what to answer: never
+    // less than an answer given before on any thread, so a caller's time cannot
+    // go back, not even after a fallback answer.
+    LONG64 Remember(int clock, LONG64 value)
+    {
+        volatile LONG64* last = &g_last[clock].Value;
+        LONG64 seen = Load64(last);
+        while (value > seen)
+        {
+            const LONG64 was = _InterlockedCompareExchange64(last, value, seen);
+            if (was == seen)
+                return value;
+            seen = was;
+        }
+        return seen;
+    }
+
     void Apply(bool rebase)
     {
         if (_InterlockedCompareExchange(&g_applying, 1, 0) != 0)
             return;
+        g_applier = static_cast<LONG>(::GetCurrentThreadId());
         const std::uint32_t serial = g_block.Serial;
         const bool changed = serial != g_block.Applied;
         if (changed || rebase)
@@ -200,6 +241,7 @@ namespace
                     clock.Base = start;
                     clock.Ref = start;
                     clock.Primed = 1;
+                    Remember(i, start);
                     continue;
                 }
                 const LONG64 ref = clock.Ref;
@@ -217,13 +259,66 @@ namespace
             g_block.Shifted = shifted ? 1u : 0u;
             g_block.Applied = serial;
         }
+        g_applier = 0;
+        g_stalled = 0;
         _InterlockedExchange(&g_applying, 0);
+    }
+
+    // The thread in Apply can be suspended (the in-process debugger, a garbage
+    // collector stopping the world, NtSuspendProcess) or killed there; a reader
+    // that waited for it without end would hang every thread that asks for the
+    // time. So a reader spins a while, yields a few times and then answers
+    // without the clock state. Once that happened, later readers give up much
+    // sooner while the same Apply still holds the clocks.
+    struct Patience
+    {
+        int Rounds = 0;
+        int Spins = kSpinRounds;
+        int Yields = kYieldRounds;
+
+        bool Wait()
+        {
+            ++Rounds;
+            if (Rounds <= Spins)
+            {
+                _mm_pause();
+                return true;
+            }
+            if (Rounds <= Spins + Yields)
+            {
+                ::SwitchToThread();
+                return true;
+            }
+            g_stalled = 1;
+            return false;
+        }
+    };
+
+    // The answer without the clock state: the last answer of the clock (time
+    // stands still for a moment), or the real time when the clock never
+    // answered (it is not primed yet). Remember keeps every later answer at or
+    // above it.
+    template <class Read>
+    LONG64 Fallback(int clock, Read read)
+    {
+        const LONG64 last = Load64(&g_last[clock].Value);
+        return last != 0 ? last : Remember(clock, read());
     }
 
     template <class Read>
     LONG64 Scaled(int clock, Read read)
     {
         const Clock& state = g_clocks[clock];
+        // A time call made by the thread in Apply itself (a vectored handler,
+        // another program's hook under the original) must not wait for it.
+        if (g_applying && g_applier == static_cast<LONG>(::GetCurrentThreadId()))
+            return Fallback(clock, read);
+        Patience patience;
+        if (g_stalled && g_applying)
+        {
+            patience.Spins = kStalledSpins;
+            patience.Yields = 0;
+        }
         for (;;)
         {
             if (g_block.Serial != g_block.Applied)
@@ -231,14 +326,15 @@ namespace
             if (!state.Primed)
             {
                 Apply(true);
-                if (!state.Primed)
-                    _mm_pause();
+                if (!state.Primed && !patience.Wait())
+                    return Fallback(clock, read);
                 continue;
             }
             const LONG sequence = g_sequence;
             if (sequence & 1)
             {
-                _mm_pause();
+                if (!patience.Wait())
+                    return Fallback(clock, read);
                 continue;
             }
             const LONG64 real = read();
@@ -246,14 +342,20 @@ namespace
             const LONG64 ref = state.Ref;
             const double speed = g_speed;
             if (g_sequence != sequence)
+            {
+                if (!patience.Wait())
+                    return Fallback(clock, read);
                 continue;
+            }
             const LONG64 delta = Delta(clock, real, ref);
             if (clock == ClockMultimedia && delta > kRebaseAfter)
             {
                 Apply(true);
+                if (!patience.Wait())
+                    return Fallback(clock, read);
                 continue;
             }
-            return base + Advance(delta, speed);
+            return Remember(clock, base + Advance(delta, speed));
         }
     }
 
@@ -316,6 +418,8 @@ namespace
     {
         for (Clock& clock : g_clocks)
             clock.Primed = 0;
+        for (LastAnswer& last : g_last)
+            ::InterlockedExchange64(&last.Value, 0);
         g_speed = 1.0;
         g_block.Wanted = 1.0;
         g_block.Speed = 1.0;
@@ -348,9 +452,34 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldSpeedCall(LPVOID parameter
     case CallApply:
         Apply(false);
         return 0;
+    case CallPin:
+    {
+        // Apply calls the timeGetTime trampoline from every hook; if its
+        // module unloaded, the trampoline would jump into unmapped code. The
+        // host asks for this before the trampoline is published in Originals.
+        std::uint32_t pinned = 0;
+        for (Hook& record : g_block.Hooks)
+        {
+            if (record.Source != SourceMultimedia || record.Target == 0 || record.Pinned)
+                continue;
+            HMODULE module = nullptr;
+            if (::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                    reinterpret_cast<LPCWSTR>(static_cast<std::uintptr_t>(record.Target)), &module))
+            {
+                record.Pinned = 1;
+                ++pinned;
+            }
+        }
+        return pinned ? 0u : 1u;
+    }
     default:
         return 2;
     }
+}
+
+std::uint64_t RealTickCount64()
+{
+    return static_cast<std::uint64_t>(RealTick());
 }
 
 void SpeedAttach(HINSTANCE instance)

@@ -74,6 +74,10 @@ namespace Manifold
         double LastValueRefresh() const { return m_lastValues; }
         void UpdateFreezes();
         void UpdateHotkeys();
+        // Deletes the record and everything below it. Refused while one of them is being switched or waits in the activation
+        // queue; the active ones are switched off first, deepest first, and a script that stays on keeps the whole tree in the
+        // table (its changes would stay in the game). Every removed record gets its ondestroy event.
+        Status RemoveRecord(int recordId, bool fromScript = false);
 
         Status LoadTable(const std::filesystem::path& path, bool merge);
         Status RestoreTable(const std::filesystem::path& path);

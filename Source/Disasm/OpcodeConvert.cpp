@@ -50,19 +50,28 @@ namespace Manifold::Disasm
                 ++end;
             std::string_view token = text.substr(at, end - at);
             at = end;
-            // \x48\x8B is one token of several bytes; 0x48 and 48h one byte each.
-            std::string digits;
+            // \x48\x8B is one token of several bytes; 0x48 and 48h one byte each. Every \x or 0x
+            // starts a group of its own, so \x1\x2 is 01 02 like \x01\x02 (the last group was not
+            // padded and the token failed as an odd digit count), and a prefix with no digits
+            // after it (a lone 0x, \x\x41) is an error instead of nothing.
+            struct Group
+            {
+                std::string Digits;
+                bool Prefixed = false;
+            };
+            std::vector<Group> groups(1);
             for (std::size_t i = 0; i < token.size(); ++i)
             {
                 const char c = token[i];
                 if ((c == '\\' || c == '0') && i + 1 < token.size() && (token[i + 1] == 'x' || token[i + 1] == 'X'))
                 {
-                    if (digits.size() % 2 == 1)
-                        digits.insert(digits.end() - 1, '0');
+                    if (groups.back().Prefixed || !groups.back().Digits.empty())
+                        groups.emplace_back();
+                    groups.back().Prefixed = true;
                     ++i;
                     continue;
                 }
-                if ((c == 'h' || c == 'H') && i + 1 == token.size() && !digits.empty())
+                if ((c == 'h' || c == 'H') && i + 1 == token.size() && !groups.back().Digits.empty())
                     continue;
                 if (Digit(c) < 0)
                 {
@@ -70,18 +79,30 @@ namespace Manifold::Disasm
                         *error = "\"" + std::string(token) + "\" is not a hex byte";
                     return std::nullopt;
                 }
-                digits += c;
+                groups.back().Digits += c;
             }
-            if (digits.size() == 1)
-                digits.insert(digits.begin(), '0');
-            if (digits.size() % 2 == 1)
+            for (Group& group : groups)
             {
-                if (error)
-                    *error = "\"" + std::string(token) + "\" has an odd number of hex digits";
-                return std::nullopt;
+                std::string& digits = group.Digits;
+                if (digits.empty())
+                {
+                    if (!group.Prefixed)
+                        continue;
+                    if (error)
+                        *error = "\"" + std::string(token) + "\" has a \\x or 0x without hex digits after it";
+                    return std::nullopt;
+                }
+                if (digits.size() == 1)
+                    digits.insert(digits.begin(), '0');
+                if (digits.size() % 2 == 1)
+                {
+                    if (error)
+                        *error = "\"" + std::string(token) + "\" has an odd number of hex digits";
+                    return std::nullopt;
+                }
+                for (std::size_t i = 0; i < digits.size(); i += 2)
+                    bytes.push_back(static_cast<std::uint8_t>(Digit(digits[i]) * 16 + Digit(digits[i + 1])));
             }
-            for (std::size_t i = 0; i < digits.size(); i += 2)
-                bytes.push_back(static_cast<std::uint8_t>(Digit(digits[i]) * 16 + Digit(digits[i + 1])));
         }
         if (error)
             error->clear();

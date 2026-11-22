@@ -224,6 +224,10 @@ namespace Manifold::UI
     void UiHost::Draw()
     {
         Lua::UiModel& model = Model();
+        // a field is active only while it is drawn with the keyboard on it
+        if (Lua::UiNode* last = model.Find(m_activeField))
+            last->Active = false;
+        m_activeField = 0;
         CloseModals();
         for (const int id : model.Windows())
         {
@@ -1168,6 +1172,11 @@ namespace Manifold::UI
                 flags |= ImGuiInputTextFlags_EnterReturnsTrue;
                 entered = node.Hint.empty() ? InputText(label.c_str(), node.String, flags) : InputTextWithHint(label.c_str(), node.Hint.c_str(), node.String, flags);
             }
+            if (ImGui::IsItemActive())
+            {
+                node.Active = true;
+                m_activeField = node.Id;
+            }
             if (node.MaxLength > 0 && node.String != before)
             {
                 std::size_t at = 0;
@@ -1209,8 +1218,8 @@ namespace Manifold::UI
             bool changed = false;
             if (node.Integer || node.Hex)
             {
-                std::int64_t value = static_cast<std::int64_t>(node.Number);
-                const std::int64_t step = node.Step > 0.0 ? std::max<std::int64_t>(1, std::llround(node.Step)) : 1;
+                std::int64_t value = Lua::UiToInteger(node.Number);
+                const std::int64_t step = node.Step > 0.0 ? std::clamp<std::int64_t>(Lua::UiToInteger(std::round(node.Step)), 1, 1000000000000000) : 1; // fast = step * 10 stays in range
                 const std::int64_t fast = step * 10;
                 changed = ImGui::InputScalar(label.c_str(), ImGuiDataType_S64, &value, &step, &fast, node.Hex ? "%llX" : "%lld", node.Hex ? ImGuiInputTextFlags_CharsHexadecimal : 0);
                 if (changed)
@@ -1225,12 +1234,14 @@ namespace Manifold::UI
                     node.Number = value;
             }
             const bool typing = ImGui::GetActiveID() == textId && textId != 0;
+            if (typing)
+            {
+                node.Active = true;
+                m_activeField = node.Id;
+            }
             if (changed)
             {
-                if (node.HasMin)
-                    node.Number = std::max(node.Number, node.Min);
-                if (node.HasMax)
-                    node.Number = std::min(node.Number, node.Max);
+                node.Number = Lua::UiClampValue(node, node.Number);
                 Model().Touch(node);
                 if (typing)
                     node.PendingChange = true;
@@ -1248,31 +1259,25 @@ namespace Manifold::UI
         case UiKind::Slider:
         {
             bool changed = false;
+            const auto [lowLimit, highLimit] = Lua::UiValueRange(node); // 0..100 or 0..1 without min and max
             if (node.Integer)
             {
-                std::int64_t value = static_cast<std::int64_t>(node.Number);
-                const std::int64_t low = node.HasMin ? static_cast<std::int64_t>(node.Min) : 0;
-                const std::int64_t high = node.HasMax ? static_cast<std::int64_t>(node.Max) : 100;
+                std::int64_t value = Lua::UiToInteger(node.Number);
+                const std::int64_t low = Lua::UiToInteger(lowLimit);
+                const std::int64_t high = Lua::UiToInteger(highLimit);
                 const std::string format = IntegerFormat(node.Format);
                 changed = ImGui::SliderScalar(label.c_str(), ImGuiDataType_S64, &value, &low, &high, format.c_str(), ImGuiSliderFlags_AlwaysClamp);
-                if (changed && node.Step > 1.0)
-                {
-                    const std::int64_t step = std::llround(node.Step);
-                    value = low + (value - low + step / 2) / step * step;
-                }
                 if (changed)
-                    node.Number = static_cast<double>(value);
+                    node.Number = Lua::UiSnapValue(node, static_cast<double>(value));
             }
             else
             {
                 double value = node.Number;
-                const double low = node.HasMin ? node.Min : 0.0;
-                const double high = node.HasMax ? node.Max : 1.0;
+                const double low = lowLimit;
+                const double high = highLimit;
                 changed = ImGui::SliderScalar(label.c_str(), ImGuiDataType_Double, &value, &low, &high, node.Format.empty() ? "%.2f" : node.Format.c_str(), ImGuiSliderFlags_AlwaysClamp);
-                if (changed && node.Step > 0.0)
-                    value = std::clamp(low + std::round((value - low) / node.Step) * node.Step, low, high);
                 if (changed)
-                    node.Number = value;
+                    node.Number = Lua::UiSnapValue(node, value);
             }
             if (changed)
             {

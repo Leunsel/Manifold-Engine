@@ -21,7 +21,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <sstream>
@@ -191,19 +193,60 @@ namespace Manifold::UI
             return ManifoldTheme::Text;
         }
 
+        // ∑ A size or place past this many points is a slip (minWidth = 2e8,
+        // math.huge), not a form: drawing takes it as this much, NaN as nothing.
+        constexpr float kMaxPoints = 100000.0f;
+
+        float Sane(float value, float fallback = 0.0f)
+        {
+            return std::isnan(value) ? fallback : std::clamp(value, -kMaxPoints, kMaxPoints);
+        }
+
+        bool Finite(ImVec2 point)
+        {
+            return std::isfinite(point.x) && std::isfinite(point.y);
+        }
+
+        // ∑ Only the part inside the draw list's clip rect is walked, in
+        // doubles: over a huge form the float step stopped moving the loop on
+        // (2e8 + 7 is 2e8) and the editor hung.
         void DashedLine(ImDrawList* draw, ImVec2 a, ImVec2 b, ImU32 color, float thickness, float dash, float gap)
         {
-            const float dx = b.x - a.x;
-            const float dy = b.y - a.y;
-            const float length = std::sqrt(dx * dx + dy * dy);
-            if (length <= 0.0f)
+            if (!Finite(a) || !Finite(b) || !(dash > 0.0f) || !(gap >= 0.0f))
                 return;
-            const float ux = dx / length;
-            const float uy = dy / length;
-            for (float at = 0.0f; at < length; at += dash + gap)
+            const double dx = static_cast<double>(b.x) - a.x;
+            const double dy = static_cast<double>(b.y) - a.y;
+            const double length = std::sqrt(dx * dx + dy * dy);
+            if (!(length > 0.0) || !std::isfinite(length))
+                return;
+            const double ux = dx / length;
+            const double uy = dy / length;
+            // the stretch [low, high] of the line (in its own length) inside the clip rect
+            const ImVec2 clipMin = draw->GetClipRectMin();
+            const ImVec2 clipMax = draw->GetClipRectMax();
+            double low = 0.0;
+            double high = length;
+            const auto cut = [&](double start, double step, double lowEdge, double highEdge) {
+                if (step == 0.0)
+                    return start >= lowEdge && start <= highEdge;
+                double t0 = (lowEdge - start) / step;
+                double t1 = (highEdge - start) / step;
+                if (t0 > t1)
+                    std::swap(t0, t1);
+                low = std::max(low, t0);
+                high = std::min(high, t1);
+                return low <= high;
+            };
+            if (!cut(a.x, ux, clipMin.x - thickness, clipMax.x + thickness) || !cut(a.y, uy, clipMin.y - thickness, clipMax.y + thickness))
+                return;
+            const double period = static_cast<double>(dash) + gap;
+            // the first dash that reaches into the clip rect keeps its place in the pattern
+            for (double at = std::floor(low / period) * period; at < high; at += period)
             {
-                const float end = std::min(length, at + dash);
-                draw->AddLine(ImVec2(a.x + ux * at, a.y + uy * at), ImVec2(a.x + ux * end, a.y + uy * end), color, thickness);
+                const double end = std::min(length, at + dash);
+                const double from = std::max(at, 0.0);
+                if (end > from)
+                    draw->AddLine(ImVec2(static_cast<float>(a.x + ux * from), static_cast<float>(a.y + uy * from)), ImVec2(static_cast<float>(a.x + ux * end), static_cast<float>(a.y + uy * end)), color, thickness);
             }
         }
 
@@ -215,13 +258,47 @@ namespace Manifold::UI
             DashedLine(draw, ImVec2(min.x, max.y), min, color, thickness, dash, gap);
         }
 
+        // ∑ diagonal lines (x + y the same along each), only those that cross
+        // the visible part of the rect: a huge widget no longer means a
+        // loop of millions of lines, or one whose float step stands still
         void Hatch(ImDrawList* draw, ImVec2 min, ImVec2 max, ImU32 color, float step)
         {
+            if (!Finite(min) || !Finite(max) || !(step > 0.0f) || max.x <= min.x || max.y <= min.y)
+                return;
             draw->PushClipRect(min, max, true);
-            const float height = max.y - min.y;
-            for (float x = min.x - height; x < max.x; x += step)
-                draw->AddLine(ImVec2(x, max.y), ImVec2(x + height, min.y), color, 1.0f);
+            const ImVec2 shownMin = draw->GetClipRectMin();
+            const ImVec2 shownMax = draw->GetClipRectMax();
+            if (shownMax.x > shownMin.x && shownMax.y > shownMin.y)
+            {
+                // the lines start at min.x - height on the bottom edge, one step apart
+                const double first = static_cast<double>(min.x) - (static_cast<double>(max.y) - min.y) + max.y;
+                const double lowSum = static_cast<double>(shownMin.x) + shownMin.y;
+                const double highSum = static_cast<double>(shownMax.x) + shownMax.y;
+                for (double sum = first + std::max(0.0, std::ceil((lowSum - first) / step)) * step; sum <= highSum; sum += step)
+                    draw->AddLine(ImVec2(static_cast<float>(sum - shownMax.y), shownMax.y), ImVec2(static_cast<float>(sum - shownMin.y), shownMin.y), color, 1.0f);
+            }
             draw->PopClipRect();
+        }
+
+        // ∑ An undo step keeps the form, not its decoded pictures (200 steps
+        // held 200 copies of every image): when the step comes back,
+        // SyncImages reads the files again.
+        void StripImages(FormDocument& form)
+        {
+            std::vector<int> stack = Lua::FormWindows(form);
+            while (!stack.empty())
+            {
+                UiNode* node = form.Model.Find(stack.back());
+                stack.pop_back();
+                if (!node)
+                    continue;
+                if (node->ImageId)
+                {
+                    form.Model.RemoveImage(node->ImageId);
+                    node->ImageId = 0;
+                }
+                stack.insert(stack.end(), node->Children.begin(), node->Children.end());
+            }
         }
 
         bool GroupHeader(const char* label, bool open)
@@ -642,6 +719,7 @@ namespace Manifold::UI
         m_trying = false;
         m_selected = m_form.Window;
         m_hovered = 0;
+        ForgetTransient();
         m_scriptPath.clear();
         m_scriptDisk.clear();
         m_scriptConflict = false;
@@ -761,11 +839,123 @@ namespace Manifold::UI
     {
         if (source != 0 && source == m_lastSource)
             return;
-        m_undo.push_back(m_form);
+        PushUndo(m_form);
+        m_lastSource = source;
+    }
+
+    void FormEditorWindow::PushUndo(Lua::FormDocument snapshot)
+    {
+        StripImages(snapshot);
+        m_undo.push_back(std::move(snapshot));
         if (m_undo.size() > kUndoLimit)
             m_undo.pop_front();
         m_redo.clear();
-        m_lastSource = source;
+        m_lastSource = 0;
+    }
+
+    void FormEditorWindow::Defer(std::function<void()> action)
+    {
+        m_deferred.push_back(std::move(action));
+    }
+
+    // ∑ The one safe point of a frame: nothing holds a widget of the form
+    // here. An action may defer another; that one runs in the same pass.
+    void FormEditorWindow::RunDeferred()
+    {
+        for (std::size_t i = 0; i < m_deferred.size() && i < 64; ++i)
+        {
+            const std::function<void()> action = std::move(m_deferred[i]);
+            action();
+        }
+        m_deferred.clear();
+    }
+
+    void FormEditorWindow::ForgetTransient()
+    {
+        // ∑ ids restart at 1 in a new document: a selection, fold, rename or
+        // hotkey capture kept from the old one would act on other widgets
+        m_deferred.clear();
+        m_multi.clear();
+        m_deferSelect = 0;
+        m_collapsed.clear();
+        m_renameNode = 0;
+        m_renameFrom.clear();
+        StopCapture();
+        m_pressNode = 0;
+        m_pressing = false;
+        m_gripping = false;
+        m_gripWindow = 0;
+        m_frameMoved = false;
+        m_wireNode = 0;
+        m_linkMenu = {};
+        m_pillMenu = 0;
+        m_chipMenu.clear();
+        m_activeChip.clear();
+        m_hoveredChip.clear();
+        m_flashWindow = 0;
+        m_lastTab = 0;
+        m_design.ForceTab = 0;
+        m_outlineOrder.clear();
+        m_outlineDrawn.clear();
+        m_problems.clear();
+        m_problemNodes.clear();
+        m_imageIds.clear();
+    }
+
+    void FormEditorWindow::CheckTransient()
+    {
+        const auto gone = [&](int id) { return !m_form.Model.Find(id); };
+        std::erase_if(m_multi, gone);
+        if (m_multi.size() < 2)
+            m_multi.clear();
+        if (gone(m_selected))
+            m_selected = m_form.Window;
+        if (!m_multi.empty() && std::find(m_multi.begin(), m_multi.end(), m_selected) == m_multi.end())
+            m_selected = m_multi.front();
+        if (m_deferSelect && gone(m_deferSelect))
+            m_deferSelect = 0;
+        std::erase_if(m_collapsed, gone);
+        // the restored step has its own names; a name typed in the newer one does not carry over
+        m_renameNode = 0;
+        m_renameFrom.clear();
+        if (m_captureNode && gone(m_captureNode))
+            StopCapture();
+        if (m_pressNode && gone(m_pressNode))
+            m_pressNode = 0;
+        if (m_wireNode && gone(m_wireNode))
+            m_wireNode = 0;
+        if (m_pillMenu && gone(m_pillMenu))
+            m_pillMenu = 0;
+        if (m_linkMenu.Node && gone(m_linkMenu.Node))
+            m_linkMenu = {};
+    }
+
+    void FormEditorWindow::StopCapture()
+    {
+        m_captureNode = 0;
+        m_captureProp.clear();
+        m_captureDown.clear();
+    }
+
+    // ∑ Widgets that follow this one (Enabled When) and handlers named after
+    // it take the new name once typing ends: when the field loses focus, and
+    // also when another widget is selected first (that click used to drop it)
+    void FormEditorWindow::FinishRename()
+    {
+        const int id = std::exchange(m_renameNode, 0);
+        const std::string from = std::exchange(m_renameFrom, std::string());
+        if (!id || !m_form.Model.Find(id))
+            return;
+        const auto meta = m_form.Meta.find(id);
+        if (meta == m_form.Meta.end())
+            return;
+        const std::string name = meta->second.Name;
+        if (Lua::FormIsIdentifier(name) && name != from && Lua::FormFindNamed(m_form, from) == 0)
+        {
+            Lua::FormRenameReferences(m_form, from, name);
+            RenameFunctions(id, from, name);
+            Changed();
+        }
     }
 
     void FormEditorWindow::Changed()
@@ -780,12 +970,12 @@ namespace Manifold::UI
         if (m_undo.empty())
             return;
         m_redo.push_back(std::move(m_form));
+        StripImages(m_redo.back());
         m_form = std::move(m_undo.back());
         m_undo.pop_back();
         m_lastSource = 0;
         m_scriptEditor.KeepCursor = true;
-        if (!m_form.Model.Find(m_selected))
-            m_selected = m_form.Window;
+        CheckTransient();
         m_dirty = true;
         ++m_revision;
     }
@@ -795,12 +985,12 @@ namespace Manifold::UI
         if (m_redo.empty())
             return;
         m_undo.push_back(std::move(m_form));
+        StripImages(m_undo.back());
         m_form = std::move(m_redo.back());
         m_redo.pop_back();
         m_lastSource = 0;
         m_scriptEditor.KeepCursor = true;
-        if (!m_form.Model.Find(m_selected))
-            m_selected = m_form.Window;
+        CheckTransient();
         m_dirty = true;
         ++m_revision;
     }
@@ -956,6 +1146,10 @@ namespace Manifold::UI
             id = m_form.Window;
         if (id != m_selected)
         {
+            // the name field and the hotkey field of the widget that was shown go away
+            if (m_renameNode)
+                FinishRename();
+            StopCapture();
             m_selected = id;
             m_scrollOutline = true;
             m_lastSource = 0;
@@ -1198,7 +1392,7 @@ namespace Manifold::UI
         ImGui::Indent(Px(22.0f));
         const std::string label = std::string(ICON_FA_MAGIC "  ") + std::string(Lua::FormFixLabel(problem.Fix)) + "##fix";
         if (ImGui::TextLink(label.c_str()))
-            FixProblem(problem);
+            Defer([this, problem] { FixProblem(problem); }); // the properties still draw the widget the fix changes
         ItemTooltip("Repairs it now; Undo takes it back.");
         ImGui::Unindent(Px(22.0f));
     }
@@ -1266,7 +1460,12 @@ namespace Manifold::UI
             }
             if (taken)
                 continue;
-            if (!shared && m_form.ScriptLoaded && Lua::FormFunctionLine(m_form.ScriptText, function) > 0)
+            // ∑ A rename the script cannot take (the form's own variable, a name used already) keeps the old handler
+            //   name, so form and script never disagree.
+            const bool inScript = !shared && m_form.ScriptLoaded && Lua::FormFunctionLine(m_form.ScriptText, function) > 0;
+            if (inScript && !Lua::FormCanRenameIdentifier(m_form.ScriptText, function, fresh))
+                continue;
+            if (inScript)
             {
                 m_form.ScriptText = Lua::FormRenameIdentifier(m_form.ScriptText, function, fresh);
                 m_scriptEditor.KeepCursor = true;
@@ -1575,7 +1774,14 @@ namespace Manifold::UI
         form.ScriptText = view;
         Reset(std::move(form), target, true);
         if (!Save(false))
+        {
+            // ∑ Reset marked the converted form clean, but nothing was written:
+            // it stays unsaved, so closing asks instead of dropping it
+            m_dirty = true;
+            ++m_revision;
+            m_engine.Notify(LogLevel::Warning, "The form was moved into " + WideToUtf8(target.filename().wstring()) + " here but not written; save it to keep it.");
             return;
+        }
         std::string note = "The form now lives in " + WideToUtf8(target.filename().wstring()) + ".";
         if (!old.empty())
             note += " " + WideToUtf8(old.filename().wstring()) + " was left as it is; the script no longer reads it.";
@@ -2179,40 +2385,12 @@ namespace Manifold::UI
                 draw->AddLine(ImVec2(rect.Min.x, line), ImVec2(rect.Max.x, line), accent, Px(2.0f));
                 draw->AddCircleFilled(ImVec2(rect.Min.x, line), Px(3.0f), accent);
             }
-            int parent = 0;
-            int index = -1;
-            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kKindPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
+            // ∑ the drop lands at the end of the frame (see Defer): this row and
+            // the rows around it still draw widgets a move or a failed move replaces
+            for (const char* type : { kKindPayload, kRecordPayload, kNodePayload })
             {
-                const UiKind kindDropped = static_cast<UiKind>(*static_cast<const int*>(payload->Data));
-                if (DropAt(id, where, parent, index))
-                    AddInto(kindDropped, parent, index);
-            }
-            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kRecordPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect); payload && payload->DataSize == sizeof(int))
-            {
-                if (DropAt(id, where, parent, index))
-                    AddRecordAt(*static_cast<const int*>(payload->Data), parent, index);
-            }
-            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kNodePayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
-            {
-                const int moving = *static_cast<const int*>(payload->Data);
-                if (moving != id && !(Many() && IsSelected(moving) && IsSelected(id)) && DropAt(id, where, parent, index))
-                {
-                    FormDocument before = m_form;
-                    std::vector<int> moved;
-                    if (MoveGroup(moving, parent, index, moved))
-                    {
-                        m_undo.push_back(std::move(before));
-                        m_redo.clear();
-                        m_lastSource = 0;
-                        Changed();
-                        if (moved.size() > 1)
-                            SelectMany(moved);
-                        else
-                            Select(moving);
-                    }
-                    else
-                        m_form = std::move(before);
-                }
+                if (const std::optional<Dropped> dropped = DroppedFrom(ImGui::AcceptDragDropPayload(type, ImGuiDragDropFlags_AcceptNoDrawDefaultRect)))
+                    Defer([this, value = *dropped, spot = DropSpot{ id, where }] { DropPayload(value, spot); });
             }
             ImGui::EndDragDropTarget();
         }
@@ -2316,11 +2494,17 @@ namespace Manifold::UI
         ImGui::PopID();
     }
 
+    // ∑ The menu of an outline row and of the preview: what changes the
+    // widgets runs at the end of the frame (Defer), since the row or frame
+    // that opened the menu goes on drawing the widget after it
     void FormEditorWindow::NodeMenu(int id)
     {
         const UiNode* node = m_form.Model.Find(id);
         if (!node)
+        {
+            ImGui::CloseCurrentPopup();
             return;
+        }
         if (Many() && IsSelected(id))
         {
             // the commands below take every selected widget
@@ -2336,25 +2520,25 @@ namespace Manifold::UI
                     continue;
                 const std::string label = std::string(KindIcon(kind)) + "  " + std::string(Lua::FormKindTitle(kind));
                 if (ImGui::MenuItem(label.c_str()))
-                    AddInto(kind, id, -1);
+                    Defer([this, kind, id] { AddInto(kind, id, -1); });
             }
             ImGui::EndMenu();
         }
         if (node->Kind == UiKind::Window)
         {
             if (CommandItem(ICON_FA_PASTE "  Paste", Command::FormPaste))
-                Paste();
+                Defer([this] { Paste(); });
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_WINDOW_RESTORE "  Add Modal Form"))
-                AddModal();
+                Defer([this] { AddModal(); });
             if (Lua::FormIsModal(m_form, id) && DangerCommandItem(ICON_FA_TRASH "  Delete Modal Form", Command::FormDelete))
-                Delete();
+                Defer([this] { Delete(); });
             return;
         }
         if (CommandItem(ICON_FA_LEVEL_UP_ALT "  Select Parent", Command::FormSelectParent))
             Select(node->Parent);
         if (!Lua::FormHandlers(node->Kind).empty() && ImGui::MenuItem(ICON_FA_BOLT "  Show Handler"))
-            OpenFirstHandler(id);
+            Defer([this, id] { OpenFirstHandler(id); });
         ImGui::Separator();
         if (node->Kind != UiKind::Tab && ImGui::BeginMenu(ICON_FA_LAYER_GROUP "  Wrap In"))
         {
@@ -2362,12 +2546,12 @@ namespace Manifold::UI
             {
                 const std::string label = std::string(KindIcon(kind)) + "  " + std::string(Lua::FormKindTitle(kind));
                 if (ImGui::MenuItem(label.c_str()))
-                    Wrap(id, kind);
+                    Defer([this, id, kind] { Wrap(id, kind); });
             }
             ImGui::EndMenu();
         }
         if (container && node->Kind != UiKind::Tab && ImGui::MenuItem(ICON_FA_EXPAND_ARROWS_ALT "  Unwrap", nullptr, false, !node->Children.empty()))
-            Unwrap(id);
+            Defer([this, id] { Unwrap(id); });
         ItemTooltip("Moves the widgets inside out to where this container is and removes it.");
         if (const std::vector<UiKind> kinds = Lua::FormKindChoices(node->Kind); !kinds.empty() && ImGui::BeginMenu(ICON_FA_EXCHANGE_ALT "  Change Kind"))
         {
@@ -2375,28 +2559,28 @@ namespace Manifold::UI
             {
                 const std::string label = std::string(KindIcon(kind)) + "  " + std::string(Lua::FormKindTitle(kind));
                 if (ImGui::MenuItem(label.c_str()))
-                    ChangeKind(id, kind);
+                    Defer([this, id, kind] { ChangeKind(id, kind); });
             }
             ImGui::EndMenu();
         }
         ImGui::Separator();
         if (CommandItem(ICON_FA_CUT "  Cut", Command::FormCut))
-            Cut();
+            Defer([this] { Cut(); });
         if (CommandItem(ICON_FA_COPY "  Copy", Command::FormCopy))
             Copy();
         if (CommandItem(ICON_FA_PASTE "  Paste", Command::FormPaste))
-            Paste();
+            Defer([this] { Paste(); });
         if (CommandItem(ICON_FA_CLONE "  Duplicate", Command::FormDuplicate))
-            Duplicate();
+            Defer([this] { Duplicate(); });
         if (node->Kind == UiKind::Button && ImGui::MenuItem(ICON_FA_WINDOW_RESTORE "  Open a New Modal Form"))
-            AddModal(id);
+            Defer([this, id] { AddModal(id); });
         if (CommandItem(ICON_FA_ARROW_UP "  Move Up", Command::FormMoveUp))
-            Move(-1);
+            Defer([this] { Move(-1); });
         if (CommandItem(ICON_FA_ARROW_DOWN "  Move Down", Command::FormMoveDown))
-            Move(1);
+            Defer([this] { Move(1); });
         ImGui::Separator();
         if (DangerCommandItem(ICON_FA_TRASH "  Delete", Command::FormDelete))
-            Delete();
+            Defer([this] { Delete(); });
     }
 
     void FormEditorWindow::Toolbar()
@@ -2640,17 +2824,18 @@ namespace Manifold::UI
 
     ImVec2 FormEditorWindow::FramePlace(int window) const
     {
+        // places and heights from the file are drawn within kMaxPoints (see Sane)
         if (window == m_form.Window || !Lua::FormIsModal(m_form, window))
-            return ImVec2(m_form.CanvasX, m_form.CanvasY);
+            return ImVec2(Sane(m_form.CanvasX), Sane(m_form.CanvasY));
         const std::string name = Lua::FormModalName(m_form, window);
         if (const auto stored = m_form.ModalNodes.find(name); stored != m_form.ModalNodes.end())
-            return ImVec2(stored->second.X, stored->second.Y);
+            return ImVec2(Sane(stored->second.X), Sane(stored->second.Y));
         // ∑ a modal without a place stacks below the main form
         const auto height = [&](int id) {
             const UiNode* node = m_form.Model.Find(id);
-            return node && node->Height > 0.0f ? node->Height : 200.0f;
+            return node && Sane(node->Height) > 0.0f ? Sane(node->Height) : 200.0f;
         };
-        float y = m_form.CanvasY + height(m_form.Window) + 70.0f;
+        float y = Sane(m_form.CanvasY) + height(m_form.Window) + 70.0f;
         for (const int modal : m_form.Modals)
         {
             if (modal == window)
@@ -2659,7 +2844,7 @@ namespace Manifold::UI
             if (stored == m_form.ModalNodes.end())
                 y += height(modal) + 60.0f;
         }
-        return ImVec2(m_form.CanvasX, y);
+        return ImVec2(Sane(m_form.CanvasX), Sane(y));
     }
 
     void FormEditorWindow::SetFramePlace(int window, ImVec2 place)
@@ -2696,8 +2881,14 @@ namespace Manifold::UI
                 value = std::min(value, high);
             return std::max(value, low);
         };
-        const float pointsWidth = limit(window->Width > 0.0f ? window->Width : 420.0f, window->MinWidth > 0.0f ? window->MinWidth : 160.0f, window->MaxWidth);
-        const float pointsHeight = limit(window->Height > 0.0f ? window->Height : 320.0f, window->MinHeight > 0.0f ? window->MinHeight : 100.0f, window->MaxHeight);
+        // the sizes as drawn: within kMaxPoints, NaN as not set (see Sane)
+        const float minWidth = Sane(window->MinWidth) > 0.0f ? Sane(window->MinWidth) : 160.0f;
+        const float minHeight = Sane(window->MinHeight) > 0.0f ? Sane(window->MinHeight) : 100.0f;
+        const float maxWidth = Sane(window->MaxWidth);
+        const float maxHeight = Sane(window->MaxHeight);
+        const float pointsWidth = limit(Sane(window->Width) > 0.0f ? Sane(window->Width) : 420.0f, minWidth, maxWidth);
+        const float pointsHeight = limit(Sane(window->Height) > 0.0f ? Sane(window->Height) : 320.0f, minHeight, maxHeight);
+        const bool hasMinimum = Sane(window->MinWidth) > 0.0f || Sane(window->MinHeight) > 0.0f;
         const ImVec2 size(Px(pointsWidth), Px(pointsHeight));
         const ImVec2 place = FramePlace(id);
         const ImVec2 frameMin(origin.x + Px(place.x), origin.y + Px(place.y));
@@ -2879,8 +3070,8 @@ namespace Manifold::UI
                         if (UiNode* edited = m_form.Model.Find(id))
                         {
                             const float scale = Px(1.0f);
-                            edited->Width = limit(std::round(pointsWidth + io.MouseDelta.x / scale), edited->MinWidth > 0.0f ? edited->MinWidth : 160.0f, edited->MaxWidth);
-                            edited->Height = limit(std::round(pointsHeight + io.MouseDelta.y / scale), edited->MinHeight > 0.0f ? edited->MinHeight : 100.0f, edited->MaxHeight);
+                            edited->Width = limit(std::round(pointsWidth + io.MouseDelta.x / scale), minWidth, maxWidth);
+                            edited->Height = limit(std::round(pointsHeight + io.MouseDelta.y / scale), minHeight, maxHeight);
                             Changed();
                         }
                     }
@@ -2914,11 +3105,11 @@ namespace Manifold::UI
         if (!m_trying)
         {
             PreviewOverlay(bodyMin, bodyMax, id);
-            if (window->MinWidth > 0.0f || window->MinHeight > 0.0f)
+            if (hasMinimum)
             {
                 // the minimum size, above the body (it used to lie under it)
                 ImDrawList* marks = Marks();
-                const ImVec2 least(frameMin.x + Px(window->MinWidth > 0.0f ? window->MinWidth : 160.0f), frameMin.y + Px(window->MinHeight > 0.0f ? window->MinHeight : 100.0f));
+                const ImVec2 least(frameMin.x + Px(minWidth), frameMin.y + Px(minHeight));
                 if (least.x < frameMax.x - 1.0f || least.y < frameMax.y - 1.0f)
                 {
                     const ImU32 guide = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Warning, 0.7f));
@@ -3306,12 +3497,31 @@ namespace Manifold::UI
         return true;
     }
 
-    void FormEditorWindow::DropBeside(const ImGuiPayload* payload, const DropSpot& spot)
+    std::optional<FormEditorWindow::Dropped> FormEditorWindow::DroppedFrom(const ImGuiPayload* payload)
+    {
+        if (!payload || !payload->Data || payload->DataSize != sizeof(int))
+            return std::nullopt;
+        Dropped dropped;
+        if (payload->IsDataType(kKindPayload))
+            dropped.What = Dropped::Type::Kind;
+        else if (payload->IsDataType(kNodePayload))
+            dropped.What = Dropped::Type::Node;
+        else if (payload->IsDataType(kRecordPayload))
+            dropped.What = Dropped::Type::Record;
+        else
+            return std::nullopt;
+        std::memcpy(&dropped.Value, payload->Data, sizeof(int));
+        return dropped;
+    }
+
+    // ∑ Both drops run from RunDeferred: a move that fails half-way puts the
+    // whole form back, which no widget pointer of a pane may outlive.
+    void FormEditorWindow::DropBeside(const Dropped& dropped, const DropSpot& spot)
     {
         const UiNode* target = m_form.Model.Find(spot.Target);
         if (!target)
             return;
-        const int moving = payload->IsDataType(kNodePayload) ? *static_cast<const int*>(payload->Data) : 0;
+        const int moving = dropped.What == Dropped::Type::Node ? dropped.Value : 0;
         if (moving && (moving == spot.Target || Within(spot.Target, moving)))
             return;
         FormDocument before = m_form;
@@ -3320,10 +3530,10 @@ namespace Manifold::UI
         if (row && Lua::FormMove(m_form, spot.Target, row, 0))
         {
             const int index = spot.Where == Drop::Left ? 0 : 1;
-            if (payload->IsDataType(kKindPayload))
-                placed = Lua::FormAdd(m_form, static_cast<UiKind>(*static_cast<const int*>(payload->Data)), row, index);
-            else if (payload->IsDataType(kRecordPayload) && payload->DataSize == sizeof(int))
-                placed = AddRecordWidget(row, index, *static_cast<const int*>(payload->Data));
+            if (dropped.What == Dropped::Type::Kind)
+                placed = Lua::FormAdd(m_form, static_cast<UiKind>(dropped.Value), row, index);
+            else if (dropped.What == Dropped::Type::Record)
+                placed = AddRecordWidget(row, index, dropped.Value);
             else if (std::vector<int> moved; moving && MoveGroup(moving, row, index, moved))
                 placed = moving;
         }
@@ -3332,49 +3542,40 @@ namespace Manifold::UI
             m_form = std::move(before);
             return;
         }
-        m_undo.push_back(std::move(before));
-        if (m_undo.size() > kUndoLimit)
-            m_undo.pop_front();
-        m_redo.clear();
-        m_lastSource = 0;
+        PushUndo(std::move(before));
         Changed();
         Select(placed);
     }
 
-    void FormEditorWindow::DropPayload(const ImGuiPayload* payload, const DropSpot& spot)
+    void FormEditorWindow::DropPayload(const Dropped& dropped, const DropSpot& spot)
     {
         if (spot.Where == Drop::Left || spot.Where == Drop::Right)
         {
-            DropBeside(payload, spot);
+            DropBeside(dropped, spot);
             return;
         }
         int parent = 0;
         int index = -1;
         if (!DropAt(spot.Target, spot.Where, parent, index))
             return;
-        if (payload->IsDataType(kKindPayload))
+        if (dropped.What == Dropped::Type::Kind)
         {
-            AddInto(static_cast<UiKind>(*static_cast<const int*>(payload->Data)), parent, index);
+            AddInto(static_cast<UiKind>(dropped.Value), parent, index);
             return;
         }
-        if (payload->IsDataType(kRecordPayload))
+        if (dropped.What == Dropped::Type::Record)
         {
-            if (payload->DataSize == sizeof(int))
-                AddRecordAt(*static_cast<const int*>(payload->Data), parent, index);
+            AddRecordAt(dropped.Value, parent, index);
             return;
         }
-        const int moving = *static_cast<const int*>(payload->Data);
-        if (moving == spot.Target || Within(parent, moving) || (IsSelected(spot.Target) && Many() && IsSelected(moving)))
+        const int moving = dropped.Value;
+        if (!m_form.Model.Find(moving) || moving == spot.Target || Within(parent, moving) || (IsSelected(spot.Target) && Many() && IsSelected(moving)))
             return;
         FormDocument before = m_form;
         std::vector<int> moved;
         if (MoveGroup(moving, parent, index, moved))
         {
-            m_undo.push_back(std::move(before));
-            if (m_undo.size() > kUndoLimit)
-                m_undo.pop_front();
-            m_redo.clear();
-            m_lastSource = 0;
+            PushUndo(std::move(before));
             Changed();
             if (moved.size() > 1)
                 SelectMany(moved);
@@ -3579,12 +3780,12 @@ namespace Manifold::UI
                 DrawSpot(draw, spot);
             if (ImGui::BeginDragDropTargetCustom(ImRect(min, max), ImGui::GetID(("##previewdrop" + std::to_string(window)).c_str())))
             {
-                if (const ImGuiPayload* kind = ImGui::AcceptDragDropPayload(kKindPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
-                    DropPayload(kind, spot);
-                if (const ImGuiPayload* moved = ImGui::AcceptDragDropPayload(kNodePayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
-                    DropPayload(moved, spot);
-                if (const ImGuiPayload* record = ImGui::AcceptDragDropPayload(kRecordPayload, ImGuiDragDropFlags_AcceptNoDrawDefaultRect))
-                    DropPayload(record, spot);
+                // at the end of the frame: this frame's window is still drawn after the overlay
+                for (const char* type : { kKindPayload, kNodePayload, kRecordPayload })
+                {
+                    if (const std::optional<Dropped> dropped = DroppedFrom(ImGui::AcceptDragDropPayload(type, ImGuiDragDropFlags_AcceptNoDrawDefaultRect)))
+                        Defer([this, value = *dropped, spot] { DropPayload(value, spot); });
+                }
                 ImGui::EndDragDropTarget();
             }
         }
@@ -3827,19 +4028,13 @@ namespace Manifold::UI
         // was emptied first, and passed through other widgets' names on the way
         if (ImGui::IsItemActivated())
         {
+            if (m_renameNode && m_renameNode != node.Id)
+                FinishRename();
             m_renameNode = node.Id;
             m_renameFrom = name;
         }
         if (ImGui::IsItemDeactivated() && m_renameNode == node.Id)
-        {
-            if (Lua::FormIsIdentifier(name) && name != m_renameFrom && Lua::FormFindNamed(m_form, m_renameFrom) == 0)
-            {
-                Lua::FormRenameReferences(m_form, m_renameFrom, name);
-                RenameFunctions(node.Id, m_renameFrom, name);
-                Changed();
-            }
-            m_renameNode = 0;
-        }
+            FinishRename();
         if (!name.empty() && !Lua::FormIsIdentifier(name))
             TextWithError(NameError(name), ManifoldTheme::Error);
     }
@@ -4168,13 +4363,18 @@ namespace Manifold::UI
                 ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.35f));
             if (ImGui::Button((face + "##capture").c_str(), ImVec2(value.empty() || capturing ? -FLT_MIN : -(button + ImGui::GetStyle().ItemInnerSpacing.x), 0.0f)))
             {
-                m_captureNode = capturing ? 0 : node.Id;
-                m_captureProp = std::string(prop.Key);
-                m_captureDown.clear();
-                for (int key = 8; key <= 254; ++key)
+                StopCapture();
+                if (!capturing)
                 {
-                    if (::GetAsyncKeyState(key) & 0x8000)
-                        m_captureDown.insert(key);
+                    m_captureNode = node.Id;
+                    m_captureProp = std::string(prop.Key);
+                    m_captureSeen = true;
+                    SetShortcutCapture(true);
+                    for (int key = 8; key <= 254; ++key)
+                    {
+                        if (::GetAsyncKeyState(key) & 0x8000)
+                            m_captureDown.insert(key);
+                    }
                 }
             }
             if (capturing)
@@ -4190,17 +4390,28 @@ namespace Manifold::UI
                     edited = true;
                 }
             }
-            if (capturing && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+            const bool stillCapturing = capturing && m_captureNode == node.Id && m_captureProp == prop.Key; // a click on the field ends it
+            if (stillCapturing && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
             {
+                // the program's own shortcuts wait while the keys are for this field
+                m_captureSeen = true;
+                SetShortcutCapture(true);
                 const auto down = [](int key) { return (::GetAsyncKeyState(key) & 0x8000) != 0; };
                 const auto modifier = [](int key) { return key == VK_CONTROL || key == VK_SHIFT || key == VK_MENU || (key >= VK_LSHIFT && key <= VK_RMENU) || key == VK_LWIN || key == VK_RWIN; };
-                if (down(VK_ESCAPE) && !m_captureDown.count(VK_ESCAPE))
-                    m_captureNode = 0;
+                // ∑ Windows' own keys (Win+..., Alt+Tab, Alt+Esc) switch windows: not a hotkey to take
+                const bool system = down(VK_LWIN) || down(VK_RWIN);
+                if (down(VK_ESCAPE) && !m_captureDown.count(VK_ESCAPE) && !down(VK_MENU) && !system)
+                    StopCapture();
                 else
                 {
                     for (int key = 8; key <= 254; ++key)
                     {
                         const bool now = down(key);
+                        if (now && !m_captureDown.count(key) && !modifier(key) && (system || (down(VK_MENU) && (key == VK_TAB || key == VK_ESCAPE))))
+                        {
+                            m_captureDown.insert(key); // held through the switch: not taken when Win or Alt goes up
+                            continue;
+                        }
                         if (now && !m_captureDown.count(key) && !modifier(key) && key != VK_ESCAPE)
                         {
                             std::vector<int> keys;
@@ -4213,7 +4424,7 @@ namespace Manifold::UI
                             keys.push_back(key);
                             value = Table::KeysText(keys);
                             edited = true;
-                            m_captureNode = 0;
+                            StopCapture();
                             break;
                         }
                         if (now)
@@ -4223,8 +4434,8 @@ namespace Manifold::UI
                     }
                 }
             }
-            else if (capturing && !ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
-                m_captureNode = 0; // another window took the focus: keys there are not for this field
+            else if (stillCapturing && !ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+                StopCapture(); // another window took the focus: keys there are not for this field
             break;
         }
         }
@@ -4266,7 +4477,7 @@ namespace Manifold::UI
                 // a field's width is the field alone, without the label beside or above it
                 const UiDesign::Rect* rect = RectOf(node.Id);
                 const float pixels = !rect ? 0.0f : height ? rect->Max.y - rect->Min.y : rect->FieldWidth > 0.0f ? rect->FieldWidth : rect->Max.x - rect->Min.x;
-                const int points = static_cast<int>(std::lround(pixels / std::max(Px(1.0f), 0.01f)));
+                const int points = static_cast<int>(std::lround(Sane(pixels / std::max(Px(1.0f), 0.01f))));
                 value = std::to_string(points > 0 ? points : 100);
             }
             else if (!fixed)
@@ -4363,11 +4574,15 @@ namespace Manifold::UI
         const bool modalWindow = Lua::FormIsModal(m_form, node->Id);
         const std::vector<int> selection = Selection();
         const bool many = selection.size() > 1;
+        // a name typed into a field this frame no longer draws counts as finished
+        if (m_renameNode && (m_renameNode != node->Id || many))
+            FinishRename();
         // ∑ several selected: the options they all have, a change goes to every one
         const auto common = [&](const Lua::FormProp& prop) {
-            // what tells widgets apart stays out: one label or list for all of them is hardly ever meant
+            // what tells widgets apart stays out: one label or list for all of them is hardly ever meant,
+            // and one hotkey for several widgets is a clash (each press would do all of them)
             static constexpr std::string_view kOwn[] = { "label", "text", "title", "items", "columns", "rows", "tree", "image" };
-            if (std::find(std::begin(kOwn), std::end(kOwn), prop.Key) != std::end(kOwn))
+            if (std::find(std::begin(kOwn), std::end(kOwn), prop.Key) != std::end(kOwn) || prop.Type == FormPropType::Hotkey)
                 return false;
             for (const int id : selection)
             {
@@ -4511,7 +4726,7 @@ namespace Manifold::UI
                 }
                 ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
                 if (IconButton(ICON_FA_PLUS "##newmodal", "A new modal form that this button opens", false, button))
-                    AddModal(node->Id);
+                    Defer([this, id = node->Id] { AddModal(id); });
                 ImGui::TableNextRow();
                 ImGui::TableSetColumnIndex(0);
                 ImGui::AlignTextToFramePadding();
@@ -4775,7 +4990,7 @@ namespace Manifold::UI
             ImGui::PopStyleColor();
             ImGui::PopTextWrapPos();
             ImGui::PushID(&problem);
-            FixLink(problem);
+            FixLink(problem); // the fix waits for the end of the frame (see FixLink)
             ImGui::PopID();
         }
         if (!ImGui::IsAnyItemActive())
@@ -5021,8 +5236,17 @@ namespace Manifold::UI
         return file;
     }
 
+    // ∑ Decodes the pictures the form's image widgets show. A picture that
+    // was replaced, or whose widget is gone, is dropped again: the model used
+    // to keep every one it ever decoded (and each undo step a copy of them).
     void FormEditorWindow::SyncImages(Lua::FormDocument& form)
     {
+        const bool own = &form == &m_form; // m_try is a copy that goes away with Try
+        std::set<int> used;
+        const auto drop = [&](int image) {
+            if (image && !used.count(image))
+                form.Model.RemoveImage(image);
+        };
         std::function<void(int)> visit = [&](int id) {
             UiNode* node = form.Model.Find(id);
             if (!node)
@@ -5032,9 +5256,13 @@ namespace Manifold::UI
                 const std::string resolved = node->Source.empty() ? std::string() : WideToUtf8(ResolveImage(node->Source).wstring());
                 const Lua::UiImage* have = form.Model.FindImage(node->ImageId);
                 if (resolved.empty())
+                {
+                    drop(node->ImageId);
                     node->ImageId = 0;
+                }
                 else if (!have || have->Path != resolved)
                 {
+                    drop(node->ImageId);
                     node->ImageId = 0;
                     if (!m_badImages.count(resolved))
                     {
@@ -5049,17 +5277,36 @@ namespace Manifold::UI
                             image.Rgba = std::move(decoded->Rgba);
                             image.Path = resolved;
                             node->ImageId = form.Model.AddImage(std::move(image));
+                            if (own)
+                                m_imageIds.insert(node->ImageId);
                         }
                         else
                             m_badImages.insert(resolved);
                     }
                 }
+                if (node->ImageId)
+                    used.insert(node->ImageId);
             }
             for (const int child : std::vector<int>(node->Children))
                 visit(child);
         };
         for (const int window : Lua::FormWindows(form))
             visit(window);
+        if (!own)
+            return;
+        // pictures of widgets that were deleted, or of an undo step's replaced ones
+        for (auto it = m_imageIds.begin(); it != m_imageIds.end();)
+        {
+            if (!form.Model.FindImage(*it))
+                it = m_imageIds.erase(it);
+            else if (!used.count(*it))
+            {
+                form.Model.RemoveImage(*it);
+                it = m_imageIds.erase(it);
+            }
+            else
+                ++it;
+        }
     }
 
     void FormEditorWindow::Copy()
@@ -5308,8 +5555,11 @@ namespace Manifold::UI
         if (m_oneFile)
         {
             // ∑ the file changed elsewhere (a script window, another editor):
-            // without own edits here, take its form and code; else warn
-            if (m_path.empty())
+            // without own edits here, take its form and code; else warn.
+            // Taking it replaces the whole form, so only Draw's call before the
+            // panes looks: a call from inside them (the script pane, a chip, a
+            // handler button) would free widgets the panes still draw.
+            if (m_path.empty() || m_inPanes)
                 return;
             const double now = ImGui::GetTime();
             if (now < m_nextScriptPoll)
@@ -5343,6 +5593,8 @@ namespace Manifold::UI
             m_fileDisk = text;
             m_scriptConflict = false;
             m_scriptEditor.KeepCursor = true;
+            // the file's widgets got their ids anew: what pointed at the old ones goes
+            ForgetTransient();
             if (!m_form.Model.Find(m_selected))
                 m_selected = m_form.Window;
             ++m_revision;
@@ -6060,6 +6312,11 @@ namespace Manifold::UI
             m_engine.Notify(LogLevel::Warning, to + " is taken already.");
             return;
         }
+        if (std::string why; m_form.ScriptLoaded && !Lua::FormCanRenameIdentifier(m_form.ScriptText, from, to, &why))
+        {
+            m_engine.Notify(LogLevel::Warning, "The script cannot rename " + from + " to " + to + (why.empty() ? std::string(".") : ": " + why + "."));
+            return;
+        }
         Remember();
         for (auto& [id, meta] : m_form.Meta)
         {
@@ -6168,7 +6425,10 @@ namespace Manifold::UI
     std::vector<Lua::FormRecordInfo> FormEditorWindow::TableRecords(std::vector<std::string>& takenKeys) const
     {
         Table::AddressList& table = m_engine.Table();
-        std::function<Lua::FormRecordInfo(const Table::MemoryRecord&)> convert = [&](const Table::MemoryRecord& record) {
+        // ∑ a table nests groups as deep as its file says: past this depth the
+        // records are left out (the generator and this walk recurse per level)
+        constexpr int kMaxDepth = 32;
+        std::function<Lua::FormRecordInfo(const Table::MemoryRecord&, int)> convert = [&](const Table::MemoryRecord& record, int depth) {
             Lua::FormRecordInfo info;
             info.Id = record.Id;
             info.Description = record.Description;
@@ -6186,15 +6446,21 @@ namespace Manifold::UI
                 takenKeys.push_back(Table::KeysText(hotkey.Keys));
                 info.TableHotkey = info.TableHotkey || hotkey.Action == Table::HotkeyAction::Toggle || hotkey.Action == Table::HotkeyAction::Activate || hotkey.Action == Table::HotkeyAction::Deactivate;
             }
-            for (const auto& child : record.Children)
-                info.Children.push_back(convert(*child));
+            if (depth < kMaxDepth)
+            {
+                for (const auto& child : record.Children)
+                {
+                    if (child)
+                        info.Children.push_back(convert(*child, depth + 1));
+                }
+            }
             return info;
         };
         std::vector<Lua::FormRecordInfo> records;
-        for (Table::MemoryRecord* record : table.Flatten())
+        for (const auto& record : table.Roots())
         {
-            if (!record->Parent)
-                records.push_back(convert(*record));
+            if (record)
+                records.push_back(convert(*record, 0));
         }
         return records;
     }
@@ -6203,11 +6469,33 @@ namespace Manifold::UI
     {
         if (!m_tableDialog.Begin())
             return;
-        std::vector<std::string> taken;
-        const std::vector<Lua::FormRecordInfo> records = TableRecords(taken);
-        Lua::FormTrainerOptions options = m_trainer;
-        options.TakenKeys = taken;
-        const Lua::FormTrainerResult preview = Lua::FormFromRecords(records, options);
+        // ∑ The counts come from a trainer made in full, which takes long on a
+        // big table: it is made again only when the table or an option that
+        // changes the counts does, not every frame (the title changes none)
+        {
+            TrainerPreview& cache = m_trainerPreview;
+            const Table::AddressList& table = m_engine.Table();
+            if (!cache.Valid || cache.Identity != table.Identity() || cache.Generation != table.Generation() || cache.WithValues != m_trainer.Values || cache.WithHotkeys != m_trainer.Hotkeys)
+            {
+                cache = TrainerPreview{};
+                cache.Records = TableRecords(cache.Taken);
+                Lua::FormTrainerOptions options = m_trainer;
+                options.TakenKeys = cache.Taken;
+                const Lua::FormTrainerResult made = Lua::FormFromRecords(cache.Records, options);
+                cache.Valid = true;
+                cache.Identity = table.Identity();
+                cache.Generation = table.Generation();
+                cache.WithValues = m_trainer.Values;
+                cache.WithHotkeys = m_trainer.Hotkeys;
+                cache.Switches = made.Switches;
+                cache.Fields = made.Fields;
+                cache.Sections = made.Sections;
+                cache.Hotkeys = made.Hotkeys;
+                cache.Skipped = made.Skipped;
+            }
+        }
+        const TrainerPreview& preview = m_trainerPreview;
+        const std::vector<std::string>& taken = preview.Taken;
         ImGui::TextWrapped("%s", "Every script and group of the open table becomes a switch, every value a field, bound to its record: they show and change it without code. "
                                  "The table's groups become sections, and what belongs to a script sits below its switch, enabled while it is on.");
         ImGui::Spacing();
@@ -6251,7 +6539,10 @@ namespace Manifold::UI
         const DialogChoice choice = m_tableDialog.Buttons("Create", preview.Switches + preview.Fields > 0, true, "Cancel");
         if (choice == DialogChoice::Ok)
         {
-            Lua::FormTrainerResult made = Lua::FormFromRecords(records, options);
+            Lua::FormTrainerOptions options = m_trainer;
+            options.TakenKeys = preview.Taken;
+            Lua::FormTrainerResult made = Lua::FormFromRecords(preview.Records, options);
+            m_trainerPreview = TrainerPreview{}; // the next time the dialog opens, from the table as it is then
             m_pendingImport = std::move(made.Form);
             m_tableDialog.Close();
             AskThen(Pending::FromTable);
@@ -6300,13 +6591,19 @@ namespace Manifold::UI
             ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_CODE "  Show the Function"))
                 ShowFunction(m_linkMenu.Function);
-            if (ImGui::MenuItem(ICON_FA_UNLINK "  Unlink"))
+            // ∑ the widget can be gone by now (undo, a delete): find, never Meta[] (that made an empty entry)
+            if (ImGui::MenuItem(ICON_FA_UNLINK "  Unlink", nullptr, false, node && meta != m_form.Meta.end()))
             {
-                Remember();
-                m_form.Meta[m_linkMenu.Node].Handlers.erase(m_linkMenu.Key);
-                Changed();
+                if (const auto held = m_form.Meta.find(m_linkMenu.Node); held != m_form.Meta.end() && node)
+                {
+                    Remember();
+                    held->second.Handlers.erase(m_linkMenu.Key);
+                    Changed();
+                }
             }
             ItemTooltip("The widget stops calling the function; the function stays in the script.");
+            if (!node)
+                ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
         }
         if (ImGui::BeginPopup("##chipmenu"))
@@ -6345,14 +6642,20 @@ namespace Manifold::UI
         }
         if (ImGui::BeginPopup("##pillmenu"))
         {
-            if (ImGui::MenuItem(ICON_FA_MOUSE_POINTER "  Select the Widget"))
-                Select(m_pillMenu);
-            if (ImGui::MenuItem(ICON_FA_UNLINK "  Unbind the Record"))
+            const auto meta = m_form.Model.Find(m_pillMenu) ? m_form.Meta.find(m_pillMenu) : m_form.Meta.end();
+            if (meta == m_form.Meta.end())
+                ImGui::CloseCurrentPopup(); // the widget is gone (undo, a delete)
+            else
             {
-                Remember();
-                m_form.Meta[m_pillMenu].Record.clear();
-                m_form.Meta[m_pillMenu].RecordById = false;
-                Changed();
+                if (ImGui::MenuItem(ICON_FA_MOUSE_POINTER "  Select the Widget"))
+                    Select(m_pillMenu);
+                if (ImGui::MenuItem(ICON_FA_UNLINK "  Unbind the Record"))
+                {
+                    Remember();
+                    meta->second.Record.clear();
+                    meta->second.RecordById = false;
+                    Changed();
+                }
             }
             ImGui::EndPopup();
         }
@@ -6508,6 +6811,13 @@ namespace Manifold::UI
             m_open = true;
             AskThen(Pending::Close);
         }
+        // ∑ A hotkey capture ends when its widget is gone, the form is tried or
+        // the editor lost the focus; while it lasts, the program's shortcuts
+        // (also global ones, and this editor's in Shortcuts) leave the keys to it.
+        if (m_captureNode && (!m_form.Model.Find(m_captureNode) || m_trying || !ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)))
+            StopCapture();
+        if (m_captureNode)
+            SetShortcutCapture(true);
         Menu();
         Shortcuts();
         if (m_oneFile && !m_trying)
@@ -6606,6 +6916,8 @@ namespace Manifold::UI
         m_rightWidth = std::clamp(m_rightWidth, minSide, std::max(minSide, room - m_leftWidth));
         const float centerWidth = std::max(Px(120.0f), available.x - m_leftWidth - m_rightWidth - gap * 2.0f);
 
+        m_inPanes = true; // until the properties are drawn; see Defer and EnsureScript
+        m_captureSeen = false;
         ImGui::SetCursorPos(start);
         ImGui::BeginChild("##left", ImVec2(m_leftWidth, available.y), ImGuiChildFlags_None);
         {
@@ -6675,7 +6987,13 @@ namespace Manifold::UI
         ImGui::BeginChild("##right", ImVec2(m_rightWidth, available.y), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
         Properties();
         ImGui::EndChild();
+        m_inPanes = false;
+        // the hotkey field that captures was not drawn (its group folded, several selected, ...)
+        if (m_captureNode && !m_captureSeen)
+            StopCapture();
         Popups();
+        // ∑ the safe point: the panes are drawn and no one holds a widget of the form
+        RunDeferred();
         EndToolWindow();
     }
 }

@@ -8,6 +8,7 @@
 #include "Target/ClrLink.h"
 #include "Target/ClrMetadata.h"
 #include "Target/ClrProtocol.h"
+#include "Target/ClrRuntime.h"
 #include "Target/Mono.h"
 #include "Target/Process.h"
 
@@ -391,6 +392,156 @@ namespace Manifold::Tests
             CHECK(!Target::ClrMetadata::FromPeFile(std::span<const std::uint8_t>(bytes.data(), 100)).has_value());
         }
 
+        // Metadata built by hand whose names refer to themselves: a TypeSpec
+        // naming itself (also from a field's signature), one whose generic
+        // arguments name itself twice, and two TypeRefs nested in each
+        // other. Each name fails, empty, instead of recursing until the stack
+        // ends; the sound rows beside them still read.
+        void CheckMetadataCycles()
+        {
+            using M = Target::ClrMetadata;
+            const auto put16 = [](std::vector<std::uint8_t>& out, std::uint32_t value)
+                {
+                    out.push_back(static_cast<std::uint8_t>(value));
+                    out.push_back(static_cast<std::uint8_t>(value >> 8));
+                };
+            const auto put32 = [&](std::vector<std::uint8_t>& out, std::uint32_t value)
+                {
+                    put16(out, value & 0xFFFF);
+                    put16(out, value >> 16);
+                };
+            const auto pad = [](std::vector<std::uint8_t>& out)
+                {
+                    while (out.size() % 4)
+                        out.push_back(0);
+                };
+            // "A" at 1, "B" at 3, "C" at 5, "N" at 7.
+            std::vector<std::uint8_t> strings = { 0, 'A', 0, 'B', 0, 'C', 0, 'N', 0 };
+            pad(strings);
+            // TypeDefOrRef coded indexes: TypeSpec row 1 is 0x06, row 2 0x0A.
+            std::vector<std::uint8_t> blobs = {
+                0x00,
+                0x02, 0x12, 0x06,                                     // 1: TypeSpec 1 = class TypeSpec 1
+                0x03, 0x06, 0x12, 0x06,                               // 4: field of class TypeSpec 1
+                0x08, 0x15, 0x12, 0x0A, 0x02, 0x12, 0x0A, 0x12, 0x0A, // 8: TypeSpec 2 = TypeSpec 2<TypeSpec 2, TypeSpec 2>
+                0x02, 0x1D, 0x08,                                     // 17: TypeSpec 3 = int[]
+            };
+            pad(blobs);
+            std::vector<std::uint8_t> tables;
+            put32(tables, 0);
+            tables.push_back(2);  // major
+            tables.push_back(0);  // minor
+            tables.push_back(0);  // heap sizes: 2-byte indexes
+            tables.push_back(1);
+            const std::uint64_t valid = (1ull << M::TypeRef) | (1ull << M::Field) | (1ull << M::TypeSpec);
+            put32(tables, static_cast<std::uint32_t>(valid));
+            put32(tables, static_cast<std::uint32_t>(valid >> 32));
+            put32(tables, 0);
+            put32(tables, 0);
+            put32(tables, 3);  // TypeRef rows
+            put32(tables, 1);  // Field rows
+            put32(tables, 3);  // TypeSpec rows
+            const auto row = [&](std::initializer_list<std::uint32_t> cells)
+                {
+                    for (const std::uint32_t cell : cells)
+                        put16(tables, cell);
+                };
+            // TypeRef: resolution scope (tag 3 = another TypeRef), name, namespace.
+            row({ (2 << 2) | 3, 1, 0 });  // A, nested in B
+            row({ (1 << 2) | 3, 3, 0 });  // B, nested in A
+            row({ 0, 5, 7 });             // N.C
+            row({ 0x16, 1, 4 });          // Field: flags, name, signature
+            row({ 1, 8, 17 });            // TypeSpec signatures
+            pad(tables);
+            const auto token = [](M::Table table, std::uint32_t rid) { return (static_cast<std::uint32_t>(table) << 24) | rid; };
+
+            struct Stream
+            {
+                const char* Name;
+                const std::vector<std::uint8_t>* Bytes;
+            };
+            const Stream streams[] = { { "#~", &tables }, { "#Strings", &strings }, { "#Blob", &blobs } };
+            std::vector<std::uint8_t> headers;
+            std::uint32_t offset = 32;
+            for (const Stream& stream : streams)
+                offset += 8 + static_cast<std::uint32_t>((std::strlen(stream.Name) + 4) & ~std::size_t{ 3 });
+            for (const Stream& stream : streams)
+            {
+                put32(headers, offset);
+                put32(headers, static_cast<std::uint32_t>(stream.Bytes->size()));
+                for (const char* c = stream.Name; *c; ++c)
+                    headers.push_back(static_cast<std::uint8_t>(*c));
+                headers.push_back(0);
+                pad(headers);
+                offset += static_cast<std::uint32_t>(stream.Bytes->size());
+            }
+            std::vector<std::uint8_t> block;
+            put32(block, 0x424A5342);  // BSJB
+            put16(block, 1);
+            put16(block, 1);
+            put32(block, 0);
+            const char version[12] = "v4.0.30319";
+            put32(block, sizeof(version));
+            block.insert(block.end(), version, version + sizeof(version));
+            put16(block, 0);
+            put16(block, static_cast<std::uint32_t>(std::size(streams)));
+            block.insert(block.end(), headers.begin(), headers.end());
+            for (const Stream& stream : streams)
+                block.insert(block.end(), stream.Bytes->begin(), stream.Bytes->end());
+
+            M metadata;
+            CHECK(metadata.Parse(block));
+            if (!metadata.Valid())
+                return;
+            CHECK_EQ(metadata.Rows(M::TypeRef), 3u);
+            CHECK_EQ(metadata.TypeName(token(M::TypeRef, 3)), std::string("N.C"));
+            CHECK_EQ(metadata.TypeName(token(M::TypeSpec, 3)), std::string("int[]"));
+            CHECK_EQ(metadata.TypeName(token(M::TypeRef, 1)), std::string());
+            CHECK_EQ(metadata.TypeName(token(M::TypeRef, 2)), std::string());
+            CHECK_EQ(metadata.TypeName(token(M::TypeSpec, 1)), std::string());
+            CHECK_EQ(metadata.FieldTypeName(1), std::string());
+            const auto began = std::chrono::steady_clock::now();
+            CHECK_EQ(metadata.TypeName(token(M::TypeSpec, 2)), std::string());
+            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+            CHECK_MSG(seconds < 1.0, Format("a self-naming generic instance took %.2f s", seconds));
+        }
+
+        // The cache of method code ranges: a newer range replaces every older
+        // one it overlaps, so the range found for an address contains it (an
+        // older range inside a newer one used to win the lookup, which then
+        // found nothing and was dereferenced anyway).
+        void CheckCodeRanges()
+        {
+            Target::ClrCodeRanges ranges;
+            CHECK(ranges.Add(0x2050, 0x2060, "Old:Inner") != nullptr);
+            CHECK(ranges.Add(0x2000, 0x2100, "New:Whole") != nullptr);
+            CHECK_EQ(ranges.Size(), 1u);
+            const Target::ClrCodeRanges::Entry* whole = ranges.Find(0x2080);
+            CHECK(whole && whole->Name == "New:Whole" && whole->Start == 0x2000 && whole->End == 0x2100);
+            whole = ranges.Find(0x2055);
+            CHECK(whole && whole->Name == "New:Whole");
+            // One reaching into the new range from before goes as well.
+            ranges.Add(0x1000, 0x1100, "Early");
+            ranges.Add(0x1080, 0x1200, "Late");
+            CHECK(ranges.Find(0x1040) == nullptr);
+            const Target::ClrCodeRanges::Entry* late = ranges.Find(0x10F0);
+            CHECK(late && late->Name == "Late" && late->Start == 0x1080);
+            // Neighbours that only touch stay.
+            ranges.Add(0x3000, 0x3010, "First");
+            ranges.Add(0x3010, 0x3020, "Second");
+            const Target::ClrCodeRanges::Entry* first = ranges.Find(0x300F);
+            const Target::ClrCodeRanges::Entry* second = ranges.Find(0x3010);
+            CHECK(first && first->Name == "First");
+            CHECK(second && second->Name == "Second");
+            CHECK(ranges.Find(0x3020) == nullptr);
+            CHECK(ranges.Find(0x0FFF) == nullptr);
+            CHECK(ranges.Add(0x4000, 0x4000, "Empty") == nullptr);
+            CHECK(ranges.Find(0x4000) == nullptr);
+            CHECK_EQ(ranges.Size(), 4u);
+            ranges.Clear();
+            CHECK(ranges.Find(0x2080) == nullptr);
+        }
+
         void CheckProtocol()
         {
             Target::ClrProtocol::Writer writer;
@@ -750,6 +901,8 @@ namespace Manifold::Tests
             const int before = Totals().Failures;
             CheckProtocol();
             CheckMetadata();
+            CheckMetadataCycles();
+            CheckCodeRanges();
             CheckHelperMissing();
             if (!std::filesystem::exists(FakeGame()))
             {

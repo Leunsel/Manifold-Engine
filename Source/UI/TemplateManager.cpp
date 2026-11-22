@@ -22,6 +22,7 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <optional>
 #include <limits>
 #include <memory>
 #include <regex>
@@ -32,6 +33,7 @@ namespace Manifold::UI
     namespace
     {
         constexpr const char* kDragType = "MANIFOLD_TEMPLATE";
+        constexpr int kPreviewLimitMs = 2000;
 
         struct Node
         {
@@ -1294,7 +1296,10 @@ namespace Manifold::UI
             else
                 add("Preview input " + input.Name + ": " + inputError, false, 0, ScriptTabIndex);
         }
+        // ∑ The preview runs the template's Lua on the UI thread as the user types; a loop in it must not hang the program.
+        std::optional<Lua::LuaEngine::TimeLimit> limit(std::in_place, m_engine.Lua(), kPreviewLimitMs, "the preview stops templates that run longer; Generate runs them without a limit");
         const Templates::GenerationResult result = Templates::Generate(m_engine, Library(), *parsed, request);
+        limit.reset();
         m_previewFailed = !result.Text;
         int failureLine = 0;
         if (result.Text)

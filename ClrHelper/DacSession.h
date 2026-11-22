@@ -157,6 +157,7 @@ namespace Manifold::ClrHelper
         HMODULE m_dac = nullptr;
         XClrDataProcess* m_data = nullptr;
         SosDac* m_sos = nullptr;
+        SosDac8* m_sos8 = nullptr;
         SosDac14* m_sos14 = nullptr;
         DacpUsefulGlobalsData m_globals{};
         ClrAddress m_defaultDomain = 0;

@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Manifold
@@ -53,7 +54,8 @@ namespace Manifold
         int ViaParent = -1;       // the record that switched it together with its children; -1 when it was switched itself
         std::size_t WriteCount = 0;
         std::size_t BytesWritten = 0;
-        std::vector<Asm::AaWrite> Writes;   // the first kTraceWrites of them
+        std::vector<Asm::AaWrite> Writes;   // the first kTraceWrites of them, each cut to its first kTraceWriteBytes bytes
+        std::vector<std::size_t> WriteSizes; // the full size of each of Writes
         std::vector<Asm::AaAllocation> Allocated;
         std::vector<Asm::AaAllocation> Released;
         std::vector<std::string> Registered;
@@ -80,10 +82,16 @@ namespace Manifold
         ActivationRunner(const ActivationRunner&) = delete;
         ActivationRunner& operator=(const ActivationRunner&) = delete;
 
-        // fromScript marks a switch Lua asked for, for the activation trace.
+        // fromScript marks a switch Lua asked for, for the activation trace. A record that is being switched right now (its own
+        // handler or {$lua} asks again) is queued after that switch in asynchronous mode and refused otherwise.
         Status SetActive(Table::MemoryRecord& record, bool active, bool fromScript = false);
         void RequestActive(Table::MemoryRecord& record, bool active, bool fromScript = false);
         bool ActivationPending(int recordId) const { return m_pending.count(recordId) > 0; }
+        // Whether the record is in the middle of a switch: its handlers, script or children run right now.
+        bool Switching(int recordId) const;
+        // How the record's last switch in this table ended: Success, the script's error, the veto of a handler or the refusal of
+        // a switch during its own switch. Success when none is known.
+        Status LastOutcome(int recordId) const;
         bool InsideActivation() const { return m_running != nullptr && m_workerLuaActive; }
         void DropQueued(int recordId);
         void CancelActivations();
@@ -106,6 +114,7 @@ namespace Manifold
 
         static constexpr std::size_t kTraceLength = 500;
         static constexpr std::size_t kTraceWrites = 64;
+        static constexpr std::size_t kTraceWriteBytes = 32;
         const std::deque<ActivationTraceEntry>& Trace() const { return m_trace; }
         std::uint64_t TraceSerial() const { return m_traceSerial; }
         void ClearTrace() { m_trace.clear(); }
@@ -116,6 +125,7 @@ namespace Manifold
         struct ActivationJob
         {
             int RecordId = 0;
+            std::uint64_t Identity = 0;   // the table it was queued for; a replaced table may reuse the id
             bool Active = false;
             bool FromScript = false;
             bool ChildrenDone = false;
@@ -124,9 +134,19 @@ namespace Manifold
         };
         struct RunningActivation;
 
-        Status ActivateTree(Table::MemoryRecord& record, bool active, int viaParent = -1, bool fromScript = false);
+        // ∑ Everything that can run Lua or wait (handlers, {$lua}, OnActivate, children) may delete records or replace the
+        //   table, so a switch carries the record's id and the table's identity across it and finds the record again after.
+        Status ActivateTree(int recordId, bool active, int viaParent = -1, bool fromScript = false);
+        Status SwitchTree(int recordId, std::uint64_t identity, bool active, int viaParent, bool fromScript);
         Status ActivatePlain(Table::MemoryRecord& record, bool active);
-        void FinishRecordActivation(Table::MemoryRecord& record, bool active, bool fromScript);
+        void FinishRecordActivation(int recordId, std::uint64_t identity, bool active, bool fromScript);
+        Table::MemoryRecord* Refind(int recordId, std::uint64_t identity);
+        Status Vanished(int recordId, std::uint64_t identity, const std::string& description, const char* during);
+        // A script whose record went away while it was switched: its [DISABLE] part runs when its changes are in the game, and
+        // the symbols it left are unregistered; what still stays is logged.
+        void ReleaseOrphan(int recordId, const std::string& description, const std::string& script, Asm::AaMemory memory, bool on,
+            const std::shared_ptr<Target::Process>& process);
+        void NoteOutcome(int recordId, const Status& status);
         void StartActivation(const ActivationJob& job);
         void FinishActivation();
         void Unpend(int recordId);
@@ -135,7 +155,7 @@ namespace Manifold
         void TraceScript(ActivationTraceEntry& entry, const Asm::AaResult& result, const Asm::AaMemory& before, const Asm::AaMemory& after) const;
         void Traced(ActivationTraceEntry entry);
         void RunRecordLua(const std::string& code, const char* name);
-        Status RunLuaForWorker(std::string_view code, int recordId, bool syntaxCheck, std::string& output);
+        Status RunLuaForWorker(std::string_view code, int recordId, std::uint64_t identity, bool syntaxCheck, std::string& output);
 
         Engine& m_engine;
         bool m_async = false;
@@ -153,5 +173,8 @@ namespace Manifold
         double m_tableTaskStarted = 0.0;
         std::deque<ActivationTraceEntry> m_trace;
         std::uint64_t m_traceSerial = 0;
+        std::unordered_set<int> m_switching;
+        std::unordered_map<int, Status> m_outcomes;
+        std::uint64_t m_outcomesIdentity = 0;
     };
 }

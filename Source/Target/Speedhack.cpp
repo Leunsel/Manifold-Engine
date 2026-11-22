@@ -30,6 +30,7 @@ namespace Manifold::Target
         constexpr std::size_t kPatch = Speed::kPatchBytes;
         constexpr int kInstallTries = 200;
         constexpr int kDrainTries = 150;
+        constexpr int kSettleMs = 500;
 
         struct Candidate
         {
@@ -428,10 +429,9 @@ namespace Manifold::Target
         std::lock_guard lock(m_lock);
         if (Usable() && m_installed && !Process::DryRun())
         {
-            if (WriteSpeed(1.0) && Call(Speed::CallApply))
+            bool shifted = true;
+            if (WriteSpeed(1.0) && Settle(shifted))
             {
-                std::uint32_t shifted = 1;
-                m_process->ReadExact(m_block + offsetof(Speed::Block, Shifted), &shifted, sizeof(shifted));
                 if (!shifted)
                     RemoveLocked();
                 else
@@ -446,6 +446,39 @@ namespace Manifold::Target
         if (!m_call)
             return Failed("the agent is not loaded");
         return m_process->CreateThread(m_call, operation, true, 5000);
+    }
+
+    // CallApply does nothing while a thread of the process is in the middle of
+    // its own Apply, and that one may still apply the serial before the last.
+    // So the agent's Shifted only counts once Applied shows the serial written
+    // last; until then (bounded) the clocks count as shifted, so the hooks stay
+    // and the time cannot jump back.
+    Status Speedhack::Settle(bool& shifted)
+    {
+        shifted = true;
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(kSettleMs);
+        for (int round = 0;; ++round)
+        {
+            if (round % 10 == 0)
+            {
+                if (Status called = Call(Speed::CallApply); !called)
+                    return called;
+            }
+            std::uint32_t applied = 0;
+            if (m_process->ReadExact(m_block + offsetof(Speed::Block, Applied), &applied, sizeof(applied)) && applied == m_serial)
+            {
+                std::uint32_t value = 1;
+                if (m_process->ReadExact(m_block + offsetof(Speed::Block, Shifted), &value, sizeof(value)))
+                    shifted = value != 0;
+                return Status::Success();
+            }
+            if (std::chrono::steady_clock::now() >= until)
+            {
+                LOG_INFO("Speedhack", m_process->Name() + " did not take the new speed in time; its clocks count as shifted, so the hooks stay");
+                return Status::Success();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
     }
 
     void Speedhack::DropAgent()
@@ -616,16 +649,15 @@ namespace Manifold::Target
             return Status::Success();
         }
 
+        // Originals stays as it is until the process is paused and the hook is
+        // written: an entry that pointed into a page freed on a failure below
+        // would make the next Apply call into freed memory.
         std::uint32_t count = static_cast<std::uint32_t>(m_hooks.size());
         for (const Plan& plan : plans)
         {
             Status written = Status::Success();
             if (plan.Trampoline)
-            {
                 written = m_process->Write(plan.Trampoline, plan.Code.data(), plan.Code.size());
-                if (written)
-                    written = WriteField(*m_process, m_block, offsetof(Speed::Block, Originals) + plan.Hook.Source * sizeof(std::uint64_t), plan.Trampoline);
-            }
             Speed::Hook record{};
             record.Target = plan.Hook.Address;
             record.Page = plan.Hook.Page;
@@ -641,10 +673,33 @@ namespace Manifold::Target
             ++count;
         }
 
+        // Every Apply calls the timeGetTime trampoline, from all hooks, so
+        // winmm must never unload under it: the agent pins the module first.
+        // The multimedia plan is the last one (winmm is the last candidate),
+        // so leaving it out leaves its record past the hook count.
+        if (plans.back().Hook.Source == Speed::SourceMultimedia)
+        {
+            const std::size_t at = offsetof(Speed::Block, Hooks) + (count - 1) * sizeof(Speed::Hook) + offsetof(Speed::Hook, Pinned);
+            std::uint32_t pinned = 0;
+            const Status called = Call(Speed::CallPin);
+            if (!called || !m_process->ReadExact(m_block + at, &pinned, sizeof(pinned)) || !pinned)
+            {
+                LOG_WARN("Speedhack", plans.back().Hook.Name + " stays as it is: its module could not be kept loaded" + (called ? std::string() : " (" + called.Text + ")"));
+                plans.pop_back();
+                --count;
+                if (plans.empty())
+                {
+                    dropNewPages();
+                    return Status::Success();
+                }
+            }
+        }
+
         std::vector<Range> busy;
         for (const Plan& plan : plans)
             busy.push_back({ plan.Hook.Address + 1, plan.Hook.Address + plan.Stolen });
         Status result = Status::Success();
+        std::vector<std::uint64_t> referenced;
         {
             Frozen frozen(*m_process);
             bool clear = false;
@@ -666,14 +721,22 @@ namespace Manifold::Target
                 result = counted;
             for (std::size_t i = 0; i < plans.size() && result; ++i)
             {
-                result = m_process->Write(plans[i].Hook.Address, plans[i].Hook.Patch.data(), plans[i].Hook.Patch.size());
+                const Plan& plan = plans[i];
+                const std::size_t original = offsetof(Speed::Block, Originals) + plan.Hook.Source * sizeof(std::uint64_t);
+                if (plan.Trampoline)
+                    result = WriteField(*m_process, m_block, original, plan.Trampoline);
                 if (result)
-                    m_hooks.push_back(plans[i].Hook);
+                    result = m_process->Write(plan.Hook.Address, plan.Hook.Patch.data(), plan.Hook.Patch.size());
+                if (result)
+                    m_hooks.push_back(plan.Hook);
+                else if (plan.Trampoline && !WriteField(*m_process, m_block, original, std::uint64_t{ 0 }))
+                    referenced.push_back(plan.Hook.Page);
             }
         }
         for (std::uint64_t page : newPages)
         {
-            if (std::any_of(m_hooks.begin(), m_hooks.end(), [&](const SpeedhackHook& hook) { return hook.Page == page; }))
+            if (std::any_of(m_hooks.begin(), m_hooks.end(), [&](const SpeedhackHook& hook) { return hook.Page == page; }) ||
+                std::find(referenced.begin(), referenced.end(), page) != referenced.end())
                 m_pages.push_back(page);
             else
                 m_process->Free(page);
@@ -793,11 +856,10 @@ namespace Manifold::Target
         }
         if (Status written = WriteSpeed(1.0); !written)
             return written;
-        if (Status applied = Call(Speed::CallApply); !applied)
+        bool shifted = true;
+        if (Status applied = Settle(shifted); !applied)
             return applied;
-        std::uint32_t shifted = 1;
-        m_process->ReadExact(m_block + offsetof(Speed::Block, Shifted), &shifted, sizeof(shifted));
-        m_shifted = shifted != 0;
+        m_shifted = shifted;
         if (!m_shifted)
             return RemoveLocked();
         if (was)

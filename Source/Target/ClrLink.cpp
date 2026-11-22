@@ -5,6 +5,7 @@
 #include "Target/Process.h"
 
 #include <atomic>
+#include <chrono>
 
 #include <windows.h>
 
@@ -33,7 +34,12 @@ namespace Manifold::Target
 
     bool ClrLink::Running() const
     {
-        std::lock_guard lock(m_lock);
+        // A call in flight holds the lock, and the helper was there when it
+        // began; if it ends on the way, that call finds out. Asking must not
+        // wait for a heap walk.
+        std::unique_lock lock(m_lock, std::try_to_lock);
+        if (!lock.owns_lock())
+            return true;
         return m_helper && ::WaitForSingleObject(m_helper, 0) == WAIT_TIMEOUT;
     }
 
@@ -105,9 +111,44 @@ namespace Manifold::Target
         return true;
     }
 
-    std::optional<std::vector<std::uint8_t>> ClrLink::Call(ClrProtocol::Writer& request, unsigned timeoutMs, std::string& error)
+    std::optional<std::vector<std::uint8_t>> ClrLink::Call(ClrProtocol::Writer& request, unsigned timeoutMs, std::string& error, bool* busy)
     {
-        std::lock_guard lock(m_lock);
+        if (busy)
+            *busy = false;
+        // Waiting for the call before is part of this call's deadline. Nothing
+        // has been sent when the wait fails, so the pipe is in order and the
+        // helper stays.
+        const bool longCall = timeoutMs > kLongCallMs;
+        const ULONGLONG waitUntil = ::GetTickCount64() + timeoutMs;
+        std::unique_lock lock(m_lock, std::defer_lock);
+        for (;;)
+        {
+            if (!longCall && m_longCall.load())
+                break;
+            if (lock.try_lock_for(std::chrono::milliseconds(20)))
+                break;
+            if (::GetTickCount64() >= waitUntil)
+                break;
+        }
+        if (!lock.owns_lock())
+        {
+            error = "the .NET helper is busy with another request (a heap walk or a type list takes a while); try again later";
+            if (busy)
+                *busy = true;
+            return std::nullopt;
+        }
+        struct LongMark
+        {
+            std::atomic<bool>& Flag;
+            bool Set;
+            ~LongMark()
+            {
+                if (Set)
+                    Flag.store(false);
+            }
+        } mark{ m_longCall, longCall };
+        if (longCall)
+            m_longCall.store(true);
         if (!m_pipe || !m_helper)
         {
             error = "the .NET helper is not running";
@@ -150,8 +191,50 @@ namespace Manifold::Target
 
     Status ClrLink::Start(const Process& process)
     {
-        Stop();
+        // A restart keeps m_info: it describes the same game, and others may
+        // be reading it.
+        {
+            std::lock_guard lock(m_lock);
+            EndHelper();
+        }
+        ClrProtocol::Writer open;
+        {
+            std::lock_guard lock(m_lock);
+            if (Status started = Launch(process, open); !started)
+                return started;
+        }
+        // Open goes through Call like any request, outside the lock it takes.
+        std::string error;
+        const auto reply = Call(open, kOpenMs, error);
         std::lock_guard lock(m_lock);
+        if (!reply)
+        {
+            EndHelper();
+            return Status::Fail(ErrorCode::ClrHelperFailed, error);
+        }
+        ClrProtocol::Reader in(*reply);
+        ClrRuntimeInfo runtime;
+        runtime.Flavour = in.Text();
+        runtime.Version = in.Text();
+        runtime.RuntimePath = in.Text();
+        runtime.DacPath = in.Text();
+        runtime.PointerSize = static_cast<int>(in.U32());
+        runtime.TypeStatics = in.U8() != 0;
+        if (!in.Ok() || runtime.PointerSize != process.PointerSize())
+        {
+            EndHelper();
+            return Status::Fail(ErrorCode::ClrHelperFailed, "its answer to Open did not fit this game");
+        }
+        // Written only when it changed, so a restart does not write under a
+        // reader of Info().
+        if (m_info.Flavour != runtime.Flavour || m_info.Version != runtime.Version || m_info.RuntimePath != runtime.RuntimePath
+            || m_info.DacPath != runtime.DacPath || m_info.PointerSize != runtime.PointerSize || m_info.TypeStatics != runtime.TypeStatics)
+            m_info = std::move(runtime);
+        return Status::Success();
+    }
+
+    Status ClrLink::Launch(const Process& process, ClrProtocol::Writer& open)
+    {
         const bool target32 = process.PointerSize() == 4;
         const std::filesystem::path helper = HelperPath(target32);
         std::error_code exists;
@@ -228,34 +311,10 @@ namespace Manifold::Target
             return Status::Fail(ErrorCode::ClrHelperFailed, "it did not connect");
         }
 
-        ClrProtocol::Writer open;
         open.U8(static_cast<std::uint8_t>(ClrProtocol::Op::Open));
         open.U32(ClrProtocol::kVersion);
         open.U32(::GetProcessId(process.Handle()));
         open.U64(handleValue);
-        std::string error;
-        m_lock.unlock();
-        const auto reply = Call(open, kOpenMs, error);
-        m_lock.lock();
-        if (!reply)
-        {
-            EndHelper();
-            return Status::Fail(ErrorCode::ClrHelperFailed, error);
-        }
-        ClrProtocol::Reader in(*reply);
-        ClrRuntimeInfo runtime;
-        runtime.Flavour = in.Text();
-        runtime.Version = in.Text();
-        runtime.RuntimePath = in.Text();
-        runtime.DacPath = in.Text();
-        runtime.PointerSize = static_cast<int>(in.U32());
-        runtime.TypeStatics = in.U8() != 0;
-        if (!in.Ok() || runtime.PointerSize != process.PointerSize())
-        {
-            EndHelper();
-            return Status::Fail(ErrorCode::ClrHelperFailed, "its answer to Open did not fit this game");
-        }
-        m_info = std::move(runtime);
         return Status::Success();
     }
 }

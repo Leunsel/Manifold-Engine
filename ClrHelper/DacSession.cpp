@@ -363,6 +363,8 @@ namespace Manifold::ClrHelper
     {
         if (m_sos14)
             m_sos14->Release();
+        if (m_sos8)
+            m_sos8->Release();
         if (m_sos)
             m_sos->Release();
         if (m_data)
@@ -434,6 +436,10 @@ namespace Manifold::ClrHelper
         m_process = inherited;
         if (!m_process || ::GetProcessId(m_process) != pid)
         {
+            // An inherited handle to some other process is of no use; it is
+            // still this process's handle to close.
+            if (m_process)
+                ::CloseHandle(m_process);
             m_process = ::OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
             if (!m_process)
                 return "could not open process " + std::to_string(pid) + " (error " + std::to_string(::GetLastError()) + ")";
@@ -493,6 +499,8 @@ namespace Manifold::ClrHelper
             return "the data access library has no SOS interface (HRESULT 0x" + Hex(static_cast<std::uint32_t>(result)) + ")";
         if (FAILED(m_data->QueryInterface(kIidSosDac14, reinterpret_cast<void**>(&m_sos14))))
             m_sos14 = nullptr;
+        if (FAILED(m_data->QueryInterface(kIidSosDac8, reinterpret_cast<void**>(&m_sos8))))
+            m_sos8 = nullptr;
         Padded<DacpUsefulGlobalsData> globals;
         if (SUCCEEDED(m_sos->GetUsefulGlobals(globals.Ptr())))
             m_globals = globals.Value;
@@ -867,7 +875,12 @@ namespace Manifold::ClrHelper
         }
         const std::uint32_t flags = TypeFlags(mt);
         const bool valueType = (flags & P::kTypeValue) != 0;
-        const bool generic = (flags & P::kTypeGeneric) != 0;
+        // ∑ Open or closed: an instantiation keeps its statics apart from the
+        // module's, and only the per-type static base (m_sos14, .NET 9+)
+        // tells where. The module's base plus the field's offset would be an
+        // address that reads like a value and is none, so without that API a
+        // generic type's statics are reported without storage.
+        const bool generic = (flags & P::kTypeGeneric) != 0 || (!m_sos14 && NameOf(mt).find('`') != std::string::npos);
         const Target::ClrMetadata* metadata = MetadataOf(info.Data.Module);
         const ClrAddress parent = info.Data.ParentMethodTable;
         out.U64(parent);
@@ -945,7 +958,8 @@ namespace Manifold::ClrHelper
                     const bool primitive = Primitive(data->Type);
                     if (!primitive && data->Type == kElementValueType)
                         field.Flags |= P::kFieldBoxed;
-                    // A generic type's statics live per instantiation, not here.
+                    // A generic type's statics live per instantiation, not in
+                    // the module (see generic above).
                     const ClrAddress base = generic ? 0 : StaticBase(mt, info.Data.Module, primitive);
                     if (base)
                         field.Address = base + data->Offset;
@@ -1192,9 +1206,29 @@ namespace Manifold::ClrHelper
         std::set<ClrAddress> seen;
         for (const DacpGcHeapDetails& details : heaps)
         {
+            // .NET 5 and later have more generations than the details hold:
+            // the pinned object heap after the large one. Its segments are
+            // laid out like the large object heap's.
+            std::vector<ClrAddress> starts;
             for (int generation = 0; generation < kDacGenerations; ++generation)
+                starts.push_back(details.GenerationTable[generation].StartSegment);
+            unsigned generations = 0;
+            if (m_sos8 && SUCCEEDED(m_sos8->GetNumberOfGenerations(&generations)) && generations > static_cast<unsigned>(kDacGenerations)
+                && generations <= 16)
             {
-                ClrAddress segment = details.GenerationTable[generation].StartSegment;
+                std::vector<DacpGenerationData> table(generations + 4);
+                unsigned needed = 0;
+                const HRESULT result = heap->ServerMode ? m_sos8->GetGenerationTableSvr(details.HeapAddr, generations, table.data(), &needed)
+                                                        : m_sos8->GetGenerationTable(generations, table.data(), &needed);
+                if (SUCCEEDED(result))
+                {
+                    for (unsigned generation = static_cast<unsigned>(kDacGenerations); generation < std::min(generations, needed); ++generation)
+                        starts.push_back(table[generation].StartSegment);
+                }
+            }
+            for (std::size_t generation = 0; generation < starts.size(); ++generation)
+            {
+                ClrAddress segment = starts[generation];
                 for (int guard = 0; segment && guard < 1000000; ++guard)
                 {
                     if (!seen.insert(segment).second)
@@ -1207,7 +1241,7 @@ namespace Manifold::ClrHelper
                     // The segment the GC allocates in is filled up to the heap's
                     // allocation pointer; its own mark lags behind.
                     part.End = segment == details.EphemeralHeapSegment && details.AllocAllocated ? details.AllocAllocated : data->Allocated;
-                    part.Large = generation == kDacGenerations - 1;
+                    part.Large = generation >= static_cast<std::size_t>(kDacGenerations - 1);
                     if (part.Start && part.End > part.Start)
                         out.push_back(part);
                     segment = data->Next;

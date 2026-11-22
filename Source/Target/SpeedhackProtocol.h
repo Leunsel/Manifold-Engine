@@ -25,15 +25,18 @@ namespace Manifold::Target::Speed
     {
         CallWatch = 1,
         CallRelease = 2,
-        CallApply = 3
+        CallApply = 3,
+        CallPin = 4
     };
 
+    // Pinned is set by the agent (CallPin) once the module holding Target can
+    // no longer unload; the host writes it as 0 with the record.
     struct Hook
     {
         std::uint64_t Target;
         std::uint64_t Page;
         std::uint32_t Source;
-        std::uint32_t Pad;
+        std::uint32_t Pinned;
         std::uint8_t Original[8];
     };
 

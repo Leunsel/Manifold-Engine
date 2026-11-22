@@ -98,12 +98,21 @@ namespace Manifold::Target
             std::span<const std::uint8_t> Bytes;
             std::size_t At = 0;
             bool Ok = true;
+            int* Budget = nullptr;  // steps left for the whole name, shared by nested cursors
         };
 
         std::uint32_t Cell(Table table, std::uint32_t row, int column) const;
         std::string String(std::uint32_t index) const;
         std::span<const std::uint8_t> Blob(std::uint32_t index) const;
         std::uint32_t ListEnd(Table table, std::uint32_t row, int column, Table target) const;
+        // ∑ One depth and one step budget for the whole resolution: a TypeSpec
+        // naming itself or TypeRefs nested in each other (A in B in A) would
+        // otherwise recurse until the stack ends, and a generic instance whose
+        // arguments name itself again would branch exponentially. Past either
+        // limit the name fails (ok = false, empty).
+        static constexpr int kMaxDepth = 64;
+        static constexpr int kMaxSteps = 4096;
+        std::string TypeNameAt(std::uint32_t token, int depth, bool& ok, int& budget) const;
         std::string SignatureType(Cursor& cursor, int depth) const;
 
         bool m_valid = false;

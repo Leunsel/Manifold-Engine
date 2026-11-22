@@ -14,9 +14,13 @@
 
 #include "lua.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -63,14 +67,23 @@ namespace Manifold::Lua
             return found;
         }
 
+        // ∑ math.huge and 0/0 are left out like a missing option: no limit,
+        // size or step is infinite, and a form saved with one could not be
+        // read back (the form file writer has no text for them)
         bool ReadNumber(lua_State* state, int index, const char* name, double& out)
         {
             lua_getfield(state, index, name);
-            const bool found = lua_isnumber(state, -1) != 0;
+            const bool found = lua_isnumber(state, -1) != 0 && std::isfinite(lua_tonumber(state, -1));
             if (found)
                 out = lua_tonumber(state, -1);
             lua_pop(state, 1);
             return found;
+        }
+
+        // a script's number as an int; NaN and values past the int range stop at 0 and its ends
+        int ToInt(double value)
+        {
+            return static_cast<int>(std::clamp<std::int64_t>(UiToInteger(value), std::numeric_limits<int>::min(), std::numeric_limits<int>::max()));
         }
 
         bool ReadFloat(lua_State* state, int index, const char* name, float& out)
@@ -118,7 +131,11 @@ namespace Manifold::Lua
         std::vector<UiTreeItem> ReadTree(lua_State* state, int list, int depth)
         {
             std::vector<UiTreeItem> items;
-            if (depth > kMaxDepth)
+            // ∑ each level holds its item and its children list on the stack: a
+            // C function gets LUA_MINSTACK (20) slots, a deep tree needs more.
+            // lua_checkstack, not luaL_checkstack: the form loader calls this
+            // outside a protected call, where a Lua error would abort
+            if (depth > kMaxDepth || !lua_checkstack(state, 4))
                 return items;
             const lua_Integer count = std::min<lua_Integer>(static_cast<lua_Integer>(lua_rawlen(state, list)), kMaxItems);
             for (lua_Integer i = 1; i <= count; ++i)
@@ -226,7 +243,7 @@ namespace Manifold::Lua
             ReadString(state, entry, "text", draw.Text);
             double image = 0.0;
             if (ReadNumber(state, entry, "image", image))
-                draw.Image = static_cast<int>(image);
+                draw.Image = ToInt(image);
             if (lua_getfield(state, entry, "points") == LUA_TTABLE)
             {
                 const int list = lua_gettop(state);
@@ -317,7 +334,7 @@ namespace Manifold::Lua
             case UiKind::Number:
             case UiKind::Slider:
                 if (node.Integer)
-                    lua_pushinteger(state, static_cast<lua_Integer>(node.Number));
+                    lua_pushinteger(state, static_cast<lua_Integer>(UiToInteger(node.Number)));
                 else
                     lua_pushnumber(state, node.Number);
                 break;
@@ -456,13 +473,13 @@ namespace Manifold::Lua
                 node.HasMax = true;
             double image = 0.0;
             if (ReadNumber(state, props, "image", image))
-                node.ImageId = static_cast<int>(image);
+                node.ImageId = ToInt(image);
             double interval = 0.0;
             if (ReadNumber(state, props, "interval", interval))
                 node.Interval = std::max(0.0, interval);
             double handlers = 0.0;
             if (ReadNumber(state, props, "handlers", handlers))
-                node.Handlers = static_cast<std::uint32_t>(handlers);
+                node.Handlers = static_cast<std::uint32_t>(UiToInteger(handlers));
             bool updates = false;
             if (ReadBool(state, props, "updates", updates))
             {
@@ -487,7 +504,7 @@ namespace Manifold::Lua
             if (columns == LUA_TTABLE)
                 ReadColumns(state, lua_gettop(state), node.Columns);
             else if (columns == LUA_TNUMBER && node.Kind == UiKind::Grid)
-                node.GridColumns = static_cast<int>(std::clamp<lua_Integer>(static_cast<lua_Integer>(lua_tonumber(state, -1)), 1, 16));
+                node.GridColumns = static_cast<int>(std::clamp<std::int64_t>(UiToInteger(lua_tonumber(state, -1)), 1, 16));
             lua_pop(state, 1);
             if (lua_getfield(state, props, "rows") == LUA_TTABLE)
                 ReadRows(state, lua_gettop(state), node.Rows);
@@ -602,6 +619,15 @@ namespace Manifold::Lua
         {
             const UiNode* node = Model(state).Find(static_cast<int>(luaL_checkinteger(state, 1)));
             lua_pushboolean(state, node && node->Kind == UiKind::Window && node->Open ? 1 : 0);
+            return 1;
+        }
+
+        // whether the user edits an input or number right now (its text field
+        // had the keyboard in the last frame drawn); record bindings leave it alone then
+        int UiIsActive(lua_State* state)
+        {
+            const UiNode* node = Model(state).Find(static_cast<int>(luaL_checkinteger(state, 1)));
+            lua_pushboolean(state, node && node->Active ? 1 : 0);
             return 1;
         }
 
@@ -734,6 +760,8 @@ namespace Manifold::Lua
 
         void PushTreeItems(lua_State* state, const std::vector<UiTreeItem>& items)
         {
+            // the list, an item and a field per level (see ReadTree); called from Lua only
+            luaL_checkstack(state, 4, "the tree nests too deep");
             lua_createtable(state, static_cast<int>(items.size()), 0);
             for (std::size_t i = 0; i < items.size(); ++i)
             {
@@ -807,7 +835,8 @@ namespace Manifold::Lua
                 lua_pushboolean(state, *flag ? 1 : 0);
             else if (const double* number = std::get_if<double>(&value))
             {
-                if (*number == static_cast<double>(static_cast<lua_Integer>(*number)) && std::abs(*number) < 9.0e15)
+                // the range test first: casting NaN or a huge value is undefined
+                if (std::abs(*number) < 9.0e15 && *number == static_cast<double>(static_cast<lua_Integer>(*number)))
                     lua_pushinteger(state, static_cast<lua_Integer>(*number));
                 else
                     lua_pushnumber(state, *number);
@@ -1122,6 +1151,7 @@ namespace Manifold::Lua
             { "uiClear", &UiClear },
             { "uiShow", &UiShow },
             { "uiIsOpen", &UiIsOpen },
+            { "uiIsActive", &UiIsActive },
             { "uiExists", &UiExists },
             { "uiDraw", &UiDrawCanvas },
             { "uiView", &UiView },

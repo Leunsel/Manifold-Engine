@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -2923,6 +2924,320 @@ return M
             CHECK_MSG(engine.Lua().Run("local w = manifold.ui.form.build((function() " + saved.substr(saved.find("return {")) + " end)())\nw.remove()\n", "value keys form").Ok(), saved);
         }
 
+        // ∑ the runtime bug hunt of 2026-11-22: deep trees, slider limits, non-finite numbers, table rows, renames
+        void UiRuntimeLimits(Engine& engine)
+        {
+            using Lua::UiKind;
+            // a tree 30 levels deep goes in and comes back whole (each level took two Lua stack slots
+            // of the 20 a C function gets: deep trees wrote past the stack)
+            LuaCheck(engine, "deep tree", R"LUA(
+                local w = manifold.ui.window.create("Deep Tree Probe", {})
+                local root = { id = "level1", text = "Level 1" }
+                local at = root
+                for level = 2, 30 do
+                  local child = { id = "level" .. level, text = "Level " .. level, open = level % 2 == 0 }
+                  at.children = { child, "leaf" .. level }
+                  at = child
+                end
+                local tree = w.add("tree", { items = { root, "plain" } })
+                local function depth(items)
+                  local most = 0
+                  for _, item in ipairs(items) do
+                    if type(item) == "table" and item.children then
+                      most = math.max(most, depth(item.children))
+                    end
+                  end
+                  return most + 1
+                end
+                local items = tree.getItems()
+                if depth(items) ~= 30 then return "depth " .. depth(items) end
+                tree.update({ items = items })
+                local again = tree.getItems()
+                if depth(again) ~= 30 then return "round trip depth " .. depth(again) end
+                local deepest = again[1]
+                for _ = 2, 30 do deepest = deepest.children[1] end
+                if deepest.id ~= "level30" or deepest.text ~= "Level 30" or deepest.open ~= true then return "deepest " .. tostring(deepest.id) end
+                if again[2].text ~= "plain" or again[1].children[2].text ~= "leaf2" then return "siblings" end
+                -- deeper than the limit is cut, not an error
+                local top = {}
+                at = top
+                for _ = 1, 60 do
+                  at.text = "x"
+                  at.children = { {} }
+                  at = at.children[1]
+                end
+                at.text = "x"
+                tree.update({ items = { top } })
+                if depth(tree.getItems()) > 33 then return "too deep a tree was kept" end
+                w.remove()
+                return "ok")LUA");
+            {
+                // the form loader reads widgets and tree items nested deep in one fresh Lua state
+                std::string text = "return {\n  form = 1,\n  title = \"Deep\",\n  children = {\n";
+                for (int i = 0; i < 30; ++i)
+                    text += "{ kind = \"column\", children = {\n";
+                text += "{ kind = \"tree\", items = ";
+                for (int i = 0; i < 30; ++i)
+                    text += "{ { text = \"t" + std::to_string(i) + "\", children = ";
+                text += "{ \"leaf\" }";
+                for (int i = 0; i < 30; ++i)
+                    text += " } }";
+                text += " },\n";
+                for (int i = 0; i < 30; ++i)
+                    text += "} },\n";
+                text += "  },\n}\n";
+                Lua::FormDocument deep;
+                std::string error;
+                CHECK_MSG(Lua::FormLoad(text, deep, error), error);
+                const Lua::UiNode* tree = deep.Model.Find(deep.Window);
+                while (tree && !tree->Children.empty())
+                    tree = deep.Model.Find(tree->Children.front());
+                CHECK(tree && tree->Kind == UiKind::Tree);
+                if (tree && tree->Kind == UiKind::Tree)
+                {
+                    int levels = 0;
+                    for (const std::vector<Lua::UiTreeItem>* items = &tree->Tree; !items->empty(); items = &items->front().Children)
+                        ++levels;
+                    CHECK_EQ(levels, 31);
+                }
+                const std::string saved = Lua::FormSave(deep);
+                Lua::FormDocument back;
+                CHECK_MSG(Lua::FormLoad(saved, back, error), error);
+                CHECK(Lua::FormSave(back) == saved);
+            }
+
+            // value hotkeys keep to the range the slider is drawn with: 0..1 (or 0..100 for an
+            // integer one) without min and max; a number without max has no limit
+            Lua::UiModel model;
+            const int window = model.Create(UiKind::Window, 0, "probe");
+            const auto add = [&](UiKind kind, int parent, std::vector<int> more) {
+                const int id = model.Create(kind, parent, "probe");
+                Lua::UiNode& node = *model.Find(id);
+                if (kind == UiKind::Checkbox || kind == UiKind::Button)
+                    node.HotkeyKeys = std::move(more);
+                else
+                    node.HotkeyMoreKeys = std::move(more);
+                return id;
+            };
+            const int fraction = add(UiKind::Slider, window, { VK_F6 });
+            model.Find(fraction)->Number = 0.5;
+            model.Find(fraction)->HotkeyStep = 0.25;
+            const int percent = add(UiKind::Slider, window, { VK_F7 });
+            model.Find(percent)->Integer = true;
+            model.Find(percent)->Number = 5;
+            const int count = add(UiKind::Number, window, { VK_F8 });
+            model.Find(count)->Number = 5;
+            const int swapped = add(UiKind::Slider, window, { VK_F9 });
+            Lua::UiNode& reversed = *model.Find(swapped);
+            reversed.HasMin = reversed.HasMax = true;
+            reversed.Min = 10.0;
+            reversed.Max = 0.0;
+            reversed.Number = 9.5;
+            std::set<std::vector<int>> held;
+            const auto press = [&](const std::vector<int>& keys, bool& down) {
+                const bool now = held.count(keys) != 0;
+                const bool pressed = now && !down;
+                down = now;
+                return pressed;
+            };
+            const auto tap = [&](std::set<std::vector<int>> keys) {
+                held.clear();
+                model.PollHotkeys(press);
+                held = std::move(keys);
+                model.PollHotkeys(press);
+            };
+            tap({ { VK_F6 }, { VK_F7 }, { VK_F8 }, { VK_F9 } });
+            CHECK(model.Find(fraction)->Number == 0.75);
+            CHECK(model.Find(percent)->Number == 6.0); // was clamped to Max = 0 without max
+            CHECK(model.Find(count)->Number == 6.0);
+            CHECK(model.Find(swapped)->Number == 10.0); // min 10, max 0 read as 0..10
+            tap({ { VK_F6 } });
+            tap({ { VK_F6 } });
+            CHECK(model.Find(fraction)->Number == 1.0);
+
+            // hidden containers and widgets behind a modal take no hotkeys
+            const int row = model.Create(UiKind::Row, window, "probe");
+            const int hiddenBox = add(UiKind::Checkbox, row, { VK_F2 });
+            model.Find(row)->Visible = false;
+            const int shownBox = add(UiKind::Checkbox, window, { VK_F3 });
+            tap({ { VK_F2 }, { VK_F3 } });
+            CHECK(!model.Find(hiddenBox)->Bool);
+            CHECK(model.Find(shownBox)->Bool);
+            const int modal = model.Create(UiKind::Window, 0, "probe");
+            model.Find(modal)->Modal = true;
+            const int modalBox = add(UiKind::Checkbox, modal, { VK_F4 });
+            tap({ { VK_F3 }, { VK_F4 } });
+            CHECK(model.Find(shownBox)->Bool); // behind the modal: not switched back
+            CHECK(model.Find(modalBox)->Bool);
+            model.Find(modal)->Open = false;
+            tap({ { VK_F3 } });
+            CHECK(!model.Find(shownBox)->Bool);
+            model.TakeEvents();
+
+            // an integer slider snaps to its step from min but never past max
+            Lua::UiNode snap;
+            snap.Kind = UiKind::Slider;
+            snap.Integer = true;
+            snap.HasMin = snap.HasMax = true;
+            snap.Min = 0.0;
+            snap.Max = 10.0;
+            snap.Step = 4.0;
+            CHECK(Lua::UiSnapValue(snap, 10.0) == 10.0); // was 12
+            CHECK(Lua::UiSnapValue(snap, 9.0) == 8.0);
+            CHECK(Lua::UiSnapValue(snap, 6.0) == 8.0);
+            CHECK(Lua::UiSnapValue(snap, 5.0) == 4.0);
+            snap.Min = 10.0; // min above max: the range the other way round
+            snap.Max = 0.0;
+            CHECK(Lua::UiValueRange(snap) == std::make_pair(0.0, 10.0));
+            CHECK(Lua::UiSnapValue(snap, 11.0) == 10.0);
+            snap.Integer = false;
+            snap.HasMin = snap.HasMax = false;
+            snap.Step = 0.25;
+            CHECK(Lua::UiSnapValue(snap, 0.6) == 0.5);
+            CHECK(Lua::UiSnapValue(snap, 7.0) == 1.0);
+            Lua::UiNode plain;
+            plain.Kind = UiKind::Number;
+            CHECK(Lua::UiClampValue(plain, -1.0e300) == -1.0e300);
+            plain.HasMin = plain.HasMax = true;
+            plain.Min = 5.0;
+            plain.Max = 1.0;
+            CHECK(Lua::UiClampValue(plain, 9.0) == 5.0);
+            CHECK(Lua::UiToInteger(std::nan("")) == 0);
+            CHECK(Lua::UiToInteger(1.0e300) == INT64_MAX && Lua::UiToInteger(-1.0e300) == INT64_MIN && Lua::UiToInteger(-2.9) == -2);
+
+            // inf and nan: not read from the editor's fields, not written into a form file
+            {
+                Lua::FormDocument form = Lua::NewForm("Finite");
+                const int number = Lua::FormAdd(form, UiKind::Number, form.Window);
+                Lua::UiNode& field = *form.Model.Find(number);
+                CHECK(Lua::FormSetProp(field, "width", "inf") && field.Width == 0.0f);
+                CHECK(Lua::FormSetProp(field, "max", "nan") && !field.HasMax);
+                CHECK(Lua::FormSetProp(field, "value", "-inf") && field.Number == 0.0);
+                field.Number = std::numeric_limits<double>::infinity();
+                field.HasMin = true;
+                field.Min = -std::numeric_limits<double>::infinity();
+                field.Width = std::numeric_limits<float>::quiet_NaN();
+                const int table = Lua::FormAdd(form, UiKind::Table, form.Window);
+                form.Model.Find(table)->Columns = { { "Name", std::numeric_limits<float>::infinity(), {} } };
+                const std::string saved = Lua::FormSave(form);
+                for (const char* written : { "= inf", "= -inf", "= nan", "= -nan" })
+                    CHECK_MSG(saved.find(written) == std::string::npos, saved);
+                Lua::FormDocument back;
+                std::string error;
+                CHECK_MSG(Lua::FormLoad(saved, back, error), error + "\n" + saved);
+                // a form file with 1e999 (inf to Lua) loads without it
+                CHECK_MSG(Lua::FormLoad("return { form = 1, title = \"Huge\", width = 1e999, children = { { kind = \"slider\", max = 1e999, value = -1e999 } } }", back, error), error);
+                const Lua::UiNode* slider = back.Model.Find(back.Model.Find(back.Window)->Children.front());
+                CHECK(slider && !slider->HasMax && std::isfinite(back.Model.Find(back.Window)->Width));
+            }
+            {
+                // the Cheat Engine importer: a NaN single and an infinite Extended are no values
+                std::vector<std::uint8_t> stream = { 'T', 'P', 'F', '0' };
+                const auto shortText = [&](std::string_view text) {
+                    stream.push_back(static_cast<std::uint8_t>(text.size()));
+                    stream.insert(stream.end(), text.begin(), text.end());
+                };
+                shortText("TCEForm");
+                shortText("UDF1");
+                shortText("Left");
+                stream.push_back(15); // vaSingle
+                const float notANumber = std::numeric_limits<float>::quiet_NaN();
+                const auto* bytes = reinterpret_cast<const std::uint8_t*>(&notANumber);
+                stream.insert(stream.end(), bytes, bytes + 4);
+                shortText("Top");
+                stream.push_back(5); // vaExtended: exponent 0x7FFF is infinity
+                stream.insert(stream.end(), { 0, 0, 0, 0, 0, 0, 0, 0x80, 0xFF, 0x7F });
+                stream.push_back(0); // end of the properties
+                stream.push_back(0); // no children
+                std::string error;
+                const std::optional<Table::CeComponent> root = Table::ReadCeComponents(stream, error);
+                CHECK_MSG(root, error);
+                if (root)
+                {
+                    CHECK(root->Find("Left") && root->Find("Left")->Type == Table::CeValue::Kind::Null);
+                    CHECK(root->Find("Top") && root->Find("Top")->Type == Table::CeValue::Kind::Null);
+                    CHECK(root->Integer("Left", 7) == 7);
+                }
+                // a list of a million and one nil items is refused, not read into gigabytes
+                std::vector<std::uint8_t> huge = { 'T', 'P', 'F', '0' };
+                for (const char* text : { "TCEForm", "UDF1", "Items" })
+                {
+                    huge.push_back(static_cast<std::uint8_t>(std::strlen(text)));
+                    huge.insert(huge.end(), text, text + std::strlen(text));
+                }
+                huge.push_back(1); // vaList
+                huge.insert(huge.end(), 1000001, std::uint8_t(13)); // vaNil
+                huge.push_back(0);
+                huge.push_back(0);
+                huge.push_back(0);
+                CHECK(!Table::ReadCeComponents(huge, error) && error.find("values") != std::string::npos);
+            }
+
+            // adding and removing rows keeps the selection on its row
+            LuaCheck(engine, "row selection", R"LUA(
+                local w = manifold.ui.window.create("Row Selection Probe", {})
+                local list = w.add("table", { columns = { "Name" }, rows = { { "a" }, { "b" }, { "c" } }, value = 2 })
+                list.addRow({ "first" }, 1)
+                if list.get() ~= 3 or list.getRow()[1] ~= "b" then return "insert above: " .. tostring(list.get()) end
+                list.addRow({ "last" })
+                if list.get() ~= 3 then return "insert below: " .. tostring(list.get()) end
+                list.removeRow(1)
+                if list.get() ~= 2 or list.getRow()[1] ~= "b" then return "remove above: " .. tostring(list.get()) end
+                list.removeRow(3)
+                if list.get() ~= 2 then return "remove below: " .. tostring(list.get()) end
+                list.removeRow(2)
+                if list.get() ~= nil then return "the removed row stayed selected: " .. tostring(list.get()) end
+                -- a full table takes no more rows instead of dropping one
+                local rows = {}
+                for i = 1, 100000 do rows[i] = { tostring(i) } end
+                list.update({ rows = rows })
+                if list.addRow({ "one too many" }, 1) ~= false then return "a full table took a row" end
+                local after = list.getRows()
+                if #after ~= 100000 or after[1][1] ~= "1" or after[100000][1] ~= "100000" then return "full table changed" end
+                w.remove()
+                return "ok")LUA");
+
+            // renaming a handler touches names and handlers, not members, strings, comments or the form's line
+            const std::string script =
+                "local ui = manifold.ui\n\n"
+                "local form = " + std::string(Lua::kFormStandIn) + "\n\n"
+                "local window, w\n"
+                "local handlers = {}\n\n"
+                "function handlers.goldChanged(value, widget)\n"
+                "  w.goldChanged.update({ text = \"goldChanged\" }) -- goldChanged in a comment\n"
+                "  local text = [[goldChanged]]\n"
+                "  obj:goldChanged()\n"
+                "  helper(handlers[\"goldChanged\"], goldChanged)\n"
+                "end\n\n"
+                "window, w = ui.form.build(form, handlers)\n";
+            const std::string renamed = Lua::FormRenameIdentifier(script, "goldChanged", "cashChanged");
+            const std::string expected =
+                "local ui = manifold.ui\n\n"
+                "local form = " + std::string(Lua::kFormStandIn) + "\n\n"
+                "local window, w\n"
+                "local handlers = {}\n\n"
+                "function handlers.cashChanged(value, widget)\n"
+                "  w.goldChanged.update({ text = \"goldChanged\" }) -- goldChanged in a comment\n"
+                "  local text = [[goldChanged]]\n"
+                "  obj:goldChanged()\n"
+                "  helper(handlers[\"cashChanged\"], cashChanged)\n"
+                "end\n\n"
+                "window, w = ui.form.build(form, handlers)\n";
+            CHECK_MSG(renamed == expected, renamed);
+            CHECK(Lua::FormViewIntact(renamed));
+            std::string why;
+            CHECK(!Lua::FormCanRenameIdentifier(script, "form", "layout", &why) && why.find("form") != std::string::npos);
+            CHECK(Lua::FormRenameIdentifier(script, "form", "layout") == script);
+            CHECK(!Lua::FormCanRenameIdentifier(script, "goldChanged", "form") && Lua::FormRenameIdentifier(script, "goldChanged", "form") == script);
+            CHECK(!Lua::FormCanRenameIdentifier(script, "goldChanged", "helper", &why) && why.find("used") != std::string::npos);
+            CHECK(!Lua::FormCanRenameIdentifier(script, "goldChanged", "handlers"));
+            CHECK(!Lua::FormCanRenameIdentifier(script, "goldChanged", "end"));
+            CHECK(Lua::FormRenameIdentifier(script, "build", "make") == script); // only a member here
+            // a full script: nothing inside the form table changes
+            const std::string full = "local form = { form = 1, title = \"goldChanged\", goldChanged = 1 }\nlocal function goldChanged() end\n";
+            CHECK(Lua::FormRenameIdentifier(full, "goldChanged", "cashChanged") == "local form = { form = 1, title = \"goldChanged\", goldChanged = 1 }\nlocal function cashChanged() end\n");
+        }
+
         void SnakeExample(Engine& engine)
         {
             Lua::UiModel& model = engine.Lua().Ui();
@@ -3079,6 +3394,7 @@ return M
         UiFormEditing();
         UiTrainer(engine);
         UiValueKeys(engine);
+        UiRuntimeLimits(engine);
         SnakeExample(engine);
         engine.CloseProcess();
         return Totals().Failures - before;

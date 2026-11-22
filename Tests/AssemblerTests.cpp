@@ -1,14 +1,23 @@
 #include "Asm/Assembler.h"
+#include "Asm/AutoAssembler.h"
+#include "Core/Errors.h"
+#include "Core/Text.h"
 #include "Disasm/Disassembler.h"
+#include "Disasm/OpcodeConvert.h"
+#include "Target/Process.h"
+#include "Target/Symbols.h"
 
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <process.h>
 
 #pragma warning(push, 0)
 #include "Zydis.h"
@@ -1047,6 +1056,192 @@ namespace Manifold::Tests
                 std::printf("FAIL unsized dec as dword: %s\n", unsized.Ok ? HexBytes(unsized.Bytes).c_str() : unsized.Message.c_str());
             }
         }
+
+        void Expect(Report& report, bool ok, std::string_view what, std::string_view got = {})
+        {
+            ++report.Cases;
+            if (!ok)
+            {
+                ++report.Failures;
+                std::printf("FAIL %.*s\n    got: %.*s\n", static_cast<int>(what.size()), what.data(), static_cast<int>(got.size()), got.data());
+            }
+        }
+
+        std::string AaOutcome(const Asm::AaResult& result)
+        {
+            return result.Ok() ? std::string("ok") : "line " + std::to_string(result.Line) + ": " + result.Error.Text;
+        }
+
+        void TestSizeWordsOnImmediates(Report& report)
+        {
+            // the size word on a lone immediate is an operand size only for push; ret word 8 was a
+            // 16-bit return (66 C2) and push byte 5 is the 6A form
+            ExpectBytes(report, "ret word 8", Mode64(), "C2 08 00");
+            ExpectBytes(report, "ret word 8", Mode32(), "C2 08 00");
+            ExpectBytes(report, "push byte 5", Mode64(), "6A 05");
+            ExpectBytes(report, "push byte 5", Mode32(), "6A 05");
+            ExpectBytes(report, "push word 1234", Mode64(), "66 68 34 12");
+        }
+
+        void TestOpcodeByteText(Report& report)
+        {
+            using Bytes = std::vector<std::uint8_t>;
+            const auto parsed = [](std::string_view text) { return Disasm::ParseByteText(text); };
+            // every \x or 0x is a group of its own, padded like a lone digit
+            Expect(report, parsed("\\x1\\x2") == std::optional<Bytes>(Bytes{ 0x01, 0x02 }), "ParseByteText(\\x1\\x2) is 01 02");
+            Expect(report, parsed("\\x1\\x23\\x4") == std::optional<Bytes>(Bytes{ 0x01, 0x23, 0x04 }), "ParseByteText(\\x1\\x23\\x4) is 01 23 04");
+            Expect(report, parsed("0x1,0x2") == std::optional<Bytes>(Bytes{ 0x01, 0x02 }), "ParseByteText(0x1,0x2) is 01 02");
+            Expect(report, parsed("48\\x8B") == std::optional<Bytes>(Bytes{ 0x48, 0x8B }), "ParseByteText(48\\x8B) is 48 8B");
+            Expect(report, parsed("\\x48\\x8B\\x05") == std::optional<Bytes>(Bytes{ 0x48, 0x8B, 0x05 }), "ParseByteText(\\x48\\x8B\\x05) is 48 8B 05");
+            // a prefix without digits is an error, not nothing
+            std::string error;
+            Expect(report, !Disasm::ParseByteText("0x", &error).has_value() && !error.empty(), "ParseByteText(0x) fails", error);
+            Expect(report, !Disasm::ParseByteText("90 0x", &error).has_value(), "ParseByteText(90 0x) fails", error);
+            Expect(report, !Disasm::ParseByteText("\\x\\x41", &error).has_value(), "ParseByteText(\\x\\x41) fails", error);
+            Expect(report, !Disasm::ParseByteText("\\x123", &error).has_value(), "ParseByteText(\\x123) fails (odd digits)", error);
+        }
+
+        // Syntax checks (no process), like CE's syntax check of the script editor.
+        void TestAutoAssemblerChecks(Report& report)
+        {
+            Asm::AaHost host;
+            Asm::AaOptions options;
+            options.CheckOnly = true;
+            const auto check = [&](std::string_view script) {
+                Asm::AaMemory memory;
+                return Asm::RunAutoAssembler(script, host, memory, options);
+            };
+
+            // a label the code uses but never places fails instead of jumping to a guessed address
+            Asm::AaResult result = check("alloc(cave,$100)\nlabel(returnhere)\ncave:\njmp returnhere\nreturnhre:\nret\n");
+            Expect(report, !result.Ok() && result.Error.Code == ErrorCode::AaLabelNotPlaced && result.Line == 4, "used label that is never placed fails at its use", AaOutcome(result));
+            result = check("alloc(cave,$100)\nlabel(back)\ncave:\ndq back\n");
+            Expect(report, !result.Ok() && result.Error.Code == ErrorCode::AaLabelNotPlaced, "label used by dq and never placed fails", AaOutcome(result));
+            result = check("alloc(cave,$100)\nlabel(unused)\ncave:\nret\n");
+            Expect(report, result.Ok(), "an unused label that is never placed stays allowed", AaOutcome(result));
+            result = check("alloc(cave,$100)\nlabel(later)\ncave:\njmp later\nnop\nlater:\nret\n");
+            Expect(report, result.Ok(), "a forward reference to a placed label is fine", AaOutcome(result));
+
+            // alloc sizes above 7FFFFFFF are refused; they wrapped the 16-byte rounding
+            result = check("alloc(huge,$FFFFFFFFFFFFFFF8)\nalloc(next,$10)\n");
+            Expect(report, !result.Ok() && result.Error.Code == ErrorCode::AaBadArguments, "alloc of FFFFFFFFFFFFFFF8 bytes fails", AaOutcome(result));
+            result = check("globalalloc(huge,$80000000)\n");
+            Expect(report, !result.Ok() && result.Error.Code == ErrorCode::AaBadArguments, "globalalloc of 80000000 bytes fails", AaOutcome(result));
+            result = check("alloc(a,$7FFFFFFF)\nalloc(b,$7FFFFFFF)\na:\nret\nb:\nret\n");
+            Expect(report, result.Ok(), "two allocs of 7FFFFFFF bytes are fine in a syntax check", AaOutcome(result));
+
+            // @f/@b inside a quoted string are text, not anonymous labels
+            result = check("alloc(cave,$100)\ncave:\ndb '@f',0\ndb \"@b\",0\n");
+            Expect(report, result.Ok(), "db '@f' is a string", AaOutcome(result));
+            result = check("alloc(cave,$100)\ncave:\njmp @f\ndb '@f',0\n@@:\nret\n");
+            Expect(report, result.Ok(), "jmp @f next to db '@f'", AaOutcome(result));
+
+            // {$try}/{$lua} that come from a custom command or a {$lua} block are not dropped
+            host.IsCustomCommand = [](std::string_view name) { return EqualsNoCase(name, "MakeTry"); };
+            host.RunCustomCommand = [](std::string_view, std::string_view, bool, std::string& output) -> Status
+                {
+                    output = "{$try}\nnop\n{$except}\nret\n";
+                    return Status::Success();
+                };
+            result = check("alloc(cave,$100)\ncave:\nMakeTry(1)\n");
+            Expect(report, !result.Ok() && result.Error.Text.find("{$try}") != std::string::npos && result.Line == 3, "{$try} from a custom command is refused", AaOutcome(result));
+            host.IsCustomCommand = nullptr;
+            host.RunCustomCommand = nullptr;
+            host.RunLua = [](std::string_view, bool, std::string& output) -> Status
+                {
+                    output = "{$lua}\nreturn 1\n";
+                    return Status::Success();
+                };
+            result = check("{$lua}\nreturn 'x'\n{$asm}\nnop\n");
+            Expect(report, !result.Ok() && result.Error.Text.find("{$lua}") != std::string::npos, "{$lua} in the output of {$lua} is refused", AaOutcome(result));
+            host.RunLua = [](std::string_view, bool, std::string& output) -> Status
+                {
+                    output = "{$strict}\n";
+                    return Status::Success();
+                };
+            result = check("{$lua}\nreturn 'x'\n{$asm}\nalloc(cave,$100)\ncave:\njmp skip\nskip:\nret\n");
+            Expect(report, !result.Ok(), "{$strict} from {$lua} output turns implicit labels off", AaOutcome(result));
+            host.RunLua = nullptr;
+        }
+
+        // Real runs in this process (allocations and writes only in memory the script allocates).
+        void TestAutoAssemblerRuns(Report& report)
+        {
+            auto opened = Target::Process::Open(MakeProcessId(static_cast<std::uint32_t>(_getpid())));
+            Expect(report, opened.Ok(), "open this process");
+            if (!opened.Ok())
+                return;
+            const std::shared_ptr<Target::Process> process = *opened;
+            Target::Symbols symbols;
+            symbols.Attach(process);
+            Asm::AaHost host;
+            host.Process = process.get();
+            host.Symbols = &symbols;
+            Asm::AaOptions options;
+            options.Owner = "assembler-test";
+            const auto cave = [](const Asm::AaMemory& memory, const char* name) -> std::uint64_t {
+                std::uint64_t found = 0;
+                for (const Asm::AaAllocation& allocation : memory.Allocations)
+                {
+                    if (EqualsNoCase(allocation.Name, name))
+                        found = allocation.Address;
+                }
+                return found;
+            };
+            const auto release = [&](Asm::AaMemory& memory) {
+                for (const Asm::AaAllocation& allocation : memory.Allocations)
+                    process->Free(allocation.Block);
+                memory.Allocations.clear();
+            };
+            const auto written = [](const Asm::AaResult& result, std::uint64_t address, std::size_t size) {
+                for (const Asm::AaWrite& write : result.Writes)
+                {
+                    if (address >= write.Address && address + size <= write.Address + write.Bytes.size())
+                        return std::vector<std::uint8_t>(write.Bytes.begin() + static_cast<std::ptrdiff_t>(address - write.Address),
+                            write.Bytes.begin() + static_cast<std::ptrdiff_t>(address - write.Address + size));
+                }
+                return std::vector<std::uint8_t>{};
+            };
+
+            {
+                // an implicit label is this run's: the second run of the same memory (the Auto Assemble
+                // window keeps one) put "skip:" at the first run's address and wrote into the old block
+                Asm::AaMemory memory;
+                const char* script = "alloc(cave,$100)\ncave:\nje skip\nnop\nskip:\nret\n";
+                const Asm::AaResult first = Asm::RunAutoAssembler(script, host, memory, options);
+                Expect(report, first.Ok(), "first run of an implicit label", AaOutcome(first));
+                const std::uint64_t old = cave(memory, "cave");
+                const Asm::AaResult second = Asm::RunAutoAssembler(script, host, memory, options);
+                Expect(report, second.Ok(), "second run of an implicit label", AaOutcome(second));
+                const std::uint64_t now = cave(memory, "cave");
+                bool inside = now != 0 && now != old && !second.Writes.empty();
+                for (const Asm::AaWrite& write : second.Writes)
+                    inside = inside && write.Address >= now && write.Address + write.Bytes.size() <= now + 0x100;
+                Expect(report, inside, "the second run writes only into its own allocation");
+                Expect(report, HexBytes(written(second, now, 8)) == "0F 84 01 00 00 00 90 C3", "the second run's je goes to its own skip", HexBytes(written(second, now, 8)));
+                release(memory);
+            }
+            {
+                // registersymbol(flag) with flag: and no label() is a label on the real pass too, as in
+                // the syntax check
+                Asm::AaMemory memory;
+                const Asm::AaResult result = Asm::RunAutoAssembler("alloc(cave,$100)\nregistersymbol(aaTestFlag)\ncave:\nret\naaTestFlag:\ndb 0\n", host, memory, options);
+                Expect(report, result.Ok(), "registersymbol of an implicit label", AaOutcome(result));
+                const auto registered = result.Symbols.find("aaTestFlag");
+                Expect(report, registered != result.Symbols.end() && registered->second == cave(memory, "cave") + 1, "the implicit label is registered at its place");
+                symbols.Unregister("aaTestFlag");
+                release(memory);
+            }
+            {
+                // a used label that is never placed (its line deleted) writes nothing and frees what it
+                // allocated; it was a jump to a guessed address
+                Asm::AaMemory memory;
+                const Asm::AaResult result = Asm::RunAutoAssembler("alloc(cave,$100)\nlabel(returnhere)\ncave:\njmp returnhere\nret\n", host, memory, options);
+                Expect(report, !result.Ok() && result.Error.Code == ErrorCode::AaLabelNotPlaced && result.Writes.empty() && memory.Allocations.empty(),
+                    "a used label that is never placed fails on the real pass", AaOutcome(result));
+                release(memory);
+            }
+        }
     }
 
     int RunAssemblerTests()
@@ -1067,6 +1262,10 @@ namespace Manifold::Tests
         TestErrors(report);
         TestRoundTrip(report);
         TestDisassemblyAssemblesBack(report);
+        TestSizeWordsOnImmediates(report);
+        TestOpcodeByteText(report);
+        TestAutoAssemblerChecks(report);
+        TestAutoAssemblerRuns(report);
         ++report.Cases;
         if (Asm::ErrorName(AsmError::OutOfRange) != "OutOfRange" || Asm::ErrorName(AsmError::None) != "None")
         {

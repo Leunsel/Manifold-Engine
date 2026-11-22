@@ -55,6 +55,7 @@ namespace Manifold::Target
         Status RemoveLocked();
         Status Watch();
         Status Call(std::uint32_t operation);
+        Status Settle(bool& shifted);
         bool Adopt();
         bool Usable() const;
         void DropAgent();

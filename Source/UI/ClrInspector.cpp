@@ -433,7 +433,9 @@ namespace Manifold::UI
 
     void ClrInspector::Inspect(const Page& page)
     {
-        const Target::ManagedObject& object = *m_current;
+        // A copy: a click on a reference opens the next object, which drops
+        // m_current while the rows of this one are still being drawn.
+        const Target::ManagedObject object = *m_current;
         if (object.Kind == Target::ManagedObjectKind::String)
         {
             const auto text = ClrStringText(*m_engine.Process(), page.Address, 65536);

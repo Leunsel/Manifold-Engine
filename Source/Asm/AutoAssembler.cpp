@@ -24,6 +24,7 @@ namespace Manifold::Asm
         constexpr int kMaxLayoutPasses = 12;
         constexpr std::uint64_t kCheckOnlyBase = 0x0000000010000000ull;
         constexpr std::uint64_t kForwardGuess = 0x10000;
+        constexpr std::uint64_t kMaxAllocSize = 0x7FFFFFFF;
 
         struct SourceLine
         {
@@ -107,11 +108,14 @@ namespace Manifold::Asm
             return "__anonymous_" + std::to_string(index);
         }
 
+        // ∑ The same rule as Collect's place statements: a line with a quote in it is data
+        //   (db 'a:'), except a quoted module name at the start ("game.exe"+10:).
         bool IsPlaceLine(const std::string& text)
         {
-            return text.size() > 1 && text.back() == ':';
+            return text.size() > 1 && text.back() == ':' && text.find('\'') == std::string::npos && (text.find('"') == std::string::npos || text.front() == '"');
         }
 
+        // ∑ Quoted text is one token (as in ReplaceWord), so db '@f' stays the two characters.
         std::string ReplaceAnonymous(const std::string& text, bool forward, const std::string& label)
         {
             const char lower = forward ? 'f' : 'b';
@@ -119,6 +123,14 @@ namespace Manifold::Asm
             std::string result;
             for (std::size_t at = 0; at < text.size();)
             {
+                if (text[at] == '\'' || text[at] == '"')
+                {
+                    const std::size_t close = text.find(text[at], at + 1);
+                    const std::size_t end = close == std::string::npos ? text.size() : close + 1;
+                    result.append(text, at, end - at);
+                    at = end;
+                    continue;
+                }
                 const bool start = at == 0 || !AnonymousNameChar(text[at - 1]);
                 if (start && at + 1 < text.size() && text[at] == '@' && (text[at + 1] == lower || text[at + 1] == upper) &&
                     (at + 2 >= text.size() || !AnonymousNameChar(text[at + 2])))
@@ -139,10 +151,7 @@ namespace Manifold::Asm
         {
             bool used = false;
             for (const SourceLine& line : lines)
-            {
-                const std::string lower = Lower(line.Text);
-                used = used || line.Text == "@@:" || lower.find("@f") != std::string::npos || lower.find("@b") != std::string::npos;
-            }
+                used = used || line.Text == "@@:" || ReplaceAnonymous(line.Text, true, "") != line.Text || ReplaceAnonymous(line.Text, false, "") != line.Text;
             if (!used)
                 return true;
             std::vector<std::string> places;
@@ -647,54 +656,8 @@ namespace Manifold::Asm
                     return Fail(ErrorCode::AaNoSections, 0, "");
 
                 std::string text;
-                const std::string lower = Lower(sectioned);
-                std::size_t at = 0;
-                while (at < sectioned.size())
-                {
-                    const std::size_t luaStart = FindLuaBlock(lower, at);
-                    const std::size_t asmEnd = luaStart == std::string::npos ? sectioned.size() : luaStart;
-                    const Directives directives = ScanDirectives(std::string_view(lower).substr(at, asmEnd - at));
-                    m_strict = m_strict || directives.Strict;
-                    if (!directives.Unsupported.empty())
-                    {
-                        const std::size_t where = lower.find(directives.Unsupported, at);
-                        const int line = static_cast<int>(std::count(sectioned.begin(), sectioned.begin() + static_cast<std::ptrdiff_t>(where == std::string::npos ? at : where), '\n')) + 1;
-                        return Fail(ErrorCode::AaUnknownCommand, line, directives.Unsupported + " is not supported yet; the script would run without it", directives.Unsupported);
-                    }
-                    if (luaStart == std::string::npos)
-                    {
-                        text += StripComments(std::string_view(sectioned).substr(at));
-                        break;
-                    }
-                    text += StripComments(std::string_view(sectioned).substr(at, luaStart - at));
-                    const std::size_t codeStart = luaStart + 6;
-                    std::size_t luaEnd = lower.find("{$asm}", codeStart);
-                    if (luaEnd == std::string::npos)
-                        luaEnd = sectioned.size();
-                    const std::string_view code = std::string_view(sectioned).substr(codeStart, luaEnd - codeStart);
-                    const int lineCount = static_cast<int>(std::count(code.begin(), code.end(), '\n'));
-                    const int startLine = static_cast<int>(std::count(sectioned.begin(), sectioned.begin() + static_cast<std::ptrdiff_t>(luaStart), '\n')) + 1;
-                    if (!m_host.RunLua)
-                        return Fail(ErrorCode::AaLuaFailed, startLine, "Lua is not available");
-                    std::string output;
-                    const Status status = m_host.RunLua(code, m_options.CheckOnly, output);
-                    if (!status)
-                    {
-                        m_result.Error = Status::Fail(ErrorCode::AaLuaFailed, status.Text);
-                        m_result.Line = startLine;
-                        return false;
-                    }
-                    for (char& c : output)
-                    {
-                        if (c == '\r')
-                            c = ' ';
-                    }
-                    const int outputLines = static_cast<int>(std::count(output.begin(), output.end(), '\n'));
-                    text += StripComments(output);
-                    for (int i = outputLines; i < lineCount; ++i)
-                        text += '\n';
-                    at = luaEnd == sectioned.size() ? luaEnd : luaEnd + 6;
-                }
+                if (!ProcessText(sectioned, 0, true, "", text))
+                    return false;
 
                 std::vector<SourceLine> selected;
                 const std::vector<std::string> lines = SplitLines(text);
@@ -713,6 +676,10 @@ namespace Manifold::Asm
                     if (EqualsNoCase(line.Text, "[32-bit]") || EqualsNoCase(line.Text, "[64-bit]") || EqualsNoCase(line.Text, "[/32-bit]") || EqualsNoCase(line.Text, "[/64-bit]"))
                         return Fail(ErrorCode::AaUnknownCommand, line.Line, "[32-bit]/[64-bit] blocks are not supported", line.Text);
                 }
+                // ∑ @f/@b before the custom commands, on purpose: CE's autoassemble2 runs
+                //   removecomments and unlabeledlabels on the whole script before its first pass
+                //   expands registered commands line by line, so a place line a custom command
+                //   produces is not an @f target there either.
                 std::string problem;
                 int problemLine = 0;
                 if (!ResolveAnonymousLabels(included, problem, problemLine))
@@ -725,6 +692,11 @@ namespace Manifold::Asm
                 // ∑ CE applies defines in script order (autoassembler.pas 2004-2050): a define counts
                 //   from its own line on, its value already has the earlier defines applied (so
                 //   define(b,a+4) works), and a second define of the same name replaces the value.
+                //   "The same name" ignores case (CE compares uppercase(defines[j].name)), and the
+                //   entry keeps its first spelling; the substitution itself is case-sensitive like
+                //   CE's replacetoken. So define(Foo,1) and define(FOO,2) are one define, and
+                //   m_defines (keyed by the lower-case name) has one entry for it instead of two
+                //   names fighting over one key.
                 std::vector<std::pair<std::string, std::string>> defines;
                 for (SourceLine line : expanded)
                 {
@@ -740,7 +712,7 @@ namespace Manifold::Asm
                             value += "," + command->Arguments[extra];
                         for (const auto& [name, earlier] : defines)
                             value = ReplaceWord(value, name, earlier);
-                        const auto same = std::find_if(defines.begin(), defines.end(), [&](const auto& define) { return define.first == command->Arguments[0]; });
+                        const auto same = std::find_if(defines.begin(), defines.end(), [&](const auto& define) { return EqualsNoCase(define.first, command->Arguments[0]); });
                         if (same != defines.end())
                             same->second = value;
                         else
@@ -759,6 +731,77 @@ namespace Manifold::Asm
                 return true;
             }
 
+            // ∑ Runs the {$lua} blocks of one text, scans its {$...} directives and strips its
+            //   comments, appending the result to text. Included files, custom-command output and
+            //   {$lua} output go through the same scan as the script itself: before, the comment
+            //   stripper dropped every {$...} in them, so an include with {$try} ran without its
+            //   handler and an included {$strict} was ignored. CE runs Lua only in the script
+            //   (luacode comes before includes and custom commands are expanded, and an include
+            //   only gets removecomments and unlabeledlabels), so {$lua} anywhere else is refused
+            //   instead of being run or dropped. fixedLine is the script line every error in a
+            //   text that is not the script itself is reported at (0: count lines in source).
+            bool ProcessText(std::string_view source, int fixedLine, bool allowLua, const std::string& origin, std::string& text)
+            {
+                const std::string lower = Lower(source);
+                const auto lineAt = [&](std::size_t offset) {
+                    if (fixedLine)
+                        return fixedLine;
+                    return static_cast<int>(std::count(source.begin(), source.begin() + static_cast<std::ptrdiff_t>(std::min(offset, source.size())), '\n')) + 1;
+                };
+                const std::string in = origin.empty() ? std::string() : " in " + origin;
+                std::size_t at = 0;
+                while (at < source.size())
+                {
+                    const std::size_t luaStart = FindLuaBlock(lower, at);
+                    const std::size_t asmEnd = luaStart == std::string::npos ? source.size() : luaStart;
+                    const Directives directives = ScanDirectives(std::string_view(lower).substr(at, asmEnd - at));
+                    m_strict = m_strict || directives.Strict;
+                    if (!directives.Unsupported.empty())
+                    {
+                        const std::size_t where = lower.find(directives.Unsupported, at);
+                        return Fail(ErrorCode::AaUnknownCommand, lineAt(where == std::string::npos ? at : where),
+                            directives.Unsupported + in + " is not supported yet; the script would run without it", directives.Unsupported);
+                    }
+                    if (luaStart == std::string::npos)
+                    {
+                        text += StripComments(source.substr(at));
+                        break;
+                    }
+                    if (!allowLua)
+                        return Fail(ErrorCode::AaUnknownCommand, lineAt(luaStart), "{$lua}" + in + " is not supported; Cheat Engine runs {$lua} blocks only in the script itself", "{$lua}");
+                    text += StripComments(source.substr(at, luaStart - at));
+                    const std::size_t codeStart = luaStart + 6;
+                    std::size_t luaEnd = lower.find("{$asm}", codeStart);
+                    if (luaEnd == std::string::npos)
+                        luaEnd = source.size();
+                    const std::string_view code = source.substr(codeStart, luaEnd - codeStart);
+                    const int lineCount = static_cast<int>(std::count(code.begin(), code.end(), '\n'));
+                    const int startLine = lineAt(luaStart);
+                    if (!m_host.RunLua)
+                        return Fail(ErrorCode::AaLuaFailed, startLine, "Lua is not available");
+                    std::string output;
+                    const Status status = m_host.RunLua(code, m_options.CheckOnly, output);
+                    if (!status)
+                    {
+                        m_result.Error = Status::Fail(ErrorCode::AaLuaFailed, status.Text);
+                        m_result.Line = startLine;
+                        return false;
+                    }
+                    for (char& c : output)
+                    {
+                        if (c == '\r')
+                            c = ' ';
+                    }
+                    const int outputLines = static_cast<int>(std::count(output.begin(), output.end(), '\n'));
+                    if (!ProcessText(output, startLine, false, "the output of a {$lua} block", text))
+                        return false;
+                    for (int i = outputLines; i < lineCount; ++i)
+                        text += '\n';
+                    at = luaEnd == source.size() ? luaEnd : luaEnd + 6;
+                }
+                return true;
+            }
+
             bool ExpandCustomCommands(const std::vector<SourceLine>& lines, std::vector<SourceLine>& out, std::vector<std::pair<std::string, std::string>>& seen, int depth)
             {
                 for (const SourceLine& line : lines)
@@ -774,7 +817,7 @@ namespace Manifold::Asm
                                 value += "," + command->Arguments[extra];
                             for (const auto& [defined, earlier] : seen)
                                 value = ReplaceWord(value, defined, earlier);
-                            const auto same = std::find_if(seen.begin(), seen.end(), [&](const auto& define) { return define.first == command->Arguments[0]; });
+                            const auto same = std::find_if(seen.begin(), seen.end(), [&](const auto& define) { return EqualsNoCase(define.first, command->Arguments[0]); });
                             if (same != seen.end())
                                 same->second = value;
                             else
@@ -799,8 +842,11 @@ namespace Manifold::Asm
                         m_result.Line = line.Line;
                         return false;
                     }
+                    std::string stripped;
+                    if (!ProcessText(replacement, line.Line, false, "the output of " + name, stripped))
+                        return false;
                     std::vector<SourceLine> produced;
-                    for (const std::string& text : SplitLines(StripComments(replacement)))
+                    for (const std::string& text : SplitLines(stripped))
                     {
                         const std::string trimmed = Trim(text);
                         if (!trimmed.empty())
@@ -836,8 +882,11 @@ namespace Manifold::Asm
                     }
                     std::stringstream content;
                     content << file.rdbuf();
+                    std::string stripped;
+                    if (!ProcessText(content.str(), line.Line, false, "the included file " + WideToUtf8(path.filename().wstring()), stripped))
+                        return false;
                     std::vector<SourceLine> included;
-                    for (const std::string& text : SplitLines(StripComments(content.str())))
+                    for (const std::string& text : SplitLines(stripped))
                     {
                         const std::string trimmed = Trim(text);
                         if (!trimmed.empty())
@@ -854,7 +903,7 @@ namespace Manifold::Asm
                 for (const SourceLine& line : lines)
                 {
                     const std::string& text = line.Text;
-                    if (text.size() > 1 && text.back() == ':' && text.find('\'') == std::string::npos && (text.find('"') == std::string::npos || text.front() == '"'))
+                    if (IsPlaceLine(text))
                     {
                         Statement statement;
                         statement.Type = Statement::Kind::Place;
@@ -924,19 +973,31 @@ namespace Manifold::Asm
                         continue;
                     if (std::all_of(name.begin(), name.end(), [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; }))
                         continue;
-                    if (KnownName(name))
+                    // ∑ Only what this run knows decides that a name is an address: CE resolves labels
+                    //   anew on every run. The values that earlier runs left in m_memory.Values (every
+                    //   placed label of the Auto Assemble window's runs, the [ENABLE] part's labels in
+                    //   its [DISABLE] part) made "skip:" an address line on the second run, so the code
+                    //   after it went into the old, live block.
+                    //   The same goes for a symbol an earlier run of this memory registered and this
+                    //   run registers again (registersymbol(flag) with flag:): it is this run's label,
+                    //   and Finish moves the symbol to it.
+                    if (KnownName(name, false))
                         continue;
-                    if (m_host.Symbols && m_host.Symbols->Evaluate(name, Extra()).Ok())
+                    const auto matches = [&](const std::string& other) { return EqualsNoCase(other, name); };
+                    const bool registeredHere = std::any_of(m_register.begin(), m_register.end(), [&](const auto& registered) { return matches(registered.first); });
+                    const bool reRegistered = registeredHere && std::any_of(m_memory.Registered.begin(), m_memory.Registered.end(), matches);
+                    if (!reRegistered && m_host.Symbols && m_host.Symbols->Evaluate(name, Extra(false)).Ok())
                         continue;
                     // ∑ Stricter than CE on the real pass: the name must also be used by the code (a
-                    //   jump to it). A bare "Hook:" whose symbol is missing, say in a [DISABLE] part
-                    //   after a failed enable, would otherwise become a label at the current address
-                    //   and write the original bytes to the wrong place.
+                    //   jump to it) or registered by registersymbol, as the syntax check accepts it.
+                    //   A bare "Hook:" whose symbol is missing, say in a [DISABLE] part after a failed
+                    //   enable, would otherwise become a label at the current address and write the
+                    //   original bytes to the wrong place.
                     if (!m_options.CheckOnly)
                     {
                         const bool used = std::any_of(m_statements.begin(), m_statements.end(), [&](const Statement& other) {
                             return other.Type == Statement::Kind::Code && ReplaceWord(Lower(other.Text), key, "\x02") != Lower(other.Text);
-                        });
+                        }) || registeredHere;
                         if (!used)
                             continue;
                     }
@@ -972,6 +1033,11 @@ namespace Manifold::Asm
                     const auto size = ParseSize(command.Arguments[1]);
                     if (!size || *size == 0)
                         return Fail(ErrorCode::AaBadArguments, line.Line, "the size of alloc is not a number", line.Text);
+                    // ∑ CE reads the size with StrToInt, a 32-bit Integer, so nothing above 7FFFFFFF
+                    //   gets through there. Here a bigger one wrapped (size+15)&~15 to a few bytes, and
+                    //   the next alloc of the group was placed inside it.
+                    if (*size > kMaxAllocSize)
+                        return Fail(ErrorCode::AaBadArguments, line.Line, "the size of alloc is too large (at most 7FFFFFFF bytes)", line.Text);
                     if (!DeclareName(command.Arguments[0], line.Line, line.Text))
                         return false;
                     PendingAlloc alloc;
@@ -1110,7 +1176,9 @@ namespace Manifold::Asm
                 return Fail(ErrorCode::AaUnknownCommand, line.Line, "unknown command " + name, line.Text);
             }
 
-            std::optional<std::uint64_t> KnownName(std::string_view name) const
+            // earlierValues: also the labels and scan results earlier runs left in m_memory.Values
+            // (the allocations of earlier runs always count; dealloc and the [DISABLE] part need them).
+            std::optional<std::uint64_t> KnownName(std::string_view name, bool earlierValues = true) const
             {
                 const std::string key = Lower(name);
                 if (const auto found = m_values.find(key); found != m_values.end())
@@ -1122,14 +1190,16 @@ namespace Manifold::Asm
                     if (EqualsNoCase(allocation.Name, name))
                         return allocation.Address;
                 }
+                if (!earlierValues)
+                    return std::nullopt;
                 if (const auto found = m_memory.Values.find(key); found != m_memory.Values.end() && !m_labels.count(key))
                     return found->second;
                 return std::nullopt;
             }
 
-            Target::ExtraResolver Extra() const
+            Target::ExtraResolver Extra(bool earlierValues = true) const
             {
-                return [this](std::string_view name) -> std::optional<std::uint64_t> { return KnownName(name); };
+                return [this, earlierValues](std::string_view name) -> std::optional<std::uint64_t> { return KnownName(name, earlierValues); };
             }
 
             bool PrepareLibraries()
@@ -1275,11 +1345,20 @@ namespace Manifold::Asm
                 for (const Group& group : groups)
                 {
                     const auto& members = group.Members;
+                    const PendingAlloc& first = *members.front();
+                    // ∑ Each size is at most 7FFFFFFF (HandleCommand), but a group adds them up: the
+                    //   sum must not wrap, and it must fit the address space of the target (4 GB for
+                    //   a WOW64 one).
+                    const std::uint64_t limit = m_is64 ? (~0ull >> 1) : 0xFFFFFFFFull;
                     std::uint64_t total = 0;
                     for (PendingAlloc* alloc : members)
-                        total += (alloc->Size + 15) & ~15ull;
+                    {
+                        const std::uint64_t rounded = (alloc->Size + 15) & ~15ull;
+                        if (rounded > limit - total)
+                            return Fail(ErrorCode::AaBadArguments, alloc->Line, "the allocations of this group are too large together");
+                        total += rounded;
+                    }
                     const std::uint64_t nearAddress = group.Near.value_or(0);
-                    const PendingAlloc& first = *members.front();
                     std::uint64_t block = 0;
                     if (!m_options.CheckOnly && !m_host.Process)
                         return Fail(ErrorCode::NoProcess, first.Line, "");
@@ -1379,6 +1458,7 @@ namespace Manifold::Asm
                 {
                     m_placed.clear();
                     m_output.clear();
+                    m_unplacedUses.clear();
                     std::optional<std::uint64_t> current;
                     bool changed = false;
                     for (std::size_t i = 0; i < m_statements.size(); ++i)
@@ -1463,16 +1543,25 @@ namespace Manifold::Asm
                     }
                     if (!changed && m_placed == previousLabels)
                     {
+                        // ∑ A label the code uses but never places was assembled against a guess
+                        //   (the previous pass, or a few bytes ahead), so label(returnhere) with a
+                        //   typo in its "returnhere:" line wrote a jump to a made-up address into the
+                        //   game. Every label the last pass asked for that is still not placed fails,
+                        //   like a registered one. CE goes further and refuses any label() whose
+                        //   "name:" line is missing (rsLabelIsNotDefinedInTheScript); an unused one
+                        //   stays allowed here, which shared headers and the program's own checks
+                        //   rely on.
                         for (const auto& [key, label] : m_labels)
                         {
-                            if (!m_placed.count(key))
-                            {
-                                bool used = false;
-                                for (const auto& [symbol, line] : m_register)
-                                    used = used || EqualsNoCase(symbol, label);
-                                if (used)
-                                    return Fail(ErrorCode::AaLabelNotPlaced, 0, label);
-                            }
+                            if (m_placed.count(key))
+                                continue;
+                            if (const auto use = m_unplacedUses.find(key); use != m_unplacedUses.end())
+                                return Fail(ErrorCode::AaLabelNotPlaced, use->second, label);
+                            bool used = false;
+                            for (const auto& [symbol, line] : m_register)
+                                used = used || EqualsNoCase(symbol, label);
+                            if (used)
+                                return Fail(ErrorCode::AaLabelNotPlaced, 0, label);
                         }
                         return true;
                     }
@@ -1529,6 +1618,8 @@ namespace Manifold::Asm
                             return { SymbolState::Known, placed->second };
                         if (m_labels.count(key))
                         {
+                            // A forward reference is placed later in the pass; Layout checks the rest.
+                            m_unplacedUses.emplace(key, statement.Line);
                             if (const auto before = previousLabels.find(key); before != previousLabels.end())
                                 return { SymbolState::Known, before->second };
                             return { SymbolState::Known, farGuess ? address + kForwardGuess : address + 0x10 };
@@ -1654,7 +1745,15 @@ namespace Manifold::Asm
                     const auto size = ParseSize(access.Size);
                     if (!address.Ok() || !size)
                         return Fail(ErrorCode::AaBadArguments, access.Line, "fullaccess(address, size) got an invalid address or size");
-                    m_host.Process->Protect(*address.Value, static_cast<std::size_t>(*size), PAGE_EXECUTE_READWRITE);
+                    // ∑ CE calls virtualprotectex for fullaccess and ignores the result, so a failure
+                    //   does not stop the script here either; it is no longer silent, though. The old
+                    //   protection is not put back on a later failure: CE never restores it.
+                    if (!m_host.Process->Protect(*address.Value, static_cast<std::size_t>(*size), PAGE_EXECUTE_READWRITE))
+                    {
+                        const std::string message = "fullaccess(" + access.Address + ", " + access.Size + "): could not make " + Hex(*address.Value) + " writable and executable";
+                        LOG_WARN("Auto Assembler", message);
+                        m_result.Notes.push_back(message);
+                    }
                 }
 
                 std::vector<AaWrite> merged;
@@ -1669,27 +1768,38 @@ namespace Manifold::Asm
                 // ∑ A failed write must not leave the earlier ones behind: Abort frees this run's
                 //   allocations, and a hook already written into the game would then jump into freed
                 //   memory. The bytes each write replaces are kept, and on a failure every finished
-                //   write is put back (newest first) before the error is returned.
+                //   write is put back (newest first) before the error is returned. The original is
+                //   read before each write: a range whose bytes cannot be read could not be put
+                //   back, so it fails before anything is written to it, and the failing write
+                //   itself is undone too (Process::Write can copy part of the range before it
+                //   fails, and that part stayed in the game).
                 std::vector<AaWrite> undo;
+                const auto restore = [&]() {
+                    for (auto done = undo.rbegin(); done != undo.rend(); ++done)
+                    {
+                        if (!m_host.Process->Write(done->Address, done->Bytes))
+                            LOG_WARN("Auto Assembler", "Could not restore the bytes at " + Hex(done->Address) + " after a failed write.");
+                    }
+                };
                 for (const AaWrite& write : merged)
                 {
                     AaWrite original{ write.Address, std::vector<std::uint8_t>(write.Bytes.size()), write.Line };
-                    const bool saved = m_host.Process->ReadExact(write.Address, original.Bytes.data(), original.Bytes.size());
+                    if (!m_host.Process->ReadExact(write.Address, original.Bytes.data(), original.Bytes.size()))
+                    {
+                        restore();
+                        m_result.Error = Status::Fail(ErrorCode::AaWriteFailed, Hex(write.Address) + " (the bytes there cannot be read, so the write could not be undone)");
+                        m_result.Line = write.Line;
+                        return false;
+                    }
+                    undo.push_back(std::move(original));
                     const Status status = m_host.Process->Write(write.Address, write.Bytes);
                     if (!status)
                     {
-                        for (auto done = undo.rbegin(); done != undo.rend(); ++done)
-                        {
-                            if (!done->Bytes.empty() && !m_host.Process->Write(done->Address, done->Bytes))
-                                LOG_WARN("Auto Assembler", "Could not restore the bytes at " + Hex(done->Address) + " after a failed write.");
-                        }
+                        restore();
                         m_result.Error = Status::Fail(ErrorCode::AaWriteFailed, Hex(write.Address));
                         m_result.Line = write.Line;
                         return false;
                     }
-                    if (!saved)
-                        original.Bytes.clear();
-                    undo.push_back(std::move(original));
                 }
                 m_result.Writes = std::move(merged);
                 return true;
@@ -1888,6 +1998,7 @@ namespace Manifold::Asm
 
             std::map<std::string, std::uint64_t> m_values;
             std::map<std::string, std::uint64_t> m_placed;
+            std::map<std::string, int> m_unplacedUses;  // labels the current layout pass used before (or without) placing them, with the first line
             std::map<std::string, std::uint64_t> m_sizes;
             std::vector<AaAllocation> m_newAllocations;
             std::vector<std::uint64_t> m_allocatedBlocks;

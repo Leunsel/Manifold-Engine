@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -174,6 +175,26 @@ namespace Manifold::Tests
             return false;
         }
 
+        struct BlockState
+        {
+            std::uint32_t Serial = 0;
+            std::uint32_t Applied = 0;
+            double Speed = 0.0;
+            bool Read = false;
+        };
+
+        BlockState ReadBlockState(Session& session)
+        {
+            BlockState state;
+            session.Core.Process()->RefreshModules();
+            const Target::Process& process = *session.Core.Process();
+            const std::uint64_t block = process.FindExport(session.Core.Speed().AgentName(), "ManifoldSpeed");
+            state.Read = block && process.ReadExact(block + offsetof(Target::Speed::Block, Serial), &state.Serial, sizeof(state.Serial)) &&
+                process.ReadExact(block + offsetof(Target::Speed::Block, Applied), &state.Applied, sizeof(state.Applied)) &&
+                process.ReadExact(block + offsetof(Target::Speed::Block, Speed), &state.Speed, sizeof(state.Speed));
+            return state;
+        }
+
         bool AgentLoaded(Session& session)
         {
             session.Core.Process()->RefreshModules();
@@ -258,6 +279,9 @@ namespace Manifold::Tests
             Pause(100);
             CHECK(speedhack.Disable().Ok());
             CHECK(speedhack.Installed() && !speedhack.Enabled() && speedhack.ClockShifted() && speedhack.Speed() == 1.0);
+            const BlockState settled = ReadBlockState(session);
+            CHECK_MSG(settled.Read && settled.Applied == settled.Serial && settled.Speed == 1.0,
+                session.Label + Format(": Disable returned before the agent applied speed 1 (serial %u, applied %u, speed %.3f)", settled.Serial, settled.Applied, settled.Speed));
             CheckRates(session, 1.0, "disabled after a shift");
             CHECK_MSG(Backwards(session) == 0, session.Label + ": a clock ran backwards when the speedhack was turned off");
 
@@ -337,6 +361,41 @@ namespace Manifold::Tests
             CHECK_MSG(AgentLoaded(session) && engine.Debugger().Attached(), session.Label + ": removing the speedhack took the debugger's agent away");
             engine.Debugger().Detach();
             CHECK_MSG(WaitAgentGone(session, 5000), session.Label + ": the agent library stayed loaded after the debugger left");
+            CHECK(session.Target.Alive());
+        }
+
+        // The in-process debugger's agent shares the library with the speedhack
+        // and times the host's heartbeat itself. With the hooked GetTickCount64
+        // it took 1.5 s of silence at speed 1000 for 25 minutes and stopped
+        // itself (and at speed 0 it never noticed a host that was gone).
+        void CheckDebuggerClock(Session& session)
+        {
+            Engine& engine = session.Core;
+            Target::Speedhack& speedhack = engine.Speed();
+            CHECK(speedhack.SetSpeed(Target::Speedhack::kMaxSpeed).Ok());
+            const std::vector<Target::SpeedhackHook> hooks = speedhack.Hooks();
+            const Status attached = engine.EnsureDebugger();
+            CHECK_MSG(attached.Ok() && engine.Debugger().UsingVeh(), session.Label + ": " + attached.Text);
+            if (attached)
+            {
+                Debug::Debugger& debugger = engine.Debugger();
+                int id = 0;
+                const Status started = debugger.StartWatch(Debug::WatchKind::Writes, session.ProbeAt + offsetof(Probe, Threads), 4, id);
+                CHECK_MSG(started.Ok(), session.Label + ": " + started.Text);
+                debugger.PauseHeartbeat(true);
+                Pause(1500);
+                debugger.PauseHeartbeat(false);
+                Pause(1500);
+                Debug::Watch watch;
+                CHECK_MSG(started && debugger.CopyWatch(id, watch) && watch.Running,
+                    session.Label + ": the in-process debugger stopped itself at speed 1000 after 1.5 s without a heartbeat");
+                if (started)
+                    debugger.RemoveWatch(id);
+                debugger.Detach();
+            }
+            CHECK(speedhack.Remove().Ok());
+            CheckRestored(session, hooks, "removed after the debugger clock check");
+            CHECK_MSG(WaitAgentGone(session, 5000), session.Label + ": the agent library stayed loaded after the debugger clock check");
             CHECK(session.Target.Alive());
         }
 
@@ -424,6 +483,7 @@ namespace Manifold::Tests
             CheckSpeeds(session);
             CheckCycles(session);
             CheckDebugger(session);
+            CheckDebuggerClock(session);
             CheckLua(session);
             CheckHostLoss(session, tests);
             engine.CloseProcess();

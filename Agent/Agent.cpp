@@ -11,6 +11,12 @@ using namespace Manifold::Debug::Veh;
 
 void SpeedAttach(HINSTANCE instance);
 
+// The speedhack (Speed.cpp) hooks GetTickCount64 in this very process, so the
+// agent's own waits and timeouts read the real tick count from the shared user
+// data instead: at speed 0 they would never end, at speed 100 the host would
+// count as gone after 40 ms. It works whether or not the hooks are installed.
+std::uint64_t RealTickCount64();
+
 namespace
 {
     constexpr std::uint64_t kResumeFlag = 0x10000;
@@ -36,7 +42,7 @@ namespace
     bool HostGone(Block* block, HostWatch& watch)
     {
         const std::uint64_t beat = block->HostBeat;
-        const ULONGLONG now = ::GetTickCount64();
+        const ULONGLONG now = RealTickCount64();
         if (beat == 0 || beat != watch.Beat || watch.Seen == 0)
         {
             watch.Beat = beat;
@@ -395,7 +401,7 @@ namespace
     {
         Recent& slot = g_recent[threadId % kRecentSlots];
         slot.Thread = threadId;
-        slot.Tick = ::GetTickCount64();
+        slot.Tick = RealTickCount64();
     }
 
     bool RecentlyActive(DWORD threadId, ULONGLONG now)
@@ -668,7 +674,7 @@ namespace
         block->Broken = 0;
         if (keep)
         {
-            g_keptSince = ::GetTickCount64();
+            g_keptSince = RealTickCount64();
             _InterlockedExchange(&g_kept, 1);
         }
         else
@@ -810,7 +816,7 @@ namespace
     int Sweep(Block* block, const std::uint64_t (&addresses)[4], std::uint64_t dr7, bool all, bool verify = false)
     {
         const DWORD self = ::GetCurrentProcessId();
-        const ULONGLONG now = ::GetTickCount64();
+        const ULONGLONG now = RealTickCount64();
         HANDLE snapshot = ::CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
         if (snapshot == INVALID_HANDLE_VALUE)
             return -1;
@@ -836,10 +842,10 @@ namespace
 
     bool WaitUntilOutside(ULONGLONG milliseconds)
     {
-        const ULONGLONG until = ::GetTickCount64() + milliseconds;
+        const ULONGLONG until = RealTickCount64() + milliseconds;
         while (g_inside != 0)
         {
-            if (::GetTickCount64() > until)
+            if (RealTickCount64() > until)
                 return false;
             ::Sleep(1);
         }
@@ -859,8 +865,8 @@ namespace
             RememberArmed(block->Watches[slot].Address);
             block->Watches[slot].Active = 0;
         }
-        const ULONGLONG until = ::GetTickCount64() + 3000;
-        while (g_breaking && ::GetTickCount64() < until)
+        const ULONGLONG until = RealTickCount64() + 3000;
+        while (g_breaking && RealTickCount64() < until)
             ::Sleep(1);
         if (_InterlockedExchange(&g_kept, 0))
             ResumeOthers();
@@ -918,7 +924,7 @@ namespace
                     lastClear[slot] = block->Watches[slot].Clear;
                 }
             }
-            if (g_kept && !block->Broken && ::GetTickCount64() - g_keptSince > kKeepMs && _InterlockedCompareExchange(&g_breaking, 1, 0) == 0)
+            if (g_kept && !block->Broken && RealTickCount64() - g_keptSince > kKeepMs && _InterlockedCompareExchange(&g_breaking, 1, 0) == 0)
             {
                 if (_InterlockedExchange(&g_kept, 0))
                     ResumeOthers();

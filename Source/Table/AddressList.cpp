@@ -134,8 +134,10 @@ namespace Manifold::Table
 
     void AddressList::ClaimTree(MemoryRecord& record)
     {
+        // ∑ the same rule as Add: Id 0 without a file that said 0 means "give it one", else getMemoryRecordByID(0) finds this child
         const auto taken = m_byId.find(record.Id);
-        if (record.Id < 0 || (taken != m_byId.end() && taken->second != &record))
+        const bool fileZero = record.Id == 0 && record.FileId == 0;
+        if (record.Id < 0 || (record.Id == 0 && !fileZero) || (taken != m_byId.end() && taken->second != &record))
             record.Id = NextId();
         m_byId[record.Id] = &record;
         for (const auto& child : record.Children)

@@ -458,6 +458,8 @@ namespace Manifold::Target
             return -1;
         if (const auto known = m_handleIndex.find(klass); known != m_handleIndex.end())
             return known->second;
+        if (m_paused && m_paused())
+            return -1;
         const std::string prefix = IsIl2Cpp() ? "il2cpp_" : "mono_";
         MonoClass info;
         info.Handle = klass;
@@ -487,6 +489,8 @@ namespace Manifold::Target
             if (const auto known = m_backend->ParentIndex(classIndex))
                 return *known;
         }
+        if (m_paused && m_paused())
+            return -1;
         const std::string prefix = IsIl2Cpp() ? "il2cpp_" : "mono_";
         const std::uint64_t parent = CallFn((prefix + "class_get_parent").c_str(), m_classes[static_cast<std::size_t>(classIndex)].Handle).value_or(0);
         return AdoptClass(parent);
@@ -497,10 +501,20 @@ namespace Manifold::Target
         std::lock_guard lock(m_lock);
         if (!m_present || !m_process || !address)
             return std::nullopt;
+        // ∑ The class is read again below and handed to the runtime; under a moving GC the object can be gone
+        //   by then, and a call with a stale or null class crashes the game. Both reads must agree. While the
+        //   debugger holds the game, every remote call would only wait for its timeout.
+        if (m_paused && m_paused())
+            return std::nullopt;
+        const std::uint64_t before = ClassHandleAt(address);
+        if (!before)
+            return std::nullopt;
         const auto name = ResolveHead(address, true);
         if (!name || name->empty() || name->back() != ']')
             return std::nullopt;
         const std::uint64_t klass = ClassHandleAt(address);
+        if (klass != before)
+            return std::nullopt;
         const std::string prefix = IsIl2Cpp() ? "il2cpp_" : "mono_";
         const auto call = [&](const char* function, std::uint64_t argument) -> std::uint64_t
             {

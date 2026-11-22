@@ -501,6 +501,146 @@ local s = getAddressList().getMemoryRecordByID(99)
             activation.ClearTrace();
             CHECK(trace.empty() && activation.TraceSerial() > ActivationRunner::kTraceLength);
         }
+
+        // A child made in code (Id 0, no file ID) gets an id of its own when its tree is added, as a root does; a child the file
+        // numbered 0 keeps it. getMemoryRecordByID(0) used to find the code-made child.
+        void ClaimTreeIds()
+        {
+            {
+                Table::AddressList list;
+                auto parent = std::make_unique<Table::MemoryRecord>();
+                parent->Description = "Made Parent";
+                parent->Kind = Table::RecordKind::Group;
+                auto child = std::make_unique<Table::MemoryRecord>();
+                child->Description = "Made Child";
+                child->Parent = parent.get();
+                parent->Children.push_back(std::move(child));
+                Table::MemoryRecord& added = list.Add(std::move(parent));
+                const Table::MemoryRecord& made = *added.Children.front();
+                CHECK_MSG(made.Id != 0 && made.Id != added.Id, std::to_string(made.Id));
+                CHECK(list.FindById(made.Id) == &made && list.FindById(added.Id) == &added);
+                CHECK(list.FindById(0) == nullptr);
+            }
+            {
+                Table::AddressList list;
+                auto parent = std::make_unique<Table::MemoryRecord>();
+                parent->Description = "File Parent";
+                parent->Kind = Table::RecordKind::Group;
+                parent->Id = 3;
+                parent->FileId = 3;
+                auto child = std::make_unique<Table::MemoryRecord>();
+                child->Description = "File Child";
+                child->FileId = 0;
+                child->Parent = parent.get();
+                parent->Children.push_back(std::move(child));
+                Table::MemoryRecord& added = list.Add(std::move(parent));
+                const Table::MemoryRecord& filed = *added.Children.front();
+                CHECK(added.Id == 3 && filed.Id == 0 && list.FindById(0) == &filed);
+            }
+        }
+
+        // find(4294967296) used to be cut to id 0, find(1.5) to 0 as well.
+        void FindRejectsOddIds()
+        {
+            Settings settings;
+            Engine engine(settings);
+            Lua::LuaEngine& lua = engine.Lua();
+            lua.Run("__manifoldHeadless = true", "headless");
+            auto zero = std::make_unique<Table::MemoryRecord>();
+            zero->Description = "Zero";
+            zero->FileId = 0;
+            Table::MemoryRecord& added = engine.Table().Add(std::move(zero));
+            CHECK(added.Id == 0);
+            const auto run = [&](const char* name, const std::string& code, const std::string& expected)
+                {
+                    std::string result;
+                    const Status status = lua.RunWithResult(code, name, result);
+                    CHECK_MSG(status.Ok() && result == expected, std::string(name) + ": " + (status.Ok() ? result : status.Text));
+                };
+            run("zero", "return tostring(manifold.record.find(0).id)", "0");
+            run("huge", "local r, e = manifold.record.find(4294967296) return tostring(r) .. ' ' .. tostring(e and e.code)", "nil ME-6008");
+            run("negative", "local r, e = manifold.record.find(-1) return tostring(r) .. ' ' .. tostring(e and e.code)", "nil ME-6008");
+            run("fraction", "local ok, r = pcall(manifold.record.find, 1.5) return tostring(ok and r ~= nil)", "false");
+        }
+
+        // The Address List Debug check assembles with Lua held back even in a trusted table; the editor's Check runs it.
+        void CheckOnlyRunsNoLua()
+        {
+            Settings settings;
+            Engine engine(settings);
+            Lua::LuaEngine& lua = engine.Lua();
+            lua.Run("__manifoldHeadless = true", "headless");
+            CHECK(engine.Tables().ScriptsTrusted());
+            const std::string script = "[ENABLE]\n{$lua}\ncheckOnlyRan = (checkOnlyRan or 0) + 1\n{$asm}\n[DISABLE]\n";
+            std::string result;
+            Asm::AaMemory memory;
+            const ScriptCheck held = engine.CheckScript(script, Asm::AaSection::Enable, memory, true);
+            CHECK_MSG(held.LuaHeldBack >= 1, std::to_string(held.LuaHeldBack));
+            CHECK(lua.RunWithResult("return tostring(checkOnlyRan)", "held", result).Ok() && result == "nil");
+            Asm::AaMemory editor;
+            const ScriptCheck ran = engine.CheckScript(script, Asm::AaSection::Enable, editor);
+            CHECK(ran.LuaHeldBack == 0);
+            CHECK_MSG(lua.RunWithResult("return tostring(checkOnlyRan)", "ran", result).Ok() && result == "1", result);
+        }
+
+        // Removing a group switches off the scripts below it first (their [DISABLE] takes the hooks out), fires ondestroy for
+        // every removed record, refuses while one of them waits in the activation queue, and setActive reports a veto.
+        void RemoveSwitchesOffBelow()
+        {
+            Settings settings;
+            Engine engine(settings);
+            Lua::LuaEngine& lua = engine.Lua();
+            lua.Run("__manifoldHeadless = true", "headless");
+            Table::AddressList& list = engine.Table();
+            std::string result;
+            const auto run = [&](const char* name, const std::string& code, const std::string& expected)
+                {
+                    const Status status = lua.RunWithResult(code, name, result);
+                    CHECK_MSG(status.Ok() && result == expected, std::string(name) + ": " + (status.Ok() ? result : status.Text));
+                };
+
+            Table::MemoryRecord& vetoed = list.AddGroup("Remove Vetoed");
+            run("veto handler", "getAddressList().getMemoryRecordByID(" + std::to_string(vetoed.Id) + ").OnActivate = function() return false end return 'ok'", "ok");
+            run("veto reported", "local r, e = manifold.record.find(" + std::to_string(vetoed.Id) + ").setActive(true) return tostring(r) .. ' ' .. tostring(e and e.code)",
+                "nil ME-7002");
+            CHECK(!vetoed.Active);
+
+            Table::MemoryRecord& queued = list.AddGroup("Remove Queued");
+            const int queuedId = queued.Id;
+            engine.SetAsync(true);
+            engine.RequestActive(queued, true, true);
+            CHECK(engine.ActivationPending(queuedId));
+            run("refused while queued", "local r, e = manifold.record.find(" + std::to_string(queuedId) + ").remove() return tostring(r) .. ' ' .. tostring(e and e.message:find('being switched', 1, true) ~= nil)",
+                "nil true");
+            CHECK(list.FindById(queuedId) == &queued);
+            engine.CancelActivations();
+            engine.SetAsync(false);
+
+            if (!engine.OpenProcess(MakeProcessId(::GetCurrentProcessId())).Ok())
+            {
+                Skip("could not open the test program itself for removing a group with a script on below it");
+                return;
+            }
+            Table::MemoryRecord& group = list.AddGroup("Remove Group");
+            Table::MemoryRecord& script = list.AddScript("Remove Child",
+                "[ENABLE]\nalloc(removemem,64)\nregistersymbol(removemem)\nremovemem:\ndd 1\n[DISABLE]\nunregistersymbol(removemem)\ndealloc(removemem)\n", &group);
+            const int groupId = group.Id;
+            const int scriptId = script.Id;
+            const Status on = engine.SetActive(script, true);
+            CHECK_MSG(on.Ok() && script.Active, on.Text);
+            CHECK(engine.Evaluate("removemem").has_value());
+            CHECK(!group.Active);
+            run("ondestroy", "destroyed = {} for _, id in ipairs({ " + std::to_string(groupId) + ", " + std::to_string(scriptId) +
+                " }) do getAddressList().getMemoryRecordByID(id).OnDestroy = function() destroyed[#destroyed + 1] = id end end return 'ok'", "ok");
+            run("remove", "return tostring(manifold.record.find(" + std::to_string(groupId) + ").remove())", "true");
+            CHECK(list.FindById(groupId) == nullptr && list.FindById(scriptId) == nullptr);
+            CHECK_MSG(!engine.Evaluate("removemem").has_value(), "the child's [DISABLE] part did not run");
+            const auto& trace = engine.Activation().Trace();
+            CHECK(!trace.empty() && trace.back().RecordId == scriptId && !trace.back().Active && trace.back().Released.size() == 1);
+            CHECK(!trace.empty() && trace.back().WriteSizes.size() == trace.back().Writes.size());
+            run("destroyed", "table.sort(destroyed) return table.concat(destroyed, ',')",
+                std::to_string(std::min(groupId, scriptId)) + "," + std::to_string(std::max(groupId, scriptId)));
+        }
     }
 
     int RunRecordDebugTests()
@@ -513,6 +653,10 @@ local s = getAddressList().getMemoryRecordByID(99)
         Paths();
         PointerChain();
         Trace();
+        ClaimTreeIds();
+        FindRejectsOddIds();
+        CheckOnlyRunsNoLua();
+        RemoveSwitchesOffBelow();
         return Totals().Failures - before;
     }
 }

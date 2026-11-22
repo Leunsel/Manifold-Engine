@@ -16,6 +16,9 @@ namespace Manifold::Table
         constexpr int kMaxDepth = 64;
         constexpr std::size_t kMaxComponents = 20000;
         constexpr std::size_t kMaxFormBytes = 64u * 1024u * 1024u;
+        // ∑ a list item or set name takes one byte of the stream but over a
+        // hundred in memory: 64 MB of vaNil items would be ~10 GB of values
+        constexpr std::size_t kMaxValues = 1000000;
 
         // ∑ Free Pascal's TValueType order; Lazarus' LRS writer uses the
         // same numbers as the classic binary DFM stream.
@@ -51,6 +54,7 @@ namespace Manifold::Table
             std::span<const std::uint8_t> Data;
             std::size_t At = 0;
             std::size_t Components = 0;
+            std::size_t Values = 0; // values and set names read so far, against kMaxValues
             std::string Error;
 
             bool Fail(std::string text)
@@ -136,10 +140,24 @@ namespace Manifold::Table
                 return negative ? -value : value;
             }
 
+            bool Counted()
+            {
+                return ++Values <= kMaxValues || Fail("the form has more than " + std::to_string(kMaxValues) + " values");
+            }
+
+            // a real number that is no number (an Extended's infinity, a raw NaN) is dropped: it reads as no value
+            static void Real(CeValue& out, double value)
+            {
+                out.Type = std::isfinite(value) ? CeValue::Kind::Real : CeValue::Kind::Null;
+                out.Real = std::isfinite(value) ? value : 0.0;
+            }
+
             bool Value(CeValue& out, int depth)
             {
                 if (depth > kMaxDepth)
                     return Fail("the form nests too deep");
+                if (!Counted())
+                    return false;
                 std::uint8_t type = 0;
                 if (!Byte(type))
                     return false;
@@ -207,27 +225,24 @@ namespace Manifold::Table
                 {
                     if (!Need(10))
                         return false;
-                    out.Type = CeValue::Kind::Real;
-                    out.Real = Extended(Data.data() + At);
+                    Real(out, Extended(Data.data() + At));
                     At += 10;
                     return true;
                 }
                 case vaSingle:
                 {
                     float value = 0.0f;
-                    out.Type = CeValue::Kind::Real;
                     if (!Raw(value))
                         return false;
-                    out.Real = value;
+                    Real(out, value);
                     return true;
                 }
                 case vaDate:
                 {
                     double value = 0.0;
-                    out.Type = CeValue::Kind::Real;
                     if (!Raw(value))
                         return false;
-                    out.Real = value;
+                    Real(out, value);
                     return true;
                 }
                 case vaCurrency:
@@ -287,6 +302,8 @@ namespace Manifold::Table
                             return false;
                         if (name.empty())
                             return true;
+                        if (!Counted())
+                            return false;
                         out.Names.push_back(std::move(name));
                     }
                 case vaCollection:
@@ -311,7 +328,7 @@ namespace Manifold::Table
                         if (!Byte(list) || list != vaList)
                             return Fail("a collection item does not start with a list");
                         std::vector<std::pair<std::string, CeValue>> entry;
-                        if (!Properties(entry, depth + 1))
+                        if (!Counted() || !Properties(entry, depth + 1))
                             return false;
                         out.Entries.push_back(std::move(entry));
                     }
@@ -461,8 +478,9 @@ namespace Manifold::Table
             return fallback;
         if (value->Type == CeValue::Kind::Integer)
             return value->Integer;
+        // llround of a value past the int64 range gives no defined result
         if (value->Type == CeValue::Kind::Real)
-            return static_cast<std::int64_t>(std::llround(value->Real));
+            return std::isfinite(value->Real) && std::fabs(value->Real) < 9.0e18 ? static_cast<std::int64_t>(std::llround(value->Real)) : fallback;
         return fallback;
     }
 

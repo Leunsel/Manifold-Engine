@@ -16,15 +16,54 @@ namespace Manifold
     {
         thread_local bool t_activationWorker = false;
 
-        std::string OwnerOf(const Table::MemoryRecord& record)
+        std::string OwnerOf(int recordId)
         {
-            return "record:" + std::to_string(record.Id);
+            return "record:" + std::to_string(recordId);
+        }
+
+        std::vector<int> ChildIds(const Table::MemoryRecord& record, bool lastFirst)
+        {
+            std::vector<int> ids;
+            ids.reserve(record.Children.size());
+            for (const auto& child : record.Children)
+                ids.push_back(child->Id);
+            if (lastFirst)
+                std::reverse(ids.begin(), ids.end());
+            return ids;
+        }
+
+        // Marks a record as being switched for as long as it lives; a mark that was there already is left to its owner.
+        class SwitchingMark
+        {
+        public:
+            SwitchingMark(std::unordered_set<int>& switching, int recordId) : m_switching(switching), m_id(recordId), m_marked(switching.insert(recordId).second) {}
+            ~SwitchingMark()
+            {
+                if (m_marked)
+                    m_switching.erase(m_id);
+            }
+            SwitchingMark(const SwitchingMark&) = delete;
+            SwitchingMark& operator=(const SwitchingMark&) = delete;
+
+        private:
+            std::unordered_set<int>& m_switching;
+            int m_id;
+            bool m_marked;
+        };
+
+        Status Vetoed(const Table::MemoryRecord& record, bool active)
+        {
+            return Status::Fail(ErrorCode::LuaRuntime, "a handler (onMemRecPreExecute or the record's " + std::string(active ? "onactivate" : "ondeactivate") +
+                ") kept \"" + record.Description + "\" from switching " + (active ? "on" : "off"));
         }
     }
 
     struct ActivationRunner::RunningActivation
     {
         int RecordId = 0;
+        std::uint64_t Identity = 0;   // the table the record belongs to; a replaced table may reuse the id
+        std::string Description;
+        std::string Script;
         bool Active = false;
         bool FromScript = false;
         Asm::AaMemory Memory;
@@ -67,8 +106,15 @@ namespace Manifold
         for (const Asm::AaWrite& write : result.Writes)
         {
             entry.BytesWritten += write.Bytes.size();
-            if (entry.Writes.size() < kTraceWrites)
-                entry.Writes.push_back(write);
+            if (entry.Writes.size() >= kTraceWrites)
+                continue;
+            // ∑ a prefix is enough to recognise a write; whole code caves in 500 entries added up to megabytes
+            Asm::AaWrite kept;
+            kept.Address = write.Address;
+            kept.Line = write.Line;
+            kept.Bytes.assign(write.Bytes.begin(), write.Bytes.begin() + static_cast<std::ptrdiff_t>(std::min(write.Bytes.size(), kTraceWriteBytes)));
+            entry.Writes.push_back(std::move(kept));
+            entry.WriteSizes.push_back(write.Bytes.size());
         }
         const auto sameAllocation = [](const Asm::AaAllocation& a, const Asm::AaAllocation& b) { return a.Name == b.Name && a.Address == b.Address; };
         for (const Asm::AaAllocation& allocation : after.Allocations)
@@ -113,50 +159,171 @@ namespace Manifold
         return queue;
     }
 
-    Status ActivationRunner::ActivateTree(Table::MemoryRecord& record, bool active, int viaParent, bool fromScript)
+    bool ActivationRunner::Switching(int recordId) const
     {
-        if (record.Active == active)
+        return m_switching.count(recordId) > 0 || (m_running && m_running->RecordId == recordId && m_running->Identity == m_engine.Table().Identity());
+    }
+
+    Status ActivationRunner::LastOutcome(int recordId) const
+    {
+        if (m_outcomesIdentity != m_engine.Table().Identity())
             return Status::Success();
-        ActivationTraceEntry trace = TraceStart(record, active, fromScript, viaParent);
+        const auto found = m_outcomes.find(recordId);
+        return found == m_outcomes.end() ? Status::Success() : found->second;
+    }
+
+    void ActivationRunner::NoteOutcome(int recordId, const Status& status)
+    {
+        const std::uint64_t identity = m_engine.Table().Identity();
+        if (m_outcomesIdentity != identity)
+        {
+            m_outcomes.clear();
+            m_outcomesIdentity = identity;
+        }
+        m_outcomes[recordId] = status;
+    }
+
+    Table::MemoryRecord* ActivationRunner::Refind(int recordId, std::uint64_t identity)
+    {
+        if (m_engine.Table().Identity() != identity)
+            return nullptr;
+        return m_engine.Table().FindById(recordId);
+    }
+
+    Status ActivationRunner::Vanished(int recordId, std::uint64_t identity, const std::string& description, const char* during)
+    {
+        const bool replaced = m_engine.Table().Identity() != identity;
+        LOG_WARN("Table", Format("\"%s\" (record %d) went away %s (%s); its switch stops there", description.c_str(), recordId, during,
+            replaced ? "the table was replaced" : "the record was deleted"));
+        return Status::Fail(ErrorCode::TableRecordGone, "\"" + description + "\"");
+    }
+
+    void ActivationRunner::ReleaseOrphan(int recordId, const std::string& description, const std::string& script, Asm::AaMemory memory, bool on,
+        const std::shared_ptr<Target::Process>& process)
+    {
+        if (!process || process != m_engine.Process() || !process->Alive())
+        {
+            LOG_INFO("Table", "\"" + description + "\" went away during its switch; the process it ran in is closed, so nothing of it is left to take out");
+            return;
+        }
+        if (on)
+        {
+            const Asm::AaResult undone = m_engine.AutoAssemble(script, Asm::AaSection::Disable, memory, false, OwnerOf(recordId), nullptr);
+            if (undone.Ok())
+                LOG_WARN("Table", "\"" + description + "\" went away while it was switched on; its [DISABLE] part ran to take its changes out of the game again");
+            else
+                m_engine.Notify(LogLevel::Error, "\"" + description + "\" went away while it was switched on, and its [DISABLE] part failed (" + undone.Error.Text +
+                                                     "): its changes stay in the game");
+        }
+        for (const std::string& name : memory.Registered)
+            m_engine.Symbols().Unregister(name);
+        if (!memory.Registered.empty())
+            LOG_INFO("Table", "Unregistered the symbols \"" + description + "\" left: " + Join(memory.Registered, ", "));
+        if (!memory.Allocations.empty())
+        {
+            std::vector<std::string> left;
+            for (const Asm::AaAllocation& allocation : memory.Allocations)
+                left.push_back(allocation.Name + " at " + Hex(allocation.Address));
+            LOG_WARN("Table", Format("%zu allocation%s of \"%s\" stay in the game (its script does not dealloc %s): %s", memory.Allocations.size(),
+                memory.Allocations.size() == 1 ? "" : "s", description.c_str(), memory.Allocations.size() == 1 ? "it" : "them", Join(left, ", ").c_str()));
+        }
+    }
+
+    Status ActivationRunner::ActivateTree(int recordId, bool active, int viaParent, bool fromScript)
+    {
+        Table::MemoryRecord* record = m_engine.Table().FindById(recordId);
+        if (!record || record->Active == active)
+            return Status::Success();
+        // ∑ A record's own handler, OnActivate code or {$lua} that switches it again would run a second switch of the same
+        //   record inside the first; it waits for the first in asynchronous mode and is refused otherwise.
+        if (m_switching.count(recordId))
+        {
+            if (m_async)
+            {
+                LOG_INFO("Table", "\"" + record->Description + "\" is being switched; the new switch waits until that one is done");
+                RequestActive(*record, active, fromScript);
+                return Status::Success();
+            }
+            const Status refused = Status::Fail(ErrorCode::LuaRuntime, "\"" + record->Description + "\" is being switched already and cannot be switched again from its own activation");
+            LOG_WARN("Table", refused.Text);
+            return refused;
+        }
+        const SwitchingMark mark(m_switching, recordId);
+        return SwitchTree(recordId, m_engine.Table().Identity(), active, viaParent, fromScript);
+    }
+
+    Status ActivationRunner::SwitchTree(int recordId, std::uint64_t identity, bool active, int viaParent, bool fromScript)
+    {
+        Table::MemoryRecord* record = m_engine.Table().FindById(recordId);
+        const std::string description = record->Description;
+        ActivationTraceEntry trace = TraceStart(*record, active, fromScript, viaParent);
         trace.Async = false;
-        if (!m_engine.Lua().BeforeActivation(record, active))
+        const auto gone = [&](const char* during)
+            {
+                trace.Result = ActivationTraceEntry::Outcome::Failed;
+                trace.Error = std::string("went away ") + during;
+                Traced(std::move(trace));
+                return Vanished(recordId, identity, description, during);
+            };
+        const bool proceed = m_engine.Lua().BeforeActivation(*record, active);
+        if (!(record = Refind(recordId, identity)))
+            return gone("in its onMemRecPreExecute or on(de)activate handler");
+        if (!proceed)
         {
             trace.Result = ActivationTraceEntry::Outcome::Vetoed;
             Traced(std::move(trace));
+            NoteOutcome(recordId, Vetoed(*record, active));
             return Status::Success();
         }
-        if (!active && record.Options.DeactivateChildren)
+        if (!active && record->Options.DeactivateChildren)
         {
-            for (auto it = record.Children.rbegin(); it != record.Children.rend(); ++it)
+            // ∑ by a copied list of ids: a child's Lua may add or delete its siblings
+            for (int child : ChildIds(*record, true))
             {
-                const Status status = ActivateTree(**it, false, record.Id, fromScript);
+                const Status status = ActivateTree(child, false, recordId, fromScript);
                 if (!status)
                     m_engine.Notify(status);
+                if (!Refind(recordId, identity))
+                    return gone("while its children were switched off");
             }
+            record = Refind(recordId, identity);
         }
         const double started = m_engine.Now();
-        if (record.Kind == Table::RecordKind::Script)
+        if (record->Kind == Table::RecordKind::Script)
         {
-            const Asm::AaMemory before = record.ScriptMemory;
-            const Asm::AaResult result = m_engine.AutoAssemble(record.Script, active ? Asm::AaSection::Enable : Asm::AaSection::Disable, record.ScriptMemory, false, OwnerOf(record), &record);
+            // ∑ assembled into a copy: a {$lua} block may delete the record, and its memory with it, while the script runs
+            const Asm::AaMemory before = record->ScriptMemory;
+            Asm::AaMemory memory = record->ScriptMemory;
+            const std::string script = record->Script;
+            const std::shared_ptr<Target::Process> process = m_engine.Process();
+            const Asm::AaResult result = m_engine.AutoAssemble(script, active ? Asm::AaSection::Enable : Asm::AaSection::Disable, memory, false, OwnerOf(recordId), record);
             trace.Seconds = m_engine.Now() - started;
-            TraceScript(trace, result, before, record.ScriptMemory);
+            TraceScript(trace, result, before, memory);
+            if (!(record = Refind(recordId, identity)))
+            {
+                const Status status = gone("while its script ran");
+                // its changes are in the game after an [ENABLE] that worked or a [DISABLE] that failed
+                ReleaseOrphan(recordId, description, script, std::move(memory), result.Ok() == active, process);
+                return status;
+            }
             Traced(std::move(trace));
+            record->ScriptMemory = std::move(memory);
             if (!result.Ok())
             {
-                record.LastError = result.Error.Text;
-                m_engine.Lua().AfterActivation(record, active, false);
+                record->LastError = result.Error.Text;
+                NoteOutcome(recordId, result.Error);
+                m_engine.Lua().AfterActivation(*record, active, false);
                 return result.Error;
             }
-            record.LastError.clear();
-            record.Active = active;
+            record->LastError.clear();
+            record->Active = active;
             if (!active)
-                record.ScriptMemory.Values.clear();
-            LOG_SUCCESS("Table", std::string(active ? "Enabled " : "Disabled ") + record.Description);
+                record->ScriptMemory.Values.clear();
+            LOG_SUCCESS("Table", std::string(active ? "Enabled " : "Disabled ") + description);
         }
         else
         {
-            const Status plain = ActivatePlain(record, active);
+            const Status plain = ActivatePlain(*record, active);
             trace.Seconds = m_engine.Now() - started;
             if (!plain)
             {
@@ -166,25 +333,33 @@ namespace Manifold
             Traced(std::move(trace));
             if (!plain)
             {
-                m_engine.Lua().AfterActivation(record, active, false);
+                NoteOutcome(recordId, plain);
+                m_engine.Lua().AfterActivation(*record, active, false);
                 return plain;
             }
         }
+        NoteOutcome(recordId, Status::Success());
 
-        if (active && record.Options.ActivateChildren)
+        if (active && record->Options.ActivateChildren)
         {
-            for (const auto& child : record.Children)
+            for (int child : ChildIds(*record, false))
             {
-                const Status status = ActivateTree(*child, true, record.Id, fromScript);
+                const Status status = ActivateTree(child, true, recordId, fromScript);
                 if (!status)
                     m_engine.Notify(status);
+                if (!Refind(recordId, identity))
+                    return Vanished(recordId, identity, description, "while its children were switched on");
             }
+            record = Refind(recordId, identity);
         }
-        if (!record.LuaOnActivate.empty() && active)
-            RunRecordLua(record.LuaOnActivate, "OnActivate");
-        if (!record.LuaOnDeactivate.empty() && !active)
-            RunRecordLua(record.LuaOnDeactivate, "OnDeactivate");
-        m_engine.Lua().AfterActivation(record, active, true);
+        const std::string code = active ? record->LuaOnActivate : record->LuaOnDeactivate;
+        if (!code.empty())
+        {
+            RunRecordLua(code, active ? "OnActivate" : "OnDeactivate");
+            if (!(record = Refind(recordId, identity)))
+                return Vanished(recordId, identity, description, active ? "in its OnActivate code" : "in its OnDeactivate code");
+        }
+        m_engine.Lua().AfterActivation(*record, active, true);
         return Status::Success();
     }
 
@@ -288,6 +463,7 @@ namespace Manifold
         }
         ActivationJob job;
         job.RecordId = record.Id;
+        job.Identity = m_engine.Table().Identity();
         job.Active = active;
         job.FromScript = fromScript;
         job.QueuedAt = m_engine.Now();
@@ -358,6 +534,7 @@ namespace Manifold
         {
             ActivationJob job;
             job.RecordId = id;
+            job.Identity = m_engine.Table().Identity();
             job.Active = active;
             job.FromScript = fromScript;
             job.ViaParent = record.Id;
@@ -368,15 +545,25 @@ namespace Manifold
         }
     }
 
-    void ActivationRunner::FinishRecordActivation(Table::MemoryRecord& record, bool active, bool fromScript)
+    void ActivationRunner::FinishRecordActivation(int recordId, std::uint64_t identity, bool active, bool fromScript)
     {
-        if (active && record.Options.ActivateChildren)
-            QueueChildren(record, active, fromScript);
-        if (!record.LuaOnActivate.empty() && active)
-            RunRecordLua(record.LuaOnActivate, "OnActivate");
-        if (!record.LuaOnDeactivate.empty() && !active)
-            RunRecordLua(record.LuaOnDeactivate, "OnDeactivate");
-        m_engine.Lua().AfterActivation(record, active, true);
+        Table::MemoryRecord* record = Refind(recordId, identity);
+        if (!record)
+            return;
+        if (active && record->Options.ActivateChildren)
+            QueueChildren(*record, active, fromScript);
+        const std::string code = active ? record->LuaOnActivate : record->LuaOnDeactivate;
+        if (!code.empty())
+        {
+            const std::string description = record->Description;
+            RunRecordLua(code, active ? "OnActivate" : "OnDeactivate");
+            if (!(record = Refind(recordId, identity)))
+            {
+                Vanished(recordId, identity, description, active ? "in its OnActivate code" : "in its OnDeactivate code");
+                return;
+            }
+        }
+        m_engine.Lua().AfterActivation(*record, active, true);
     }
 
     void ActivationRunner::PumpActivations(double budgetSeconds)
@@ -441,7 +628,7 @@ namespace Manifold
         const int recordId = job.RecordId;
         const bool active = job.Active;
         const bool fromScript = job.FromScript;
-        Table::MemoryRecord* record = m_engine.Table().FindById(recordId);
+        Table::MemoryRecord* record = Refind(recordId, job.Identity);
         if (!record || record->Active == active)
         {
             Unpend(recordId);
@@ -459,6 +646,7 @@ namespace Manifold
                 {
                     ActivationJob childJob;
                     childJob.RecordId = child->Id;
+                    childJob.Identity = job.Identity;
                     childJob.Active = false;
                     childJob.FromScript = fromScript;
                     childJob.ViaParent = recordId;
@@ -470,13 +658,28 @@ namespace Manifold
                 return;
             }
         }
+        const std::uint64_t identity = m_engine.Table().Identity();
+        const std::string description = record->Description;
+        // its handlers run now: a switch of the record they ask for goes in the queue after this one
+        const SwitchingMark mark(m_switching, recordId);
         ActivationTraceEntry trace = TraceStart(*record, active, fromScript, job.ViaParent);
         const double started = m_engine.Now();
         trace.Waited = job.QueuedAt > 0.0 ? started - job.QueuedAt : 0.0;
-        if (!m_engine.Lua().BeforeActivation(*record, active))
+        const bool proceed = m_engine.Lua().BeforeActivation(*record, active);
+        if (!(record = Refind(recordId, identity)))
+        {
+            trace.Result = ActivationTraceEntry::Outcome::Failed;
+            trace.Error = "went away in its onMemRecPreExecute or on(de)activate handler";
+            Traced(std::move(trace));
+            Unpend(recordId);
+            Vanished(recordId, identity, description, "in its onMemRecPreExecute or on(de)activate handler");
+            return;
+        }
+        if (!proceed)
         {
             trace.Result = ActivationTraceEntry::Outcome::Vetoed;
             Traced(std::move(trace));
+            NoteOutcome(recordId, Vetoed(*record, active));
             Unpend(recordId);
             return;
         }
@@ -492,6 +695,7 @@ namespace Manifold
             }
             Traced(std::move(trace));
             Unpend(recordId);
+            NoteOutcome(recordId, status);
             if (!status)
             {
                 m_engine.Lua().AfterActivation(*record, active, false);
@@ -500,13 +704,16 @@ namespace Manifold
                     Sounds::Play(Sounds::Cue::Error);
                 return;
             }
-            FinishRecordActivation(*record, active, fromScript);
+            FinishRecordActivation(recordId, identity, active, fromScript);
             m_engine.Table().Refresh();
             return;
         }
 
         auto running = std::make_unique<RunningActivation>();
         running->RecordId = recordId;
+        running->Identity = identity;
+        running->Description = description;
+        running->Script = record->Script;
         running->Active = active;
         running->FromScript = fromScript;
         running->Memory = record->ScriptMemory;
@@ -518,32 +725,32 @@ namespace Manifold
         Asm::AaOptions options;
         options.Section = active ? Asm::AaSection::Enable : Asm::AaSection::Disable;
         options.CheckOnly = false;
-        options.Owner = OwnerOf(*record);
+        options.Owner = OwnerOf(recordId);
         options.IncludeFolder = m_engine.Table().FilePath.empty() ? Paths::AutorunFolder() : std::filesystem::path(Utf8ToWide(m_engine.Table().FilePath)).parent_path();
         Asm::AaMemory* memory = &running->Memory;
         std::shared_ptr<Target::Process> process = m_engine.Process();
-        running->Result = std::async(std::launch::async, [this, script = record->Script, options, memory, process, recordId]()
+        running->Result = std::async(std::launch::async, [this, script = record->Script, options, memory, process, recordId, identity]()
             {
                 SetThreadName(L"Script activation");
                 t_activationWorker = true;
                 Asm::AaHost host;
                 host.Process = process.get();
                 host.Symbols = &m_engine.Symbols();
-                host.RunLua = [this, recordId](std::string_view code, bool syntaxCheck, std::string& output) { return RunLuaForWorker(code, recordId, syntaxCheck, output); };
+                host.RunLua = [this, recordId, identity](std::string_view code, bool syntaxCheck, std::string& output) { return RunLuaForWorker(code, recordId, identity, syntaxCheck, output); };
                 host.IsCustomCommand = [this](std::string_view name)
                     {
                         bool known = false;
                         RunOnMainAndWait([&]() { known = m_engine.Lua().IsAutoAssemblerCommand(name); });
                         return known;
                     };
-                host.RunCustomCommand = [this, recordId](std::string_view name, std::string_view parameters, bool syntaxCheck, std::string& output)
+                host.RunCustomCommand = [this, recordId, identity](std::string_view name, std::string_view parameters, bool syntaxCheck, std::string& output)
                     {
                         Status status = Status::Success();
                         RunOnMainAndWait([&]()
                             {
                                 m_workerLuaActive = true;
                                 const Lua::ScriptGlobals saved = m_engine.Lua().SaveScriptGlobals();
-                                m_engine.Lua().SetScriptGlobals(m_engine.Table().FindById(recordId), syntaxCheck);
+                                m_engine.Lua().SetScriptGlobals(Refind(recordId, identity), syntaxCheck);
                                 status = m_engine.Lua().RunAutoAssemblerCommand(name, parameters, syntaxCheck, output);
                                 m_engine.Lua().RestoreScriptGlobals(saved);
                                 m_workerLuaActive = false;
@@ -562,19 +769,42 @@ namespace Manifold
         std::unique_ptr<RunningActivation> running = std::move(m_running);
         const Asm::AaResult result = running->Result.get();
         Unpend(running->RecordId);
-        Table::MemoryRecord* record = m_engine.Table().FindById(running->RecordId);
-        if (!record)
-            return;
-        ActivationTraceEntry trace = TraceStart(*record, running->Active, running->FromScript, running->ViaParent);
+        const SwitchingMark mark(m_switching, running->RecordId);
+        // ∑ by id and table: a replaced table may have a record with the same id, which must not get this script's memory
+        Table::MemoryRecord* record = Refind(running->RecordId, running->Identity);
+        ActivationTraceEntry trace;
+        if (record)
+            trace = TraceStart(*record, running->Active, running->FromScript, running->ViaParent);
+        else
+        {
+            trace.RecordId = running->RecordId;
+            trace.Description = running->Description;
+            trace.Kind = Table::RecordKind::Script;
+            trace.Active = running->Active;
+            trace.FromScript = running->FromScript;
+            trace.ViaParent = running->ViaParent;
+        }
         trace.Async = true;
         trace.Seconds = m_engine.Now() - running->StartedAt;
         trace.Waited = running->QueuedAt > 0.0 ? running->StartedAt - running->QueuedAt : 0.0;
         TraceScript(trace, result, running->Before, running->Memory);
+        if (!record)
+        {
+            // ∑ Never dropped: the hooks and allocations of an [ENABLE] that worked would stay in the game with nothing left
+            //   to take them out again.
+            trace.Notes.push_back("the record went away while its script ran; the log says what was taken out of the game again and what stays");
+            Traced(std::move(trace));
+            Vanished(running->RecordId, running->Identity, running->Description, "while its script ran in the background");
+            ReleaseOrphan(running->RecordId, running->Description, running->Script, std::move(running->Memory), result.Ok() == running->Active, running->Process);
+            m_engine.Table().Refresh();
+            return;
+        }
         Traced(std::move(trace));
         record->ScriptMemory = std::move(running->Memory);
         if (!result.Ok())
         {
             record->LastError = result.Error.Text;
+            NoteOutcome(running->RecordId, result.Error);
             m_engine.Lua().AfterActivation(*record, running->Active, false);
             m_engine.Notify(result.Error);
             if (!running->FromScript)
@@ -586,8 +816,9 @@ namespace Manifold
         record->Active = running->Active;
         if (!running->Active)
             record->ScriptMemory.Values.clear();
+        NoteOutcome(running->RecordId, Status::Success());
         LOG_SUCCESS("Table", std::string(running->Active ? "Enabled " : "Disabled ") + record->Description);
-        FinishRecordActivation(*record, running->Active, running->FromScript);
+        FinishRecordActivation(running->RecordId, running->Identity, running->Active, running->FromScript);
         m_engine.Table().Refresh();
     }
 
@@ -597,13 +828,16 @@ namespace Manifold
             return;
         const bool previous = m_waitingForWorker;
         m_waitingForWorker = true;
-        while (m_running->Result.wait_for(std::chrono::milliseconds(2)) != std::future_status::ready)
+        // ∑ a Lua task run while waiting may wait for (and finish) the same activation itself
+        const RunningActivation* waited = m_running.get();
+        while (m_running.get() == waited && m_running->Result.wait_for(std::chrono::milliseconds(2)) != std::future_status::ready)
         {
             DrainMainWork();
             m_engine.Lua().RunTasks(0.005);
         }
         m_waitingForWorker = previous;
-        FinishActivation();
+        if (m_running.get() == waited)
+            FinishActivation();
     }
 
     void ActivationRunner::RunOnMainAndWait(const std::function<void()>& work)
@@ -631,7 +865,7 @@ namespace Manifold
         m_mainQueue.Drain();
     }
 
-    Status ActivationRunner::RunLuaForWorker(std::string_view code, int recordId, bool syntaxCheck, std::string& output)
+    Status ActivationRunner::RunLuaForWorker(std::string_view code, int recordId, std::uint64_t identity, bool syntaxCheck, std::string& output)
     {
         std::promise<Status> finished;
         std::future<Status> future = finished.get_future();
@@ -647,10 +881,10 @@ namespace Manifold
                             result = value;
                             finished.set_value(status);
                         },
-                        [this, saved, recordId, syntaxCheck]()
+                        [this, saved, recordId, identity, syntaxCheck]()
                         {
                             *saved = m_engine.Lua().SaveScriptGlobals();
-                            m_engine.Lua().SetScriptGlobals(m_engine.Table().FindById(recordId), syntaxCheck);
+                            m_engine.Lua().SetScriptGlobals(Refind(recordId, identity), syntaxCheck);
                             m_workerLuaActive = true;
                         },
                         [this, saved]()
@@ -662,7 +896,7 @@ namespace Manifold
                 }
                 m_workerLuaActive = true;
                 const Lua::ScriptGlobals saved = m_engine.Lua().SaveScriptGlobals();
-                m_engine.Lua().SetScriptGlobals(m_engine.Table().FindById(recordId), syntaxCheck);
+                m_engine.Lua().SetScriptGlobals(Refind(recordId, identity), syntaxCheck);
                 const Status status = m_engine.Lua().RunWithResult(text, "{$lua}", result);
                 m_engine.Lua().RestoreScriptGlobals(saved);
                 m_workerLuaActive = false;
@@ -675,9 +909,25 @@ namespace Manifold
 
     Status ActivationRunner::SetActive(Table::MemoryRecord& record, bool active, bool fromScript)
     {
+        const int recordId = record.Id;
+        const std::uint64_t identity = m_engine.Table().Identity();
+        const std::string description = record.Description;
         if (m_running && Manifold::OnMainThread())
+        {
+            // finishing the running activation runs Lua, which may delete this record
             WaitForActivation();
-        const Status status = ActivateTree(record, active, -1, fromScript);
+            if (!Refind(recordId, identity))
+                return Vanished(recordId, identity, description, "while the running activation finished");
+        }
+        // ∑ Still running: this comes from that activation's own {$lua} or custom command. A sync switch of the record whose
+        //   script the worker is assembling right now would run the two at once; it goes in the queue after it instead.
+        if (m_running && m_running->RecordId == recordId && m_running->Identity == identity)
+        {
+            LOG_INFO("Table", "\"" + description + "\" is being switched in the background; the new switch waits until that one is done");
+            RequestActive(*Refind(recordId, identity), active, fromScript);
+            return Status::Success();
+        }
+        const Status status = ActivateTree(recordId, active, -1, fromScript);
         m_engine.Table().Refresh();
         return status;
     }
@@ -700,16 +950,25 @@ namespace Manifold
         CancelActivations();
         WaitForActivation();
         std::vector<std::string> failures;
+        const std::uint64_t identity = m_engine.Table().Identity();
         for (int id : BottomToTop())
         {
+            // a switch's Lua may replace the table: the ids left are those of the old one
+            if (m_engine.Table().Identity() != identity)
+                break;
             Table::MemoryRecord* record = m_engine.Table().FindById(id);
             if (!record || !record->Active)
                 continue;
+            const bool script = record->Kind == Table::RecordKind::Script;
+            const std::string description = record->Description;
             const Status status = SetActive(*record, false);
-            if (!status && record->Kind == Table::RecordKind::Script)
-                failures.push_back(record->Description + ": " + status.Text);
-            else if (record->Kind != Table::RecordKind::Script)
-                record->Active = false;
+            if (!status && script)
+                failures.push_back(description + ": " + status.Text);
+            else if (!script)
+            {
+                if (Table::MemoryRecord* again = Refind(id, identity))
+                    again->Active = false;
+            }
         }
         if (failures.empty())
             LOG_INFO("Table", "Turned off every active record");

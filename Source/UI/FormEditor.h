@@ -7,12 +7,16 @@
 #include "UI/ToolWindowBase.h"
 #include "UI/UiHost.h"
 
+#include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace Manifold
 {
@@ -84,8 +88,21 @@ namespace Manifold::UI
         void DrawSpot(ImDrawList* draw, const DropSpot& spot) const;
         const UiDesign::Rect* RectOf(int id) const;
         bool Within(int node, int ancestor) const;
-        void DropPayload(const ImGuiPayload* payload, const DropSpot& spot);
-        void DropBeside(const ImGuiPayload* payload, const DropSpot& spot);
+        // what a drag brought, copied out of the ImGui payload so the drop can run after the panes are drawn
+        struct Dropped
+        {
+            enum class Type : std::uint8_t
+            {
+                Kind,   // a widget kind from Add
+                Node,   // a widget of the form (its id)
+                Record, // a record from the address list (its id)
+            };
+            Type What = Type::Kind;
+            int Value = 0;
+        };
+        static std::optional<Dropped> DroppedFrom(const ImGuiPayload* payload);
+        void DropPayload(const Dropped& dropped, const DropSpot& spot);
+        void DropBeside(const Dropped& dropped, const DropSpot& spot);
         int AddRecordWidget(int parent, int index, int record);
         void AddRecordAt(int record, int parent, int index);
         void ChangeKind(int id, Lua::UiKind kind);
@@ -159,7 +176,17 @@ namespace Manifold::UI
         void Popups();
 
         void Remember(ImGuiID source = 0);
+        void PushUndo(Lua::FormDocument snapshot); // an undo step (without its decoded pictures), within kUndoLimit
         void Changed();
+        // ∑ Edits that add, remove or move widgets, asked for while the panes
+        // are drawn (menus, drops), wait for the end of the frame: the outline,
+        // the preview and the properties hold widgets they are drawing.
+        void Defer(std::function<void()> action);
+        void RunDeferred();
+        void ForgetTransient(); // a new document: ids of the old one mean other widgets now
+        void CheckTransient();  // undo/redo: drops what the restored step does not have
+        void FinishRename();    // applies a typed name to what follows it (references, handlers)
+        void StopCapture();
         void Undo();
         void Redo();
         void Select(int id);
@@ -281,6 +308,7 @@ namespace Manifold::UI
         int m_captureNode = 0;        // the widget whose Hotkey field waits for keys...
         std::string m_captureProp;    // ...and which of its hotkey fields
         std::set<int> m_captureDown;  // keys that were down already when it started (not taken)
+        bool m_captureSeen = false;   // this frame drew the capturing field (else the capture ends)
         int m_wireNode = 0;           // a wire dropped on empty space: from this widget...
         ImVec2 m_wireDrop;            // ...at this surface point (points)
         std::vector<std::pair<ImVec2, ImVec2>> m_pillRects; // last frame's record pills (tags keep off them)
@@ -296,6 +324,27 @@ namespace Manifold::UI
         int m_deferSelect = 0;      // pressed on one of several selected: it alone is selected on release, unless dragged
         int m_renameNode = 0;       // the widget whose name field is being typed into
         std::string m_renameFrom;   // its name when typing started
+        std::vector<std::function<void()>> m_deferred; // see Defer
+        bool m_inPanes = false;     // the outline, preview and properties are being drawn
+        std::set<int> m_imageIds;   // pictures SyncImages decoded into m_form (unused ones are dropped)
+
+        // the New Trainer dialog's counts, made again only when the table or an option changes
+        struct TrainerPreview
+        {
+            bool Valid = false;
+            std::uint64_t Identity = 0;
+            std::uint64_t Generation = 0;
+            bool WithValues = true;
+            bool WithHotkeys = true;
+            std::vector<Lua::FormRecordInfo> Records;
+            std::vector<std::string> Taken;
+            int Switches = 0;
+            int Fields = 0;
+            int Sections = 0;
+            int Hotkeys = 0;
+            int Skipped = 0;
+        };
+        TrainerPreview m_trainerPreview;
 
         std::deque<Lua::FormDocument> m_undo;
         std::deque<Lua::FormDocument> m_redo;

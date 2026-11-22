@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace Manifold::UI
@@ -53,6 +54,9 @@ namespace Manifold::UI
         void UpdateStaticIssues(bool force);
         Problems ProblemsOf(int recordId) const;
         std::vector<const Table::RecordIssue*> IssuesOf(int recordId) const;
+        // Counts the issues per record once for each new check result (m_issuesSerial), not per record and frame.
+        void IndexIssues() const;
+        void IssuesChanged() { ++m_issuesSerial; }
 
         void RecordsPage();
         void BuildRows();
@@ -94,6 +98,22 @@ namespace Manifold::UI
         bool m_showHidden = true;
         std::set<int> m_collapsed;
         std::vector<Row> m_rows;
+        // ∑ What m_rows was built from: it is built again only when one of these changes, and at most every kRowsRecheck
+        //   seconds besides (an address error or a hidden child's visibility can change without a table change).
+        struct RowsKey
+        {
+            std::uint64_t Generation = 0;
+            std::uint64_t Identity = 0;
+            std::uint64_t Issues = 0;
+            std::string Filter;
+            bool OnlyProblems = false;
+            bool ShowHidden = false;
+            std::set<int> Collapsed;
+            bool operator==(const RowsKey&) const = default;
+        };
+        RowsKey m_rowsKey;
+        bool m_rowsBuilt = false;
+        double m_rowsAt = -10.0;
         float m_inspectorWidth = 360.0f;
 
         std::vector<Table::RecordIssue> m_static;
@@ -102,6 +122,9 @@ namespace Manifold::UI
         double m_staticAt = -10.0;
 
         std::vector<Table::RecordIssue> m_runtime;
+        std::uint64_t m_issuesSerial = 1;
+        mutable std::uint64_t m_indexedSerial = 0;
+        mutable std::unordered_map<int, Problems> m_problems;
         std::vector<int> m_checkQueue;
         std::size_t m_checkNext = 0;
         bool m_checkRunning = false;

@@ -268,8 +268,15 @@ namespace Manifold::Lua
     bool FormUnwrap(FormDocument& form, int node);
     // a Lua name for a text ("Infinite Health" -> infiniteHealth) no widget has
     std::string FormNameFromText(const FormDocument& form, std::string_view text);
-    // renames a Lua name in a script where it stands as a whole name
+    // renames a Lua name in a script where it stands as a name of its own or
+    // as a handler (handlers.name, handlers["name"]): not in strings or
+    // comments, not another table's member (w.name, obj:name()), not in the
+    // form table's line; a rename FormCanRenameIdentifier refuses leaves the
+    // script as it is
     std::string FormRenameIdentifier(std::string_view text, std::string_view from, std::string_view to);
+    // false (and why) when renaming `from` to `to` would break the script: no
+    // Lua names, the form table's variable or `handlers`, or `to` in use already
+    bool FormCanRenameIdentifier(std::string_view text, std::string_view from, std::string_view to, std::string* why = nullptr);
 
     std::optional<FormRule> FormParseWhen(std::string_view text);
     std::string FormWhenText(const FormRule& rule);

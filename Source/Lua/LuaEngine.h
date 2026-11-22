@@ -294,6 +294,21 @@ namespace Manifold::Lua
         LuaEngine(const LuaEngine&) = delete;
         LuaEngine& operator=(const LuaEngine&) = delete;
 
+        // Stops Lua on the main state that runs longer than the given time while it lives, for code that runs
+        // outside the guarded callbacks (the Templates preview); a limit that is already running stays.
+        class TimeLimit
+        {
+        public:
+            TimeLimit(LuaEngine& engine, int milliseconds, const char* reason);
+            ~TimeLimit();
+            TimeLimit(const TimeLimit&) = delete;
+            TimeLimit& operator=(const TimeLimit&) = delete;
+
+        private:
+            LuaEngine& m_engine;
+            bool m_set = false;
+        };
+
         Status Run(std::string_view code, std::string_view chunkName = "script");
         Status RunWithResult(std::string_view code, std::string_view chunkName, std::string& result);
         Status Compile(std::string_view code, std::string_view chunkName = "check");
@@ -522,6 +537,7 @@ namespace Manifold::Lua
         std::uint64_t m_modulesRevision = 0;
         double m_callDeadline = 0.0;
         int m_callLimit = 0;
+        const char* m_callReason = nullptr;
         std::vector<std::unique_ptr<Task>> m_tasks;
         int m_nextTask = 1;
         std::vector<Task*> m_taskStack;

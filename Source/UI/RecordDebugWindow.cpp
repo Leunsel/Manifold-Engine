@@ -25,6 +25,7 @@ namespace Manifold::UI
         using Table::RecordKind;
 
         constexpr double kStaticRecheck = 0.5;
+        constexpr double kRowsRecheck = 0.25;
         constexpr double kCheckBudget = 0.006;
         constexpr const char* kRecordEvents[] = { "onactivate", "ondeactivate", "onvaluechanged", "ongetdisplayvalue", "ondestroy" };
 
@@ -122,6 +123,23 @@ namespace Manifold::UI
             std::string text = HexBytes(std::span<const std::uint8_t>(bytes.data(), shown));
             if (bytes.size() > shown)
                 text += Format(" … (%zu bytes)", bytes.size());
+            return text;
+        }
+
+        // The trace keeps only a prefix of each write; WriteSizes has the full sizes.
+        std::size_t TracedWriteSize(const ActivationTraceEntry& entry, std::size_t index)
+        {
+            return index < entry.WriteSizes.size() ? entry.WriteSizes[index] : entry.Writes[index].Bytes.size();
+        }
+
+        std::string TracedBytes(const ActivationTraceEntry& entry, std::size_t index, std::size_t most)
+        {
+            const std::vector<std::uint8_t>& bytes = entry.Writes[index].Bytes;
+            const std::size_t full = TracedWriteSize(entry, index);
+            const std::size_t shown = std::min(bytes.size(), most);
+            std::string text = HexBytes(std::span<const std::uint8_t>(bytes.data(), shown));
+            if (full > shown)
+                text += Format(" … (%zu bytes)", full);
             return text;
         }
 
@@ -306,6 +324,7 @@ namespace Manifold::UI
         m_references.clear();
         m_staticGeneration = 0;
         m_runtime.clear();
+        IssuesChanged();
         m_checkQueue.clear();
         m_checkRunning = false;
         m_checkRan = false;
@@ -322,6 +341,7 @@ namespace Manifold::UI
         Lua::LuaEngine& lua = engine.Lua();
         hooks.CustomTypeExists = [&lua](std::string_view name) { return lua.FindCustomType(name) != nullptr; };
         m_static = Table::CheckRecords(list, hooks);
+        IssuesChanged();
         m_references = Table::FindRecordReferences(list);
         m_staticGeneration = list.Generation();
         m_staticAt = engine.Now();
@@ -343,18 +363,32 @@ namespace Manifold::UI
         return issues;
     }
 
+    void RecordDebugWindow::IndexIssues() const
+    {
+        if (m_indexedSerial == m_issuesSerial)
+            return;
+        m_problems.clear();
+        for (const std::vector<RecordIssue>* issues : { &m_static, &m_runtime })
+        {
+            for (const RecordIssue& issue : *issues)
+            {
+                Problems& problems = m_problems[issue.RecordId];
+                if (issue.Level == IssueLevel::Error)
+                    ++problems.Errors;
+                else if (issue.Level == IssueLevel::Warning)
+                    ++problems.Warnings;
+                else
+                    ++problems.Notes;
+            }
+        }
+        m_indexedSerial = m_issuesSerial;
+    }
+
     RecordDebugWindow::Problems RecordDebugWindow::ProblemsOf(int recordId) const
     {
-        Problems problems;
-        for (const RecordIssue* issue : IssuesOf(recordId))
-        {
-            if (issue->Level == IssueLevel::Error)
-                ++problems.Errors;
-            else if (issue->Level == IssueLevel::Warning)
-                ++problems.Warnings;
-            else
-                ++problems.Notes;
-        }
+        IndexIssues();
+        const auto indexed = m_problems.find(recordId);
+        Problems problems = indexed == m_problems.end() ? Problems{} : indexed->second;
         if (const Table::MemoryRecord* record = m_workspace.Core().Table().FindById(recordId); record && !record->LastError.empty())
             ++problems.Errors;
         return problems;
@@ -514,8 +548,15 @@ namespace Manifold::UI
 
     void RecordDebugWindow::BuildRows()
     {
-        m_rows.clear();
         Table::AddressList& list = m_workspace.Core().Table();
+        const double now = m_workspace.Core().Now();
+        RowsKey key{ list.Generation(), list.Identity(), m_issuesSerial, m_filter, m_onlyProblems, m_showHidden, m_collapsed };
+        if (m_rowsBuilt && key == m_rowsKey && now - m_rowsAt < kRowsRecheck)
+            return;
+        m_rowsKey = std::move(key);
+        m_rowsBuilt = true;
+        m_rowsAt = now;
+        m_rows.clear();
         const bool filtering = !m_filter.empty() || m_onlyProblems;
         const auto idText = ParseDecimal(m_filter);
         const auto matches = [&](Table::MemoryRecord& record)
@@ -1107,9 +1148,9 @@ namespace Manifold::UI
                 }
                 else
                     Property("Dropdown list", record.DropDown.empty() ? std::string("(none)") : Format("%zu entries of its own", record.DropDown.size()));
-                const int named = record.Description.empty() ? 0 : Table::CountWithDescription(list, record.Description);
+                const int named = record.Description.empty() ? 0 : list.CountByDescription(record.Description);
                 if (named > 1)
-                    Property("Same name", Format("%d records are called this; lookups by name find the first", named), ManifoldTheme::Warning);
+                    Property("Same name", Format("%d records are called this; getMemoryRecordByDescription finds the first, manifold.record.find fails (ME-6011)", named), ManifoldTheme::Warning);
                 std::vector<std::string> names;
                 for (const Table::MemoryRecord* other : linking)
                     names.push_back(Format("%s (ID %d)", Name(*other).c_str(), other->Id));
@@ -1278,6 +1319,7 @@ namespace Manifold::UI
     {
         Engine& engine = m_workspace.Core();
         m_runtime.clear();
+        IssuesChanged();
         m_checkQueue.clear();
         m_checkNext = 0;
         for (const Table::MemoryRecord* record : engine.Table().Flatten())
@@ -1298,6 +1340,7 @@ namespace Manifold::UI
         {
             m_checkRunning = false;
             m_runtime.push_back({ Table::kTableLevel, IssueLevel::Info, "check", "The process closed during the check; it stopped there." });
+            IssuesChanged();
             return;
         }
         const double deadline = engine.Now() + kCheckBudget;
@@ -1317,7 +1360,11 @@ namespace Manifold::UI
     void RecordDebugWindow::CheckRecordAtRuntime(Table::MemoryRecord& record)
     {
         Engine& engine = m_workspace.Core();
-        const auto add = [&](IssueLevel level, const char* check, std::string text) { m_runtime.push_back({ record.Id, level, check, std::move(text) }); };
+        const auto add = [&](IssueLevel level, const char* check, std::string text)
+            {
+                m_runtime.push_back({ record.Id, level, check, std::move(text) });
+                IssuesChanged();
+            };
         if (record.Kind == RecordKind::Value || record.AddressGroupHeader)
         {
             if (TrimView(record.Address).empty())
@@ -1346,8 +1393,10 @@ namespace Manifold::UI
         const Asm::AaSection section = record.Active ? Asm::AaSection::Disable : Asm::AaSection::Enable;
         const char* part = record.Active ? "[DISABLE]" : "[ENABLE]";
         Asm::AaMemory memory = record.ScriptMemory;
-        const ScriptCheck check = engine.CheckScript(record.Script, section, memory);
-        const std::string heldBack = check.LuaHeldBack ? Format(" %d Lua %s not run because the table's scripts are not trusted yet.", check.LuaHeldBack, check.LuaHeldBack == 1 ? "block was" : "blocks were") : std::string();
+        // ∑ Lua always held back here, trusted table or not: a check over the whole table must not run its {$lua} blocks and
+        //   custom commands (they may write memory, switch records or delete them). The editor's Check keeps running them.
+        const ScriptCheck check = engine.CheckScript(record.Script, section, memory, true);
+        const std::string heldBack = check.LuaHeldBack ? Format(" %d Lua %s not run: this check runs no Lua.", check.LuaHeldBack, check.LuaHeldBack == 1 ? "part was" : "parts were") : std::string();
         if (!check.Result.Ok())
         {
             const std::string line = check.Result.Line > 0 ? Format(" (line %d)", check.Result.Line) : std::string();
@@ -1511,8 +1560,11 @@ namespace Manifold::UI
             if (!entry->Error.empty())
                 text += "\t" + entry->Error + (entry->ErrorLine > 0 ? Format(" (line %d)", entry->ErrorLine) : std::string());
             text += "\n";
-            for (const Asm::AaWrite& write : entry->Writes)
-                text += Format("    write %s: %s (line %d)\n", Hex(write.Address).c_str(), ShortBytes(write.Bytes, 32).c_str(), write.Line);
+            for (std::size_t i = 0; i < entry->Writes.size(); ++i)
+            {
+                const Asm::AaWrite& write = entry->Writes[i];
+                text += Format("    write %s: %s (line %d)\n", Hex(write.Address).c_str(), TracedBytes(*entry, i, 32).c_str(), write.Line);
+            }
             for (const Asm::AaAllocation& allocation : entry->Allocated)
                 text += Format("    alloc %s at %s, size %s\n", allocation.Name.c_str(), Hex(allocation.Address).c_str(), Hex(allocation.Size).c_str());
             for (const Asm::AaAllocation& allocation : entry->Released)
@@ -1675,16 +1727,17 @@ namespace Manifold::UI
             ImGui::TableSetupColumn("Line", ImGuiTableColumnFlags_WidthFixed, Px(44.0f));
             ImGui::TableHeadersRow();
             PushMono();
-            for (const Asm::AaWrite& write : entry.Writes)
+            for (std::size_t i = 0; i < entry.Writes.size(); ++i)
             {
+                const Asm::AaWrite& write = entry.Writes[i];
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 TextFitted(engine.Describe(write.Address), ImGui::GetContentRegionAvail().x, ManifoldTheme::AddressText);
                 ItemTooltip(Hex(write.Address).c_str());
                 ImGui::TableNextColumn();
-                Muted(std::to_string(write.Bytes.size()));
+                Muted(std::to_string(TracedWriteSize(entry, i)));
                 ImGui::TableNextColumn();
-                TextFitted(ShortBytes(write.Bytes, 24), ImGui::GetContentRegionAvail().x, ManifoldTheme::BytesText);
+                TextFitted(TracedBytes(entry, i, 24), ImGui::GetContentRegionAvail().x, ManifoldTheme::BytesText);
                 ImGui::TableNextColumn();
                 Muted(write.Line > 0 ? std::to_string(write.Line) : std::string());
             }

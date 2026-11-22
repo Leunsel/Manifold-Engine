@@ -1129,11 +1129,14 @@ namespace Manifold::Asm
             request.operand_count = static_cast<ZyanU8>(slot);
             // ∑ "push word 1234" has no other operand that sets the size, so the size word is the
             //   only thing that says 66 68 (2 bytes on the stack) instead of a full-width push.
-            if (operands.size() == 1 && operands.front().Kind == OperandKind::Immediate && operands.front().SizeWritten)
+            //   Only push: for ret word 8, int byte 3 and the like the size word names the
+            //   immediate, not an operand size, and the hint made ret word 8 a 66 C2 (a 16-bit
+            //   return). push byte 5 is the 6A form, which the immediate already picks.
+            if (attempt.Mnemonic == ZYDIS_MNEMONIC_PUSH && operands.size() == 1 && operands.front().Kind == OperandKind::Immediate && operands.front().SizeWritten &&
+                operands.front().Size != 1)
             {
                 switch (operands.front().Size)
                 {
-                case 1: request.operand_size_hint = ZYDIS_OPERAND_SIZE_HINT_8; break;
                 case 2: request.operand_size_hint = ZYDIS_OPERAND_SIZE_HINT_16; break;
                 case 4: request.operand_size_hint = ZYDIS_OPERAND_SIZE_HINT_32; break;
                 case 8: request.operand_size_hint = ZYDIS_OPERAND_SIZE_HINT_64; break;

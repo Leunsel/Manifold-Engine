@@ -8,6 +8,7 @@
 #include "UI/Widgets.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace Manifold::UI
 {
@@ -92,7 +93,7 @@ namespace Manifold::UI
                 if (ImGui::MenuItem(undo.c_str(), "Ctrl+Z", false, !m_undo.empty()))
                     Undo();
                 if (DangerMenuItem(ICON_FA_TRASH "  Remove", "Delete", !selected.empty()))
-                    Remove(selected);
+                    m_removeLater = selected;
                 ImGui::EndMenu();
             }
             ImGui::EndMenuBar();
@@ -130,14 +131,20 @@ namespace Manifold::UI
         }
         Keys(keys);
         EditDialog();
+        // ∑ Removed only here, after the rows: a row drawn after the removal would read a note that is gone.
+        if (!m_removeLater.empty())
+            Remove(std::exchange(m_removeLater, {}));
         EndToolWindow();
     }
 
     void CommentListWindow::Row(const std::string& key, const std::vector<std::string>& keys, int index)
     {
         Engine& engine = m_workspace.Core();
-        const Table::AddressList::DisasmNote& note = engine.Table().DisasmNotes[key];
+        const auto found = engine.Table().DisasmNotes.find(key);
         ImGui::TableNextRow();
+        if (found == engine.Table().DisasmNotes.end())
+            return;
+        const Table::AddressList::DisasmNote& note = found->second;
         ImGui::TableNextColumn();
         PushMono();
         const bool isSelected = m_selected.count(key) > 0;
@@ -152,7 +159,7 @@ namespace Manifold::UI
                 m_selected = { key };
                 m_anchor = key;
             }
-            RowMenu(key);
+            RowMenu(key, keys);
             ImGui::EndPopup();
         }
         ImGui::SameLine(0.0f, 0.0f);
@@ -176,10 +183,10 @@ namespace Manifold::UI
         TextFitted(note.Header, ImGui::GetContentRegionAvail().x, ManifoldTheme::Accent);
     }
 
-    void CommentListWindow::RowMenu(const std::string& key)
+    void CommentListWindow::RowMenu(const std::string& key, const std::vector<std::string>& keys)
     {
         Engine& engine = m_workspace.Core();
-        const std::vector<std::string> selected(m_selected.begin(), m_selected.end());
+        const std::vector<std::string> selected = SelectedIn(keys);
         if (ImGui::MenuItem(ICON_FA_CODE "  Go to in the Disassembler", "Enter", false, selected.size() == 1))
             Reveal(key);
         ImGui::Separator();
@@ -199,12 +206,14 @@ namespace Manifold::UI
         ImGui::Separator();
         if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Address"))
             ImGui::SetClipboardText(key.c_str());
-        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Comment", nullptr, false, !engine.Table().DisasmNotes[key].Comment.empty()))
-            ImGui::SetClipboardText(engine.Table().DisasmNotes[key].Comment.c_str());
+        const auto note = engine.Table().DisasmNotes.find(key);
+        const bool hasComment = note != engine.Table().DisasmNotes.end() && !note->second.Comment.empty();
+        if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Comment", nullptr, false, hasComment))
+            ImGui::SetClipboardText(note->second.Comment.c_str());
         ImGui::Separator();
         const std::string remove = selected.size() > 1 ? ICON_FA_TRASH "  Remove " + std::to_string(selected.size()) + " Comments" : std::string(ICON_FA_TRASH "  Remove");
         if (DangerMenuItem(remove.c_str(), "Delete"))
-            Remove(selected);
+            m_removeLater = selected;
     }
 
     void CommentListWindow::Click(const std::vector<std::string>& keys, int index)
@@ -286,7 +295,7 @@ namespace Manifold::UI
         const ImGuiIO& io = ImGui::GetIO();
         const std::vector<std::string> selected = SelectedIn(keys);
         if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) && !selected.empty())
-            Remove(selected);
+            m_removeLater = selected;
         else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false))
             Undo();
         else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false))

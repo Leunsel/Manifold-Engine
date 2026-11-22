@@ -17,6 +17,7 @@
 
 #include <windows.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -289,11 +290,27 @@ namespace Manifold::Tests
             WriteText(folder / "Globals.CEA", "<< type(print) >>|<< TemplateSettings.MyOffset >>|<< TemplateSettings.SubMenuName >>|<< TemplateSettings.MenuOrder >>");
             WriteText(folder / "Globals.Settings.lua", "return { SchemaVersion = 2, Id = \"test.globals\", Caption = \"Globals\", AllowUnsafeGlobals = true, SubMenuName = \"Pointers\", MenuOrder = 7, MyOffset = 0x30 }");
             WriteText(folder / "Hooks.CEA", "<< HookName >>|<< HookNameParsed >>|<< GlobalAlloc >>");
+            WriteText(folder / "Spin.CEA", "<% while true do end %>");
+            WriteText(folder / "Spin.Settings.lua", "return { SchemaVersion = 2, Id = \"test.spin\", Caption = \"Spin\" }");
             WriteText(folder / "Hooks.Settings.lua", "return { SchemaVersion = 2, Id = \"test.hooks\", Caption = \"Hooks\", Requires = { \"HookName\" }, Memory = { AllocationSize = 4096 } }");
 
             Library library(folder);
             library.Load(engine.Lua().State());
 
+            {
+                // the Templates preview runs drafts under a time limit: an endless loop ends with an error, not a hang
+                const auto started = std::chrono::steady_clock::now();
+                GenerationResult spin;
+                {
+                    Lua::LuaEngine::TimeLimit limit(engine.Lua(), 200, "test limit");
+                    spin = Run(engine, library, "test.spin");
+                }
+                const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+                CHECK_MSG(!spin.Ok() && spin.Failure.Message.find("test limit") != std::string::npos, spin.Failure.Message);
+                CHECK_MSG(seconds < 5.0, Format("the loop ran %.1f s", seconds));
+                std::string after;
+                CHECK(engine.Lua().RunWithResult("local n = 0 for i = 1, 300000 do n = n + 1 end return tostring(n)", "after limit", after).Ok() && after == "300000");
+            }
             const GenerationResult standalone = Run(engine, library, "test.standalone");
             CHECK_MSG(standalone.Text && *standalone.Text == "[DISABLE]\n\nManifoldNop(Hook)\n\nunregisterSymbol(*)\n", standalone.Text.value_or(standalone.Failure.Message));
             GenerationRequest off;

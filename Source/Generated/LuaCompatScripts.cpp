@@ -4514,10 +4514,12 @@ end
 local byToken
 local generation
 
--- The classes by "module:token", rebuilt when the class list changes.
+-- The classes by "module:token", rebuilt when the class list changes. The
+-- process id and the generation (one per reading of the classes) tell a
+-- restarted game from the one before, whose module and count are the same.
 local function classByToken(api, module, token)
   local status = api.status()
-  local key = tostring(status.module) .. ":" .. tostring(status.classes)
+  local key = tostring(status.processId) .. ":" .. tostring(status.generation) .. ":" .. tostring(status.module) .. ":" .. tostring(status.classes)
   if not byToken or generation ~= key then
     byToken = {}
     for _, class in ipairs(api.classes() or {}) do
@@ -5211,7 +5213,7 @@ end
 setmetatable(_G, globalMeta)
 )MLUA"),
         };
-        constexpr std::array<std::string_view, 17> kManifold0 = {
+        constexpr std::array<std::string_view, 18> kManifold0 = {
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
@@ -7594,9 +7596,25 @@ local uiEntries = {}
 local uiOwned = {}
 local imageIds = setmetatable({}, { __mode = "k" })
 
-local function ownerSource()
-  local info = callerFrame()
-  return info and info.source or ""
+-- ∑ a live reload runs from the program, not from the script: what it makes
+-- (modal windows, pictures) belongs to the form's script all the same, so
+-- running the script again removes it. ownerSource(true, source) makes
+-- `source` the owner until ownerSource(true, nil) (see reloadForm). The
+-- override lives in a block: the main chunk is at Lua's 200 locals.
+local ownerSource
+do
+  local override
+  ownerSource = function(set, owner)
+    if set then
+      override = owner
+      return
+    end
+    if override then
+      return override
+    end
+    local info = callerFrame()
+    return info and info.source or ""
+  end
 end
 
 local function remember(owner, key, remove)
@@ -7654,7 +7672,8 @@ local function checkOptions(path, keys, options)
       misuse(("%s: options.%s must be %s, got %s"):format(path, key, NOUNS[kind], kindOf(value)))
     end
   end
-  checkColor(path, "options.color", options.color)
+)MLUA"),
+            std::string_view(R"MLUA(  checkColor(path, "options.color", options.color)
   checkColor(path, "options.background", options.background)
   checkIcon(path, options.icon)
   if options.style ~= nil and keys == WIDGET_KEYS.checkbox then
@@ -7662,8 +7681,7 @@ local function checkOptions(path, keys, options)
       misuse(('%s: options.style must be "checkbox" or "switch", got %q'):format(path, options.style))
     end
   elseif options.style ~= nil and not BUTTON_STYLES[options.style] then
-)MLUA"),
-            std::string_view(R"MLUA(    misuse(('%s: options.style must be one of "default", "accent", "danger", got %q'):format(path, options.style))
+    misuse(('%s: options.style must be one of "default", "accent", "danger", got %q'):format(path, options.style))
   end
   for _, key in ipairs({ "hotkey", "hotkeyIncrease", "hotkeyDecrease", "hotkeyNext", "hotkeyPrevious" }) do
     local text = options[key]
@@ -7924,8 +7942,18 @@ widgetObject = function(entry)
     end
     row = row or #rows + 1
     rowIndex("addRow", rows, row, true)
+    if #rows >= 100000 then
+      -- full: the native side keeps the first 100000 rows (kMaxItems), one more would drop the last one unseen
+      return false
+    end
     table.insert(rows, row, cellsOf("addRow", cells))
-    return updateEntry(prefix .. ".addRow", entry, WIDGET_KEYS.table, { rows = rows })
+    -- the selected row stays selected: a row inserted above it moves it down
+    local selected = native.uiGet(entry.id)
+    local update = { rows = rows }
+    if selected ~= nil and row <= selected then
+      update.value = selected + 1
+    end
+    return updateEntry(prefix .. ".addRow", entry, WIDGET_KEYS.table, update)
   end)
   method("setRow", { params = { { name = "row", type = "integer" }, { name = "cells", type = "table" } } }, function(row, cells)
     local rows = rowsOf("setRow")
@@ -7943,7 +7971,15 @@ widgetObject = function(entry)
     end
     rowIndex("removeRow", rows, row)
     table.remove(rows, row)
-    return updateEntry(prefix .. ".removeRow", entry, WIDGET_KEYS.table, { rows = rows })
+    -- the selection stays on its row: one above it moves it up, and removing the selected row clears it
+    local selected = native.uiGet(entry.id)
+    local update = { rows = rows }
+    if selected ~= nil and row == selected then
+      update.value = 0
+    elseif selected ~= nil and row < selected then
+      update.value = selected - 1
+    end
+    return updateEntry(prefix .. ".removeRow", entry, WIDGET_KEYS.table, update)
   end)
   method("getItems", {}, function()
     if entry.kind ~= "combo" and entry.kind ~= "radio" and entry.kind ~= "tree" then
@@ -7963,7 +7999,8 @@ widgetObject = function(entry)
     end
     return native.uiView(entry.id)
   end)
-  method("setView", { params = { { name = "view", type = "table", keys = { x = "number", y = "number", scale = "number" } } } }, function(view)
+)MLUA"),
+            std::string_view(R"MLUA(  method("setView", { params = { { name = "view", type = "table", keys = { x = "number", y = "number", scale = "number" } } } }, function(view)
     if entry.kind ~= "canvas" then
       misuse(prefix .. ".setView: only a canvas has a view")
     end
@@ -7981,8 +8018,7 @@ local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open
   minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean", modal = "boolean",
   position = "string", x = "number", y = "number", onClose = "function", onUpdate = "function" }
 local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", opacity = "number", inactiveOpacity = "number", labelPosition = "string",
-)MLUA"),
-            std::string_view(R"MLUA(  minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean", modal = "boolean",
+  minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean", modal = "boolean",
   onClose = "function", onUpdate = "function" }
 local WINDOW_FLAG_KEYS = { "minWidth", "minHeight", "maxWidth", "maxHeight", "resizable", "autoSize", "scrollbar", "topmost", "modal" }
 local WINDOW_POSITIONS = { center = true, mouse = true }
@@ -8149,13 +8185,13 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
     "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line); `minWidth` and `maxWidth` keep fields, buttons and lists within that range, and a text wraps at `maxWidth`. Handlers get the widget as their last argument.",
     "- Labels of fields (`input`, `number`, `slider`, `combo`, `radio`, `color`): `labelPosition` is `left` (the default: the labels of one column, section or window share a column and the fields line up after it, and a checkbox among them lines up with the fields), `above` or `right` (after the field). Set on a window, column, section, tab or split it is the default for the fields inside. When none is set and a column is too narrow for the labels beside the fields, the labels go above them instead. A field fills the rest of its line unless it has a `width`, so no label is cut off; a negative `height` makes a table, tree, canvas, scrolling column or tab, multi-line input or section fill the height that is left.",
     "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line. In a row, fields, bars, cards, lists and columns without a `width` share the free width equally, a `spacer` without a width takes a share too (so what follows it goes to the right), and `wrap = true` moves a widget that does not fit to the next line. `gap` (points) sets the space between the widgets of a row, column, section or tab; a column or tab with `scroll = true` scrolls inside its `height` (200).",
-    "- `grid`: places its widgets in `columns` (2) cells per row, row by row. The first column fits its content and the others share the rest, so `text` then a field per row lines labels up; a field without a `label` fills its cell.",
+)MLUA"),
+            std::string_view(R"MLUA(    "- `grid`: places its widgets in `columns` (2) cells per row, row by row. The first column fits its content and the others share the rest, so `text` then a field per row lines labels up; a field without a `label` fills its cell.",
     "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it, `open = false` starts it folded.",
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
     "- `text` (`text`, `color`, `wrap`, `mono`, `bold`, `size` in points, `align` = `left`, `center` or `right` for text that does not wrap), `heading` (`text`, `icon`, `color`, `size`, `align`), `separator` (`text` puts a caption into the line), `spacer`.",
     "- `button`: `text`, `icon` (an icon without text makes an icon button), `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through; `hotkey` (like `F5` or `Ctrl+F2`) clicks it from anywhere, also while the game has the focus, as long as its window is open (not a button with `confirm`).",
-)MLUA"),
-            std::string_view(R"MLUA(    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch; `hotkey` like `F1` or `Ctrl+F2` switches it from anywhere, also while the game has the focus, as long as its window is open and the box is enabled, and shows the key beside it), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click; a `number` or `slider` takes `hotkeyIncrease` and `hotkeyDecrease`, keys that move it by `hotkeyStep` (else its `step`, else 1) from anywhere while its window is open, within `min` and `max`), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line; a `combo` or `radio` takes `hotkeyNext` and `hotkeyPrevious`, keys that choose the next or previous item, round the end), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
+    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch; `hotkey` like `F1` or `Ctrl+F2` switches it from anywhere, also while the game has the focus, as long as its window is open and the box is enabled, and shows the key beside it), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click; a `number` or `slider` takes `hotkeyIncrease` and `hotkeyDecrease`, keys that move it by `hotkeyStep` (else its `step`, else 1) from anywhere while its window is open, within `min` and `max`), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line; a `combo` or `radio` takes `hotkeyNext` and `hotkeyPrevious`, keys that choose the next or previous item, round the end), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
@@ -8254,7 +8290,8 @@ local function formWindowOptions(path, spec, where, resolve, skip)
   for key, value in pairs(spec) do
     if not skip[key] then
       if not WINDOW_KEYS[key] or key == "modal" then
-        misuse(("%s: %s.%s is not a window option (known options: %s)"):format(path, where, tostring(key), table.concat(sortedNames(WINDOW_KEYS), ", ")))
+)MLUA"),
+            std::string_view(R"MLUA(        misuse(("%s: %s.%s is not a window option (known options: %s)"):format(path, where, tostring(key), table.concat(sortedNames(WINDOW_KEYS), ", ")))
       end
       if UI_HANDLER_BITS[key] then
         options[key] = resolve(where, key, value)
@@ -8288,8 +8325,7 @@ local function formWidget(path, child, at, resolve)
     misuse(("%s: %s must be a table, got %s"):format(path, at, kindOf(child)))
   end
   if type(child.kind) ~= "string" then
-)MLUA"),
-            std::string_view(R"MLUA(    misuse(("%s: %s has no kind"):format(path, at))
+    misuse(("%s: %s has no kind"):format(path, at))
   end
   if child.name ~= nil and (type(child.name) ~= "string" or not child.name:match("^[%a_][%w_]*$")) then
     misuse(("%s: %s.name must be a Lua name, got %s"):format(path, at, tostring(child.name)))
@@ -8460,7 +8496,8 @@ local function fillForm(path, made, members, children, resolve, folder, links)
       if not ok then
         return
       end
-      local items = wiring.items[name] or {}
+      -- the items the widget has now: the script may have changed them since the form was built
+      local items = native.uiItems(source.id) or wiring.items[name] or {}
       local chosen = type(value) == "table" and value or { value }
       for _, rule in ipairs(list) do
         local on
@@ -8491,13 +8528,22 @@ local function fillForm(path, made, members, children, resolve, folder, links)
     -- whose record is not in the table is disabled until it is.
     wiring.binds = wiring.binds or {}
     wiring.missing = wiring.missing or {}
+    -- a combo's or radio's items as they are now (the script may update them), else the form's
+    local function itemsOf(bind)
+      return bind.handle and native.uiItems(bind.handle.id) or bind.items or {}
+    end
     local function shownValue(bind, value, text, entry)
       if bind.kind == "number" or bind.kind == "slider" then
-        return type(value) == "number" and value or tonumber(text)
+        local number = type(value) == "number" and value or tonumber(text)
+        -- an integer widget shows 1.5 as 2: compared unrounded, it never matched and was set again and again
+        if bind.integer and math.type(number) == "float" and number == number and number > -2 ^ 63 and number < 2 ^ 63 then
+          number = math.floor(number + 0.5)
+        end
+        return number
       end
       if bind.kind == "combo" or bind.kind == "radio" then
         -- an item names a drop-down entry by its description, or the value as shown
-        for index, item in ipairs(bind.items or {}) do
+        for index, item in ipairs(itemsOf(bind)) do
           local named = tostring(item)
           if (entry ~= nil and named == entry) or named == text or named == tostring(value) then
             return index
@@ -8523,7 +8569,8 @@ local function fillForm(path, made, members, children, resolve, folder, links)
           local problem = missing and missing.code or nil
           if problem ~= bind.problem then
             bind.problem = problem
-            if problem == "ME-6011" then
+)MLUA"),
+            std::string_view(R"MLUA(            if problem == "ME-6011" then
               emit("warning", "manifold.ui", ("%s stays disabled: %s"):format(bind.label, missing.message))
             end
           end
@@ -8552,9 +8599,9 @@ local function fillForm(path, made, members, children, resolve, folder, links)
             if value ~= nil then
               local shown = shownValue(bind, value, text, entry)
               local ok, current = pcall(bind.handle.get)
-              -- a field the user is typing into differs from what it last showed: leave it
-              local typing = (bind.kind == "input" or bind.kind == "number") and ok and bind.last ~= nil and current ~= bind.last
-              if not typing and shown ~= nil and (shown ~= bind.last or current ~= shown) then
+              -- a field the user is typing into keeps the keyboard: leave it until it is left
+              local typing = (bind.kind == "input" or bind.kind == "number") and native.uiIsActive(bind.handle.id)
+              if not typing and shown ~= nil and (shown ~= bind.last or not ok or current ~= shown) then
                 bind.last = shown
                 pcall(bind.handle.set, shown)
                 followRules(bind)
@@ -8569,8 +8616,7 @@ local function fillForm(path, made, members, children, resolve, folder, links)
       local ok, problem
       if not record then
         ok, problem = nil, missing
-)MLUA"),
-            std::string_view(R"MLUA(      elseif bind.kind == "checkbox" or bind.kind == "button" then
+      elseif bind.kind == "checkbox" or bind.kind == "button" then
         -- like a click on the record's box: queued, so a long script does not freeze the program
         local wanted = value
         if bind.kind == "button" then
@@ -8581,7 +8627,7 @@ local function fillForm(path, made, members, children, resolve, folder, links)
           bind.last = value
         end
       elseif bind.kind == "combo" or bind.kind == "radio" then
-        local item = bind.items and bind.items[value]
+        local item = itemsOf(bind)[value]
         if item ~= nil then
           ok, problem = record.setValue(tostring(item))
           bind.last = value
@@ -8625,6 +8671,10 @@ local function fillForm(path, made, members, children, resolve, folder, links)
           file = folder .. file
         end
         copy.image = formImageLoad(file)
+        if copy.image and links.images then
+          -- the form's pictures, freed when a reload replaces them
+          links.images[#links.images + 1] = copy.image
+        end
       end
       if child.kind == "button" and (child.opens or child.closes) then
         local original = copy.onClick
@@ -8646,7 +8696,7 @@ local function fillForm(path, made, members, children, resolve, folder, links)
       end
       local bind
       if wiring and child.record ~= nil then
-        bind = { record = child.record, kind = child.kind, items = child.items, window = links.window, label = label, name = child.name, enabled = child.enabled ~= false }
+        bind = { record = child.record, kind = child.kind, items = child.items, integer = child.integer == true, window = links.window, label = label, name = child.name, enabled = child.enabled ~= false }
         if child.enabledWhen ~= nil then
           bind.rule = formWhen(child.enabledWhen).source
         end
@@ -8706,16 +8756,17 @@ local function buildForm(path, spec, handlers, folder)
   local modalTable, modalMembers = strict(("form(%q).modals"):format(spec.title))
   local windows = { made }
   local wiring = { rules = {}, items = {} }
+  local images = {}
   local ok, problem = pcall(function()
     for _, modal in ipairs(modals) do
       local handle = rawget(window.members, "create")(modal.spec.title, modal.options)
       windows[#windows + 1] = handle
       rawset(modalMembers, modal.name, handle)
     end
-    fillForm(path, made, members, spec.children, resolve, folder, { window = made, modals = modalMembers, wiring = wiring })
+    fillForm(path, made, members, spec.children, resolve, folder, { window = made, modals = modalMembers, wiring = wiring, images = images })
     for _, modal in ipairs(modals) do
       local handle = rawget(modalMembers, modal.name)
-      fillForm(path, handle, members, modal.spec.children, resolve, folder, { window = handle, modals = modalMembers, wiring = wiring })
+      fillForm(path, handle, members, modal.spec.children, resolve, folder, { window = handle, modals = modalMembers, wiring = wiring, images = images })
     end
     for name in pairs(wiring.rules) do
       wiring.refresh(name)
@@ -8728,9 +8779,12 @@ local function buildForm(path, spec, handlers, folder)
     for _, made in ipairs(windows) do
       made.remove()
     end
+    for _, picture in ipairs(images) do
+      picture.remove()
+    end
     error(problem, 0)
   end
-  return made, widgets, members, modalTable, modalMembers
+  return made, widgets, members, modalTable, modalMembers, images
 end
 
 local function readFormFile(file, folder, block)
@@ -8781,6 +8835,16 @@ local function reloadForm(watch, start)
     end
     return update
   end
+  -- ∑ update only sets the handlers it is given: one the file no longer
+  -- names would keep running (onUpdate) or keep being called (onClose)
+  local function windowHandlers(handle, options)
+    local entry = uiEntries[handle.id]
+    if entry then
+      entry.onUpdate = options.onUpdate
+      entry.onClose = options.onClose
+      native.uiUpdate(handle.id, { updates = options.onUpdate ~= nil, handlers = options.onClose and UI_HANDLER_BITS.onClose or 0 })
+    end
+  end
 
   local spec, shown, message = readFormFile(watch.file, nil, watch.block)
   local options, modals
@@ -8816,11 +8880,13 @@ local function reloadForm(watch, start)
   end
   watch.window.clear()
   watch.window.update(windowUpdate(spec.title, options))
+  windowHandlers(watch.window, options)
   -- modals: kept by name (cleared and refilled), new ones made, dropped ones removed
   local wanted = {}
   for _, modal in ipairs(modals) do
     wanted[modal.name] = modal
-  end
+)MLUA"),
+            std::string_view(R"MLUA(  end
   local existing = {}
   for name in pairs(watch.modals) do
     existing[#existing + 1] = name
@@ -8833,6 +8899,9 @@ local function reloadForm(watch, start)
     end
   end
   local resolve = formResolver("manifold.ui.form.load", watch.handlers)
+  local images = {}
+  -- new modals and pictures belong to the form's script, as when it built the form
+  ownerSource(true, watch.entry.owner)
   local ok, failure = pcall(function()
     for _, modal in ipairs(modals) do
       local handle = rawget(watch.modals, modal.name)
@@ -8841,19 +8910,26 @@ local function reloadForm(watch, start)
         local update = windowUpdate(modal.spec.title, modal.options)
         update.modal = true
         handle.update(update)
+        windowHandlers(handle, modal.options)
       else
         handle = rawget(window.members, "create")(modal.spec.title, modal.options)
         rawset(watch.modals, modal.name, handle)
       end
     end
     local wiring = { rules = {}, items = {} }
-    fillForm("manifold.ui.form.load", watch.window, watch.members, spec.children, resolve, watch.folder, { window = watch.window, modals = watch.modals, wiring = wiring })
+    fillForm("manifold.ui.form.load", watch.window, watch.members, spec.children, resolve, watch.folder, { window = watch.window, modals = watch.modals, wiring = wiring, images = images })
     for _, modal in ipairs(modals) do
       local handle = rawget(watch.modals, modal.name)
-      fillForm("manifold.ui.form.load", handle, watch.members, modal.spec.children, resolve, watch.folder, { window = handle, modals = watch.modals, wiring = wiring })
+      fillForm("manifold.ui.form.load", handle, watch.members, modal.spec.children, resolve, watch.folder, { window = handle, modals = watch.modals, wiring = wiring, images = images })
     end
     watch.wiring = wiring
   end)
+  ownerSource(true, nil)
+  -- the old widgets are gone, and with them the last use of the old pictures
+  for _, picture in ipairs(watch.images or {}) do
+    pcall(picture.remove)
+  end
+  watch.images = images
   for name, saved in pairs(values) do
     local handle = rawget(watch.members, name)
     if handle and handle.kind == saved.kind then
@@ -8896,15 +8972,14 @@ define(form, "build", {
     { name = "options", type = "table", optional = true, keys = { reload = "boolean", onReload = "function" } },
   },
   returns = "window",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like." .. " `modals` lists modal forms: window tables like the form itself with a `name`, each made as a modal window (`modal = true`) that waits hidden; `modals.<name>.show()` opens it. A button's `opens = \"<name>\"` opens that modal when clicked and `closes = true` hides the window it is in; both run before the button's `onClick`." .. " Any widget can take `enabledWhen`, which enables it only while another widget of the form says so, without code: `\"god\"` (that checkbox or switch is on, or that combo or radio has a choice), `\"not god\"`, or `\"mode = Multiplier, Double\"` (one of these items of that combo or radio is chosen). It follows the user's changes; a script's `set` does not update it." .. " A checkbox, button, number, slider, input, text, combo or radio can take `record`: a memory record's description or id (see `manifold.record`), which binds the widget to it without code. A checkbox shows and switches whether the record is on, a button switches it, a number or slider shows and writes its value, an input writes when Enter is pressed, a text shows the value as the address list does, a combo or radio writes the chosen item's text (a drop-down entry of the record). The window refreshes them ten times a second while it is open, the script's own handlers still run after the write, and a widget whose record is not in the table is disabled until it is. A description binds only when exactly one record has it: with several, the widget stays disabled and a warning names them, until the descriptions differ or the form names the record by id." .. " The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty." .. " A script file that holds its form as `local form = { form = 1, ... }` (as the Form Editor writes it) gets a live reload like `load`: saving the script rebuilds the window's widgets from the table in the file, with the same handlers; the handlers' own code changes only when the script runs again. `options.reload = false` switches that off, `options.onReload(window, widgets, modals)` runs after each rebuild.",
+  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like." .. " `modals` lists modal forms: window tables like the form itself with a `name`, each made as a modal window (`modal = true`) that waits hidden; `modals.<name>.show()` opens it. A button's `opens = \"<name>\"` opens that modal when clicked and `closes = true` hides the window it is in; both run before the button's `onClick`." .. " Any widget can take `enabledWhen`, which enables it only while another widget of the form says so, without code: `\"god\"` (that checkbox or switch is on, or that combo or radio has a choice), `\"not god\"`, or `\"mode = Multiplier, Double\"` (one of these items of that combo or radio is chosen). It follows the user's changes; a script's `set` does not update it." .. " A checkbox, button, number, slider, input, text, combo or radio can take `record`: a memory record's description or id (see `manifold.record`), which binds the widget to it without code. A checkbox shows and switches whether the record is on, a button switches it, a number or slider shows and writes its value, an input writes when Enter is pressed, a text shows the value as the address list does, a combo or radio writes the chosen item's text (a drop-down entry of the record). The window refreshes them ten times a second while it is open, the script's own handlers still run after the write, and a widget whose record is not in the table is disabled until it is. A description binds only when exactly one record has it: with several, the widget stays disabled and a warning names them, until the descriptions differ or the form names the record by id." .. " The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty." .. " A script file that holds its form as `local form = { form = 1, ... }` (as the Form Editor writes it) gets a live reload like `load`: saving the script rebuilds the window's widgets from the table in the file, with the same handlers; the handlers' own code changes only when the script runs again. `options.reload = false` switches that off, `options.onReload(window, widgets, modals)` runs after each rebuild.",
 }, function(spec, handlers, options)
   options = options or {}
   local info = callerFrame()
   local source = info and info.source or ""
   local file = source:sub(1, 1) == "@" and source:sub(2) or nil
   local folder = file and file:match("^(.*[\\/])") or nil
-  local made, widgets, members, modalTable, modalMembers = buildForm("manifold.ui.form.build", spec, handlers, folder)
+  local made, widgets, members, modalTable, modalMembers, images = buildForm("manifold.ui.form.build", spec, handlers, folder)
   if file and options.reload ~= false then
     -- ∑ only when the file's form table is this form (a script may build others)
     local text = native.uiFormRead(file)
@@ -8912,7 +8987,7 @@ define(form, "build", {
     chunk = chunk and load(chunk, "=form", "t", {})
     local ok, found = pcall(chunk or error)
     if ok and type(found) == "table" and found.title == spec.title then
-      reloadForm({ window = made, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = file, block = true, handlers = handlers, folder = folder, onReload = options.onReload }, true)
+      reloadForm({ window = made, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = file, block = true, handlers = handlers, folder = folder, onReload = options.onReload, images = images }, true)
     end
   end
   return made, widgets, modalTable
@@ -8936,9 +9011,9 @@ define(form, "load", {
     return result(nil, shown, message)
   end
   local formFolder = shown:match("^(.*[\\/])")
-  local made, widgets, members, modalTable, modalMembers = buildForm("manifold.ui.form.load", spec, handlers, formFolder)
+  local made, widgets, members, modalTable, modalMembers, images = buildForm("manifold.ui.form.load", spec, handlers, formFolder)
   if options.reload ~= false then
-    reloadForm({ window = made, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = shown, handlers = handlers, folder = formFolder, onReload = options.onReload }, true)
+    reloadForm({ window = made, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = shown, handlers = handlers, folder = formFolder, onReload = options.onReload, images = images }, true)
   end
   return made, widgets, modalTable
 end)
@@ -9016,7 +9091,8 @@ define(dialog, "input", {
   return openDialog("input", { text = text, title = options.title, value = options.value }, options.onClose)
 end)
 
-define(dialog, "choose", {
+)MLUA"),
+            std::string_view(R"MLUA(define(dialog, "choose", {
   params = {
     { name = "text", type = "string" },
     { name = "items", type = "table" },
@@ -9094,8 +9170,7 @@ local function noticeObject(entry)
       body = function(options)
         checkLevel("notice.update", options.level)
         state.text = options.text or state.text
-)MLUA"),
-            std::string_view(R"MLUA(        state.level = options.level or state.level
+        state.level = options.level or state.level
         if options.progress ~= nil then
           state.progress = options.progress
         end
@@ -9291,7 +9366,8 @@ native.docDefine(nil, "manifold.ui.image.Image.width", { kind = "field", type = 
 native.docDefine(nil, "manifold.ui.image.Image.height", { kind = "field", type = "integer", doc = "Height in pixels." })
 
 define(ui, "getMode", {
-  returns = "table",
+)MLUA"),
+            std::string_view(R"MLUA(  returns = "table",
   doc = "How the main window looks: `{ release = boolean, compact = boolean }`. *Release* shows three columns, hides the Edit, Tools and Debug menus and toggles records with a double click; *compact* hides the scanner and shows only the address list. View > Compact Mode and View > Release Mode (Ctrl+Shift+C, Ctrl+Shift+R) switch the same.",
 }, function()
   return native.uiMode()
@@ -9399,8 +9475,7 @@ end
 
 local function moduleRequire(name, ...)
   if type(name) ~= "string" then
-)MLUA"),
-            std::string_view(R"MLUA(    return baseRequire(name, ...)
+    return baseRequire(name, ...)
   end
   local info = callerFrame()
   local key = info and native.moduleOfSource(info.source) or nil
@@ -9607,7 +9682,8 @@ This file is generated from the API itself (`Manifold-Engine.Tests.exe --manifol
 local RULES = [[
 ## Schema
 
-1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`. An area may group its functions into sub-areas one level down (`manifold.ui.window`, `manifold.ui.dialog`).
+)MLUA"),
+            std::string_view(R"MLUA(1. **One namespace.** Everything lives in the global table `manifold`. Its fields are areas (`manifold.log`, `manifold.process`, …), constants (`manifold.apiVersion`, `manifold.version`) and `manifold.has`. An area may group its functions into sub-areas one level down (`manifold.ui.window`, `manifold.ui.dialog`).
 2. **Names.** Areas are lower-case nouns. Functions are lowerCamelCase: a lookup without side effects is named after what it returns (`process.module`, `log.channel`), everything else starts with a verb (`open`, `read`, `create`). Predicates start with `is` or `has` and return a boolean. Settings come in `get…`/`set…` pairs. The five log functions are named after their level. Constants are lowerCamelCase fields. There are no aliases and no capitalised duplicates.
 3. **Calls use a dot.** `manifold.log.info("ready")`, never `manifold.log:info("ready")`. No function takes `self`, and the objects the API returns (channels) work the same way. A colon call raises an error that says so.
 4. **Arguments.** Required arguments come first, optional ones after them, and settings go into one `options` table at the end. A `?` after a name marks it optional. A missing, extra or wrongly typed argument and an unknown option key raise `ME-7007`, naming the function and the argument. Addresses are integers or address expressions such as `"game.exe+10"`.

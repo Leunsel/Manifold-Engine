@@ -158,6 +158,7 @@ namespace Manifold
         Status WriteRecord(Table::MemoryRecord& record, std::string_view text, bool recursive = true) { return m_tables.WriteRecord(record, text, recursive); }
         Status AddToRecord(Table::MemoryRecord& record, double delta) { return m_tables.AddToRecord(record, delta); }
         Status SetActive(Table::MemoryRecord& record, bool active, bool fromScript = false) { return m_activation.SetActive(record, active, fromScript); }
+        Status RemoveRecord(int recordId, bool fromScript = false) { return m_tables.RemoveRecord(recordId, fromScript); }
         void RequestActive(Table::MemoryRecord& record, bool active, bool fromScript = false);
         bool ActivationPending(int recordId) const { return m_activation.ActivationPending(recordId); }
         bool InsideActivation() const { return m_activation.InsideActivation(); }
@@ -180,7 +181,8 @@ namespace Manifold
 
         Asm::AaResult AutoAssemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record = nullptr);
         Asm::AaResult AutoAssemble(std::string_view script, bool checkOnly);
-        ScriptCheck CheckScript(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory);
+        // holdLuaBack compiles {$lua} blocks and skips custom commands also when the table's scripts are trusted, so nothing runs.
+        ScriptCheck CheckScript(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool holdLuaBack = false);
 
         Status LoadTable(const std::filesystem::path& path, bool merge) { return m_tables.LoadTable(path, merge); }
         Status RestoreTable(const std::filesystem::path& path) { return m_tables.RestoreTable(path); }

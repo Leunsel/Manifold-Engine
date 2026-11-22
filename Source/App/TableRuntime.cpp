@@ -458,6 +458,8 @@ namespace Manifold
 
     void TableRuntime::ApplyHotkey(Table::MemoryRecord& record, const Table::Hotkey& hotkey)
     {
+        // a switch runs Lua right away in synchronous mode, which may delete the record: it is not used after the action
+        const std::string description = record.Description;
         Status status;
         switch (hotkey.Action)
         {
@@ -482,7 +484,7 @@ namespace Manifold
         if (!status)
             m_engine.Notify(status);
         else
-            LOG_INFO("Hotkey", Table::KeysText(hotkey.Keys) + ": " + Table::HotkeyActionName(hotkey.Action) + " " + record.Description);
+            LOG_INFO("Hotkey", Table::KeysText(hotkey.Keys) + ": " + Table::HotkeyActionName(hotkey.Action) + " " + description);
     }
 
     namespace
@@ -520,17 +522,27 @@ namespace Manifold
 
     void TableRuntime::UpdateHotkeys()
     {
-        std::vector<std::pair<Table::MemoryRecord*, Table::Hotkey>> fired;
+        // ∑ By id: a hotkey's switch runs Lua, which may delete the record of the next one or replace the table.
+        std::vector<std::pair<int, Table::Hotkey>> fired;
         m_table.ForEach([&](Table::MemoryRecord& record)
             {
                 for (Table::Hotkey& hotkey : record.Hotkeys)
                 {
                     if (Table::KeysPressed(hotkey.Keys, hotkey.WasDown))
-                        fired.emplace_back(&record, hotkey);
+                        fired.emplace_back(record.Id, hotkey);
                 }
             });
-        for (auto& [record, hotkey] : fired)
+        const std::uint64_t identity = m_table.Identity();
+        for (auto& [id, hotkey] : fired)
         {
+            if (m_table.Identity() != identity)
+            {
+                LOG_INFO("Hotkey", "The table was replaced by a hotkey's switch; the other hotkeys pressed with it are dropped");
+                break;
+            }
+            Table::MemoryRecord* record = m_table.FindById(id);
+            if (!record)
+                continue;
             if (!HotkeyHeld(*record, hotkey))
             {
                 ApplyHotkey(*record, hotkey);
@@ -543,6 +555,72 @@ namespace Manifold
         }
     }
 
+    Status TableRuntime::RemoveRecord(int recordId, bool fromScript)
+    {
+        const std::uint64_t identity = m_table.Identity();
+        Table::MemoryRecord* record = m_table.FindById(recordId);
+        if (!record)
+            return Status::Fail(ErrorCode::TableRecordGone, std::to_string(recordId));
+        const std::string description = record->Description;
+        std::vector<int> ids;
+        const std::function<void(const Table::MemoryRecord&)> collect = [&](const Table::MemoryRecord& node)
+            {
+                ids.push_back(node.Id);
+                for (const auto& child : node.Children)
+                    collect(*child);
+            };
+        collect(*record);
+        // ∑ A switch in the background keeps its result for the record: removed under it, the script's hooks and allocations
+        //   would have no record left to take them out again.
+        ActivationRunner& activation = m_engine.Activation();
+        for (int id : ids)
+        {
+            if (!m_engine.ActivationPending(id) && !activation.Switching(id))
+                continue;
+            const Table::MemoryRecord* busy = m_table.FindById(id);
+            return Status::Fail(ErrorCode::LuaRuntime, "\"" + description + "\" cannot be removed while " +
+                (id == recordId || !busy ? std::string("it is") : "\"" + busy->Description + "\" below it is") + " being switched; remove it once that is done");
+        }
+        // deepest first: the reverse of the top-down order has every child before its parent
+        for (auto it = ids.rbegin(); it != ids.rend(); ++it)
+        {
+            Table::MemoryRecord* below = m_table.FindById(*it);
+            if (!below || !below->Active)
+                continue;
+            const bool script = below->Kind == Table::RecordKind::Script;
+            const std::string name = below->Description;
+            const Status off = m_engine.SetActive(*below, false, fromScript);
+            if (m_table.Identity() != identity)
+                return Status::Fail(ErrorCode::TableRecordGone, "\"" + description + "\"");
+            if (!off && script)
+                return off;
+            const Table::MemoryRecord* again = m_table.FindById(*it);
+            if (script && again && again->Active)
+            {
+                const Status why = activation.LastOutcome(*it);
+                return Status::Fail(ErrorCode::LuaRuntime, "\"" + name + "\" stayed on" + (why ? std::string() : " (" + why.Text + ")") + ", so \"" + description +
+                                                               "\" stays in the table");
+            }
+        }
+        record = m_table.FindById(recordId);
+        if (!record)
+            return Status::Fail(ErrorCode::TableRecordGone, "\"" + description + "\"");
+        // Lua of the switches may have added records below it: what is removed is the tree as it is now
+        ids.clear();
+        collect(*record);
+        for (int id : ids)
+        {
+            const Table::MemoryRecord* below = m_table.FindById(id);
+            if (below && below->Kind == Table::RecordKind::Script && below->Active)
+                return Status::Fail(ErrorCode::LuaRuntime, "\"" + below->Description + "\" below \"" + description + "\" was switched on meanwhile, so it stays in the table");
+        }
+        m_table.Remove(*record);
+        m_table.Touch();
+        for (int id : ids)
+            m_engine.Lua().RecordDestroyed(id);
+        return Status::Success();
+    }
+
     std::vector<Table::TableSymbol> TableRuntime::TableSymbols() const
     {
         return m_tableSymbols;
@@ -553,8 +631,11 @@ namespace Manifold
         m_engine.CancelActivations();
         m_engine.Activation().WaitForActivation();
         m_engine.StopTableScript();
+        const std::uint64_t identity = m_table.Identity();
         for (int id : m_engine.Activation().BottomToTop())
         {
+            if (m_table.Identity() != identity)
+                break;
             Table::MemoryRecord* record = m_table.FindById(id);
             if (record && record->Kind == Table::RecordKind::Script && record->Active)
                 m_engine.SetActive(*record, false);

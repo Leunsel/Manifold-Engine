@@ -7,6 +7,8 @@
 #include "Target/Process.h"
 
 #include <algorithm>
+#include <iterator>
+#include <memory>
 
 namespace Manifold::Target
 {
@@ -20,26 +22,110 @@ namespace Manifold::Target
         constexpr unsigned kHeapMs = 120000;  // one walk over the whole GC heap
         constexpr std::size_t kMaxMisses = 8192;
         constexpr auto kMissLife = std::chrono::seconds(3);
+        constexpr auto kMembersRetry = std::chrono::seconds(2);   // members that could not be read
+        constexpr auto kStaticsRetry = std::chrono::seconds(5);   // statics without storage yet
+        constexpr auto kRestartFirst = std::chrono::seconds(10);  // at most one restart per this
+        constexpr auto kRestartMost = std::chrono::seconds(160);  // the longest pause after failed ones
     }
 
-    std::optional<std::vector<std::uint8_t>> ClrRuntime::Ask(P::Op op, std::uint64_t argument, unsigned timeoutMs, std::string* error, const std::uint32_t* extra)
+    const ClrCodeRanges::Entry* ClrCodeRanges::Find(std::uint64_t address) const
     {
+        auto it = m_ranges.upper_bound(address);
+        if (it == m_ranges.begin())
+            return nullptr;
+        --it;
+        return address < it->second.End ? &it->second : nullptr;
+    }
+
+    const ClrCodeRanges::Entry* ClrCodeRanges::Add(std::uint64_t start, std::uint64_t end, std::string name)
+    {
+        if (end <= start)
+            return nullptr;
+        // Every older range that overlaps the new one goes: the one starting
+        // before it and reaching into it, and all that start inside it.
+        auto it = m_ranges.lower_bound(start);
+        if (it != m_ranges.begin())
+        {
+            if (const auto before = std::prev(it); before->second.End > start)
+                it = before;
+        }
+        while (it != m_ranges.end() && it->first < end)
+            it = m_ranges.erase(it);
+        Entry& entry = m_ranges[start];
+        entry.Start = start;
+        entry.End = end;
+        entry.Name = std::move(name);
+        return &entry;
+    }
+
+    std::optional<std::vector<std::uint8_t>> ClrRuntime::Ask(P::Op op, std::uint64_t argument, unsigned timeoutMs, std::string* error, const std::uint32_t* extra,
+        bool* busy)
+    {
+        // A helper that ended is started again by the next request that may
+        // take a moment; lookups asked while drawing never wait for that.
+        if (timeoutMs > kLookupMs && !m_link.Running())
+            Restart();
         P::Writer request;
         request.U8(static_cast<std::uint8_t>(op));
         request.U64(argument);
         if (extra)
             request.U32(*extra);
         std::string reason;
-        auto reply = m_link.Call(request, timeoutMs, reason);
+        bool wasBusy = false;
+        auto reply = m_link.Call(request, timeoutMs, reason, &wasBusy);
+        if (busy)
+            *busy = wasBusy;
         if (!reply && error)
+        {
             *error = reason;
+            if (!wasBusy && m_attached.load() && !m_link.Running())
+                *error += " (it is started again by a later request, at most every 10 s)";
+        }
         return reply;
+    }
+
+    bool ClrRuntime::Restart()
+    {
+        // One thread restarts; the others go on without the helper.
+        std::unique_lock guard(m_restartLock, std::try_to_lock);
+        if (!guard.owns_lock() || !m_attached.load())
+            return false;
+        if (m_link.Running())
+            return true;
+        const auto now = Clock::now();
+        if (now < m_nextRestart)
+            return false;
+        // Detach waits for m_restartLock before the bridge lets go of the
+        // process, so it is still there.
+        const std::shared_ptr<Process> process = m_bridge.m_process;
+        if (!process)
+            return false;
+        LOG_INFO("Mono", "The .NET helper has ended; starting it again");
+        const Status started = m_link.Start(*process);
+        if (started.Ok())
+        {
+            m_restartDelay = kRestartFirst;
+            m_nextRestart = now + kRestartFirst;
+            LOG_INFO("Mono", "The .NET helper runs again");
+            return true;
+        }
+        m_nextRestart = now + m_restartDelay;
+        LOG_WARN("Mono", Format("Could not start the .NET helper again (%s); the next try is in %lld s", started.Text.c_str(),
+            static_cast<long long>(m_restartDelay.count())));
+        m_restartDelay = std::min<std::chrono::seconds>(m_restartDelay * 2, kRestartMost);
+        return false;
     }
 
     Status ClrRuntime::Attach(const std::string& module)
     {
         if (Status started = m_link.Start(*m_bridge.m_process); !started)
             return started;
+        {
+            std::lock_guard guard(m_restartLock);
+            m_attached.store(true);
+            m_nextRestart = {};
+            m_restartDelay = kRestartFirst;
+        }
         m_bridge.m_module = module;
         m_bridge.m_runtime = ManagedRuntime::Clr;
         const ClrRuntimeInfo& info = m_link.Info();
@@ -49,10 +135,17 @@ namespace Manifold::Target
 
     void ClrRuntime::Detach()
     {
+        // No restart from here on; one under way finishes first.
+        {
+            std::lock_guard guard(m_restartLock);
+            m_attached.store(false);
+        }
         m_link.Stop();
         m_parents.clear();
         m_notTypes.clear();
-        m_code.clear();
+        m_code.Clear();
+        m_membersRetry.clear();
+        m_staticsRead.clear();
         m_misses.clear();
         m_images.clear();
         m_modules.clear();
@@ -176,6 +269,11 @@ namespace Manifold::Target
             m_modules = modules;
             m_notTypes.clear();
             m_misses.clear();
+            // Code may have been thrown away and compiled anew since, and the
+            // class indexes start over.
+            m_code.Clear();
+            m_membersRetry.clear();
+            m_staticsRead.clear();
             if (starting)
                 m_bridge.m_present = true;
             ++m_bridge.m_generation;
@@ -186,30 +284,43 @@ namespace Manifold::Target
 
     void ClrRuntime::EnsureMembers(int classIndex)
     {
-        MonoClass& info = m_bridge.m_classes[static_cast<std::size_t>(classIndex)];
-        if (info.MembersLoaded)
+        if (m_bridge.m_classes[static_cast<std::size_t>(classIndex)].MembersLoaded)
             return;
+        if (const auto retry = m_membersRetry.find(classIndex); retry != m_membersRetry.end())
+        {
+            if (Clock::now() < retry->second)
+                return;
+            m_membersRetry.erase(retry);
+        }
+        ReadMembers(classIndex, false);
+    }
+
+    bool ClrRuntime::ReadMembers(int classIndex, bool staticsOnly)
+    {
+        const std::uint64_t handle = m_bridge.m_classes[static_cast<std::size_t>(classIndex)].Handle;
         std::string error;
-        const auto reply = Ask(P::Op::Members, info.Handle, kQueryMs, &error);
+        bool busy = false;
+        const auto reply = Ask(P::Op::Members, handle, kQueryMs, &error, nullptr, &busy);
+        MonoClass& info = m_bridge.m_classes[static_cast<std::size_t>(classIndex)];
         if (!reply)
         {
-            // Asked again next time, unless the helper is gone.
-            if (!m_link.Running())
-                info.MembersLoaded = true;
-            LOG_WARN("Mono", "Could not read the members of " + info.FullName() + ": " + error);
-            return;
+            // ∑ Never marked as read: a class marked without its members
+            // would stay empty after the helper is back (busy, restarted).
+            // Asked again after a pause rather than on every frame.
+            if (!staticsOnly)
+                m_membersRetry[classIndex] = Clock::now() + kMembersRetry;
+            if (!busy)
+                LOG_WARN("Mono", "Could not read the members of " + info.FullName() + ": " + error);
+            return false;
         }
-        info.MembersLoaded = true;
-        info.ValueTypesRead = true;
         P::Reader in(*reply);
         const std::uint64_t parent = in.U64();
-        info.Parent = in.Text();
+        std::string parentName = in.Text();
         in.U32();  // type flags
-        if (static_cast<std::size_t>(classIndex) < m_parents.size())
-            m_parents[static_cast<std::size_t>(classIndex)] = parent;
         const std::uint32_t fields = in.Count(40);
         std::vector<MonoField> instance;
         std::vector<MonoField> statics;
+        bool waitingStatics = false;
         for (std::uint32_t i = 0; i < fields && in.Ok(); ++i)
         {
             MonoField field;
@@ -229,10 +340,31 @@ namespace Manifold::Target
                 field.ValueSize = valueSize;
             }
             if (flags & P::kFieldStatic)
+            {
+                // Thread statics never have one address; other statics get
+                // theirs once the class is initialized.
+                if (!field.Address && !(flags & P::kFieldThreadStatic))
+                    waitingStatics = true;
                 statics.push_back(std::move(field));
+            }
             else
                 instance.push_back(std::move(field));
         }
+        if (waitingStatics)
+            m_staticsRead[classIndex] = Clock::now();
+        else
+            m_staticsRead.erase(classIndex);
+        if (staticsOnly)
+        {
+            if (in.Ok())
+                info.Statics = std::move(statics);
+            return in.Ok();
+        }
+        info.MembersLoaded = true;
+        info.ValueTypesRead = true;
+        info.Parent = std::move(parentName);
+        if (static_cast<std::size_t>(classIndex) < m_parents.size())
+            m_parents[static_cast<std::size_t>(classIndex)] = parent;
         // A struct's size from its method table includes padding up to the
         // pointer size; the next field's offset bounds it exactly.
         std::stable_sort(instance.begin(), instance.end(), [](const MonoField& a, const MonoField& b) { return a.Offset < b.Offset; });
@@ -257,6 +389,7 @@ namespace Manifold::Target
         }
         if (!in.Ok())
             LOG_WARN("Mono", "The members of " + info.FullName() + " were cut short");
+        return true;
     }
 
     std::optional<int> ClrRuntime::ParentIndex(int classIndex)
@@ -278,12 +411,38 @@ namespace Manifold::Target
         if (classIndex < 0 || static_cast<std::size_t>(classIndex) >= m_bridge.m_classes.size())
             return std::nullopt;
         EnsureMembers(classIndex);
-        for (const MonoField& candidate : m_bridge.m_classes[static_cast<std::size_t>(classIndex)].Statics)
+        // 0 with named set: the field is there but has no storage yet.
+        const auto find = [&](bool& named) -> std::uint64_t
+            {
+                named = false;
+                for (const MonoField& candidate : m_bridge.m_classes[static_cast<std::size_t>(classIndex)].Statics)
+                {
+                    if (candidate.Name != field)
+                        continue;
+                    named = true;
+                    if (candidate.Address)
+                        return candidate.Address;
+                }
+                return 0;
+            };
+        bool named = false;
+        std::uint64_t address = find(named);
+        // A static without storage gets it when the class is initialized,
+        // which may be after its members were read: its class is asked
+        // again, every few seconds at most.
+        if (!address && named)
         {
-            if (candidate.Name == field && candidate.Address)
-                return candidate.Address;
+            const auto read = m_staticsRead.find(classIndex);
+            if (read != m_staticsRead.end() && Clock::now() - read->second >= kStaticsRetry)
+            {
+                read->second = Clock::now();
+                ReadMembers(classIndex, true);
+                address = find(named);
+            }
         }
-        return std::nullopt;
+        if (!address)
+            return std::nullopt;
+        return address;
     }
 
     std::uint64_t ClrRuntime::ManagedClass(std::string_view space, std::string_view name)
@@ -359,50 +518,38 @@ namespace Manifold::Target
         return address >= next->first && address < next->second;
     }
 
-    const std::pair<const std::uint64_t, ClrRuntime::CodeEntry>* ClrRuntime::FindCode(std::uint64_t address)
+    const ClrCodeRanges::Entry* ClrRuntime::AskCode(std::uint64_t address)
     {
-        auto it = m_code.upper_bound(address);
-        if (it == m_code.begin())
-            return nullptr;
-        --it;
-        return address < it->second.End ? &*it : nullptr;
-    }
-
-    bool ClrRuntime::AskCode(std::uint64_t address)
-    {
-        if (FindCode(address))
-            return true;
+        if (const ClrCodeRanges::Entry* known = m_code.Find(address))
+            return known;
         // Code in a native module (the runtime itself, the system) is never
         // managed; only the JIT's own pages and precompiled assemblies are.
         if (const auto module = m_bridge.m_process->ModuleAt(address); module && !InManagedImage(address))
-            return false;
+            return nullptr;
         const auto now = std::chrono::steady_clock::now();
         if (const auto missed = m_misses.find(address); missed != m_misses.end())
         {
             if (now - missed->second < kMissLife)
-                return false;
+                return nullptr;
             m_misses.erase(missed);
         }
-        const auto reply = Ask(P::Op::MethodAt, address, kLookupMs);
-        bool found = false;
+        bool busy = false;
+        const auto reply = Ask(P::Op::MethodAt, address, kLookupMs, nullptr, nullptr, &busy);
+        const ClrCodeRanges::Entry* found = nullptr;
         if (reply)
         {
             P::Reader in(*reply);
             if (in.U8() != 0)
             {
-                CodeEntry entry;
-                entry.Name = in.Text();
+                std::string name = in.Text();
                 const std::uint64_t start = in.U64();
                 const std::uint32_t size = in.U32();
                 if (in.Ok() && size && address >= start && address < start + size)
-                {
-                    entry.End = start + size;
-                    m_code[start] = std::move(entry);
-                    found = true;
-                }
+                    found = m_code.Add(start, start + size, std::move(name));
             }
         }
-        if (!found)
+        // A busy helper said nothing about the address.
+        if (!found && !busy)
         {
             if (m_misses.size() >= kMaxMisses)
                 m_misses.clear();
@@ -413,33 +560,32 @@ namespace Manifold::Target
 
     std::optional<std::string> ClrRuntime::MethodNameAt(std::uint64_t address)
     {
-        if (!AskCode(address))
+        const ClrCodeRanges::Entry* entry = AskCode(address);
+        if (!entry)
             return std::nullopt;
-        return FindCode(address)->second.Name;
+        return entry->Name;
     }
 
     std::optional<std::string> ClrRuntime::MethodStartNameAt(std::uint64_t address)
     {
-        if (!AskCode(address))
+        const ClrCodeRanges::Entry* entry = AskCode(address);
+        if (!entry || entry->Start != address)
             return std::nullopt;
-        const auto* entry = FindCode(address);
-        if (entry->first != address)
-            return std::nullopt;
-        return entry->second.Name;
+        return entry->Name;
     }
 
     std::optional<std::pair<std::uint64_t, std::uint64_t>> ClrRuntime::MethodRange(std::uint64_t address)
     {
-        if (!AskCode(address))
+        const ClrCodeRanges::Entry* entry = AskCode(address);
+        if (!entry)
             return std::nullopt;
-        const auto* entry = FindCode(address);
-        return std::make_pair(entry->first, entry->second.End);
+        return std::make_pair(entry->Start, entry->End);
     }
 
     std::size_t ClrRuntime::MethodsSharingCode(std::uint64_t address)
     {
-        const auto* entry = FindCode(address);
-        return entry && entry->first == address ? 1 : 0;
+        const ClrCodeRanges::Entry* entry = m_code.Find(address);
+        return entry && entry->Start == address ? 1 : 0;
     }
 
     Result<ManagedHeap> ClrRuntime::ReadHeap()

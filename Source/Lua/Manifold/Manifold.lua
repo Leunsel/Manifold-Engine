@@ -2372,9 +2372,25 @@ local uiEntries = {}
 local uiOwned = {}
 local imageIds = setmetatable({}, { __mode = "k" })
 
-local function ownerSource()
-  local info = callerFrame()
-  return info and info.source or ""
+-- ∑ a live reload runs from the program, not from the script: what it makes
+-- (modal windows, pictures) belongs to the form's script all the same, so
+-- running the script again removes it. ownerSource(true, source) makes
+-- `source` the owner until ownerSource(true, nil) (see reloadForm). The
+-- override lives in a block: the main chunk is at Lua's 200 locals.
+local ownerSource
+do
+  local override
+  ownerSource = function(set, owner)
+    if set then
+      override = owner
+      return
+    end
+    if override then
+      return override
+    end
+    local info = callerFrame()
+    return info and info.source or ""
+  end
 end
 
 local function remember(owner, key, remove)
@@ -2701,8 +2717,18 @@ widgetObject = function(entry)
     end
     row = row or #rows + 1
     rowIndex("addRow", rows, row, true)
+    if #rows >= 100000 then
+      -- full: the native side keeps the first 100000 rows (kMaxItems), one more would drop the last one unseen
+      return false
+    end
     table.insert(rows, row, cellsOf("addRow", cells))
-    return updateEntry(prefix .. ".addRow", entry, WIDGET_KEYS.table, { rows = rows })
+    -- the selected row stays selected: a row inserted above it moves it down
+    local selected = native.uiGet(entry.id)
+    local update = { rows = rows }
+    if selected ~= nil and row <= selected then
+      update.value = selected + 1
+    end
+    return updateEntry(prefix .. ".addRow", entry, WIDGET_KEYS.table, update)
   end)
   method("setRow", { params = { { name = "row", type = "integer" }, { name = "cells", type = "table" } } }, function(row, cells)
     local rows = rowsOf("setRow")
@@ -2720,7 +2746,15 @@ widgetObject = function(entry)
     end
     rowIndex("removeRow", rows, row)
     table.remove(rows, row)
-    return updateEntry(prefix .. ".removeRow", entry, WIDGET_KEYS.table, { rows = rows })
+    -- the selection stays on its row: one above it moves it up, and removing the selected row clears it
+    local selected = native.uiGet(entry.id)
+    local update = { rows = rows }
+    if selected ~= nil and row == selected then
+      update.value = 0
+    elseif selected ~= nil and row < selected then
+      update.value = selected - 1
+    end
+    return updateEntry(prefix .. ".removeRow", entry, WIDGET_KEYS.table, update)
   end)
   method("getItems", {}, function()
     if entry.kind ~= "combo" and entry.kind ~= "radio" and entry.kind ~= "tree" then
@@ -3234,7 +3268,8 @@ local function fillForm(path, made, members, children, resolve, folder, links)
       if not ok then
         return
       end
-      local items = wiring.items[name] or {}
+      -- the items the widget has now: the script may have changed them since the form was built
+      local items = native.uiItems(source.id) or wiring.items[name] or {}
       local chosen = type(value) == "table" and value or { value }
       for _, rule in ipairs(list) do
         local on
@@ -3265,13 +3300,22 @@ local function fillForm(path, made, members, children, resolve, folder, links)
     -- whose record is not in the table is disabled until it is.
     wiring.binds = wiring.binds or {}
     wiring.missing = wiring.missing or {}
+    -- a combo's or radio's items as they are now (the script may update them), else the form's
+    local function itemsOf(bind)
+      return bind.handle and native.uiItems(bind.handle.id) or bind.items or {}
+    end
     local function shownValue(bind, value, text, entry)
       if bind.kind == "number" or bind.kind == "slider" then
-        return type(value) == "number" and value or tonumber(text)
+        local number = type(value) == "number" and value or tonumber(text)
+        -- an integer widget shows 1.5 as 2: compared unrounded, it never matched and was set again and again
+        if bind.integer and math.type(number) == "float" and number == number and number > -2 ^ 63 and number < 2 ^ 63 then
+          number = math.floor(number + 0.5)
+        end
+        return number
       end
       if bind.kind == "combo" or bind.kind == "radio" then
         -- an item names a drop-down entry by its description, or the value as shown
-        for index, item in ipairs(bind.items or {}) do
+        for index, item in ipairs(itemsOf(bind)) do
           local named = tostring(item)
           if (entry ~= nil and named == entry) or named == text or named == tostring(value) then
             return index
@@ -3326,9 +3370,9 @@ local function fillForm(path, made, members, children, resolve, folder, links)
             if value ~= nil then
               local shown = shownValue(bind, value, text, entry)
               local ok, current = pcall(bind.handle.get)
-              -- a field the user is typing into differs from what it last showed: leave it
-              local typing = (bind.kind == "input" or bind.kind == "number") and ok and bind.last ~= nil and current ~= bind.last
-              if not typing and shown ~= nil and (shown ~= bind.last or current ~= shown) then
+              -- a field the user is typing into keeps the keyboard: leave it until it is left
+              local typing = (bind.kind == "input" or bind.kind == "number") and native.uiIsActive(bind.handle.id)
+              if not typing and shown ~= nil and (shown ~= bind.last or not ok or current ~= shown) then
                 bind.last = shown
                 pcall(bind.handle.set, shown)
                 followRules(bind)
@@ -3354,7 +3398,7 @@ local function fillForm(path, made, members, children, resolve, folder, links)
           bind.last = value
         end
       elseif bind.kind == "combo" or bind.kind == "radio" then
-        local item = bind.items and bind.items[value]
+        local item = itemsOf(bind)[value]
         if item ~= nil then
           ok, problem = record.setValue(tostring(item))
           bind.last = value
@@ -3398,6 +3442,10 @@ local function fillForm(path, made, members, children, resolve, folder, links)
           file = folder .. file
         end
         copy.image = formImageLoad(file)
+        if copy.image and links.images then
+          -- the form's pictures, freed when a reload replaces them
+          links.images[#links.images + 1] = copy.image
+        end
       end
       if child.kind == "button" and (child.opens or child.closes) then
         local original = copy.onClick
@@ -3419,7 +3467,7 @@ local function fillForm(path, made, members, children, resolve, folder, links)
       end
       local bind
       if wiring and child.record ~= nil then
-        bind = { record = child.record, kind = child.kind, items = child.items, window = links.window, label = label, name = child.name, enabled = child.enabled ~= false }
+        bind = { record = child.record, kind = child.kind, items = child.items, integer = child.integer == true, window = links.window, label = label, name = child.name, enabled = child.enabled ~= false }
         if child.enabledWhen ~= nil then
           bind.rule = formWhen(child.enabledWhen).source
         end
@@ -3479,16 +3527,17 @@ local function buildForm(path, spec, handlers, folder)
   local modalTable, modalMembers = strict(("form(%q).modals"):format(spec.title))
   local windows = { made }
   local wiring = { rules = {}, items = {} }
+  local images = {}
   local ok, problem = pcall(function()
     for _, modal in ipairs(modals) do
       local handle = rawget(window.members, "create")(modal.spec.title, modal.options)
       windows[#windows + 1] = handle
       rawset(modalMembers, modal.name, handle)
     end
-    fillForm(path, made, members, spec.children, resolve, folder, { window = made, modals = modalMembers, wiring = wiring })
+    fillForm(path, made, members, spec.children, resolve, folder, { window = made, modals = modalMembers, wiring = wiring, images = images })
     for _, modal in ipairs(modals) do
       local handle = rawget(modalMembers, modal.name)
-      fillForm(path, handle, members, modal.spec.children, resolve, folder, { window = handle, modals = modalMembers, wiring = wiring })
+      fillForm(path, handle, members, modal.spec.children, resolve, folder, { window = handle, modals = modalMembers, wiring = wiring, images = images })
     end
     for name in pairs(wiring.rules) do
       wiring.refresh(name)
@@ -3501,9 +3550,12 @@ local function buildForm(path, spec, handlers, folder)
     for _, made in ipairs(windows) do
       made.remove()
     end
+    for _, picture in ipairs(images) do
+      picture.remove()
+    end
     error(problem, 0)
   end
-  return made, widgets, members, modalTable, modalMembers
+  return made, widgets, members, modalTable, modalMembers, images
 end
 
 local function readFormFile(file, folder, block)
@@ -3554,6 +3606,16 @@ local function reloadForm(watch, start)
     end
     return update
   end
+  -- ∑ update only sets the handlers it is given: one the file no longer
+  -- names would keep running (onUpdate) or keep being called (onClose)
+  local function windowHandlers(handle, options)
+    local entry = uiEntries[handle.id]
+    if entry then
+      entry.onUpdate = options.onUpdate
+      entry.onClose = options.onClose
+      native.uiUpdate(handle.id, { updates = options.onUpdate ~= nil, handlers = options.onClose and UI_HANDLER_BITS.onClose or 0 })
+    end
+  end
 
   local spec, shown, message = readFormFile(watch.file, nil, watch.block)
   local options, modals
@@ -3589,6 +3651,7 @@ local function reloadForm(watch, start)
   end
   watch.window.clear()
   watch.window.update(windowUpdate(spec.title, options))
+  windowHandlers(watch.window, options)
   -- modals: kept by name (cleared and refilled), new ones made, dropped ones removed
   local wanted = {}
   for _, modal in ipairs(modals) do
@@ -3606,6 +3669,9 @@ local function reloadForm(watch, start)
     end
   end
   local resolve = formResolver("manifold.ui.form.load", watch.handlers)
+  local images = {}
+  -- new modals and pictures belong to the form's script, as when it built the form
+  ownerSource(true, watch.entry.owner)
   local ok, failure = pcall(function()
     for _, modal in ipairs(modals) do
       local handle = rawget(watch.modals, modal.name)
@@ -3614,19 +3680,26 @@ local function reloadForm(watch, start)
         local update = windowUpdate(modal.spec.title, modal.options)
         update.modal = true
         handle.update(update)
+        windowHandlers(handle, modal.options)
       else
         handle = rawget(window.members, "create")(modal.spec.title, modal.options)
         rawset(watch.modals, modal.name, handle)
       end
     end
     local wiring = { rules = {}, items = {} }
-    fillForm("manifold.ui.form.load", watch.window, watch.members, spec.children, resolve, watch.folder, { window = watch.window, modals = watch.modals, wiring = wiring })
+    fillForm("manifold.ui.form.load", watch.window, watch.members, spec.children, resolve, watch.folder, { window = watch.window, modals = watch.modals, wiring = wiring, images = images })
     for _, modal in ipairs(modals) do
       local handle = rawget(watch.modals, modal.name)
-      fillForm("manifold.ui.form.load", handle, watch.members, modal.spec.children, resolve, watch.folder, { window = handle, modals = watch.modals, wiring = wiring })
+      fillForm("manifold.ui.form.load", handle, watch.members, modal.spec.children, resolve, watch.folder, { window = handle, modals = watch.modals, wiring = wiring, images = images })
     end
     watch.wiring = wiring
   end)
+  ownerSource(true, nil)
+  -- the old widgets are gone, and with them the last use of the old pictures
+  for _, picture in ipairs(watch.images or {}) do
+    pcall(picture.remove)
+  end
+  watch.images = images
   for name, saved in pairs(values) do
     local handle = rawget(watch.members, name)
     if handle and handle.kind == saved.kind then
@@ -3676,7 +3749,7 @@ define(form, "build", {
   local source = info and info.source or ""
   local file = source:sub(1, 1) == "@" and source:sub(2) or nil
   local folder = file and file:match("^(.*[\\/])") or nil
-  local made, widgets, members, modalTable, modalMembers = buildForm("manifold.ui.form.build", spec, handlers, folder)
+  local made, widgets, members, modalTable, modalMembers, images = buildForm("manifold.ui.form.build", spec, handlers, folder)
   if file and options.reload ~= false then
     -- ∑ only when the file's form table is this form (a script may build others)
     local text = native.uiFormRead(file)
@@ -3684,7 +3757,7 @@ define(form, "build", {
     chunk = chunk and load(chunk, "=form", "t", {})
     local ok, found = pcall(chunk or error)
     if ok and type(found) == "table" and found.title == spec.title then
-      reloadForm({ window = made, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = file, block = true, handlers = handlers, folder = folder, onReload = options.onReload }, true)
+      reloadForm({ window = made, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = file, block = true, handlers = handlers, folder = folder, onReload = options.onReload, images = images }, true)
     end
   end
   return made, widgets, modalTable
@@ -3708,9 +3781,9 @@ define(form, "load", {
     return result(nil, shown, message)
   end
   local formFolder = shown:match("^(.*[\\/])")
-  local made, widgets, members, modalTable, modalMembers = buildForm("manifold.ui.form.load", spec, handlers, formFolder)
+  local made, widgets, members, modalTable, modalMembers, images = buildForm("manifold.ui.form.load", spec, handlers, formFolder)
   if options.reload ~= false then
-    reloadForm({ window = made, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = shown, handlers = handlers, folder = formFolder, onReload = options.onReload }, true)
+    reloadForm({ window = made, widgets = widgets, members = members, modals = modalMembers, modalTable = modalTable, file = shown, handlers = handlers, folder = formFolder, onReload = options.onReload, images = images }, true)
   end
   return made, widgets, modalTable
 end)

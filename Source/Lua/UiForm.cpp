@@ -656,9 +656,14 @@ namespace Manifold::Lua
             return node;
         }
 
+        // ∑ inf and nan have no text a form file reads back (Lua has no
+        // literal for them), so a non-finite number writes nothing: the
+        // option is left out (nil) and the form stays loadable
         std::string NumberText(double value)
         {
-            if (std::isfinite(value) && std::floor(value) == value && std::fabs(value) < 1.0e15)
+            if (!std::isfinite(value))
+                return {};
+            if (std::floor(value) == value && std::fabs(value) < 1.0e15)
                 return std::to_string(static_cast<long long>(value));
             char buffer[64];
             const auto done = std::to_chars(buffer, buffer + sizeof(buffer), value);
@@ -670,7 +675,9 @@ namespace Manifold::Lua
         // 0.4000000059604645
         std::string NumberText(float value)
         {
-            if (std::isfinite(value) && std::floor(value) == value && std::fabs(value) < 1.0e7f)
+            if (!std::isfinite(value))
+                return {};
+            if (std::floor(value) == value && std::fabs(value) < 1.0e7f)
                 return std::to_string(static_cast<long long>(value));
             char buffer[64];
             const auto done = std::to_chars(buffer, buffer + sizeof(buffer), value);
@@ -700,8 +707,20 @@ namespace Manifold::Lua
                 value = static_cast<double>(whole);
                 return true;
             }
-            const auto done = std::from_chars(begin, end, value);
-            return done.ec == std::errc() && done.ptr == end;
+            // from_chars reads "inf" and "nan" too, which no option can hold
+            double read = 0.0;
+            const auto done = std::from_chars(begin, end, read);
+            if (done.ec != std::errc() || done.ptr != end || !std::isfinite(read))
+                return false;
+            value = read;
+            return true;
+        }
+
+        // a number where the file must have one (a column width, a place in the editor)
+        std::string NumberLiteral(double value)
+        {
+            const std::string text = NumberText(value);
+            return text.empty() ? std::string("0") : text;
         }
 
         std::string Quote(std::string_view text)
@@ -1160,6 +1179,14 @@ namespace Manifold::Lua
                     Error = "the form nests deeper than " + std::to_string(kMaxDepth) + " levels";
                     return false;
                 }
+                // ∑ every level keeps its children list and its child on the
+                // stack (a fresh state starts with about 40 slots); not
+                // luaL_checkstack: this runs outside a protected call
+                if (!lua_checkstack(State, 8))
+                {
+                    Error = "the form nests too deep for the Lua stack";
+                    return false;
+                }
                 if (++Nodes > kMaxNodes)
                 {
                     Error = "the form has more than " + std::to_string(kMaxNodes) + " widgets";
@@ -1249,7 +1276,7 @@ namespace Manifold::Lua
             static float Number(lua_State* state, int table, const char* key, float fallback)
             {
                 lua_getfield(state, table, key);
-                const float value = lua_isnumber(state, -1) ? static_cast<float>(lua_tonumber(state, -1)) : fallback;
+                const float value = lua_isnumber(state, -1) && std::isfinite(lua_tonumber(state, -1)) ? static_cast<float>(lua_tonumber(state, -1)) : fallback;
                 lua_pop(state, 1);
                 return value;
             }
@@ -2908,7 +2935,7 @@ namespace Manifold::Lua
                 {
                     out += "{ title = " + Quote(column.Title);
                     if (column.Width > 0.0f)
-                        out += ", width = " + NumberText(column.Width);
+                        out += ", width = " + NumberLiteral(column.Width);
                     if (!column.Align.empty())
                         out += ", align = " + Quote(column.Align);
                     out += " }";
@@ -3414,25 +3441,107 @@ namespace Manifold::Lua
         return FormUniqueName(form, name);
     }
 
+    namespace
+    {
+        // ∑ What a rename may touch, found with the tokenizer FormFindFunction
+        // uses (strings, long brackets and comments are skipped): a name on
+        // its own (`goldChanged(v)`, `local function goldChanged`) and a
+        // handler (`handlers.goldChanged`, `handlers["goldChanged"]`), but
+        // not another table's member (`w.goldChanged`, `obj:goldChanged()`)
+        // and nothing in the form table's line (`local form = { ... }`).
+        struct RenameSpot
+        {
+            std::size_t Begin = 0;
+            std::size_t End = 0;
+        };
+
+        struct RenameScan
+        {
+            std::vector<RenameSpot> Spots;  // where `name` stands
+            std::vector<std::string> Locked; // the form table's variable ("form")
+        };
+
+        RenameScan ScanRenames(std::string_view text, std::string_view name)
+        {
+            using W = LuaToken::Type;
+            RenameScan scan;
+            std::vector<std::pair<std::size_t, std::size_t>> locked;
+            for (const StandIn& standIn : FindStandIns(text))
+            {
+                locked.push_back({ standIn.Begin, standIn.End });
+                scan.Locked.push_back(standIn.Name);
+            }
+            if (locked.empty())
+            {
+                if (const std::optional<FormBlock> block = FormFindBlock(text))
+                {
+                    locked.push_back({ block->Begin, block->End });
+                    scan.Locked.push_back(block->Name);
+                }
+            }
+            const std::vector<LuaToken> tokens = Tokenize(text);
+            const auto member = [&](std::size_t at) { return at > 0 && (Is(tokens, at - 1, W::Symbol, ".") || Is(tokens, at - 1, W::Symbol, ":")); };
+            const auto handlers = [&](std::size_t at) { return Is(tokens, at, W::Word, "handlers") && !member(at); };
+            for (std::size_t i = 0; i < tokens.size(); ++i)
+            {
+                const LuaToken& token = tokens[i];
+                if (token.Text != name)
+                    continue;
+                if (std::any_of(locked.begin(), locked.end(), [&](const auto& range) { return token.Begin >= range.first && token.Begin < range.second; }))
+                    continue;
+                if (token.Kind == W::Word)
+                {
+                    if (!member(i) || (i >= 2 && Is(tokens, i - 1, W::Symbol, ".") && handlers(i - 2)))
+                        scan.Spots.push_back({ token.Begin, token.End });
+                }
+                else if (token.Kind == W::String && i >= 2 && Is(tokens, i - 1, W::Symbol, "[") && handlers(i - 2) && Is(tokens, i + 1, W::Symbol, "]") &&
+                         (text[token.Begin] == '"' || text[token.Begin] == '\''))
+                    scan.Spots.push_back({ token.Begin + 1, token.Begin + 1 + token.Text.size() }); // inside the quotes
+            }
+            return scan;
+        }
+    }
+
+    bool FormCanRenameIdentifier(std::string_view text, std::string_view from, std::string_view to, std::string* why)
+    {
+        const auto refuse = [&](std::string reason) {
+            if (why)
+                *why = std::move(reason);
+            return false;
+        };
+        if (!FormIsIdentifier(from) || !FormIsIdentifier(to))
+            return refuse(std::string(FormIsIdentifier(from) ? to : from) + " is no Lua name");
+        if (from == to)
+            return true;
+        if (from == "handlers" || to == "handlers")
+            return refuse("handlers is the table the form's handlers are in");
+        const RenameScan scan = ScanRenames(text, from);
+        for (const std::string& locked : scan.Locked)
+        {
+            if (locked == from || locked == to)
+                return refuse(locked + " is the form table's name in the script");
+        }
+        // a name the script uses already: the renamed one would hide it, or be hidden
+        if (!ScanRenames(text, to).Spots.empty())
+            return refuse(std::string(to) + " is used in the script already");
+        return true;
+    }
+
     std::string FormRenameIdentifier(std::string_view text, std::string_view from, std::string_view to)
     {
-        const auto part = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; };
+        if (from == to || !FormCanRenameIdentifier(text, from, to, nullptr))
+            return std::string(text);
+        const RenameScan scan = ScanRenames(text, from);
         std::string out;
-        out.reserve(text.size());
+        out.reserve(text.size() + scan.Spots.size() * to.size());
         std::size_t at = 0;
-        while (at < text.size())
+        for (const RenameSpot& spot : scan.Spots)
         {
-            const std::size_t found = from.empty() ? std::string_view::npos : text.find(from, at);
-            if (found == std::string_view::npos)
-            {
-                out.append(text.substr(at));
-                break;
-            }
-            const bool whole = (found == 0 || !part(text[found - 1])) && (found + from.size() >= text.size() || !part(text[found + from.size()]));
-            out.append(text.substr(at, found - at));
-            out.append(whole ? to : from);
-            at = found + from.size();
+            out.append(text.substr(at, spot.Begin - at));
+            out.append(to);
+            at = spot.End;
         }
+        out.append(text.substr(at));
         return out;
     }
 
@@ -3661,19 +3770,19 @@ namespace Manifold::Lua
             if (form.CanvasX != 40.0f || form.CanvasY != 30.0f || !form.Nodes.empty() || !form.ModalNodes.empty())
             {
                 writer.Line(1, "editor = {");
-                writer.Line(2, "form = { x = " + NumberText(std::round(form.CanvasX)) + ", y = " + NumberText(std::round(form.CanvasY)) + " },");
+                writer.Line(2, "form = { x = " + NumberLiteral(std::round(form.CanvasX)) + ", y = " + NumberLiteral(std::round(form.CanvasY)) + " },");
                 if (!form.ModalNodes.empty())
                 {
                     writer.Line(2, "modals = {");
                     for (const auto& [name, node] : form.ModalNodes)
-                        writer.Line(3, name + " = { x = " + NumberText(std::round(node.X)) + ", y = " + NumberText(std::round(node.Y)) + " },");
+                        writer.Line(3, name + " = { x = " + NumberLiteral(std::round(node.X)) + ", y = " + NumberLiteral(std::round(node.Y)) + " },");
                     writer.Line(2, "},");
                 }
                 if (!form.Nodes.empty())
                 {
                     writer.Line(2, "nodes = {");
                     for (const auto& [name, node] : form.Nodes)
-                        writer.Line(3, name + " = { x = " + NumberText(std::round(node.X)) + ", y = " + NumberText(std::round(node.Y)) + (node.Folded ? ", folded = true" : "") + " },");
+                        writer.Line(3, name + " = { x = " + NumberLiteral(std::round(node.X)) + ", y = " + NumberLiteral(std::round(node.Y)) + (node.Folded ? ", folded = true" : "") + " },");
                     writer.Line(2, "},");
                 }
                 writer.Line(1, "},");

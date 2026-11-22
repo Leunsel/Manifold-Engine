@@ -195,6 +195,7 @@ namespace Manifold::Lua
         double NextUpdate = 0.0;
         bool Updates = false;
         bool PendingChange = false; // number: typed but not yet left or entered, so not reported yet
+        bool Active = false;        // input/number: the user edits it (its text field had the keyboard in the last frame drawn)
         std::string LabelPosition;  // field: "left", "above" or "right"; container/window: the default for its fields; empty inherits
         float FontSize = 0.0f;      // text/heading: points, 0 for the usual size
         bool Bold = false;          // text: bold
@@ -206,6 +207,20 @@ namespace Manifold::Lua
 
     // seconds between two refreshes of a window's record-bound widgets
     inline constexpr double kBindInterval = 0.1;
+
+    // ∑ the limits of a number or slider, the same for drawing, hotkeys and
+    // scripts: a slider without min or max runs 0..100 (integer) or 0..1, a
+    // number without them has no limit on that side; a min above the max is
+    // taken the other way round (std::clamp needs low <= high)
+    std::pair<double, double> UiValueRange(const UiNode& node);
+    // the value within UiValueRange (NaN stays NaN)
+    double UiClampValue(const UiNode& node, double value);
+    // a slider's value moved to the nearest `step` from its min, never past
+    // its max (then the max itself); without a step only kept in its range
+    double UiSnapValue(const UiNode& node, double value);
+    // a double as a 64-bit integer without undefined behaviour: NaN is 0,
+    // values past the range stop at its ends
+    std::int64_t UiToInteger(double value);
 
     namespace UiHandler
     {
@@ -331,6 +346,8 @@ namespace Manifold::Lua
         // switches the box or clicks the button like the mouse does (onChange,
         // onClick, record bindings, Enabled When). `pressed` tells whether keys
         // went down since the last call (Table::KeysPressed in the program).
+        // Widgets in hidden containers do not fire, and while a modal window
+        // is open only the one opened last (the one in front) takes hotkeys.
         void PollHotkeys(const std::function<bool(const std::vector<int>&, bool&)>& pressed);
 
         void Watch(int window, std::string path);
@@ -350,6 +367,7 @@ namespace Manifold::Lua
         std::vector<UiDialog> m_dialogs;
         std::vector<UiEvent> m_events;
         std::vector<UiWatch> m_watches;
+        std::vector<int> m_modalOrder; // open modal windows in the order they opened (the host stacks them the same way)
         double m_nextPoll = 0.0;
         int m_next = 1;
         std::uint64_t m_order = 0;

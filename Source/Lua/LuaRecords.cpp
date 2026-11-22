@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <string>
 
 namespace Manifold::Lua
@@ -22,6 +23,17 @@ namespace Manifold::Lua
     {
         using Table::MemoryRecord;
         using Table::RecordKind;
+
+        // An id as a record has one: a whole number from 0 to kMaxRecordId. Anything else (1.5, 2^32, -1) names no record;
+        // a plain cast would cut 4294967296 to 0 and find record 0.
+        std::optional<int> RecordId(lua_State* state, int index)
+        {
+            int exact = 0;
+            const lua_Integer id = lua_tointegerx(state, index, &exact);
+            if (!exact || id < 0 || id > Table::kMaxRecordId)
+                return std::nullopt;
+            return static_cast<int>(id);
+        }
 
         // ∑ A record is named by its id and the table it came from: a table
         // that was replaced (new, opened, restored) may reuse ids, so a handle
@@ -32,7 +44,9 @@ namespace Manifold::Lua
             const lua_Integer identity = luaL_checkinteger(state, index + 1);
             if (static_cast<std::uint64_t>(identity) != engine.Table().Identity())
                 return nullptr;
-            return engine.Table().FindById(static_cast<int>(luaL_checkinteger(state, index)));
+            luaL_checkinteger(state, index);
+            const std::optional<int> id = RecordId(state, index);
+            return id ? engine.Table().FindById(*id) : nullptr;
         }
 
         int Gone(lua_State* state, int index)
@@ -104,8 +118,18 @@ namespace Manifold::Lua
             std::string shown;
             if (lua_type(state, 1) == LUA_TNUMBER)
             {
-                record = table.FindById(static_cast<int>(lua_tointeger(state, 1)));
-                shown = std::to_string(lua_tointeger(state, 1));
+                const std::optional<int> id = RecordId(state, 1);
+                if (!id)
+                {
+                    char number[48];
+                    if (lua_isinteger(state, 1))
+                        std::snprintf(number, sizeof(number), "%lld", static_cast<long long>(lua_tointeger(state, 1)));
+                    else
+                        std::snprintf(number, sizeof(number), "%.17g", static_cast<double>(lua_tonumber(state, 1)));
+                    return PushFailure(state, ErrorCode::TableRecordNotFound, std::string(number) + " (an id is a whole number from 0 to " + std::to_string(Table::kMaxRecordId) + ")");
+                }
+                record = table.FindById(*id);
+                shown = std::to_string(*id);
             }
             else
             {
@@ -364,12 +388,33 @@ namespace Manifold::Lua
             return 1;
         }
 
+        // ∑ True only when the record ended in the wanted state. A veto of onMemRecPreExecute or its on(de)activate handler,
+        //   or a failed script of a switch that ran in the background, comes back as nil and the reason. A switch that had to
+        //   wait behind the record's own running switch (asked from inside it) is queued and counts as done: waiting there
+        //   would never end.
+        int PushSwitched(lua_State* state, int index, bool wanted)
+        {
+            MemoryRecord* record = Find(state, index);
+            if (!record)
+                return Gone(state, index);
+            Engine& engine = Owner(state);
+            if (record->Active == wanted || engine.ActivationPending(record->Id))
+            {
+                lua_pushboolean(state, 1);
+                return 1;
+            }
+            const Status why = engine.Activation().LastOutcome(record->Id);
+            if (!why)
+                return PushFailure(state, why);
+            return PushFailure(state, ErrorCode::LuaRuntime, "\"" + record->Description + "\" stayed " + (wanted ? "off" : "on"));
+        }
+
+        // the context is the record's id and the wanted state in its lowest bit; the arguments are still on the stack
         int ActivationDone(lua_State* state, int, lua_KContext context)
         {
-            if (Owner(state).ActivationPending(static_cast<int>(context)))
+            if (Owner(state).ActivationPending(static_cast<int>(context >> 1)))
                 return lua_yieldk(state, 0, context, &ActivationDone);
-            lua_pushboolean(state, 1);
-            return 1;
+            return PushSwitched(state, 1, (context & 1) != 0);
         }
 
         // ∑ the same way as memrec.Active: inside a script's own coroutine
@@ -381,24 +426,24 @@ namespace Manifold::Lua
             if (!record)
                 return Gone(state, 1);
             const bool wanted = lua_toboolean(state, 3) != 0;
+            const int id = record->Id;
             Engine& engine = Owner(state);
             if (engine.Async() && Manifold::OnMainThread() && lua_isyieldable(state) && EngineOf(state).IsCooperative(state))
             {
                 if (!engine.InsideActivation())
                 {
                     engine.RequestActive(*record, wanted, true);
-                    if (engine.ActivationPending(record->Id))
-                        return lua_yieldk(state, 0, static_cast<lua_KContext>(record->Id), &ActivationDone);
-                    lua_pushboolean(state, 1);
-                    return 1;
+                    if (engine.ActivationPending(id))
+                        return lua_yieldk(state, 0, (static_cast<lua_KContext>(id) << 1) | (wanted ? 1 : 0), &ActivationDone);
+                    return PushSwitched(state, 1, wanted);
                 }
-                engine.DropQueued(record->Id);
+                engine.DropQueued(id);
             }
+            // the switch runs Lua, which may delete the record: PushSwitched finds it again
             const Status status = engine.SetActive(*record, wanted, true);
             if (!status)
                 return PushFailure(state, status);
-            lua_pushboolean(state, 1);
-            return 1;
+            return PushSwitched(state, 1, wanted);
         }
 
         // ∑ a form's switch or button: like a click on the record's box, queued
@@ -477,6 +522,13 @@ namespace Manifold::Lua
                 parent = Find(state, 5);
                 if (!parent)
                     return Gone(state, 5);
+                // as deep as a table file may nest them: CheatTable.cpp reads kMaxRecordDepth levels, the top level being 1
+                int level = 1;
+                for (const MemoryRecord* above = parent; above->Parent; above = above->Parent)
+                    ++level;
+                if (level >= Table::kMaxRecordDepth)
+                    return PushFailure(state, ErrorCode::LuaBadArgument, "\"" + parent->Description + "\" is at level " + std::to_string(level) +
+                        " already; records go no deeper than " + std::to_string(Table::kMaxRecordDepth) + " levels");
             }
             MemoryRecord* made = nullptr;
             if (kind == "group")
@@ -505,22 +557,16 @@ namespace Manifold::Lua
             return 1;
         }
 
+        // ∑ RemoveRecord switches off every active record of the tree (deepest first), refuses while one is being switched and
+        //   fires ondestroy for each removed id; the record is never used after a switch, whose Lua may delete it.
         int RecordRemove(lua_State* state)
         {
             MemoryRecord* record = Find(state, 1);
             if (!record)
                 return Gone(state, 1);
-            Engine& engine = Owner(state);
-            if (record->Active)
-            {
-                const Status status = engine.SetActive(*record, false, true);
-                if (!status)
-                    return PushFailure(state, status);
-            }
-            const int id = record->Id;
-            engine.Table().Remove(*record);
-            EngineOf(state).RecordDestroyed(id);
-            engine.Table().Touch();
+            const Status status = Owner(state).RemoveRecord(record->Id, true);
+            if (!status)
+                return PushFailure(state, status);
             lua_pushboolean(state, 1);
             return 1;
         }

@@ -442,10 +442,10 @@ namespace Manifold
         return Assemble(script, section, memory, checkOnly, owner, record, nullptr);
     }
 
-    ScriptCheck Engine::CheckScript(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory)
+    ScriptCheck Engine::CheckScript(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool holdLuaBack)
     {
         ScriptCheck check;
-        check.Result = Assemble(script, section, memory, true, "check", nullptr, m_tables.ScriptsTrusted() ? nullptr : &check.LuaHeldBack, true);
+        check.Result = Assemble(script, section, memory, true, "check", nullptr, m_tables.ScriptsTrusted() && !holdLuaBack ? nullptr : &check.LuaHeldBack, true);
         return check;
     }
 
@@ -455,7 +455,18 @@ namespace Manifold
         Asm::AaHost host;
         host.Process = m_target.Process().get();
         host.Symbols = &m_target.Symbols();
-        host.RunLua = [this, record, luaHeldBack](std::string_view code, bool syntaxCheck, std::string& output) -> Status
+        // ∑ The record by its id and table, found again for every block: a {$lua} block may delete it (or replace the table),
+        //   and a later block of the same script would then read freed memory through the pointer.
+        const bool forRecord = record != nullptr;
+        const int recordId = record ? record->Id : 0;
+        const std::uint64_t identity = m_tables.Table().Identity();
+        const auto currentRecord = [this, forRecord, recordId, identity]() -> const Table::MemoryRecord*
+            {
+                if (!forRecord || m_tables.Table().Identity() != identity)
+                    return nullptr;
+                return m_tables.Table().FindById(recordId);
+            };
+        host.RunLua = [this, currentRecord, luaHeldBack](std::string_view code, bool syntaxCheck, std::string& output) -> Status
             {
                 if (luaHeldBack)
                 {
@@ -464,13 +475,13 @@ namespace Manifold
                     return m_lua->Compile(code, "{$lua}");
                 }
                 const Lua::ScriptGlobals saved = m_lua->SaveScriptGlobals();
-                m_lua->SetScriptGlobals(record, syntaxCheck);
+                m_lua->SetScriptGlobals(currentRecord(), syntaxCheck);
                 const Status status = m_lua->RunWithResult(code, "{$lua}", output);
                 m_lua->RestoreScriptGlobals(saved);
                 return status;
             };
         host.IsCustomCommand = [this](std::string_view name) { return m_lua->IsAutoAssemblerCommand(name); };
-        host.RunCustomCommand = [this, record, luaHeldBack](std::string_view name, std::string_view parameters, bool syntaxCheck, std::string& output) -> Status
+        host.RunCustomCommand = [this, currentRecord, luaHeldBack](std::string_view name, std::string_view parameters, bool syntaxCheck, std::string& output) -> Status
             {
                 if (luaHeldBack)
                 {
@@ -479,7 +490,7 @@ namespace Manifold
                     return Status::Success();
                 }
                 const Lua::ScriptGlobals saved = m_lua->SaveScriptGlobals();
-                m_lua->SetScriptGlobals(record, syntaxCheck);
+                m_lua->SetScriptGlobals(currentRecord(), syntaxCheck);
                 const Status status = m_lua->RunAutoAssemblerCommand(name, parameters, syntaxCheck, output);
                 m_lua->RestoreScriptGlobals(saved);
                 return status;

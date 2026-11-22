@@ -19,7 +19,7 @@ namespace Manifold::UI
 
     private:
         void Row(const std::string& key, const std::vector<std::string>& keys, int index);
-        void RowMenu(const std::string& key);
+        void RowMenu(const std::string& key, const std::vector<std::string>& keys);
         void Click(const std::vector<std::string>& keys, int index);
         void Reveal(const std::string& key);
         void Remove(std::vector<std::string> keys);
@@ -33,6 +33,7 @@ namespace Manifold::UI
         std::set<std::string> m_selected;
         std::string m_anchor;
         std::vector<std::vector<Table::RemovedNote>> m_undo;
+        std::vector<std::string> m_removeLater;
         std::uint64_t m_tableIdentity = 0;
 
         bool m_editOpen = false;

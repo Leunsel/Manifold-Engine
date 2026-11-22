@@ -124,6 +124,7 @@ namespace Manifold::UI
         std::map<int, CanvasState> m_canvases;
         std::uint64_t m_textureGeneration = 0;
         int m_openDialog = 0;
+        int m_activeField = 0; // the input or number marked Active in the last frame (Draw clears it first)
         std::vector<int> m_modals;
         std::map<int, ImGuiID> m_modalIds;
         ImGuiID m_modalViewport = 0;

@@ -35,8 +35,9 @@ namespace Manifold::Disasm
     };
 
     // Bytes as people paste them: "48 8B 05", "488B05", "0x48, 0x8B",
-    // "\x48\x8B", "{ 0x48 }" and the like. A single digit is one byte; an odd
-    // run of more digits is an error, named in `error`.
+    // "\x48\x8B", "{ 0x48 }" and the like. A single digit is one byte (also
+    // each \x or 0x group: \x1\x2 is 01 02); an odd run of more digits and a
+    // \x or 0x without digits are errors, named in `error`.
     std::optional<std::vector<std::uint8_t>> ParseByteText(std::string_view text, std::string* error = nullptr);
     std::string FormatBytes(std::span<const std::uint8_t> bytes, ByteStyle style);
 

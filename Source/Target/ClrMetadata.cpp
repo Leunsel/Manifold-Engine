@@ -488,6 +488,19 @@ namespace Manifold::Target
 
     std::string ClrMetadata::TypeName(std::uint32_t token) const
     {
+        bool ok = true;
+        int budget = kMaxSteps;
+        std::string name = TypeNameAt(token, 0, ok, budget);
+        return ok ? name : std::string();
+    }
+
+    std::string ClrMetadata::TypeNameAt(std::uint32_t token, int depth, bool& ok, int& budget) const
+    {
+        if (depth > kMaxDepth || !ok || --budget < 0)
+        {
+            ok = false;
+            return {};
+        }
         const std::uint32_t table = token >> 24;
         const std::uint32_t row = token & 0x00FFFFFF;
         if (table == TypeDef)
@@ -500,7 +513,9 @@ namespace Manifold::Target
             const std::uint32_t scope = Cell(TypeRef, row, 0);
             if ((scope & 3) == 3 && (scope >> 2) != row)  // nested in another TypeRef
             {
-                const std::string outer = TypeName(Token(TypeRef, scope >> 2));
+                const std::string outer = TypeNameAt(Token(TypeRef, scope >> 2), depth + 1, ok, budget);
+                if (!ok)
+                    return {};
                 if (!outer.empty())
                     return outer + "+" + own;
             }
@@ -511,8 +526,14 @@ namespace Manifold::Target
         {
             if (row == 0 || row > Rows(TypeSpec))
                 return {};
-            Cursor cursor{ Blob(Cell(TypeSpec, row, 0)) };
-            return SignatureType(cursor, 0);
+            Cursor cursor{ Blob(Cell(TypeSpec, row, 0)), 0, true, &budget };
+            std::string name = SignatureType(cursor, depth + 1);
+            if (!cursor.Ok)
+            {
+                ok = false;
+                return {};
+            }
+            return name;
         }
         return {};
     }
@@ -571,7 +592,7 @@ namespace Manifold::Target
 
     std::string ClrMetadata::SignatureType(Cursor& cursor, int depth) const
     {
-        if (depth > 16 || !cursor.Ok || cursor.At >= cursor.Bytes.size())
+        if (depth > kMaxDepth || !cursor.Ok || cursor.At >= cursor.Bytes.size() || !cursor.Budget || --*cursor.Budget < 0)
         {
             cursor.Ok = false;
             return {};
@@ -597,7 +618,7 @@ namespace Manifold::Target
             case 0x0F: return SignatureType(cursor, depth + 1) + "*";
             case 0x10: return SignatureType(cursor, depth + 1) + "&";
             case 0x11:
-            case 0x12: return TypeName(typeToken());
+            case 0x12: return TypeNameAt(typeToken(), depth + 1, cursor.Ok, *cursor.Budget);
             case 0x13: return "T" + std::to_string(Compressed(cursor.Bytes, cursor.At, cursor.Ok));
             case 0x1E: return "M" + std::to_string(Compressed(cursor.Bytes, cursor.At, cursor.Ok));
             case 0x14:
@@ -620,7 +641,7 @@ namespace Manifold::Target
                     return {};
                 }
                 ++cursor.At;  // CLASS or VALUETYPE
-                std::string name = WithoutArity(TypeName(typeToken()));
+                std::string name = WithoutArity(TypeNameAt(typeToken(), depth + 1, cursor.Ok, *cursor.Budget));
                 const std::uint32_t count = Compressed(cursor.Bytes, cursor.At, cursor.Ok);
                 name += "<";
                 for (std::uint32_t i = 0; i < count && i < 64 && cursor.Ok; ++i)
@@ -649,7 +670,8 @@ namespace Manifold::Target
         const auto field = FieldAt(row);
         if (!field)
             return {};
-        Cursor cursor{ Blob(field->Signature) };
+        int budget = kMaxSteps;
+        Cursor cursor{ Blob(field->Signature), 0, true, &budget };
         if (cursor.Bytes.empty() || (cursor.Bytes[0] & 0x0F) != 0x06)
             return {};
         cursor.At = 1;

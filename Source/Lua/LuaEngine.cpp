@@ -186,7 +186,28 @@ namespace Manifold::Lua
         if (CallClock() < engine->m_callDeadline)
             return;
         lua_sethook(state, &LuaEngine::CallHook, LUA_MASKCOUNT, 1);
+        if (engine->m_callReason)
+            luaL_error(state, "stopped after %d ms: %s", engine->m_callLimit, engine->m_callReason);
         luaL_error(state, "stopped after %d ms: a callback has to return quickly, so long work belongs in createThread (Settings → Scripts sets the limit)", engine->m_callLimit);
+    }
+
+    LuaEngine::TimeLimit::TimeLimit(LuaEngine& engine, int milliseconds, const char* reason) : m_engine(engine)
+    {
+        if (milliseconds <= 0 || engine.m_callDeadline > 0.0)
+            return;
+        engine.m_callLimit = milliseconds;
+        engine.m_callDeadline = CallClock() + milliseconds / 1000.0;
+        engine.m_callReason = reason;
+        m_set = true;
+    }
+
+    LuaEngine::TimeLimit::~TimeLimit()
+    {
+        if (!m_set)
+            return;
+        m_engine.m_callDeadline = 0.0;
+        m_engine.m_callReason = nullptr;
+        lua_sethook(m_engine.m_state, &LuaEngine::CallHook, LUA_MASKCOUNT, kCallHookInstructions);
     }
 
     bool LuaEngine::GuardedCall(int arguments, int results, int handler)
