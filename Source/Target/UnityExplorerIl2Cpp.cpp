@@ -8,7 +8,10 @@
 
 #include <algorithm>
 #include <cstring>
+#include <set>
 #include <thread>
+
+#include <windows.h>
 
 namespace Manifold::Target
 {
@@ -41,6 +44,10 @@ namespace Manifold::Target
         constexpr const char* kSceneManagerClass = "UnityEngine.SceneManagement.SceneManager";
         constexpr const char* kApplicationClass = "UnityEngine.Application";
         constexpr const char* kStripped = " (stripped from this build, or another Unity version)";
+        // ∑ Six of the owner's IL2CPP builds stripped the managed runInBackground property (GTFO, Moon
+        //   Sweepers, ShellShock Live, The Survivalists, Uno, Master Duel); the engine's internal call stays.
+        constexpr const char* kGetBackgroundIcall = "UnityEngine.Application::get_runInBackground()";
+        constexpr const char* kSetBackgroundIcall = "UnityEngine.Application::set_runInBackground(System.Boolean)";
 
         // Unity's object finders by version: 6000.6 has no FindObjectsOfType
         // any more and its two-argument FindObjectsByType takes a
@@ -96,6 +103,28 @@ namespace Manifold::Target
         };
 
         constexpr const char* kVectorGetters[] = { "get_localPosition", "get_localEulerAngles", "get_localScale", "get_position" };
+
+        // ∑ Application.unityVersion is stripped in some builds (Dale&Dawson, Master Duel); the player's own
+        //   file version carries the same major.minor.patch.
+        std::string PlayerVersion(const Process& process)
+        {
+            std::optional<ModuleInfo> player = process.FindModule("UnityPlayer.dll");
+            if (!player)
+                player = process.MainModule();
+            if (!player || player->Path.empty())
+                return {};
+            DWORD ignored = 0;
+            const DWORD size = ::GetFileVersionInfoSizeW(player->Path.c_str(), &ignored);
+            std::vector<std::uint8_t> data(size);
+            VS_FIXEDFILEINFO* info = nullptr;
+            UINT length = 0;
+            if (size == 0 || !::GetFileVersionInfoW(player->Path.c_str(), 0, size, data.data()) || !::VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&info), &length) || !info)
+                return {};
+            const unsigned major = HIWORD(info->dwFileVersionMS);
+            if (major < 4)
+                return {};
+            return std::to_string(major) + "." + std::to_string(LOWORD(info->dwFileVersionMS)) + "." + std::to_string(HIWORD(info->dwFileVersionLS));
+        }
     }
 
     struct UnityExplorer::Il2Node
@@ -314,6 +343,53 @@ namespace Manifold::Target
             return out;
         }
 
+        struct Flag
+        {
+            Invoked Call;
+            std::uint64_t Cell = 0;
+            int Raw = -1;
+        };
+
+        Flag ReadBackground()
+        {
+            Flag out;
+            if (const std::uint64_t get = Owner.Il2Method(kApplicationClass, "get_runInBackground", {}))
+            {
+                out.Call = Invoke(get, Arg::Null());
+                out.Cell = Unbox(out.Call.Call, 1);
+            }
+            else if (const std::uint64_t icall = Owner.Il2Icall(kGetBackgroundIcall))
+            {
+                out.Raw = Batch.Call(icall);
+            }
+            return out;
+        }
+
+        std::optional<bool> Value(const Flag& flag) const
+        {
+            if (flag.Raw >= 0)
+                return (Batch.Result(flag.Raw) & 0xFF) != 0;
+            if (Returned(flag.Call))
+                return Number<std::uint8_t>(flag.Cell) != 0;
+            return std::nullopt;
+        }
+
+        bool CanSetBackground()
+        {
+            return Owner.Il2Method(kApplicationClass, "set_runInBackground", { "System.Boolean" }) || Owner.Il2Icall(kSetBackgroundIcall);
+        }
+
+        Invoked SetBackground(bool value)
+        {
+            const std::uint8_t byte = value ? 1 : 0;
+            if (const std::uint64_t set = Owner.Il2Method(kApplicationClass, "set_runInBackground", { "System.Boolean" }))
+                return Invoke(set, Arg::Null(), { Bytes(&byte, 1) });
+            Invoked out;
+            if (const std::uint64_t icall = Owner.Il2Icall(kSetBackgroundIcall))
+                out.Call = Batch.Call(icall, static_cast<std::uint64_t>(byte));
+            return out;
+        }
+
         std::uint64_t Result(int call) const { return Batch.Result(call); }
         std::uint64_t Exception(const Invoked& invoked) const { return invoked.Exception ? Batch.Pointer(invoked.Exception) : 0; }
         bool Returned(const Invoked& invoked) const { return invoked.Call >= 0 && Batch.Result(invoked.Call) != 0; }
@@ -427,6 +503,30 @@ namespace Manifold::Target
             LOG_INFO("Unity", "This game's build has no " + key);
         m_il2->Methods[key] = handle;
         return handle;
+    }
+
+    std::uint64_t UnityExplorer::Il2Icall(const std::string& name)
+    {
+        if (const auto found = m_il2->Icalls.find(name); found != m_il2->Icalls.end())
+            return found->second;
+        std::uint64_t address = 0;
+        {
+            std::lock_guard bridge(m_mono.m_lock);
+            if (m_mono.m_present && m_mono.Fn("il2cpp_resolve_icall"))
+            {
+                m_mono.m_call.ResetScratch();
+                if (const std::uint64_t text = m_mono.m_call.Scratch(name.size() + 1))
+                {
+                    m_mono.m_process->Write(text, name.c_str(), name.size() + 1);
+                    address = m_mono.CallFn("il2cpp_resolve_icall", text).value_or(0);
+                }
+                m_mono.m_call.ResetScratch();
+            }
+        }
+        if (address)
+            LOG_INFO("Unity", "Using the engine's internal call " + name + ", the managed method is stripped");
+        m_il2->Icalls[name] = address;
+        return address;
     }
 
     Status UnityExplorer::Il2EnsureHook()
@@ -544,15 +644,34 @@ namespace Manifold::Target
             boxedCell = recipe.Unbox(recipe.Invoke(hash, Arg::Of(box)).Call, 4);
             rawCell = recipe.Unbox(recipe.Invoke(hash, Arg::Of(box, recipe.Layout.ObjectHeader)).Call, 4);
         }
+        // ∑ Int32.GetHashCode is virtual; before metadata v29 a virtual struct method may sit behind an adjustor
+        //   thunk where the explorer's own Scene methods do not. Scene.get_handle is the kind actually used,
+        //   checked against the handle unboxed from GetActiveScene, and wins when it decides.
+        std::uint64_t sceneCell = 0;
+        std::uint64_t sceneBoxedCell = 0;
+        std::uint64_t sceneRawCell = 0;
+        const std::uint64_t getActive = Il2Method(kSceneManagerClass, "GetActiveScene", {});
+        const std::uint64_t getHandle = Il2Method(kSceneClass, "get_handle", {});
+        if (getActive && getHandle)
+        {
+            const Il2Recipe::Invoked active = recipe.Invoke(getActive, Arg::Null());
+            sceneCell = recipe.Unbox(active.Call, 4);
+            sceneBoxedCell = recipe.Unbox(recipe.Invoke(getHandle, Arg::Of(active.Call)).Call, 4);
+            sceneRawCell = recipe.Unbox(recipe.Invoke(getHandle, Arg::Of(active.Call, recipe.Layout.ObjectHeader)).Call, 4);
+        }
         const std::uint64_t versionCell = recipe.Chars(recipe.Invoke(Il2Method(kApplicationClass, "get_unityVersion", {}), Arg::Null()).Call, 64);
-        const Il2Recipe::Invoked background = recipe.Invoke(Il2Method(kApplicationClass, "get_runInBackground", {}), Arg::Null());
-        const std::uint64_t backgroundCell = recipe.Unbox(background.Call, 1);
+        const Il2Recipe::Flag background = recipe.ReadBackground();
         if (const Status ran = Il2Run(recipe, std::chrono::seconds(5)); !ran)
         {
             state.Frame.Unhook();
             return Status::Fail(ErrorCode::MonoCallFailed, "the frame stub did not answer its first request: " + ran.Text);
         }
-        if (recipe.Number<std::int32_t>(boxedCell) == kProbeValue)
+        const std::int32_t sceneHandle = recipe.Number<std::int32_t>(sceneCell);
+        const bool sceneBoxed = sceneHandle != 0 && recipe.Number<std::int32_t>(sceneBoxedCell) == sceneHandle;
+        const bool sceneRaw = sceneHandle != 0 && recipe.Number<std::int32_t>(sceneRawCell) == sceneHandle;
+        if (sceneBoxed != sceneRaw)
+            state.BoxedThis = sceneBoxed;
+        else if (recipe.Number<std::int32_t>(boxedCell) == kProbeValue)
             state.BoxedThis = true;
         else if (recipe.Number<std::int32_t>(rawCell) == kProbeValue)
             state.BoxedThis = false;
@@ -562,7 +681,9 @@ namespace Manifold::Target
             LOG_WARN("Unity", "Could not find out how this IL2CPP version passes a struct to its own methods; scenes cannot be read");
         }
         state.Ready = true;
-        const std::string version = recipe.TextAt(versionCell);
+        std::string version = recipe.TextAt(versionCell);
+        if (version.empty())
+            version = PlayerVersion(*process);
         {
             std::lock_guard lock(m_stateLock);
             if (!m_status.Hooked)
@@ -570,8 +691,8 @@ namespace Manifold::Target
             m_status.Hooked = true;
             m_status.Hook = state.Hook;
             m_status.UnityVersion = version;
-            if (recipe.Returned(background))
-                m_status.RunInBackground = recipe.Number<std::uint8_t>(backgroundCell) != 0;
+            if (const auto running = recipe.Value(background))
+                m_status.RunInBackground = *running;
             m_status.CallbackRuns = state.Frame.Frames();
             m_status.MainThread = state.Frame.Thread();
             m_status.Error.clear();
@@ -735,10 +856,7 @@ namespace Manifold::Target
         {
             Il2Recipe recipe(*this);
             if (!restored)
-            {
-                const std::uint8_t value = *state.OriginalRunInBackground ? 1 : 0;
-                recipe.Invoke(Il2Method(kApplicationClass, "set_runInBackground", { "System.Boolean" }), Il2Recipe::Arg::Null(), { recipe.Bytes(&value, 1) });
-            }
+                recipe.SetBackground(*state.OriginalRunInBackground);
             const std::size_t before = recipe.Batch.Calls();
             std::size_t planned = next;
             while (planned < handles.size() && recipe.Batch.Fits(1, 0))
@@ -1051,12 +1169,14 @@ namespace Manifold::Target
         const std::uint64_t getGameObject = Il2Method(kComponentClass, "get_gameObject", {});
         const std::uint64_t getScene = Il2Method(kGameObjectClass, "get_scene", {});
         const std::uint64_t getName = Il2Method(kSceneClass, "get_name", {});
-        if (!transformClass || !getParent || !getGameObject || !getScene)
+        if (!transformClass || !getParent || !getGameObject || (!getScene && describe))
             return Status::Fail(ErrorCode::MonoCallFailed, std::string("this game's build has none of SceneManager.GetSceneAt, Scene.GetRootGameObjects, "
                                                                        "and one of Transform.parent, Component.gameObject or GameObject.scene is missing too") + kStripped);
+        // ∑ Without GameObject.scene the roots cannot be told apart by scene, and Resources.FindObjectsOfTypeAll
+        //   would mix in prefabs, so only the active scene objects are walked; they all land under handle 0.
         std::size_t total = 0;
         std::vector<std::uint64_t> transforms;
-        const Status found = Il2FindObjects(transformClass, true, false, kMaxWalked, transforms, total);
+        const Status found = Il2FindObjects(transformClass, getScene != 0, false, kMaxWalked, transforms, total);
         const auto done = [&](Status status)
             {
                 Il2Release(kScratchGroup);
@@ -1110,8 +1230,11 @@ namespace Manifold::Target
             {
                 Plan plan;
                 plan.GameObject = recipe.Invoke(getGameObject, Arg::Object(roots[next++]));
-                plan.Scene = recipe.Invoke(getScene, Arg::Of(plan.GameObject.Call));
-                plan.Handle = recipe.Unbox(plan.Scene.Call, 4);
+                if (getScene)
+                {
+                    plan.Scene = recipe.Invoke(getScene, Arg::Of(plan.GameObject.Call));
+                    plan.Handle = recipe.Unbox(plan.Scene.Call, 4);
+                }
                 plans.push_back(plan);
             }
             if (const Status ran = Il2Run(recipe, kListWait); !ran)
@@ -1119,10 +1242,10 @@ namespace Manifold::Target
             for (const Plan& plan : plans)
             {
                 const std::uint64_t gameObject = recipe.Returned(plan.GameObject) ? recipe.Result(plan.GameObject.Call) : 0;
-                if (!gameObject || !recipe.Returned(plan.Scene) || recipe.Exception(plan.Scene))
+                if (!gameObject || (getScene && (!recipe.Returned(plan.Scene) || recipe.Exception(plan.Scene))))
                     continue;
-                const std::int32_t handle = recipe.Number<std::int32_t>(plan.Handle);
-                if (handle == 0)
+                const std::int32_t handle = getScene ? recipe.Number<std::int32_t>(plan.Handle) : 0;
+                if (handle == 0 && getScene)
                     continue;
                 Il2SceneRoots& scene = byHandle[handle];
                 scene.Handle = handle;
@@ -1173,7 +1296,7 @@ namespace Manifold::Target
             return Fail("Could not read the scenes: Manifold could not find out how this IL2CPP version passes a struct to its own methods");
         UnityTree tree;
         tree.Read = true;
-        if (!getCount || !getAt || !Il2Method(kSceneClass, "GetRootGameObjects", {}))
+        if (!getCount || !getAt)
         {
             // A stripped build: the scenes come from the root walk.
             std::int32_t active = 0;
@@ -1184,6 +1307,12 @@ namespace Manifold::Target
                 if (const Status ran = Il2Run(first, kCallWait); !ran)
                     return Fail("Could not read the scenes: " + ran.Text);
                 active = first.Number<std::int32_t>(activeCell);
+            }
+            if (!m_dontDestroyHandle)
+            {
+                int slot = 0;
+                int handle = 0;
+                Il2DontDestroyScene(slot, handle);
             }
             std::vector<Il2SceneRoots> found;
             if (const Status walked = Il2WalkRoots(true, kTreeGroup, found); !walked)
@@ -1196,7 +1325,7 @@ namespace Manifold::Target
                 UnityScene scene;
                 scene.Slot = read.Slot;
                 scene.Handle = read.Handle;
-                scene.Name = read.Name.empty() ? std::string("?") : std::move(read.Name);
+                scene.Name = read.Name.empty() ? "Scene #" + std::to_string(read.Handle) : std::move(read.Name);
                 scene.BuildIndex = -1;
                 scene.RootCount = static_cast<int>(read.GameObjects.size());
                 scene.Loaded = true;
@@ -1261,7 +1390,7 @@ namespace Manifold::Target
                 scene.Loaded = plan.Loaded ? second.Number<std::uint8_t>(plan.Loaded) != 0 : true;
                 scene.Active = scene.Handle == active;
                 if (scene.Name.empty())
-                    scene.Name = "?";
+                    scene.Name = "Scene #" + std::to_string(scene.Handle);
                 if (scene.Slot)
                     tree.Scenes.push_back(std::move(scene));
             }
@@ -1325,6 +1454,56 @@ namespace Manifold::Target
         return Status::Success();
     }
 
+    Status UnityExplorer::Il2DontDestroyByDifference(std::uint64_t generation, std::vector<std::uint64_t>& items, std::size_t& total)
+    {
+        using Arg = Il2Recipe::Arg;
+        std::vector<int> sceneSlots;
+        {
+            std::lock_guard state(m_stateLock);
+            if (m_tree.Generation != generation)
+                return Status::Fail(ErrorCode::MonoCallFailed, "the scenes were read again meanwhile");
+            for (const UnityScene& scene : m_tree.Scenes)
+            {
+                if (!scene.DontDestroy && scene.Slot)
+                    sceneSlots.push_back(scene.Slot);
+            }
+        }
+        std::vector<Il2SceneRoots> found;
+        if (const Status walked = Il2WalkRoots(false, kScratchGroup, found); !walked)
+            return walked;
+        const std::uint64_t getRoots = Il2Method(kSceneClass, "GetRootGameObjects", {});
+        std::set<std::uint64_t> inScenes;
+        for (const int sceneSlot : sceneSlots)
+        {
+            const std::uint64_t sceneAddress = AddressOf(sceneSlot);
+            if (!sceneAddress)
+                continue;
+            Il2Recipe recipe(*this);
+            const Il2Recipe::Invoked roots = recipe.Invoke(getRoots, recipe.This(Arg::Object(sceneAddress)));
+            const int array = recipe.Hold(Arg::Of(roots.Call), kScratchGroup);
+            if (const Status ran = Il2Run(recipe, kListWait); !ran)
+                return ran;
+            Il2Keep(recipe, kScratchGroup);
+            if (recipe.Exception(roots))
+                continue;
+            for (const std::uint64_t root : ReadArray(recipe.Address(array), kMaxWalked, nullptr))
+                inScenes.insert(root);
+        }
+        items.clear();
+        for (const Il2SceneRoots& group : found)
+        {
+            for (const std::uint64_t gameObject : group.GameObjects)
+            {
+                if (!inScenes.count(gameObject))
+                    items.push_back(gameObject);
+            }
+        }
+        total = items.size();
+        if (items.size() > kMaxChildren)
+            items.resize(kMaxChildren);
+        return Status::Success();
+    }
+
     void UnityExplorer::Il2ExpandScene(int sceneIndex)
     {
         using Arg = Il2Recipe::Arg;
@@ -1356,20 +1535,29 @@ namespace Manifold::Target
             return finish(ready.Text);
         int slot = scene.Slot;
         int handle = scene.Handle;
-        if (scene.DontDestroy)
+        std::size_t total = 0;
+        std::vector<std::uint64_t> items;
+        const std::uint64_t getRootList = Il2Method(kSceneClass, "GetRootGameObjects", {});
+        const bool byDifference = scene.DontDestroy && !Il2Method(kGameObjectClass, "get_scene", {}) && getRootList;
+        if (scene.DontDestroy && !byDifference)
         {
             if (const Status probed = Il2DontDestroyScene(slot, handle); !probed)
                 return finish(probed.Text);
         }
-        const std::uint64_t address = AddressOf(slot);
-        if (!address)
+        const std::uint64_t address = byDifference ? 0 : AddressOf(slot);
+        if (!address && !byDifference)
             return finish("Manifold no longer holds this scene; read the scenes again");
-        std::size_t total = 0;
-        std::vector<std::uint64_t> items;
-        if (const std::uint64_t getRoots = Il2Method(kSceneClass, "GetRootGameObjects", {}))
+        if (byDifference)
+        {
+            // ∑ No GameObject.scene (GTFO, Golf With Your Friends): the DontDestroyOnLoad roots are the
+            //   parentless GameObjects that no loaded scene lists among its own roots.
+            if (const Status listed = Il2DontDestroyByDifference(generation, items, total); !listed)
+                return finish("Could not read the DontDestroyOnLoad objects: " + listed.Text);
+        }
+        else if (getRootList)
         {
             Il2Recipe first(*this);
-            const Il2Recipe::Invoked roots = first.Invoke(getRoots, first.This(Arg::Object(address)));
+            const Il2Recipe::Invoked roots = first.Invoke(getRootList, first.This(Arg::Object(address)));
             const int array = first.Hold(Arg::Of(roots.Call), kScratchGroup);
             if (const Status ran = Il2Run(first, kListWait); !ran)
                 return finish("Could not read the scene's objects: " + ran.Text);
@@ -1520,12 +1708,15 @@ namespace Manifold::Target
                 break;
             }
         }
+        // ∑ GTFO (2019.4) kept no inactive finder at all; the engine's internal call behind
+        //   Resources.FindObjectsOfTypeAll is registered whatever the managed side stripped.
+        const std::uint64_t icall = !find && includeInactive ? Il2Icall("UnityEngine.Resources::FindObjectsOfTypeAll(System.Type)") : 0;
         const std::uint64_t type = Worker("il2cpp_class_get_type", klass).value_or(0);
-        if (!find || !type || !state.TypeGetObject)
+        if ((!find && !icall) || !type || !state.TypeGetObject)
             return Status::Fail(ErrorCode::MonoCallFailed, std::string("this game's build has neither ") +
                                                            (includeInactive && assetsFirst ? "Resources.FindObjectsOfTypeAll" : "Object.FindObjectsOfType") +
                                                            " nor Object.FindObjectsByType" + kStripped);
-        if (includeInactive && assetsFirst && shape != &shapes.front())
+        if (includeInactive && assetsFirst && shape && shape != &shapes.front())
             LOG_INFO("Unity", "This game's build has no Resources.FindObjectsOfTypeAll; the search lists inactive objects through Object.FindObjectsByType, but no assets");
         Il2Recipe first(*this);
         const int typeObject = first.Batch.Call(state.TypeGetObject, type);
@@ -1533,7 +1724,7 @@ namespace Manifold::Target
         const std::int32_t inactive = includeInactive ? 1 : 0;
         const std::int32_t unsorted = 0;
         std::vector<Arg> arguments{ Arg::Of(typeObject) };
-        for (std::size_t i = 1; i < shape->Count; ++i)
+        for (std::size_t i = 1; shape && i < shape->Count; ++i)
         {
             const std::string_view parameter = shape->Parameters[i];
             if (parameter == kFindInactive)
@@ -1543,7 +1734,11 @@ namespace Manifold::Target
             else
                 arguments.push_back(first.Bytes(&includeInactive, 1));
         }
-        const Il2Recipe::Invoked found = first.Invoke(find, Arg::Null(), arguments);
+        Il2Recipe::Invoked found;
+        if (find)
+            found = first.Invoke(find, Arg::Null(), arguments);
+        else
+            found.Call = first.Batch.Call(icall, Arg::Of(typeObject).Frame());
         const int array = first.Hold(Arg::Of(found.Call), kScratchGroup);
         if (const Status ran = Il2Run(first, kListWait); !ran)
             return ran;
@@ -1961,27 +2156,21 @@ namespace Manifold::Target
 
     Status UnityExplorer::Il2SetRunInBackground(bool enabled)
     {
-        using Arg = Il2Recipe::Arg;
         if (Status ready = Il2EnsureHook(); !ready)
             return ready;
         Il2CppExplorerState& state = *m_il2;
-        const std::uint64_t get = Il2Method(kApplicationClass, "get_runInBackground", {});
-        const std::uint64_t set = Il2Method(kApplicationClass, "set_runInBackground", { "System.Boolean" });
-        if (!get || !set)
-            return Status::Fail(ErrorCode::MonoCallFailed, std::string("Could not change Application.runInBackground: this game's build has no such property") + kStripped);
         Il2Recipe recipe(*this);
-        const std::uint8_t wanted = enabled ? 1 : 0;
-        const Il2Recipe::Invoked before = recipe.Invoke(get, Arg::Null());
-        const std::uint64_t beforeCell = recipe.Unbox(before.Call, 1);
-        const Il2Recipe::Invoked changed = recipe.Invoke(set, Arg::Null(), { recipe.Bytes(&wanted, 1) });
-        const Il2Recipe::Invoked after = recipe.Invoke(get, Arg::Null());
-        const std::uint64_t afterCell = recipe.Unbox(after.Call, 1);
+        if (!recipe.CanSetBackground())
+            return Status::Fail(ErrorCode::MonoCallFailed, std::string("Could not change Application.runInBackground: this game's build has no such property") + kStripped);
+        const Il2Recipe::Flag before = recipe.ReadBackground();
+        const Il2Recipe::Invoked changed = recipe.SetBackground(enabled);
+        const Il2Recipe::Flag after = recipe.ReadBackground();
         if (const Status ran = Il2Run(recipe, std::chrono::seconds(5)); !ran)
             return Status::Fail(ErrorCode::MonoCallFailed, "Bring the game to the foreground once so this can run on its main thread, then try again (" + ran.Text + ")");
         if (const std::uint64_t thrown = recipe.Exception(changed))
             return Status::Fail(ErrorCode::MonoCallFailed, "Could not change Application.runInBackground: it " + Il2Thrown(thrown));
-        const bool was = recipe.Returned(before) && recipe.Number<std::uint8_t>(beforeCell) != 0;
-        const bool now = recipe.Returned(after) ? recipe.Number<std::uint8_t>(afterCell) != 0 : enabled;
+        const bool was = recipe.Value(before).value_or(false);
+        const bool now = recipe.Value(after).value_or(enabled);
         if (!state.OriginalRunInBackground)
             state.OriginalRunInBackground = was;
         if (*state.OriginalRunInBackground == now)

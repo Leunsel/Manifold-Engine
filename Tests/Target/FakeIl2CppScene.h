@@ -407,12 +407,15 @@ namespace
 
         const FakeMethodInfo* getVersion = AddMethod(application, "get_unityVersion", tString, {}, {}, true,
             +[](void*, void**, void**) -> void* { return SceneText(u"2021.3.99f1"); });
-        const FakeMethodInfo* getBackground = AddMethod(application, "get_runInBackground", tBool, {}, {}, true,
+        const FakeMethodInfo* getBackground = g_sceneAlt ? nullptr : AddMethod(application, "get_runInBackground", tBool, {}, {}, true,
             +[](void*, void**, void**) -> void* { return BoxBool(g_il2cppRunInBackground != 0); });
-        const FakeMethodInfo* setBackground = AddMethod(application, "set_runInBackground", tVoid, { tBool }, { "value" }, true,
+        const FakeMethodInfo* setBackground = g_sceneAlt ? nullptr : AddMethod(application, "set_runInBackground", tVoid, { tBool }, { "value" }, true,
             +[](void*, void** params, void**) -> void* { g_il2cppRunInBackground = *static_cast<bool*>(params[0]) ? 1 : 0; return nullptr; });
         AddProperty(application, "unityVersion", getVersion, nullptr);
-        AddProperty(application, "runInBackground", getBackground, setBackground);
+        // Six real builds stripped the managed property; --il2cpp-alt keeps it
+        // only as the engine's internal call (il2cpp_resolve_icall).
+        if (!g_sceneAlt)
+            AddProperty(application, "runInBackground", getBackground, setBackground);
 
         AddMethod(sceneManager, "GetActiveScene", tScene, {}, {}, true, +[](void*, void**, void**) -> void* { return BoxScene(g_scenes[0].Handle); });
         AddMethod(g_sceneStruct, "get_handle", tInt, {}, {}, false, +[](void* self, void**, void**) -> void* { return BoxInt(StructInt(self)); });
@@ -890,6 +893,16 @@ extern "C"
         }
         else if (field->Parent->StaticData)
             std::memcpy(value, static_cast<char*>(field->Parent->StaticData) + field->Offset, sizeof(int));
+    }
+    __declspec(dllexport) void* il2cpp_resolve_icall(const char* name)
+    {
+        if (!name)
+            return nullptr;
+        if (std::strcmp(name, "UnityEngine.Application::get_runInBackground()") == 0)
+            return reinterpret_cast<void*>(+[]() -> bool { SceneTouch(); return g_il2cppRunInBackground != 0; });
+        if (std::strcmp(name, "UnityEngine.Application::set_runInBackground(System.Boolean)") == 0)
+            return reinterpret_cast<void*>(+[](bool value) { SceneTouch(); g_il2cppRunInBackground = value ? 1 : 0; });
+        return nullptr;
     }
     __declspec(dllexport) void* il2cpp_runtime_invoke(const FakeMethodInfo* method, void* object, void** params, void** exc)
     {

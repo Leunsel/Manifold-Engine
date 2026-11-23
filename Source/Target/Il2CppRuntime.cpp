@@ -47,7 +47,7 @@ namespace Manifold::Target
             "il2cpp_method_get_return_type", "il2cpp_method_get_param", "il2cpp_method_get_param_name", "il2cpp_method_is_generic",
             "il2cpp_class_get_static_field_data", "il2cpp_field_static_get_value", "il2cpp_runtime_invoke", "il2cpp_gchandle_new",
             "il2cpp_gchandle_free", "il2cpp_string_new", "il2cpp_type_get_object", "il2cpp_object_new", "il2cpp_value_box",
-            "il2cpp_field_set_value", "il2cpp_field_static_set_value",
+            "il2cpp_field_set_value", "il2cpp_field_static_set_value", "il2cpp_resolve_icall",
         };
         const char* const kIl2CppRequired[] = {
             "il2cpp_domain_get", "il2cpp_thread_attach", "il2cpp_domain_get_assemblies", "il2cpp_assembly_get_image",

@@ -446,6 +446,8 @@ namespace Manifold::Target
         void Il2Shutdown(bool alive);
         std::uint64_t Il2Method(std::string_view className, std::string_view name, std::initializer_list<const char*> parameters);
         std::uint64_t Il2Method(std::string_view className, std::string_view name, std::span<const char* const> parameters);
+        std::uint64_t Il2Icall(const std::string& name);
+        Status Il2DontDestroyByDifference(std::uint64_t generation, std::vector<std::uint64_t>& items, std::size_t& total);
         Status Il2Run(Il2Recipe& recipe, std::chrono::milliseconds timeout, bool cancellable = true);
         void Il2Keep(Il2Recipe& recipe, int group);
         int Il2Register(std::uint64_t address, std::uint64_t handle, int group);

@@ -52,6 +52,7 @@ namespace Manifold::Target
         std::uint64_t FieldSet = 0;
         std::uint64_t FieldStaticSet = 0;
         std::map<std::string, std::uint64_t> Methods;
+        std::map<std::string, std::uint64_t> Icalls;
         std::map<int, Il2CppHeld> Slots;
         int NextSlot = 1;
         std::vector<std::uint64_t> Surplus;

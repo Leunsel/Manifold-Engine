@@ -52,7 +52,9 @@ namespace Manifold::Target
         bool clr = false;
         for (const ModuleInfo& module : *modules)
         {
-            if (EqualsNoCase(module.Name, kIl2CppModule))
+            // ∑ A Mono game may carry a managed assembly named GameAssembly.dll (Super Battle Golf), only
+            //   the native one exports the IL2CPP API.
+            if (EqualsNoCase(module.Name, kIl2CppModule) && process.FindExport(module.Name, "il2cpp_domain_get"))
                 return ManagedRuntime::Il2Cpp;
             for (const char* candidate : kModuleCandidates)
             {
@@ -93,18 +95,19 @@ namespace Manifold::Target
         }
         if (!found.empty())
             return found;
-        // A renamed or embedded runtime: any module with the exports. Mono is
-        // tried first within a module, IL2CPP after it.
+        // A renamed or embedded runtime: any module with the exports. IL2CPP
+        // also exports mono_* debugger shims, so it is tried first; the Mono
+        // attach then refuses those shims (no mono_assembly_foreach).
         if (const auto modules = process.Modules())
         {
             for (const ModuleInfo& info : *modules)
             {
                 if (progress && progress->Cancelled())
                     return {};
-                if (process.FindExport(info.Name, "mono_get_root_domain"))
-                    found.push_back({ info.Name, ManagedRuntime::Mono });
                 if (process.FindExport(info.Name, "il2cpp_domain_get"))
                     found.push_back({ info.Name, ManagedRuntime::Il2Cpp });
+                if (process.FindExport(info.Name, "mono_get_root_domain"))
+                    found.push_back({ info.Name, ManagedRuntime::Mono });
             }
         }
         return found;
