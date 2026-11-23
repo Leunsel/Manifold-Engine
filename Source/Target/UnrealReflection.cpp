@@ -575,6 +575,27 @@ namespace Manifold::Target
         }
         std::vector<UnrealEnumEntry> entries;
         const std::uint64_t pointer = static_cast<std::uint64_t>(m_pointer);
+        // ∑ Most enums carry a generated ..._MAX entry, but not always last (UE 5.7's EBlendableLocation keeps
+        //   deprecated aliases after BL_MAX) and not always at all (EBakeCurvatureTypeMode ends with Gaussian).
+        //   Every name must decode, and one ends with MAX or all share one "Type::" or "XX_" prefix.
+        const auto names = [&](std::uint64_t first, std::uint64_t stride, int count)
+            {
+                const std::string head = NameAt(first).value_or("");
+                std::size_t cut = head.find("::");
+                cut = cut != std::string::npos ? cut + 2 : head.find('_') != std::string::npos ? head.find('_') + 1 : 0;
+                const std::string prefix = cut > 1 ? head.substr(0, cut) : std::string();
+                bool max = false;
+                bool shared = !prefix.empty();
+                for (int i = 0; i < count; ++i)
+                {
+                    const auto name = NameAt(first + static_cast<std::uint64_t>(i) * stride);
+                    if (!name || name->empty())
+                        return false;
+                    max = max || EndsWith(Upper(*name), "MAX");
+                    shared = shared && name->starts_with(prefix);
+                }
+                return max || shared;
+            };
         for (std::uint64_t offset = m_pointer == 8 ? 0x28 : 0x1C; offset <= 0x80; offset += pointer)
         {
             const std::uint64_t data = ReadObject(enumObject + offset);
@@ -585,8 +606,7 @@ namespace Manifold::Target
             int stride = 0;
             for (const int candidate : { 16, 12, 8 })
             {
-                const std::string last = Upper(NameAt(data + static_cast<std::uint64_t>(*count - 1) * static_cast<std::uint64_t>(candidate)).value_or(""));
-                if (EndsWith(last, "MAX") && (*count == 1 || NameAt(data + static_cast<std::uint64_t>(candidate)).has_value()))
+                if (names(data, static_cast<std::uint64_t>(candidate), *count))
                 {
                     stride = candidate;
                     break;
@@ -605,6 +625,21 @@ namespace Manifold::Target
                 entries.push_back({ NameAt(entry).value_or("?"), value });
             }
             break;
+        }
+        // ∑ UE 5.7 (KLETKA) keeps the names and the values in two arrays, each pointer tagged in its low bit,
+        //   followed by one int32 count: [names | 1][values | 1][count].
+        const std::uint64_t untag = ~static_cast<std::uint64_t>(m_pointer - 1);
+        for (std::uint64_t offset = m_pointer == 8 ? 0x28 : 0x1C; entries.empty() && offset <= 0x80; offset += pointer)
+        {
+            const std::uint64_t nameArray = ReadPointer(enumObject + offset).value_or(0) & untag;
+            const std::uint64_t values = ReadPointer(enumObject + offset + pointer).value_or(0) & untag;
+            const auto count = ReadInt(enumObject + offset + 2 * pointer);
+            if (!IsPtr(nameArray) || !IsPtr(values) || nameArray == values || !count || *count <= 0 || *count > 4096)
+                continue;
+            if (!NameAt(nameArray).has_value() || !names(nameArray, 8, *count) || !ReadQword(values + static_cast<std::uint64_t>(*count - 1) * 8).has_value())
+                continue;
+            for (int i = 0; i < *count; ++i)
+                entries.push_back({ NameAt(nameArray + static_cast<std::uint64_t>(i) * 8).value_or("?"), static_cast<std::int64_t>(ReadQword(values + static_cast<std::uint64_t>(i) * 8).value_or(0)) });
         }
         std::lock_guard lock(m_lock);
         m_enumEntries[enumObject] = entries;

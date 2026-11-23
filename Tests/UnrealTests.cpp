@@ -233,8 +233,8 @@ namespace Manifold::Tests
                 CHECK_MSG(z != vector.Fields.end() && z->Offset == 2 * component && z->Type == (variant.Doubles ? Scan::ValueType::Double : Scan::ValueType::Float), label);
             }
             const auto entries = runtime.EnumEntries(fake.Mode);
-            const std::int64_t last = variant.NarrowEnum ? 6 : 2;
-            CHECK_MSG(entries.size() == 3 && entries.back().Name == "EMyMode_MAX" && entries.back().Value == last && entries[1].Name == "EMyMode::B", label);
+            const std::int64_t last = variant.NarrowEnum || variant.SplitEnum ? 6 : 2;
+            CHECK_MSG(entries.size() == 3 && entries.back().Name == (variant.NoMaxEnum ? "EMyMode::C" : "EMyMode_MAX") && entries.back().Value == last && entries[1].Name == "EMyMode::B", label);
             CHECK_MSG(runtime.Engine() == fake.Engine, label);
         }
 
@@ -406,15 +406,54 @@ namespace Manifold::Tests
                 std::printf(", first %s flags %X with %zu parameters", functions.front().Name.c_str(), functions.front().Flags, functions.front().Parameters.size());
             std::printf("\n");
             const std::shared_ptr<const Target::UnrealTypeIndex> index = runtime.Index();
+            std::size_t enums = 0;
+            std::size_t read = 0;
+            std::string sample;
+            std::vector<std::string> unread;
             for (const auto& type : index->List)
             {
                 if (type.Kind != Target::UnrealKind::Enum)
                     continue;
+                ++enums;
                 const auto entries = runtime.EnumEntries(type.Object);
-                if (entries.size() < 3)
+                if (entries.empty())
+                {
+                    if (unread.size() < 8)
+                        unread.push_back(type.Name);
                     continue;
-                std::printf("enum %s: %zu entries, first %s = %lld\n", type.Name.c_str(), entries.size(), entries.front().Name.c_str(), static_cast<long long>(entries.front().Value));
-                break;
+                }
+                ++read;
+                if (sample.empty() && entries.size() >= 3)
+                    sample = type.Name + ": " + std::to_string(entries.size()) + " entries, first " + entries.front().Name + " = " + std::to_string(entries.front().Value) +
+                             ", last " + entries.back().Name + " = " + std::to_string(entries.back().Value);
+            }
+            std::printf("enums: %zu of %zu read%s%s\n", read, enums, sample.empty() ? "" : ", e.g. ", sample.c_str());
+            if (!unread.empty())
+                std::printf("enums not read: %s\n", Join(unread, ", ").c_str());
+            const auto realUnread = std::find_if(unread.begin(), unread.end(), [](const std::string& name) { return name.rfind("Default__", 0) != 0; });
+            if (read == 0 || realUnread != unread.end())
+            {
+                const std::uint64_t probe = read == 0 ? (runtime.Enum("ETickingGroup") ? runtime.Enum("ETickingGroup") : runtime.Enum("ECollisionChannel")) : runtime.Enum(*realUnread);
+                std::printf("enum probe %llX:\n", static_cast<unsigned long long>(probe));
+                for (std::uint64_t offset = 0; probe && offset < 0x90; offset += 8)
+                {
+                    const std::uint64_t value = engine.Process()->ReadPointer(probe + offset).value_or(0);
+                    const std::string name = runtime.NameAt(probe + offset).value_or("");
+                    std::printf("  +%02llX %016llX  %s\n", static_cast<unsigned long long>(offset), static_cast<unsigned long long>(value), name.size() < 60 ? name.c_str() : "");
+                }
+                for (std::uint64_t offset = 0x30; probe && offset <= 0x60; offset += 8)
+                {
+                    const std::uint64_t value = engine.Process()->ReadPointer(probe + offset).value_or(0) & ~std::uint64_t(7);
+                    if (value < 0x10000 || value > 0x7FFFFFFFFFFFull)
+                        continue;
+                    std::printf("  [+%02llX] -> %llX:\n", static_cast<unsigned long long>(offset), static_cast<unsigned long long>(value));
+                    for (std::uint64_t at = 0; at < 0x60; at += 8)
+                    {
+                        const std::uint64_t word = engine.Process()->ReadPointer(value + at).value_or(0);
+                        const std::string name = runtime.NameAt(value + at).value_or("");
+                        std::printf("      +%02llX %016llX  %s\n", static_cast<unsigned long long>(at), static_cast<unsigned long long>(word), name.size() < 60 ? name.c_str() : "");
+                    }
+                }
             }
             std::printf("symbol Actor_RootComponent = %s, SceneComponent_RelativeLocation = %s, offline %s\n",
                 runtime.ResolveSymbol("Actor_RootComponent") ? Hex(*runtime.ResolveSymbol("Actor_RootComponent")).c_str() : "-",
@@ -584,6 +623,9 @@ namespace Manifold::Tests
         for (const bool reverse : { false, true })
             VariantLayout(engine, { .Doubles = true, .ReverseChain = reverse, .ShadowField = true, .NarrowEnum = true }, reverse ? "UE5 variant, reversed chain" : "UE5 variant");
         VariantLayout(engine, { .ReverseChain = true }, "float vectors, reversed chain");
+        VariantLayout(engine, { .Doubles = true, .SplitEnum = true }, "UE 5.7 split enum arrays");
+        VariantLayout(engine, { .Doubles = true, .SplitEnum = true, .NoMaxEnum = true }, "UE 5.7 enum without _MAX");
+        VariantLayout(engine, { .NoMaxEnum = true }, "enum without _MAX");
         engine.CloseProcess();
         SyntheticTarget(target.parent_path() / L"TestTarget32.exe", FakeUnreal::kOffsets32, "32-bit target");
         SyntheticTarget(target.parent_path() / L"TestTarget.exe", FakeUnreal::kOffsets64, "64-bit target");

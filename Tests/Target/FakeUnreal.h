@@ -83,6 +83,8 @@ namespace FakeUnreal
         bool ReverseChain = false;
         bool ShadowField = false;
         bool NarrowEnum = false;
+        bool SplitEnum = false;
+        bool NoMaxEnum = false;
     };
 
     inline constexpr int kLocationDouble = 0x120;
@@ -234,7 +236,7 @@ namespace FakeUnreal
             Put<std::uintptr_t>(Fake.Actor, o.ChildProperties, health);
 
             const std::uintptr_t entries = reinterpret_cast<std::uintptr_t>(m_fields) + 0xF000;
-            const char* names[] = { "EMyMode::A", "EMyMode::B", "EMyMode_MAX" };
+            const char* names[] = { "EMyMode::A", "EMyMode::B", variant.NoMaxEnum ? "EMyMode::C" : "EMyMode_MAX" };
             const std::uint8_t narrowValues[] = { 0, 5, 6 };
             for (int i = 0; i < 3; ++i)
             {
@@ -247,9 +249,26 @@ namespace FakeUnreal
                 Put<std::uint32_t>(entries, i * 16, Name(names[i]));
                 Put<std::int64_t>(entries, i * 16 + 8, i);
             }
-            Put<std::uintptr_t>(Fake.Mode, o.EnumNames, entries);
-            Put<std::int32_t>(Fake.Mode, o.EnumNames + o.Pointer, 3);
-            Put<std::int32_t>(Fake.Mode, o.EnumNames + o.Pointer + 4, 3);
+            if (variant.SplitEnum)
+            {
+                // UE 5.7: names and values in two arrays, pointers tagged in bit 0, then the count.
+                const std::uintptr_t splitNames = entries + 0x80;
+                const std::uintptr_t splitValues = entries + 0xC0;
+                for (int i = 0; i < 3; ++i)
+                {
+                    Put<std::uint32_t>(splitNames, i * 8, Name(names[i]));
+                    Put<std::int64_t>(splitValues, i * 8, narrowValues[i]);
+                }
+                Put<std::uintptr_t>(Fake.Mode, o.EnumNames, splitNames | 1);
+                Put<std::uintptr_t>(Fake.Mode, o.EnumNames + o.Pointer, splitValues | 1);
+                Put<std::int32_t>(Fake.Mode, o.EnumNames + 2 * o.Pointer, 3);
+            }
+            else
+            {
+                Put<std::uintptr_t>(Fake.Mode, o.EnumNames, entries);
+                Put<std::int32_t>(Fake.Mode, o.EnumNames + o.Pointer, 3);
+                Put<std::int32_t>(Fake.Mode, o.EnumNames + o.Pointer + 4, 3);
+            }
 
             Put<std::uintptr_t>(Fake.ActorInstance, kRoot, Fake.SceneInstance);
             Put<float>(Fake.ActorInstance, kHealth, 75.0f);
