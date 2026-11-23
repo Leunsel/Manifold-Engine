@@ -92,6 +92,7 @@ namespace Manifold::Lua
                     options.ImmediateThreshold = static_cast<std::uint64_t>(std::max<lua_Integer>(lua_tointeger(state, -1), 0));
                 lua_pop(state, 1);
             }
+            ReadChoice(state, table, "registers", options.Registers, { "keep", "sib", "all" });
             ReadInt(state, table, "maxBytes", options.MaxBytes);
             options.MaxBytes = std::clamp(options.MaxBytes, 1, 1024);
             ReadInt(state, table, "minBytes", options.MinBytes);

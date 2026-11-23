@@ -146,6 +146,7 @@ namespace Manifold
         int SignatureOffsets = 2;
         int SignatureImmediates = 1;
         std::string SignatureImmediateThreshold = "10000";
+        int SignatureRegisters = 1;
         int SignatureMaxBytes = 128;
         int SignatureMinBytes = 8;
         bool SignatureStopAtFunctionEnd = false;

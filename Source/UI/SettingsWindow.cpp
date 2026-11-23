@@ -1514,6 +1514,11 @@ namespace Manifold::UI
             segmented("##sigimmediates", settings.SignatureImmediates, { "Keep", "Large", "All" });
             list.EndRow();
         }
+        if (list.Row("Registers", "The compiler may pick other registers after an update. SIB Only wildcards the base and index of memory operands like [ebx+edi].", choice))
+        {
+            segmented("##sigregisters", settings.SignatureRegisters, { "Keep", "SIB Only", "ModRM + SIB" });
+            list.EndRow();
+        }
         if (list.Row("Large Immediate From", "Hex; a value at least this large counts as large.", field))
         {
             Layout::Field("", { .Placement = Layout::LabelPlacement::None, .Width = field });

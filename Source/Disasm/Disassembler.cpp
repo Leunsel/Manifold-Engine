@@ -752,6 +752,11 @@ namespace Manifold::Disasm
             layout.ModRm = instruction.raw.modrm.offset;
         if (instruction.attributes & ZYDIS_ATTRIB_HAS_SIB)
             layout.Sib = instruction.raw.sib.offset;
+        for (std::uint8_t i = 0; i < instruction.operand_count; ++i)
+        {
+            if (operands[i].encoding == ZYDIS_OPERAND_ENCODING_MODRM_REG)
+                layout.RegisterInReg = true;
+        }
         const auto read = [&](unsigned offset, unsigned bytes)
             {
                 std::uint64_t value = 0;

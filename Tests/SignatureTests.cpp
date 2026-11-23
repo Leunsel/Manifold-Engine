@@ -185,7 +185,7 @@ namespace Manifold::Tests
             CHECK_MSG(made.has_value(), error);
             if (made)
             {
-                CHECK_EQ(Text(*made), std::string("48 89 5C 24 ?? 48 83 EC 20 48 8B 05 ?? ?? ?? ?? 8B 88"));
+                CHECK_EQ(Text(*made), std::string("48 89 5C ?? ?? 48 83 EC 20 48 8B 05 ?? ?? ?? ?? 8B 88"));
                 CHECK(made->Verified && made->Offset == 0 && made->Start == block.At(0x100));
                 CHECK(made->Bytes[0].Role == Disasm::ByteRole::Prefix && made->Bytes[1].Role == Disasm::ByteRole::Opcode && made->Bytes[2].Role == Disasm::ByteRole::ModRm);
                 CHECK(made->Bytes[4].Role == Disasm::ByteRole::Offset && made->Bytes[8].Role == Disasm::ByteRole::Immediate && made->Bytes[12].Role == Disasm::ByteRole::Address);
@@ -194,14 +194,15 @@ namespace Manifold::Tests
             }
             options.MaskAddresses = false;
             const auto kept = Disasm::MakeSignature(process, disassembler, block.At(0x100), options, error);
-            CHECK(kept && Text(*kept) == "48 89 5C 24 ?? 48 83 EC 20 48 8B 05 11");
+            CHECK(kept && Text(*kept) == "48 89 5C ?? ?? 48 83 EC 20 48 8B 05 11");
 
             options = InBlock(block);
             options.MinBytes = 26;
             const auto longer = Disasm::MakeSignature(process, disassembler, block.At(0x100), options, error);
-            CHECK(longer && Text(*longer) == "48 89 5C 24 ?? 48 83 EC 20 48 8B 05 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? E8");
+            CHECK(longer && Text(*longer) == "48 89 5C ?? ?? 48 83 EC 20 48 8B 05 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? E8");
             options.Offsets = Disasm::MaskMode::Keep;
             options.Branches = Disasm::MaskMode::Keep;
+            options.Registers = Disasm::MaskMode::Keep;
             options.MinBytes = 28;
             const auto literal = Disasm::MakeSignature(process, disassembler, block.At(0x100), options, error);
             CHECK(literal && Text(*literal) == "48 89 5C 24 08 48 83 EC 20 48 8B 05 ?? ?? ?? ?? 8B 88 A8 01 00 00 E8 55 66 77 08 C3");
@@ -262,6 +263,35 @@ namespace Manifold::Tests
             options.MinSaving = 2;
             const auto saved = Disasm::MakeSignature(process, disassembler, target, options, error);
             CHECK(saved && saved->Offset == 5 && saved->Bytes.size() == 6);
+        }
+
+        // The owner's Isaac case: lea ecx,[ebx+edi] / test ecx,ecx / cmovg eax,ecx has
+        // no number at all, so only register wildcards keep it apart from a rebuild.
+        void Registers(const Target::Process& process, const Disasm::Disassembler& disassembler)
+        {
+            Block block(64 * 1024, PAGE_EXECUTE_READWRITE);
+            CHECK(block.Data != nullptr);
+            if (!block.Data)
+                return;
+            std::memset(block.Data, 0xCC, block.Size);
+            block.Put(0x100, { 0x8D, 0x0C, 0x3B, 0x85, 0xC9, 0x0F, 0x4F, 0xC1, 0x83, 0xEC, 0x20 });
+            std::string error;
+            Disasm::SignatureOptions options = InBlock(block);
+            const auto text = [&](Disasm::MaskMode mode)
+                {
+                    options.Registers = mode;
+                    const auto made = Disasm::MakeSignature(process, disassembler, block.At(0x100), options, error);
+                    return made ? Text(*made) : "error: " + error;
+                };
+            CHECK_EQ(text(Disasm::MaskMode::Keep), std::string("8D 0C 3B 85 C9 0F 4F C1"));
+            CHECK_EQ(text(Disasm::MaskMode::Partial), std::string("8D 0C ?? 85 C9 0F 4F C1"));
+            CHECK_EQ(text(Disasm::MaskMode::All), std::string("8D ?? ?? 85 ?? 0F 4F"));
+            options.MinBytes = 11;
+            CHECK_EQ(text(Disasm::MaskMode::All), std::string("8D ?? ?? 85 ?? 0F 4F ?? 83 EC 20"));
+            const std::uint8_t sub[] = { 0x83, 0xEC, 0x20 };
+            const Disasm::Instruction line = disassembler.Decode(0x1000, sub, sizeof(sub));
+            const auto layout = disassembler.Layout(line);
+            CHECK(layout && !layout->RegisterInReg);
         }
 
         // Three neighbouring regions (different protections, so separate regions).
@@ -440,6 +470,7 @@ namespace Manifold::Tests
         Masking(*process, disassembler);
         Offsets(*process, disassembler);
         RegionBoundaries(*process, disassembler);
+        Registers(*process, disassembler);
         Formats();
         Parsing();
         Speed(*process, disassembler);
