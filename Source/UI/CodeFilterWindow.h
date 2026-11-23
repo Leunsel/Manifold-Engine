@@ -48,7 +48,7 @@ namespace Manifold::UI
         void Results();
         void ResultRow(const CodeCandidate& candidate, int index);
         void Refresh();
-        std::string Instruction(std::uint64_t address) const;
+        void Instruction(std::uint64_t address) const;
         std::string KeysFor(FilterRound kind) const;
 
         Workspace& m_workspace;
@@ -68,6 +68,7 @@ namespace Manifold::UI
         int m_selected = -1;
         bool m_unwind = true;
         bool m_exports = true;
+        bool m_pointers = true;
         bool m_outDown = false;
         bool m_keepDown = false;
         bool m_collectPending = false;

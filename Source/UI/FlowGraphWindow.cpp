@@ -34,20 +34,6 @@ namespace Manifold::UI
             }
         }
 
-        ImU32 MnemonicColor(const Disasm::Instruction& line)
-        {
-            switch (line.Kind)
-            {
-            case Disasm::Flow::Jump:
-            case Disasm::Flow::ConditionalJump: return ImGui::GetColorU32(ManifoldTheme::FlowJump);
-            case Disasm::Flow::Call: return ImGui::GetColorU32(ManifoldTheme::FlowCall);
-            case Disasm::Flow::Return: return ImGui::GetColorU32(ManifoldTheme::FlowReturn);
-            case Disasm::Flow::Interrupt: return ImGui::GetColorU32(ManifoldTheme::Muted);
-            default: break;
-            }
-            return ImGui::GetColorU32(line.IsNop || !line.Valid ? ManifoldTheme::Muted : ManifoldTheme::CodeKeyword);
-        }
-
         void DashedLine(ImDrawList* draw, ImVec2 a, ImVec2 b, ImU32 color, float thickness, float dash)
         {
             const float length = std::hypot(b.x - a.x, b.y - a.y);
@@ -470,7 +456,7 @@ namespace Manifold::UI
                     draw->AddCircleFilled(toScreen(at.X + m_padding * 0.5f, y + m_lineHeight * 0.5f), std::max(2.0f, m_fontSize * 0.25f * m_zoom), ImGui::GetColorU32(ManifoldTheme::Breakpoint));
                 const std::string offset = "+" + Hex(line.Address - m_graph.Entry);
                 draw->AddText(font, textSize, toScreen(at.X + m_padding, textY), ImGui::GetColorU32(ManifoldTheme::Muted), offset.c_str(), nullptr, 0.0f, &clip);
-                draw->AddText(font, textSize, toScreen(at.X + m_padding + m_offsetWidth, textY), MnemonicColor(line), line.Mnemonic.c_str(), nullptr, 0.0f, &clip);
+                draw->AddText(font, textSize, toScreen(at.X + m_padding + m_offsetWidth, textY), AsmMnemonicColor(line), line.Mnemonic.c_str(), nullptr, 0.0f, &clip);
                 const float mnemonic = std::max(m_mnemonicWidth, font->CalcTextSizeA(m_fontSize, FLT_MAX, 0.0f, (line.Mnemonic + " ").c_str()).x);
                 AsmOperands(draw, font, textSize, toScreen(at.X + m_padding + m_offsetWidth + mnemonic, textY), clip, line.Operands);
                 y += m_lineHeight;

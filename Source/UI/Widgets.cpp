@@ -3,6 +3,7 @@
 #include "Core/Errors.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
+#include "Disasm/Disassembler.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Layout/Layout.h"
 #include "UI/Fonts.h"
@@ -1001,6 +1002,41 @@ namespace Manifold::UI
             x += advance;
             at = end;
         }
+    }
+
+    ImU32 AsmMnemonicColor(const Disasm::Instruction& line)
+    {
+        switch (line.Kind)
+        {
+        case Disasm::Flow::Jump:
+        case Disasm::Flow::ConditionalJump: return ImGui::GetColorU32(ManifoldTheme::FlowJump);
+        case Disasm::Flow::Call: return ImGui::GetColorU32(ManifoldTheme::FlowCall);
+        case Disasm::Flow::Return: return ImGui::GetColorU32(ManifoldTheme::FlowReturn);
+        case Disasm::Flow::Interrupt: return ImGui::GetColorU32(ManifoldTheme::Muted);
+        default: break;
+        }
+        return ImGui::GetColorU32(line.IsNop || !line.Valid ? ManifoldTheme::Muted : ManifoldTheme::CodeKeyword);
+    }
+
+    void AsmInstruction(const Disasm::Instruction& line)
+    {
+        PushMono();
+        ImFont* font = ImGui::GetFont();
+        const float size = ImGui::GetFontSize();
+        const ImVec2 pos = ImGui::GetCursorScreenPos();
+        const float width = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+        const float height = ImGui::GetTextLineHeight();
+        const ImVec4 clip(pos.x, pos.y, pos.x + width, pos.y + height);
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        const std::string mnemonic = line.Valid ? line.Mnemonic : std::string("??");
+        draw->AddText(font, size, pos, AsmMnemonicColor(line), mnemonic.c_str(), nullptr, 0.0f, &clip);
+        if (line.Valid && !line.Operands.empty())
+        {
+            const float advance = font->CalcTextSizeA(size, FLT_MAX, 0.0f, (mnemonic + " ").c_str()).x;
+            AsmOperands(draw, font, size, ImVec2(pos.x + advance, pos.y), clip, line.Operands);
+        }
+        ImGui::Dummy(ImVec2(width, height));
+        PopMono();
     }
 
     void Spinner(float size, ImVec4 color)

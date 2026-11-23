@@ -11,6 +11,11 @@
 #include <string_view>
 #include <vector>
 
+namespace Manifold::Disasm
+{
+    struct Instruction;
+}
+
 namespace Manifold::UI
 {
     struct EmptyAction
@@ -69,6 +74,10 @@ namespace Manifold::UI
     bool Splitter(const char* id, bool vertical, float thickness, float* first, float* second, float minFirst, float minSecond, float length = 0.0f);
     void Spinner(float size, ImVec4 color);
     void AsmOperands(ImDrawList* draw, ImFont* font, float size, ImVec2 pos, const ImVec4& clip, std::string_view operands, std::string_view highlight = {});
+    // The disassembler's colour for a mnemonic: jumps, calls and returns by flow, nops and invalid bytes muted.
+    ImU32 AsmMnemonicColor(const Disasm::Instruction& line);
+    // One instruction as a line of text in the mono font, coloured like the disassembler, clipped to the cell.
+    void AsmInstruction(const Disasm::Instruction& line);
     std::string RegisterFamily(std::string_view word);
     std::string HighlightToken(std::string_view word);
     bool HighlightMatches(std::string_view word, std::string_view highlight);

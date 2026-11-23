@@ -25,7 +25,8 @@ namespace Manifold
         SourceUnwind = 1,
         SourceExport = 2,
         SourceCall = 4,
-        SourceBlock = 8
+        SourceBlock = 8,
+        SourcePointer = 16
     };
 
     std::string CodeSourceText(std::uint8_t sources);
@@ -42,6 +43,7 @@ namespace Manifold
         std::vector<std::string> Modules;
         bool Unwind = true;
         bool Exports = true;
+        bool Pointers = true;
         std::optional<bool> Calls;
     };
 
@@ -51,6 +53,7 @@ namespace Manifold
         std::size_t Unwind = 0;
         std::size_t Exports = 0;
         std::size_t Calls = 0;
+        std::size_t Pointers = 0;
         std::size_t Rejected = 0;
         std::size_t Total = 0;
     };

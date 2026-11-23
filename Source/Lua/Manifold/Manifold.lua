@@ -2070,10 +2070,10 @@ do
 
   define(codefilter, "prepare", {
     params = {
-      { name = "options", type = "table", optional = true, keys = { modules = "table", unwind = "boolean", exports = "boolean", calls = "boolean" } },
+      { name = "options", type = "table", optional = true, keys = { modules = "table", unwind = "boolean", exports = "boolean", pointers = "boolean", calls = "boolean" } },
     },
     returns = "`{ total, seconds, modules }`, or nil, error",
-    doc = "Collects the candidates and starts a new filter (the rounds and the undo steps before are gone). `options.modules` lists module names, by default every module that is not part of Windows or Manifold's own library; `unwind` and `exports` (both on by default) and `calls` (on by default for 32-bit, from Settings for 64-bit) choose the sources. `modules` in the result lists `{ name, functions, unwind, exports, calls, rejected }` per module. Call targets take a code dissect of each module, which takes a while in a large game. `ME-1016` for a module that is not loaded, `ME-1020` when nothing can be collected.",
+    doc = "Collects the candidates and starts a new filter (the rounds and the undo steps before are gone). `options.modules` lists module names, by default every module that is not part of Windows or Manifold's own library; `unwind`, `exports` and `pointers` (all on by default) and `calls` (on by default for 32-bit, from Settings for 64-bit) choose the sources; `pointers` takes the functions that are only reached through a pointer (virtual methods from their vtables, callbacks, function tables), from the module's relocations and, with `calls`, the code's own address references. `modules` in the result lists `{ name, functions, unwind, exports, calls, pointers, rejected }` per module. Call targets take a code dissect of each module, which takes a while in a large game. `ME-1016` for a module that is not loaded, `ME-1020` when nothing can be collected.",
   }, function(options)
     return result(native.codefilterPrepare(options or EMPTY))
   end)
@@ -2131,7 +2131,7 @@ do
   define(codefilter, "candidates", {
     params = { { name = "limit", type = "integer", optional = true } },
     returns = "list of `{ address, name, function, sources }`",
-    doc = "What is left, in address order, at most `limit` (default 1000, up to 1000000). `name` is the address as the disassembler names it, `sources` lists where it came from (`\"unwind\"`, `\"export\"`, `\"call\"`, `\"block\"`), `function` is set for blocks.",
+    doc = "What is left, in address order, at most `limit` (default 1000, up to 1000000). `name` is the address as the disassembler names it, `sources` lists where it came from (`\"unwind\"`, `\"export\"`, `\"call\"`, `\"pointer\"`, `\"block\"`), `function` is set for blocks.",
   }, function(limit)
     if limit ~= nil and (limit < 1 or limit > 1000000) then
       misuse("manifold.codefilter.candidates: limit must be 1 to 1000000")

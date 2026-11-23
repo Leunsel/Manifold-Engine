@@ -28,22 +28,6 @@ namespace Manifold::UI
     {
         constexpr const char* kHexModes[] = { "Bytes", "2 Bytes (hex)", "4 Bytes (hex)", "8 Bytes (hex)", "4 Bytes", "Float", "Double" };
 
-        ImU32 FlowColor(const Disasm::Instruction& instruction)
-        {
-            switch (instruction.Kind)
-            {
-            case Disasm::Flow::Jump:
-            case Disasm::Flow::ConditionalJump: return ImGui::GetColorU32(ManifoldTheme::FlowJump);
-            case Disasm::Flow::Call: return ImGui::GetColorU32(ManifoldTheme::FlowCall);
-            case Disasm::Flow::Return: return ImGui::GetColorU32(ManifoldTheme::FlowReturn);
-            case Disasm::Flow::Interrupt: return ImGui::GetColorU32(ManifoldTheme::Muted);
-            default: break;
-            }
-            if (instruction.IsNop || !instruction.Valid)
-                return ImGui::GetColorU32(ManifoldTheme::Muted);
-            return ImGui::GetColorU32(ManifoldTheme::CodeKeyword);
-        }
-
         std::string UndoNote()
         {
             const std::string keys = ShortcutLabel(Command::UndoMemoryEdit);
@@ -1195,7 +1179,7 @@ namespace Manifold::UI
 
             cell(addressX, bytesX, textY, ImGui::GetColorU32(addressInModule[i] ? ManifoldTheme::AddressText : ManifoldTheme::Text), addressTexts[i]);
             cell(bytesX, textX, textY, ImGui::GetColorU32(ManifoldTheme::BytesText), line.Mnemonic == "??" ? std::string("??") : line.BytesText());
-            cell(textX, commentX, textY, FlowColor(line), line.Mnemonic);
+            cell(textX, commentX, textY, AsmMnemonicColor(line), line.Mnemonic);
             const float operandX = textX + charWidth * static_cast<float>(std::max<std::size_t>(line.Mnemonic.size() + 1, 7));
             {
                 const ImVec4 operandClip(operandX, textY, std::min(commentX - Px(6.0f), rightX - Px(4.0f)), textY + rowHeight);
