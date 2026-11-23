@@ -1058,6 +1058,27 @@ namespace Manifold::Tests
             }
         }
 
+        if (scenesRead)
+        {
+            tree = unity.Tree();
+            for (int s = 0; s < static_cast<int>(tree.Scenes.size()); ++s)
+            {
+                if (!tree.Scenes[static_cast<std::size_t>(s)].DontDestroy)
+                    continue;
+                unity.ExpandScene(s);
+                const bool loaded = wait("DontDestroyOnLoad", [&] { return unity.Tree().Scenes[static_cast<std::size_t>(s)].RootsLoaded; }, 30);
+                tree = unity.Tree();
+                const Target::UnityScene& scene = tree.Scenes[static_cast<std::size_t>(s)];
+                std::printf("DontDestroyOnLoad: %s, %d root(s)\n", loaded ? "read" : "not read", scene.RootCount);
+                for (std::size_t i = 0; i < scene.Roots.size() && i < 8; ++i)
+                {
+                    const Target::UnityNode& node = tree.Nodes[static_cast<std::size_t>(scene.Roots[i])];
+                    std::printf("  %s%-32s  %d child(ren)\n", node.Active ? " " : "~", node.Name.c_str(), node.ChildCount);
+                }
+                break;
+            }
+        }
+
         const auto searched = [&]
             {
                 const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
