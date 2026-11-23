@@ -36,6 +36,32 @@ Failures name the line and end in an `ME-3xxx` code; see [ERRORS.md](ERRORS.md).
 | `include(file)` | Inserts another script file, looked up next to the table or in the autorun folder. |
 | `luacall(code)` | Runs Lua code while the script runs. |
 | `{$lua}` ... `{$asm}` | A Lua block. A string it returns is inserted as script text. The global `syntaxcheck` is true while a script is only checked. |
+| `{$log}` | Writes every step of this script to the log, see [Step log](#step-log). Cheat Engine reads it as a comment. |
+
+## Step log
+
+When a script does not do what it should, the step log shows what each command did. It is off unless you turn it on:
+
+- **For every script**: Settings → Scripts → Log Auto Assembler Steps.
+- **For one script**: put `{$log}` anywhere in it, outside comments and strings. It covers the `[ENABLE]` and the `[DISABLE]` part.
+
+The steps go to the Log window (area Auto Assembler, level Info) and to the log file. Each line names the record, the part and the script line, for example `"Infinite Health" [ENABLE], line 3: aobscanmodule(INJECT) for 89 83 50 01 00 00 in game.exe (...): found at game.exe+1234 (7FF6...)`. The last line is a summary of the writes, allocations and symbols, or the error. Address List Debug → Trace keeps the steps of each switch, up to 400 per run.
+
+| Command | What the log says |
+| --- | --- |
+| `aobscan`, `aobscanmodule`, `aobscanregion` | The pattern, where it was searched and the address it was found at, or that it was not found |
+| `alloc`, `globalalloc` | The address, the shared block, the near address and whether a 5-byte jump reaches it; a `globalalloc` that reuses earlier memory says so |
+| `dealloc` | The block it freed, a block that stays because other allocations still use it, or a name with nothing allocated |
+| `define` | The value, and the one it replaces |
+| `assert` | The address and the bytes it found, matching or not |
+| `readmem`, `reassemble` | The bytes copied, or the instruction read and where it was placed |
+| `label` and address lines | The address of each label, and where the lines after an address line go |
+| Writes | Address, size, the new bytes and the bytes they replaced |
+| `registersymbol`, `unregistersymbol` | The address registered, or whether the symbol was there to remove |
+| `fullaccess`, `createthread`, `loadlibrary`, `include`, `luacall`, `{$lua}` | What ran, what it returned, the file that was read |
+| Commands written in Lua | The parameters after `define`s and the text the command returned |
+
+A syntax check logs too, and says what it leaves out (scans, asserts, Lua calls). When a run fails, the log shows what was put back and freed again before the error.
 
 ## Templates
 

@@ -1,6 +1,7 @@
 #include "Asm/Assembler.h"
 #include "Asm/AutoAssembler.h"
 #include "Core/Errors.h"
+#include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Disasm/Disassembler.h"
 #include "Disasm/OpcodeConvert.h"
@@ -1244,6 +1245,142 @@ namespace Manifold::Tests
         }
     }
 
+    namespace
+    {
+        std::uint8_t g_logTarget[16] = { 0xCC, 0x48, 0x89, 0xC8, 0xC3, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC };
+
+        std::string StepDump(const Asm::AaResult& result)
+        {
+            std::string dump;
+            for (const Asm::AaLogLine& step : result.Log)
+                dump += "\n    " + std::to_string(step.Line) + ": " + step.Text;
+            return dump.empty() ? std::string(" (no steps)") : dump;
+        }
+
+        bool HasStep(const Asm::AaResult& result, int line, std::initializer_list<std::string_view> parts)
+        {
+            for (const Asm::AaLogLine& step : result.Log)
+            {
+                if (line >= 0 && step.Line != line)
+                    continue;
+                bool all = true;
+                for (const std::string_view part : parts)
+                    all = all && step.Text.find(part) != std::string::npos;
+                if (all)
+                    return true;
+            }
+            return false;
+        }
+
+        // The optional step log: every command says what it did, in the result and in the runtime log.
+        void TestAutoAssemblerLog(Report& report)
+        {
+            auto opened = Target::Process::Open(MakeProcessId(static_cast<std::uint32_t>(_getpid())));
+            Expect(report, opened.Ok(), "open this process for the step log");
+            if (!opened.Ok())
+                return;
+            const std::shared_ptr<Target::Process> process = *opened;
+            Target::Symbols symbols;
+            symbols.Attach(process);
+            Asm::AaHost host;
+            host.Process = process.get();
+            host.Symbols = &symbols;
+            Asm::AaOptions options;
+            options.Owner = "assembler-log-test";
+            options.LogTitle = "\"Log Test\"";
+            options.Section = Asm::AaSection::Enable;
+
+            const std::uint64_t start = reinterpret_cast<std::uintptr_t>(&g_logTarget[0]);
+            const std::string script =
+                "{$log}\n"                                                                         // 1
+                "[ENABLE]\n"                                                                       // 2
+                "aobscanregion(hit," + Hex(start) + "," + Hex(start + sizeof(g_logTarget)) + ",48 89 C8 C3)\n"  // 3
+                "alloc(cave,$100)\n"                                                               // 4
+                "label(back)\n"                                                                    // 5
+                "define(target,hit)\n"                                                             // 6
+                "registersymbol(aaLogBack)\n"                                                      // 7
+                "assert(target,48 89 C8)\n"                                                        // 8
+                "cave:\n"                                                                          // 9
+                "reassemble(target)\n"                                                             // 10
+                "readmem(target,4)\n"                                                              // 11
+                "jmp back\n"                                                                       // 12
+                "aaLogBack:\n"                                                                     // 13
+                "back:\n"                                                                          // 14
+                "ret\n"                                                                            // 15
+                "[DISABLE]\n"                                                                      // 16
+                "unregistersymbol(aaLogBack)\n"                                                    // 17
+                "dealloc(cave)\n"                                                                  // 18
+                "dealloc(missing)\n";                                                              // 19
+
+            Asm::AaMemory memory;
+            const std::uint64_t logBefore = RuntimeLog::Generation();
+            Asm::AaResult result = Asm::RunAutoAssembler(script, host, memory, options);
+            Expect(report, result.Ok() && result.Logged, "{$log} script runs and logs", AaOutcome(result));
+            Expect(report, HasStep(result, 0, { "run of [ENABLE]", "64-bit" }), "the log starts with the section and the process", StepDump(result));
+            Expect(report, HasStep(result, 3, { "aobscanregion(hit)", "48 89 C8 C3", "found at" }), "aobscanregion says where it found the bytes", StepDump(result));
+            Expect(report, HasStep(result, 4, { "alloc(cave, 256 bytes) is at" }), "alloc says where its memory is", StepDump(result));
+            Expect(report, HasStep(result, 6, { "define(target) is hit" }), "define says its value", StepDump(result));
+            Expect(report, HasStep(result, 8, { "assert(hit) at", "matches 48 89 C8" }), "assert says what it compared", StepDump(result));
+            Expect(report, HasStep(result, 9, { "cave: the next lines go to" }), "an address line says where the code goes", StepDump(result));
+            Expect(report, HasStep(result, 10, { "reassemble(hit) read mov rax", "placed at", "48 89 C8" }), "reassemble says what it read and where it put it", StepDump(result));
+            Expect(report, HasStep(result, 11, { "readmem(hit, 4 bytes) read 48 89 C8 C3" }), "readmem says the bytes it copied", StepDump(result));
+            Expect(report, HasStep(result, 14, { "label back is at" }), "a label says its address", StepDump(result));
+            Expect(report, HasStep(result, -1, { "wrote ", "(was " }), "a write says its bytes and the old ones", StepDump(result));
+            Expect(report, HasStep(result, 7, { "registersymbol(aaLogBack) is" }), "registersymbol says the address", StepDump(result));
+            Expect(report, HasStep(result, 0, { "done: 1 write", "1 allocation", "1 symbol registered" }), "the log ends with a summary", StepDump(result));
+            bool inRuntimeLog = false;
+            for (const LogEntry& entry : RuntimeLog::Entries())
+                inRuntimeLog = inRuntimeLog || (entry.Serial > 0 && entry.Area == "Auto Assembler" && entry.Message.find("\"Log Test\" [ENABLE], line 3: aobscanregion(hit)") != std::string::npos);
+            Expect(report, RuntimeLog::Generation() > logBefore && inRuntimeLog, "the steps go to the runtime log with the script's name, section and line");
+
+            options.Section = Asm::AaSection::Disable;
+            result = Asm::RunAutoAssembler(script, host, memory, options);
+            Expect(report, result.Ok() && result.Logged, "the [DISABLE] part logs too", AaOutcome(result));
+            Expect(report, HasStep(result, 17, { "unregistersymbol(aaLogBack) removed it" }), "unregistersymbol says it removed the symbol", StepDump(result));
+            Expect(report, HasStep(result, 18, { "dealloc(cave) freed the block at" }), "dealloc says what it freed", StepDump(result));
+            Expect(report, HasStep(result, 19, { "dealloc(missing) finds no memory" }), "dealloc of an unknown name says so", StepDump(result));
+            for (const Asm::AaAllocation& allocation : memory.Allocations)
+                process->Free(allocation.Block);
+
+            // a check says what it leaves out
+            Asm::AaMemory checked;
+            options.Section = Asm::AaSection::Enable;
+            options.CheckOnly = true;
+            result = Asm::RunAutoAssembler(script, host, checked, options);
+            Expect(report, result.Ok() && HasStep(result, 0, { "check of [ENABLE]" }) && HasStep(result, 3, { "does not scan in a check" }) &&
+                               HasStep(result, 8, { "does not compare in a check" }) && HasStep(result, 0, { "check passed" }),
+                "a check logs what it skips", StepDump(result));
+            options.CheckOnly = false;
+            options.Section = Asm::AaSection::Whole;
+
+            // a failure is the last step, after what was undone
+            Asm::AaMemory failing;
+            result = Asm::RunAutoAssembler("{$log}\nalloc(cave,$100)\nassert(" + Hex(start + 1) + ",90 90)\ncave:\nret\n", host, failing, options);
+            Expect(report, !result.Ok() && result.Error.Code == ErrorCode::AaAssertFailed, "failing assert with {$log}", AaOutcome(result));
+            Expect(report, HasStep(result, 3, { "expected 90 90 but found 48 89" }) && HasStep(result, 0, { "freed the memory this run allocated" }) &&
+                               !result.Log.empty() && result.Log.back().Text.find("failed at line 3") == 0,
+                "the log shows the mismatch, the freed memory and the failure", StepDump(result));
+            Expect(report, failing.Allocations.empty(), "the failed run keeps no allocation");
+
+            // off by default: no {$log}, no option, no steps
+            Asm::AaMemory quiet;
+            result = Asm::RunAutoAssembler("alloc(cave,$10)\ncave:\nret\n", host, quiet, options);
+            Expect(report, result.Ok() && !result.Logged && result.Log.empty(), "without {$log} or the option nothing is logged", StepDump(result));
+            for (const Asm::AaAllocation& allocation : quiet.Allocations)
+                process->Free(allocation.Block);
+            // the option logs every script
+            Asm::AaMemory loud;
+            options.Log = true;
+            result = Asm::RunAutoAssembler("alloc(cave,$10)\ncave:\nret\n", host, loud, options);
+            Expect(report, result.Ok() && result.Logged && HasStep(result, 1, { "alloc(cave, 16 bytes)" }), "the option logs a script without {$log}", StepDump(result));
+            for (const Asm::AaAllocation& allocation : loud.Allocations)
+                process->Free(allocation.Block);
+            // {$log} inside a comment or a string does not count
+            Expect(report, !Asm::WantsLog("// {$log}\nnop\n") && !Asm::WantsLog("db '{$log}'\n") && !Asm::WantsLog("{ {$log} }\n") && Asm::WantsLog("{$LOG}\nnop\n"),
+                "WantsLog skips comments and strings and ignores case");
+        }
+    }
+
     int RunAssemblerTests()
     {
         Report report;
@@ -1266,6 +1403,7 @@ namespace Manifold::Tests
         TestOpcodeByteText(report);
         TestAutoAssemblerChecks(report);
         TestAutoAssemblerRuns(report);
+        TestAutoAssemblerLog(report);
         ++report.Cases;
         if (Asm::ErrorName(AsmError::OutOfRange) != "OutOfRange" || Asm::ErrorName(AsmError::None) != "None")
         {

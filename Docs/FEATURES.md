@@ -393,6 +393,7 @@ Cheat Engine's script language with `[ENABLE]`/`[DISABLE]`, `alloc`, `label`, `d
 - A new Auto Assembler or Lua script editor opens as a tab beside the editors already open, each tab with its own menus, keys and buttons.
 - With Shift held a tab can be dragged out into a window of its own.
 - Settings → Scripts → Script Editors → Open as Tabs switches back to one window per editor.
+- Optional step log: with Settings → Scripts → Log Auto Assembler Steps, or `{$log}` in one script, every command writes what it did to the Log window, such as where an AOB was found, where `alloc` put its memory, what `assert` compared and which bytes a write replaced. See [Step log](AUTO-ASSEMBLER.md#step-log).
 
 ### Code editor
 

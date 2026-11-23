@@ -61,6 +61,7 @@ namespace Manifold
         std::vector<std::string> Registered;
         std::vector<std::string> Unregistered;
         std::vector<std::string> Notes;
+        std::vector<Asm::AaLogLine> Steps;  // what each command did, when the script logged its steps
     };
 
     struct QueuedActivation

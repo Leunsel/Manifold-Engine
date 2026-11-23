@@ -500,11 +500,24 @@ namespace Manifold
         options.CheckOnly = checkOnly;
         options.ScanInCheck = scanInCheck;
         options.Owner = owner;
+        options.Log = m_settings.AutoAssemblerLog;
+        options.LogTitle = AutoAssemblerLogTitle(owner, record);
         if (!m_tables.Table().FilePath.empty())
             options.IncludeFolder = std::filesystem::path(Utf8ToWide(m_tables.Table().FilePath)).parent_path();
         else
             options.IncludeFolder = Paths::AutorunFolder();
         return Asm::RunAutoAssembler(script, host, memory, options);
+    }
+
+    std::string Engine::AutoAssemblerLogTitle(std::string_view owner, const Table::MemoryRecord* record)
+    {
+        if (record)
+            return "\"" + record->Description + "\"";
+        if (owner == "window")
+            return "Auto Assembler window";
+        if (owner == "lua" || owner == "scratch")
+            return "autoAssemble";
+        return {};
     }
 
     Asm::AaResult Engine::AutoAssemble(std::string_view script, bool checkOnly)

@@ -92,6 +92,7 @@ namespace Manifold
             { "Scripts", "ConsoleTime", &Settings::LuaConsoleTime },
             { "Scripts", "ConsoleHex", &Settings::LuaConsoleHex },
             { "Scripts", "DocsPanel", &Settings::LuaDocsPanel },
+            { "Scripts", "AutoAssemblerLog", &Settings::AutoAssemblerLog },
             { "Scripts", "TableScripts", &kTableScripts },
             { "Scripts", "ActiveScriptsOnQuit", &kQuitPolicy },
             { "Backups", "BackupsEnabled", &Settings::BackupsEnabled },

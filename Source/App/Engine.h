@@ -181,6 +181,7 @@ namespace Manifold
 
         Asm::AaResult AutoAssemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record = nullptr);
         Asm::AaResult AutoAssemble(std::string_view script, bool checkOnly);
+        static std::string AutoAssemblerLogTitle(std::string_view owner, const Table::MemoryRecord* record);
         // holdLuaBack compiles {$lua} blocks and skips custom commands also when the table's scripts are trusted, so nothing runs.
         ScriptCheck CheckScript(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool holdLuaBack = false);
 

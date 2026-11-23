@@ -138,6 +138,7 @@ namespace Manifold
                 entry.Unregistered.push_back(name);
         }
         entry.Notes = result.Notes;
+        entry.Steps = result.Log;
     }
 
     void ActivationRunner::Traced(ActivationTraceEntry entry)
@@ -736,6 +737,8 @@ namespace Manifold
         options.Section = active ? Asm::AaSection::Enable : Asm::AaSection::Disable;
         options.CheckOnly = false;
         options.Owner = OwnerOf(recordId);
+        options.Log = m_engine.Options().AutoAssemblerLog;
+        options.LogTitle = Engine::AutoAssemblerLogTitle(options.Owner, record);
         options.IncludeFolder = m_engine.Table().FilePath.empty() ? Paths::AutorunFolder() : std::filesystem::path(Utf8ToWide(m_engine.Table().FilePath)).parent_path();
         Asm::AaMemory* memory = &running->Memory;
         std::shared_ptr<Target::Process> process = m_engine.Process();

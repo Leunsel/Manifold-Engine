@@ -1275,6 +1275,13 @@ namespace Manifold::UI
             list.EndRow();
         }
 
+        list.Section("Auto Assembler");
+        if (list.Row("Log Auto Assembler Steps", "Each command writes what it did to the Log window; {$log} in a script does it for that script only.", toggle))
+        {
+            changed |= ToggleSwitch("##aalog", &settings.AutoAssemblerLog);
+            list.EndRow();
+        }
+
         list.Section("Tables");
         if (list.Row("Table Lua Script", "When a loaded table has a Lua script.", choice))
         {

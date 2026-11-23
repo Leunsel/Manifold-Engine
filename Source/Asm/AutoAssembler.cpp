@@ -445,6 +445,7 @@ namespace Manifold::Asm
         struct Directives
         {
             bool Strict = false;
+            bool Log = false;
             std::string Unsupported;
         };
 
@@ -497,6 +498,8 @@ namespace Manifold::Asm
                     const std::string name = Trim(std::string(lower.substr(i + 2, close == std::string_view::npos ? std::string_view::npos : close - i - 2)));
                     if (name == "strict")
                         found.Strict = true;
+                    else if (name == "log")
+                        found.Log = true;
                     else if ((name == "try" || name == "except" || name == "c" || name == "ccode" || name == "luacode") && found.Unsupported.empty())
                         found.Unsupported = "{$" + name + "}";
                     i = close == std::string_view::npos ? lower.size() : close;
@@ -569,6 +572,48 @@ namespace Manifold::Asm
             return text;
         }
 
+        // ∑ Log lines stay one line each and readable: long patterns, Lua code and command output
+        //   are cut, line breaks become " | ".
+        std::string Short(std::string_view text, std::size_t limit = 96)
+        {
+            std::string out;
+            for (const char c : TrimView(text))
+            {
+                if (c == '\r')
+                    continue;
+                if (c == '\n')
+                {
+                    while (!out.empty() && (out.back() == ' ' || out.back() == '\t'))
+                        out.pop_back();
+                    if (!out.empty() && !out.ends_with(" | "))
+                        out += " | ";
+                    continue;
+                }
+                out += c == '\t' ? ' ' : c;
+            }
+            while (out.ends_with(" | "))
+                out.resize(out.size() - 3);
+            if (out.size() > limit)
+            {
+                out.resize(limit);
+                out += "...";
+            }
+            return out;
+        }
+
+        std::string BytesPreview(std::span<const std::uint8_t> bytes, std::size_t limit = 16)
+        {
+            std::string text = HexBytes(bytes.first(std::min(bytes.size(), limit)));
+            if (bytes.size() > limit)
+                text += " ...";
+            return text;
+        }
+
+        std::string ByteCount(std::uint64_t count)
+        {
+            return std::to_string(count) + (count == 1 ? " byte" : " bytes");
+        }
+
         class Run
         {
         public:
@@ -579,9 +624,22 @@ namespace Manifold::Asm
 
             AaResult Execute(std::string_view script)
             {
+                m_log = m_options.Log || WantsLog(script);
+                m_result.Logged = m_log;
+                if (m_log)
+                    LogStart();
+                Steps(script);
+                if (m_log)
+                    LogEnd();
+                return m_result;
+            }
+
+        private:
+            void Steps(std::string_view script)
+            {
                 std::vector<SourceLine> lines;
                 if (!Preprocess(script, lines))
-                    return m_result;
+                    return;
                 if (!Collect(lines))
                     return Abort();
                 if (!PrepareLibraries() || !RunScans() || !Allocate() || !ReadMemory())
@@ -589,20 +647,126 @@ namespace Manifold::Asm
                 if (!Layout())
                     return Abort();
                 MeasureLabels();
+                if (m_log)
+                    LogLayout();
                 if (!CheckAsserts() || !CheckThreads())
                     return Abort();
                 if (m_options.CheckOnly)
                 {
                     ReleaseAllocations();
-                    return m_result;
+                    return;
                 }
                 if (!WriteCode())
                     return Abort();
                 Finish();
-                return m_result;
             }
 
-        private:
+            // ---------------------------------------------------------------- log
+
+            void Step(int line, const std::string& text)
+            {
+                if (!m_log)
+                    return;
+                std::string message = m_logPrefix;
+                if (line > 0)
+                    message += "line " + std::to_string(line) + ": ";
+                message += text;
+                LOG_INFO("Auto Assembler", message);
+                if (m_result.Log.size() < kMaxLogLines)
+                    m_result.Log.push_back({ line, text });
+                else
+                    ++m_droppedLog;
+            }
+
+            std::string Where(std::uint64_t address) const
+            {
+                const std::string hex = Hex(address);
+                if (!m_host.Symbols || m_options.CheckOnly)
+                    return hex;
+                const std::string name = m_host.Symbols->Describe(address);
+                return name.empty() || name == hex ? hex : name + " (" + hex + ")";
+            }
+
+            void LogStart()
+            {
+                const char* section = m_options.Section == AaSection::Enable ? "[ENABLE]" : m_options.Section == AaSection::Disable ? "[DISABLE]" : "the whole script";
+                std::vector<std::string> parts;
+                if (!m_options.LogTitle.empty())
+                    parts.push_back(m_options.LogTitle);
+                if (m_options.Section != AaSection::Whole)
+                    parts.push_back(section);
+                m_logPrefix = parts.empty() ? std::string() : Join(parts, " ") + ", ";
+                std::string text = m_options.CheckOnly ? "check of " : "run of ";
+                text += section;
+                if (m_host.Process)
+                    text += " in " + m_host.Process->Name() + (m_is64 ? " (64-bit)" : " (32-bit)");
+                else
+                    text += " without a process";
+                if (m_options.CheckOnly)
+                    text += m_options.ScanInCheck ? "; a check allocates and writes nothing, but it scans" : "; a check allocates, scans and writes nothing";
+                Step(0, text);
+            }
+
+            void LogEnd()
+            {
+                if (m_droppedLog)
+                    Step(0, std::to_string(m_droppedLog) + " more steps are only in the log file and the Log window");
+                if (!m_result.Ok())
+                {
+                    std::string text = "failed";
+                    if (m_result.Line > 0)
+                        text += " at line " + std::to_string(m_result.Line);
+                    text += ": " + m_result.Error.Text;
+                    m_result.Log.push_back({ 0, text });
+                    LOG_WARN("Auto Assembler", m_logPrefix + text);
+                    return;
+                }
+                if (m_options.CheckOnly)
+                {
+                    Step(0, "check passed");
+                    return;
+                }
+                std::size_t bytes = 0;
+                for (const AaWrite& write : m_result.Writes)
+                    bytes += write.Bytes.size();
+                std::string text = "done: " + std::to_string(m_result.Writes.size()) + (m_result.Writes.size() == 1 ? " write, " : " writes, ") + ByteCount(bytes);
+                if (!m_newAllocations.empty())
+                    text += ", " + std::to_string(m_newAllocations.size()) + (m_newAllocations.size() == 1 ? " allocation" : " allocations");
+                if (!m_result.Symbols.empty())
+                    text += ", " + std::to_string(m_result.Symbols.size()) + (m_result.Symbols.size() == 1 ? " symbol registered" : " symbols registered");
+                Step(0, text);
+            }
+
+            void LogLayout()
+            {
+                std::size_t output = 0;
+                for (std::size_t i = 0; i < m_statements.size(); ++i)
+                {
+                    const Statement& statement = m_statements[i];
+                    if (statement.Type == Statement::Kind::Place)
+                    {
+                        const std::string key = Lower(statement.Text);
+                        if (const auto placed = m_placed.find(key); placed != m_placed.end() && m_labels.count(key))
+                            Step(statement.Line, "label " + statement.Text + " is at " + Where(placed->second));
+                        else if (m_placeAt.size() > i && m_placeAt[i])
+                            Step(statement.Line, statement.Text + ": the next lines go to " + Where(*m_placeAt[i]));
+                        continue;
+                    }
+                    const AaWrite* written = output < m_output.size() ? &m_output[output] : nullptr;
+                    ++output;
+                    if (statement.Text.empty() || statement.Text.front() != '\x01' || !written)
+                        continue;
+                    const std::string source = Trim(statement.Text.substr(std::string("\x01reassemble ").size()));
+                    const auto found = m_reassembled.find(&statement);
+                    std::string text = "reassemble(" + source + ")";
+                    if (found != m_reassembled.end())
+                        text += " read " + found->second.second + " at " + Where(found->second.first);
+                    else if (m_options.CheckOnly)
+                        text += ": a nop stands in during a check";
+                    text += ", placed at " + Where(written->Address) + " as " + BytesPreview(written->Bytes);
+                    Step(statement.Line, text);
+                }
+            }
             bool Fail(ErrorCode code, int line, std::string_view message, std::string_view text = {})
             {
                 if (m_result.Error.Ok())
@@ -614,10 +778,9 @@ namespace Manifold::Asm
                 return false;
             }
 
-            AaResult Abort()
+            void Abort()
             {
                 ReleaseAllocations();
-                return m_result;
             }
 
             bool Preprocess(std::string_view script, std::vector<SourceLine>& out)
@@ -713,6 +876,7 @@ namespace Manifold::Asm
                         for (const auto& [name, earlier] : defines)
                             value = ReplaceWord(value, name, earlier);
                         const auto same = std::find_if(defines.begin(), defines.end(), [&](const auto& define) { return EqualsNoCase(define.first, command->Arguments[0]); });
+                        Step(line.Line, "define(" + command->Arguments[0] + ") is " + Short(value) + (same != defines.end() ? ", replacing " + Short(same->second) : ""));
                         if (same != defines.end())
                             same->second = value;
                         else
@@ -793,6 +957,9 @@ namespace Manifold::Asm
                             c = ' ';
                     }
                     const int outputLines = static_cast<int>(std::count(output.begin(), output.end(), '\n'));
+                    if (m_log)
+                        Step(startLine, std::string("{$lua} block ran") + (m_options.CheckOnly ? " (syntaxcheck is true)" : "") +
+                                            (Trim(output).empty() ? " and returned no script text" : " and returned: " + Short(output)));
                     if (!ProcessText(output, startLine, false, "the output of a {$lua} block", text))
                         return false;
                     for (int i = outputLines; i < lineCount; ++i)
@@ -842,6 +1009,9 @@ namespace Manifold::Asm
                         m_result.Line = line.Line;
                         return false;
                     }
+                    if (m_log)
+                        Step(line.Line, name + "(" + Short(parameters) + ")" + (m_options.CheckOnly ? " in a check" : "") +
+                                            (Trim(replacement).empty() ? " returned no script text" : " returned: " + Short(replacement, 160)));
                     std::string stripped;
                     if (!ProcessText(replacement, line.Line, false, "the output of " + name, stripped))
                         return false;
@@ -892,6 +1062,8 @@ namespace Manifold::Asm
                         if (!trimmed.empty())
                             included.push_back({ trimmed, line.Line });
                     }
+                    Step(line.Line, "include(" + Unquote(command->Arguments[0]) + ") read " + WideToUtf8(path.wstring()) + ", " + std::to_string(included.size()) +
+                                        (included.size() == 1 ? " line" : " lines"));
                     if (!ExpandIncludes(included, out, depth + 1))
                         return false;
                 }
@@ -1054,7 +1226,7 @@ namespace Manifold::Asm
                     if (!NeedArguments(command, line, 1, "dealloc(name)"))
                         return false;
                     for (const std::string& allocation : NameList(command.Arguments))
-                        m_deallocs.push_back(allocation);
+                        m_deallocs.push_back({ allocation, line.Line });
                     return true;
                 }
                 if (name == "label")
@@ -1084,7 +1256,7 @@ namespace Manifold::Asm
                     if (!NeedArguments(command, line, 1, "unregistersymbol(name)"))
                         return false;
                     for (const std::string& symbol : NameList(command.Arguments))
-                        m_unregister.push_back(symbol);
+                        m_unregister.push_back({ symbol, line.Line });
                     return true;
                 }
                 if (name == "aobscan" || name == "aobscanmodule" || name == "aobscanregion")
@@ -1171,6 +1343,7 @@ namespace Manifold::Asm
                             return false;
                         }
                     }
+                    Step(line.Line, "luacall(" + Short(code) + (m_options.CheckOnly ? ") does not run in a check" : ") ran"));
                     return true;
                 }
                 return Fail(ErrorCode::AaUnknownCommand, line.Line, "unknown command " + name, line.Text);
@@ -1205,7 +1378,11 @@ namespace Manifold::Asm
             bool PrepareLibraries()
             {
                 if (m_options.CheckOnly)
+                {
+                    for (const auto& [path, line] : m_libraries)
+                        Step(line, "loadlibrary(" + path + ") does not run in a check");
                     return true;
+                }
                 for (const auto& [path, line] : m_libraries)
                 {
                     if (!m_host.Process)
@@ -1221,6 +1398,7 @@ namespace Manifold::Asm
                         m_result.Line = line;
                         return false;
                     }
+                    Step(line, "loadlibrary(" + path + ") loaded " + WideToUtf8(file.wstring()));
                 }
                 return true;
             }
@@ -1243,9 +1421,11 @@ namespace Manifold::Asm
                     //   activation that checks first would scan twice. The program's own checks
                     //   (Engine::CheckScript: the script editor, the record checks) still scan, since
                     //   telling the user that a pattern is gone is what they are for.
+                    const std::string scanText = scan.Kind + "(" + scan.Arguments[0] + ")";
                     if (m_options.CheckOnly && !m_options.ScanInCheck)
                     {
                         m_values[Lower(scan.Arguments[0])] = 0;
+                        Step(scan.Line, scanText + " does not scan in a check; " + scan.Arguments[0] + " is 0 until the script runs");
                         continue;
                     }
                     if (!m_host.Process || !m_host.Symbols)
@@ -1274,14 +1454,25 @@ namespace Manifold::Asm
                         stop = *to.Value;
                     }
                     const auto hits = Scan::FindPattern(*m_host.Process, *pattern, start, stop, false, 1);
+                    std::string range;
+                    if (m_log)
+                    {
+                        range = scan.Kind == "aobscanmodule" ? " in " + Unquote(scan.Arguments[1]) + " (" + Hex(start) + "-" + Hex(stop) + ")"
+                              : scan.Kind == "aobscanregion" ? " between " + Hex(start) + " and " + Hex(stop)
+                                                             : " in the whole process";
+                        range = " for " + Short(patternText, 64) + range;
+                    }
                     if (hits.empty())
                     {
+                        Step(scan.Line, scanText + range + ": not found");
                         m_result.Error = Status::Fail(ErrorCode::AaPatternNotFound, scan.Arguments[0]);
                         m_result.Line = scan.Line;
                         return false;
                     }
                     m_values[Lower(scan.Arguments[0])] = hits.front();
                     m_result.Notes.push_back(scan.Arguments[0] + " = " + Hex(hits.front()));
+                    if (m_log)
+                        Step(scan.Line, scanText + range + ": found at " + Where(hits.front()));
                 }
                 return true;
             }
@@ -1306,6 +1497,8 @@ namespace Manifold::Asm
                         if (const auto existing = m_host.Symbols->FindRegistered(alloc.Name))
                         {
                             m_values[Lower(alloc.Name)] = *existing;
+                            if (m_log)
+                                Step(alloc.Line, "globalalloc(" + alloc.Name + ") uses the memory it registered before, at " + Where(*existing));
                             continue;
                         }
                     }
@@ -1388,6 +1581,23 @@ namespace Manifold::Asm
                         m_values[Lower(alloc->Name)] = address;
                         m_newAllocations.push_back({ alloc->Name, address, alloc->Size, block, alloc->Global });
                         offset += (alloc->Size + 15) & ~15ull;
+                        if (m_log)
+                        {
+                            std::string text = std::string(alloc->Global ? "globalalloc(" : "alloc(") + alloc->Name + ", " + ByteCount(alloc->Size) + ")";
+                            text += m_options.CheckOnly ? " stands at " + Hex(address) + " for the check" : " is at " + Hex(address);
+                            if (members.size() > 1)
+                                text += ", in a block of " + ByteCount(total) + " at " + Hex(block) + " shared by " + std::to_string(members.size()) + " allocations";
+                            if (group.Near)
+                            {
+                                const std::uint64_t distance = address > *group.Near ? address - *group.Near : *group.Near - address;
+                                text += ", near " + Where(*group.Near) + " (" + Hex(distance) + " bytes away";
+                                if (m_is64 && !m_options.CheckOnly)
+                                    text += distance < 0x7FFF0000ull ? ", within 2 GB, so a 5-byte jump reaches it)" : ", more than 2 GB: jumps between them need 14 bytes)";
+                                else
+                                    text += ")";
+                            }
+                            Step(alloc->Line, text);
+                        }
                     }
                 }
                 return true;
@@ -1409,8 +1619,14 @@ namespace Manifold::Asm
                         const auto fake = [&](std::uint64_t at) {
                             return std::any_of(m_fakeBlocks.begin(), m_fakeBlocks.end(), [at](const auto& block) { return at >= block.first && at < block.second; });
                         };
-                        if (address.Ok() && !fake(*address.Value) && !m_host.Process->ReadExact(*address.Value, statement.Data.data(), statement.Data.size()))
+                        bool copied = address.Ok() && !fake(*address.Value);
+                        if (copied && !m_host.Process->ReadExact(*address.Value, statement.Data.data(), statement.Data.size()))
+                        {
                             std::fill(statement.Data.begin(), statement.Data.end(), std::uint8_t(0));
+                            copied = false;
+                        }
+                        Step(read.Line, "readmem(" + read.Address + ", " + ByteCount(statement.Data.size()) + ")" +
+                                            (copied ? " copied " + BytesPreview(statement.Data) + " for the check" : " stands as zeros in the check (nothing readable there yet)"));
                         continue;
                     }
                     if (!address.Ok())
@@ -1421,6 +1637,8 @@ namespace Manifold::Asm
                         m_result.Line = read.Line;
                         return false;
                     }
+                    if (m_log)
+                        Step(read.Line, "readmem(" + read.Address + ", " + ByteCount(statement.Data.size()) + ") read " + BytesPreview(statement.Data) + " at " + Where(*address.Value));
                 }
                 return true;
             }
@@ -1430,7 +1648,10 @@ namespace Manifold::Asm
                 if (!m_host.Process || m_options.CheckOnly)
                     return;
                 for (std::uint64_t block : m_allocatedBlocks)
+                {
                     m_host.Process->Free(block);
+                    Step(0, "freed the memory this run allocated at " + Hex(block) + ", since the run failed");
+                }
                 m_allocatedBlocks.clear();
             }
 
@@ -1459,6 +1680,7 @@ namespace Manifold::Asm
                     m_placed.clear();
                     m_output.clear();
                     m_unplacedUses.clear();
+                    m_placeAt.assign(m_statements.size(), std::nullopt);
                     std::optional<std::uint64_t> current;
                     bool changed = false;
                     for (std::size_t i = 0; i < m_statements.size(); ++i)
@@ -1494,6 +1716,7 @@ namespace Manifold::Asm
                                 return false;
                             }
                             current = *address;
+                            m_placeAt[i] = *address;
                             continue;
                         }
                         if (!current && m_options.CheckOnly)
@@ -1678,9 +1901,13 @@ namespace Manifold::Asm
                         if (!instruction.Valid)
                             return checkPlaceholder();
                         AssembleResult checked = Assemble(instruction.Text(), options);
+                        if (checked.Ok && m_log)
+                            m_reassembled[&statement] = { *source.Value, instruction.Text() };
                         return checked.Ok ? checked : checkPlaceholder();
                     }
                     text = instruction.Text();
+                    if (m_log)
+                        m_reassembled[&statement] = { *source.Value, text };
                 }
                 return Assemble(text, options);
             }
@@ -1699,6 +1926,7 @@ namespace Manifold::Asm
                             m_result.Line = check.Line;
                             return false;
                         }
+                        Step(check.Line, "assert(" + check.Address + ") does not compare in a check");
                     }
                     return true;
                 }
@@ -1721,12 +1949,18 @@ namespace Manifold::Asm
                         return false;
                     }
                     std::vector<std::uint8_t> actual(pattern->Bytes.size());
-                    if (!m_host.Process->ReadExact(*address.Value, actual.data(), actual.size()) || !pattern->Matches(actual.data()))
+                    const bool readable = m_host.Process->ReadExact(*address.Value, actual.data(), actual.size());
+                    if (!readable || !pattern->Matches(actual.data()))
                     {
+                        if (m_log)
+                            Step(check.Line, "assert(" + check.Address + ") at " + Where(*address.Value) + " expected " + Short(check.Bytes, 64) +
+                                                 (readable ? " but found " + HexBytes(actual) : " but the memory there cannot be read"));
                         m_result.Error = Status::Fail(ErrorCode::AaAssertFailed, check.Address + " (found " + HexBytes(actual) + ")");
                         m_result.Line = check.Line;
                         return false;
                     }
+                    if (m_log)
+                        Step(check.Line, "assert(" + check.Address + ") at " + Where(*address.Value) + " matches " + HexBytes(actual));
                 }
                 return true;
             }
@@ -1754,6 +1988,8 @@ namespace Manifold::Asm
                         LOG_WARN("Auto Assembler", message);
                         m_result.Notes.push_back(message);
                     }
+                    else if (m_log)
+                        Step(access.Line, "fullaccess(" + access.Address + ", " + ByteCount(*size) + ") made " + Where(*address.Value) + " readable, writable and executable");
                 }
 
                 std::vector<AaWrite> merged;
@@ -1779,6 +2015,8 @@ namespace Manifold::Asm
                     {
                         if (!m_host.Process->Write(done->Address, done->Bytes))
                             LOG_WARN("Auto Assembler", "Could not restore the bytes at " + Hex(done->Address) + " after a failed write.");
+                        else
+                            Step(done->Line, "put back the " + ByteCount(done->Bytes.size()) + " at " + Hex(done->Address) + ", since a later write failed");
                     }
                 };
                 for (const AaWrite& write : merged)
@@ -1800,6 +2038,9 @@ namespace Manifold::Asm
                         m_result.Line = write.Line;
                         return false;
                     }
+                    if (m_log)
+                        Step(write.Line, "wrote " + ByteCount(write.Bytes.size()) + " at " + Where(write.Address) + ": " + BytesPreview(write.Bytes) + " (was " +
+                                             BytesPreview(undo.back().Bytes) + ")");
                 }
                 m_result.Writes = std::move(merged);
                 return true;
@@ -1835,30 +2076,37 @@ namespace Manifold::Asm
                 // ∑ CE order (autoassembler.pas 2718-2758, 4234-4282): dealloc only frees what an earlier
                 //   run allocated (never this run's code, which a new thread may be running), and the
                 //   symbols to unregister go before the ones to register.
-                std::vector<std::string> deallocs;
-                for (const std::string& name : m_deallocs)
+                std::vector<std::pair<std::string, int>> deallocs;
+                for (const auto& [name, line] : m_deallocs)
                 {
                     if (name == "*")
                     {
+                        if (m_memory.Allocations.empty())
+                            Step(line, "dealloc(*) finds nothing that an earlier run allocated");
                         for (const AaAllocation& allocation : m_memory.Allocations)
-                            deallocs.push_back(allocation.Name);
+                            deallocs.push_back({ allocation.Name, line });
                     }
                     else
                     {
-                        deallocs.push_back(name);
+                        deallocs.push_back({ name, line });
                     }
                 }
-                for (const std::string& name : deallocs)
+                for (const auto& [name, line] : deallocs)
                 {
                     auto found = std::find_if(m_memory.Allocations.begin(), m_memory.Allocations.end(), [&](const AaAllocation& allocation) { return EqualsNoCase(allocation.Name, name); });
                     if (found == m_memory.Allocations.end())
+                    {
+                        Step(line, "dealloc(" + name + ") finds no memory an earlier run allocated under that name; nothing is freed");
                         continue;
+                    }
                     if (found->Global)
                     {
+                        Step(line, "dealloc(" + name + ") leaves the globalalloc memory at " + Hex(found->Address) + " in place, as it is shared");
                         m_memory.Allocations.erase(found);
                         continue;
                     }
                     const std::uint64_t block = found->Block;
+                    const std::uint64_t address = found->Address;
                     m_memory.Allocations.erase(found);
                     const bool stillUsed = std::any_of(m_memory.Allocations.begin(), m_memory.Allocations.end(), [&](const AaAllocation& allocation) { return allocation.Block == block; });
                     if (!stillUsed && m_host.Process)
@@ -1866,7 +2114,10 @@ namespace Manifold::Asm
                         const Status status = m_host.Process->Free(block);
                         if (!status)
                             m_result.Notes.push_back(status.Text);
+                        Step(line, "dealloc(" + name + ") " + (status ? "freed the block at " + Hex(block) : "could not free the block at " + Hex(block) + ": " + status.Text));
                     }
+                    else if (stillUsed)
+                        Step(line, "dealloc(" + name + ") released " + Hex(address) + "; its block at " + Hex(block) + " stays until the rest of it is released");
                 }
                 for (const AaAllocation& allocation : m_newAllocations)
                     m_memory.Allocations.push_back(allocation);
@@ -1877,18 +2128,23 @@ namespace Manifold::Asm
                 for (const auto& [key, value] : m_placed)
                     m_memory.Values[key] = value;
 
-                std::vector<std::string> unregister;
-                for (const std::string& name : m_unregister)
+                std::vector<std::pair<std::string, int>> unregister;
+                for (const auto& [name, line] : m_unregister)
                 {
                     if (name == "*")
-                        unregister.insert(unregister.end(), m_memory.Registered.begin(), m_memory.Registered.end());
+                    {
+                        if (m_memory.Registered.empty())
+                            Step(line, "unregistersymbol(*) finds nothing that an earlier run registered");
+                        for (const std::string& known : m_memory.Registered)
+                            unregister.push_back({ known, line });
+                    }
                     else
-                        unregister.push_back(name);
+                        unregister.push_back({ name, line });
                 }
-                for (const std::string& name : unregister)
+                for (const auto& [name, line] : unregister)
                 {
-                    if (m_host.Symbols)
-                        m_host.Symbols->Unregister(name);
+                    const bool removed = m_host.Symbols && m_host.Symbols->Unregister(name);
+                    Step(line, "unregistersymbol(" + name + ")" + (removed ? " removed it" : ": it was not registered"));
                     m_memory.Registered.erase(std::remove_if(m_memory.Registered.begin(), m_memory.Registered.end(), [&](const std::string& known) { return EqualsNoCase(known, name); }),
                         m_memory.Registered.end());
                 }
@@ -1900,6 +2156,7 @@ namespace Manifold::Asm
                     if (!value)
                     {
                         m_result.Notes.push_back("registersymbol: " + name + " has no address");
+                        Step(line, "registersymbol(" + name + "): it has no address, so nothing is registered");
                         continue;
                     }
                     const auto size = defined == m_defines.end() ? m_sizes.find(Lower(name)) : m_sizes.end();
@@ -1912,6 +2169,8 @@ namespace Manifold::Asm
                     m_result.Symbols[name] = *value;
                     if (size != m_sizes.end())
                         m_result.SymbolSizes[name] = size->second;
+                    if (m_log)
+                        Step(line, "registersymbol(" + name + ") is " + Hex(*value) + (size != m_sizes.end() ? ", " + ByteCount(size->second) + " of data" : ""));
                     if (std::find_if(m_memory.Registered.begin(), m_memory.Registered.end(), [&](const std::string& known) { return EqualsNoCase(known, name); }) ==
                         m_memory.Registered.end())
                         m_memory.Registered.push_back(name);
@@ -1919,9 +2178,11 @@ namespace Manifold::Asm
                 for (const ThreadCommand& thread : m_threads)
                 {
                     const auto address = FinalValue(thread.Address);
+                    const std::string command = std::string(thread.Mode.empty() ? "createthread(" : "createthreadandwait(") + thread.Address + ")";
                     if (!address)
                     {
                         m_result.Notes.push_back("createthread: " + thread.Address + " has no address");
+                        Step(thread.Line, command + ": it has no address, so no thread was started");
                         continue;
                     }
                     if (!m_host.Process)
@@ -1932,6 +2193,9 @@ namespace Manifold::Asm
                     const Status status = m_host.Process->CreateThread(*address, 0, !thread.Mode.empty());
                     if (!status)
                         m_result.Notes.push_back(status.Text);
+                    if (m_log)
+                        Step(thread.Line, command + (status ? (thread.Mode.empty() ? " started a thread at " : " ran a thread to its end at ") + Where(*address)
+                                                            : " could not start a thread at " + Hex(*address) + ": " + status.Text));
                 }
 
                 for (const PendingAlloc& alloc : m_allocs)
@@ -1939,7 +2203,10 @@ namespace Manifold::Asm
                     if (alloc.Global && m_host.Symbols && !m_host.Symbols->FindRegistered(alloc.Name))
                     {
                         if (const auto value = KnownName(alloc.Name))
+                        {
                             m_host.Symbols->Register(alloc.Name, *value, "");
+                            Step(alloc.Line, "globalalloc(" + alloc.Name + ") registered its memory at " + Hex(*value));
+                        }
                     }
                 }
             }
@@ -1982,14 +2249,14 @@ namespace Manifold::Asm
             std::vector<PendingRead> m_reads;
             std::vector<std::pair<std::uint64_t, std::uint64_t>> m_fakeBlocks;
             std::vector<PendingAlloc> m_allocs;
-            std::vector<std::string> m_deallocs;
+            std::vector<std::pair<std::string, int>> m_deallocs;
             std::map<std::string, std::string> m_labels;
             std::set<std::string> m_declared;
             std::set<std::string> m_potential;
             bool m_strict = false;
             std::vector<std::pair<std::string, int>> m_register;
             std::map<std::string, std::string> m_defines;
-            std::vector<std::string> m_unregister;
+            std::vector<std::pair<std::string, int>> m_unregister;
             std::vector<ScanCommand> m_scans;
             std::vector<AssertCommand> m_asserts;
             std::vector<FullAccessCommand> m_fullAccess;
@@ -2003,14 +2270,25 @@ namespace Manifold::Asm
             std::vector<AaAllocation> m_newAllocations;
             std::vector<std::uint64_t> m_allocatedBlocks;
             std::vector<AaWrite> m_output;
+
+            bool m_log = false;
+            std::string m_logPrefix;
+            std::size_t m_droppedLog = 0;
+            std::vector<std::optional<std::uint64_t>> m_placeAt;     // where each address line of the last layout pass pointed
+            std::map<const Statement*, std::pair<std::uint64_t, std::string>> m_reassembled;  // where each reassemble() read and what, for the log
         };
+    }
+
+    bool WantsLog(std::string_view script)
+    {
+        return ScanDirectives(Lower(script)).Log;
     }
 
     AaResult RunAutoAssembler(std::string_view script, AaHost& host, AaMemory& memory, const AaOptions& options)
     {
         Run run(host, memory, options);
         AaResult result = run.Execute(script);
-        if (!result.Ok())
+        if (!result.Ok() && !result.Logged)
             LOG_WARN("Auto Assembler", result.Error.Text);
         return result;
     }
