@@ -80,16 +80,10 @@
 python "$(ProjectDir)..\Tools\embed_lua.py" || exit /b 1
 python "$(ProjectDir)..\Tools\embed_templates.py" || exit /b 1
 python "$(ProjectDir)..\Tools\embed_modules.py" || exit /b 1
-python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"</Command>
-      <Message>Embedding the Lua compatibility scripts, the built-in templates and the hashes of the shipped autorun modules, writing the build info</Message>
+python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"
+python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
+      <Message>Embedding the Lua compatibility scripts, the built-in templates and the hashes of the shipped autorun modules, writing the build info, checking the raw ImGui calls against Source\Layout\RawImGui.txt</Message>
     </PreBuildEvent>
-    <PostBuildEvent>
-      <Command>if not exist "$(ProjectDir)..\Autorun\*" exit /b 0
-xcopy "$(ProjectDir)..\Autorun" "$(OutDir)autorun" /D /E /I /Y /Q &gt;nul
-if errorlevel 2 exit /b 1
-exit /b 0</Command>
-      <Message>Copying the Autorun modules that are newer than the ones next to the program</Message>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>
@@ -171,6 +165,13 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp" />
     <ClCompile Include="..\Source\Generated\ManagedDumperImage.cpp" />
     <ClCompile Include="..\Source\Generated\ShippedModules.cpp" />
+    <ClCompile Include="..\Source\Layout\Audit.cpp" />
+    <ClCompile Include="..\Source\Layout\Components.cpp" />
+    <ClCompile Include="..\Source\Layout\Containers.cpp" />
+    <ClCompile Include="..\Source\Layout\Region.cpp" />
+    <ClCompile Include="..\Source\Layout\Rules.cpp" />
+    <ClCompile Include="..\Source\Layout\Size.cpp" />
+    <ClCompile Include="..\Source\Layout\Typography.cpp" />
     <ClCompile Include="..\Source\Lua\AutorunModules.cpp" />
     <ClCompile Include="..\Source\Lua\ConsoleHistory.cpp" />
     <ClCompile Include="..\Source\Lua\DocAnnotations.cpp" />
@@ -269,6 +270,7 @@ exit /b 0</Command>
     <ClCompile Include="..\Source\UI\FlowGraphWindow.cpp" />
     <ClCompile Include="..\Source\UI\Fonts.cpp" />
     <ClCompile Include="..\Source\UI\FormEditor.cpp" />
+    <ClCompile Include="..\Source\UI\LayoutAuditWindow.cpp" />
     <ClCompile Include="..\Source\UI\Loading.cpp" />
     <ClCompile Include="..\Source\UI\LogWindow.cpp" />
     <ClCompile Include="..\Source\UI\LuaDialogs.cpp" />
@@ -360,6 +362,14 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\Disasm\OpcodeConvert.h" />
     <ClInclude Include="..\Source\Disasm\UniqueAob.h" />
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h" />
+    <ClInclude Include="..\Source\Layout\Audit.h" />
+    <ClInclude Include="..\Source\Layout\Components.h" />
+    <ClInclude Include="..\Source\Layout\Containers.h" />
+    <ClInclude Include="..\Source\Layout\Layout.h" />
+    <ClInclude Include="..\Source\Layout\Region.h" />
+    <ClInclude Include="..\Source\Layout\Rules.h" />
+    <ClInclude Include="..\Source\Layout\Size.h" />
+    <ClInclude Include="..\Source\Layout\Typography.h" />
     <ClInclude Include="..\Source\Lua\AutorunModules.h" />
     <ClInclude Include="..\Source\Lua\ConsoleHistory.h" />
     <ClInclude Include="..\Source\Lua\DocAnnotations.h" />
@@ -454,6 +464,7 @@ exit /b 0</Command>
     <ClInclude Include="..\Source\UI\FlowGraphWindow.h" />
     <ClInclude Include="..\Source\UI\Fonts.h" />
     <ClInclude Include="..\Source\UI\FormEditor.h" />
+    <ClInclude Include="..\Source\UI\LayoutAuditWindow.h" />
     <ClInclude Include="..\Source\UI\Loading.h" />
     <ClInclude Include="..\Source\UI\LogWindow.h" />
     <ClInclude Include="..\Source\UI\LuaDialogs.h" />

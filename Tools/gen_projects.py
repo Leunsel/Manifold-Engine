@@ -358,6 +358,8 @@ def main():
     app += tail()
     app = disable_jmc_for(app, "Source/Syscalls/Syscall.cpp")
     app = with_prebuild(app)
+    app = app.replace('ManifoldBuild.h"</Command>', 'ManifoldBuild.h"\npython "$(ProjectDir)..\\Tools\\check_ui_raw.py"</Command>', 1)
+    app = app.replace("writing the build info</Message>", "writing the build info, checking the raw ImGui calls against Source\\Layout\\RawImGui.txt</Message>", 1)
     app = with_postbuild(app)
     write("Manifold-Engine.vcxproj", app)
     write("Manifold-Engine.vcxproj.filters", filters(app_sources, app_headers, (("ResourceCompile", ["Source/Resources/App.rc"]), ("Image", ["Source/Resources/icon.ico"]))))

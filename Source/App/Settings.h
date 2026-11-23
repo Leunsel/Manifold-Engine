@@ -110,6 +110,7 @@ namespace Manifold
         bool PlaySounds = true;
         bool ReleaseMode = false;
         bool ProfilerEnabled = false;
+        bool LayoutChecks = false;
         bool ProfilerInStatusBar = true;
         bool ShowSplash = true;
         int NopSledBest = 0;

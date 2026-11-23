@@ -12,7 +12,7 @@ Lower layers never include higher ones. `Core` includes nothing from the other f
 | Engine core | `Source/Disasm`, `Source/Asm`, `Source/Syscalls`, `Source/Target`, `Source/Scan`, `Source/Debug`, `Source/Table` | Zydis disassembler, code dissect; the assembler and the Auto Assembler; direct system calls; process access, modules, symbols, address expressions and the code map; Mono/IL2CPP (`MonoBridge`, `RemoteCall`, `UnityExplorer`, the managed agent link, `FrameCalls` for IL2CPP's main-thread calls); the scanner; the debugger, watches and tracer; the address list, cheat table files and structures |
 | Application | `Source/App`, `Source/Templates` | `Engine` and its parts, settings, commands, diagnostics, the window host; the template engine |
 | Scripting | `Source/Lua` | the Lua engine, the Cheat Engine compatible API, the `manifold.*` API and its documentation registry |
-| Interface | `Source/UI` | `Workspace`, the main window and every tool window, widgets and theme |
+| Interface | `Source/Layout`, `Source/UI` | the layout system (rules, rows and regions, text, buttons, fields, cards, the audit; [UI-LAYOUT.md](UI-LAYOUT.md)); `Workspace`, the main window and every tool window, widgets and theme |
 
 Outside the program: `Agent` is the in-process debugger DLL (VEH) that is injected into the target; `Managed` is the .NET 3.5 dumper and scene agent that is loaded into a game's Mono root domain; `Source/Generated` is written by the scripts in `Tools`; `Tests` holds the test runner and `TestTarget`.
 
@@ -63,6 +63,7 @@ Outside the program: `Agent` is the in-process debugger DLL (VEH) that is inject
 - **A window:**
   - Put the class in its own header next to its `.cpp` and derive it from `ToolWindowBase`. That gives it `m_open`, bringing it to the front, and `BeginWindow`.
   - Add a member and an `Open…` method to `Workspace`.
+  - Draw its content with the components of `Source/Layout` ([UI-LAYOUT.md](UI-LAYOUT.md)): `Row`, `Layout::Text`, `Layout::Button`, `Layout::Field`, `Layout::Card`. A new file may not use the raw ImGui calls those replace; the tests check it.
 - **A setting:** add the field to `Settings` and a row to `kFields` in `App/Settings.cpp`. Load and save follow from the row, and the test `SettingsTable` covers the new field by itself.
 - **A Lua function:**
   - Cheat Engine compatible functions are a table row in `Lua/LuaApi.cpp`, `LuaObjects.cpp` or `LuaCompat.cpp`. They take their arguments with the helpers in `Lua/LuaArgs.h`.

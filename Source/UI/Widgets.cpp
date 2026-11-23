@@ -4,6 +4,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "UI/Fonts.h"
 #include "UI/Loading.h"
 #include "UI/UiScale.h"
@@ -26,8 +27,6 @@ namespace Manifold::UI
 {
     namespace
     {
-        constexpr float kCardRounding = 6.0f;
-
         int ResizeCallback(ImGuiInputTextCallbackData* data)
         {
             if (data->EventFlag == ImGuiInputTextFlags_CallbackResize)
@@ -186,7 +185,7 @@ namespace Manifold::UI
             rows.back().push_back(i);
         }
 
-        struct Layout
+        struct Arrangement
         {
             bool Icon = true;
             float Padding = 0.0f;
@@ -194,7 +193,7 @@ namespace Manifold::UI
             std::vector<std::string> Lines;
         };
         const auto measure = [&](bool withIcon, bool withText, float padding) {
-            Layout layout;
+            Arrangement layout;
             layout.Icon = withIcon;
             layout.Padding = padding;
             if (withText && !text.empty())
@@ -214,7 +213,7 @@ namespace Manifold::UI
         const float padding = std::round(Px(card ? 26.0f : 8.0f));
         const float tight = std::round(Px(card ? 14.0f : 4.0f));
         const float room = available.y - Px(8.0f);
-        Layout layout = measure(true, true, padding);
+        Arrangement layout = measure(true, true, padding);
         if (layout.Height > room)
             layout = measure(false, true, tight);
         if (layout.Height > room)
@@ -298,7 +297,10 @@ namespace Manifold::UI
                     const EmptyAction& action = actions[static_cast<std::size_t>(index)];
                     ImGui::SetCursorScreenPos(ImVec2(x, y));
                     ImGui::PushID(index);
-                    const bool pressed = action.Accent ? AccentButton(action.Label.c_str(), ImVec2(widths[i], 0.0f)) : ImGui::Button(action.Label.c_str(), ImVec2(widths[i], 0.0f));
+                    Layout::ButtonStyle look;
+                    look.Kind = action.Accent ? Layout::ButtonKind::Accent : Layout::ButtonKind::Normal;
+                    look.Width = Layout::Size::Fixed(widths[i] / Layout::Scale());
+                    const bool pressed = Layout::Button(action.Label, look);
                     ImGui::PopID();
                     if (pressed)
                         clicked = index;
@@ -399,82 +401,56 @@ namespace Manifold::UI
 
     void BeginCard(const char* id, const char* title, ImVec2 size, ImGuiWindowFlags flags)
     {
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ManifoldTheme::Card);
-        ImGui::PushStyleColor(ImGuiCol_Border, ManifoldTheme::CardBorder);
-        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, Px(kCardRounding));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, PxWhole(10.0f, 8.0f));
-        ImGui::BeginChild(id, size, ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding, flags);
-        ImGui::PopStyleVar(2);
-        ImGui::PopStyleColor(2);
+        // ∑ ImGui's child sizes: 0 is all that is left, below 0 all but that much
+        Layout::CardOptions options;
+        options.Width = size.x;
+        options.Height = size.y == 0.0f ? -FLT_MIN : size.y;
+        options.Flags = flags;
+        Layout::BeginCard(id, options);
         if (title && title[0])
-        {
-            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
-            ImGui::TextUnformatted(title);
-            ImGui::PopStyleColor();
-        }
+            Layout::Muted(title);
     }
 
     void EndCard()
     {
-        ImGui::EndChild();
+        Layout::EndCard();
     }
 
     void CardTitle(const char* icon, const char* title, std::string_view note)
     {
-        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Accent);
-        ImGui::TextUnformatted(icon);
-        ImGui::PopStyleColor();
-        ImGui::SameLine(0.0f, Px(6.0f));
-        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Label);
-        ImGui::TextUnformatted(title);
-        ImGui::PopStyleColor();
-        if (!note.empty())
-        {
-            ImGui::SameLine(0.0f, Px(10.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
-            ImGui::TextUnformatted(note.data(), note.data() + note.size());
-            ImGui::PopStyleColor();
-        }
+        Layout::TitleLine(icon, title ? std::string_view(title) : std::string_view(), note);
     }
 
     bool IconButton(const char* icon, const char* tooltip, bool danger, float side)
     {
-        if (side <= 0.0f)
-            side = ImGui::GetFrameHeight();
-        if (danger)
+        // ∑ the tooltip is part of the ID: two buttons with the same glyph
+        // and different jobs in one window no longer share an ImGui ID
+        return Layout::IconButton(tooltip && tooltip[0] ? tooltip : icon, icon, tooltip, danger ? Layout::ButtonKind::Danger : Layout::ButtonKind::Normal, side);
+    }
+
+    namespace
+    {
+        bool StyledButton(const char* label, ImVec2 size, Layout::ButtonKind kind)
         {
-            ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Error, 0.18f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Error, 0.32f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Error, 0.45f));
+            Layout::ButtonStyle look;
+            look.Kind = kind;
+            if (size.x > 0.0f)
+                look.Width = Layout::Size::Fixed(size.x / Layout::Scale());
+            else if (size.x < 0.0f)
+                look.Width = Layout::Size::Fill();
+            look.Height = size.y > 0.0f ? size.y : 0.0f;
+            return Layout::Button(label, look);
         }
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
-        const bool clicked = ImGui::Button(icon, ImVec2(side, side));
-        ImGui::PopStyleVar();
-        if (danger)
-            ImGui::PopStyleColor(3);
-        ItemTooltip(tooltip);
-        return clicked;
     }
 
     bool AccentButton(const char* label, ImVec2 size)
     {
-        ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.22f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.34f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Accent, 0.48f));
-        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::AccentHovered);
-        const bool clicked = ImGui::Button(label, size);
-        ImGui::PopStyleColor(4);
-        return clicked;
+        return StyledButton(label, size, Layout::ButtonKind::Accent);
     }
 
     bool DangerButton(const char* label, ImVec2 size)
     {
-        ImGui::PushStyleColor(ImGuiCol_Button, ManifoldTheme::WithAlpha(ManifoldTheme::Error, 0.18f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ManifoldTheme::WithAlpha(ManifoldTheme::Error, 0.32f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ManifoldTheme::WithAlpha(ManifoldTheme::Error, 0.45f));
-        const bool clicked = ImGui::Button(label, size);
-        ImGui::PopStyleColor(3);
-        return clicked;
+        return StyledButton(label, size, Layout::ButtonKind::Danger);
     }
 
     GhostButtons::GhostButtons(ImVec4 text)
@@ -557,24 +533,21 @@ namespace Manifold::UI
 
     void TextWithError(std::string_view text, ImVec4 color)
     {
-        ImGui::PushStyleColor(ImGuiCol_Text, color);
-        ImGui::TextUnformatted(text.data(), text.data() + text.size());
-        ImGui::PopStyleColor();
+        Layout::TextStyle style;
+        style.Color = color;
+        style.Tooltip = ErrorOf(text) == nullptr;   // the error's own tooltip shows the text's code
+        Layout::Text(text, style);
         ErrorTooltip(text);
     }
 
     void Muted(std::string_view text)
     {
-        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
-        ImGui::TextUnformatted(text.data(), text.data() + text.size());
-        ImGui::PopStyleColor();
+        Layout::Muted(text);
     }
 
     void SectionLabel(const char* text)
     {
-        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
-        ImGui::TextUnformatted(text);
-        ImGui::PopStyleColor();
+        Layout::Muted(text ? std::string_view(text) : std::string_view());
     }
 
     namespace
@@ -1243,25 +1216,11 @@ namespace Manifold::UI
 
     void TextFitted(std::string_view text, float maxWidth, const ImVec4& color)
     {
-        const char* begin = text.data();
-        const char* end = begin + text.size();
-        const ImVec2 size = ImGui::CalcTextSize(begin, end);
-        ImGui::PushStyleColor(ImGuiCol_Text, color);
-        if (size.x <= maxWidth || maxWidth <= 0.0f)
-        {
-            ImGui::TextUnformatted(begin, end);
-            ImGui::PopStyleColor();
-            return;
-        }
-        const ImVec2 pos = ImGui::GetCursorScreenPos();
-        const float width = std::max(0.0f, maxWidth);
-        const ImRect rect(pos, ImVec2(pos.x + width, pos.y + size.y));
-        ImGui::ItemSize(rect.GetSize());
-        if (ImGui::ItemAdd(rect, 0))
-            ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(), rect.Min, rect.Max, rect.Max.x, begin, end, &size);
-        ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
-            ImGui::SetTooltip("%.*s", static_cast<int>(text.size()), begin);
+        Layout::TextStyle style;
+        style.Color = color;
+        style.MaxWidth = maxWidth;
+        style.Mode = maxWidth > 0.0f ? Layout::Overflow::Ellipsis : Layout::Overflow::Visible;
+        Layout::Text(text, style);
     }
 
     bool KeepOutOfCentralDock(const char* title)
@@ -1555,20 +1514,32 @@ namespace Manifold::UI
         const bool escape = focused && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
         ImGui::Spacing();
         DialogChoice choice = DialogChoice::None;
-        ImGui::BeginDisabled(!okEnabled);
-        if (AccentButton(ok, Px(100.0f, 0.0f)) || (enter && okEnabled))
-            choice = DialogChoice::Ok;
-        ImGui::EndDisabled();
+        std::vector<Layout::Size> cells{ Layout::Size::Fit().Min(100.0f) };
+        if (cancel)
+            cells.push_back(Layout::Size::Fit().Min(100.0f));
+        Layout::Row row("##dialogbuttons", std::move(cells), Layout::RowOptions{ .Gap = Layout::Space::M });
+        Layout::ButtonStyle wide;
+        wide.Width = Layout::Size::Fill();
+        row.Cell([&] {
+            ImGui::BeginDisabled(!okEnabled);
+            wide.Kind = Layout::ButtonKind::Accent;
+            if (Layout::Button(ok, wide) || (enter && okEnabled))
+                choice = DialogChoice::Ok;
+            ImGui::EndDisabled();
+        });
         if (cancel)
         {
-            ImGui::SameLine();
-            if (ImGui::Button(cancel, Px(100.0f, 0.0f)) || escape)
-                choice = DialogChoice::Cancel;
+            row.Cell([&] {
+                wide.Kind = Layout::ButtonKind::Normal;
+                if (Layout::Button(cancel, wide) || escape)
+                    choice = DialogChoice::Cancel;
+            });
         }
         else if (escape)
         {
             choice = DialogChoice::Cancel;
         }
+        row.End();
         if (choice == DialogChoice::Cancel)
             ImGui::CloseCurrentPopup();
         return choice;

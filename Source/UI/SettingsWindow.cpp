@@ -8,6 +8,7 @@
 #include "Core/BuildInfo.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Target/Process.h"
+#include "Layout/Layout.h"
 #include "UI/Fonts.h"
 #include "UI/Shortcuts.h"
 #include "UI/UiScale.h"
@@ -935,6 +936,25 @@ namespace Manifold::UI
         {
             if (ImGui::Button(ICON_FA_TACHOMETER_ALT "  Open Profiler", ImVec2(profilerButton, 0.0f)))
                 m_workspace.OpenProfiler();
+            list.EndRow();
+        }
+
+        if (list.Row("Layout Checks", "Outlines content that is cut off or leaves its place, and lists it (" + BindingText(Command::OpenLayoutProblems, CurrentBinding(Command::OpenLayoutProblems)) + ").", toggle))
+        {
+            if (ToggleSwitch("##layoutchecks", &settings.LayoutChecks))
+            {
+                Layout::Audit::SetEnabled(settings.LayoutChecks);
+                changed = true;
+            }
+            list.EndRow();
+        }
+        const float layoutButton = std::round(Px(210.0f));
+        if (list.Row("Layout Problems", "What the layout checks found, per window; hover a row to see it on screen.", layoutButton))
+        {
+            Layout::ButtonStyle open;
+            open.Width = Layout::Size::Fixed(210.0f);
+            if (Layout::Button(ICON_FA_RULER_COMBINED "  Open Layout Problems", open))
+                m_workspace.OpenLayoutProblems();
             list.EndRow();
         }
 

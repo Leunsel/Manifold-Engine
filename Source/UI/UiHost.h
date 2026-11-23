@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Layout/Rules.h"
+#include "Layout/Size.h"
 #include "Lua/UiModel.h"
 
 #include "imgui.h"
@@ -34,6 +36,11 @@ namespace Manifold::UI
         std::vector<Rect> Rects;
     };
 
+    // ∑ The host of every script window (manifold.ui): it turns the model's
+    // widgets into the layout system's rows, regions, fields, cards and texts,
+    // so a script gets the same rules as the program's own windows without
+    // asking for them, and it keeps each window at least as wide as its
+    // content's minimum. Rules() is what its windows are drawn with.
     class UiHost
     {
     public:
@@ -50,6 +57,8 @@ namespace Manifold::UI
         void DrawToolbar(float right, float y);
         float StatusWidth(float gap);
         void DrawStatus(float& x, float y, float gap);
+
+        Layout::Rules& Rules() { return m_rules; }
 
         static ImVec4 Color(std::string_view name, ImVec4 fallback);
         static std::string IconText(std::string_view icon, std::string_view text);
@@ -96,6 +105,10 @@ namespace Manifold::UI
         void PruneTextures();
         void MenuItems(const std::vector<Lua::UiSlot>& slots, const std::string& prefix);
 
+        Layout::Size SizeOf(const Lua::UiNode& node) const;
+        float ContentMinimum(int window) const;
+        void DrawRoot(Lua::UiNode& window);
+
         Engine& m_engine;
         Shell& m_shell;
         Lua::UiModel* m_model = nullptr;
@@ -103,23 +116,16 @@ namespace Manifold::UI
         int m_depth = 0;
         bool m_inGrid = false;
         bool m_cell = false;
-        std::map<int, float> m_rowWidths;
-        // ∑ layout of fields: where labels go (inherited from the window and its
-        // containers), the aligned label column of the current container, the
-        // share of a row the widget being drawn gets, and the width a slotted
-        // container's content stays within
+        // ∑ fields' labels: where they go (inherited from the window and its
+        // containers) and the aligned label column of the current container
         std::string m_labelPosition = "left";
         float m_labelWidth = 0.0f;
         float m_fieldWidth = 0.0f; // the last field's own width (design mode notes it per widget)
         bool m_labelChosen = false; // a window or container set labelPosition
-        float m_rowSlot = 0.0f;
         bool m_inRow = false;
-        float m_limit = 0.0f;
-        float m_limitStart = 0.0f;
-        std::map<int, float> m_itemWidths;
-        float Avail() const;
-        float SlotWidth(const Lua::UiNode& node) const;
-        float FieldLayout(const Lua::UiNode& node, const std::string& side);
+        Layout::Rules m_rules;
+        std::map<int, float> m_contentMinimum; // per window: the least width its content takes, pixels, from the last frame
+        float FieldLayout(const Lua::UiNode& node, const std::string& side, float reserve);
         std::map<int, Texture> m_textures;
         std::map<int, CanvasState> m_canvases;
         std::uint64_t m_textureGeneration = 0;

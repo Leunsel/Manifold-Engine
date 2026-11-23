@@ -157,6 +157,13 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Generated\LuaDocs.cpp" />
     <ClCompile Include="..\Source\Generated\ManagedDumperImage.cpp" />
     <ClCompile Include="..\Source\Generated\ShippedModules.cpp" />
+    <ClCompile Include="..\Source\Layout\Audit.cpp" />
+    <ClCompile Include="..\Source\Layout\Components.cpp" />
+    <ClCompile Include="..\Source\Layout\Containers.cpp" />
+    <ClCompile Include="..\Source\Layout\Region.cpp" />
+    <ClCompile Include="..\Source\Layout\Rules.cpp" />
+    <ClCompile Include="..\Source\Layout\Size.cpp" />
+    <ClCompile Include="..\Source\Layout\Typography.cpp" />
     <ClCompile Include="..\Source\Lua\AutorunModules.cpp" />
     <ClCompile Include="..\Source\Lua\ConsoleHistory.cpp" />
     <ClCompile Include="..\Source\Lua\DocAnnotations.cpp" />
@@ -268,6 +275,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\TableFileTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
     <ClCompile Include="..\Tests\TextTests.cpp" />
+    <ClCompile Include="..\Tests\UiLayoutTests.cpp" />
     <ClCompile Include="..\Tests\UnrealTests.cpp" />
     <ClCompile Include="..\Tests\WatchStress.cpp" />
     <ClCompile Include="..\Tests\WorkTests.cpp" />

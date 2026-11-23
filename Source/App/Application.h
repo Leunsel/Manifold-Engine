@@ -23,6 +23,7 @@ namespace Manifold
         std::vector<std::string> Open;
         std::filesystem::path ProfileReport;
         int ProfileSeconds = 10;
+        bool LayoutAudit = false;
     };
 
     class Application final : private WindowHost::Client, public UI::Shell

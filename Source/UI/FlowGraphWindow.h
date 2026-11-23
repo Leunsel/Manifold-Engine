@@ -43,8 +43,8 @@ namespace Manifold::UI
 
         Workspace& m_workspace;
         Disasm::FlowGraph m_graph;
-        Layout::Result m_layout;
-        std::vector<Layout::Size> m_sizes;
+        Graph::Result m_layout;
+        std::vector<Graph::Size> m_sizes;
         std::vector<std::uint64_t> m_history;
         std::uint64_t m_entry = 0;
         std::uint64_t m_generation = 0;
