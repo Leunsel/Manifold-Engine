@@ -73,6 +73,9 @@ namespace Manifold
         const SettingChoice kSignatureCopyFormat{ { "aob", "code", "array", "autoassembler" },
             [](const Settings& s) { return s.SignatureCopyFormat; },
             [](Settings& s, int value) { s.SignatureCopyFormat = value; } };
+        const SettingChoice kSignatureRegisters{ { "keep", "sib", "all" },
+            [](const Settings& s) { return s.SignatureRegisters; },
+            [](Settings& s, int value) { s.SignatureRegisters = value; } };
         const SettingChoice kAppearance{ { "dark", "light", "system" },
             [](const Settings& s) { return static_cast<int>(s.Theme.Mode); },
             [](Settings& s, int value) { s.Theme.Mode = static_cast<ThemeMode>(value); } };
@@ -156,6 +159,7 @@ namespace Manifold
             { "Signatures", "Offsets", &kSignatureOffsets },
             { "Signatures", "Immediates", &kSignatureImmediates },
             { "Signatures", "ImmediateThreshold", &Settings::SignatureImmediateThreshold },
+            { "Signatures", "Registers", &kSignatureRegisters },
             { "Signatures", "MaxBytes", &Settings::SignatureMaxBytes, 8, 1024 },
             { "Signatures", "MinBytes", &Settings::SignatureMinBytes, 0, 256 },
             { "Signatures", "StopAtFunctionEnd", &Settings::SignatureStopAtFunctionEnd },

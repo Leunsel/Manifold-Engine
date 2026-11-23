@@ -135,6 +135,8 @@ namespace Manifold::Disasm
         std::uint8_t PrefixEnd = 0;
         std::uint8_t ModRm = 0xFF;
         std::uint8_t Sib = 0xFF;
+        // ModRM.reg is an operand register, not an opcode extension.
+        bool RegisterInReg = false;
         std::vector<InstructionField> Fields;
     };
 
