@@ -528,13 +528,12 @@ namespace Manifold::UI
         }
     }
 
-    std::string CodeFilterWindow::Instruction(std::uint64_t address) const
+    void CodeFilterWindow::Instruction(std::uint64_t address) const
     {
         Engine& engine = m_workspace.Core();
         if (!engine.HasProcess())
-            return {};
-        const Disasm::Instruction instruction = engine.Disassembler().Read(*engine.Process(), address, &engine.Symbols());
-        return instruction.Valid ? instruction.Text() : "??";
+            return;
+        AsmInstruction(engine.Disassembler().Read(*engine.Process(), address, &engine.Symbols()));
     }
 
     void CodeFilterWindow::ResultRow(const CodeCandidate& candidate, int index)
@@ -569,7 +568,7 @@ namespace Manifold::UI
                 Layout::Muted("start");
         }
         ImGui::TableNextColumn();
-        Layout::Text(Instruction(candidate.Address), { .Font = Fonts::Mono() });
+        Instruction(candidate.Address);
         ImGui::TableNextColumn();
         Layout::Muted(CodeSourceText(candidate.Sources));
     }
