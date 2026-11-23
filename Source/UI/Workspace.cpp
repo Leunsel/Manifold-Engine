@@ -32,6 +32,7 @@
 #include "UI/RecordEditor.h"
 #include "UI/ScriptWindow.h"
 #include "UI/SettingsWindow.h"
+#include "UI/SignatureWindow.h"
 #include "UI/StaticPointersWindow.h"
 #include "UI/StructureWindow.h"
 #include "UI/TableFilesWindow.h"
@@ -161,6 +162,7 @@ namespace Manifold::UI
         drawOne("Assembly search", m_asmSearch);
         drawOne("Byte search", m_byteSearch);
         drawOne("Static pointers", m_staticPointers);
+        drawOne("Signature maker", m_signatures);
         drawOne("Pointer scan", m_pointerScan);
         drawOne("Breakpoints", m_breakpoints);
         drawOne("Thread list", m_threadList);
@@ -234,6 +236,7 @@ namespace Manifold::UI
         case Command::OpenUnreal:
         case Command::OpenPointerScan:
         case Command::OpenStaticPointers:
+        case Command::OpenSignatureMaker:
         case Command::OpenFormEditor:
         case Command::OpenOpcodeConverter:
         case Command::OpenRecordDebug:
@@ -264,6 +267,7 @@ namespace Manifold::UI
         case Command::OpenUnreal: OpenUnreal(); break;
         case Command::OpenPointerScan: OpenPointerScan(); break;
         case Command::OpenStaticPointers: OpenStaticPointers(); break;
+        case Command::OpenSignatureMaker: OpenSignatureMaker(); break;
         case Command::OpenFormEditor: OpenFormEditor(); break;
         case Command::OpenOpcodeConverter: OpenOpcodeConverter(); break;
         case Command::OpenRecordDebug: OpenRecordDebug(); break;
@@ -632,6 +636,33 @@ namespace Manifold::UI
         if (!m_staticPointers)
             m_staticPointers = std::make_unique<StaticPointersWindow>(*this);
         m_staticPointers->Show();
+    }
+
+    void Workspace::OpenSignatureMaker(std::uint64_t address, bool make)
+    {
+        if (!m_signatures)
+            m_signatures = std::make_unique<SignatureWindow>(*this);
+        if (make && address)
+            m_signatures->Make(address);
+        else
+            m_signatures->Prepare(address);
+    }
+
+    void Workspace::OpenSignatureMaker(const std::string& expression)
+    {
+        if (!m_signatures)
+            m_signatures = std::make_unique<SignatureWindow>(*this);
+        m_signatures->MakeWhenReady(expression);
+    }
+
+    void Workspace::CopySignature(std::uint64_t address)
+    {
+        if (!m_signatures)
+        {
+            m_signatures = std::make_unique<SignatureWindow>(*this);
+            m_signatures->Hide();
+        }
+        m_signatures->Copy(address);
     }
 
     void Workspace::OpenPointerScan(std::uint64_t address)

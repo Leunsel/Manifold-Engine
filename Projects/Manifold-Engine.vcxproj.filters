@@ -93,6 +93,9 @@
     <ClCompile Include="..\Source\App\SettingsStore.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\SignatureSettings.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Sounds.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -196,6 +199,9 @@
       <Filter>Source\Disasm</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Disasm\OpcodeConvert.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Disasm\Signature.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp">
@@ -310,6 +316,9 @@
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaSignature.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp">
@@ -597,6 +606,9 @@
     <ClCompile Include="..\Source\UI\Shortcuts.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\SignatureWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\SplashScreen.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -673,6 +685,9 @@
       <Filter>Source\App</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\SettingsStore.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\SignatureSettings.h">
       <Filter>Source\App</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\Sounds.h">
@@ -792,6 +807,9 @@
     <ClInclude Include="..\Source\Disasm\OpcodeConvert.h">
       <Filter>Source\Disasm</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Disasm\Signature.h">
+      <Filter>Source\Disasm</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Disasm\UniqueAob.h">
       <Filter>Source\Disasm</Filter>
     </ClInclude>
@@ -877,6 +895,9 @@
       <Filter>Source\Lua</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Lua\LuaRtti.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaSignature.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Lua\LuaSnapshot.h">
@@ -1165,6 +1186,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Shortcuts.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\SignatureWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\SplashScreen.h">

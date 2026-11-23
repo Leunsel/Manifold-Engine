@@ -219,6 +219,8 @@ namespace Manifold::Autorun
             return "Unreal Engine support is built into the program now (Extensions > Unreal Engine, manifold.unreal)";
         if (head.find("__MANIFOLD_RTTI_RUNTIME__") != std::string_view::npos)
             return "C++ run-time type information is built into the program now (Extensions > C++ RTTI, manifold.rtti; ManifoldRTTI still works)";
+        if (head.find("Manifold-SigMaker") != std::string_view::npos && head.find("NAME") != std::string_view::npos)
+            return "The signature maker is built into the program now (Copy Signature and Signature Maker in the memory viewer, manifold.signature; ManifoldSigMaker still works)";
         return nullptr;
     }
 

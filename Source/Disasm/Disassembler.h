@@ -109,6 +109,35 @@ namespace Manifold::Disasm
         std::uint32_t FlagsUndefined = 0;
     };
 
+    enum class FieldKind : std::uint8_t
+    {
+        Displacement,
+        Immediate,
+        Relative
+    };
+
+    // A number encoded in an instruction: where its bytes sit and what it is.
+    struct InstructionField
+    {
+        std::uint8_t Offset = 0;
+        std::uint8_t Size = 0;
+        FieldKind Kind = FieldKind::Immediate;
+        bool RipRelative = false;
+        bool Absolute = false;
+        std::int64_t Value = 0;
+    };
+
+    // The parts of an encoded instruction: prefixes (legacy, REX, VEX/EVEX/XOP),
+    // the opcode bytes, ModRM/SIB and the numbers.
+    struct InstructionLayout
+    {
+        std::uint8_t Length = 0;
+        std::uint8_t PrefixEnd = 0;
+        std::uint8_t ModRm = 0xFF;
+        std::uint8_t Sib = 0xFF;
+        std::vector<InstructionField> Fields;
+    };
+
     std::string FlagNames(std::uint32_t mask);
     std::vector<std::string> ExplainFacts(const InstructionFacts& facts);
 
@@ -151,6 +180,7 @@ namespace Manifold::Disasm
         std::optional<std::uint64_t> EffectiveAddress(const Instruction& instruction, const RegisterValues& registers) const;
         std::optional<InstructionFacts> Facts(const Instruction& instruction) const;
         std::uint16_t AddressBytes(const Instruction& instruction, const std::function<bool(std::uint64_t)>& isAddress = {}) const;
+        std::optional<InstructionLayout> Layout(const Instruction& instruction) const;
         std::optional<std::uint64_t> PreviousStart(const Target::Process& process, std::uint64_t address) const;
         std::optional<std::uint64_t> PreviousStart(const std::uint8_t* buffer, std::size_t size, std::uint64_t base, std::uint64_t address) const;
         // The address the given number of lines above an address. Stops only

@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 27 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 28 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -267,6 +267,16 @@ The speedhack: the opened process's clocks run faster or slower by a factor. Set
 | `manifold.speed.disable()` | true, or nil, error | Goes back to normal speed. The hooks are taken out when the process's clocks still equal the real ones; otherwise they stay and pass time on at normal speed. |
 | `manifold.speed.remove()` | true, or nil, error | Takes the hooks out and restores the time functions byte for byte. After a speed other than 1 the process's clocks jump to the real time at that moment, backwards if the game ran faster. |
 | `manifold.speed.status()` | `{ enabled, speed, installed, clockShifted, hooks }` | The state of the speedhack: `installed` says whether the hooks are in the process, `clockShifted` whether its clocks differ from the real ones, and `hooks` lists `{ name, address }` for every redirected time function. |
+
+## manifold.signature
+
+Byte signatures: a pattern for an address that matches nowhere else, so a script or an `aobscanmodule` finds the place again after the game is updated. `make` grows the pattern from the address one byte at a time, with the numbers that move between builds (addresses, jump distances, structure offsets, large constants) as wildcards, until no other place in the module (or the process) matches it. The defaults are the ones under Settings > Signatures; the options of a call override them for that call. `parse` reads signatures in the shapes other tools write, and `find` searches for one. Copy Signature and the Signature Maker in the memory viewer use the same functions.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.signature.make(address, options?)` | `{ pattern, mask, code, array, autoAssembler, address, start, offset, length, wildcards, instructions, module, scope, uniqueIn, verified, functionEnd, seconds, bytes }`, or nil, error | Makes the shortest pattern from the address that matches only there. `pattern` is it as an AoB (`"48 8B 05 ?? ?? ?? ?? 8B 88"`), `mask` the matching `x`/`?` string, `code`, `array` and `autoAssembler` the other ways to write it; `bytes` lists `{ value, wild, role }` per byte. With `options.offset` the pattern may start at an instruction up to `maxOffset` bytes before or after the address when that saves `minSaving` bytes: `start` is where it begins and `offset` is `address - start`, so the address is a scan hit plus `offset`. `options.scope` is `"module"` (unique in the address's module, like `aobscanmodule`) or `"process"`; `codeOnly` counts executable memory only. `branches` and `offsets` take `"keep"`, `"long"` (32-bit ones only) or `"all"`; `immediates` takes `"keep"`, `"large"` (from `immediateThreshold` up) or `"all"`; `maskAddresses` false keeps RIP-relative and absolute addresses. `maxBytes` (up to 1024) and `minBytes` bound the length, `stopAtFunctionEnd` never goes past a ret, jmp or int3. `wildcard` (`"??"`, `"?"`, `"**"`, `"*"`), `spaces` and `label` shape the text. `functionEnd` is set when the pattern reaches past the end of the function. `ME-2018` when no pattern within `maxBytes` is unique; a module-wide search takes milliseconds, a process-wide one reads all memory. |
+| `manifold.signature.parse(text)` | `{ pattern, length, fixed, wildcards, partial, source, module, notes }`, or nil, error | Reads a signature as other tools write it: `"48 8B ?? ??"`, `"48 8B ? ?"`, `"48 8B ** *"`, `"488B????"`, the C string with its mask (`"\x48\x8B\x00", "xx?"`), a C array (`{ 0x48, 0x8B }`), nibble wildcards (`"4?"`) or a whole `aobscanmodule(name,module,bytes)` line, with comment and header lines around it. `pattern` is it written as `manifold.memory.scan` takes it, `partial` counts the half-known bytes, `source` says which shape it was, `module` is the module of an `aobscanmodule` line, and `notes` lists what was read in a way that may surprise (a C string without a mask keeps its zeros). `ME-2003` when it does not read as a pattern. |
+| `manifold.signature.find(text, options?)` | list of integers, or nil, error | Reads a signature like `parse` and returns where it matches, in address order: in `options.module`, else in the module of an `aobscanmodule` line, else in the whole process. `options.executable` true searches code only; `options.limit` (1 to 100000, default 100) stops after that many hits. No hit is an empty list. |
 
 ## manifold.dotnet
 

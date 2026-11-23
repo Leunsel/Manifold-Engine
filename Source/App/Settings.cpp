@@ -55,6 +55,24 @@ namespace Manifold
         const SettingChoice kPalette{ { "standard", "red", "green", "blue" },
             [](const Settings& s) { return static_cast<int>(s.Theme.Family); },
             [](Settings& s, int value) { s.Theme.Family = static_cast<ThemeFamily>(value); } };
+        const SettingChoice kSignatureWildcard{ { "double", "single", "doublestar", "star" },
+            [](const Settings& s) { return s.SignatureWildcard; },
+            [](Settings& s, int value) { s.SignatureWildcard = value; } };
+        const SettingChoice kSignatureScope{ { "module", "process" },
+            [](const Settings& s) { return s.SignatureScope; },
+            [](Settings& s, int value) { s.SignatureScope = value; } };
+        const SettingChoice kSignatureBranches{ { "keep", "long", "all" },
+            [](const Settings& s) { return s.SignatureBranches; },
+            [](Settings& s, int value) { s.SignatureBranches = value; } };
+        const SettingChoice kSignatureOffsets{ { "keep", "long", "all" },
+            [](const Settings& s) { return s.SignatureOffsets; },
+            [](Settings& s, int value) { s.SignatureOffsets = value; } };
+        const SettingChoice kSignatureImmediates{ { "keep", "large", "all" },
+            [](const Settings& s) { return s.SignatureImmediates; },
+            [](Settings& s, int value) { s.SignatureImmediates = value; } };
+        const SettingChoice kSignatureCopyFormat{ { "aob", "code", "array", "autoassembler" },
+            [](const Settings& s) { return s.SignatureCopyFormat; },
+            [](Settings& s, int value) { s.SignatureCopyFormat = value; } };
         const SettingChoice kAppearance{ { "dark", "light", "system" },
             [](const Settings& s) { return static_cast<int>(s.Theme.Mode); },
             [](Settings& s, int value) { s.Theme.Mode = static_cast<ThemeMode>(value); } };
@@ -129,6 +147,23 @@ namespace Manifold
             { "Debugger", "DissectRtti", &Settings::StructureRtti },
             { "Debugger", "CodeShare", &Settings::MemoryCodeShare, 100, 950 },
             { "Mono", "AutoExplorer", &Settings::AutoExplorer },
+            { "Signatures", "Wildcard", &kSignatureWildcard },
+            { "Signatures", "Spaces", &Settings::SignatureSpaces },
+            { "Signatures", "Scope", &kSignatureScope },
+            { "Signatures", "CodeOnly", &Settings::SignatureCodeOnly },
+            { "Signatures", "MaskAddresses", &Settings::SignatureMaskAddresses },
+            { "Signatures", "Branches", &kSignatureBranches },
+            { "Signatures", "Offsets", &kSignatureOffsets },
+            { "Signatures", "Immediates", &kSignatureImmediates },
+            { "Signatures", "ImmediateThreshold", &Settings::SignatureImmediateThreshold },
+            { "Signatures", "MaxBytes", &Settings::SignatureMaxBytes, 8, 1024 },
+            { "Signatures", "MinBytes", &Settings::SignatureMinBytes, 0, 256 },
+            { "Signatures", "StopAtFunctionEnd", &Settings::SignatureStopAtFunctionEnd },
+            { "Signatures", "AobOffset", &Settings::SignatureOffset },
+            { "Signatures", "MaxOffset", &Settings::SignatureMaxOffset, 1, 512 },
+            { "Signatures", "MinSaving", &Settings::SignatureMinSaving, 0, 64 },
+            { "Signatures", "CopyFormat", &kSignatureCopyFormat },
+            { "Signatures", "Label", &Settings::SignatureLabel },
             { "Recent", "LastProcess", &Settings::LastProcess },
             { "Theme", "Palette", &kPalette },
             { "Theme", "Appearance", &kAppearance },

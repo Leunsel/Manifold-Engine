@@ -540,6 +540,9 @@ namespace Manifold::UI
                 m_workspace.OpenPointerScan();
             if (CommandItem(ICON_FA_THUMBTACK "  Find Static Pointers", Command::OpenStaticPointers))
                 m_workspace.OpenStaticPointers();
+            if (CommandItem(ICON_FA_FINGERPRINT "  Signature Maker", Command::OpenSignatureMaker))
+                m_workspace.OpenSignatureMaker(m_selected, true);
+            ItemTooltip("A unique byte pattern for the selected instruction.");
             if (CommandItem(ICON_FA_EXCHANGE_ALT "  Opcode Converter", Command::OpenOpcodeConverter))
                 m_workspace.OpenOpcodeConverter(m_selected);
             ItemTooltip("Bytes to instructions and back, at the selected address.");
@@ -1632,6 +1635,9 @@ namespace Manifold::UI
         case Command::CopyInstructions:
             CopyInstructions(m_engine.Options().ShowSymbols ? Target::AddressStyle::Name : Target::AddressStyle::ModuleOffset);
             break;
+        case Command::CopySignature:
+            m_workspace.CopySignature(m_selected);
+            break;
         case Command::CopyInstructionBytes:
         {
             std::string text;
@@ -1992,6 +1998,9 @@ namespace Manifold::UI
             m_hexSelected = *instruction.Memory.Absolute;
         }
         item(ICON_FA_PLUS "  Add This Address to the Address List", Command::AddInstructionToList);
+        item(ICON_FA_FINGERPRINT "  Copy Signature", Command::CopySignature);
+        if (ImGui::MenuItem(ICON_FA_FINGERPRINT "  Signature Maker..."))
+            m_workspace.OpenSignatureMaker(instruction.Address, true);
         if (ImGui::BeginMenu(ICON_FA_COPY "  Copy"))
         {
             item(m_engine.Options().ShowSymbols ? "Selected instructions with names" : "Selected instructions with module offsets", Command::CopyInstructions);

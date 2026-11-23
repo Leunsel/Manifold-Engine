@@ -98,11 +98,10 @@ This makes planting visible; it is not a sandbox. A script can still write the s
 | Module | Where | Global | What it does |
 | --- | --- | --- | --- |
 | `Manifold-Godot` | `modules\Engines\Godot.lua` | `ManifoldGodot` | Godot 4 runtime: StringNames, ObjectDB, ClassDB, the scene tree and method symbols (`Class::method`); fills structures and adds a *Godot Engine* menu. Godot 3 is declined with a message. |
-| `Manifold-SigMaker` | `modules\Tools\SigMaker\` | `ManifoldSigMaker` | Makes byte signatures for the selected instruction in the memory viewer, checks that they are unique in their module, and finds them again (Ctrl+Shift+F). |
 
-They are built on the program's own [manifold API](MANIFOLD-API.md) and do not run in stock Cheat Engine. Up to version 2.0.0 they were `Manifold-Godot.lua` and `Manifold-SigMaker.lua` with a `Manifold-SigMaker-Modules` folder in the root of `autorun`; such old copies are superseded by the modules and can be deleted.
+It is built on the program's own [manifold API](MANIFOLD-API.md) and does not run in stock Cheat Engine. Up to version 2.0.0 it was `Manifold-Godot.lua` in the root of `autorun`; such an old copy is superseded by the module and can be deleted, and so can an old `Manifold-SigMaker.lua` with its `Manifold-SigMaker-Modules` folder.
 
-Unreal Engine support and C++ run-time type information are built into the program (Extensions → Unreal Engine and Extensions → C++ RTTI, [`manifold.unreal`](MANIFOLD-API.md) and [`manifold.rtti`](MANIFOLD-API.md)).
+Unreal Engine support, C++ run-time type information and the signature maker are built into the program (Extensions → Unreal Engine, Extensions → C++ RTTI and Copy Signature / Signature Maker in the memory viewer; [`manifold.unreal`](MANIFOLD-API.md), [`manifold.rtti`](MANIFOLD-API.md) and [`manifold.signature`](MANIFOLD-API.md)). An installed copy of the old `Manifold-SigMaker` module is shown as built in and no longer runs; `ManifoldSigMaker` keeps working for scripts that call it.
 
 - The program skips an old `Manifold-UE.lua` or `Manifold-RTTI.lua` in its `autorun` folder (state *Built in*); those files can be deleted.
 - The global `ManifoldRTTI` of the RTTI script is still there: its functions call `manifold.rtti` and return what the script returned, so tables and scripts written against it keep working.
@@ -112,7 +111,7 @@ Building the program copies the repository's `Autorun` folder into `autorun` nex
 
 ## How they use the API
 
-- Output goes to log channels (`Godot`, `SigMaker`) with levels; listings the user asks for are info lines. Start-up lines are debug, so *Show on print* does not open the Lua engine at every start.
+- Output goes to log channels (`Godot`) with levels; listings the user asks for are info lines. Start-up lines are debug, so *Show on print* does not open the Lua engine at every start.
 - Memory is read with `manifold.memory.read`, objects as one `raw` block unpacked with `string.unpack` instead of one read per field.
 - Pattern scans use `manifold.memory.scan`, symbols `manifold.symbol`, Structure Dissect hooks `manifold.structure`, and process changes arrive through `manifold.event`. Every registration carries a key, so running a file again replaces its hooks instead of adding a second set.
 - Failures come back as error objects with an `ME-` code or the module's own code (`GODOT-STAGE`, …); menu actions catch them with `manifold.error.try` and log them with the traceback.
@@ -148,6 +147,6 @@ Checked so far, read-only, with the scripts as they were before they became modu
 
 - Crab Champions (UE 4.2x): the built-in Unreal tool resolves in 0.8 s and names and fills `GameEngine`, `World` and the pawn; RTTI named only the objects without reflection (`CSteamUserV021`), checked with the RTTI script the built-in stage replaced; Godot declines.
 - Unrailed 2 (Godot 4.6.3 .NET): Godot resolves in 0.24 s with the measured layout, names and fills the scene root, and registers 14 611 method symbols in 0.26 s; UE declines; the RTTI script left the Godot objects to Godot.
-- Headless against the test program: both modules; SigMaker with ten module-unique signatures. The Unreal tool and RTTI have their own test suites (`unreal` with a synthetic Unreal image, `rtti` with hand-built and compiler-made RTTI in the 64-bit and the 32-bit test program).
+- Headless against the test program: the Godot module. The Unreal tool, RTTI and the signature maker have their own test suites (`signatures` checks the uniqueness search against a brute-force search), (`unreal` with a synthetic Unreal image, `rtti` with hand-built and compiler-made RTTI in the 64-bit and the 32-bit test program).
 
 Not checked yet: the two modules in a real game since the move to `modules\`, UE5 and modular Unreal builds, other Godot 4 releases, the built-in RTTI on a real game (64-bit or 32-bit).

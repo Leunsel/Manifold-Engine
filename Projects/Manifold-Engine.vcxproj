@@ -123,6 +123,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\App\SessionBackup.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
     <ClCompile Include="..\Source\App\SettingsStore.cpp" />
+    <ClCompile Include="..\Source\App\SignatureSettings.cpp" />
     <ClCompile Include="..\Source\App\Sounds.cpp" />
     <ClCompile Include="..\Source\App\TableRuntime.cpp" />
     <ClCompile Include="..\Source\App\TargetSession.cpp" />
@@ -158,6 +159,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Disasm\FlowGraph.cpp" />
     <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp" />
     <ClCompile Include="..\Source\Disasm\OpcodeConvert.cpp" />
+    <ClCompile Include="..\Source\Disasm\Signature.cpp" />
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\IconNames.cpp" />
@@ -196,6 +198,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRtti.cpp" />
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaSignature.cpp" />
     <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp" />
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
@@ -293,6 +296,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\UI\ScriptWindow.cpp" />
     <ClCompile Include="..\Source\UI\SettingsWindow.cpp" />
     <ClCompile Include="..\Source\UI\Shortcuts.cpp" />
+    <ClCompile Include="..\Source\UI\SignatureWindow.cpp" />
     <ClCompile Include="..\Source\UI\SplashScreen.cpp" />
     <ClCompile Include="..\Source\UI\StaticPointersWindow.cpp" />
     <ClCompile Include="..\Source\UI\StructureWindow.cpp" />
@@ -321,6 +325,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\App\SessionBackup.h" />
     <ClInclude Include="..\Source\App\Settings.h" />
     <ClInclude Include="..\Source\App\SettingsStore.h" />
+    <ClInclude Include="..\Source\App\SignatureSettings.h" />
     <ClInclude Include="..\Source\App\Sounds.h" />
     <ClInclude Include="..\Source\App\TableRuntime.h" />
     <ClInclude Include="..\Source\App\TargetSession.h" />
@@ -360,6 +365,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Disasm\FlowGraph.h" />
     <ClInclude Include="..\Source\Disasm\FunctionBounds.h" />
     <ClInclude Include="..\Source\Disasm\OpcodeConvert.h" />
+    <ClInclude Include="..\Source\Disasm\Signature.h" />
     <ClInclude Include="..\Source\Disasm\UniqueAob.h" />
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h" />
     <ClInclude Include="..\Source\Layout\Audit.h" />
@@ -389,6 +395,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Lua\LuaModules.h" />
     <ClInclude Include="..\Source\Lua\LuaRecords.h" />
     <ClInclude Include="..\Source\Lua\LuaRtti.h" />
+    <ClInclude Include="..\Source\Lua\LuaSignature.h" />
     <ClInclude Include="..\Source\Lua\LuaSnapshot.h" />
     <ClInclude Include="..\Source\Lua\LuaUi.h" />
     <ClInclude Include="..\Source\Lua\LuaUnreal.h" />
@@ -485,6 +492,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\UI\ScriptWindow.h" />
     <ClInclude Include="..\Source\UI\SettingsWindow.h" />
     <ClInclude Include="..\Source\UI\Shortcuts.h" />
+    <ClInclude Include="..\Source\UI\SignatureWindow.h" />
     <ClInclude Include="..\Source\UI\SplashScreen.h" />
     <ClInclude Include="..\Source\UI\StaticPointersWindow.h" />
     <ClInclude Include="..\Source\UI\StructureWindow.h" />

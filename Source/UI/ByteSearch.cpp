@@ -2,6 +2,7 @@
 
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
+#include "Disasm/Signature.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Scan/Scanner.h"
 #include "Target/Process.h"
@@ -38,9 +39,12 @@ namespace Manifold::UI
             return bytes;
         }
         auto pattern = Scan::ParsePattern(text);
-        if (!pattern || pattern->Empty())
-            return std::nullopt;
-        return pattern;
+        if (pattern && !pattern->Empty())
+            return pattern;
+        std::string error;
+        if (auto signature = Disasm::ParseSignature(text, error))
+            return std::move(signature->Pattern);
+        return std::nullopt;
     }
 
     ByteSearchWindow::ByteSearchWindow(Workspace& workspace) : m_workspace(workspace)

@@ -234,6 +234,12 @@ namespace Manifold
                 m_workspace->OpenPointerScan();
             else if (window == "staticpointers")
                 m_workspace->OpenStaticPointers();
+            else if (window == "signatures")
+                m_workspace->OpenSignatureMaker();
+            else if (window.rfind("signature:", 0) == 0)
+                m_workspace->OpenSignatureMaker(window.substr(10));
+            else if (window == "signaturesettings")
+                m_workspace->OpenSettings(UI::SettingsWindow::SignaturesPage);
             else if (window == "shortcuts")
                 m_workspace->OpenShortcuts();
             else if (window == "keyboard")

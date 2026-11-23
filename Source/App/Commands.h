@@ -53,6 +53,7 @@ namespace Manifold
         OpenFormEditor,
         OpenOpcodeConverter,
         OpenRecordDebug,
+        OpenSignatureMaker,
 
         NewTable,
         OpenLastProcess,
@@ -146,6 +147,7 @@ namespace Manifold
         NopInstruction,
         CopyInstructions,
         CopyInstructionBytes,
+        CopySignature,
         InstructionAccesses,
         CodeReferences,
         FlowGraph,
