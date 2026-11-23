@@ -4,6 +4,7 @@
 #include "Core/Handle.h"
 #include "Core/Types.h"
 
+#include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -77,6 +78,17 @@ namespace Manifold::Target
         int Libraries = 0;
     };
 
+    // Bytes another part of the program changed in the process for a while
+    // (the code filter's int3s). Every read shows them as they were, and a
+    // write over one first asks their owner to put them back.
+    class ByteShadow
+    {
+    public:
+        virtual ~ByteShadow() = default;
+        virtual void Show(std::uint64_t address, std::uint8_t* buffer, std::size_t size) const = 0;
+        virtual void BeforeWrite(std::uint64_t address, std::size_t size) const = 0;
+    };
+
     class Process
     {
     public:
@@ -98,6 +110,7 @@ namespace Manifold::Target
 
         std::size_t Read(std::uint64_t address, void* buffer, std::size_t size) const;
         bool ReadExact(std::uint64_t address, void* buffer, std::size_t size) const;
+        bool ReadRaw(std::uint64_t address, void* buffer, std::size_t size) const;
         std::optional<std::uint64_t> ReadPointer(std::uint64_t address) const;
         template <class T>
         std::optional<T> ReadValue(std::uint64_t address) const
@@ -138,6 +151,8 @@ namespace Manifold::Target
         static bool DryRun();
         DryRunActivity DryActivity() const;
 
+        void SetShadow(std::shared_ptr<const ByteShadow> shadow);
+
     private:
         Process() = default;
         std::uint64_t ExportAddress(std::string_view module, std::string_view name, int depth) const;
@@ -145,6 +160,8 @@ namespace Manifold::Target
         bool DryReserve(std::uint64_t base, std::size_t size) const;
         void DryOverlay(std::uint64_t address, std::uint8_t* out, std::size_t size) const;
         bool DryInsideAllocation(std::uint64_t address, std::size_t size) const;
+        std::shared_ptr<const ByteShadow> CurrentShadow() const;
+        void ShowShadow(std::uint64_t address, void* buffer, std::size_t size) const;
 
         ProcessId m_id = ProcessId::None;
         UniqueHandle m_handle;
@@ -167,6 +184,10 @@ namespace Manifold::Target
         mutable std::map<std::uint64_t, std::vector<std::uint8_t>> m_dryAllocations;
         mutable std::map<std::uint64_t, std::uint8_t> m_dryBytes;
         inline static DryRunActivity m_dryActivity;
+
+        mutable std::mutex m_shadowLock;
+        std::shared_ptr<const ByteShadow> m_shadow;
+        std::atomic<bool> m_hasShadow{ false };
     };
 
     std::string ProtectText(std::uint32_t protect);

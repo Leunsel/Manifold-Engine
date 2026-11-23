@@ -76,6 +76,8 @@ namespace Manifold::Target
         Status Arm(std::span<const std::uint64_t> addresses);
         Status Disarm();
         Status Release();
+        Status ReleaseRange(std::uint64_t begin, std::uint64_t end);
+        bool Owns(std::uint64_t address) const;
 
         bool Installed() const;
         bool Armed() const;
@@ -86,6 +88,8 @@ namespace Manifold::Target
         std::uint64_t BlockAddress() const;
 
     private:
+        class Shadow;
+
         Status Install();
         Status Watch();
         Status Call(std::uint32_t operation);
@@ -96,9 +100,13 @@ namespace Manifold::Target
         bool Usable() const;
         void DropAgent();
         void Forget();
+        void ShowArmed();
 
         mutable std::mutex m_lock;
         std::shared_ptr<Process> m_process;
+        std::shared_ptr<Shadow> m_shadow;
+        mutable std::mutex m_shadowGuard;
+        std::shared_ptr<Shadow> m_shadowSeen;
         std::uint64_t m_block = 0;
         std::uint64_t m_call = 0;
         std::uint64_t m_table = 0;

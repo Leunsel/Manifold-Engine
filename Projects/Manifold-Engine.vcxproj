@@ -113,6 +113,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Main.cpp" />
     <ClCompile Include="..\Source\App\ActivationRunner.cpp" />
     <ClCompile Include="..\Source\App\Application.cpp" />
+    <ClCompile Include="..\Source\App\CodeFilter.cpp" />
     <ClCompile Include="..\Source\App\Commands.cpp" />
     <ClCompile Include="..\Source\App\CrashHandler.cpp" />
     <ClCompile Include="..\Source\App\Diagnostics.cpp" />
@@ -317,6 +318,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Resource.h" />
     <ClInclude Include="..\Source\App\ActivationRunner.h" />
     <ClInclude Include="..\Source\App\Application.h" />
+    <ClInclude Include="..\Source\App\CodeFilter.h" />
     <ClInclude Include="..\Source\App\Commands.h" />
     <ClInclude Include="..\Source\App\CrashHandler.h" />
     <ClInclude Include="..\Source\App\Diagnostics.h" />

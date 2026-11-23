@@ -368,6 +368,34 @@ namespace
         WaitOutside(2000);
     }
 
+    // Before the host writes over armed bytes (a script, a breakpoint), the
+    // agent puts them back: after a write over an int3 the entry would hold
+    // an original that is no longer true, and ending the round would undo
+    // the write.
+    void ReleaseRange(std::uint64_t begin, std::uint64_t end)
+    {
+        Entry* table = Table();
+        const std::uint32_t count = g_block.Count;
+        if (!g_block.Active || !table || count > kMaxEntries || begin >= end)
+            return;
+        std::uint32_t low = 0;
+        std::uint32_t high = count;
+        while (low < high)
+        {
+            const std::uint32_t middle = low + (high - low) / 2;
+            if (table[middle].Address < begin)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+        std::uint32_t last = low;
+        while (last < count && table[last].Address < end)
+            ++last;
+        Entry* part = table + low;
+        ForPages(part, last - low, [&](std::uint32_t first, std::uint32_t stop) { DisarmPage(part, first, stop); });
+        WaitRestored(part, last - low);
+    }
+
     std::uint32_t Arm()
     {
         DisarmAll();
@@ -531,6 +559,9 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldCoverCall(LPVOID parameter
     case CallRelease:
         DisarmAll();
         result = RemoveHandler();
+        break;
+    case CallReleaseRange:
+        ReleaseRange(g_block.RangeBegin, g_block.RangeEnd);
         break;
     default:
         result = ResultUnknownCall;

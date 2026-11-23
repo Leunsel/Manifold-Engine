@@ -1,11 +1,13 @@
 #include "TestKit.h"
 
+#include "App/CodeFilter.h"
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/Text.h"
 #include "Target/Coverage.h"
 #include "Target/CoverageProtocol.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
@@ -81,6 +83,8 @@ namespace Manifold::Tests
             std::uint64_t Never = 0;
             std::uint64_t Foreign = 0;
             std::map<std::uint64_t, std::uint8_t> Originals;
+            Settings* Config = nullptr;
+            std::string Module;
         };
 
         bool Start(const std::filesystem::path& path, const std::wstring& arguments, Child& child, bool pipe = false, HANDLE* output = nullptr)
@@ -419,6 +423,139 @@ namespace Manifold::Tests
             CHECK(session.Target.Alive());
         }
 
+        // Every reader sees the original bytes while the int3s are in; a write
+        // over one first takes it back, so ending the round keeps the write.
+        void CheckShadow(Session& session)
+        {
+            Engine& engine = session.Core;
+            Target::Coverage& coverage = engine.CodeCoverage();
+            const Target::Process& process = *engine.Process();
+            const std::uint64_t both[] = { session.Never, session.Action };
+            const Disasm::Instruction before = engine.Disassembler().Read(process, session.Never);
+            CHECK(coverage.Arm(both).Ok());
+            CHECK(RawByte(session, session.Never) == Target::Cover::kInt3);
+            std::uint8_t shown[4] = {};
+            CHECK_MSG(process.ReadExact(session.Never, shown, sizeof(shown)) && shown[0] == session.Originals[session.Never], session.Label + ": a read shows the int3");
+            std::uint8_t raw = 0;
+            CHECK_MSG(process.ReadRaw(session.Never, &raw, 1) && raw == Target::Cover::kInt3, session.Label + ": the raw read does not show the int3");
+            std::vector<std::uint8_t> span(64);
+            CHECK(process.Read(session.Never - 16, span.data(), span.size()) == span.size() && span[16] == session.Originals[session.Never]);
+            const Disasm::Instruction during = engine.Disassembler().Read(process, session.Never);
+            CHECK_MSG(during.Valid && during.Text() == before.Text(), session.Label + ": the disassembler sees " + during.Text() + " instead of " + before.Text());
+            CHECK(coverage.Owns(session.Never) && !coverage.Owns(session.Never + 1));
+
+            const std::uint8_t patch = 0xC3;
+            const Status written = process.Write(session.Never, &patch, 1);
+            CHECK_MSG(written.Ok(), session.Label + ": " + written.Text);
+            CHECK_MSG(StateIs(session, session.Never, Target::CoverState::Released) && RawByte(session, session.Never) == patch,
+                session.Label + ": the write over an armed byte did not release it first");
+            CHECK_MSG(StateIs(session, session.Action, Target::CoverState::Armed), session.Label + ": the write released more than its own bytes");
+            CHECK(!coverage.Owns(session.Never));
+            CHECK(coverage.Disarm().Ok());
+            CHECK_MSG(RawByte(session, session.Never) == patch, session.Label + ": ending the round undid a write");
+            CHECK(process.Write(session.Never, &session.Originals[session.Never], 1).Ok());
+            CHECK(AllOriginal(session));
+        }
+
+        // The Windows debugger sees every int3 first and passes the filter's
+        // on to the process, also with "break on all exceptions".
+        void CheckWindowsDebugger(Session& session)
+        {
+            Engine& engine = session.Core;
+            Target::Coverage& coverage = engine.CodeCoverage();
+            session.Config->UseInProcessDebugger = false;
+            const Status attached = engine.EnsureDebugger();
+            session.Config->UseInProcessDebugger = true;
+            CHECK_MSG(attached.Ok() && !engine.Debugger().UsingVeh(), session.Label + ": " + attached.Text);
+            if (!attached)
+                return;
+            engine.Debugger().SetExceptionBreak(Debug::ExceptionBreak::Always, 0, 0);
+            const std::uint64_t action[] = { session.Action, session.Leaf, session.Never };
+            CHECK(coverage.Arm(action).Ok());
+            const long before = Field(session, &Probe::Action);
+            Trigger(session);
+            CHECK_MSG(WaitFor(3000, [&] { return StateIs(session, session.Action, Target::CoverState::Hit) && StateIs(session, session.Leaf, Target::CoverState::Hit); }),
+                session.Label + ": the action was not hit under the Windows debugger");
+            CHECK(WaitFor(3000, [&] { return Field(session, &Probe::Action) >= before + 8; }));
+            Pause(200);
+            CHECK_MSG(!engine.Debugger().Broken(), session.Label + ": the Windows debugger stopped at an int3 of the code filter");
+            if (engine.Debugger().Broken())
+                engine.Debugger().Resume(Debug::ResumeMode::Continue);
+            CHECK(coverage.Disarm().Ok());
+            engine.Debugger().SetExceptionBreak(Debug::ExceptionBreak::Never, 0, 0);
+            engine.Debugger().Detach();
+            CHECK(Field(session, &Probe::Wrong) == 0);
+            CHECK(AllOriginal(session));
+            CHECK(session.Target.Alive());
+        }
+
+        bool Has(const std::vector<CodeCandidate>& candidates, std::uint64_t address)
+        {
+            return std::any_of(candidates.begin(), candidates.end(), [&](const CodeCandidate& candidate) { return candidate.Address == address; });
+        }
+
+        void CheckFilter(Session& session)
+        {
+            Engine& engine = session.Core;
+            CodeFilter& filter = engine.Filter();
+            CHECK(filter.Start(FilterRound::FilterOut).Code == ErrorCode::CodeFilterFailed);
+            CodeFilterOptions options;
+            options.Modules = { session.Module };
+            options.Calls = true;
+            const Result<CodeFilterReport> report = filter.Prepare(options);
+            CHECK_MSG(report.Ok(), session.Label + ": " + report.Error().Text);
+            if (!report)
+                return;
+            const bool is64Bit = engine.Process()->Is64Bit();
+            const CodeModuleCount& count = report->Modules.front();
+            CHECK(report->Modules.size() == 1 && report->Total == filter.Remaining() && report->Total > 50);
+            CHECK_MSG(is64Bit ? count.Unwind > 50 : count.Unwind == 0, session.Label + ": unwind entries miscounted");
+            CHECK(count.Exports >= 5 && count.Calls > 20);
+            std::printf("  %s: %zu functions (%zu unwind, %zu exports, %zu calls, %zu rejected) in %.2f s\n", session.Label.c_str(), report->Total, count.Unwind, count.Exports,
+                count.Calls, count.Rejected, report->Seconds);
+            const std::vector<CodeCandidate> all = filter.Candidates();
+            for (const std::uint64_t address : { session.Idle, session.Action, session.Leaf, session.Never })
+                CHECK_MSG(Has(all, address), session.Label + ": a test function is not a candidate: " + Hex(address));
+            CHECK(!Has(all, session.ProbeAt));
+            const auto leaf = std::find_if(all.begin(), all.end(), [&](const CodeCandidate& candidate) { return candidate.Address == session.Leaf; });
+            CHECK_MSG(leaf != all.end() && (leaf->Sources & SourceExport) && (leaf->Sources & SourceCall),
+                session.Label + ": the leaf's sources are " + (leaf != all.end() ? CodeSourceText(leaf->Sources) : std::string("none")));
+
+            for (int round = 0; round < 2; ++round)
+            {
+                const Status started = filter.Start(FilterRound::FilterOut);
+                CHECK_MSG(started.Ok(), session.Label + ": " + started.Text);
+                CHECK(filter.Running() && filter.RunningKind() == FilterRound::FilterOut);
+                CHECK(filter.Start(FilterRound::KeepOnly).Code == ErrorCode::CodeFilterFailed);
+                Pause(1200);
+                if (round == 0)
+                    CHECK_MSG(filter.LiveHits() > 0, session.Label + ": nothing ran during the first round");
+                CHECK(filter.Stop().Ok());
+            }
+            const std::vector<CodeCandidate> quiet = filter.Candidates();
+            CHECK_MSG(!Has(quiet, session.Idle) && Has(quiet, session.Action) && Has(quiet, session.Never), session.Label + ": filtering out what runs on its own went wrong");
+            const std::size_t beforeKeep = filter.Remaining();
+
+            const long calls = Field(session, &Probe::Action);
+            CHECK(filter.Start(FilterRound::KeepOnly).Ok());
+            Trigger(session);
+            CHECK(WaitFor(2000, [&] { return Field(session, &Probe::Action) >= calls + 8; }));
+            CHECK(filter.Stop().Ok());
+            const std::vector<CodeCandidate> kept = filter.Candidates();
+            std::printf("  %s: %zu after two Filter Out rounds, %zu after Keep Only\n", session.Label.c_str(), beforeKeep, kept.size());
+            CHECK_MSG(Has(kept, session.Action) && Has(kept, session.Leaf) && !Has(kept, session.Never) && !Has(kept, session.Idle), session.Label + ": Keep Only did not keep the action");
+            CHECK_MSG(kept.size() <= 12, session.Label + Format(": %zu functions are left, the action should stand out", kept.size()));
+            const std::vector<RoundRecord> history = filter.History();
+            CHECK(history.size() == 3 && history.back().Kind == FilterRound::KeepOnly && history.back().After == kept.size() && history.back().Before == beforeKeep);
+            CHECK(filter.Undo() && filter.Remaining() == beforeKeep && filter.History().size() == 2);
+            CHECK(filter.Start(FilterRound::KeepOnly).Ok());
+            CHECK(filter.Cancel().Ok() && !filter.Running() && filter.Remaining() == beforeKeep);
+            filter.Reset();
+            CHECK(!filter.Prepared() && filter.Remaining() == 0);
+            CHECK(AllOriginal(session));
+            CHECK(Field(session, &Probe::Wrong) == 0 && session.Target.Alive());
+        }
+
         std::uint64_t Export(Engine& engine, const std::string& module, const char* name)
         {
             return engine.Process()->FindExport(module, name);
@@ -437,7 +574,9 @@ namespace Manifold::Tests
             Engine engine(settings);
             Session session{ engine, target };
             session.Label = label;
+            session.Config = &settings;
             const std::string module = WideToUtf8(path.filename().wstring());
+            session.Module = module;
             const bool found = WaitFor(8000, [&]
                 {
                     if (!target.Alive())
@@ -468,6 +607,9 @@ namespace Manifold::Tests
             CheckStress(session);
             CheckSkips(session);
             CheckDebugger(session);
+            CheckShadow(session);
+            CheckWindowsDebugger(session);
+            CheckFilter(session);
             CheckRelease(session);
             CheckHostLoss(session, tests);
             engine.CloseProcess();

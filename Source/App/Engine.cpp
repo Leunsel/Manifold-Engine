@@ -35,6 +35,7 @@ namespace Manifold
         m_rtti.SetOtherEngines([this](std::uint64_t address) { return UnrealClaims(address) || m_lua->EngineScriptClaims(address); });
         m_debugger.SetLogDebugStrings(settings.LogDebugStrings);
         m_debugger.SetPreferHardware(settings.UseHardwareExecuteBreakpoints);
+        m_debugger.SetForeignBreakpoints([this](std::uint64_t address) { return m_coverage.Owns(address); });
         m_target.Mono().SetPauseCheck([this] { return m_debugger.Attached() && m_debugger.Broken(); });
         m_writes.SetGuard({ [this](const Target::Process& process, std::uint64_t address, std::uint8_t* buffer, std::size_t size) { return m_debugger.ReadAround(process, address, buffer, size); },
             [this](const Target::Process& process, std::uint64_t address, std::span<const std::uint8_t> bytes) { return m_debugger.WriteAround(process, address, bytes); } });
@@ -46,6 +47,7 @@ namespace Manifold
         CancelActivations();
         m_activation.WaitForActivation();
         m_tracer.Stop();
+        m_codeFilter.Reset();
         m_coverage.Leave();
         m_debugger.Detach();
         m_speedhack.Leave();
@@ -254,6 +256,7 @@ namespace Manifold
         m_activation.WaitForActivation();
         m_managed.CancelWork();
         m_tracer.Stop();
+        m_codeFilter.Reset();
         m_coverage.Leave();
         m_debugger.Detach();
         m_speedhack.Leave();

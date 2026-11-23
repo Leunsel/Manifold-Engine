@@ -187,6 +187,9 @@ namespace Manifold::Debug
         void SetPreferHardware(bool on) { m_preferHardware = on; }
         void PauseHeartbeat(bool paused) { m_beatPaused = paused; }
         void SimulateMissingStepBits(bool on) { m_simulateMissingStepBits = on; }
+        // int3s another part of the program set (the code filter): the process
+        // handles them itself, so the debugger passes them on.
+        void SetForeignBreakpoints(std::function<bool(std::uint64_t)> owns) { m_foreignBreakpoints = std::move(owns); }
         void SetBackend(Backend backend) { m_backend = backend; }
         Backend CurrentBackend() const { return m_backend; }
         bool UsingVeh() const { return m_backend == Backend::Veh; }
@@ -308,6 +311,7 @@ namespace Manifold::Debug
         std::atomic<bool> m_preferHardware{ false };
         std::atomic<bool> m_beatPaused{ false };
         std::atomic<bool> m_simulateMissingStepBits{ false };
+        std::function<bool(std::uint64_t)> m_foreignBreakpoints;
         bool m_is64Bit = true;
         bool m_initialBreakSeen = false;
 

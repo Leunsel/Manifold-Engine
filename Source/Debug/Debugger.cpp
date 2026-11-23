@@ -1618,7 +1618,7 @@ namespace Manifold::Debug
                 return DBG_CONTINUE;
             }
             std::uint8_t current = 0xCC;
-            if (m_process->ReadExact(at, &current, 1) && current != 0xCC)
+            if (m_process->ReadRaw(at, &current, 1) && current != 0xCC)
             {
                 ContextHolder context(m_is64Bit);
                 if (context.Read(thread.Handle))
@@ -1629,6 +1629,8 @@ namespace Manifold::Debug
                 LOG_DEBUG("Debugger", "Breakpoint at " + Hex(at) + " was already removed; the thread runs on");
                 return DBG_CONTINUE;
             }
+            if (m_foreignBreakpoints && m_foreignBreakpoints(at))
+                return DBG_EXCEPTION_NOT_HANDLED;
             if (m_breakRequested)
             {
                 m_breakRequested = false;

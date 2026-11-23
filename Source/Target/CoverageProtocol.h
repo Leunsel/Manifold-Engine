@@ -9,7 +9,7 @@
 namespace Manifold::Target::Cover
 {
     constexpr std::uint32_t kMagic = 0x564F434Du;
-    constexpr std::uint32_t kVersion = 1;
+    constexpr std::uint32_t kVersion = 2;
     constexpr std::uint32_t kMaxEntries = 1u << 21;
     constexpr std::uint8_t kInt3 = 0xCC;
 
@@ -49,7 +49,8 @@ namespace Manifold::Target::Cover
         CallWatch = 1,
         CallArm = 2,
         CallDisarm = 3,
-        CallRelease = 4
+        CallRelease = 4,
+        CallReleaseRange = 5
     };
 
     struct Entry
@@ -86,8 +87,10 @@ namespace Manifold::Target::Cover
         std::uint64_t ImageSize;
         std::uint64_t Low;
         std::uint64_t High;
+        std::uint64_t RangeBegin;
+        std::uint64_t RangeEnd;
     };
 
     static_assert(sizeof(Entry) == 24);
-    static_assert(sizeof(Block) == 120);
+    static_assert(sizeof(Block) == 136);
 }

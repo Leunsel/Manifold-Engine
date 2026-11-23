@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App/ActivationRunner.h"
+#include "App/CodeFilter.h"
 #include "App/ManagedSession.h"
 #include "App/Notifications.h"
 #include "App/SessionBackup.h"
@@ -136,6 +137,7 @@ namespace Manifold
         RttiSession& Rtti() { return m_rtti; }
         Target::Speedhack& Speed() { return m_speedhack; }
         Target::Coverage& CodeCoverage() { return m_coverage; }
+        CodeFilter& Filter() { return m_codeFilter; }
         bool UnrealClaims(std::uint64_t address) const;
         WriteHistory& Writes() { return m_writes; }
         SessionBackup& Backups() { return m_backup; }
@@ -249,5 +251,6 @@ namespace Manifold
         RttiSession m_rtti{ m_target, m_settings };
         Target::Speedhack m_speedhack;
         Target::Coverage m_coverage;
+        CodeFilter m_codeFilter{ *this };
     };
 }

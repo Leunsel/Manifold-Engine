@@ -107,6 +107,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\Source\App\ActivationRunner.cpp" />
+    <ClCompile Include="..\Source\App\CodeFilter.cpp" />
     <ClCompile Include="..\Source\App\Commands.cpp" />
     <ClCompile Include="..\Source\App\Diagnostics.cpp" />
     <ClCompile Include="..\Source\App\Engine.cpp" />

@@ -664,6 +664,7 @@ namespace Manifold::Target
         {
             if (DryRun())
                 DryOverlay(address, static_cast<std::uint8_t*>(buffer), size);
+            ShowShadow(address, buffer, size);
             return size;
         }
 
@@ -692,6 +693,8 @@ namespace Manifold::Target
         }
         if (anyRead && DryRun())
             DryOverlay(address, out, total);
+        if (anyRead)
+            ShowShadow(address, out, total);
         return anyRead ? total : 0;
     }
 
@@ -708,7 +711,36 @@ namespace Manifold::Target
         const bool read = TryReadVm(m_handle.Get(), address, buffer, size, done) && done == size;
         if (read && DryRun())
             DryOverlay(address, static_cast<std::uint8_t*>(buffer), size);
+        if (read)
+            ShowShadow(address, buffer, size);
         return read;
+    }
+
+    bool Process::ReadRaw(std::uint64_t address, void* buffer, std::size_t size) const
+    {
+        SIZE_T done = 0;
+        return m_handle.Get() && size != 0 && TryReadVm(m_handle.Get(), address, buffer, size, done) && done == size;
+    }
+
+    void Process::SetShadow(std::shared_ptr<const ByteShadow> shadow)
+    {
+        std::lock_guard lock(m_shadowLock);
+        m_shadow = std::move(shadow);
+        m_hasShadow = m_shadow != nullptr;
+    }
+
+    std::shared_ptr<const ByteShadow> Process::CurrentShadow() const
+    {
+        if (!m_hasShadow.load(std::memory_order_acquire))
+            return nullptr;
+        std::lock_guard lock(m_shadowLock);
+        return m_shadow;
+    }
+
+    void Process::ShowShadow(std::uint64_t address, void* buffer, std::size_t size) const
+    {
+        if (const std::shared_ptr<const ByteShadow> shadow = CurrentShadow())
+            shadow->Show(address, static_cast<std::uint8_t*>(buffer), size);
     }
 
     namespace
@@ -819,6 +851,8 @@ namespace Manifold::Target
             return Status::Success();
         }
 
+        if (const std::shared_ptr<const ByteShadow> shadow = CurrentShadow())
+            shadow->BeforeWrite(address, size);
         // ∑ Every page is checked before any protection changes: a range running past the end of its region used to return with
         //   the earlier pages left writable (a read-only or execute-only page stayed read-write).
         std::vector<std::pair<std::uint64_t, DWORD>> pages;

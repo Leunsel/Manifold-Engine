@@ -9,6 +9,8 @@
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
+#include <shared_mutex>
+#include <utility>
 
 #include <windows.h>
 
@@ -59,6 +61,93 @@ namespace Manifold::Target
             }
         }
     }
+
+    // The original bytes of the armed int3s, for every reader of the process,
+    // and the check that releases them before a write lands on one.
+    class Coverage::Shadow final : public ByteShadow
+    {
+    public:
+        explicit Shadow(Coverage& owner) : m_owner(&owner) {}
+
+        void Set(std::vector<std::pair<std::uint64_t, std::uint8_t>> bytes)
+        {
+            std::unique_lock lock(m_lock);
+            m_bytes = std::move(bytes);
+        }
+
+        void Clear()
+        {
+            std::unique_lock lock(m_lock);
+            m_bytes.clear();
+        }
+
+        void Detach()
+        {
+            std::unique_lock lock(m_lock);
+            m_bytes.clear();
+            m_owner = nullptr;
+        }
+
+        void Drop(std::uint64_t begin, std::uint64_t end)
+        {
+            std::unique_lock lock(m_lock);
+            const auto first = std::lower_bound(m_bytes.begin(), m_bytes.end(), begin, [](const auto& entry, std::uint64_t at) { return entry.first < at; });
+            auto last = first;
+            while (last != m_bytes.end() && last->first < end)
+                ++last;
+            m_bytes.erase(first, last);
+        }
+
+        bool Contains(std::uint64_t address) const
+        {
+            std::shared_lock lock(m_lock);
+            const auto found = std::lower_bound(m_bytes.begin(), m_bytes.end(), address, [](const auto& entry, std::uint64_t at) { return entry.first < at; });
+            return found != m_bytes.end() && found->first == address;
+        }
+
+        std::size_t Size() const
+        {
+            std::shared_lock lock(m_lock);
+            return m_bytes.size();
+        }
+
+        void Show(std::uint64_t address, std::uint8_t* buffer, std::size_t size) const override
+        {
+            const std::uint64_t end = address + size;
+            std::shared_lock lock(m_lock);
+            if (m_bytes.empty() || end <= m_bytes.front().first || address > m_bytes.back().first)
+                return;
+            auto it = std::lower_bound(m_bytes.begin(), m_bytes.end(), address, [](const auto& entry, std::uint64_t at) { return entry.first < at; });
+            for (; it != m_bytes.end() && it->first < end; ++it)
+                buffer[it->first - address] = it->second;
+        }
+
+        void BeforeWrite(std::uint64_t address, std::size_t size) const override
+        {
+            thread_local bool inside = false;
+            if (inside)
+                return;
+            Coverage* owner = nullptr;
+            {
+                std::shared_lock lock(m_lock);
+                const auto it = std::lower_bound(m_bytes.begin(), m_bytes.end(), address, [](const auto& entry, std::uint64_t at) { return entry.first < at; });
+                if (it == m_bytes.end() || it->first >= address + size)
+                    return;
+                owner = m_owner;
+            }
+            if (!owner)
+                return;
+            inside = true;
+            if (Status released = owner->ReleaseRange(address, address + size); !released)
+                LOG_WARN("CodeFilter", "The code filter's breakpoints under a write at " + Hex(address) + " could not be taken back first: " + released.Text);
+            inside = false;
+        }
+
+    private:
+        Coverage* m_owner = nullptr;
+        mutable std::shared_mutex m_lock;
+        std::vector<std::pair<std::uint64_t, std::uint8_t>> m_bytes;
+    };
 
     const char* CoverSkipText(CoverSkip skip)
     {
@@ -117,6 +206,15 @@ namespace Manifold::Target
 
     void Coverage::Forget()
     {
+        if (m_shadow)
+        {
+            m_shadow->Detach();
+            if (m_process)
+                m_process->SetShadow(nullptr);
+            m_shadow.reset();
+            std::lock_guard guard(m_shadowGuard);
+            m_shadowSeen.reset();
+        }
         m_process.reset();
         m_block = 0;
         m_call = 0;
@@ -133,6 +231,14 @@ namespace Manifold::Target
         std::lock_guard lock(m_lock);
         Forget();
         m_process = std::move(process);
+        if (!m_process)
+            return;
+        m_shadow = std::make_shared<Shadow>(*this);
+        m_process->SetShadow(m_shadow);
+        {
+            std::lock_guard guard(m_shadowGuard);
+            m_shadowSeen = m_shadow;
+        }
         if (!Usable() || Process::DryRun())
             return;
         if (Adopt())
@@ -283,6 +389,7 @@ namespace Manifold::Target
             if (Status disarmed = Call(Cover::CallDisarm); !disarmed)
                 return disarmed;
             m_armed = false;
+            m_shadow->Clear();
         }
         if (Status reserved = Reserve(std::max<std::size_t>(sorted.size(), 1)); !reserved)
             return reserved;
@@ -303,9 +410,11 @@ namespace Manifold::Target
         if (Status written = WriteField(*m_process, m_block, offsetof(Cover::Block, Count), count); !written)
             return written;
         m_count = count;
-        if (Status armed = Call(Cover::CallArm); !armed)
-            return armed;
+        const Status armed = Call(Cover::CallArm);
         m_armed = count != 0;
+        ShowArmed();
+        if (!armed)
+            return armed;
         return Status::Success();
     }
 
@@ -317,13 +426,56 @@ namespace Manifold::Target
         if (Status disarmed = Call(Cover::CallDisarm); !disarmed)
             return disarmed;
         m_armed = false;
+        m_shadow->Clear();
         return Status::Success();
+    }
+
+    void Coverage::ShowArmed()
+    {
+        std::vector<std::pair<std::uint64_t, std::uint8_t>> bytes;
+        if (const Result<std::vector<CoverEntry>> entries = EntriesLocked())
+        {
+            for (const CoverEntry& entry : *entries)
+            {
+                if (entry.State == CoverState::Armed || entry.State == CoverState::Restoring || entry.State == CoverState::Hit)
+                    bytes.emplace_back(entry.Address, entry.Original);
+            }
+        }
+        m_shadow->Set(std::move(bytes));
+    }
+
+    Status Coverage::ReleaseRange(std::uint64_t begin, std::uint64_t end)
+    {
+        std::lock_guard lock(m_lock);
+        if (m_installed && m_armed && Usable())
+        {
+            if (Status written = WriteField(*m_process, m_block, offsetof(Cover::Block, RangeBegin), begin); !written)
+                return written;
+            if (Status written = WriteField(*m_process, m_block, offsetof(Cover::Block, RangeEnd), end); !written)
+                return written;
+            if (Status released = Call(Cover::CallReleaseRange); !released)
+                return released;
+        }
+        if (m_shadow)
+            m_shadow->Drop(begin, end);
+        return Status::Success();
+    }
+
+    bool Coverage::Owns(std::uint64_t address) const
+    {
+        std::shared_ptr<Shadow> shadow;
+        {
+            std::lock_guard guard(m_shadowGuard);
+            shadow = m_shadowSeen;
+        }
+        return shadow && shadow->Contains(address);
     }
 
     Status Coverage::ReleaseLocked()
     {
         Status result = Call(Cover::CallRelease);
         m_armed = false;
+        m_shadow->Clear();
         if (!result)
             return result;
         const std::uint64_t none = 0;
