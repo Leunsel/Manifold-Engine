@@ -40,6 +40,11 @@ namespace Manifold::UI
         void StartPrepare();
         void Toggle(FilterRound kind);
         void Refine();
+        void ImportText(std::string_view text, std::string_view from);
+        void ImportFile();
+        void ImportClipboard();
+        void ExportFile();
+        void ImportMenu();
         void Hotkeys();
         void MenuBar();
         void Setup();
@@ -69,6 +74,7 @@ namespace Manifold::UI
         bool m_unwind = true;
         bool m_exports = true;
         bool m_pointers = true;
+        bool m_importAdd = false;
         bool m_outDown = false;
         bool m_keepDown = false;
         bool m_collectPending = false;

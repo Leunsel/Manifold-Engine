@@ -65,6 +65,7 @@ namespace Manifold::Lua
             add(SourceCall, "call");
             add(SourceBlock, "block");
             add(SourcePointer, "pointer");
+            add(SourceImport, "import");
         }
 
         void PushRecord(lua_State* state, const RoundRecord& record)
@@ -128,6 +129,7 @@ namespace Manifold::Lua
                 SetInteger(state, "exports", count.Exports);
                 SetInteger(state, "calls", count.Calls);
                 SetInteger(state, "pointers", count.Pointers);
+                SetInteger(state, "imported", count.Imported);
                 SetInteger(state, "rejected", count.Rejected);
                 lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
             }
@@ -214,6 +216,38 @@ namespace Manifold::Lua
             return 1;
         }
 
+        int Import(lua_State* state)
+        {
+            std::size_t length = 0;
+            const char* text = luaL_checklstring(state, 1, &length);
+            const ImportMode mode = lua_toboolean(state, 2) ? ImportMode::Add : ImportMode::Replace;
+            const Result<CodeImportReport> report = Owner(state).Filter().Import(std::string_view(text, length), mode);
+            if (!report)
+                return PushFailure(state, report.Error());
+            lua_createtable(state, 0, 7);
+            SetInteger(state, "imported", report->Imported);
+            SetInteger(state, "lines", report->Lines);
+            SetInteger(state, "duplicates", report->Duplicates);
+            SetInteger(state, "rejected", report->Rejected);
+            SetInteger(state, "total", report->Total);
+            SetNumber(state, "seconds", report->Seconds);
+            lua_createtable(state, static_cast<int>(report->Problems.size()), 0);
+            for (std::size_t i = 0; i < report->Problems.size(); ++i)
+            {
+                lua_pushlstring(state, report->Problems[i].data(), report->Problems[i].size());
+                lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
+            }
+            lua_setfield(state, -2, "problems");
+            return 1;
+        }
+
+        int Export(lua_State* state)
+        {
+            const std::string text = Owner(state).Filter().ExportText();
+            lua_pushlstring(state, text.data(), text.size());
+            return 1;
+        }
+
         int StatusOf(lua_State* state)
         {
             CodeFilter& filter = Owner(state).Filter();
@@ -255,6 +289,8 @@ namespace Manifold::Lua
             { "codefilterReset", &Reset },
             { "codefilterRefine", &Refine },
             { "codefilterCandidates", &Candidates },
+            { "codefilterImport", &Import },
+            { "codefilterExport", &Export },
             { "codefilterStatus", &StatusOf },
             { "codefilterHistory", &History },
             { nullptr, nullptr },

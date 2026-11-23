@@ -2,6 +2,7 @@
 
 #include "App/Engine.h"
 #include "App/Sounds.h"
+#include "Core/Ini.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Disasm/Disassembler.h"
@@ -16,6 +17,8 @@
 #include "UI/Workspace.h"
 
 #include <algorithm>
+#include <cstring>
+#include <filesystem>
 
 namespace Manifold::UI
 {
@@ -38,6 +41,20 @@ namespace Manifold::UI
         {
             return Grouped(count) + " " + (count == 1 ? one : many);
         }
+
+        // Notepad and PowerShell may save UTF-16; the list is plain ASCII.
+        std::string FileText(std::string bytes)
+        {
+            if (bytes.size() >= 2 && static_cast<unsigned char>(bytes[0]) == 0xFF && static_cast<unsigned char>(bytes[1]) == 0xFE)
+            {
+                std::wstring wide((bytes.size() - 2) / 2, L'\0');
+                std::memcpy(wide.data(), bytes.data() + 2, wide.size() * sizeof(wchar_t));
+                return WideToUtf8(wide);
+            }
+            return bytes;
+        }
+
+        const std::vector<FileFilter> kListFiles = { { L"Address lists (*.txt)", L"*.txt" }, { L"All files", L"*.*" } };
     }
 
     CodeFilterWindow::CodeFilterWindow(Workspace& workspace) : m_workspace(workspace)
@@ -160,6 +177,87 @@ namespace Manifold::UI
         engine.Notify(LogLevel::Info, Counted(*refined, "block", "blocks") + " to filter now.");
     }
 
+    void CodeFilterWindow::ImportText(std::string_view text, std::string_view from)
+    {
+        Engine& engine = m_workspace.Core();
+        CodeFilter& filter = engine.Filter();
+        const bool add = m_importAdd && filter.Prepared() && filter.History().empty();
+        const Result<CodeImportReport> report = filter.Import(text, add ? ImportMode::Add : ImportMode::Replace);
+        if (!report)
+        {
+            engine.Notify(report.Error());
+            Sounds::Play(Sounds::Cue::Error);
+            return;
+        }
+        m_error.clear();
+        m_shownRemaining = static_cast<std::size_t>(-1);
+        m_selected = -1;
+        std::string message = (add ? "Added " : "Imported ") + Counted(report->Imported, "address", "addresses") + " from " + std::string(from);
+        if (report->Duplicates)
+            message += ", " + Counted(report->Duplicates, "duplicate", "duplicates") + " skipped";
+        if (report->Rejected)
+            message += ", " + Grouped(report->Rejected) + " rejected (the log lists them)";
+        if (add)
+            message += "; " + Grouped(report->Total) + " in the list";
+        engine.Notify(report->Rejected ? LogLevel::Warning : LogLevel::Success, message + ".");
+    }
+
+    void CodeFilterWindow::ImportFile()
+    {
+        const auto path = m_workspace.OpenFileDialog(kListFiles);
+        if (!path)
+            return;
+        const std::optional<std::string> bytes = Ini::ReadText(*path);
+        if (!bytes)
+        {
+            m_workspace.Core().Notify(LogLevel::Error, "Could not read " + WideToUtf8(path->wstring()) + ".");
+            return;
+        }
+        ImportText(FileText(*bytes), WideToUtf8(path->filename().wstring()));
+    }
+
+    void CodeFilterWindow::ImportClipboard()
+    {
+        const char* text = ImGui::GetClipboardText();
+        ImportText(text ? std::string_view(text) : std::string_view(), "the clipboard");
+    }
+
+    void CodeFilterWindow::ExportFile()
+    {
+        Engine& engine = m_workspace.Core();
+        std::string name = "codefilter.txt";
+        if (const auto main = engine.HasProcess() ? engine.Process()->MainModule() : std::nullopt)
+            name = WideToUtf8(std::filesystem::path(Utf8ToWide(main->Name)).stem().wstring()) + "-codefilter.txt";
+        const auto path = m_workspace.SaveFileDialog(kListFiles, name, L"txt");
+        if (!path)
+            return;
+        const std::size_t count = engine.Filter().Remaining();
+        if (!Ini::WriteAtomic(*path, engine.Filter().ExportText()))
+        {
+            engine.Notify(LogLevel::Error, "Could not write " + WideToUtf8(path->wstring()) + ".");
+            return;
+        }
+        engine.Notify(LogLevel::Success, "Exported " + Counted(count, "address", "addresses") + " to " + WideToUtf8(path->filename().wstring()) + ".");
+    }
+
+    void CodeFilterWindow::ImportMenu()
+    {
+        CodeFilter& filter = m_workspace.Core().Filter();
+        if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  From File..."))
+            ImportFile();
+        ItemTooltip("A text file with one address per line: hex, module+offset or a symbol. Empty lines and lines starting with # or ; are skipped.");
+        if (ImGui::MenuItem(ICON_FA_PASTE "  From Clipboard"))
+            ImportClipboard();
+        ItemTooltip("The same, from the text on the clipboard.");
+        ImGui::Separator();
+        const bool canAdd = filter.Prepared() && filter.History().empty();
+        bool add = m_importAdd && canAdd;
+        if (ImGui::MenuItem("Add to the Current List", nullptr, &add, canAdd))
+            m_importAdd = add;
+        ItemTooltip(canAdd ? "On: the addresses join the list that is there. Off: they replace it and start a new filter."
+                           : "Only before the first round. Afterwards an import replaces the list and starts a new filter.");
+    }
+
     // ∑ While the game has the focus, the two key sets start and stop a
     //   round, so the action can be done in the game without switching to
     //   this window. Only while this window is open.
@@ -193,6 +291,15 @@ namespace Manifold::UI
         {
             if (ImGui::MenuItem(ICON_FA_SYNC "  Collect Functions Again", nullptr, false, engine.HasProcess() && !running && !m_task.Running()))
                 StartPrepare();
+            if (ImGui::BeginMenu(ICON_FA_FILE_IMPORT "  Import Addresses", engine.HasProcess() && !running && !m_task.Running()))
+            {
+                ImportMenu();
+                ImGui::EndMenu();
+            }
+            if (ImGui::MenuItem(ICON_FA_FILE_EXPORT "  Export Addresses...", nullptr, false, prepared && filter.Remaining() > 0))
+                ExportFile();
+            ItemTooltip("Writes what is left as module+offset lines, which Import Addresses reads back after the game restarted.");
+            ImGui::Separator();
             if (ImGui::MenuItem(ICON_FA_UNDO "  Undo Last Step", nullptr, false, prepared && !running && !filter.History().empty()))
             {
                 filter.Undo();
@@ -374,7 +481,7 @@ namespace Manifold::UI
             ImGui::EndTable();
         }
         list.End();
-        Layout::Row actions("##cfprepare", { Layout::Size::Fit(), Layout::Size::Fill() });
+        Layout::Row actions("##cfprepare", { Layout::Size::Fit(), Layout::Size::Fit(), Layout::Size::Fill() });
         actions.Cell([&] {
             if (running)
             {
@@ -388,6 +495,15 @@ namespace Manifold::UI
             if (Layout::Button(ICON_FA_SEARCH "  Collect Functions##cfprepare", style))
                 StartPrepare();
             ImGui::EndDisabled();
+        });
+        actions.Cell([&] {
+            if (running)
+                return;
+            Layout::ButtonStyle style;
+            style.Kind = Layout::ButtonKind::Ghost;
+            style.Tooltip = "Takes the addresses from a text file instead, one per line: hex, module+offset or a symbol. Filter > Import Addresses also reads the clipboard.";
+            if (Layout::Button(ICON_FA_FILE_IMPORT "  Import Addresses...##cfimport", style))
+                ImportFile();
         });
         actions.Cell([&] {
             if (running)

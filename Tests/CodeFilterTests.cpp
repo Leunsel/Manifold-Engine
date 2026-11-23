@@ -607,6 +607,73 @@ namespace Manifold::Tests
             filter.Reset();
         }
 
+        // An address list as a user writes it: a BOM, comments, empty lines,
+        // hex with and without 0x, module+offset, a symbol, a second column,
+        // a duplicate and lines that are not code.
+        void CheckImport(Session& session)
+        {
+            Engine& engine = session.Core;
+            CodeFilter& filter = engine.Filter();
+            const std::string text = "\xEF\xBB\xBF# found with the code filter\r\n\r\n" + engine.Symbols().ModuleOffset(session.Action) + "\r\n" + "0x" + Hex(session.Leaf) + "\r\n" +
+                engine.Describe(session.Never) + "\r\n" + Hex(session.Idle) + "\tthe idle loop\r\n" + "; a note\n" + "// another note\n" + Hex(session.Leaf) + "\n" +
+                "not an address at all\n" + Hex(session.ProbeAt) + "\n0\n";
+            const Result<CodeImportReport> report = filter.Import(text);
+            CHECK_MSG(report.Ok(), session.Label + " import: " + (report ? std::string() : report.Error().Text));
+            if (!report)
+                return;
+            std::printf("  %s: imported %zu of %zu lines (%zu duplicates, %zu rejected) in %.3f s\n", session.Label.c_str(), report->Imported, report->Lines, report->Duplicates,
+                report->Rejected, report->Seconds);
+            CHECK_MSG(report->Lines == 8 && report->Imported == 4 && report->Duplicates == 1 && report->Rejected == 3 && report->Total == 4,
+                session.Label + Format(": import counted %zu lines, %zu imported, %zu duplicates, %zu rejected", report->Lines, report->Imported, report->Duplicates, report->Rejected));
+            CHECK(report->Problems.size() == 3 && report->Problems.front().starts_with("line 10,"));
+            const std::vector<CodeCandidate> imported = filter.Candidates();
+            CHECK(filter.Prepared() && filter.History().empty() && imported.size() == 4);
+            for (const std::uint64_t address : { session.Action, session.Leaf, session.Never, session.Idle })
+                CHECK_MSG(Has(imported, address), session.Label + ": the import missed " + Hex(address));
+            CHECK(std::all_of(imported.begin(), imported.end(), [](const CodeCandidate& candidate) { return candidate.Sources == SourceImport && candidate.Function == 0; }));
+            CHECK(CodeSourceText(SourceImport) == "Import");
+
+            const long calls = Field(session, &Probe::Action);
+            CHECK(filter.Start(FilterRound::KeepOnly).Ok());
+            Trigger(session);
+            CHECK(WaitFor(2000, [&] { return Field(session, &Probe::Action) >= calls + 8; }));
+            CHECK(filter.Stop().Ok());
+            const std::vector<CodeCandidate> kept = filter.Candidates();
+            CHECK_MSG(Has(kept, session.Action) && Has(kept, session.Leaf) && !Has(kept, session.Never), session.Label + ": a round on imported addresses went wrong");
+            const Result<CodeImportReport> late = filter.Import(Hex(session.Never), ImportMode::Add);
+            CHECK(!late && late.Error().Code == ErrorCode::CodeFilterFailed);
+
+            const std::string exported = filter.ExportText();
+            CHECK(exported.starts_with("# Manifold Engine code filter: " + std::to_string(kept.size()) + " addresses"));
+            const Result<CodeImportReport> back = filter.Import(exported);
+            CHECK(back.Ok() && back->Imported == kept.size() && back->Rejected == 0 && filter.History().empty());
+            CHECK(back.Ok() && filter.Candidates().size() == kept.size() && Has(filter.Candidates(), session.Action));
+
+            const Result<CodeImportReport> nothing = filter.Import("# only a comment\n\n");
+            CHECK(!nothing && nothing.Error().Code == ErrorCode::CodeFilterFailed && filter.Remaining() == kept.size());
+            const Result<CodeImportReport> noCode = filter.Import(Hex(session.ProbeAt) + "\n");
+            CHECK(!noCode && noCode.Error().Text.find("not in executable memory") != std::string::npos);
+
+            CodeFilterOptions options;
+            options.Modules = { session.Module };
+            options.Calls = true;
+            options.Pointers = false;
+            const Result<CodeFilterReport> prepared = filter.Prepare(options);
+            CHECK(prepared.Ok() && !Has(filter.Candidates(), session.Virtual));
+            const std::size_t before = filter.Remaining();
+            const Result<CodeImportReport> added = filter.Import(Hex(session.Virtual) + "\n" + Hex(session.Action) + "\n", ImportMode::Add);
+            CHECK_MSG(added.Ok() && added->Imported == 1 && added->Duplicates == 1 && added->Total == before + 1, session.Label + ": adding to the collected list went wrong");
+            const std::vector<CodeCandidate> merged = filter.Candidates();
+            CHECK(merged.size() == before + 1 && std::is_sorted(merged.begin(), merged.end(), [](const CodeCandidate& a, const CodeCandidate& b) { return a.Address < b.Address; }));
+            const auto virtualAt = std::find_if(merged.begin(), merged.end(), [&](const CodeCandidate& candidate) { return candidate.Address == session.Virtual; });
+            CHECK(virtualAt != merged.end() && virtualAt->Sources == SourceImport);
+            const auto actionAt = std::find_if(merged.begin(), merged.end(), [&](const CodeCandidate& candidate) { return candidate.Address == session.Action; });
+            CHECK(actionAt != merged.end() && !(actionAt->Sources & SourceImport));
+            CHECK(filter.Report().Total == before + 1);
+            filter.Reset();
+            CHECK(AllOriginal(session));
+        }
+
         void CheckLua(Session& session)
         {
             Engine& engine = session.Core;
@@ -635,6 +702,20 @@ namespace Manifold::Tests
                 if cf.undo() ~= true or cf.status().remaining ~= record.before - record.skipped or #cf.history() ~= 0 then return "undo" end
                 if cf.undo() ~= false then return "undo twice" end
                 if cf.reset() ~= true or cf.status().prepared then return "reset" end
+                local action = )" + std::to_string(session.Action) + R"(
+                local imported, importError = cf.import({ action, string.format("0x%X", action), "nowhere at all" })
+                if not imported then return "import: " .. tostring(importError) end
+                if imported.imported ~= 1 or imported.duplicates ~= 1 or imported.rejected ~= 1 or #imported.problems ~= 1 or imported.total ~= 1 then return "import counts" end
+                local only = cf.candidates()
+                if #only ~= 1 or only[1].address ~= action or only[1].sources[1] ~= "import" then return "import candidates" end
+                local text = cf.export()
+                if type(text) ~= "string" or not text:find("^# Manifold Engine code filter: 1 addresses") then return "export" end
+                local again = cf.import(text)
+                if not again or again.imported ~= 1 or again.rejected ~= 0 then return "import export" end
+                if pcall(cf.import, { {} }) then return "import misuse" end
+                local empty, emptyError = cf.import("")
+                if empty ~= nil or emptyError.code ~= "ME-1020" then return "import empty" end
+                if cf.reset() ~= true then return "reset after import" end
                 return "ok"
             )";
             const Status status = engine.Lua().RunWithResult(script, "codefilter", result);
@@ -706,6 +787,7 @@ namespace Manifold::Tests
             CheckWindowsDebugger(session);
             CheckFilter(session);
             CheckWithoutPointers(session);
+            CheckImport(session);
             CheckLua(session);
             CheckRelease(session);
             CheckHostLoss(session, tests);

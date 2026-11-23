@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 29
+local API_VERSION = 30
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -2073,7 +2073,7 @@ do
       { name = "options", type = "table", optional = true, keys = { modules = "table", unwind = "boolean", exports = "boolean", pointers = "boolean", calls = "boolean" } },
     },
     returns = "`{ total, seconds, modules }`, or nil, error",
-    doc = "Collects the candidates and starts a new filter (the rounds and the undo steps before are gone). `options.modules` lists module names, by default every module that is not part of Windows or Manifold's own library; `unwind`, `exports` and `pointers` (all on by default) and `calls` (on by default for 32-bit, from Settings for 64-bit) choose the sources; `pointers` takes the functions that are only reached through a pointer (virtual methods from their vtables, callbacks, function tables), from the module's relocations and, with `calls`, the code's own address references. `modules` in the result lists `{ name, functions, unwind, exports, calls, pointers, rejected }` per module. Call targets take a code dissect of each module, which takes a while in a large game. `ME-1016` for a module that is not loaded, `ME-1020` when nothing can be collected.",
+    doc = "Collects the candidates and starts a new filter (the rounds and the undo steps before are gone). `options.modules` lists module names, by default every module that is not part of Windows or Manifold's own library; `unwind`, `exports` and `pointers` (all on by default) and `calls` (on by default for 32-bit, from Settings for 64-bit) choose the sources; `pointers` takes the functions that are only reached through a pointer (virtual methods from their vtables, callbacks, function tables), from the module's relocations and, with `calls`, the code's own address references. `modules` in the result lists `{ name, functions, unwind, exports, calls, pointers, imported, rejected }` per module. Call targets take a code dissect of each module, which takes a while in a large game. `ME-1016` for a module that is not loaded, `ME-1020` when nothing can be collected.",
   }, function(options)
     return result(native.codefilterPrepare(options or EMPTY))
   end)
@@ -2128,10 +2128,42 @@ do
     return result(native.codefilterRefine(maxFunctions))
   end)
 
+  define(codefilter, "import", {
+    params = {
+      { name = "addresses", type = "string|table" },
+      { name = "options", type = "table", optional = true, keys = { add = "boolean" } },
+    },
+    returns = "`{ imported, lines, duplicates, rejected, total, problems, seconds }`, or nil, error",
+    doc = "Takes the candidates from a list of addresses instead of collecting them, like Filter > Import Addresses: a text with one address per line (hex, `module+offset`, a symbol or any address expression; empty lines and lines starting with `#`, `;` or `//` are skipped; a line with more words uses its first), or a table of addresses and texts. An address must be executable code where an instruction starts; code outside a module (JIT code) is fine. By default the list replaces the candidates and starts a new filter; `options.add` adds it to the collected list instead, which only works before the first round. `problems` holds the first 20 rejected lines with the reason. `ME-1020` when no line is an address in code, or `add` after a round.",
+  }, function(addresses, options)
+    local text = addresses
+    if type(addresses) == "table" then
+      local lines = {}
+      for i, value in ipairs(addresses) do
+        if math.type(value) == "integer" then
+          lines[i] = string.format("%X", value)
+        elseif type(value) == "string" then
+          lines[i] = value
+        else
+          misuse("manifold.codefilter.import: addresses[" .. i .. "] must be an integer or a string")
+        end
+      end
+      text = table.concat(lines, "\n")
+    end
+    return result(native.codefilterImport(text, options ~= nil and options.add == true))
+  end)
+
+  define(codefilter, "export", {
+    returns = "string",
+    doc = "What is left as text for `import` or Filter > Import Addresses: a comment header, then one `module+offset` per line, which still points at the same code after the game restarted.",
+  }, function()
+    return native.codefilterExport()
+  end)
+
   define(codefilter, "candidates", {
     params = { { name = "limit", type = "integer", optional = true } },
     returns = "list of `{ address, name, function, sources }`",
-    doc = "What is left, in address order, at most `limit` (default 1000, up to 1000000). `name` is the address as the disassembler names it, `sources` lists where it came from (`\"unwind\"`, `\"export\"`, `\"call\"`, `\"pointer\"`, `\"block\"`), `function` is set for blocks.",
+    doc = "What is left, in address order, at most `limit` (default 1000, up to 1000000). `name` is the address as the disassembler names it, `sources` lists where it came from (`\"unwind\"`, `\"export\"`, `\"call\"`, `\"pointer\"`, `\"import\"`, `\"block\"`), `function` is set for blocks.",
   }, function(limit)
     if limit ~= nil and (limit < 1 or limit > 1000000) then
       misuse("manifold.codefilter.candidates: limit must be 1 to 1000000")

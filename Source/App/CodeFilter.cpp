@@ -212,6 +212,7 @@ namespace Manifold
         add(SourceCall, "Call");
         add(SourceBlock, "Block");
         add(SourcePointer, "Pointer");
+        add(SourceImport, "Import");
         return text;
     }
 
@@ -437,6 +438,246 @@ namespace Manifold
         m_skipped = 0;
         LOG_INFO("CodeFilter", Format("%zu functions in %zu modules ready for the code filter (%.2f s)", report.Total, report.Modules.size(), report.Seconds));
         return report;
+    }
+
+    namespace
+    {
+        constexpr std::size_t kImportProblems = 20;
+
+        std::string_view Trimmed(std::string_view text)
+        {
+            if (text.starts_with("\xEF\xBB\xBF"))
+                text.remove_prefix(3);
+            while (!text.empty() && (text.front() == ' ' || text.front() == '\t' || text.front() == '\r'))
+                text.remove_prefix(1);
+            while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r'))
+                text.remove_suffix(1);
+            return text;
+        }
+
+        // A plain hex number with an optional 0x and ` or ' separators, the
+        // common case of a long list, without the expression parser.
+        std::optional<std::uint64_t> PlainHex(std::string_view text)
+        {
+            if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+                text.remove_prefix(2);
+            std::uint64_t value = 0;
+            int digits = 0;
+            for (const char c : text)
+            {
+                if (c == '`' || c == '\'')
+                    continue;
+                int digit = -1;
+                if (c >= '0' && c <= '9')
+                    digit = c - '0';
+                else if (c >= 'a' && c <= 'f')
+                    digit = c - 'a' + 10;
+                else if (c >= 'A' && c <= 'F')
+                    digit = c - 'A' + 10;
+                if (digit < 0 || ++digits > 16)
+                    return std::nullopt;
+                value = (value << 4) | static_cast<std::uint64_t>(digit);
+            }
+            return digits ? std::optional<std::uint64_t>(value) : std::nullopt;
+        }
+    }
+
+    // ∑ A line is the whole text first (an expression may hold spaces, as in
+    //   "game.exe + 1A0"), then its first word, so lists with a second column
+    //   (Copy the List, CE's "address - name") read too. An address must be
+    //   executable, decode and not hold an int3 already; outside a module is
+    //   fine (JIT code), Manifold's own library is not.
+    Result<CodeImportReport> CodeFilter::Import(std::string_view text, ImportMode mode)
+    {
+        const auto started = std::chrono::steady_clock::now();
+        const std::shared_ptr<Target::Process> process = m_engine.Process();
+        if (!process || !process->Alive())
+            return Status::Fail(ErrorCode::NoProcess);
+        {
+            std::lock_guard lock(m_lock);
+            if (m_running)
+                return Failed("a round is still running");
+            if (mode == ImportMode::Add && !m_history.empty())
+                return Failed("rounds have run already; addresses can only be added before the first round");
+        }
+        process->RefreshModules();
+        const Disasm::Disassembler& disassembler = m_engine.Disassembler();
+        Debug::Debugger& debugger = m_engine.Debugger();
+        CodeImportReport report;
+        std::map<std::uint64_t, std::uint8_t> found;
+        const auto reject = [&](std::size_t line, std::string_view shown, std::string_view why)
+            {
+                ++report.Rejected;
+                if (report.Problems.size() < kImportProblems)
+                    report.Problems.push_back(Format("line %zu, %.*s: %.*s", line, static_cast<int>(std::min<std::size_t>(shown.size(), 60)), shown.data(),
+                        static_cast<int>(why.size()), why.data()));
+            };
+        std::uint64_t lastPage = ~0ull;
+        bool lastCode = false;
+        std::size_t lineNumber = 0;
+        std::size_t at = 0;
+        while (at <= text.size())
+        {
+            const std::size_t end = std::min(text.find('\n', at), text.size());
+            const std::string_view line = Trimmed(text.substr(at, end - at));
+            at = end + 1;
+            ++lineNumber;
+            if (line.empty() || line.front() == '#' || line.front() == ';' || line.starts_with("//"))
+                continue;
+            ++report.Lines;
+            std::optional<std::uint64_t> address = PlainHex(line);
+            if (!address)
+                address = m_engine.Evaluate(line);
+            if (!address)
+            {
+                const std::size_t space = line.find_first_of(" \t,");
+                if (space != std::string_view::npos)
+                {
+                    const std::string_view word = line.substr(0, space);
+                    address = PlainHex(word);
+                    if (!address)
+                        address = m_engine.Evaluate(word);
+                }
+            }
+            if (!address)
+            {
+                reject(lineNumber, line, "not an address");
+                continue;
+            }
+            const std::uint64_t page = *address & ~0xFFFull;
+            if (page != lastPage)
+            {
+                const auto region = process->RegionAt(*address);
+                lastCode = region && region->Committed() && region->Executable() && !region->Guarded();
+                lastPage = page;
+            }
+            if (!lastCode)
+            {
+                reject(lineNumber, line, "not in executable memory");
+                continue;
+            }
+            if (const auto module = process->ModuleAt(*address); module && IsAgent(module->Name))
+            {
+                reject(lineNumber, line, "inside Manifold Engine's own library");
+                continue;
+            }
+            std::uint8_t head = 0;
+            if (!process->ReadExact(*address, &head, 1) || head == 0xCC)
+            {
+                reject(lineNumber, line, head == 0xCC ? "an int3 is there already" : "cannot be read");
+                continue;
+            }
+            if (!disassembler.Read(*process, *address).Valid)
+            {
+                reject(lineNumber, line, "no instruction starts there");
+                continue;
+            }
+            if ((debugger.Attached() && debugger.HasBreakpoint(*address)) || m_engine.Speed().Owns(*address, 1))
+            {
+                reject(lineNumber, line, "a breakpoint or the speedhack uses it");
+                continue;
+            }
+            if (found.count(*address))
+            {
+                ++report.Duplicates;
+                continue;
+            }
+            found[*address] = SourceImport;
+        }
+        std::lock_guard lock(m_lock);
+        if (m_running)
+            return Failed("a round is still running");
+        const bool add = mode == ImportMode::Add && m_prepared && m_history.empty();
+        if (found.empty() && !add)
+        {
+            if (!report.Lines)
+                return Failed("the text holds no addresses");
+            return Failed(Format("none of the %zu lines is an address in code", report.Lines) + (report.Problems.empty() ? std::string() : " (" + report.Problems.front() + ")"));
+        }
+        std::vector<CodeCandidate> candidates;
+        if (add)
+        {
+            for (const CodeCandidate& candidate : m_candidates)
+            {
+                const auto it = found.find(candidate.Address);
+                if (it != found.end())
+                {
+                    ++report.Duplicates;
+                    found.erase(it);
+                }
+            }
+            candidates = m_candidates;
+        }
+        report.Imported = found.size();
+        for (const auto& [address, sources] : found)
+            candidates.push_back({ address, sources });
+        std::sort(candidates.begin(), candidates.end(), [](const CodeCandidate& a, const CodeCandidate& b) { return a.Address < b.Address; });
+        if (candidates.size() > Target::Cover::kMaxEntries)
+            return Failed(Format("%zu addresses are more than one round can hold (%u)", candidates.size(), Target::Cover::kMaxEntries));
+        CodeFilterReport merged = add ? m_report : CodeFilterReport{};
+        std::map<std::string, std::size_t> perModule;
+        for (const auto& [address, sources] : found)
+        {
+            const auto module = process->ModuleAt(address);
+            ++perModule[module ? module->Name : std::string("(no module)")];
+        }
+        for (const auto& [name, imported] : perModule)
+        {
+            auto it = std::find_if(merged.Modules.begin(), merged.Modules.end(), [&](const CodeModuleCount& count) { return count.Module == name; });
+            if (it == merged.Modules.end())
+            {
+                merged.Modules.push_back({});
+                it = std::prev(merged.Modules.end());
+                it->Module = name;
+            }
+            it->Imported += imported;
+            it->Total += imported;
+        }
+        merged.Total = candidates.size();
+        report.Total = candidates.size();
+        report.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        merged.Seconds = report.Seconds;
+        m_candidates = std::move(candidates);
+        m_report = std::move(merged);
+        if (!add)
+        {
+            m_undo.clear();
+            m_history.clear();
+        }
+        m_prepared = true;
+        m_skipped = 0;
+        const std::string message = Format("Imported %zu addresses for the code filter (%zu lines, %zu duplicates, %zu rejected), %zu in the list", report.Imported, report.Lines,
+            report.Duplicates, report.Rejected, report.Total);
+        if (report.Problems.empty())
+        {
+            LOG_INFO("CodeFilter", message);
+        }
+        else
+        {
+            std::string details = "Rejected lines:";
+            for (const std::string& problem : report.Problems)
+                details += "\n" + problem;
+            if (report.Rejected > report.Problems.size())
+                details += Format("\nand %zu more", report.Rejected - report.Problems.size());
+            RuntimeLog::WriteDetailed(LogLevel::Warning, "CodeFilter", __FILE__, __FUNCTION__, __LINE__, message, details);
+        }
+        return report;
+    }
+
+    std::string CodeFilter::ExportText() const
+    {
+        const std::vector<CodeCandidate> candidates = Candidates();
+        const std::shared_ptr<Target::Process> process = m_engine.Process();
+        std::string text = Format("# Manifold Engine code filter: %zu addresses", candidates.size());
+        if (process)
+        {
+            if (const auto main = process->MainModule())
+                text += " in " + main->Name;
+        }
+        text += "\n# One address per line as module+offset, which stays right after the game restarts. Filter > Import Addresses reads it back.\n";
+        for (const CodeCandidate& candidate : candidates)
+            text += m_engine.Symbols().ModuleOffset(candidate.Address) + "\n";
+        return text;
     }
 
     Status CodeFilter::Start(FilterRound kind)

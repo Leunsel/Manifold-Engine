@@ -26,7 +26,8 @@ namespace Manifold
         SourceExport = 2,
         SourceCall = 4,
         SourceBlock = 8,
-        SourcePointer = 16
+        SourcePointer = 16,
+        SourceImport = 32
     };
 
     std::string CodeSourceText(std::uint8_t sources);
@@ -54,6 +55,7 @@ namespace Manifold
         std::size_t Exports = 0;
         std::size_t Calls = 0;
         std::size_t Pointers = 0;
+        std::size_t Imported = 0;
         std::size_t Rejected = 0;
         std::size_t Total = 0;
     };
@@ -62,6 +64,25 @@ namespace Manifold
     {
         std::vector<CodeModuleCount> Modules;
         std::size_t Total = 0;
+        double Seconds = 0.0;
+    };
+
+    enum class ImportMode
+    {
+        Replace,
+        Add
+    };
+
+    // What an address list import did. Problems holds the first rejected
+    // lines with their line number and the reason.
+    struct CodeImportReport
+    {
+        std::size_t Lines = 0;
+        std::size_t Imported = 0;
+        std::size_t Duplicates = 0;
+        std::size_t Rejected = 0;
+        std::size_t Total = 0;
+        std::vector<std::string> Problems;
         double Seconds = 0.0;
     };
 
@@ -98,6 +119,14 @@ namespace Manifold
         static std::vector<Target::ModuleInfo> DefaultModules(const Target::Process& process);
 
         Result<CodeFilterReport> Prepare(const CodeFilterOptions& options, Disasm::DissectProgress* progress = nullptr);
+        // Takes addresses from text, one per line (hex, module+offset, a
+        // symbol or any address expression); empty lines and lines starting
+        // with # ; or // are skipped. Replace starts a new filter with them,
+        // Add puts them into the list, but only before the first round.
+        Result<CodeImportReport> Import(std::string_view text, ImportMode mode = ImportMode::Replace);
+        // What is left as module+offset lines with a comment header, which
+        // Import reads back after the game restarted.
+        std::string ExportText() const;
         Status Start(FilterRound kind);
         Status Stop();
         Status Cancel();
