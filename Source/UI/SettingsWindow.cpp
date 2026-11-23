@@ -1244,6 +1244,18 @@ namespace Manifold::UI
             changed |= ToggleSwitch("##mapped", &settings.ScanMapped);
             list.EndRow();
         }
+        // ∑ Guard pages stay out without a switch: reading one clears its guard, and a thread stack
+        //   that grows through it then crashes the game.
+        if (list.Row("Skip No-Cache Memory", "PAGE_NOCACHE pages are device memory; reading them is slow and never finds game values.", toggle))
+        {
+            changed |= ToggleSwitch("##skipnocache", &settings.ScanSkipNoCache);
+            list.EndRow();
+        }
+        if (list.Row("Skip Write-Combined Memory", "PAGE_WRITECOMBINE pages are GPU upload buffers; reading them is very slow.", toggle))
+        {
+            changed |= ToggleSwitch("##skipwritecombine", &settings.ScanSkipWriteCombine);
+            list.EndRow();
+        }
 
         list.Section("Storage");
         const float folder = std::round(Px(130.0f));

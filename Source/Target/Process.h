@@ -46,6 +46,8 @@ namespace Manifold::Target
         bool Executable() const;
         bool CopyOnWrite() const;
         bool Guarded() const;
+        bool NoCache() const;
+        bool WriteCombine() const;
         std::uint64_t End() const { return Base + Size; }
     };
 

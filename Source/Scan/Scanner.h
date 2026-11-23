@@ -123,6 +123,8 @@ namespace Manifold::Scan
         bool Private = true;
         bool Image = true;
         bool Mapped = false;
+        bool SkipNoCache = true;
+        bool SkipWriteCombine = true;
         int Alignment = 4;
         bool PauseProcess = false;
         int Threads = 0;

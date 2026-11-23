@@ -521,6 +521,16 @@ namespace Manifold::Target
         return (Protect & PAGE_GUARD) != 0;
     }
 
+    bool RegionInfo::NoCache() const
+    {
+        return (Protect & PAGE_NOCACHE) != 0;
+    }
+
+    bool RegionInfo::WriteCombine() const
+    {
+        return (Protect & PAGE_WRITECOMBINE) != 0;
+    }
+
     std::vector<ProcessEntry> ListProcesses(bool withWindowTitles)
     {
         std::vector<ProcessEntry> list;

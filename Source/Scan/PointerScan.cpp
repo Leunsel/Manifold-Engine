@@ -345,6 +345,8 @@ namespace Manifold::Scan
         {
             if (!region.Committed() || !region.Readable() || region.Guarded())
                 continue;
+            if ((m_memory.SkipNoCache && region.NoCache()) || (m_memory.SkipWriteCombine && region.WriteCombine()))
+                continue;
             if (!m_memory.ReadOnly && !region.Writable())
                 continue;
             if (region.Type == kMappedType && !m_memory.Mapped)

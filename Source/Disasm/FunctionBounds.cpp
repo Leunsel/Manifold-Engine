@@ -211,6 +211,52 @@ namespace Manifold::Disasm
         return end;
     }
 
+    std::optional<std::uint64_t> DataTail(const Disassembler& disassembler, const Target::Process& process, std::uint64_t start, std::uint64_t end,
+        const CodeHints* hints)
+    {
+        // ∑ A JIT puts a method's float and double constants behind its code and counts them in the
+        //   code size (Mono: GameplayData:InterestRateSet reads 100.0f from +B0 and +C0, behind the
+        //   ret at +AB). The code reads them through absolute or RIP-relative operands, so the lowest
+        //   such target ahead of the reading instruction is where the data starts: an indirect jump
+        //   (switch) cannot cut it short the way a reachability walk would.
+        constexpr std::uint64_t kMaxSpan = 0x40000;
+        constexpr std::uint64_t kFiller = 16;
+        if (end <= start || end - start > kMaxSpan)
+            return std::nullopt;
+        std::uint64_t data = end;
+        std::uint64_t at = start;
+        while (at < data)
+        {
+            const std::vector<Instruction> chunk = disassembler.ReadMany(process, at, kChunk, nullptr, hints);
+            if (chunk.empty())
+                break;
+            for (const Instruction& line : chunk)
+            {
+                if (line.Address >= data)
+                    break;
+                at = line.Next();
+                if (!line.Valid || !line.Memory.Present || !line.Memory.Read || !line.Memory.Absolute || line.Kind != Flow::None)
+                    continue;
+                const std::uint64_t target = *line.Memory.Absolute;
+                if (target >= line.Next() && target < data)
+                    data = target;
+            }
+        }
+        if (data >= end)
+            return std::nullopt;
+        // ∑ The few bytes between the last ret and the first constant are the JIT's too, not code. Only
+        //   behind a ret: behind an indirect jmp the cases of a switch may follow.
+        const std::uint64_t code = CodeExtent(disassembler, process, start, data, hints);
+        if (code > start && code < data && data - code <= kFiller)
+        {
+            const std::uint64_t last = disassembler.BackUp(process, code, 1, hints);
+            const Instruction ending = disassembler.Read(process, last);
+            if (ending.Valid && ending.Kind == Flow::Return && ending.Next() == code)
+                return code;
+        }
+        return data;
+    }
+
     const char* FunctionSourceText(FunctionSource source)
     {
         switch (source)

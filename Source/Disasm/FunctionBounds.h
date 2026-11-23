@@ -36,5 +36,10 @@ namespace Manifold::Disasm
     std::optional<FunctionSpan> FindFunction(const Disassembler& disassembler, const Target::Process& process, std::uint64_t address, const CodeHints* hints,
         const FunctionClues& clues);
     std::uint64_t CodeExtent(const Disassembler& disassembler, const Target::Process& process, std::uint64_t start, std::uint64_t limit, const CodeHints* hints);
+    // Where the constants a JIT stores behind a method's code begin: the lowest
+    // address inside [start, end) that the method's own instructions read as
+    // data. Nothing when the method reads nothing of its own range.
+    std::optional<std::uint64_t> DataTail(const Disassembler& disassembler, const Target::Process& process, std::uint64_t start, std::uint64_t end,
+        const CodeHints* hints);
     const char* FunctionSourceText(FunctionSource source);
 }

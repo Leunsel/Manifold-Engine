@@ -1339,6 +1339,8 @@ namespace Manifold::UI
         options.Private = m_private;
         options.Image = m_image;
         options.Mapped = m_mapped;
+        options.SkipNoCache = m_engine.Options().ScanSkipNoCache;
+        options.SkipWriteCombine = m_engine.Options().ScanSkipWriteCombine;
         options.Alignment = m_fastScan ? std::max(1, m_alignment) : 1;
         options.PauseProcess = m_pause;
         options.Threads = m_engine.Options().ScanThreads;

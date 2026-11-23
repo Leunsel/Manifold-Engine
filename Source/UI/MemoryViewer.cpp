@@ -905,6 +905,7 @@ namespace Manifold::UI
             {
                 m_lines = disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, symbols, m_engine.CodeMap());
             }
+            MarkMethodData(buffer, readable, m_top);
         }
 
         const ImVec2 frame = ImGui::GetCursorScreenPos();
@@ -1239,6 +1240,14 @@ namespace Manifold::UI
                 if (const auto effective = disassembler.EffectiveAddress(line, info.Registers))
                     comment = "-> " + m_engine.Describe(*effective);
             }
+            else if (!line.Valid && line.Length == 4 && line.Mnemonic == "dd")
+            {
+                float number = 0.0f;
+                std::memcpy(&number, line.Bytes.data(), sizeof(number));
+                const float size = std::fabs(number);
+                if (std::isfinite(number) && size >= 1e-4f && size <= 1e9f)
+                    comment = Format("(float)%g", static_cast<double>(number));
+            }
             float commentEnd = commentX;
             if (userComment)
             {
@@ -1270,27 +1279,9 @@ namespace Manifold::UI
                     });
             }
 
-            if (line.Target && (line.Kind == Disasm::Flow::Jump || line.Kind == Disasm::Flow::ConditionalJump))
-            {
-                for (std::size_t j = 0; j < m_lines.size(); ++j)
-                {
-                    if (m_lines[j].Address != *line.Target)
-                        continue;
-                    const bool focused = line.Address >= selectionLow && line.Address <= selectionHigh;
-                    const float depth = Px(6.0f) + static_cast<float>((i * 7 + j * 3) % 4) * Px(4.0f);
-                    const float x = addressX - depth;
-                    const float y1 = y + rowHeight * 0.5f;
-                    const float y2 = linesOrigin.y + static_cast<float>(j) * rowHeight + rowHeight * 0.5f;
-                    const ImU32 color = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::FlowJump, focused ? 0.95f : 0.35f));
-                    const float thickness = focused ? Px(1.6f) : Px(1.0f);
-                    drawList->AddLine(ImVec2(addressX - Px(2.0f), y1), ImVec2(x, y1), color, thickness);
-                    drawList->AddLine(ImVec2(x, y1), ImVec2(x, y2), color, thickness);
-                    drawList->AddLine(ImVec2(x, y2), ImVec2(addressX - Px(2.0f), y2), color, thickness);
-                    drawList->AddTriangleFilled(ImVec2(addressX - Px(1.0f), y2), ImVec2(addressX - Px(5.0f), y2 - Px(3.0f)), ImVec2(addressX - Px(5.0f), y2 + Px(3.0f)), color);
-                    break;
-                }
-            }
         }
+        if (!m_lines.empty())
+            JumpLines(drawList, linesOrigin, origin.y + bodyHeight, addressX, rowHeight, hoveredRow, selectionLow, selectionHigh);
         drawList->PopClipRect();
         if (sticky)
         {
@@ -1378,16 +1369,26 @@ namespace Manifold::UI
                 if (!visible)
                     m_top = disassembler.BackUp(process, m_selected, std::max(1, m_visibleLines / 3), m_engine.CodeMap());
             };
+        // ∑ The arrow keys follow the rows on screen when the selection is one of them, so they step
+        //   over the data rows behind a JIT method the way they are shown.
+        const auto shownRow = [&]() -> std::ptrdiff_t
+            {
+                const auto row = std::find_if(m_lines.begin(), m_lines.end(), [&](const Disasm::Instruction& line) { return line.Address == m_selected; });
+                return row == m_lines.end() ? -1 : row - m_lines.begin();
+            };
         if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
         {
-            m_selected = disassembler.Read(process, m_selected, nullptr).Next();
+            const std::ptrdiff_t row = shownRow();
+            m_selected = row >= 0 && row + 1 < static_cast<std::ptrdiff_t>(m_lines.size()) ? m_lines[static_cast<std::size_t>(row + 1)].Address
+                                                                                           : disassembler.Read(process, m_selected, nullptr).Next();
             if (!io.KeyShift)
                 m_selectionEnd = m_selected;
             ensureVisible();
         }
         if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
         {
-            m_selected = disassembler.BackUp(process, m_selected, 1, m_engine.CodeMap());
+            const std::ptrdiff_t row = shownRow();
+            m_selected = row > 0 ? m_lines[static_cast<std::size_t>(row - 1)].Address : disassembler.BackUp(process, m_selected, 1, m_engine.CodeMap());
             if (!io.KeyShift)
                 m_selectionEnd = m_selected;
             ensureVisible();
@@ -2373,6 +2374,306 @@ namespace Manifold::UI
         if (added)
             entry->second = m_engine.SymbolEnd(start);
         return entry->second;
+    }
+
+    std::optional<std::pair<std::uint64_t, std::uint64_t>> MemoryViewer::MethodData(std::uint64_t address)
+    {
+        if (!m_engine.MonoPresent())
+            return std::nullopt;
+        const auto range = m_engine.Mono().MethodRange(address);
+        if (!range)
+            return std::nullopt;
+        const std::uint64_t generation = m_engine.ProcessGeneration();
+        const std::uint64_t writes = m_engine.Writes().Revision();
+        if (m_methodData.Generation != generation || m_methodData.Writes != writes)
+        {
+            m_methodData.Tails.clear();
+            m_methodData.Generation = generation;
+            m_methodData.Writes = writes;
+        }
+        const auto [entry, added] = m_methodData.Tails.try_emplace(range->first);
+        if (added)
+        {
+            const Target::Process& process = *m_engine.Process();
+            const std::uint64_t end = WithoutPadding(process, range->first, range->second);
+            if (const auto tail = Disasm::DataTail(m_engine.Disassembler(), process, range->first, end, m_engine.CodeMap()); tail && *tail < end)
+                entry->second = std::make_pair(*tail, end);
+        }
+        return entry->second;
+    }
+
+    void MemoryViewer::MarkMethodData(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::uint64_t base)
+    {
+        // ∑ The constants a JIT keeps behind a method's code were decoded as instructions ("ret far",
+        //   "enter CB42,1" in GameplayData:InterestRateSet, owner screenshot). They stay part of the
+        //   method, so the +offsets go on, but they are shown as the dwords the code reads, and
+        //   decoding goes on behind them.
+        if (!m_engine.MonoPresent() || m_lines.empty())
+            return;
+        const Disasm::Disassembler& disassembler = m_engine.Disassembler();
+        const Target::Symbols* symbols = m_engine.Options().ShowSymbols ? &m_engine.Symbols() : nullptr;
+        const std::size_t want = m_lines.size();
+        std::vector<Disasm::Instruction> source = std::move(m_lines);
+        std::vector<Disasm::Instruction> lines;
+        lines.reserve(want);
+        std::size_t i = 0;
+        while (i < source.size() && lines.size() < want)
+        {
+            const Disasm::Instruction& line = source[i];
+            const auto data = MethodData(line.Address);
+            if (!data || line.Address < data->first || line.Address >= data->second)
+            {
+                lines.push_back(line);
+                ++i;
+                continue;
+            }
+            std::uint64_t at = line.Address;
+            while (at < data->second && lines.size() < want && at - base < buffer.size())
+            {
+                const std::size_t offset = static_cast<std::size_t>(at - base);
+                const std::uint64_t aligned = 4 - at % 4;
+                const std::size_t size = static_cast<std::size_t>(std::min<std::uint64_t>({ aligned, data->second - at, buffer.size() - offset }));
+                Disasm::Instruction row;
+                row.Address = at;
+                row.Length = static_cast<std::uint8_t>(size);
+                std::uint32_t value = 0;
+                std::memcpy(row.Bytes.data(), buffer.data() + offset, size);
+                std::memcpy(&value, buffer.data() + offset, size);
+                const bool known = readable[offset] && readable[offset + size - 1];
+                row.Mnemonic = known ? (size == 4 ? "dd" : size == 2 ? "dw" : "db") : "??";
+                row.Operands = known ? Hex(value, static_cast<int>(size * 2)) : std::string();
+                lines.push_back(std::move(row));
+                at += size;
+            }
+            if (lines.size() >= want || at - base >= buffer.size())
+                break;
+            const std::size_t offset = static_cast<std::size_t>(at - base);
+            const std::vector<std::uint8_t> rest(buffer.begin() + static_cast<std::ptrdiff_t>(offset), buffer.end());
+            const std::vector<bool> restReadable(readable.begin() + static_cast<std::ptrdiff_t>(offset), readable.end());
+            source = disassembler.DecodeMany(rest, restReadable, at, static_cast<int>(want - lines.size()), symbols, m_engine.CodeMap());
+            i = 0;
+        }
+        m_lines = std::move(lines);
+    }
+
+    void MemoryViewer::JumpLines(ImDrawList* drawList, ImVec2 linesOrigin, float bottom, float addressX, float rowHeight, int hoveredRow, std::uint64_t selectionLow,
+        std::uint64_t selectionHigh)
+    {
+        const std::uint64_t first = m_lines.front().Address;
+        const std::uint64_t lastStart = m_lines.back().Address;
+        const std::uint64_t lastEnd = m_lines.back().Next();
+        std::uint64_t low = 0;
+        std::uint64_t high = 0;
+        const std::vector<JumpLink>& around = JumpsAround(first, lastStart, lastEnd, low, high);
+        std::vector<JumpLink> links;
+        for (const Disasm::Instruction& line : m_lines)
+        {
+            if (!line.Target || (line.Kind != Disasm::Flow::Jump && line.Kind != Disasm::Flow::ConditionalJump))
+                continue;
+            const std::uint64_t to = *line.Target;
+            if ((to >= first && to < lastEnd) || (to >= low && to < high))
+                links.push_back({ line.Address, to });
+        }
+        for (const JumpLink& link : around)
+        {
+            if (link.From < first || link.From >= lastEnd)
+                links.push_back(link);
+        }
+        if (links.empty())
+            return;
+
+        enum class Side
+        {
+            Above,
+            Shown,
+            Below
+        };
+        const float top = linesOrigin.y;
+        const auto place = [&](std::uint64_t address, float& y, Side& side)
+            {
+                if (address < first)
+                {
+                    side = Side::Above;
+                    y = top;
+                    return true;
+                }
+                if (address >= lastEnd)
+                {
+                    side = Side::Below;
+                    y = bottom;
+                    return true;
+                }
+                const auto row = std::lower_bound(m_lines.begin(), m_lines.end(), address, [](const Disasm::Instruction& line, std::uint64_t at) { return line.Address < at; });
+                if (row == m_lines.end() || row->Address != address)
+                    return false;
+                side = Side::Shown;
+                y = linesOrigin.y + static_cast<float>(row - m_lines.begin()) * rowHeight + rowHeight * 0.5f;
+                return true;
+            };
+        const std::uint64_t hoveredAddress = hoveredRow >= 0 && hoveredRow < static_cast<int>(m_lines.size()) ? m_lines[static_cast<std::size_t>(hoveredRow)].Address : ~0ull;
+        struct Drawn
+        {
+            float From = 0.0f;
+            float To = 0.0f;
+            Side FromSide = Side::Shown;
+            Side ToSide = Side::Shown;
+            bool Focused = false;
+            int Lane = 0;
+        };
+        std::vector<Drawn> drawn;
+        drawn.reserve(links.size());
+        for (const JumpLink& link : links)
+        {
+            Drawn line;
+            if (!place(link.From, line.From, line.FromSide) || !place(link.To, line.To, line.ToSide))
+                continue;
+            if (line.FromSide != Side::Shown && line.FromSide == line.ToSide)
+                continue;
+            const auto picked = [&](std::uint64_t address) { return (address >= selectionLow && address <= selectionHigh) || address == hoveredAddress; };
+            line.Focused = (line.FromSide == Side::Shown && picked(link.From)) || (line.ToSide == Side::Shown && picked(link.To));
+            drawn.push_back(line);
+        }
+
+        // ∑ Lanes go to the shortest lines first, so short hops sit next to the addresses and long
+        //   ones (now often running off the view) take the outer lanes; before, the lane came from
+        //   the row numbers and overlapping lines could share one.
+        constexpr int kLanes = 5;
+        std::vector<std::size_t> order(drawn.size());
+        for (std::size_t i = 0; i < order.size(); ++i)
+            order[i] = i;
+        std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b)
+            {
+                return std::fabs(drawn[a].To - drawn[a].From) < std::fabs(drawn[b].To - drawn[b].From);
+            });
+        std::array<std::vector<std::pair<float, float>>, kLanes> taken;
+        for (std::size_t n = 0; n < order.size(); ++n)
+        {
+            Drawn& line = drawn[order[n]];
+            const float spanTop = std::min(line.From, line.To) - rowHeight * 0.25f;
+            const float spanBottom = std::max(line.From, line.To) + rowHeight * 0.25f;
+            int lane = -1;
+            for (int candidate = 0; candidate < kLanes && lane < 0; ++candidate)
+            {
+                const auto& spans = taken[static_cast<std::size_t>(candidate)];
+                if (std::none_of(spans.begin(), spans.end(), [&](const auto& span) { return spanTop < span.second && span.first < spanBottom; }))
+                    lane = candidate;
+            }
+            if (lane < 0)
+                lane = static_cast<int>(n % kLanes);
+            taken[static_cast<std::size_t>(lane)].push_back({ spanTop, spanBottom });
+            line.Lane = lane;
+        }
+
+        for (const bool focusedPass : { false, true })
+        {
+            for (const Drawn& line : drawn)
+            {
+                if (line.Focused != focusedPass)
+                    continue;
+                const float x = addressX - Px(6.0f) - static_cast<float>(line.Lane) * Px(4.0f);
+                const ImU32 color = ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::FlowJump, line.Focused ? 0.95f : 0.35f));
+                const float thickness = line.Focused ? Px(1.6f) : Px(1.0f);
+                const float stub = addressX - Px(2.0f);
+                if (line.FromSide == Side::Shown)
+                    drawList->AddLine(ImVec2(stub, line.From), ImVec2(x, line.From), color, thickness);
+                drawList->AddLine(ImVec2(x, line.From), ImVec2(x, line.To), color, thickness);
+                if (line.ToSide == Side::Shown)
+                {
+                    drawList->AddLine(ImVec2(x, line.To), ImVec2(stub, line.To), color, thickness);
+                    drawList->AddTriangleFilled(ImVec2(addressX - Px(1.0f), line.To), ImVec2(addressX - Px(5.0f), line.To - Px(3.0f)), ImVec2(addressX - Px(5.0f), line.To + Px(3.0f)),
+                        color);
+                }
+                else
+                {
+                    const float edge = line.ToSide == Side::Above ? top : bottom;
+                    const float tip = line.ToSide == Side::Above ? edge + Px(1.0f) : edge - Px(1.0f);
+                    const float base = line.ToSide == Side::Above ? edge + Px(5.0f) : edge - Px(5.0f);
+                    drawList->AddTriangleFilled(ImVec2(x, tip), ImVec2(x - Px(3.0f), base), ImVec2(x + Px(3.0f), base), color);
+                }
+            }
+        }
+    }
+
+    const std::vector<MemoryViewer::JumpLink>& MemoryViewer::JumpsAround(std::uint64_t first, std::uint64_t lastStart, std::uint64_t lastEnd, std::uint64_t& low,
+        std::uint64_t& high)
+    {
+        // ∑ Jump lines were only drawn when both ends were on screen, so a loop longer than the
+        //   view or a jump to the epilogue showed nothing (owner). The jumps of the functions around
+        //   the view are decoded once per function and kept until the code or the process changes;
+        //   without a known function a few dozen lines above and below stand in for it.
+        constexpr std::uint64_t kReach = 0x8000;
+        constexpr int kFallbackLines = 48;
+        const std::uint64_t generation = m_engine.ProcessGeneration();
+        const std::uint64_t writes = m_engine.Writes().Revision();
+        if (m_jumps.Valid && m_jumps.First == first && m_jumps.LastStart == lastStart && m_jumps.Generation == generation && m_jumps.Writes == writes)
+        {
+            low = m_jumps.Low;
+            high = m_jumps.High;
+            return m_jumps.Links;
+        }
+        const Target::Process& process = *m_engine.Process();
+        const Disasm::Disassembler& disassembler = m_engine.Disassembler();
+        const Target::CodeMap* map = m_engine.CodeMap();
+        const auto spanAt = [&](std::uint64_t address) -> std::optional<std::pair<std::uint64_t, std::uint64_t>>
+            {
+                if (map)
+                {
+                    if (const auto function = map->FunctionAt(address))
+                        return function;
+                }
+                if (m_engine.MonoPresent())
+                {
+                    if (const auto method = m_engine.Mono().MethodRange(address))
+                        return method;
+                }
+                return std::nullopt;
+            };
+        const auto top = spanAt(first);
+        const auto bottom = spanAt(lastStart);
+        low = top ? top->first : disassembler.BackUp(process, first, kFallbackLines, map);
+        high = bottom ? bottom->second : lastEnd + static_cast<std::uint64_t>(kFallbackLines) * 4;
+        low = std::max(low, first > kReach ? first - kReach : 0);
+        high = std::min(high, lastEnd + kReach);
+        m_jumps.First = first;
+        m_jumps.LastStart = lastStart;
+        if (m_jumps.Valid && m_jumps.Low == low && m_jumps.High == high && m_jumps.Generation == generation && m_jumps.Writes == writes)
+            return m_jumps.Links;
+        m_jumps.Valid = true;
+        m_jumps.Low = low;
+        m_jumps.High = high;
+        m_jumps.Generation = generation;
+        m_jumps.Writes = writes;
+        m_jumps.Links.clear();
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> data;
+        for (const std::uint64_t at : { low, lastStart })
+        {
+            if (const auto tail = MethodData(at))
+                data.push_back(*tail);
+        }
+        const auto inData = [&](std::uint64_t address)
+            {
+                return std::any_of(data.begin(), data.end(), [&](const auto& range) { return address >= range.first && address < range.second; });
+            };
+        std::uint64_t at = low;
+        while (at < high)
+        {
+            const std::vector<Disasm::Instruction> chunk = disassembler.ReadMany(process, at, 64, nullptr, map);
+            if (chunk.empty())
+                break;
+            for (const Disasm::Instruction& line : chunk)
+            {
+                if (line.Address >= high)
+                    break;
+                at = line.Next();
+                if (!line.Target || (line.Kind != Disasm::Flow::Jump && line.Kind != Disasm::Flow::ConditionalJump) || inData(line.Address))
+                    continue;
+                if (*line.Target >= low && *line.Target < high)
+                    m_jumps.Links.push_back({ line.Address, *line.Target });
+            }
+            if (chunk.back().Address >= high)
+                break;
+        }
+        return m_jumps.Links;
     }
 
     void MemoryViewer::JumpToFunction(Command command)

@@ -75,6 +75,8 @@ namespace Manifold
         bool ScanPrivate = true;
         bool ScanImage = true;
         bool ScanMapped = false;
+        bool ScanSkipNoCache = true;
+        bool ScanSkipWriteCombine = true;
         std::uint32_t AllTypes = 0x3F;
         int ResultValueRefreshMs = 500;
         int AddressColumn = 2;

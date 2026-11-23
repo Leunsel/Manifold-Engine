@@ -54,6 +54,8 @@ namespace Manifold::Scan
         bool ReadOnly = false;
         bool Mapped = false;
         bool SystemModules = false;
+        bool SkipNoCache = true;
+        bool SkipWriteCombine = true;
     };
 
     class ProcessPointerSource final : public PointerSource

@@ -153,6 +153,8 @@ namespace Manifold::Scan
         {
             if (!region.Readable())
                 return false;
+            if ((options.SkipNoCache && region.NoCache()) || (options.SkipWriteCombine && region.WriteCombine()))
+                return false;
             if (region.Type == MEM_PRIVATE && !options.Private)
                 return false;
             if (region.Type == MEM_IMAGE && !options.Image)

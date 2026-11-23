@@ -488,6 +488,51 @@ namespace Manifold::Tests
             std::printf("  layout of %zu blocks and %zu edges took %.1f ms\n", many.size(), links.size(), ms);
             CheckLayout(many, links, large);
         }
+
+        void MethodConstants(Engine& engine)
+        {
+            // A JIT method shaped like Mono's: code, a ret, a few bytes of the JIT's, then the float
+            // constants the code reads RIP-relative, all inside the method's code size.
+            static constexpr std::uint8_t kMethod[] = {
+                0x55,                                      // +00 push rbp
+                0x48, 0x8B, 0xEC,                          // +01 mov rbp,rsp
+                0xF3, 0x0F, 0x10, 0x05, 0x14, 0, 0, 0,     // +04 movss xmm0,[+20]
+                0x85, 0xC0,                                // +0C test eax,eax
+                0x74, 0x08,                                // +0E jz +18
+                0xF3, 0x0F, 0x10, 0x05, 0x0C, 0, 0, 0,     // +10 movss xmm0,[+24]
+                0x5D,                                      // +18 pop rbp
+                0xC3,                                      // +19 ret
+                0xCB, 0x01, 0x00, 0x00, 0x00, 0x00,        // +1A the JIT's bytes
+                0x00, 0x00, 0xC8, 0x42,                    // +20 100.0f
+                0x00, 0x00, 0x80, 0x3F,                    // +24 1.0f
+            };
+            // A switch: the cases behind the indirect jmp are code, only the constant is data.
+            static constexpr std::uint8_t kSwitch[] = {
+                0xF3, 0x0F, 0x10, 0x05, 0x08, 0, 0, 0,     // +00 movss xmm0,[+10]
+                0xFF, 0xE0,                                // +08 jmp rax
+                0x31, 0xC0,                                // +0A xor eax,eax
+                0xC3,                                      // +0C ret
+                0xCC, 0xCC, 0xCC,                          // +0D
+                0x00, 0x00, 0x80, 0x3F,                    // +10 1.0f
+            };
+            auto* memory = static_cast<std::uint8_t*>(::VirtualAlloc(nullptr, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+            CHECK(memory != nullptr);
+            if (!memory)
+                return;
+            std::memset(memory, 0xCC, 0x1000);
+            std::memcpy(memory, kMethod, sizeof(kMethod));
+            std::memcpy(memory + 0x100, kSwitch, sizeof(kSwitch));
+            const auto base = reinterpret_cast<std::uint64_t>(memory);
+            const Disasm::Disassembler& disassembler = engine.Disassembler();
+            const Target::Process& process = *engine.Process();
+
+            const auto tail = Disasm::DataTail(disassembler, process, base, base + sizeof(kMethod), nullptr);
+            CHECK_MSG(tail && *tail == base + 0x1A, "the data behind a JIT method starts right after its ret");
+            CHECK(!Disasm::DataTail(disassembler, process, base, base + 0x1A, nullptr));
+            const auto cases = Disasm::DataTail(disassembler, process, base + 0x100, base + 0x100 + sizeof(kSwitch), nullptr);
+            CHECK_MSG(cases && *cases == base + 0x110, "the cases behind a switch's indirect jmp stay code");
+            ::VirtualFree(memory, 0, MEM_RELEASE);
+        }
     }
 
     int RunFlowGraphTests()
@@ -519,6 +564,7 @@ namespace Manifold::Tests
             ::VirtualFree(code, 0, MEM_RELEASE);
         }
         FunctionOfExport(engine);
+        MethodConstants(engine);
         engine.CloseProcess();
         return Totals().Failures - before;
     }

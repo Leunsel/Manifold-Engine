@@ -2570,6 +2570,8 @@ namespace Manifold::Lua
                         options.Unicode = lua_toboolean(s, 14) != 0;
                         options.CaseSensitive = lua_isnoneornil(s, 15) || lua_toboolean(s, 15);
                         options.Mapped = false;
+                        options.SkipNoCache = Owner(s).Options().ScanSkipNoCache;
+                        options.SkipWriteCombine = Owner(s).Options().ScanSkipWriteCombine;
                         if (ceType == 7)
                             options.Unicode = true;
                         if (ceType == kCeCustom)

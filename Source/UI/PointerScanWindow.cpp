@@ -114,7 +114,9 @@ namespace Manifold::UI
         options.Aligned = m_aligned;
         options.MaxResults = m_maxResults;
         const std::shared_ptr<Target::Process> process = engine.Process();
-        const Scan::PointerMemory memory = m_memory;
+        Scan::PointerMemory memory = m_memory;
+        memory.SkipNoCache = engine.Options().ScanSkipNoCache;
+        memory.SkipWriteCombine = engine.Options().ScanSkipWriteCombine;
         m_running = Job::Scan;
         m_rescanAddress = Hex(*target);
         m_task.Start(engine.Work(), "Scanning for pointer paths", [process, memory, options](Scan::PointerProgress& progress)

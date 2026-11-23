@@ -164,6 +164,35 @@ namespace Manifold::UI
             std::unordered_map<std::uint64_t, std::uint64_t> Ends;
         };
         SymbolEndCache m_symbolEnds;
+        std::optional<std::pair<std::uint64_t, std::uint64_t>> MethodData(std::uint64_t address);
+        void MarkMethodData(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::uint64_t base);
+        struct MethodDataCache
+        {
+            std::uint64_t Generation = 0;
+            std::uint64_t Writes = 0;
+            std::unordered_map<std::uint64_t, std::optional<std::pair<std::uint64_t, std::uint64_t>>> Tails;
+        };
+        MethodDataCache m_methodData;
+        struct JumpLink
+        {
+            std::uint64_t From = 0;
+            std::uint64_t To = 0;
+        };
+        void JumpLines(ImDrawList* drawList, ImVec2 linesOrigin, float bottom, float addressX, float rowHeight, int hoveredRow, std::uint64_t selectionLow,
+            std::uint64_t selectionHigh);
+        const std::vector<JumpLink>& JumpsAround(std::uint64_t first, std::uint64_t lastStart, std::uint64_t lastEnd, std::uint64_t& low, std::uint64_t& high);
+        struct JumpCache
+        {
+            std::uint64_t First = 0;
+            std::uint64_t LastStart = 0;
+            std::uint64_t Low = 0;
+            std::uint64_t High = 0;
+            std::uint64_t Generation = 0;
+            std::uint64_t Writes = 0;
+            bool Valid = false;
+            std::vector<JumpLink> Links;
+        };
+        JumpCache m_jumps;
         std::vector<std::uint64_t> m_history;
         std::vector<Disasm::Instruction> m_lines;
         int m_visibleLines = 30;
