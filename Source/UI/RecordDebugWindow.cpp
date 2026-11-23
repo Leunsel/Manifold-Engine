@@ -4,6 +4,7 @@
 #include "App/Settings.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Lua/LuaEngine.h"
 #include "Table/RecordPath.h"
 #include "UI/Fonts.h"
@@ -1779,15 +1780,13 @@ namespace Manifold::UI
                 ImGui::TableNextColumn();
                 Muted(step.Line > 0 ? std::to_string(step.Line) : std::string());
                 ImGui::TableNextColumn();
-                ImGui::PushTextWrapPos(0.0f);
-                ImGui::TextUnformatted(step.Text.c_str());
-                ImGui::PopTextWrapPos();
+                Layout::Wrapped(step.Text);
             }
             PopMono();
             ImGui::EndTable();
         }
         else if (entry.Steps.empty() && entry.Kind == RecordKind::Script)
-            Muted("Turn on Settings > Scripts > Log Auto Assembler Steps, or put {$log} into the script, to see each step here.");
+            Layout::Muted("Turn on Settings > Scripts > Log Auto Assembler Steps, or put {$log} into the script, to see each step here.", Layout::Overflow::Wrap);
     }
 
     // ---------------------------------------------------------------- Internals
