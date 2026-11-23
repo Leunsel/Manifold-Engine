@@ -1618,7 +1618,18 @@ namespace Manifold::UI
             TextWithError(scanner.LastError().Text, ManifoldTheme::Error);
         }
 
+        // ∑ Only the settings scroll; the scan buttons above them stay at the top of the card (owner:
+        //   with the memory scan options open, the buttons scrolled out of sight).
         ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        const bool settingsVisible = ImGui::BeginChild("##scansettings", ImVec2(0.0f, 0.0f), ImGuiChildFlags_NavFlattened);
+        ImGui::PopStyleColor();
+        if (!settingsVisible)
+        {
+            ImGui::EndChild();
+            EndCard();
+            return;
+        }
         const Scan::ScanKind kind = scanned ? scanner.Kind() : m_scanKind;
         if (!Scan::CompareAvailable(kind, kCompares[m_compareIndex]))
             m_compareIndex = 0;
@@ -1655,7 +1666,7 @@ namespace Manifold::UI
         ImGui::Checkbox("Hex", &m_hex);
         if (Scan::CompareNeedsTwoValues(compare))
         {
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + labelWidth - ImGui::GetStyle().WindowPadding.x + Px(2.0f));
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + labelWidth + Px(2.0f));
             ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - hexWidth);
             InputTextWithHint("##value2", "to", m_value2);
         }
@@ -1780,7 +1791,7 @@ namespace Manifold::UI
         ImGui::EndDisabled();
 
         const Scan::ValueType type = scanned ? scanner.Type() : Scan::kScanTypes[m_typeIndex];
-        const float optionIndent = ImGui::GetCursorPosX() + labelWidth - ImGui::GetStyle().WindowPadding.x + Px(2.0f);
+        const float optionIndent = ImGui::GetCursorPosX() + labelWidth + Px(2.0f);
         if ((kind == Scan::ScanKind::Single && Scan::IsFloating(type)) || kind == Scan::ScanKind::All)
         {
             ImGui::SetCursorPosX(optionIndent);
@@ -1805,7 +1816,7 @@ namespace Manifold::UI
         {
             const ImGuiStyle& style = ImGui::GetStyle();
             const float stopLabel = ImGui::CalcTextSize("Stop").x;
-            const float rangeRoom = ImGui::GetContentRegionAvail().x - labelWidth + style.WindowPadding.x;
+            const float rangeRoom = ImGui::GetContentRegionAvail().x - labelWidth;
             const bool rangeOneLine = rangeRoom >= Px(150.0f) * 2.0f + stopLabel + style.ItemSpacing.x * 2.0f;
             const float rangeWidth = rangeOneLine ? Px(150.0f) : std::max(Px(80.0f), rangeRoom - style.ItemSpacing.x);
             ImGui::AlignTextToFramePadding();
@@ -1853,9 +1864,12 @@ namespace Manifold::UI
             ImGui::Checkbox("Mapped", &m_mapped);
             ImGui::Checkbox("Fast scan", &m_fastScan);
             ItemTooltip("Only look at addresses aligned to this many bytes. Values in games are nearly always aligned.");
-            FlowNext(Px(70.0f) + style.ItemInnerSpacing.x + ImGui::CalcTextSize("Alignment").x);
+            // ∑ InputInt takes its - and + buttons out of the item width; at 70 px the number had
+            //   room for one digit and "16" was cut off (owner screenshot)
+            const float alignField = Px(28.0f) + style.FramePadding.x * 2.0f + (ImGui::GetFrameHeight() + style.ItemInnerSpacing.x) * 2.0f;
+            FlowNext(alignField + style.ItemInnerSpacing.x + ImGui::CalcTextSize("Alignment").x);
             ImGui::BeginDisabled(!m_fastScan);
-            ImGui::SetNextItemWidth(Px(70.0f));
+            ImGui::SetNextItemWidth(alignField);
             ImGui::InputInt("Alignment", &m_alignment, 1, 4);
             m_alignment = std::clamp(m_alignment, 1, 64);
             ImGui::EndDisabled();
@@ -1863,6 +1877,7 @@ namespace Manifold::UI
         }
         ImGui::EndDisabled();
         SpeedhackSection();
+        ImGui::EndChild();
         EndCard();
     }
 
@@ -3233,21 +3248,65 @@ namespace Manifold::UI
         std::reverse(chain.begin(), chain.end());
         const float textY = std::round(min.y + (rowHeight - ImGui::GetTextLineHeight()) * 0.5f);
         float x = table->Columns[1].MinX + ImGui::GetStyle().CellPadding.x;
+        // ∑ The path has to fit the header: the owner's Isaac table nests groups whose names alone
+        //   are wider than the list, and the path ran out of the window. The outer groups give way
+        //   first (shown as "..."), the group the rows belong to stays and is cut last.
+        const auto widthOf = [](const std::string& text) { return ImGui::CalcTextSize(text.c_str()).x; };
+        const float gap = Px(8.0f);
+        const float limit = max.x - Px(6.0f);
+        const std::string ellipsis = "...";
+        const float separator = gap + widthOf(ICON_FA_ANGLE_RIGHT) + gap;
+        const float start = x + widthOf(ICON_FA_FOLDER_OPEN) + gap;
+        std::vector<std::string> names;
+        for (const Table::MemoryRecord* group : chain)
+            names.push_back(group->Description);
+        const auto pathWidth = [&](std::size_t from) {
+            float width = from > 0 ? widthOf(ellipsis) + separator : 0.0f;
+            for (std::size_t i = from; i < names.size(); ++i)
+                width += widthOf(names[i]) + (i + 1 < names.size() ? separator : 0.0f);
+            return width;
+        };
+        std::size_t from = 0;
+        while (from + 1 < names.size() && start + pathWidth(from) > limit)
+            ++from;
+        const bool shortened = from > 0 || start + pathWidth(from) > limit;
+        if (start + pathWidth(from) > limit)
+        {
+            std::string& inner = names.back();
+            const float room = limit - (start + pathWidth(from) - widthOf(inner));
+            while (!inner.empty() && widthOf(inner + ellipsis) > room)
+            {
+                inner.pop_back();
+                while (!inner.empty() && (static_cast<unsigned char>(inner.back()) & 0xC0) == 0x80)
+                    inner.pop_back();
+            }
+            inner += ellipsis;
+        }
         std::vector<Piece> pieces;
         pieces.push_back({ ImVec2(x, textY), ImGui::GetColorU32(ManifoldTheme::Accent), ICON_FA_FOLDER_OPEN });
-        x += ImGui::CalcTextSize(ICON_FA_FOLDER_OPEN).x + Px(8.0f);
-        for (std::size_t i = 0; i < chain.size(); ++i)
+        x = start;
+        const auto addSeparator = [&]() {
+            x += gap;
+            pieces.push_back({ ImVec2(x, textY), ImGui::GetColorU32(ManifoldTheme::Muted), ICON_FA_ANGLE_RIGHT });
+            x += separator - gap;
+        };
+        if (from > 0)
         {
-            const bool inner = i + 1 == chain.size();
-            pieces.push_back({ ImVec2(x, textY), ImGui::GetColorU32(inner ? ManifoldTheme::Text : ManifoldTheme::Muted), chain[i]->Description });
-            x += ImGui::CalcTextSize(chain[i]->Description.c_str()).x;
-            if (!inner)
-            {
-                x += Px(8.0f);
-                pieces.push_back({ ImVec2(x, textY), ImGui::GetColorU32(ManifoldTheme::Muted), ICON_FA_ANGLE_RIGHT });
-                x += ImGui::CalcTextSize(ICON_FA_ANGLE_RIGHT).x + Px(8.0f);
-            }
+            pieces.push_back({ ImVec2(x, textY), ImGui::GetColorU32(ManifoldTheme::Muted), ellipsis });
+            x += widthOf(ellipsis);
+            addSeparator();
         }
+        for (std::size_t i = from; i < names.size(); ++i)
+        {
+            const bool inner = i + 1 == names.size();
+            pieces.push_back({ ImVec2(x, textY), ImGui::GetColorU32(inner ? ManifoldTheme::Text : ManifoldTheme::Muted), names[i] });
+            x += widthOf(names[i]);
+            if (!inner)
+                addSeparator();
+        }
+        std::string path;
+        for (const Table::MemoryRecord* group : chain)
+            path += (path.empty() ? "" : "  >  ") + group->Description;
 
         struct Border
         {
@@ -3284,7 +3343,7 @@ namespace Manifold::UI
         if (ImGui::IsItemHovered())
         {
             ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-            ItemTooltip("Scroll up to this group");
+            ItemTooltip(shortened ? ("Scroll up to this group\n" + path).c_str() : "Scroll up to this group");
         }
         ImGui::PopClipRect();
 
