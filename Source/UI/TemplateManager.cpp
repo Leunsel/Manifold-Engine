@@ -854,18 +854,24 @@ namespace Manifold::UI
                     });
             }
         };
+        // ∑ each group gets its own ID scope: the group "Process" holds a value
+        // named Process, and a node and a selectable with the same label share
+        // one ID (ImGui's "conflicting ID" error on hover)
         auto group = [&](const std::string& title, const std::function<void()>& body)
         {
+            ImGui::PushID(title.c_str());
             if (!filter.empty())
             {
                 body();
+                ImGui::PopID();
                 return;
             }
             ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
-            const bool open = Layout::TreeNode(title.c_str(), title, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen);
+            const bool open = Layout::TreeNode("##group", title, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen);
             ImGui::PopStyleColor();
             if (open)
                 body();
+            ImGui::PopID();
         };
 
         ImGui::BeginChild("##valuelist", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None);
