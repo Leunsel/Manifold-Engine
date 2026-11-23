@@ -51,6 +51,14 @@ namespace Manifold::Table
 
     std::string RecordsToXml(const std::vector<const MemoryRecord*>& records);
     std::optional<std::vector<std::uint8_t>> DecodeTableFile(std::string_view text, std::size_t limit = kMaxTableFileBytes);
+    // Ascii85 of the deflated bytes, as CE stores a table file. Results for files of 1 KB and more are cached by their bytes.
     std::string EncodeTableFile(std::span<const std::uint8_t> data);
+    struct EncodeCacheStats
+    {
+        std::uint64_t Hits = 0;
+        std::uint64_t Misses = 0;
+    };
+    EncodeCacheStats EncodeTableFileCacheStats();
+    void ClearEncodeTableFileCache();
     std::vector<std::unique_ptr<MemoryRecord>> RecordsFromXml(std::string_view text);
 }

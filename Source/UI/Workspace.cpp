@@ -1024,14 +1024,10 @@ namespace Manifold::UI
                 return false;
             path = *chosen;
         }
-        const Status status = m_engine.SaveTable(path);
-        if (!status)
-        {
-            Report(status);
-            return false;
-        }
-        m_engine.Notify(LogLevel::Success, "Saved " + WideToUtf8(path.filename().wstring()));
-        return true;
+        // ∑ The engine logs and toasts the outcome itself, once: this notice was the second "Saved" entry per save in the Log.
+        if (askName)
+            return m_engine.SaveTable(path, true).Ok();
+        return m_engine.RequestSave(path) != SaveKind::Failed;
     }
 
     void Workspace::OpenBackupDialog()
@@ -1102,6 +1098,7 @@ namespace Manifold::UI
 
     bool Workspace::UnsavedTable()
     {
+        m_engine.FlushPendingSave();
         return m_engine.Table().Dirty() && Table::TableHasContent(m_engine.Table(), m_engine.Structures(), m_engine.TableSymbols());
     }
 

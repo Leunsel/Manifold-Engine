@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <future>
 
@@ -628,6 +629,7 @@ namespace Manifold
 
     void TableRuntime::NewTable()
     {
+        FlushPendingSave();
         m_engine.CancelActivations();
         m_engine.Activation().WaitForActivation();
         m_engine.StopTableScript();
@@ -763,19 +765,204 @@ namespace Manifold
         return status;
     }
 
-    Status TableRuntime::SaveTable(const std::filesystem::path& path)
+    namespace
     {
-        std::vector<Table::TableSymbol> symbols = m_tableSymbols;
-        const Status status = Table::SaveTable(path, m_table, m_structures, symbols, m_engine.TableFileNaming());
-        if (!status)
+        std::wstring SaveKey(const std::filesystem::path& path)
         {
-            LOG_ERROR("Table", status.Text);
-            return status;
+            std::error_code ignored;
+            std::filesystem::path full = std::filesystem::absolute(path, ignored);
+            if (full.empty())
+                full = path;
+            std::wstring key = full.lexically_normal().wstring();
+            if (!key.empty())
+                ::CharLowerBuffW(key.data(), static_cast<DWORD>(key.size()));
+            return key;
         }
-        m_table.FilePath = WideToUtf8(path.wstring());
-        m_table.SetClean();
-        m_engine.Options().AddRecentTable(m_table.FilePath);
-        LOG_SUCCESS("Table", "Saved " + WideToUtf8(path.filename().wstring()));
-        return status;
+
+        std::optional<std::pair<std::uint64_t, std::uint64_t>> DiskStamp(const std::filesystem::path& path)
+        {
+            WIN32_FILE_ATTRIBUTE_DATA data{};
+            if (!::GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data) || (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                return std::nullopt;
+            const std::uint64_t time = (static_cast<std::uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) | data.ftLastWriteTime.dwLowDateTime;
+            const std::uint64_t size = (static_cast<std::uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+            return std::pair{ time, size };
+        }
+
+        std::string SizeText(std::size_t bytes)
+        {
+            if (bytes >= 1024u * 1024u)
+            {
+                char text[32];
+                std::snprintf(text, sizeof(text), "%.1f MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
+                return text;
+            }
+            return std::to_string((bytes + 1023) / 1024) + " KB";
+        }
+
+        std::string Milliseconds(std::chrono::steady_clock::time_point from, std::chrono::steady_clock::time_point to)
+        {
+            return std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count());
+        }
+    }
+
+    SaveKind TableRuntime::SaveNow(const std::filesystem::path& path, double now, bool toast, bool background, Status* failure)
+    {
+        PROFILE_ZONE("Save table");
+        FinishWrite();
+        m_pendingSave.reset();
+        m_lastSaveAt = now;
+        const auto started = std::chrono::steady_clock::now();
+        const std::string name = WideToUtf8(path.filename().wstring());
+        std::string text = Table::WriteTable(m_table, m_structures, m_tableSymbols, m_engine.TableFileNaming());
+        const std::size_t hash = std::hash<std::string>{}(text);
+        const std::wstring key = SaveKey(path);
+        const auto stamp = DiskStamp(path);
+        if (m_savedFile && m_savedFile->Path == key && m_savedFile->Hash == hash && m_savedFile->Size == text.size() && stamp &&
+            stamp->first == m_savedFile->DiskTime && stamp->second == m_savedFile->DiskSize)
+        {
+            m_table.FilePath = WideToUtf8(path.wstring());
+            m_table.SetClean();
+            m_lastSaveKind = SaveKind::UpToDate;
+            const std::string message = name + " is up to date, nothing to save";
+            LOG_INFO("Table", message + " (" + Milliseconds(started, std::chrono::steady_clock::now()) + " ms)");
+            // ∑ The toast goes to the notification centre directly: Engine::Notify would log the save a second time.
+            if (toast)
+                m_engine.Notifications().Post(LogLevel::Info, message, now);
+            return m_lastSaveKind;
+        }
+        const auto serialized = std::chrono::steady_clock::now();
+        const std::uint64_t identity = m_table.Identity();
+        const std::uint64_t changes = m_table.Changes();
+        const std::size_t size = text.size();
+        // Runs on the main thread: in Drain for a background write, right away for one made here.
+        const auto finish = [this, path, key, name, hash, size, identity, changes, toast, started, serialized](bool ok, std::optional<std::pair<std::uint64_t, std::uint64_t>> written,
+                                std::chrono::steady_clock::time_point finished, Status* failure)
+            {
+                m_writeId = 0;
+                const double at = m_engine.Now();
+                if (!ok)
+                {
+                    const Status status = Status::Fail(ErrorCode::TableNotSaved, WideToUtf8(path.wstring()));
+                    LOG_ERROR("Table", status.Text);
+                    if (toast)
+                        m_engine.Notifications().Post(LogLevel::Error, status.Text, at);
+                    if (failure)
+                        *failure = status;
+                    m_lastSaveKind = SaveKind::Failed;
+                    return;
+                }
+                ++m_tableWrites;
+                m_savedFile = SavedFile{ key, hash, size, written ? written->first : 0, written ? written->second : 0 };
+                if (m_table.Identity() == identity)
+                {
+                    m_table.FilePath = WideToUtf8(path.wstring());
+                    // ∑ A change made while the file was being written is not in it, so the table stays dirty for it.
+                    if (m_table.Changes() == changes)
+                        m_table.SetClean();
+                }
+                m_engine.Options().AddRecentTable(WideToUtf8(path.wstring()));
+                LOG_SUCCESS("Table", "Saved " + name + " (" + SizeText(size) + ", " + Milliseconds(started, finished) + " ms: " + Milliseconds(started, serialized) + " ms text, " +
+                    Milliseconds(serialized, finished) + " ms disk)");
+                if (toast)
+                    m_engine.Notifications().Post(LogLevel::Success, "Saved " + name, at);
+                m_lastSaveKind = SaveKind::Written;
+            };
+        if (!background)
+        {
+            const bool ok = Table::WriteFileSafely(path, text, true);
+            finish(ok, ok ? DiskStamp(path) : std::nullopt, std::chrono::steady_clock::now(), failure);
+            return m_lastSaveKind;
+        }
+        // ∑ The owner's Isaac table lives on an SMR hard disk: building the text takes 15-30 ms, the flushed write-through
+        //   write 70-290 ms. Only the write runs on a worker; the table is not touched there.
+        auto shared = std::make_shared<const std::string>(std::move(text));
+        WorkOptions options;
+        options.Title = "Saving " + name;
+        options.Group = "Table save";
+        options.Cancellable = false;
+        options.Quiet = true;
+        m_writeId = m_engine.Work().Start(std::move(options), [path, shared, finish](WorkProgress&) -> BackgroundWork::Finish
+            {
+                const bool ok = Table::WriteFileSafely(path, *shared, true);
+                const auto written = ok ? DiskStamp(path) : std::nullopt;
+                const auto finished = std::chrono::steady_clock::now();
+                return [ok, written, finished, finish]() { finish(ok, written, finished, nullptr); };
+            });
+        m_writingKey = key;
+        if (!m_writeId)
+        {
+            const bool ok = Table::WriteFileSafely(path, *shared, true);
+            finish(ok, ok ? DiskStamp(path) : std::nullopt, std::chrono::steady_clock::now(), failure);
+            return m_lastSaveKind;
+        }
+        return SaveKind::Writing;
+    }
+
+    Status TableRuntime::SaveTable(const std::filesystem::path& path, bool toast)
+    {
+        FinishWrite();
+        if (m_pendingSave && SaveKey(*m_pendingSave) != SaveKey(path))
+            FlushPendingSave();
+        Status failure = Status::Success();
+        SaveNow(path, m_engine.Now(), toast, false, &failure);
+        return failure;
+    }
+
+    SaveKind TableRuntime::RequestSave(const std::filesystem::path& path, double now)
+    {
+        const std::wstring key = SaveKey(path);
+        if (m_pendingSave)
+        {
+            if (SaveKey(*m_pendingSave) == key)
+                return SaveKind::Queued;
+            FlushPendingSave();
+        }
+        if (m_writeId)
+        {
+            if (m_writingKey != key)
+                FinishWrite();
+            else
+            {
+                m_pendingSave = path;
+                m_pendingDue = std::max(now, m_lastSaveAt + kSaveCooldownSeconds);
+                return SaveKind::Queued;
+            }
+        }
+        // ∑ The owner's Log showed a save every 200-450 ms (Ctrl+S pressed again and again on the Isaac table). Within the
+        //   cooldown a request only marks a save for when it ends, so a burst of presses costs one save at the start and at
+        //   most one at the end; the queued save takes the table as it is then, so nothing done in between is left out.
+        if (m_savedFile && m_savedFile->Path == key && m_lastSaveAt >= 0.0 && now >= m_lastSaveAt && now - m_lastSaveAt < kSaveCooldownSeconds)
+        {
+            m_pendingSave = path;
+            m_pendingDue = m_lastSaveAt + kSaveCooldownSeconds;
+            return SaveKind::Queued;
+        }
+        return SaveNow(path, now, true, true);
+    }
+
+    void TableRuntime::TickSaves(double now)
+    {
+        if (m_pendingSave && !m_writeId && now >= m_pendingDue)
+        {
+            const std::filesystem::path path = *m_pendingSave;
+            SaveNow(path, now, true, true);
+        }
+    }
+
+    void TableRuntime::FinishWrite()
+    {
+        if (m_writeId)
+            m_engine.Work().Complete(m_writeId);
+        m_writeId = 0;
+    }
+
+    void TableRuntime::FlushPendingSave()
+    {
+        FinishWrite();
+        if (!m_pendingSave)
+            return;
+        const std::filesystem::path path = *m_pendingSave;
+        SaveNow(path, m_engine.Now(), true, false);
     }
 }

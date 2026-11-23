@@ -185,7 +185,10 @@ namespace Manifold::Table
         int NextId() { return m_nextId++; }
         void NoteId(int id);
         std::uint64_t Generation() const { return m_generation; }
-        void Touch() { ++m_generation; m_dirty = true; }
+        void Touch() { ++m_generation; ++m_changes; m_dirty = true; }
+        // Counts Touch calls only, not Refresh: a save that writes in the background marks the table clean only if no change
+        // came after the text it wrote.
+        std::uint64_t Changes() const { return m_changes; }
         void Refresh() { ++m_generation; }
         bool Dirty() const { return m_dirty; }
         void SetClean() { m_dirty = false; }
@@ -231,6 +234,7 @@ namespace Manifold::Table
         std::uint64_t m_describedAt = 0;
         std::vector<int> m_selection;
         int m_nextId = 0;
+        std::uint64_t m_changes = 0;
         std::uint64_t m_generation = 1;
         std::uint64_t m_identity = 1;
         bool m_dirty = false;

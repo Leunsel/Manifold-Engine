@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <fstream>
 #include <functional>
+#include <mutex>
 #include <set>
 #include <sstream>
 
@@ -716,35 +717,105 @@ namespace Manifold::Table
         return unpacked;
     }
 
+    namespace
+    {
+        // ∑ Every save and every session backup encodes all table files again: on the owner's Isaac table (3.4 MB, 24 files)
+        //   building the text took 32 ms, 14 ms with the files cached. The files rarely change between saves, so the text of the
+        //   last few is kept with a copy of their bytes; a hit needs equal bytes, not just an equal name or version, because Lua
+        //   streams write into a file's data without bumping its version.
+        struct EncodedFile
+        {
+            std::vector<std::uint8_t> Plain;
+            std::string Text;
+            std::uint64_t Used = 0;
+        };
+
+        constexpr std::size_t kEncodeCacheMinBytes = 1024;
+        constexpr std::size_t kEncodeCacheMaxBytes = 64u * 1024u * 1024u;
+        constexpr std::size_t kEncodeCacheMaxFiles = 32;
+
+        std::mutex g_encodedMutex;
+        std::vector<EncodedFile> g_encoded;
+        std::uint64_t g_encodedClock = 0;
+        EncodeCacheStats g_encodedStats;
+
+        std::string EncodeTableFileUncached(std::span<const std::uint8_t> data)
+        {
+            std::vector<std::uint8_t> plain(4 + data.size());
+            const std::uint32_t size = static_cast<std::uint32_t>(data.size());
+            plain[0] = static_cast<std::uint8_t>(size);
+            plain[1] = static_cast<std::uint8_t>(size >> 8);
+            plain[2] = static_cast<std::uint8_t>(size >> 16);
+            plain[3] = static_cast<std::uint8_t>(size >> 24);
+            std::copy(data.begin(), data.end(), plain.begin() + 4);
+            const auto packed = Deflate::Compress(plain);
+            if (!packed)
+                return {};
+            std::string text;
+            text.reserve(packed->size() / 4 * 5 + 5);
+            for (std::size_t at = 0; at < packed->size(); at += 4)
+            {
+                const std::size_t count = std::min<std::size_t>(4, packed->size() - at);
+                std::uint32_t word = 0;
+                for (std::size_t i = 0; i < 4; ++i)
+                    word = (word << 8) | (i < count ? (*packed)[at + i] : 0u);
+                char chunk[5];
+                std::uint64_t value = word;
+                for (int i = 4; i >= 0; --i)
+                {
+                    chunk[i] = kBase85[value % 85];
+                    value /= 85;
+                }
+                text.append(chunk, count + 1);
+            }
+            return text;
+        }
+    }
+
+    EncodeCacheStats EncodeTableFileCacheStats()
+    {
+        std::lock_guard lock(g_encodedMutex);
+        return g_encodedStats;
+    }
+
+    void ClearEncodeTableFileCache()
+    {
+        std::lock_guard lock(g_encodedMutex);
+        g_encoded.clear();
+        g_encodedStats = {};
+    }
+
     std::string EncodeTableFile(std::span<const std::uint8_t> data)
     {
-        std::vector<std::uint8_t> plain(4 + data.size());
-        const std::uint32_t size = static_cast<std::uint32_t>(data.size());
-        plain[0] = static_cast<std::uint8_t>(size);
-        plain[1] = static_cast<std::uint8_t>(size >> 8);
-        plain[2] = static_cast<std::uint8_t>(size >> 16);
-        plain[3] = static_cast<std::uint8_t>(size >> 24);
-        std::copy(data.begin(), data.end(), plain.begin() + 4);
-        const auto packed = Deflate::Compress(plain);
-        if (!packed)
-            return {};
-        std::string text;
-        text.reserve(packed->size() / 4 * 5 + 5);
-        for (std::size_t at = 0; at < packed->size(); at += 4)
+        if (data.size() < kEncodeCacheMinBytes || data.size() > kEncodeCacheMaxBytes)
+            return EncodeTableFileUncached(data);
         {
-            const std::size_t count = std::min<std::size_t>(4, packed->size() - at);
-            std::uint32_t word = 0;
-            for (std::size_t i = 0; i < 4; ++i)
-                word = (word << 8) | (i < count ? (*packed)[at + i] : 0u);
-            char chunk[5];
-            std::uint64_t value = word;
-            for (int i = 4; i >= 0; --i)
+            std::lock_guard lock(g_encodedMutex);
+            for (EncodedFile& entry : g_encoded)
             {
-                chunk[i] = kBase85[value % 85];
-                value /= 85;
+                if (entry.Plain.size() == data.size() && std::equal(data.begin(), data.end(), entry.Plain.begin()))
+                {
+                    entry.Used = ++g_encodedClock;
+                    ++g_encodedStats.Hits;
+                    return entry.Text;
+                }
             }
-            text.append(chunk, count + 1);
+            ++g_encodedStats.Misses;
         }
+        std::string text = EncodeTableFileUncached(data);
+        if (text.empty())
+            return text;
+        std::lock_guard lock(g_encodedMutex);
+        std::size_t total = data.size();
+        for (const EncodedFile& entry : g_encoded)
+            total += entry.Plain.size();
+        while (!g_encoded.empty() && (g_encoded.size() >= kEncodeCacheMaxFiles || total > kEncodeCacheMaxBytes))
+        {
+            const auto oldest = std::min_element(g_encoded.begin(), g_encoded.end(), [](const EncodedFile& a, const EncodedFile& b) { return a.Used < b.Used; });
+            total -= oldest->Plain.size();
+            g_encoded.erase(oldest);
+        }
+        g_encoded.push_back({ std::vector<std::uint8_t>(data.begin(), data.end()), text, ++g_encodedClock });
         return text;
     }
 

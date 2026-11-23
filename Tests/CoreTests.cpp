@@ -1595,6 +1595,183 @@ hostileRan = true
         CHECK(!std::filesystem::exists(Backups::MarkerFile(Paths::ConfigFolder(), ::GetCurrentProcessId()), ignored));
     }
 
+    // Ctrl+S on the owner's Isaac table saved every 200-450 ms, each save writing the whole file and two log entries.
+    void TableSaves()
+    {
+        std::error_code ignored;
+        const std::filesystem::path folder = Paths::DataFolder() / L"table-saves";
+        std::filesystem::create_directories(folder, ignored);
+        const std::filesystem::path path = folder / L"Saves.CT";
+        const std::filesystem::path other = folder / L"Other.CT";
+        std::filesystem::remove(path, ignored);
+        std::filesystem::remove(other, ignored);
+        const auto content = [](const std::filesystem::path& file) {
+            std::ifstream in(file, std::ios::binary);
+            return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        };
+        const auto entriesSince = [](std::uint64_t serial) {
+            std::vector<LogEntry> found;
+            for (const LogEntry& entry : RuntimeLog::Entries())
+            {
+                if (entry.Serial > serial && entry.Message.find("Saves.CT") != std::string::npos)
+                    found.push_back(entry);
+            }
+            return found;
+        };
+        const auto lastSerial = []() {
+            const auto last = RuntimeLog::Last();
+            return last ? last->Serial : 0;
+        };
+
+        Settings settings;
+        Engine engine(settings);
+        TableRuntime& tables = engine.Tables();
+        // A real write runs in the background (Writing); FinishWrite waits for it like the next frame's Drain would.
+        const auto saved = [&](SaveKind kind) {
+            tables.FinishWrite();
+            return kind == SaveKind::Writing && tables.LastSave() == SaveKind::Written;
+        };
+        engine.Table().AddValue("Health", "game.exe+10", Scan::ValueType::FourBytes);
+        std::vector<std::uint8_t> bytes(64 * 1024);
+        for (std::size_t i = 0; i < bytes.size(); ++i)
+            bytes[i] = static_cast<std::uint8_t>((i * 7) ^ (i >> 5));
+        *engine.Table().AddFile("data.bin").Data = bytes;
+
+        // The first save writes, and is one log entry with the time it took.
+        std::uint64_t serial = lastSerial();
+        CHECK(saved(tables.RequestSave(path, 100.0)));
+        CHECK_EQ(tables.TableWrites(), 1u);
+        CHECK(!engine.Table().Dirty());
+        std::vector<LogEntry> entries = entriesSince(serial);
+        CHECK(entries.size() == 1 && entries[0].Area == "Table" && entries[0].Level == LogLevel::Success && entries[0].Message.starts_with("Saved Saves.CT ("));
+        const std::string first = content(path);
+        CHECK(!first.empty());
+
+        // Presses within the cooldown queue one save; nothing is written or logged until it ends.
+        serial = lastSerial();
+        CHECK(tables.RequestSave(path, 100.3) == SaveKind::Queued);
+        CHECK(tables.RequestSave(path, 100.6) == SaveKind::Queued);
+        CHECK(tables.SavePending());
+        tables.TickSaves(100.9);
+        CHECK(tables.SavePending());
+        CHECK(entriesSince(serial).empty());
+        // Nothing changed: the trailing save finds the file up to date and does not write it.
+        tables.TickSaves(101.0);
+        CHECK(!tables.SavePending());
+        CHECK(tables.LastSave() == SaveKind::UpToDate);
+        CHECK_EQ(tables.TableWrites(), 1u);
+        entries = entriesSince(serial);
+        CHECK(entries.size() == 1 && entries[0].Level == LogLevel::Info && entries[0].Message.find("up to date") != std::string::npos);
+
+        // After the cooldown an unchanged table is not written either, and a change that was undone counts as unchanged.
+        CHECK(tables.RequestSave(path, 105.0) == SaveKind::UpToDate);
+        engine.Table().Roots()[0]->Description = "Mana";
+        engine.Table().Touch();
+        engine.Table().Roots()[0]->Description = "Health";
+        CHECK(engine.Table().Dirty());
+        CHECK(tables.RequestSave(path, 110.0) == SaveKind::UpToDate);
+        CHECK(!engine.Table().Dirty());
+        CHECK_EQ(tables.TableWrites(), 1u);
+        CHECK_EQ(content(path), first);
+
+        // A real change is always written: right away after the cooldown, at its end within it, with what the table holds then.
+        engine.Table().Roots()[0]->Description = "Armor";
+        engine.Table().Touch();
+        CHECK(saved(tables.RequestSave(path, 120.0)));
+        CHECK_EQ(tables.TableWrites(), 2u);
+        CHECK(content(path).find("Armor") != std::string::npos);
+        engine.Table().AddValue("Ammo", "game.exe+20", Scan::ValueType::FourBytes);
+        CHECK(tables.RequestSave(path, 120.2) == SaveKind::Queued);
+        engine.Table().AddValue("Gold", "game.exe+30", Scan::ValueType::FourBytes);
+        CHECK(engine.Table().Dirty());
+        tables.TickSaves(121.0);
+        CHECK(tables.SavePending());
+        tables.FinishWrite();
+        CHECK(tables.LastSave() == SaveKind::Written && !engine.Table().Dirty());
+        CHECK_EQ(tables.TableWrites(), 3u);
+        CHECK(content(path).find("Ammo") != std::string::npos && content(path).find("Gold") != std::string::npos);
+
+        // A change made while the file is written is not in it, so the table stays dirty; a request meanwhile waits for the write.
+        engine.Table().AddValue("Speed", "game.exe+24", Scan::ValueType::FourBytes);
+        CHECK(tables.RequestSave(path, 125.0) == SaveKind::Writing);
+        engine.Table().AddValue("Luck", "game.exe+28", Scan::ValueType::FourBytes);
+        CHECK(tables.RequestSave(path, 126.5) == SaveKind::Queued);
+        tables.TickSaves(126.6);
+        CHECK(tables.SavePending());
+        tables.FinishWrite();
+        CHECK(tables.LastSave() == SaveKind::Written && engine.Table().Dirty());
+        CHECK(content(path).find("Speed") != std::string::npos && content(path).find("Luck") == std::string::npos);
+        tables.TickSaves(126.7);
+        tables.FinishWrite();
+        CHECK(tables.LastSave() == SaveKind::Written && !engine.Table().Dirty() && !tables.SavePending());
+        CHECK(content(path).find("Luck") != std::string::npos);
+
+        // A file changed from outside (another program saved over it) is written again although the table did not change.
+        {
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            out << "<CheatTable/>";
+        }
+        CHECK(saved(tables.RequestSave(path, 130.0)));
+        CHECK(content(path).find("Gold") != std::string::npos);
+        std::filesystem::remove(path, ignored);
+        CHECK(saved(tables.RequestSave(path, 140.0)));
+        CHECK(std::filesystem::exists(path, ignored));
+        CHECK_EQ(tables.TableWrites(), 7u);
+
+        // A queued save is not lost: quit, a new table and a save to another file run it first.
+        engine.Table().AddValue("Keys", "game.exe+40", Scan::ValueType::FourBytes);
+        CHECK(saved(engine.RequestSave(path)));
+        engine.Table().AddValue("Bombs", "game.exe+50", Scan::ValueType::FourBytes);
+        CHECK(engine.RequestSave(path) == SaveKind::Queued);
+        engine.FlushPendingSave();
+        CHECK(!engine.SavePending() && !engine.Table().Dirty());
+        CHECK(content(path).find("Bombs") != std::string::npos);
+        engine.Table().AddValue("Coins", "game.exe+60", Scan::ValueType::FourBytes);
+        CHECK(engine.RequestSave(path) == SaveKind::Queued);
+        CHECK(engine.SaveTable(other).Ok());
+        CHECK(!engine.SavePending());
+        CHECK(content(path).find("Coins") != std::string::npos && content(other).find("Coins") != std::string::npos);
+        CHECK(engine.Table().FilePath == WideToUtf8(other.wstring()));
+        engine.Table().AddValue("Hearts", "game.exe+70", Scan::ValueType::FourBytes);
+        CHECK(saved(engine.RequestSave(path)));
+        engine.Table().AddValue("Souls", "game.exe+80", Scan::ValueType::FourBytes);
+        CHECK(engine.RequestSave(path) == SaveKind::Queued);
+        engine.NewTable();
+        CHECK(!engine.SavePending());
+        Table::LoadedTable loaded;
+        CHECK(Table::LoadTable(path, loaded).Ok());
+        CHECK(std::any_of(loaded.Records.begin(), loaded.Records.end(), [](const auto& record) { return record->Description == "Souls"; }));
+
+        // A save that fails reports it and leaves the table dirty.
+        engine.Table().AddValue("Lost", "game.exe+90", Scan::ValueType::FourBytes);
+        const Status failed = engine.SaveTable(folder / L"missing folder" / L"No.CT");
+        CHECK(!failed.Ok() && failed.Code == ErrorCode::TableNotSaved && engine.Table().Dirty());
+        CHECK(tables.LastSave() == SaveKind::Failed);
+
+        // Table files are deflated once while their bytes stay the same, also when Lua writes into them without a version bump.
+        Table::ClearEncodeTableFileCache();
+        Table::AddressList list;
+        list.AddValue("Health", "game.exe+10", Scan::ValueType::FourBytes);
+        Table::TableFile& file = list.AddFile("data.bin");
+        *file.Data = bytes;
+        Table::StructureStore structures;
+        const std::string once = Table::WriteTable(list, structures, {});
+        const std::string twice = Table::WriteTable(list, structures, {});
+        CHECK_EQ(once, twice);
+        Table::EncodeCacheStats stats = Table::EncodeTableFileCacheStats();
+        CHECK(stats.Misses == 1 && stats.Hits == 1);
+        (*file.Data)[100] ^= 0xFF;
+        const std::string changed = Table::WriteTable(list, structures, {});
+        CHECK(changed != once);
+        stats = Table::EncodeTableFileCacheStats();
+        CHECK(stats.Misses == 2 && stats.Hits == 1);
+        Table::ClearEncodeTableFileCache();
+        CHECK_EQ(Table::WriteTable(list, structures, {}), changed);
+        Table::LoadedTable reread;
+        CHECK(Table::ParseTable(changed, reread).Ok() && reread.Files.size() == 1 && *reread.Files[0].Data == *file.Data);
+        std::filesystem::remove_all(folder, ignored);
+    }
+
     void SessionBackups()
     {
         CHECK_EQ(Backups::SafeName("Crab: Champions?"), "Crab_ Champions_");
@@ -1889,6 +2066,7 @@ hostileRan = true
         HostileExpressions();
         SessionBackups();
         SessionBackupContent();
+        TableSaves();
         DiagnosticsInfo();
         return Totals().Failures - before;
     }

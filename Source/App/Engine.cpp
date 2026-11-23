@@ -584,6 +584,7 @@ namespace Manifold
             PROFILE_ZONE("Finished background jobs");
             m_work.Drain();
         }
+        m_tables.TickSaves(now);
         m_backup.Tick(now);
         const int scansBefore = m_scanner.ScanNumber();
         {

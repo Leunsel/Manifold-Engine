@@ -546,6 +546,7 @@ namespace Manifold
             m_host.RenderFrame();
         }
         Sounds::Stop();
+        m_engine->FlushPendingSave();
         m_engine->Backups().Finish();
         RememberPlacement();
         const Status saved = m_engine->SaveOptionsNow();

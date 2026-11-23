@@ -189,7 +189,10 @@ namespace Manifold
 
         Status LoadTable(const std::filesystem::path& path, bool merge) { return m_tables.LoadTable(path, merge); }
         Status RestoreTable(const std::filesystem::path& path) { return m_tables.RestoreTable(path); }
-        Status SaveTable(const std::filesystem::path& path) { return m_tables.SaveTable(path); }
+        Status SaveTable(const std::filesystem::path& path, bool toast = false) { return m_tables.SaveTable(path, toast); }
+        SaveKind RequestSave(const std::filesystem::path& path) { return m_tables.RequestSave(path, Now()); }
+        void FlushPendingSave() { m_tables.FlushPendingSave(); }
+        bool SavePending() const { return m_tables.SavePending(); }
         Table::FileNaming TableFileNaming() const { return static_cast<Table::FileNaming>(std::clamp(m_settings.TableFileNames, 0, 2)); }
         void NewTable() { m_tables.NewTable(); }
         std::vector<Table::TableSymbol> TableSymbols() const { return m_tables.TableSymbols(); }
