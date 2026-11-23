@@ -452,13 +452,14 @@ namespace Manifold::UI
             });
             bar.Cell([&] {
                 const float side = ImGui::GetFrameHeight();
+                const float room = std::max(1.0f, ImGui::GetContentRegionAvail().x);
                 if (!slow)
                 {
-                    ImGui::Dummy(ImVec2(side, side));
+                    ImGui::Dummy(ImVec2(room, side));
                     return;
                 }
                 const ImVec2 at = ImGui::GetCursorScreenPos();
-                const float spin = ImGui::GetTextLineHeight();
+                const float spin = std::min(ImGui::GetTextLineHeight(), room);
                 ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + (side - spin) * 0.5f));
                 Spinner(spin, ManifoldTheme::Accent);
                 const Scan::PatternProgress& progress = m_task.State();
