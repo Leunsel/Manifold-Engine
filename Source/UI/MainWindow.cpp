@@ -2952,7 +2952,7 @@ namespace Manifold::UI
         }
         else if (record.Kind == Table::RecordKind::Script && !m_release)
         {
-            Muted(record.Active ? "<enabled>" : "<script>");
+            Muted(record.Active ? "<Enabled>" : "<Disabled>");
         }
         PopMono();
         ImGui::PopID();
