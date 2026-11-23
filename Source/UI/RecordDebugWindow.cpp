@@ -1769,16 +1769,19 @@ namespace Manifold::UI
             ImGui::EndTable();
         }
         if (!entry.Steps.empty() && Section(Format("Auto Assembler Steps (%zu)", entry.Steps.size()).c_str()) &&
-            ImGui::BeginTable("##tracesteps", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit))
+            ImGui::BeginTable("##tracesteps", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit))
         {
             ImGui::TableSetupColumn("Line", ImGuiTableColumnFlags_WidthFixed);
-            ImGui::TableSetupColumn("Step", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Command", ImGuiTableColumnFlags_WidthFixed);
+            ImGui::TableSetupColumn("Result", ImGuiTableColumnFlags_WidthStretch);
             PushMono();
             for (const Asm::AaLogLine& step : entry.Steps)
             {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 Muted(step.Line > 0 ? std::to_string(step.Line) : std::string());
+                ImGui::TableNextColumn();
+                Layout::Colored(step.Command, ManifoldTheme::CodeLabel, Layout::Overflow::Visible);
                 ImGui::TableNextColumn();
                 Layout::Wrapped(step.Text);
             }

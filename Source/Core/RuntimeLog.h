@@ -49,6 +49,9 @@ namespace Manifold
         void SetVerbose(bool verbose);
         bool Verbose();
         void Write(LogLevel level, std::string_view area, const char* file, const char* function, int line, std::string_view message);
+        // message is the one line the list shows; details (any number of lines) is what the details
+        // pane shows and what goes into the log file, indented under the entry.
+        void WriteDetailed(LogLevel level, std::string_view area, const char* file, const char* function, int line, std::string_view message, std::string_view details);
         void Clear();
         std::vector<LogEntry> Entries();
         std::optional<LogEntry> Last();

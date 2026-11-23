@@ -437,9 +437,10 @@ namespace Manifold
             });
     }
 
-    Asm::AaResult Engine::AutoAssemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record)
+    Asm::AaResult Engine::AutoAssemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record,
+        std::string_view logTitle)
     {
-        return Assemble(script, section, memory, checkOnly, owner, record, nullptr);
+        return Assemble(script, section, memory, checkOnly, owner, record, nullptr, false, logTitle);
     }
 
     ScriptCheck Engine::CheckScript(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool holdLuaBack)
@@ -450,7 +451,7 @@ namespace Manifold
     }
 
     Asm::AaResult Engine::Assemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record,
-        int* luaHeldBack, bool scanInCheck)
+        int* luaHeldBack, bool scanInCheck, std::string_view logTitle)
     {
         Asm::AaHost host;
         host.Process = m_target.Process().get();
@@ -501,7 +502,7 @@ namespace Manifold
         options.ScanInCheck = scanInCheck;
         options.Owner = owner;
         options.Log = m_settings.AutoAssemblerLog;
-        options.LogTitle = AutoAssemblerLogTitle(owner, record);
+        options.LogTitle = logTitle.empty() ? AutoAssemblerLogTitle(owner, record) : std::string(logTitle);
         if (!m_tables.Table().FilePath.empty())
             options.IncludeFolder = std::filesystem::path(Utf8ToWide(m_tables.Table().FilePath)).parent_path();
         else

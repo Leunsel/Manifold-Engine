@@ -1251,21 +1251,20 @@ namespace Manifold::Tests
 
         std::string StepDump(const Asm::AaResult& result)
         {
-            std::string dump;
-            for (const Asm::AaLogLine& step : result.Log)
-                dump += "\n    " + std::to_string(step.Line) + ": " + step.Text;
-            return dump.empty() ? std::string(" (no steps)") : dump;
+            return result.Log.empty() ? std::string(" (no steps)") : "\n" + Asm::FormatLog(result.Log);
         }
 
+        // parts are looked for in "command | result"
         bool HasStep(const Asm::AaResult& result, int line, std::initializer_list<std::string_view> parts)
         {
             for (const Asm::AaLogLine& step : result.Log)
             {
                 if (line >= 0 && step.Line != line)
                     continue;
+                const std::string text = step.Command + " | " + step.Text;
                 bool all = true;
                 for (const std::string_view part : parts)
-                    all = all && step.Text.find(part) != std::string::npos;
+                    all = all && text.find(part) != std::string::npos;
                 if (all)
                     return true;
             }
@@ -1313,53 +1312,78 @@ namespace Manifold::Tests
                 "dealloc(missing)\n";                                                              // 19
 
             Asm::AaMemory memory;
-            const std::uint64_t logBefore = RuntimeLog::Generation();
+            const auto entriesSince = [](std::uint64_t serial) {
+                std::vector<LogEntry> found;
+                for (const LogEntry& entry : RuntimeLog::Entries())
+                {
+                    if (entry.Serial > serial && entry.Area == "Auto Assembler")
+                        found.push_back(entry);
+                }
+                return found;
+            };
+            const auto lastSerial = []() {
+                const auto last = RuntimeLog::Last();
+                return last ? last->Serial : std::uint64_t(0);
+            };
+            std::uint64_t serial = lastSerial();
             Asm::AaResult result = Asm::RunAutoAssembler(script, host, memory, options);
             Expect(report, result.Ok() && result.Logged, "{$log} script runs and logs", AaOutcome(result));
-            Expect(report, HasStep(result, 0, { "run of [ENABLE]", "64-bit" }), "the log starts with the section and the process", StepDump(result));
-            Expect(report, HasStep(result, 3, { "aobscanregion(hit)", "48 89 C8 C3", "found at" }), "aobscanregion says where it found the bytes", StepDump(result));
-            Expect(report, HasStep(result, 4, { "alloc(cave, 256 bytes) is at" }), "alloc says where its memory is", StepDump(result));
-            Expect(report, HasStep(result, 6, { "define(target) is hit" }), "define says its value", StepDump(result));
-            Expect(report, HasStep(result, 8, { "assert(hit) at", "matches 48 89 C8" }), "assert says what it compared", StepDump(result));
-            Expect(report, HasStep(result, 9, { "cave: the next lines go to" }), "an address line says where the code goes", StepDump(result));
-            Expect(report, HasStep(result, 10, { "reassemble(hit) read mov rax", "placed at", "48 89 C8" }), "reassemble says what it read and where it put it", StepDump(result));
-            Expect(report, HasStep(result, 11, { "readmem(hit, 4 bytes) read 48 89 C8 C3" }), "readmem says the bytes it copied", StepDump(result));
-            Expect(report, HasStep(result, 14, { "label back is at" }), "a label says its address", StepDump(result));
-            Expect(report, HasStep(result, -1, { "wrote ", "(was " }), "a write says its bytes and the old ones", StepDump(result));
-            Expect(report, HasStep(result, 7, { "registersymbol(aaLogBack) is" }), "registersymbol says the address", StepDump(result));
-            Expect(report, HasStep(result, 0, { "done: 1 write", "1 allocation", "1 symbol registered" }), "the log ends with a summary", StepDump(result));
-            bool inRuntimeLog = false;
-            for (const LogEntry& entry : RuntimeLog::Entries())
-                inRuntimeLog = inRuntimeLog || (entry.Serial > 0 && entry.Area == "Auto Assembler" && entry.Message.find("\"Log Test\" [ENABLE], line 3: aobscanregion(hit)") != std::string::npos);
-            Expect(report, RuntimeLog::Generation() > logBefore && inRuntimeLog, "the steps go to the runtime log with the script's name, section and line");
+            Expect(report, HasStep(result, 3, { "aobscanregion(hit) | found at" }), "aobscanregion says where it found the bytes", StepDump(result));
+            Expect(report, HasStep(result, 4, { "alloc(cave) | ", ", 256 bytes" }), "alloc says where its memory is", StepDump(result));
+            Expect(report, HasStep(result, 6, { "define(target) | hit" }), "define says its value", StepDump(result));
+            Expect(report, HasStep(result, 8, { "assert(hit) | matches 48 89 C8 at" }), "assert says what it compared", StepDump(result));
+            Expect(report, HasStep(result, 9, { "cave: | code goes to" }), "an address line says where the code goes", StepDump(result));
+            Expect(report, HasStep(result, 10, { "reassemble(hit) | mov rax", "as 48 89 C8" }), "reassemble says what it read and where it put it", StepDump(result));
+            Expect(report, HasStep(result, 11, { "readmem(hit, 4) | 48 89 C8 C3 from" }), "readmem says the bytes it copied", StepDump(result));
+            Expect(report, HasStep(result, 14, { "back: | label at" }), "a label says its address", StepDump(result));
+            Expect(report, HasStep(result, -1, { "write | 13 bytes at", "(was " }), "a write says its bytes and the old ones", StepDump(result));
+            Expect(report, HasStep(result, 7, { "registersymbol(aaLogBack) | " }), "registersymbol says the address", StepDump(result));
+            std::vector<LogEntry> entries = entriesSince(serial);
+            Expect(report, entries.size() == 1 && entries.front().Level == LogLevel::Info, "a run writes ONE log entry", Format("%zu entries", entries.size()));
+            if (entries.size() == 1)
+            {
+                const LogEntry& entry = entries.front();
+                Expect(report, entry.Message.find("\"Log Test\" [ENABLE]: 1 write (13 bytes) · 1 allocation · registered aaLogBack") == 0, "the entry's line sums the run up", entry.Message);
+                Expect(report, entry.Full.find("Manifold-Engine.Tests.exe (64-bit)") != std::string::npos && entry.Full.find("line  command") != std::string::npos &&
+                                   entry.Full.find("aobscanregion(hit)") != std::string::npos,
+                    "the entry's details hold the process and the step table", entry.Full);
+            }
 
             options.Section = Asm::AaSection::Disable;
+            serial = lastSerial();
             result = Asm::RunAutoAssembler(script, host, memory, options);
             Expect(report, result.Ok() && result.Logged, "the [DISABLE] part logs too", AaOutcome(result));
-            Expect(report, HasStep(result, 17, { "unregistersymbol(aaLogBack) removed it" }), "unregistersymbol says it removed the symbol", StepDump(result));
-            Expect(report, HasStep(result, 18, { "dealloc(cave) freed the block at" }), "dealloc says what it freed", StepDump(result));
-            Expect(report, HasStep(result, 19, { "dealloc(missing) finds no memory" }), "dealloc of an unknown name says so", StepDump(result));
+            Expect(report, HasStep(result, 17, { "unregistersymbol(aaLogBack) | removed" }), "unregistersymbol says it removed the symbol", StepDump(result));
+            Expect(report, HasStep(result, 18, { "dealloc(cave) | freed the block at" }), "dealloc says what it freed", StepDump(result));
+            Expect(report, HasStep(result, 19, { "dealloc(missing) | nothing allocated" }), "dealloc of an unknown name says so", StepDump(result));
+            entries = entriesSince(serial);
+            Expect(report, entries.size() == 1 && entries.front().Message.find("[DISABLE]: nothing written · 1 block freed · 1 symbol removed") != std::string::npos,
+                "the [DISABLE] summary counts what it took out", entries.empty() ? std::string() : entries.front().Message);
             for (const Asm::AaAllocation& allocation : memory.Allocations)
                 process->Free(allocation.Block);
 
-            // a check says what it leaves out
+            // a check that passes writes no log entry, but keeps its steps in the result
             Asm::AaMemory checked;
             options.Section = Asm::AaSection::Enable;
             options.CheckOnly = true;
+            serial = lastSerial();
             result = Asm::RunAutoAssembler(script, host, checked, options);
-            Expect(report, result.Ok() && HasStep(result, 0, { "check of [ENABLE]" }) && HasStep(result, 3, { "does not scan in a check" }) &&
-                               HasStep(result, 8, { "does not compare in a check" }) && HasStep(result, 0, { "check passed" }),
-                "a check logs what it skips", StepDump(result));
+            Expect(report, result.Ok() && HasStep(result, 3, { "not scanned in a check" }) && HasStep(result, 8, { "skipped in a check" }), "a check keeps what it skipped", StepDump(result));
+            Expect(report, entriesSince(serial).empty(), "a check that passes writes no log entry");
             options.CheckOnly = false;
             options.Section = Asm::AaSection::Whole;
 
-            // a failure is the last step, after what was undone
+            // a failure: one warning entry, the failure last in the steps
             Asm::AaMemory failing;
+            serial = lastSerial();
             result = Asm::RunAutoAssembler("{$log}\nalloc(cave,$100)\nassert(" + Hex(start + 1) + ",90 90)\ncave:\nret\n", host, failing, options);
             Expect(report, !result.Ok() && result.Error.Code == ErrorCode::AaAssertFailed, "failing assert with {$log}", AaOutcome(result));
-            Expect(report, HasStep(result, 3, { "expected 90 90 but found 48 89" }) && HasStep(result, 0, { "freed the memory this run allocated" }) &&
+            Expect(report, HasStep(result, 3, { "expected 90 90 at", "found 48 89" }) && HasStep(result, 0, { "again, since the run failed" }) &&
                                !result.Log.empty() && result.Log.back().Text.find("failed at line 3") == 0,
                 "the log shows the mismatch, the freed memory and the failure", StepDump(result));
+            entries = entriesSince(serial);
+            Expect(report, entries.size() == 1 && entries.front().Level == LogLevel::Warning && entries.front().Message.find("\"Log Test\" failed at line 3") == 0,
+                "a failed run writes one warning", entries.empty() ? std::string() : entries.front().Message);
             Expect(report, failing.Allocations.empty(), "the failed run keeps no allocation");
 
             // off by default: no {$log}, no option, no steps
@@ -1372,9 +1396,27 @@ namespace Manifold::Tests
             Asm::AaMemory loud;
             options.Log = true;
             result = Asm::RunAutoAssembler("alloc(cave,$10)\ncave:\nret\n", host, loud, options);
-            Expect(report, result.Ok() && result.Logged && HasStep(result, 1, { "alloc(cave, 16 bytes)" }), "the option logs a script without {$log}", StepDump(result));
+            Expect(report, result.Ok() && result.Logged && HasStep(result, 1, { "alloc(cave) | ", ", 16 bytes" }), "the option logs a script without {$log}", StepDump(result));
             for (const Asm::AaAllocation& allocation : loud.Allocations)
                 process->Free(allocation.Block);
+            // a define a custom command returns is shown with the command, not again on its own
+            Asm::AaMemory custom;
+            host.IsCustomCommand = [](std::string_view name) { return EqualsNoCase(name, "MakeDefine"); };
+            host.RunCustomCommand = [](std::string_view, std::string_view, bool, std::string& output) -> Status
+                {
+                    output = "define(made,90)\n";
+                    return Status::Success();
+                };
+            result = Asm::RunAutoAssembler("MakeDefine(made, 1)\nalloc(cave,$10)\ncave:\ndb made\n", host, custom, options);
+            Expect(report, result.Ok() && HasStep(result, 1, { "MakeDefine(made, ...) | returned define(made,90)" }) && !HasStep(result, 1, { "define(made) |" }),
+                "a custom command shows what it returned, its define is not listed twice", StepDump(result));
+            host.IsCustomCommand = nullptr;
+            host.RunCustomCommand = nullptr;
+            for (const Asm::AaAllocation& allocation : custom.Allocations)
+                process->Free(allocation.Block);
+            // the table lines up
+            const std::string table = Asm::FormatLog({ { 3, "aobscan(x)", "found" }, { 12, "alloc(longer)", "at 1000" }, { 0, "", "failed" } });
+            Expect(report, table == "line  command        result\n   3  aobscan(x)     found\n  12  alloc(longer)  at 1000\n                     failed", "FormatLog lines up the columns", "\n" + table);
             // {$log} inside a comment or a string does not count
             Expect(report, !Asm::WantsLog("// {$log}\nnop\n") && !Asm::WantsLog("db '{$log}'\n") && !Asm::WantsLog("{ {$log} }\n") && Asm::WantsLog("{$LOG}\nnop\n"),
                 "WantsLog skips comments and strings and ignores case");

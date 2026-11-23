@@ -62,7 +62,8 @@ namespace Manifold::Asm
     struct AaLogLine
     {
         int Line = 0;
-        std::string Text;
+        std::string Command;  // the command as written, such as aobscanmodule(INJECT) or a label line
+        std::string Text;     // what it did
     };
 
     struct AaResult
@@ -91,6 +92,8 @@ namespace Manifold::Asm
     inline constexpr std::size_t kMaxLogLines = 400;
 
     bool WantsLog(std::string_view script);
+    // The steps as an aligned table (line, command, result), one row per step.
+    std::string FormatLog(const std::vector<AaLogLine>& steps);
     AaResult RunAutoAssembler(std::string_view script, AaHost& host, AaMemory& memory, const AaOptions& options);
 
     bool HasSections(std::string_view script);

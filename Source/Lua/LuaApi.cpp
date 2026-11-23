@@ -585,6 +585,24 @@ namespace Manifold::Lua
             return 0;
         }
 
+        // ∑ The Auto Assembler step log names a Lua-run script after the record whose script called it
+        //   (memrec), since a table framework runs many hook scripts through the same autoAssemble.
+        std::string StepLogTitle(lua_State* state, const char* function)
+        {
+            std::string title = function;
+            lua_pushcfunction(state, [](lua_State* s) -> int {
+                lua_getglobal(s, "memrec");
+                if (lua_type(s, -1) != LUA_TUSERDATA)
+                    return 0;
+                lua_getfield(s, -1, "Description");
+                return 1;
+            });
+            if (lua_pcall(state, 0, 1, 0) == LUA_OK && lua_type(state, -1) == LUA_TSTRING)
+                title += " from \"" + std::string(lua_tostring(state, -1)) + "\"";
+            lua_pop(state, 1);
+            return title;
+        }
+
         int AutoAssemble(lua_State* state)
         {
             const char* script = luaL_checkstring(state, 1);
@@ -600,13 +618,16 @@ namespace Manifold::Lua
             const SharedMemory memory = given ? *given : std::make_shared<Asm::AaMemory>();
             const bool sections = Asm::HasSections(script);
             const Asm::AaSection section = !sections ? Asm::AaSection::Whole : given ? Asm::AaSection::Disable : Asm::AaSection::Enable;
-            const Asm::AaResult result = Owner(state).AutoAssemble(script, section, *memory, false, "lua");
+            const bool log = Owner(state).Options().AutoAssemblerLog || Asm::WantsLog(script);
+            const Asm::AaResult result = Owner(state).AutoAssemble(script, section, *memory, false, "lua", nullptr, log ? StepLogTitle(state, "autoAssemble") : std::string());
             if (!result.Ok())
             {
                 const std::string message = result.Line > 0 ? "line " + std::to_string(result.Line) + ": " + result.Error.Text : result.Error.Text;
                 std::string first = Trim(script);
                 first = first.substr(0, std::min<std::size_t>(first.find('\n'), 80));
-                LOG_WARN("Lua", "autoAssemble failed (" + std::string(section == Asm::AaSection::Disable ? "disable" : "enable") + "), " + message + " | script starts with: " + first);
+                // the step log's own entry already says all of this, with the steps before the failure
+                if (!result.Logged)
+                    LOG_WARN("Lua", "autoAssemble failed (" + std::string(section == Asm::AaSection::Disable ? "disable" : "enable") + "), " + message + " | script starts with: " + first);
                 lua_pushboolean(state, 0);
                 lua_pushstring(state, message.c_str());
                 return 2;
@@ -626,7 +647,8 @@ namespace Manifold::Lua
             const bool enable = lua_isnoneornil(state, 2) || lua_toboolean(state, 2);
             Asm::AaMemory memory;
             const Asm::AaSection section = Asm::HasSections(script) ? (enable ? Asm::AaSection::Enable : Asm::AaSection::Disable) : Asm::AaSection::Whole;
-            const Asm::AaResult result = Owner(state).AutoAssemble(script, section, memory, true, "check");
+            const bool log = Owner(state).Options().AutoAssemblerLog || Asm::WantsLog(script);
+            const Asm::AaResult result = Owner(state).AutoAssemble(script, section, memory, true, "check", nullptr, log ? StepLogTitle(state, "autoAssembleCheck") : std::string());
             lua_pushboolean(state, result.Ok());
             if (!result.Ok())
                 lua_pushstring(state, result.Error.Text.c_str());

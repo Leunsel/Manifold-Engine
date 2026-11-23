@@ -632,7 +632,14 @@ namespace Manifold::UI
             ImGui::PopStyleColor();
             ImGui::PopTextWrapPos();
         }
+        // ∑ details of several lines are tables, traces or code (the Auto Assembler's step table): a
+        //   fixed-width font keeps their columns in line
+        const bool table = m_detailText.find('\n') != std::string::npos;
+        if (table)
+            PushMono();
         InputMultiline("##logtext", m_detailText, ImVec2(-FLT_MIN, -FLT_MIN), ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
+        if (table)
+            PopMono();
     }
 
     void LogWindow::ErrorsTab()

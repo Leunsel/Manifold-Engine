@@ -45,7 +45,21 @@ When a script does not do what it should, the step log shows what each command d
 - **For every script**: Settings → Scripts → Log Auto Assembler Steps.
 - **For one script**: put `{$log}` anywhere in it, outside comments and strings. It covers the `[ENABLE]` and the `[DISABLE]` part.
 
-The steps go to the Log window (area Auto Assembler, level Info) and to the log file. Each line names the record, the part and the script line, for example `"Infinite Health" [ENABLE], line 3: aobscanmodule(INJECT) for 89 83 50 01 00 00 in game.exe (...): found at game.exe+1234 (7FF6...)`. The last line is a summary of the writes, allocations and symbols, or the error. Address List Debug → Trace keeps the steps of each switch, up to 400 per run.
+Each run writes **one** entry to the Log window (area Auto Assembler). Its line sums the run up, for example `"Infinite Health" [ENABLE]: 2 writes (19 bytes) · 1 allocation · registered INJECT · 9 steps`. A failed run is a warning that names the line and the error. Pick the entry and the details pane shows the steps as a table:
+
+```
+line  command                  result
+   3  aobscanmodule(INJECT)    found at game.exe+1234 (7FF6...)
+   4  alloc(newmem)            1F0000, 4096 bytes, 7FF... from game.exe+1234 (a 5-byte jump reaches)
+  12  INJECT:                  code goes to game.exe+1234 (7FF6...)
+  13  write                    5 bytes at game.exe+1234: E9 ...  (was 89 83 50 01 00)
+```
+
+- A script run from Lua (`autoAssemble`) is named after the record whose script called it.
+- A syntax check that passes writes nothing to the log: tables check their scripts before every run, and those entries only buried the runs. A check that fails writes its warning like a run.
+- `define`s that a command written in Lua returns are shown with that command, not a second time.
+- The log file holds the same: the entry's line, and the table indented below it.
+- Address List Debug → Trace keeps the steps of each switch, up to 400 per run.
 
 | Command | What the log says |
 | --- | --- |

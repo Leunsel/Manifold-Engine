@@ -127,6 +127,11 @@ namespace Manifold::RuntimeLog
 
     void Write(LogLevel level, std::string_view area, const char* file, const char* function, int line, std::string_view message)
     {
+        WriteDetailed(level, area, file, function, line, message, {});
+    }
+
+    void WriteDetailed(LogLevel level, std::string_view area, const char* file, const char* function, int line, std::string_view message, std::string_view details)
+    {
         LogEntry entry;
         entry.Time = TimeText(entry.Milliseconds);
         entry.Clock = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_started).count();
@@ -136,7 +141,9 @@ namespace Manifold::RuntimeLog
         entry.Area = std::string(area);
         entry.Trace = TraceText(file, function, line);
         entry.Message = OneLine(message);
-        if (entry.Message != message)
+        if (!details.empty())
+            entry.Full = std::string(details);
+        else if (entry.Message != message)
             entry.Full = std::string(message);
 
         std::lock_guard lock(g_lock);
@@ -146,6 +153,21 @@ namespace Manifold::RuntimeLog
         if (g_file)
         {
             std::fprintf(g_file, "[%s.%03d] [%-5s] [%s] [%s] %s\n", entry.Time.c_str(), entry.Milliseconds, LevelName(level), entry.Area.c_str(), entry.Trace.c_str(), entry.Message.c_str());
+            // ∑ the details go into the file too, indented under their entry, so a file read later
+            //   holds what the Log window's details pane shows
+            if (!details.empty())
+            {
+                std::size_t at = 0;
+                while (at <= details.size())
+                {
+                    const std::size_t end = std::min(details.find('\n', at), details.size());
+                    std::string_view part = details.substr(at, end - at);
+                    if (!part.empty() && part.back() == '\r')
+                        part.remove_suffix(1);
+                    std::fprintf(g_file, "    %.*s\n", static_cast<int>(part.size()), part.data());
+                    at = end + 1;
+                }
+            }
             std::fflush(g_file);
         }
         g_entries.push_back(std::move(entry));

@@ -179,7 +179,9 @@ namespace Manifold
         bool NeedsValue(const Table::MemoryRecord& record) const { return m_tables.NeedsValue(record); }
         void SetVisibleRecords(std::vector<int> ids) { m_tables.SetVisibleRecords(std::move(ids)); }
 
-        Asm::AaResult AutoAssemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record = nullptr);
+        // logTitle names the run in the Auto Assembler step log; empty: the record, or what owner says
+        Asm::AaResult AutoAssemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record = nullptr,
+            std::string_view logTitle = {});
         Asm::AaResult AutoAssemble(std::string_view script, bool checkOnly);
         static std::string AutoAssemblerLogTitle(std::string_view owner, const Table::MemoryRecord* record);
         // holdLuaBack compiles {$lua} blocks and skips custom commands also when the table's scripts are trusted, so nothing runs.
@@ -212,7 +214,7 @@ namespace Manifold
     private:
         void UpdateAutoAttach();
         Asm::AaResult Assemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record,
-            int* luaHeldBack, bool scanInCheck = false);
+            int* luaHeldBack, bool scanInCheck = false, std::string_view logTitle = {});
         Settings& m_settings;
         SettingsStore m_settingsStore;
         TargetSession m_target;
