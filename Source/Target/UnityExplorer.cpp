@@ -525,7 +525,7 @@ namespace Manifold::Target
         if (!process || !monoArray)
             return items;
         const MonoObjectLayout layout = MonoLayoutFor(process->PointerSize());
-        const std::uint64_t length = process->ReadPointer(monoArray + layout.ArrayLength).value_or(~std::uint64_t(0));
+        const std::uint64_t length = process->ReadValue<std::uint32_t>(monoArray + layout.ArrayLength).value_or(~std::uint32_t(0));
         if (length > 0x10000000ull)
             return items;
         if (total)
@@ -1277,7 +1277,7 @@ namespace Manifold::Target
         }
         if (className.empty())
             className = ShortTypeName(type);
-        const std::optional<std::uint64_t> length = process && !className.empty() && className.back() == ']' ? process->ReadPointer(pointer + objects.ArrayLength) : std::nullopt;
+        const std::optional<std::uint32_t> length = process && !className.empty() && className.back() == ']' ? process->ReadValue<std::uint32_t>(pointer + objects.ArrayLength) : std::nullopt;
         if (length)
             shown.Text = ShortName(className) + "  (" + std::to_string(*length) + ")";
         else

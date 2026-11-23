@@ -173,8 +173,61 @@ namespace Manifold.Managed
             output.U8(s_originalRunInBackground >= 0 ? 1 : 0);
         }
 
+        // ∑ Unity before 5.3 (INSIDE is 5.0) has no SceneManagement: one loaded level, named by
+        //   Application.loadedLevelName, whose roots are the parentless Transforms. DontDestroyOnLoad
+        //   objects are among them, so that scene stays empty.
+        sealed class LegacyScene
+        {
+            public readonly int Handle;
+
+            public LegacyScene(int handle)
+            {
+                Handle = handle;
+            }
+        }
+
+        static bool HasSceneManager()
+        {
+            return Unity.Find("UnityEngine.SceneManagement.SceneManager") != null;
+        }
+
+        static string LegacyLevelName()
+        {
+            return Unity.GetStatic("UnityEngine.Application", "loadedLevelName") as string ?? "";
+        }
+
+        static List<object> LegacyRoots()
+        {
+            List<object> roots = new List<object>();
+            Type transform = Unity.Need("UnityEngine.Transform");
+            Array all = Unity.CallStatic("UnityEngine.Object", "FindObjectsOfType", new Type[] { typeof(Type) }, transform) as Array;
+            if (all == null)
+                return roots;
+            foreach (object item in all)
+            {
+                if (item != null && Unity.Get("UnityEngine.Transform", "parent", item) == null)
+                    roots.Add(Unity.Get("UnityEngine.Component", "gameObject", item));
+            }
+            return roots;
+        }
+
+        static void ListLegacyScenes(int group, Writer output)
+        {
+            output.I32(1);
+            output.I32(1);
+            output.I32(Objects.Put(new LegacyScene(1), group));
+            output.I32(1);
+            output.Text(LegacyLevelName());
+            output.I32(ToInt(Unity.GetStatic("UnityEngine.Application", "loadedLevel"), -1));
+            output.I32(LegacyRoots().Count);
+            output.U8(1);
+        }
+
         static int SceneHandle(object scene)
         {
+            LegacyScene legacy = scene as LegacyScene;
+            if (legacy != null)
+                return legacy.Handle;
             object handle = Unity.TryGet(scene, "handle");
             if (handle is int)
                 return (int)handle;
@@ -185,6 +238,11 @@ namespace Manifold.Managed
         static void ListScenes(int group, Writer output)
         {
             const string manager = "UnityEngine.SceneManagement.SceneManager";
+            if (!HasSceneManager())
+            {
+                ListLegacyScenes(group, output);
+                return;
+            }
             int count = (int)Unity.GetStatic(manager, "sceneCount");
             object active = Unity.CallStatic(manager, "GetActiveScene", Type.EmptyTypes);
             output.I32(active != null ? SceneHandle(active) : 0);
@@ -206,6 +264,8 @@ namespace Manifold.Managed
         {
             if (s_dontDestroy != null)
                 return s_dontDestroy;
+            if (!HasSceneManager())
+                return s_dontDestroy = new LegacyScene(-1);
             Type gameObject = Unity.Need("UnityEngine.GameObject");
             object probe = Activator.CreateInstance(gameObject, new object[] { "Manifold probe" });
             try
@@ -236,7 +296,9 @@ namespace Manifold.Managed
             object scene = sceneSlot > 0 ? Objects.Get(sceneSlot) : DontDestroyScene();
             output.I32(Objects.Put(scene, group));
             output.I32(SceneHandle(scene));
-            Array roots = Unity.Call("UnityEngine.SceneManagement.Scene", "GetRootGameObjects", scene, Type.EmptyTypes) as Array;
+            LegacyScene legacy = scene as LegacyScene;
+            Array roots = legacy != null ? (legacy.Handle > 0 ? LegacyRoots().ToArray() : new object[0]) :
+                Unity.Call("UnityEngine.SceneManagement.Scene", "GetRootGameObjects", scene, Type.EmptyTypes) as Array;
             int total = roots != null ? roots.Length : 0;
             int shown = Math.Min(total, Math.Max(max, 0));
             output.I32(total);
@@ -287,13 +349,13 @@ namespace Manifold.Managed
             const string go = "UnityEngine.GameObject";
             object target = Objects.Get(slot);
             object transform = Unity.Get(go, "transform", target);
-            object scene = Unity.Get(go, "scene", target);
+            object scene = HasSceneManager() ? Unity.TryGet(target, "scene") : null;
             output.Text(Unity.Get("UnityEngine.Object", "name", target) as string);
             output.Text(Unity.TryGet(target, "tag") as string);
             output.I32(ToInt(Unity.Get(go, "layer", target), 0));
             output.U8(true.Equals(Unity.Get(go, "activeSelf", target)) ? 1 : 0);
             output.U8(true.Equals(Unity.Get(go, "activeInHierarchy", target)) ? 1 : 0);
-            output.Text(scene != null ? Unity.Get("UnityEngine.SceneManagement.Scene", "name", scene) as string : "");
+            output.Text(scene != null ? Unity.Get("UnityEngine.SceneManagement.Scene", "name", scene) as string : HasSceneManager() ? "" : LegacyLevelName());
             output.I32(Objects.Put(transform, group));
             WriteTransform(transform, output);
             object parent = transform != null ? Unity.Get("UnityEngine.Transform", "parent", transform) : null;

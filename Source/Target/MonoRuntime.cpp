@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <set>
 #include <thread>
 
 #include <windows.h>
@@ -50,6 +51,7 @@ namespace Manifold::Target
             "mono_method_get_param_names",
             "mono_image_open_from_data", "mono_assembly_load_from_full", "mono_class_from_name", "mono_class_get_field_from_name",
             "mono_method_get_token", "mono_class_get_field_token", "mono_class_get_type_token",
+            "mono_domain_foreach", "g_free",
         };
     }
 
@@ -62,8 +64,13 @@ namespace Manifold::Target
             if (address)
                 functions[name] = address;
         }
-        if (!functions.count("mono_get_root_domain") || !functions.count("mono_class_get_methods"))
+        // ∑ IL2CPP's GameAssembly exports mono_* debugger shims (mono_get_root_domain, mono_class_get_methods)
+        //   but no mono_assembly_foreach, so that one tells a real Mono apart.
+        if (!functions.count("mono_get_root_domain") || !functions.count("mono_class_get_methods") || !functions.count("mono_assembly_foreach"))
             return Status::Fail(ErrorCode::MonoNotFound, module + " is missing expected functions");
+        // ∑ Unity's legacy Mono (mono.dll) has no mono_free; the strings it hands out come from g_malloc.
+        if (!functions.count("mono_free") && functions.count("g_free"))
+            functions["mono_free"] = functions["g_free"];
         m_bridge.m_functions = std::move(functions);
         const std::uint64_t root = m_bridge.CallFn("mono_get_root_domain").value_or(0);
         if (!root)
@@ -71,11 +78,48 @@ namespace Manifold::Target
             m_bridge.m_functions.clear();
             return Status::Fail(ErrorCode::MonoNotFound, "the root domain was null");
         }
-        m_bridge.m_domain = root;
         m_bridge.m_module = module;
         m_bridge.m_runtime = ManagedRuntime::Mono;
-        m_bridge.CallFn("mono_thread_attach", root);
+        // ∑ Unity 5.x players load the game into "Unity Child Domain"; the root domain then holds only
+        //   mscorlib, and code compiled, statics read or assemblies loaded there are copies the game never
+        //   uses. mono_thread_attach on an attached thread switches it to the given domain.
+        const std::uint64_t domain = GameDomain(root);
+        m_bridge.m_domain = domain;
+        m_bridge.CallFn("mono_thread_attach", domain);
+        if (domain != root)
+            LOG_INFO("Mono", "The game runs in a child domain, Manifold works in that one instead of the root domain");
         return Status::Success();
+    }
+
+    std::uint64_t MonoRuntime::GameDomain(std::uint64_t root)
+    {
+        if (!m_bridge.Fn("mono_domain_foreach"))
+            return root;
+        constexpr std::uint64_t kMaxDomains = 64;
+        std::vector<std::uint64_t> domains;
+        {
+            std::lock_guard lock(m_bridge.m_lock);
+            m_bridge.m_call.ResetScratch();
+            const std::uint64_t array = m_bridge.m_call.Scratch(static_cast<std::size_t>(16 + kMaxDomains * 8));
+            if (!array)
+                return root;
+            m_bridge.m_process->Write(array + 8, &kMaxDomains, sizeof(kMaxDomains));
+            m_bridge.CallFn("mono_domain_foreach", m_bridge.m_call.CollectorAddress(), array);
+            std::uint64_t count = 0;
+            m_bridge.m_process->ReadExact(array, &count, sizeof(count));
+            count = std::min(count, kMaxDomains);
+            domains.resize(static_cast<std::size_t>(count));
+            if (count)
+                m_bridge.m_process->ReadExact(array + 16, domains.data(), static_cast<std::size_t>(count) * 8);
+            m_bridge.m_call.ResetScratch();
+        }
+        std::uint64_t child = 0;
+        for (const std::uint64_t domain : domains)
+        {
+            if (domain && domain != root)
+                child = domain;
+        }
+        return child ? child : root;
     }
 
     void MonoRuntime::Detach()
@@ -507,6 +551,24 @@ namespace Manifold::Target
         std::lock_guard lock(m_bridge.m_lock);
         RemoteCall& call = m_bridge.m_call;
         call.ResetScratch();
+        // ∑ Reflection sees only the assemblies of the domain the dumper runs in; an image the runtime lists
+        //   with classes the dump lacks means a partial class list, so the runtime's own list is used instead.
+        std::set<std::string> dumped;
+        for (const MonoClass& info : dump.Classes)
+            dumped.insert(info.Image);
+        for (const auto& [handle, name] : images)
+        {
+            const std::string plain = name.size() > 4 && EqualsNoCase(std::string_view(name).substr(name.size() - 4), ".dll") ? name.substr(0, name.size() - 4) : name;
+            if (dumped.count(plain) || dumped.count(name) || plain.rfind("ManifoldDumper", 0) == 0)
+                continue;
+            const std::uint64_t table = m_bridge.CallFn("mono_image_get_table_info", handle, kTableTypeDef).value_or(0);
+            const std::int64_t rows = table ? static_cast<std::int32_t>(m_bridge.CallFn("mono_table_info_get_rows", table).value_or(0) & 0xFFFFFFFFu) : 0;
+            if (rows > 1)
+            {
+                LOG_WARN("Mono", "The managed dump lacks the classes of " + name + ", reading the classes through the runtime");
+                return false;
+            }
+        }
         std::size_t classesChecked = 0;
         for (std::size_t i = 0; i < count && classesChecked < kClassSamples; i += stride)
         {

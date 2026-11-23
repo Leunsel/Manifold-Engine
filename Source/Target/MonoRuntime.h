@@ -49,6 +49,7 @@ namespace Manifold::Target
         };
 
         ImageList ReadImages();
+        std::uint64_t GameDomain(std::uint64_t root);
         Status LoadManagedImage(const ImageList& images);
         std::optional<std::vector<MonoClass>> DumpWithAgent(const ImageList& images, std::int64_t total, WorkProgress* progress);
         Status LoadDumper(const ImageList& images);

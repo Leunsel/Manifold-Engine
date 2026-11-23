@@ -535,7 +535,7 @@ namespace Manifold::Target
             layout.ElementSize = pointer;
         const MonoObjectLayout object = MonoLayoutFor(pointer);
         layout.DataOffset = static_cast<int>(object.ArrayData);
-        layout.Length = m_process->ReadPointer(address + object.ArrayLength).value_or(0);
+        layout.Length = m_process->ReadValue<std::uint32_t>(address + object.ArrayLength).value_or(0);
         const std::uint64_t type = call("class_get_type", element);
         layout.Element.TypeCode = type ? static_cast<int>(call("type_get_type", type) & 0xFFu) : 0;
         if (MayBeValueType(layout.Element.TypeCode))

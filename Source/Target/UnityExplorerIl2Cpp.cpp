@@ -1789,7 +1789,7 @@ namespace Manifold::Target
         }
         if (layout.Rank > 0 && object && !layout.Element.ValueType)
         {
-            const std::uint64_t length = std::min<std::uint64_t>(process->ReadPointer(object + objects.ArrayLength).value_or(0), kMaxShownElements);
+            const std::uint64_t length = std::min<std::uint64_t>(static_cast<std::uint64_t>(process->ReadValue<std::uint32_t>(object + objects.ArrayLength).value_or(0)), kMaxShownElements);
             for (std::uint64_t i = 0; i < length && recipe.Batch.Fits(2, 0); ++i)
                 recipe.Hold(Arg::Of(recipe.Load(object + objects.ArrayData + i * pointer)));
         }

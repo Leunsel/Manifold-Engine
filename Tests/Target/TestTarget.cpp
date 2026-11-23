@@ -130,6 +130,8 @@ namespace
     const unsigned long long kNotAClass[8] = { 0x4141414141414141ull, 0x4242424242424242ull, 0x4343434343434343ull, 0x4444444444444444ull,
                                                0x4545454545454545ull, 0x4646464646464646ull, 0x4747474747474747ull, 0x4848484848484848ull };
     int g_domain = 0xD0;
+    int g_childDomain = 0xD1;
+    bool g_monoChild = false;
 
     struct FakeVTable { const FakeClass* Klass; };
     FakeVTable g_playerVT = { &kClasses[0] };
@@ -470,7 +472,20 @@ extern "C"
 extern "C"
 {
     __declspec(dllexport) void* mono_get_root_domain() { return g_il2cpp ? nullptr : &g_domain; }
-    __declspec(dllexport) void* mono_thread_attach(void* domain) { return domain; }
+    __declspec(dllexport) void* g_monoAttached = nullptr;
+    __declspec(dllexport) void* mono_thread_attach(void* domain)
+    {
+        g_monoAttached = domain;
+        return domain;
+    }
+    __declspec(dllexport) void mono_domain_foreach(void (*fn)(void*, void*), void* user)
+    {
+        if (g_il2cpp)
+            return;
+        fn(&g_domain, user);
+        if (g_monoChild)
+            fn(&g_childDomain, user);
+    }
     __declspec(dllexport) void mono_assembly_foreach(void (*fn)(void*, void*), void* user)
     {
         fn(const_cast<FakeImage*>(&kImage), user);
@@ -1077,6 +1092,8 @@ int main(int argc, char** argv)
         }
         else if (std::strcmp(argv[i], "--mono-values") == 0)
             g_monoValues = true;
+        else if (std::strcmp(argv[i], "--mono-child-domain") == 0)
+            g_monoChild = true;
         else if (std::strcmp(argv[i], "--speed") == 0)
             StartSpeedProbe();
         else if (std::strcmp(argv[i], "--mono-agent") == 0)

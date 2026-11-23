@@ -541,8 +541,33 @@ namespace Manifold::Tests
             engine.CloseProcess();
         }
 
+        void CheckChildDomain(const std::filesystem::path& targetPath)
+        {
+            AgentTarget target;
+            const bool started = target.Start(targetPath, L"--mono-child-domain --mono-values");
+            CHECK_MSG(started, "could not start the test target with --mono-child-domain");
+            if (!started)
+                return;
+            Settings settings;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.Info.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            if (!opened)
+                return;
+            const Status mono = engine.Managed().Ensure();
+            CHECK_MSG(mono.Ok(), "child domain: " + mono.Text);
+            const std::string stem = std::filesystem::path(engine.Process()->Name()).stem().string();
+            const std::uint64_t slot = engine.Evaluate(stem + ".g_monoAttached").value_or(0);
+            const std::uint64_t attached = slot ? engine.Process()->ReadPointer(slot).value_or(0) : 0;
+            const auto marker = attached ? engine.Process()->ReadValue<std::int32_t>(attached) : std::nullopt;
+            CHECK_MSG(marker == 0xD1, "the worker attached to the domain marked " + Hex(static_cast<std::uint64_t>(marker.value_or(0)), 0) + " instead of the child domain");
+            CHECK(mono.Ok() && engine.Mono().FieldsOf("Game.Mover").size() == 4);
+            engine.CloseProcess();
+        }
+
         void CheckAgentTarget(const std::filesystem::path& targetPath)
         {
+            CheckChildDomain(targetPath);
             CheckValueTypes(targetPath, L"--mono-values");
             if (Target::ManagedDumperImage().empty())
             {

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -249,7 +248,7 @@ namespace Manifold.Managed
                         s_pending = new Batch(seq, request);
                         Marshal.WriteInt32(box, OffBusy, 1);
                     }
-                    if (!s_pending.Run(Stopwatch.Frequency * FrameBudgetMs / 1000))
+                    if (!s_pending.Run(Clock.Frequency * FrameBudgetMs / 1000))
                         return;
                     Publish(box, s_pending);
                     s_lastSeq = s_pending.Seq;
@@ -296,6 +295,72 @@ namespace Manifold.Managed
         }
     }
 
+    // ∑ Unity strips System.dll down to what the game uses (Stopwatch, Queue<T> and InvalidDataException
+    //   are gone in several builds), so the agent uses nothing outside mscorlib.
+    static class Clock
+    {
+        [DllImport("kernel32.dll")]
+        static extern bool QueryPerformanceCounter(out long value);
+
+        [DllImport("kernel32.dll")]
+        static extern bool QueryPerformanceFrequency(out long value);
+
+        public static readonly long Frequency = ReadFrequency();
+
+        static long ReadFrequency()
+        {
+            long value;
+            return QueryPerformanceFrequency(out value) && value > 0 ? value : 1000;
+        }
+
+        public static long Now()
+        {
+            long value;
+            if (QueryPerformanceCounter(out value))
+                return value;
+            return Environment.TickCount * Frequency / 1000;
+        }
+    }
+
+    sealed class IntQueue
+    {
+        int[] m_items = new int[16];
+        int m_head;
+        int m_count;
+
+        public int Count { get { return m_count; } }
+
+        public void Enqueue(int value)
+        {
+            if (m_count == m_items.Length)
+            {
+                int[] grown = new int[m_items.Length * 2];
+                for (int i = 0; i < m_count; ++i)
+                    grown[i] = m_items[(m_head + i) % m_items.Length];
+                m_items = grown;
+                m_head = 0;
+            }
+            m_items[(m_head + m_count) % m_items.Length] = value;
+            ++m_count;
+        }
+
+        public int Dequeue()
+        {
+            if (m_count == 0)
+                throw new InvalidOperationException("the queue is empty");
+            int value = m_items[m_head];
+            m_head = (m_head + 1) % m_items.Length;
+            --m_count;
+            return value;
+        }
+
+        public void Clear()
+        {
+            m_head = 0;
+            m_count = 0;
+        }
+    }
+
     sealed class RefComparer : IEqualityComparer<object>
     {
         public new bool Equals(object a, object b)
@@ -319,7 +384,7 @@ namespace Manifold.Managed
         readonly int[] m_generations;
         readonly Dictionary<object, int> m_index = new Dictionary<object, int>(new RefComparer());
         readonly List<int>[] m_groups;
-        readonly Queue<int> m_free = new Queue<int>();
+        readonly IntQueue m_free = new IntQueue();
         int m_next = 1;
 
         public Registry(object[] slots)
@@ -435,7 +500,7 @@ namespace Manifold.Managed
 
         public bool Run(long budget)
         {
-            Stopwatch clock = Stopwatch.StartNew();
+            long started = Clock.Now();
             if (m_left < 0)
             {
                 if (m_request.Length < 4)
@@ -448,7 +513,7 @@ namespace Manifold.Managed
             }
             while (m_left > 0)
             {
-                if (m_done > 0 && clock.ElapsedTicks > budget)
+                if (m_done > 0 && Clock.Now() - started > budget)
                     return false;
                 --m_left;
                 if (m_request.Length - m_at < 8)
@@ -517,7 +582,7 @@ namespace Manifold.Managed
         void Need(int bytes)
         {
             if (m_end - m_at < bytes)
-                throw new InvalidDataException("the request is cut short");
+                throw new InvalidOperationException("the request is cut short");
         }
 
         public int I32()
@@ -559,7 +624,7 @@ namespace Manifold.Managed
         {
             int length = I32();
             if (length < 0)
-                throw new InvalidDataException("a negative length");
+                throw new InvalidOperationException("a negative length");
             Need(length);
             byte[] value = new byte[length];
             Buffer.BlockCopy(m_data, m_at, value, 0, length);
