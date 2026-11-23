@@ -58,6 +58,21 @@ namespace Manifold::UI
             return roots;
         }
 
+        // ∑ halfway down (or back to the top) in every scrollable window of the given roots (all when none are given):
+        //   some things only show while a list is scrolled, like the address list's pinned group header
+        void ScrollWindows(const std::vector<ImGuiID>* roots, bool halfway)
+        {
+            for (ImGuiWindow* window : GImGui->Windows)
+            {
+                if (!window->WasActive || window->Hidden || window->ScrollMax.y <= 0.0f)
+                    continue;
+                const ImGuiWindow* root = window->RootWindow ? window->RootWindow : window;
+                if (roots && std::find(roots->begin(), roots->end(), root->ID) == roots->end())
+                    continue;
+                ImGui::SetScrollY(window, halfway ? std::round(window->ScrollMax.y * 0.5f) : 0.0f);
+            }
+        }
+
         std::string ScaleLabel(float scale)
         {
             return std::to_string(static_cast<int>(std::lround(scale * 100.0f))) + " %";
@@ -167,13 +182,23 @@ namespace Manifold::UI
             return;
 
         case Phase::MainSize:
+            if (m_scrollNext)
+            {
+                m_scrollNext = false;
+                ScrollWindows(nullptr, true);
+                StartCollecting(m_sizeContext + " · scrolled");
+                return;
+            }
+            ScrollWindows(nullptr, false);
             if (m_mainSize < static_cast<int>(std::size(kMainSizes)))
             {
                 const SizeStep& step = kMainSizes[m_mainSize++];
                 host.SetSweepMainSize(static_cast<int>(std::lround(step.Width * scale)), static_cast<int>(std::lround(step.Height * scale)));
                 m_opened = "main";
                 m_mainOnly = true;
-                StartCollecting(ScaleLabel(scale) + " · " + step.Name);
+                m_sizeContext = ScaleLabel(scale) + " · " + step.Name;
+                StartCollecting(m_sizeContext);
+                m_scrollNext = true;
                 return;
             }
             host.SetSweepMainSize(static_cast<int>(std::lround(kToolMainWidth * scale)), static_cast<int>(std::lround(kToolMainHeight * scale)));
@@ -244,7 +269,9 @@ namespace Manifold::UI
             m_tab = 0;
             m_tabsListed = false;
             m_firstTabs.clear();
-            StartCollecting(ScaleLabel(scale) + " · " + kToolSizes[m_size].Name);
+            m_scrollNext = true;
+            m_sizeContext = ScaleLabel(scale) + " · " + kToolSizes[m_size].Name;
+            StartCollecting(m_sizeContext);
             m_phase = Phase::Tab;
             return;
 
@@ -286,6 +313,21 @@ namespace Manifold::UI
                 if (ImGuiTabItem* tab = bar ? ImGui::TabBarFindTabByID(bar, tabId) : nullptr)
                     ImGui::TabBarQueueFocus(bar, tab);
             }
+            if (!m_firstTabs.empty())
+            {
+                // back on the first tabs before scrolling, so their lists are the ones that scroll
+                m_firstTabs.clear();
+                Wait(3);
+                return;
+            }
+            if (m_scrollNext)
+            {
+                m_scrollNext = false;
+                ScrollWindows(&m_targets, true);
+                StartCollecting(m_sizeContext + " · scrolled");
+                return;
+            }
+            ScrollWindows(&m_targets, false);
             ++m_size;
             m_phase = Phase::SizeWindows;
             Wait(3);

@@ -95,6 +95,8 @@ namespace Manifold::UI
         std::vector<TabStep> m_tabs;
         std::size_t m_tab = 0;
         bool m_tabsListed = false;
+        bool m_scrollNext = false;   // the next step looks at the same size scrolled halfway
+        std::string m_sizeContext;
         std::map<ImGuiID, ImGuiID> m_firstTabs;   // bar → tab selected when the window opened
 
         bool m_collecting = false;

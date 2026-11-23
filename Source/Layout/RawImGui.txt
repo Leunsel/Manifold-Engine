@@ -51,7 +51,7 @@ Source/UI/OpcodeWindow.cpp 8
 Source/UI/PatchScanWindow.cpp 24
 Source/UI/PointerScanWindow.cpp 28
 Source/UI/ProfilerWindow.cpp 54
-Source/UI/RecordDebugWindow.cpp 78
+Source/UI/RecordDebugWindow.cpp 77
 Source/UI/RecordEditor.cpp 43
 Source/UI/ScriptUi.cpp 11
 Source/UI/ScriptWindow.cpp 25

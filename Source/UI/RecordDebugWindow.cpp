@@ -806,7 +806,10 @@ namespace Manifold::UI
                 TextFitted(engine.Tables().AddressHex(record.ResolvedAddress), ImGui::GetContentRegionAvail().x, ManifoldTheme::Text);
             else
             {
-                ImGui::TextColored(ManifoldTheme::Error, ICON_FA_UNLINK " unresolved");
+                Layout::TextStyle unresolved;
+                unresolved.Color = ManifoldTheme::Error;
+                unresolved.Tooltip = record.AddressError.empty();   // the error's own tooltip says more
+                Layout::Text(ICON_FA_UNLINK " unresolved", unresolved);
                 if (!record.AddressError.empty())
                     ErrorTooltip(record.AddressError);
             }

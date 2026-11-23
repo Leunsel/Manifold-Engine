@@ -3339,8 +3339,16 @@ namespace Manifold::UI
         }
 
         ImGui::PushClipRect(min, max, false);
+        // ∑ the header's click area lies over the whole table but is submitted while the table is in its first column;
+        //   it is no content of that column (the column would measure the table's width and its auto-fit would follow)
+        ImGuiWindow* listWindow = ImGui::GetCurrentWindow();
+        const ImVec2 cursorMax = listWindow->DC.CursorMaxPos;
+        const ImVec2 idealMax = listWindow->DC.IdealMaxPos;
         ImGui::SetCursorScreenPos(min);
-        if (ImGui::InvisibleButton("##stickygroup", ImVec2(max.x - min.x, max.y - min.y)))
+        const bool clicked = ImGui::InvisibleButton("##stickygroup", ImVec2(max.x - min.x, max.y - min.y));
+        listWindow->DC.CursorMaxPos = cursorMax;
+        listWindow->DC.IdealMaxPos = idealMax;
+        if (clicked)
             ImGui::SetScrollY(std::max(0.0f, ImGui::GetScrollY() - (bodyTop - pinnedTop) - ImGui::GetStyle().CellPadding.y));
         if (ImGui::IsItemHovered())
         {
