@@ -33,6 +33,7 @@
 #include "UI/ScriptWindow.h"
 #include "UI/SettingsWindow.h"
 #include "UI/SignatureWindow.h"
+#include "UI/CodeFilterWindow.h"
 #include "UI/StaticPointersWindow.h"
 #include "UI/StructureWindow.h"
 #include "UI/TableFilesWindow.h"
@@ -144,6 +145,10 @@ namespace Manifold::UI
             OpenSignatureMaker();
         else if (window.rfind("signature:", 0) == 0)
             OpenSignatureMaker(window.substr(10));
+        else if (window == "codefilter")
+            OpenCodeFilter();
+        else if (window == "codefilter:collect")
+            OpenCodeFilter(true);
         else if (window == "signaturesettings")
             OpenSettings(UI::SettingsWindow::SignaturesPage);
         else if (window == "shortcuts")
@@ -219,7 +224,7 @@ namespace Manifold::UI
             "memory", "hex", "structure", "script", "lua", "mono", "unreal", "log", "settings", "symbols", "regions", "tablefiles", "patches",
             "dissect", "asmsearch", "bytes", "pointerscan", "staticpointers", "shortcuts", "keyboard", "appearance", "processes", "about",
             "profiler", "breakdown", "threads", "checks", "appinfo", "nopsled", "writehistory", "comments", "recorddebug", "flowgraph", "opcodes",
-            "templates", "forms", "modules", "breakpoints", "threadlist", "layoutproblems", "signatures",
+            "templates", "forms", "modules", "breakpoints", "threadlist", "layoutproblems", "signatures", "codefilter",
             "signaturesettings", "settings:2", "settings:3", "settings:4"
         };
         return names;
@@ -286,6 +291,7 @@ namespace Manifold::UI
         drawOne("Byte search", m_byteSearch);
         drawOne("Static pointers", m_staticPointers);
         drawOne("Signature maker", m_signatures);
+        drawOne("Code filter", m_codeFilter);
         drawOne("Pointer scan", m_pointerScan);
         drawOne("Breakpoints", m_breakpoints);
         drawOne("Thread list", m_threadList);
@@ -360,6 +366,7 @@ namespace Manifold::UI
         case Command::OpenPointerScan:
         case Command::OpenStaticPointers:
         case Command::OpenSignatureMaker:
+        case Command::OpenCodeFilter:
         case Command::OpenFormEditor:
         case Command::OpenOpcodeConverter:
         case Command::OpenRecordDebug:
@@ -391,6 +398,7 @@ namespace Manifold::UI
         case Command::OpenPointerScan: OpenPointerScan(); break;
         case Command::OpenStaticPointers: OpenStaticPointers(); break;
         case Command::OpenSignatureMaker: OpenSignatureMaker(); break;
+        case Command::OpenCodeFilter: OpenCodeFilter(); break;
         case Command::OpenFormEditor: OpenFormEditor(); break;
         case Command::OpenOpcodeConverter: OpenOpcodeConverter(); break;
         case Command::OpenRecordDebug: OpenRecordDebug(); break;
@@ -951,6 +959,15 @@ namespace Manifold::UI
         auto window = std::make_unique<TraceWindow>(*this, m_nextTrace++);
         window->Start(address, viewport);
         m_traces.push_back(std::move(window));
+    }
+
+    void Workspace::OpenCodeFilter(bool collect)
+    {
+        if (!m_codeFilter)
+            m_codeFilter = std::make_unique<CodeFilterWindow>(*this);
+        m_codeFilter->Show();
+        if (collect)
+            m_codeFilter->CollectWhenReady();
     }
 
     void Workspace::OpenPatchScan()

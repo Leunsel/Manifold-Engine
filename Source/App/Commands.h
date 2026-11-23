@@ -54,6 +54,7 @@ namespace Manifold
         OpenOpcodeConverter,
         OpenRecordDebug,
         OpenSignatureMaker,
+        OpenCodeFilter,
 
         NewTable,
         OpenLastProcess,

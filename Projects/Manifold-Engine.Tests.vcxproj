@@ -176,6 +176,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaApi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaArgs.cpp" />
     <ClCompile Include="..\Source\Lua\LuaAssist.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaCodeFilter.cpp" />
     <ClCompile Include="..\Source\Lua\LuaCompat.cpp" />
     <ClCompile Include="..\Source\Lua\LuaCompatGaps.cpp" />
     <ClCompile Include="..\Source\Lua\LuaCompatSystem.cpp" />

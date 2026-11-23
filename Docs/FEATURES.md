@@ -476,6 +476,19 @@ For a single level, [Static pointers](#static-pointers) is quicker and stays its
 - **Finding one again.** Find Bytes (`Ctrl+F`) reads signatures in the shapes other tools write: `?`/`??`/`*` wildcards, nibble wildcards (`4?`), the C string with its mask, C arrays, and whole `aobscanmodule` lines with header and comment lines around them.
 - **Lua.** `manifold.signature.make`, `.parse` and `.find`; `ManifoldSigMaker:Make/Pattern/Copy/Scan` still works for scripts written against the old Manifold-SigMaker module, which this replaces.
 
+## Code filter
+
+*Code Filter* (`Ctrl+Alt+Shift+C`, Tools menus) finds code by what it does instead of by a value: what runs while you jump, shoot or open a menu, and not while you stand still.
+
+- **Collect.** The function starts of the chosen modules (by default every module that is not part of Windows): the unwind table of 64-bit modules, the exports, and the targets of calls (always for 32-bit modules, which have no unwind table; for 64-bit modules in Options). A call target counts only when it decodes as plain instructions, does not land inside a function of the unwind table, and on 32-bit also has a second caller, a 16-byte alignment or padding before it. *All*, *None* and *Main Module Only* pick the modules.
+- **Rounds.** Every round puts a one-time `int3` on each candidate that is left. *Filter Out Running Code* (`F7`): let the game run without doing the thing, then stop; everything that ran is dropped. *Keep Only Running Code* (`F8`): do the thing once, then stop; only what ran is kept. A few rounds of each leave the code behind the action. The keys work while the game has the focus as long as the window is open (Options: the key sets, or no hotkeys), and a sound marks start and stop. *Cancel Round* ends a round without a change; *Undo* goes back up to 32 steps.
+- **Refine to Blocks.** When 256 functions or fewer are left, each is split into the basic blocks of its flow graph, so the next rounds show which part of a function ran (which branch of an `if`).
+- **Results.** Every candidate with its name, its first instruction and where it came from; double-click shows it in the memory viewer, the right-click menu has the flow graph, the signature maker and the address actions. *Copy the List* copies them.
+- **How it works.** The `int3`s are set and taken back by the agent library inside the game (the same `ManifoldAgent.dll` the in-process debugger and the speedhack use): the first thread that runs into one puts the byte back, notes itself and runs on, so each candidate costs at most one exception per round, however often it runs. Threads that meet at the same `int3` wait for each other. System libraries and the agent itself are never touched. When Manifold Engine ends unexpectedly the agent takes every `int3` back by itself.
+- **The rest of the program sees the original bytes.** While a round runs, reads show the bytes as they were (AoB scans, the Auto Assembler, the disassembler, the signature maker, Scan for Patches), and a write over an armed byte (a script, a breakpoint) takes that `int3` back first, so ending the round never undoes it. Both debuggers pass the filter's `int3`s on, also with "break on all exceptions".
+- **Limits.** Games that check their own code or run an anti-cheat notice the `int3`s; use it in single-player games. Code that is inlined into its caller has no start of its own (Refine to Blocks finds it inside the caller). Mono JIT methods and PDB-only functions are not collected yet.
+- **Lua.** `manifold.codefilter.prepare`, `.start`, `.stop`, `.cancel`, `.undo`, `.reset`, `.refine`, `.candidates`, `.status` and `.history`; the window and the functions share one filter.
+
 ## Speedhack
 
 The game's time runs faster or slower by a factor.

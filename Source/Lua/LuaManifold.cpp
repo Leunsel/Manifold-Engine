@@ -14,6 +14,7 @@
 #include "Lua/LuaRecords.h"
 #include "Lua/LuaRtti.h"
 #include "Lua/LuaSignature.h"
+#include "Lua/LuaCodeFilter.h"
 #include "Lua/LuaUnreal.h"
 #include "Scan/Scanner.h"
 #include "Target/Process.h"
@@ -854,6 +855,7 @@ namespace Manifold::Lua
             RegisterUnrealNatives(state, -1);
             RegisterRttiNatives(state, -1);
             RegisterSignatureNatives(state, -1);
+            RegisterCodeFilterNatives(state, -1);
             RegisterDotNetNatives(state, -1);
             RegisterModuleNatives(state, -1);
             RegisterRecordNatives(state, -1);

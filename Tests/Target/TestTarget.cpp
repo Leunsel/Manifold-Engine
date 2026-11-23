@@ -1082,6 +1082,7 @@ struct CoverProbe
 };
 
 extern "C" __declspec(dllexport) CoverProbe g_coverProbe = {};
+extern "C" __declspec(dllexport) volatile long g_coverBranch = 0;
 
 extern "C" __declspec(dllexport) __declspec(noinline) int CoverLeaf(int value)
 {
@@ -1093,6 +1094,8 @@ extern "C" __declspec(dllexport) __declspec(noinline) int CoverAction(int value)
     int sum = 0;
     for (int i = 0; i < 4; ++i)
         sum += CoverLeaf(value + i);
+    if (g_coverBranch)
+        sum += CoverLeaf(sum) * 1000;
     return sum;
 }
 

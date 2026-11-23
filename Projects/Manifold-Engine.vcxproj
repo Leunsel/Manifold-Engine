@@ -184,6 +184,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Lua\LuaApi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaArgs.cpp" />
     <ClCompile Include="..\Source\Lua\LuaAssist.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaCodeFilter.cpp" />
     <ClCompile Include="..\Source\Lua\LuaCompat.cpp" />
     <ClCompile Include="..\Source\Lua\LuaCompatGaps.cpp" />
     <ClCompile Include="..\Source\Lua\LuaCompatSystem.cpp" />
@@ -263,6 +264,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\UI\ByteSearch.cpp" />
     <ClCompile Include="..\Source\UI\ClrInspector.cpp" />
     <ClCompile Include="..\Source\UI\CodeEditor.cpp" />
+    <ClCompile Include="..\Source\UI\CodeFilterWindow.cpp" />
     <ClCompile Include="..\Source\UI\CodeTools.cpp" />
     <ClCompile Include="..\Source\UI\CommentListWindow.cpp" />
     <ClCompile Include="..\Source\UI\ConsoleView.cpp" />
@@ -389,6 +391,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Lua\InputBox.h" />
     <ClInclude Include="..\Source\Lua\LuaApi.h" />
     <ClInclude Include="..\Source\Lua\LuaArgs.h" />
+    <ClInclude Include="..\Source\Lua\LuaCodeFilter.h" />
     <ClInclude Include="..\Source\Lua\LuaCompatGaps.h" />
     <ClInclude Include="..\Source\Lua\LuaCompatScripts.h" />
     <ClInclude Include="..\Source\Lua\LuaConsole.h" />
@@ -465,6 +468,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\UI\ByteSearch.h" />
     <ClInclude Include="..\Source\UI\ClrInspector.h" />
     <ClInclude Include="..\Source\UI\CodeEditor.h" />
+    <ClInclude Include="..\Source\UI\CodeFilterWindow.h" />
     <ClInclude Include="..\Source\UI\CodeTools.h" />
     <ClInclude Include="..\Source\UI\CommentListWindow.h" />
     <ClInclude Include="..\Source\UI\ConsoleView.h" />

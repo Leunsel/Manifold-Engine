@@ -5,6 +5,7 @@
 #include "Core/Text.h"
 #include "Disasm/CodeDissect.h"
 #include "Disasm/Disassembler.h"
+#include "Disasm/FlowGraph.h"
 #include "Target/CodeMap.h"
 #include "Target/Coverage.h"
 #include "Target/CoverageProtocol.h"
@@ -96,12 +97,19 @@ namespace Manifold
         add(SourceUnwind, "Unwind");
         add(SourceExport, "Export");
         add(SourceCall, "Call");
+        add(SourceBlock, "Block");
         return text;
     }
 
     const char* FilterRoundText(FilterRound round)
     {
-        return round == FilterRound::FilterOut ? "Filter Out" : "Keep Only";
+        switch (round)
+        {
+        case FilterRound::FilterOut: return "Filter Out";
+        case FilterRound::KeepOnly: return "Keep Only";
+        case FilterRound::Refine: return "Refine to Blocks";
+        }
+        return "";
     }
 
     std::vector<Target::ModuleInfo> CodeFilter::DefaultModules(const Target::Process& process)
@@ -274,6 +282,8 @@ namespace Manifold
             return Failed("no functions were collected yet");
         if (m_running)
             return Failed("a round is already running");
+        if (kind == FilterRound::Refine)
+            return Failed("refining is not a round; call Refine");
         if (m_candidates.empty())
             return Failed("no functions are left");
         std::vector<std::uint64_t> addresses;
@@ -340,6 +350,70 @@ namespace Manifold
         m_history.push_back(record);
         LOG_INFO("CodeFilter", Format("%s: %zu of %zu functions ran, %zu left", FilterRoundText(record.Kind), record.Hits, record.Before, record.After));
         return disarmed;
+    }
+
+    // ∑ Every block start comes from decoding the function from its start,
+    //   so it is an instruction boundary as long as the function start is one.
+    //   Blocks that are already blocks stay as they are; a function's first
+    //   block keeps the function's own sources.
+    Result<std::size_t> CodeFilter::Refine(std::size_t maxFunctions)
+    {
+        const std::shared_ptr<Target::Process> process = m_engine.Process();
+        if (!process || !process->Alive())
+            return Status::Fail(ErrorCode::NoProcess);
+        std::lock_guard lock(m_lock);
+        if (!m_prepared)
+            return Failed("no functions were collected yet");
+        if (m_running)
+            return Failed("a round is still running");
+        const std::size_t functions = static_cast<std::size_t>(std::count_if(m_candidates.begin(), m_candidates.end(), [](const CodeCandidate& candidate) { return candidate.Function == 0; }));
+        if (functions == 0)
+            return Failed("every candidate is a block already");
+        if (functions > maxFunctions)
+            return Failed(Format("%zu functions are left; narrow them down to %zu or fewer first", functions, maxFunctions));
+        const auto started = std::chrono::steady_clock::now();
+        const Disasm::Disassembler& disassembler = m_engine.Disassembler();
+        const Target::Symbols& symbols = m_engine.Symbols();
+        const Target::CodeMap* hints = m_engine.CodeMap();
+        const auto other = [&](std::uint64_t target, Disasm::EdgeKind) { return m_engine.FunctionStartAt(target); };
+        std::map<std::uint64_t, CodeCandidate> blocks;
+        for (const CodeCandidate& candidate : m_candidates)
+        {
+            if (candidate.Function != 0)
+            {
+                blocks.emplace(candidate.Address, candidate);
+                continue;
+            }
+            const Disasm::FlowGraph graph = Disasm::BuildFlowGraph(disassembler, *process, candidate.Address, &symbols, hints, other);
+            CodeCandidate entry = candidate;
+            entry.Function = candidate.Address;
+            blocks[candidate.Address] = entry;
+            for (const Disasm::FlowBlock& block : graph.Blocks)
+            {
+                if (block.Start == candidate.Address || block.Lines.empty())
+                    continue;
+                CodeCandidate part;
+                part.Address = block.Start;
+                part.Sources = SourceBlock;
+                part.Function = candidate.Address;
+                blocks.emplace(block.Start, part);
+            }
+        }
+        RoundRecord record;
+        record.Kind = FilterRound::Refine;
+        record.Before = m_candidates.size();
+        m_undo.push_back(m_candidates);
+        if (m_undo.size() > kUndoDepth)
+            m_undo.erase(m_undo.begin());
+        m_candidates.clear();
+        m_candidates.reserve(blocks.size());
+        for (auto& [address, candidate] : blocks)
+            m_candidates.push_back(candidate);
+        record.After = m_candidates.size();
+        record.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        m_history.push_back(record);
+        LOG_INFO("CodeFilter", Format("Refined %zu functions into %zu blocks", functions, record.After));
+        return record.After;
     }
 
     Status CodeFilter::Cancel()

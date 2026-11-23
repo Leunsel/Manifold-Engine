@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 28
+local API_VERSION = 29
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -2061,6 +2061,96 @@ do
       misuse("manifold.signature.find: options.limit must be 1 to 100000")
     end
     return result(native.signatureFind(text, options))
+  end)
+end
+
+-- ∑ In a do block like manifold.signature: the main chunk is close to Lua's limit of 200 locals.
+do
+  local codefilter = area("codefilter", "The code filter: finds code by what it does instead of by a value. `prepare` collects the function starts of the game's modules (the unwind table of 64-bit modules, the exports and checked call targets), and every round puts a one-time int3 on each one that is left, inside the process through the agent library: the first thread that runs into one puts the byte back and runs on. A `\"filterOut\"` round drops what ran during it (let the game run without doing the thing), a `\"keepOnly\"` round keeps only what ran (do the thing once), so a few rounds leave the code behind an action. While a round runs every read through Manifold shows the original bytes, and a write over an armed byte takes its int3 back first. Tools > Code Filter is the same filter: the window and these functions share one state. Games that check their own code or run an anti-cheat notice the int3s.")
+
+  define(codefilter, "prepare", {
+    params = {
+      { name = "options", type = "table", optional = true, keys = { modules = "table", unwind = "boolean", exports = "boolean", calls = "boolean" } },
+    },
+    returns = "`{ total, seconds, modules }`, or nil, error",
+    doc = "Collects the candidates and starts a new filter (the rounds and the undo steps before are gone). `options.modules` lists module names, by default every module that is not part of Windows or Manifold's own library; `unwind` and `exports` (both on by default) and `calls` (on by default for 32-bit, from Settings for 64-bit) choose the sources. `modules` in the result lists `{ name, functions, unwind, exports, calls, rejected }` per module. Call targets take a code dissect of each module, which takes a while in a large game. `ME-1016` for a module that is not loaded, `ME-1020` when nothing can be collected.",
+  }, function(options)
+    return result(native.codefilterPrepare(options or EMPTY))
+  end)
+
+  define(codefilter, "start", {
+    params = { { name = "kind", type = "string" } },
+    returns = "true, or nil, error",
+    doc = "Starts a round on what is left: `\"filterOut\"` or `\"keepOnly\"`. Addresses the agent cannot arm (system code, an int3 already there, a page that cannot be written) are dropped from the list. `ME-1020` when `prepare` was not called, a round already runs or nothing is left.",
+  }, function(kind)
+    if kind ~= "filterOut" and kind ~= "keepOnly" then
+      misuse("manifold.codefilter.start: kind must be \"filterOut\" or \"keepOnly\"")
+    end
+    return result(native.codefilterStart(kind))
+  end)
+
+  define(codefilter, "stop", {
+    returns = "`{ kind, before, after, hits, skipped, seconds }`, or nil, error",
+    doc = "Ends the round and applies it: `filterOut` drops every candidate that ran, `keepOnly` keeps only those. Returns the round's record. `ME-1020` when no round runs.",
+  }, function()
+    return result(native.codefilterStop())
+  end)
+
+  define(codefilter, "cancel", {
+    returns = "true, or nil, error",
+    doc = "Ends the round without changing the list. Nothing happens when no round runs.",
+  }, function()
+    return result(native.codefilterCancel())
+  end)
+
+  define(codefilter, "undo", {
+    returns = "boolean",
+    doc = "Goes back one step (a round or a refine), up to 32 steps. False when there is nothing to undo or a round runs.",
+  }, function()
+    return native.codefilterUndo() == true
+  end)
+
+  define(codefilter, "reset", {
+    returns = "true",
+    doc = "Ends a running round and forgets the candidates, the rounds and the undo steps.",
+  }, function()
+    return native.codefilterReset()
+  end)
+
+  define(codefilter, "refine", {
+    params = { { name = "maxFunctions", type = "integer", optional = true } },
+    returns = "integer, or nil, error",
+    doc = "Splits every function that is left into its basic blocks, from its flow graph, so the next rounds show which part of it ran; blocks have the source `\"block\"` and their `function`. Returns how many candidates there are now. `ME-1020` when more than `maxFunctions` (default 256) functions are left or every candidate is a block already.",
+  }, function(maxFunctions)
+    if maxFunctions ~= nil and (maxFunctions < 1 or maxFunctions > 4096) then
+      misuse("manifold.codefilter.refine: maxFunctions must be 1 to 4096")
+    end
+    return result(native.codefilterRefine(maxFunctions))
+  end)
+
+  define(codefilter, "candidates", {
+    params = { { name = "limit", type = "integer", optional = true } },
+    returns = "list of `{ address, name, function, sources }`",
+    doc = "What is left, in address order, at most `limit` (default 1000, up to 1000000). `name` is the address as the disassembler names it, `sources` lists where it came from (`\"unwind\"`, `\"export\"`, `\"call\"`, `\"block\"`), `function` is set for blocks.",
+  }, function(limit)
+    if limit ~= nil and (limit < 1 or limit > 1000000) then
+      misuse("manifold.codefilter.candidates: limit must be 1 to 1000000")
+    end
+    return native.codefilterCandidates(limit)
+  end)
+
+  define(codefilter, "status", {
+    returns = "`{ prepared, running, kind, remaining, total, liveHits, seconds }`",
+    doc = "The filter's state: whether candidates are collected, whether a round runs and which, how many are left of how many collected, and for a running round how many candidates ran so far and for how long.",
+  }, function()
+    return native.codefilterStatus()
+  end)
+
+  define(codefilter, "history", {
+    returns = "list of `{ kind, before, after, hits, skipped, seconds }`",
+    doc = "The steps since `prepare`, oldest first: rounds (`\"filterOut\"`, `\"keepOnly\"`) and refines (`\"refine\"`).",
+  }, function()
+    return native.codefilterHistory()
   end)
 end
 

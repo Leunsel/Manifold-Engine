@@ -543,6 +543,9 @@ namespace Manifold::UI
             if (CommandItem(ICON_FA_FINGERPRINT "  Signature Maker", Command::OpenSignatureMaker))
                 m_workspace.OpenSignatureMaker(m_selected, true);
             ItemTooltip("A unique byte pattern for the selected instruction.");
+            if (CommandItem(ICON_FA_FILTER "  Code Filter", Command::OpenCodeFilter))
+                m_workspace.OpenCodeFilter();
+            ItemTooltip("Finds code by what it does: what runs during an action in the game and not without it.");
             if (CommandItem(ICON_FA_EXCHANGE_ALT "  Opcode Converter", Command::OpenOpcodeConverter))
                 m_workspace.OpenOpcodeConverter(m_selected);
             ItemTooltip("Bytes to instructions and back, at the selected address.");

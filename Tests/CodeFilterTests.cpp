@@ -4,6 +4,7 @@
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/Text.h"
+#include "Lua/LuaEngine.h"
 #include "Target/Coverage.h"
 #include "Target/CoverageProtocol.h"
 
@@ -550,10 +551,77 @@ namespace Manifold::Tests
             CHECK(filter.Undo() && filter.Remaining() == beforeKeep && filter.History().size() == 2);
             CHECK(filter.Start(FilterRound::KeepOnly).Ok());
             CHECK(filter.Cancel().Ok() && !filter.Running() && filter.Remaining() == beforeKeep);
+
+            const Result<std::size_t> tooMany = filter.Refine(4);
+            CHECK_MSG(!tooMany && tooMany.Error().Code == ErrorCode::CodeFilterFailed, session.Label + ": refine took more functions than allowed");
+            const long again = Field(session, &Probe::Action);
+            CHECK(filter.Start(FilterRound::KeepOnly).Ok());
+            Trigger(session);
+            CHECK(WaitFor(2000, [&] { return Field(session, &Probe::Action) >= again + 8; }));
+            CHECK(filter.Stop().Ok());
+            const std::size_t functions = filter.Remaining();
+            CHECK(filter.Start(FilterRound::Refine).Code == ErrorCode::CodeFilterFailed);
+            const Result<std::size_t> refined = filter.Refine();
+            CHECK_MSG(refined.Ok(), session.Label + ": " + (refined ? std::string() : refined.Error().Text));
+            const std::vector<CodeCandidate> blocks = filter.Candidates();
+            std::printf("  %s: %zu functions refined into %zu blocks\n", session.Label.c_str(), functions, blocks.size());
+            CHECK_MSG(refined && *refined == blocks.size() && blocks.size() > functions, session.Label + ": the action's branch gave no block of its own");
+            CHECK_MSG(std::all_of(blocks.begin(), blocks.end(), [](const CodeCandidate& candidate) { return candidate.Function != 0; }), session.Label + ": a block has no function");
+            CHECK(Has(blocks, session.Action) && Has(blocks, session.Leaf));
+            CHECK(filter.History().back().Kind == FilterRound::Refine);
+            const Result<std::size_t> twice = filter.Refine();
+            CHECK(!twice && twice.Error().Code == ErrorCode::CodeFilterFailed);
+            const long blockRound = Field(session, &Probe::Action);
+            CHECK(filter.Start(FilterRound::KeepOnly).Ok());
+            Trigger(session);
+            CHECK(WaitFor(2000, [&] { return Field(session, &Probe::Action) >= blockRound + 8; }));
+            CHECK(filter.Stop().Ok());
+            const std::vector<CodeCandidate> ranBlocks = filter.Candidates();
+            CHECK_MSG(Has(ranBlocks, session.Action) && Has(ranBlocks, session.Leaf), session.Label + ": the blocks of the action did not run");
+            CHECK_MSG(ranBlocks.size() < blocks.size(), session.Label + ": the block of the branch that is never taken was kept");
+            CHECK(filter.Undo() && filter.Undo() && filter.Remaining() == functions);
+            CHECK(AllOriginal(session));
+
             filter.Reset();
             CHECK(!filter.Prepared() && filter.Remaining() == 0);
             CHECK(AllOriginal(session));
             CHECK(Field(session, &Probe::Wrong) == 0 && session.Target.Alive());
+        }
+
+        void CheckLua(Session& session)
+        {
+            Engine& engine = session.Core;
+            std::string result;
+            const std::string script = R"(
+                local cf = manifold.codefilter
+                if manifold.apiVersion < 29 or not manifold.has("codefilter.prepare") then return "api" end
+                if cf.status().prepared then return "prepared before" end
+                local none, failure = cf.start("filterOut")
+                if none ~= nil or failure.code ~= "ME-1020" then return "start before prepare" end
+                local report, err = cf.prepare({ modules = { ")" + session.Module + R"(" }, calls = true })
+                if not report then return "prepare: " .. tostring(err) end
+                if report.total < 50 or #report.modules ~= 1 or report.modules[1].functions ~= report.total then return "report" end
+                local status = cf.status()
+                if not status.prepared or status.running or status.remaining ~= report.total or status.total ~= report.total then return "status" end
+                local list = cf.candidates(5)
+                if #list ~= 5 or type(list[1].address) ~= "number" or #list[1].sources < 1 or type(list[1].name) ~= "string" then return "candidates" end
+                if pcall(cf.start, "sideways") then return "misuse" end
+                if cf.start("filterOut") ~= true or not cf.status().running or cf.status().kind ~= "filterOut" then return "start" end
+                local record = cf.stop()
+                if not record or record.kind ~= "filterOut" or record.before < record.after or record.after + record.hits + record.skipped ~= record.before then return "stop" end
+                if #cf.history() ~= 1 then return "history" end
+                local tooMany, refineError = cf.refine(1)
+                if tooMany ~= nil or refineError.code ~= "ME-1020" then return "refine limit" end
+                if cf.start("keepOnly") ~= true or cf.cancel() ~= true or cf.status().running then return "cancel" end
+                if cf.undo() ~= true or cf.status().remaining ~= record.before - record.skipped or #cf.history() ~= 0 then return "undo" end
+                if cf.undo() ~= false then return "undo twice" end
+                if cf.reset() ~= true or cf.status().prepared then return "reset" end
+                return "ok"
+            )";
+            const Status status = engine.Lua().RunWithResult(script, "codefilter", result);
+            CHECK_MSG(status.Ok() && result == "ok", session.Label + " Lua: " + (status.Ok() ? result : status.Text));
+            CHECK(!engine.Filter().Prepared());
+            CHECK(AllOriginal(session));
         }
 
         std::uint64_t Export(Engine& engine, const std::string& module, const char* name)
@@ -610,6 +678,7 @@ namespace Manifold::Tests
             CheckShadow(session);
             CheckWindowsDebugger(session);
             CheckFilter(session);
+            CheckLua(session);
             CheckRelease(session);
             CheckHostLoss(session, tests);
             engine.CloseProcess();

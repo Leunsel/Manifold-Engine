@@ -75,6 +75,7 @@ namespace Manifold::UI
     class ByteSearchWindow;
     class StaticPointersWindow;
     class SignatureWindow;
+    class CodeFilterWindow;
     class PointerScanWindow;
     class ShortcutsWindow;
     class TemplateManager;
@@ -127,6 +128,7 @@ namespace Manifold::UI
         void OpenSignatureMaker(std::uint64_t address = 0, bool make = false);
         void CopySignature(std::uint64_t address);
         void OpenSignatureMaker(const std::string& expression);
+        void OpenCodeFilter(bool collect = false);
         void OpenPointerScan(std::uint64_t address = 0);
         void OpenScript(std::string script, int recordId = kNoRecord, bool lua = false);
         ScriptWindow* ScriptFile(const std::filesystem::path& path);
@@ -249,6 +251,7 @@ namespace Manifold::UI
         std::unique_ptr<ByteSearchWindow> m_byteSearch;
         std::unique_ptr<StaticPointersWindow> m_staticPointers;
         std::unique_ptr<SignatureWindow> m_signatures;
+        std::unique_ptr<CodeFilterWindow> m_codeFilter;
         std::unique_ptr<PointerScanWindow> m_pointerScan;
         std::unique_ptr<ShortcutsWindow> m_shortcuts;
         std::unique_ptr<TemplateManager> m_templateManager;

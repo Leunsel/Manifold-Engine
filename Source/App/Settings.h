@@ -156,6 +156,11 @@ namespace Manifold
         int SignatureCopyFormat = 0;
         std::string SignatureLabel = "INJECT";
 
+        std::string CodeFilterOutKeys = "F7";
+        std::string CodeFilterKeepKeys = "F8";
+        bool CodeFilterCalls = false;
+        bool CodeFilterHotkeys = true;
+
         std::vector<std::string> RecentTables;
         std::string LastProcess;
         ThemeSettings Theme;

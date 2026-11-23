@@ -24,7 +24,8 @@ namespace Manifold
     {
         SourceUnwind = 1,
         SourceExport = 2,
-        SourceCall = 4
+        SourceCall = 4,
+        SourceBlock = 8
     };
 
     std::string CodeSourceText(std::uint8_t sources);
@@ -33,6 +34,7 @@ namespace Manifold
     {
         std::uint64_t Address = 0;
         std::uint8_t Sources = 0;
+        std::uint64_t Function = 0;
     };
 
     struct CodeFilterOptions
@@ -63,7 +65,8 @@ namespace Manifold
     enum class FilterRound
     {
         FilterOut,
-        KeepOnly
+        KeepOnly,
+        Refine
     };
 
     const char* FilterRoundText(FilterRound round);
@@ -85,6 +88,7 @@ namespace Manifold
     {
     public:
         static constexpr std::size_t kUndoDepth = 32;
+        static constexpr std::size_t kMaxRefine = 256;
 
         explicit CodeFilter(Engine& engine) : m_engine(engine) {}
 
@@ -94,6 +98,9 @@ namespace Manifold
         Status Start(FilterRound kind);
         Status Stop();
         Status Cancel();
+        // Splits every function that is left into its basic blocks (from its
+        // flow graph), so the next rounds tell which part of it ran.
+        Result<std::size_t> Refine(std::size_t maxFunctions = kMaxRefine);
         bool Undo();
         void Reset();
 

@@ -33,6 +33,7 @@ Works in every window, unless the focused window uses the same keys for somethin
 | `Ctrl+Alt+O` | Opcode Converter | `OpenOpcodeConverter` | Manifold |
 | `Ctrl+Alt+Shift+D` | Address List Debug | `OpenRecordDebug` | Manifold |
 | `Ctrl+Alt+Shift+G` | Signature Maker | `OpenSignatureMaker` | Manifold |
+| `Ctrl+Alt+Shift+C` | Code Filter | `OpenCodeFilter` | Manifold |
 
 ## Main Window
 
