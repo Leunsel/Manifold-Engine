@@ -38,6 +38,19 @@ namespace
                 options.ProfileSeconds = std::max(1, std::min(3600, _wtoi(argument.substr(18).c_str())));
             else if (argument == L"--layout-audit")
                 options.LayoutAudit = true;
+            else if (argument.rfind(L"--layout-sweep=", 0) == 0)
+                options.LayoutSweep = argument.substr(15);
+            else if (argument.rfind(L"--sweep-windows=", 0) == 0)
+                options.SweepWindows = Manifold::Split(Manifold::WideToUtf8(argument.substr(16)), ',');
+            else if (argument.rfind(L"--sweep-scales=", 0) == 0)
+            {
+                for (const std::string& part : Manifold::Split(Manifold::WideToUtf8(argument.substr(15)), ','))
+                {
+                    const int percent = std::atoi(part.c_str());
+                    if (percent >= 50 && percent <= 400)
+                        options.SweepScales.push_back(static_cast<float>(percent) / 100.0f);
+                }
+            }
             else if (!argument.empty() && argument[0] != L'-')
                 options.Table = argument;
         }

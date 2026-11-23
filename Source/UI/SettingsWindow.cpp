@@ -45,6 +45,7 @@ namespace Manifold::UI
             { ICON_FA_KEYBOARD, "Keyboard", "Click keys to change them, right-click to remove them." },
         };
         constexpr int kPageCount = static_cast<int>(std::size(kPages));
+        static_assert(kPageCount == SettingsWindow::PageCount);
 
         struct AccentPreset
         {

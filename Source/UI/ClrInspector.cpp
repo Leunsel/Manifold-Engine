@@ -4,6 +4,7 @@
 #include "Core/BackgroundWork.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Table/ManagedStructures.h"
 #include "Target/Process.h"
 #include "UI/AddressActions.h"
@@ -496,7 +497,7 @@ namespace Manifold::UI
         bool open = false;
         const std::string leaf = name.substr(name.rfind('.') == std::string::npos ? 0 : name.rfind('.') + 1);
         if (embedded && depth < kMaxDepth)
-            open = ImGui::TreeNodeEx(leaf.c_str(), ImGuiTreeNodeFlags_SpanAllColumns);
+            open = Layout::TreeNode(leaf.c_str(), leaf, ImGuiTreeNodeFlags_SpanAllColumns);
         else
         {
             ImGui::Indent(Px(4.0f) + ImGui::GetTreeNodeToLabelSpacing() * static_cast<float>(embedded ? 1 : 0));

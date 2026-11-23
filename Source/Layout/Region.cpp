@@ -171,7 +171,10 @@ namespace Manifold::Layout
         if (const ImGuiTable* table = g.CurrentTable; table && table->InnerWindow == window && table->CurrentColumn >= 0)
         {
             const ImGuiTableColumn& column = table->Columns[table->CurrentColumn];
-            if ((column.Flags & ImGuiTableColumnFlags_WidthFixed) && (column.AutoFitQueue != 0 || (column.Flags & ImGuiTableColumnFlags_NoResize)))
+            // ∑ a fixed column fits its content while it is queued for that, or for good when it has no width of its own
+            //   and cannot be resized; a fixed column given a width (TableSetupColumn) is bounded like any other
+            if ((column.Flags & ImGuiTableColumnFlags_WidthFixed) &&
+                (column.AutoFitQueue != 0 || ((column.Flags & ImGuiTableColumnFlags_NoResize) && column.InitStretchWeightOrWidth <= 0.0f)))
                 return false;
         }
         return true;

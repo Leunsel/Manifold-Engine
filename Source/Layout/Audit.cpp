@@ -73,6 +73,8 @@ namespace Manifold::Layout::Audit
             return "Below Minimum Size";
         case Kind::WindowClipped:
             return "Content Cut Off";
+        case Kind::ColumnClipped:
+            return "Column Cuts Its Content";
         }
         return "Layout";
     }
@@ -167,6 +169,35 @@ namespace Manifold::Layout::Audit
             char detail[96];
             std::snprintf(detail, sizeof(detail), "content is %.0f px wide, the window shows %.0f px", content, visible);
             NoteWindow(window, Kind::WindowClipped, drawn, bounds, detail);
+        }
+        // ∑ a table cell clips its content at the column's edge, so text
+        // written with raw calls into a narrow column is cut without a trace
+        // in the window's content size; the column's measured content shows it
+        for (int i = 0; i < g.Tables.GetMapSize(); ++i)
+        {
+            ImGuiTable* table = g.Tables.TryGetMapData(i);
+            if (!table || table->LastFrameActive != frame || !table->InnerWindow)
+                continue;
+            ImGuiWindow* window = table->InnerWindow;
+            if (!window->WasActive || window->Hidden || window->Collapsed || Settling(state, window, frame))
+                continue;
+            for (int n = 0; n < table->ColumnsCount; ++n)
+            {
+                const ImGuiTableColumn& column = table->Columns[n];
+                if (!column.IsEnabled || !column.IsVisibleX || (column.Flags & ImGuiTableColumnFlags_NoClip) || column.WidthGiven <= 0.0f)
+                    continue;
+                const float content = std::max(column.ContentMaxXFrozen, column.ContentMaxXUnfrozen);
+                const float edge = column.ClipRect.Max.x;
+                if (content <= edge + 1.0f)
+                    continue;
+                const ImRect bounds(column.ClipRect.Min.x, table->InnerRect.Min.y, edge, table->InnerRect.Max.y);
+                const ImRect drawn(bounds.Min.x, bounds.Min.y, content, bounds.Max.y);
+                const char* name = ImGui::TableGetColumnName(table, n);
+                char detail[160];
+                std::snprintf(detail, sizeof(detail), "column \"%s\" holds %.0f px, its content needs %.0f px", name && *name ? name : "#", edge - column.WorkMinX,
+                    content - column.WorkMinX);
+                NoteWindow(window, Kind::ColumnClipped, drawn, bounds, detail);
+            }
         }
         for (auto it = state.Problems.begin(); it != state.Problems.end();)
         {

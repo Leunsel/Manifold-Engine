@@ -1076,6 +1076,9 @@ namespace Manifold::UI
             for (const char* option : options)
                 width += ImGui::CalcTextSize(option, nullptr, true).x + style.FramePadding.x * 2.0f + Px(8.0f);
         }
+        // ∑ never wider than its place; the labels give way instead (below)
+        if (Layout::Bounded())
+            width = std::max(std::min(width, Layout::Avail()), frame * static_cast<float>(options.size()));
         const float cell = std::floor(width / static_cast<float>(options.size()));
         const ImVec2 pos = ImGui::GetCursorScreenPos();
         const ImVec2 end(pos.x + cell * static_cast<float>(options.size()), pos.y + frame);
@@ -1114,11 +1117,16 @@ namespace Manifold::UI
                 draw->AddRectFilled(ImVec2(cellMin.x + inset, cellMin.y + inset), ImVec2(cellMax.x - inset, cellMax.y - inset),
                     ImGui::GetColorU32(ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.05f)), rounding - inset);
             }
-            const char* text = options[static_cast<std::size_t>(i)];
-            const ImVec2 size = ImGui::CalcTextSize(text, nullptr, true);
+            const char* option = options[static_cast<std::size_t>(i)];
+            const std::string_view full(option, static_cast<std::size_t>(ImGui::FindRenderedTextEnd(option) - option));
+            bool shortened = false;
+            const std::string text = Layout::Shorten(full, cell - Px(12.0f), &shortened);
+            if (shortened && hovered)
+                Layout::TextTooltip(full);
+            const ImVec2 size = ImGui::CalcTextSize(text.c_str());
             const ImVec4 clip(cellMin.x + inset, cellMin.y, cellMax.x - inset, cellMax.y);
             draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2(std::round(std::max(cellMin.x + Px(6.0f), cellMin.x + (cell - size.x) * 0.5f)), std::round(cellMin.y + (frame - size.y) * 0.5f)),
-                ImGui::GetColorU32(selected ? ManifoldTheme::Accent : (hovered ? ManifoldTheme::Text : ManifoldTheme::Label)), text, ImGui::FindRenderedTextEnd(text), 0.0f, &clip);
+                ImGui::GetColorU32(selected ? ManifoldTheme::Accent : (hovered ? ManifoldTheme::Text : ManifoldTheme::Label)), text.c_str(), nullptr, 0.0f, &clip);
         }
         ImGui::EndGroup();
         ImGui::PopID();
@@ -1281,8 +1289,20 @@ namespace Manifold::UI
         }
     }
 
+    namespace
+    {
+        int g_closeToolWindowsFrame = -10;
+    }
+
+    void CloseToolWindows()
+    {
+        g_closeToolWindowsFrame = ImGui::GetFrameCount();
+    }
+
     bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags, ImVec2 minimum, bool escapeCloses, const ToolWindowExtras* extras)
     {
+        if (open && *open && ImGui::GetFrameCount() - g_closeToolWindowsFrame <= 1)
+            *open = false;
         const bool raise = FocusRequested();
         ImGuiWindowClass windowClass;
         windowClass.ViewportFlagsOverrideSet = ImGuiViewportFlags_NoAutoMerge;

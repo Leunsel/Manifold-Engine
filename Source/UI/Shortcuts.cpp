@@ -2,6 +2,7 @@
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "UI/Fonts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
@@ -200,7 +201,7 @@ namespace Manifold::UI
                     ImGui::PopStyleColor();
                     PopMono();
                     ImGui::TableNextColumn();
-                    ImGui::TextUnformatted(info->Name);
+                    Layout::Text(info->Name);
                     ImGui::TableNextColumn();
                     ImGui::PushStyleColor(ImGuiCol_Text, customized ? ManifoldTheme::Warning : info->FromCheatEngine ? ManifoldTheme::Accent : ManifoldTheme::Muted);
                     ImGui::TextUnformatted(customized ? "Yours" : info->FromCheatEngine ? "CE" : "Manifold");

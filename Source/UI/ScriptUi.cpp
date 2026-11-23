@@ -3,6 +3,7 @@
 #include "App/Commands.h"
 #include "App/Engine.h"
 #include "Core/RuntimeLog.h"
+#include "Layout/Layout.h"
 #include "UI/Fonts.h"
 #include "UI/Shortcuts.h"
 #include "UI/Theme.h"
@@ -1057,7 +1058,7 @@ namespace Manifold::UI
                 flags |= ImGuiTreeNodeFlags_Selected;
             if (!leaf)
                 ImGui::SetNextItemOpen(node.Expanded, ImGuiCond_Always);
-            const bool open = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<std::intptr_t>(node.Id)), flags, "%s", node.Text.c_str());
+            const bool open = Layout::TreeNode(reinterpret_cast<void*>(static_cast<std::intptr_t>(node.Id)), node.Text, flags);
             visible.push_back(&node);
             if (scroll && node.Id == tree.Selected)
                 ImGui::SetScrollHereY();

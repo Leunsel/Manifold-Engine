@@ -35,6 +35,13 @@ namespace Manifold::UI
 {
     namespace
     {
+        // ∑ whether width still fits after the last item on its line; a toolbar goes on to the next line otherwise
+        bool FitsBeside(float width)
+        {
+            const ImGuiWindow* window = ImGui::GetCurrentWindow();
+            return window->WorkRect.Max.x - ImGui::GetItemRectMax().x - ImGui::GetStyle().ItemSpacing.x >= width;
+        }
+
         using Lua::FormDocument;
         using Lua::FormPropType;
         using Lua::UiKind;
@@ -2814,6 +2821,11 @@ namespace Manifold::UI
             NodeMenu(m_selected);
             ImGui::EndPopup();
         }
+        // ∑ the surface is a canvas: what lies on it moves with the view and is clipped by design, so it has no content
+        //   size of its own (its click area covers the padding too)
+        ImGuiWindow* surface = ImGui::GetCurrentWindow();
+        surface->DC.CursorMaxPos = surface->DC.CursorStartPos;
+        surface->DC.IdealMaxPos = surface->DC.CursorStartPos;
         ImGui::EndChild();
     }
 
@@ -4633,6 +4645,8 @@ namespace Manifold::UI
                 longest = std::max(longest, ImGui::CalcTextSize(std::string(handler.Key).c_str()).x);
             const float wanted = longest + Px(10.0f) + ImGui::GetFrameHeight() * 0.8f + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::GetStyle().CellPadding.x * 2.0f;
             labels = std::clamp(wanted, labels, std::max(labels, ImGui::GetContentRegionAvail().x * 0.45f));
+            // ∑ in a narrow panel the names give way (they end in "...") before the value fields get too small to use
+            labels = std::min(labels, std::max(Px(70.0f), ImGui::GetContentRegionAvail().x - Px(130.0f)));
         }
         const auto beginTable = [&](const char* id) {
             if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX))
@@ -5010,8 +5024,10 @@ namespace Manifold::UI
             ScriptPane();
         else
         {
-            ImGui::SameLine();
-            Segmented("##style", &m_style, { "Standalone", "Script + Form File", "One File" }, Px(360.0f));
+            const float icons = (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x) * 2.0f;
+            if (FitsBeside(Px(220.0f) + icons))
+                ImGui::SameLine();
+            Segmented("##style", &m_style, { "Standalone", "Script + Form File", "One File" }, std::min(Px(360.0f), ImGui::GetContentRegionAvail().x - icons));
             ItemTooltip("Standalone: one script that builds the window with manifold.ui calls.\nScript + Form File: the layout in a .form.lua file that the script loads with manifold.ui.form.load (the older way).\nOne File: the script holds the form as a table and builds it with manifold.ui.form.build; this is how the Form Editor saves.");
             ImGui::SameLine();
             if (IconButton(ICON_FA_COPY, "Copy the generated code"))
@@ -5046,7 +5062,8 @@ namespace Manifold::UI
             return;
         }
         EnsureScript();
-        ImGui::SameLine();
+        if (FitsBeside((ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x) * 2.0f))
+            ImGui::SameLine();
         if (IconButton(ICON_FA_PLUS, "Add a function for every handler the script does not have yet"))
             AddFunctions();
         ImGui::SameLine();

@@ -76,6 +76,13 @@ namespace Manifold
         void ApplyPendingResize();
         void RenderFrame();
         void SetRelaxedPacing(bool relaxed) { m_relaxedPacing = relaxed; }
+        // ∑ the layout sweep runs while the owner works or plays: before StartRendering, keeps every tool window inside
+        //   the (cloaked) main window instead of its own platform window, and reads and writes no layout file
+        void SetQuiet() { m_quiet = true; }
+        bool Quiet() const { return m_quiet; }
+        // The layout sweep's scale (96 = 100 %) and client size; the window is neither moved nor activated.
+        void SetDpi(UINT dpi) { RescaleForDpi(dpi); }
+        void ResizeClient(int width, int height);
 
         HWND Window() const { return m_hwnd; }
         static HWND DropSource();
@@ -131,6 +138,7 @@ namespace Manifold
         ULONGLONG m_refreshCheckedAt = 0;
         bool m_inSizeMove = false;
         bool m_inFrame = false;
+        bool m_quiet = false;
         UINT m_dpi = 96;
         bool m_roundedCorners = false;
         std::vector<RECT> m_dragAreas;

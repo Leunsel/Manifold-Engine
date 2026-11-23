@@ -43,6 +43,17 @@ namespace Manifold::Layout
         }
     }
 
+    std::string Shorten(std::string_view text, float width, bool* truncated)
+    {
+        ImFont* font = ImGui::GetFont();
+        const TextFit fit = FitText(font, ImGui::GetFontSize(), text, std::max(0.0f, width));
+        if (truncated)
+            *truncated = fit.Truncated;
+        if (!fit.Truncated)
+            return std::string(text);
+        return std::string(text.substr(0, fit.Bytes)) + EllipsisText(font);
+    }
+
     TextFit FitText(ImFont* font, float size, std::string_view text, float width)
     {
         TextFit fit;

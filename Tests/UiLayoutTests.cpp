@@ -516,6 +516,96 @@ namespace Manifold::Tests
             Layout::Audit::SetEnabled(false);
         }
 
+        // ∑ a table cell clips at its column, so raw text there leaves no trace
+        //   in the window's size; the audit reads the columns' measured content
+        void AuditFindsCutColumns()
+        {
+            Headless ui;
+            Layout::Audit::Clear();
+            Layout::Audit::SetEnabled(true);
+            for (int frame = 0; frame < 8; ++frame)
+            {
+                ui.Frame([&] {
+                    ui.Window("columns", 400.0f, [&] {
+                        if (ImGui::BeginTable("##cut", 2, ImGuiTableFlags_BordersInnerV))
+                        {
+                            ImGui::TableSetupColumn("Raw", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+                            ImGui::TableSetupColumn("Kept", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+                            ImGui::TableNextRow();
+                            ImGui::TableNextColumn();
+                            ImGui::TextUnformatted("A raw text much longer than its column");
+                            ImGui::TableNextColumn();
+                            Layout::Text("A layout text much longer than its column");
+                            ImGui::EndTable();
+                        }
+                    });
+                });
+            }
+            bool raw = false;
+            bool kept = true;
+            std::string seen;
+            for (const Layout::Audit::Problem& problem : Layout::Audit::Problems())
+            {
+                seen += problem.WindowName + ": " + Layout::Audit::KindName(problem.What) + " (" + problem.Detail + "); ";
+                if (problem.What != Layout::Audit::Kind::ColumnClipped)
+                    continue;
+                raw = raw || problem.Detail.find("\"Raw\"") != std::string::npos;
+                kept = kept && problem.Detail.find("\"Kept\"") == std::string::npos;
+            }
+            CHECK_MSG(raw, "raw text cut by its column is reported: " + seen);
+            CHECK_MSG(kept, "a layout text in a fixed column given a width ends in an ellipsis instead: " + seen);
+            Layout::Audit::SetEnabled(false);
+        }
+
+        // ∑ a tree node ends its label in "..." within its place and keeps the
+        //   natural width for windows and columns that fit their content
+        void TreeNodesFitTheirPlace()
+        {
+            {
+                Headless ui;
+                bool truncated = false;
+                std::string shown;
+                std::string whole;
+                float used = 0.0f;
+                for (int frame = 0; frame < 3; ++frame)
+                {
+                    ui.Frame([&] {
+                        ui.Window("shorten", 400.0f, [&] {
+                            whole = Layout::Shorten("short", 1000.0f);
+                            shown = Layout::Shorten("A long label that will not fit", 60.0f, &truncated);
+                            used = ImGui::CalcTextSize(shown.c_str()).x;
+                        });
+                    });
+                }
+                CHECK(whole == "short");
+                CHECK(truncated);
+                CHECK_MSG(used <= 60.0f + 0.5f, std::to_string(used));
+                CHECK(shown.size() < std::string("A long label that will not fit").size());
+            }
+            for (const float scale : { 1.0f, 1.5f, 2.0f })
+            {
+                Headless ui(scale);
+                ImRect node;
+                ImRect bounds;
+                for (int frame = 0; frame < 3; ++frame)
+                {
+                    ui.Frame([&] {
+                        ui.Window("tree", 400.0f, [&] {
+                            ImGui::BeginChild("##pane", ImVec2(150.0f * scale, 200.0f));
+                            const ImGuiWindow* pane = ImGui::GetCurrentWindow();
+                            bounds = pane->ContentRegionRect;
+                            if (Layout::TreeNode("##folder", "x86/x64 - Teleporter Hooks and other long names", ImGuiTreeNodeFlags_SpanAvailWidth))
+                                ImGui::TreePop();
+                            node = ImRect(ImGui::GetItemRectMin(), ImVec2(pane->DC.CursorMaxPos.x, ImGui::GetItemRectMax().y));
+                            ImGui::EndChild();
+                        });
+                    });
+                }
+                CHECK_MSG(node.Max.x <= bounds.Max.x + 1.0f, "scale " + std::to_string(scale) + ": the node's content reaches " + std::to_string(node.Max.x) + ", its pane ends at " +
+                                                                std::to_string(bounds.Max.x));
+            }
+        }
+
         // ---- the lock on raw ImGui calls (Source/Layout/RawImGui.txt, Tools/check_ui_raw.py) ----
 
         struct RawRules
@@ -630,6 +720,8 @@ namespace Manifold::Tests
             RegionsRestoreTheWindow();
             CardsClipTheirContent();
             AuditFindsRawOverflow();
+            AuditFindsCutColumns();
+            TreeNodesFitTheirPlace();
             RawCallsStayLocked();
             return Totals().Failures - before;
         }

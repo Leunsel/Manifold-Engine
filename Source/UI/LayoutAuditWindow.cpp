@@ -68,7 +68,7 @@ namespace Manifold::UI
                     Layout::Audit::Highlight(problem.Window, problem.Rect);
                 Layout::Text(name);
                 ImGui::TableNextColumn();
-                Layout::Colored(Layout::Audit::KindName(problem.What), problem.What == Layout::Audit::Kind::WindowClipped ? ManifoldTheme::Warning : ManifoldTheme::Error);
+                Layout::Colored(Layout::Audit::KindName(problem.What), problem.What == Layout::Audit::Kind::WindowClipped || problem.What == Layout::Audit::Kind::ColumnClipped ? ManifoldTheme::Warning : ManifoldTheme::Error);
                 ImGui::TableNextColumn();
                 Layout::Muted(problem.Detail);
                 ImGui::TableNextColumn();

@@ -872,11 +872,13 @@ A crash writes a minidump and a short report into `crashes`.
 | `mono`, `unreal` | engine windows |
 | `pointerscan`, `staticpointers`, `asmsearch`, `bytes`, `patches`, `writehistory`, `comments` | search and history |
 | `tablefiles`, `recorddebug` (`recorddebug:<ID>`, `recorddebug:check`, `:trace`, `:internals`) | the table |
-| `symbols`, `regions`, `processes` | process |
-| `log`, `settings`, `keyboard`, `appearance`, `shortcuts`, `about` | program |
+| `symbols`, `regions`, `processes`, `modules` | process |
+| `log`, `settings` (`settings:<n>` on page n, 0 = General … 5 = Keyboard), `keyboard`, `appearance`, `shortcuts`, `about` | program |
 | `profiler`, `breakdown`, `threads`, `checks`, `appinfo` | the profiler window on that tab |
+| `breakpoints`, `threadlist` | debugger |
+| `forms`, `layoutproblems` | Form Editor, Layout Problems |
 
-An option the program does not know is ignored.
+An option the program does not know is ignored; a window name it does not know is noted in the log.
 
 ### Folders next to the program
 
@@ -941,4 +943,4 @@ Then:
 - `Manifold-Engine.exe --profile-report=report.txt --profile-seconds=10` measures for that long, writes the report and closes.
 - `--open=profiler`, `breakdown`, `threads`, `checks` or `appinfo` opens the window on that tab at start.
 
-**Layout Problems** (`Ctrl+Shift+F11`, Help menu while Settings → Diagnostics → Layout Checks is on, or start with `--layout-audit`) lists, per window, content that is cut off, leaves its cell or does not fit its row, and outlines it on screen; hovering a row highlights it. See [UI-LAYOUT.md](UI-LAYOUT.md).
+**Layout Problems** (`Ctrl+Shift+F11`, Help menu while Settings → Diagnostics → Layout Checks is on, or start with `--layout-audit`) lists, per window, content that is cut off, leaves its cell or does not fit its row, and outlines it on screen; hovering a row highlights it. `--layout-sweep=<report>` opens every window in turn, unseen, at several sizes, tabs and scales, and writes what the checks found into the report (see [UI-LAYOUT.md](UI-LAYOUT.md#the-sweep-over-all-windows)).

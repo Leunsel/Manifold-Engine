@@ -531,6 +531,9 @@
     <ClCompile Include="..\Source\UI\LayoutAuditWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\LayoutSweep.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\Loading.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -1105,6 +1108,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\LayoutAuditWindow.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\LayoutSweep.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Loading.h">

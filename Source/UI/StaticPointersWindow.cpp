@@ -4,6 +4,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Target/Process.h"
 #include "UI/AddressActions.h"
 #include "UI/Fonts.h"
@@ -188,18 +189,25 @@ namespace Manifold::UI
         Muted("Looks in the writable sections of the loaded modules for pointers to the address or to a structure start up to the largest offset before it.");
         const bool running = m_task.Running();
         bool enter = false;
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Address");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(Px(220.0f));
-        enter |= InputTextWithHint("##staticaddress", "address or expression", m_address, ImGuiInputTextFlags_EnterReturnsTrue);
-        ImGui::SameLine(0.0f, Px(14.0f));
-        ImGui::TextUnformatted("Largest offset");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(Px(90.0f));
-        enter |= InputTextWithHint("##staticoffset", "1000", m_maxOffset, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CharsHexadecimal);
-        ImGui::SameLine(0.0f, Px(14.0f));
-        ImGui::Checkbox("System modules", &m_system);
+        // ∑ the three settings share a line while it is wide enough and wrap onto the next one in a narrow window
+        Layout::RowOptions line;
+        line.Wrap = true;
+        line.Gap = Layout::Space::L;
+        Layout::Row settings("##staticsettings", { Layout::Size::Fill().Min(240.0f).Max(320.0f), Layout::Size::Fixed(190.0f), Layout::Size::Fit() }, line);
+        settings.Cell([&] {
+            Layout::FieldOptions field;
+            field.Placement = Layout::LabelPlacement::Left;
+            Layout::Field("Address", field);
+            enter |= InputTextWithHint("##staticaddress", "address or expression", m_address, ImGuiInputTextFlags_EnterReturnsTrue);
+        });
+        settings.Cell([&] {
+            Layout::FieldOptions field;
+            field.Placement = Layout::LabelPlacement::Left;
+            Layout::Field("Largest offset", field);
+            enter |= InputTextWithHint("##staticoffset", "1000", m_maxOffset, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CharsHexadecimal);
+        });
+        settings.Cell([&] { ImGui::Checkbox("System modules", &m_system); });
+        settings.End();
         if (!m_error.empty())
             TextWithError(m_error, ManifoldTheme::Error);
         ImGui::BeginDisabled(running || !engine.HasProcess());

@@ -1647,7 +1647,8 @@ namespace Manifold::UI
             ImGui::SetKeyboardFocusHere();
             m_focusValue = false;
         }
-        const float hexWidth = ImGui::CalcTextSize("Hex").x + ImGui::GetFrameHeight() + Px(12.0f);
+        // ∑ what the checkbox takes beside the field: the spacing before it, its box, the gap to its label and the label
+        const float hexWidth = ImGui::GetStyle().ItemSpacing.x + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize("Hex").x;
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - hexWidth);
         const char* hint = kind == Scan::ScanKind::Grouped ? "4:100 f:1.5 d:*" : Scan::CompareNeedsTwoValues(compare) ? "from" : "value";
         if (InputTextWithHint("##value", hint, m_value, ImGuiInputTextFlags_EnterReturnsTrue))

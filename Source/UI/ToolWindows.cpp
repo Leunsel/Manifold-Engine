@@ -3,6 +3,7 @@
 #include "App/Sounds.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Lua/LuaEngine.h"
 #include "UI/Fonts.h"
 #include "UI/Shortcuts.h"
@@ -523,13 +524,19 @@ namespace Manifold::UI
         {
             if (ImGui::BeginTabItem("Registered Symbols"))
             {
-                ImGui::SetNextItemWidth(Px(160.0f));
-                InputTextWithHint("##name", "name", m_name);
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(Px(220.0f));
-                InputTextWithHint("##address", "address", m_address);
-                ImGui::SameLine();
-                if (ImGui::Button(ICON_FA_PLUS "  Register"))
+                bool registerNow = false;
+                Layout::Row line("##registerline", { Layout::Size::Fill(1.0f).Min(100.0f).Max(220.0f), Layout::Size::Fill(1.4f).Min(120.0f).Max(300.0f), Layout::Size::Fit() });
+                line.Cell([&] {
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    InputTextWithHint("##name", "name", m_name);
+                });
+                line.Cell([&] {
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    InputTextWithHint("##address", "address", m_address);
+                });
+                line.Cell([&] { registerNow = Layout::Button(ICON_FA_PLUS "  Register"); });
+                line.End();
+                if (registerNow)
                 {
                     Status error;
                     if (const auto value = engine.Evaluate(m_address, &error))
@@ -559,7 +566,7 @@ namespace Manifold::UI
                         ImGui::TableNextRow();
                         ImGui::PushID(symbol.Name.c_str());
                         ImGui::TableNextColumn();
-                        ImGui::TextUnformatted(symbol.Name.c_str());
+                        Layout::Text(symbol.Name);
                         ImGui::TableNextColumn();
                         PushMono();
                         if (ImGui::Selectable(Hex(symbol.Address).c_str()))
@@ -599,13 +606,16 @@ namespace Manifold::UI
                             ImGui::TableNextRow();
                             ImGui::TableNextColumn();
                             ImGui::PushID(reinterpret_cast<const void*>(static_cast<std::uintptr_t>(module.Base)));
-                            if (ImGui::Selectable(module.Name.c_str(), m_module == module.Name, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
+                            if (Layout::RowSelectable("##module", m_module == module.Name, ImGuiSelectableFlags_AllowDoubleClick))
                             {
                                 m_module = module.Name;
                                 if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                                     m_workspace.OpenMemoryViewer(module.Base, true);
                             }
                             ItemTooltip(WideToUtf8(module.Path).c_str());
+                            Layout::TextStyle name;
+                            name.Tooltip = false;   // the row's tooltip is the module's path
+                            Layout::Text(module.Name, name);
                             ImGui::PopID();
                             ImGui::TableNextColumn();
                             PushMono();

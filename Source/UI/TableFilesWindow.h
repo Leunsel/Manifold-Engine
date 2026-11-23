@@ -205,6 +205,7 @@ namespace Manifold::UI
         const void* m_textData = nullptr;
         std::uint64_t m_textVersion = 0;
         bool m_textDirty = false;
+        int m_textBarLines = 1;   // lines the text view's button bar took last frame
         bool m_textStale = false;
         std::map<std::string, Draft> m_drafts;
         CodeEditorState m_editor;

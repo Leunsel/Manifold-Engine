@@ -5,6 +5,7 @@
 #include "imgui.h"
 
 #include <cstddef>
+#include <string>
 #include <string_view>
 
 namespace Manifold::Layout
@@ -45,6 +46,9 @@ namespace Manifold::Layout
     // Pure measure (no drawing): how much of a single line fits into width with an ellipsis. Cuts at UTF-8 boundaries.
     TextFit FitText(ImFont* font, float size, std::string_view text, float width);
 
+    // The text as it fits into width in the current font, ending in an ellipsis when it was shortened (for labels a
+    // widget draws itself: tree nodes, tabs, combo previews).
+    std::string Shorten(std::string_view text, float width, bool* truncated = nullptr);
     // Returns true when the text was shortened.
     bool Text(std::string_view text, const TextStyle& style = {});
     bool Muted(std::string_view text, Overflow overflow = Overflow::Ellipsis);

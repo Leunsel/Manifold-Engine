@@ -2,6 +2,7 @@
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Table/ManagedStructures.h"
 #include "Target/Mono.h"
 #include "Target/UnityExplorer.h"
@@ -583,8 +584,7 @@ namespace Manifold::UI
             if (scene.Active)
                 label += "  · active";
             ImGui::PushStyleColor(ImGuiCol_Text, scene.DontDestroy ? ManifoldTheme::Label : ManifoldTheme::Accent);
-            const bool open = ImGui::TreeNodeEx("##scene", ImGuiTreeNodeFlags_SpanAvailWidth | (scene.DontDestroy ? 0 : ImGuiTreeNodeFlags_DefaultOpen),
-                "%s %s", ICON_FA_LAYER_GROUP, label.c_str());
+            const bool open = Layout::TreeNode("##scene", ICON_FA_LAYER_GROUP " " + label, ImGuiTreeNodeFlags_SpanAvailWidth | (scene.DontDestroy ? 0 : ImGuiTreeNodeFlags_DefaultOpen));
             ImGui::PopStyleColor();
             if (scene.DontDestroy)
                 ItemTooltip("Objects kept across scene loads. Unity does not list this scene; the first look moves an empty GameObject there, "
@@ -630,7 +630,7 @@ namespace Manifold::UI
             flags |= ImGuiTreeNodeFlags_Selected;
         ImGui::PushStyleColor(ImGuiCol_Text, node.Active ? ManifoldTheme::Text : ManifoldTheme::Muted);
         const std::string label = node.ChildCount > 0 ? node.Name + "  (" + std::to_string(node.ChildCount) + ")" : node.Name;
-        const bool open = ImGui::TreeNodeEx("##node", flags, "%s", label.c_str());
+        const bool open = Layout::TreeNode("##node", label, flags);
         ImGui::PopStyleColor();
         if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen())
         {

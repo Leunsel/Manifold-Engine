@@ -93,6 +93,9 @@ namespace Manifold::UI
         ImVec2 Position = ImVec2(0.0f, 0.0f);
     };
 
+    // Closes every tool window that has a close button, in the next frame they are drawn (the layout sweep goes
+    // through the windows one at a time).
+    void CloseToolWindows();
     bool BeginToolWindow(const char* title, bool* open, ImVec2 size, ImGuiWindowFlags flags = 0, ImVec2 minimum = ImVec2(260.0f, 160.0f), bool escapeCloses = true,
         const ToolWindowExtras* extras = nullptr);
     void EndToolWindow();

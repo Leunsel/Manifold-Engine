@@ -20,7 +20,8 @@ namespace Manifold::Layout::Audit
         CellOverflow,
         RowTooNarrow,
         BelowMinimum,
-        WindowClipped
+        WindowClipped,
+        ColumnClipped
     };
 
     struct Problem

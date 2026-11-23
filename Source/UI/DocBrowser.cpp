@@ -2,6 +2,7 @@
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "UI/DocView.h"
 #include "UI/Theme.h"
 #include "UI/UiScale.h"
@@ -99,8 +100,8 @@ namespace Manifold::UI
     void DocBrowser::Branch(const Lua::DocRegistry& registry, const Lua::DocPtr& record, const std::function<void(const std::string&)>& insert, int depth)
     {
         const std::string label = depth == 0 ? record->Path : record->Name;
-        const bool open = ImGui::TreeNodeEx(record.get(), ImGuiTreeNodeFlags_SpanAvailWidth | (m_selected == record ? ImGuiTreeNodeFlags_Selected : 0), "%s  %s",
-            DocKindIcon(record->Kind), label.c_str());
+        const bool open = Layout::TreeNode(record.get(), std::string(DocKindIcon(record->Kind)) + "  " + label,
+            ImGuiTreeNodeFlags_SpanAvailWidth | (m_selected == record ? ImGuiTreeNodeFlags_Selected : 0));
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
             m_selected = record;
         if (!open)
@@ -168,8 +169,8 @@ namespace Manifold::UI
                     Branch(registry, group.Items.front(), insert, 0);
                     continue;
                 }
-                if (!ImGui::TreeNodeEx(group.Title.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth, "%s  %s  (%zu)", group.Flat ? ICON_FA_LIST : ICON_FA_FOLDER,
-                        group.Title.c_str(), group.Items.size()))
+                if (!Layout::TreeNode(group.Title.c_str(), Format("%s  %s  (%zu)", group.Flat ? ICON_FA_LIST : ICON_FA_FOLDER, group.Title.c_str(), group.Items.size()),
+                        ImGuiTreeNodeFlags_SpanAvailWidth))
                     continue;
                 if (group.Flat)
                 {

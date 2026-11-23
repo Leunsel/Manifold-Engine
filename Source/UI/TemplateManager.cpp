@@ -4,6 +4,7 @@
 #include "Asm/AsmAssist.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Lua/DocRecord.h"
 #include "Lua/LuaEngine.h"
 #include "Target/Process.h"
@@ -691,7 +692,7 @@ namespace Manifold::UI
                 if (!filter.empty())
                     ImGui::SetNextItemOpen(true);
                 ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Label);
-                const bool open = ImGui::TreeNodeEx("##node", flags, "%s  %s", ICON_FA_FOLDER, child->Label.c_str());
+                const bool open = Layout::TreeNode("##node", ICON_FA_FOLDER "  " + child->Label, flags);
                 ImGui::PopStyleColor();
                 drop(child->Path);
                 if (open)
@@ -745,14 +746,20 @@ namespace Manifold::UI
                     ImGui::EndPopup();
                 }
                 ImGui::SameLine(x);
-                ImGui::TextUnformatted(info->Caption.c_str());
-                if (changed || info->BuiltIn)
+                // ∑ the caption gives way to the marker after it; its tooltip is the item's own (caption and description)
+                const char* marker = changed ? "\xE2\x97\x8F" : info->BuiltIn ? "built-in" : nullptr;
+                const float markerWidth = marker ? ImGui::CalcTextSize(marker).x + ImGui::GetStyle().ItemSpacing.x : 0.0f;
+                Layout::TextStyle caption;
+                caption.MaxWidth = std::max(1.0f, Layout::Avail() - markerWidth);
+                caption.Tooltip = false;
+                Layout::Text(info->Caption, caption);
+                if (marker)
                 {
                     ImGui::SameLine();
                     if (changed)
-                        ImGui::TextColored(ManifoldTheme::Warning, "\xE2\x97\x8F");
+                        Layout::Colored(marker, ManifoldTheme::Warning, Layout::Overflow::Visible);
                     else
-                        Muted("built-in");
+                        Layout::Muted(marker, Layout::Overflow::Visible);
                 }
                 ImGui::PopID();
             }
@@ -767,15 +774,18 @@ namespace Manifold::UI
             ImGui::Spacing();
             const std::string label = ICON_FA_EXCLAMATION_TRIANGLE "  Skipped (" + std::to_string(library.Problems().size()) + ")";
             ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Warning);
-            const bool open = ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth);
+            const bool open = Layout::TreeNode("##skipped", label, ImGuiTreeNodeFlags_SpanAvailWidth);
             ImGui::PopStyleColor();
             if (open)
             {
                 for (const Templates::LibraryProblem& problem : library.Problems())
                 {
-                    ImGui::TextColored(ManifoldTheme::Error, "%s", std::filesystem::path(Utf8ToWide(problem.File)).filename().string().c_str());
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("%s", problem.Message.c_str());
+                    Layout::TextStyle style;
+                    style.Color = ManifoldTheme::Error;
+                    style.Tooltip = false;
+                    Layout::Text(WideToUtf8(std::filesystem::path(Utf8ToWide(problem.File)).filename().wstring()), style);
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                        Layout::TextTooltip(problem.File + "\n" + problem.Message);
                 }
                 ImGui::TreePop();
             }
@@ -852,7 +862,7 @@ namespace Manifold::UI
                 return;
             }
             ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
-            const bool open = ImGui::TreeNodeEx(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen);
+            const bool open = Layout::TreeNode(title.c_str(), title, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen);
             ImGui::PopStyleColor();
             if (open)
                 body();

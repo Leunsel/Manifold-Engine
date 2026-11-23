@@ -15,6 +15,7 @@ namespace Manifold::UI
     public:
         static constexpr int ThemePage = 1;
         static constexpr int KeyboardPage = 5;
+        static constexpr int PageCount = 6;
 
         explicit SettingsWindow(Workspace& workspace);
         void Draw() override;
@@ -22,7 +23,7 @@ namespace Manifold::UI
         {
             m_open = true;
             m_bringToFront = true;
-            if (page >= 0)
+            if (page >= 0 && page < PageCount)
             {
                 m_page = page;
                 m_search.clear();

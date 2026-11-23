@@ -271,6 +271,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\UI\Fonts.cpp" />
     <ClCompile Include="..\Source\UI\FormEditor.cpp" />
     <ClCompile Include="..\Source\UI\LayoutAuditWindow.cpp" />
+    <ClCompile Include="..\Source\UI\LayoutSweep.cpp" />
     <ClCompile Include="..\Source\UI\Loading.cpp" />
     <ClCompile Include="..\Source\UI\LogWindow.cpp" />
     <ClCompile Include="..\Source\UI\LuaDialogs.cpp" />
@@ -465,6 +466,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\UI\Fonts.h" />
     <ClInclude Include="..\Source\UI\FormEditor.h" />
     <ClInclude Include="..\Source\UI\LayoutAuditWindow.h" />
+    <ClInclude Include="..\Source\UI\LayoutSweep.h" />
     <ClInclude Include="..\Source\UI\Loading.h" />
     <ClInclude Include="..\Source\UI\LogWindow.h" />
     <ClInclude Include="..\Source\UI\LuaDialogs.h" />

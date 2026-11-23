@@ -3,6 +3,7 @@
 #include "Core/Text.h"
 #include "Debug/BreakAction.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "UI/Theme.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
@@ -489,12 +490,16 @@ namespace Manifold::UI
                 }
                 PopMono();
                 ImGui::TableNextColumn();
-                ImGui::TextColored(ManifoldTheme::AddressText, "%s", row.Start ? m_engine.Describe(row.Start).c_str() : "?");
+                // ∑ the warning keeps its icon; the start address and the warning's words give way
                 if (row.Hidden)
                 {
-                    ImGui::SameLine();
-                    ImGui::TextColored(ManifoldTheme::Warning, "%s", ICON_FA_EYE_SLASH "  hidden from debuggers");
+                    Layout::Row start("##start", { Layout::Size::Fill(2.0f), Layout::Size::Fill(1.0f).Min(24.0f) }, { .Gap = Layout::Space::S, .FrameLine = false });
+                    start.Cell([&] { Layout::Colored(row.Start ? m_engine.Describe(row.Start) : std::string("?"), ManifoldTheme::AddressText); });
+                    start.Cell([&] { Layout::Colored(ICON_FA_EYE_SLASH "  hidden from debuggers", ManifoldTheme::Warning); });
+                    start.End();
                 }
+                else
+                    Layout::Colored(row.Start ? m_engine.Describe(row.Start) : std::string("?"), ManifoldTheme::AddressText);
                 ImGui::TableNextColumn();
                 PushMono();
                 ImGui::Text("%s", row.Teb ? Hex(row.Teb, digits).c_str() : "?");

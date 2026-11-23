@@ -19,6 +19,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <utility>
 
@@ -111,6 +112,8 @@ namespace Manifold
 
     bool Application::Initialise(HINSTANCE instance, int showCommand)
     {
+        if (!m_options.LayoutSweep.empty())
+            m_host.SetQuiet();
         if (!m_host.Open(instance))
             return false;
         AcceptDroppedFiles();
@@ -123,7 +126,7 @@ namespace Manifold
         placement.Maximised = m_settings.Maximised;
         m_host.Place(placement);
         const bool minimised = showCommand == SW_SHOWMINIMIZED || showCommand == SW_SHOWMINNOACTIVE || showCommand == SW_MINIMIZE;
-        if (m_settings.ShowSplash && !minimised)
+        if (m_settings.ShowSplash && !minimised && !m_host.Quiet())
         {
             m_splash = UI::SplashScreen::Show(instance, m_host.Window(), m_settings.Maximised);
             m_splashSince = ::GetTickCount64();
@@ -142,12 +145,22 @@ namespace Manifold
         m_workspace = std::make_unique<UI::Workspace>(*m_engine, *this);
         m_dialogs = std::make_unique<UI::DialogHost>(m_host.Window(), m_host.Device(), m_host.Context());
         UI::InstallLuaDialogs(*m_dialogs);
-        m_dialogs->SetBeforeShow([this]() { m_host.Reveal(); });
+        m_dialogs->SetBeforeShow([this]() {
+            if (!m_host.Quiet())
+                m_host.Reveal();
+        });
 
         SplashStatus("Opening the window");
-        if (!minimised)
+        if (!minimised || m_host.Quiet())
             m_host.HideUntilFirstFrame();
-        ::ShowWindow(m_host.Window(), m_settings.Maximised && !minimised ? SW_SHOWMAXIMIZED : showCommand);
+        if (m_host.Quiet())
+        {
+            // ∑ the sweep stays cloaked and must not take the focus from whatever the owner is doing
+            ::ShowWindow(m_host.Window(), SW_SHOWNOACTIVATE);
+            m_sweep = std::make_unique<UI::LayoutSweep>(m_options.LayoutSweep, m_options.SweepWindows, m_options.SweepScales);
+        }
+        else
+            ::ShowWindow(m_host.Window(), m_settings.Maximised && !minimised ? SW_SHOWMAXIMIZED : showCommand);
         ::UpdateWindow(m_host.Window());
         m_host.NoteInput();
         m_running = true;
@@ -198,89 +211,8 @@ namespace Manifold
         SplashStatus("Ready");
         for (const std::string& window : m_options.Open)
         {
-            if (window == "memory")
-                m_workspace->OpenMemoryViewer(0);
-            else if (window == "hex")
-                m_workspace->OpenMemoryViewer(0, true);
-            else if (window == "structure")
-                m_workspace->OpenStructure(0);
-            else if (window == "script")
-                m_workspace->OpenScript(Asm::CheatTableTemplate());
-            else if (window == "lua")
-                m_workspace->OpenLua();
-            else if (window == "mono")
-                m_workspace->OpenMono();
-            else if (window == "unreal")
-                m_workspace->OpenUnreal();
-            else if (window == "log")
-                m_workspace->OpenLog();
-            else if (window == "settings")
-                m_workspace->OpenSettings();
-            else if (window == "symbols")
-                m_workspace->OpenSymbols();
-            else if (window == "regions")
-                m_workspace->OpenRegions();
-            else if (window == "tablefiles")
-                m_workspace->OpenTableFiles();
-            else if (window == "patches")
-                m_workspace->OpenPatchScan();
-            else if (window == "dissect")
-                m_workspace->OpenCodeDissect();
-            else if (window == "asmsearch")
-                m_workspace->OpenAsmSearch();
-            else if (window == "bytes")
-                m_workspace->OpenByteSearch();
-            else if (window == "pointerscan")
-                m_workspace->OpenPointerScan();
-            else if (window == "staticpointers")
-                m_workspace->OpenStaticPointers();
-            else if (window == "shortcuts")
-                m_workspace->OpenShortcuts();
-            else if (window == "keyboard")
-                m_workspace->OpenSettings(UI::SettingsWindow::KeyboardPage);
-            else if (window == "appearance")
-                m_workspace->OpenSettings(UI::SettingsWindow::ThemePage);
-            else if (window == "processes")
-                m_workspace->OpenProcessPicker();
-            else if (window == "about")
-                m_workspace->OpenAbout();
-            else if (window == "profiler")
-                m_workspace->OpenProfiler(UI::ProfilerWindow::OverviewTab);
-            else if (window == "breakdown")
-                m_workspace->OpenProfiler(UI::ProfilerWindow::BreakdownTab);
-            else if (window == "threads")
-                m_workspace->OpenProfiler(UI::ProfilerWindow::ThreadsTab);
-            else if (window == "checks")
-                m_workspace->OpenProfiler(UI::ProfilerWindow::ChecksTab);
-            else if (window == "appinfo")
-                m_workspace->OpenProfiler(UI::ProfilerWindow::InfoTab);
-            else if (window == "nopsled")
-                m_workspace->OpenNopSled();
-            else if (window == "writehistory")
-                m_workspace->OpenWriteHistory();
-            else if (window == "comments")
-                m_workspace->OpenCommentList();
-            else if (window == "recorddebug")
-                m_workspace->OpenRecordDebug();
-            else if (window.rfind("recorddebug:", 0) == 0)
-            {
-                if (const auto id = ParseDecimal(window.substr(12)))
-                    m_workspace->OpenRecordDebug(static_cast<int>(*id));
-                else
-                    m_workspace->OpenRecordDebugPage(window.substr(12));
-            }
-            else if (window == "flowgraph")
-                m_workspace->OpenFlowGraph();
-            else if (window == "opcodes")
-                m_workspace->OpenOpcodeConverter();
-            else if (window == "templates")
-                m_workspace->OpenTemplateManager();
-            else if (window == "forms")
-                m_workspace->OpenFormEditor();
-            else if (window.rfind("forms:", 0) == 0)
-                m_workspace->OpenFormEditor(Utf8ToWide(window.substr(6)));
-            else if (window.rfind("templates:", 0) == 0)
-                m_workspace->OpenTemplateManager(window.substr(10));
+            if (!m_workspace->OpenNamed(window))
+                LOG_WARN("Program", "--open: no window is called " + window);
         }
         if (!m_options.ProfileReport.empty())
         {
@@ -321,7 +253,7 @@ namespace Manifold
     {
         m_firstFrameReady = true;
         LOG_INFO("Program", Format("The first frame was ready %llu ms after the start", MillisecondsSinceStart()));
-        if (!m_splash)
+        if (!m_splash && !m_host.Quiet())
             m_host.RequestReveal();
     }
 
@@ -434,9 +366,13 @@ namespace Manifold
         Layout::Defaults().Bold = Fonts::Bold();
         Layout::Defaults().Mono = Fonts::Mono();
         Layout::NewFrame();
-        Layout::Audit::SetEnabled(m_settings.LayoutChecks || m_options.LayoutAudit);
+        Layout::Audit::SetEnabled(m_settings.LayoutChecks || m_options.LayoutAudit || m_sweep);
+        if (m_sweep && m_started)
+            m_sweep->BeforeDraw(*m_workspace, *this);
         m_workspace->Draw();
         Layout::Audit::EndFrame();
+        if (m_sweep && m_started)
+            m_sweep->AfterDraw();
         UI::ApplyWindowOpacity(static_cast<float>(m_settings.ActiveWindowOpacity) / 100.0f, static_cast<float>(m_settings.InactiveWindowOpacity) / 100.0f);
         if (!m_started && ++m_frames >= 2)
         {
@@ -444,6 +380,30 @@ namespace Manifold
             FirstFrameWork();
         }
         ProfileReportWork();
+        LayoutSweepWork();
+    }
+
+    void Application::SetSweepScale(float scale)
+    {
+        m_host.SetDpi(static_cast<UINT>(std::lround(96.0f * scale)));
+    }
+
+    void Application::SetSweepMainSize(int width, int height)
+    {
+        m_host.ResizeClient(width, height);
+    }
+
+    void Application::LayoutSweepWork()
+    {
+        if (!m_sweep || !m_sweep->Finished())
+            return;
+        std::string error;
+        if (m_sweep->Write(&error))
+            LOG_INFO("Program", Format("The layout sweep found %zu problems, report in ", m_sweep->ProblemCount()) + WideToUtf8(m_options.LayoutSweep.wstring()));
+        else
+            LOG_ERROR("Program", "Layout sweep: " + error);
+        m_sweep.reset();
+        Close();
     }
 
     void Application::CloseRequested()
@@ -537,7 +497,11 @@ namespace Manifold
             }
             const bool animating = m_workspace->Animating();
             const bool busy = m_engine->Scanner().Busy() || m_engine->Debugger().Broken() || !m_engine->Notifications().Empty() || m_engine->Working();
-            if (!animating && !busy && m_host.InputAge() > kBusyMilliseconds)
+            if (m_sweep)
+            {
+                // the sweep needs every frame
+            }
+            else if (!animating && !busy && m_host.InputAge() > kBusyMilliseconds)
                 TickWhileWaiting(kIdleFrameMilliseconds);
             else if (!animating && busy && m_host.InputAge() > kBusyMilliseconds)
                 TickWhileWaiting(33);
@@ -548,10 +512,14 @@ namespace Manifold
         Sounds::Stop();
         m_engine->FlushPendingSave();
         m_engine->Backups().Finish();
-        RememberPlacement();
-        const Status saved = m_engine->SaveOptionsNow();
-        if (!saved)
-            LOG_ERROR("Program", saved.Text);
+        if (!m_host.Quiet())
+        {
+            // the sweep's sizes and scales are not the owner's placement
+            RememberPlacement();
+            const Status saved = m_engine->SaveOptionsNow();
+            if (!saved)
+                LOG_ERROR("Program", saved.Text);
+        }
         if (ImGui::GetCurrentContext() && ImGui::GetIO().IniFilename)
             ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
         m_engine->Debugger().Detach();

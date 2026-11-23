@@ -131,6 +131,13 @@ namespace Manifold::Layout
     // in "..." when the column is narrow) is drawn over it.
     bool RowSelectable(const char* id, bool selected, ImGuiSelectableFlags flags = 0);
 
+    // ∑ A tree node whose label ends in "..." when its place is narrower than
+    // the label (the whole label is its tooltip then), so a tree in a narrow
+    // pane never runs out of it. id is the node's ID, apart from the label.
+    // Returns whether the node is open, like ImGui::TreeNodeEx.
+    bool TreeNode(const char* id, std::string_view label, ImGuiTreeNodeFlags flags = 0);
+    bool TreeNode(const void* id, std::string_view label, ImGuiTreeNodeFlags flags = 0);
+
     // the title line a card draws, for places that draw their own frame
     void TitleLine(const char* icon, std::string_view title, std::string_view badge = {});
 

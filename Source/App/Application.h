@@ -4,6 +4,7 @@
 #include "App/Settings.h"
 #include "App/WindowHost.h"
 #include "UI/DialogHost.h"
+#include "UI/LayoutSweep.h"
 #include "UI/SplashScreen.h"
 #include "UI/Workspace.h"
 
@@ -24,9 +25,12 @@ namespace Manifold
         std::filesystem::path ProfileReport;
         int ProfileSeconds = 10;
         bool LayoutAudit = false;
+        std::filesystem::path LayoutSweep;     // report file; the sweep runs cloaked and closes the program
+        std::vector<std::string> SweepWindows; // empty = every window
+        std::vector<float> SweepScales;        // empty = 100 % and 150 %
     };
 
-    class Application final : private WindowHost::Client, public UI::Shell
+    class Application final : private WindowHost::Client, public UI::Shell, private UI::LayoutSweep::Host
     {
     public:
         explicit Application(StartOptions options);
@@ -65,6 +69,10 @@ namespace Manifold
         void FirstFrameWork();
         void TickWhileWaiting(unsigned milliseconds);
         void ProfileReportWork();
+        void SetSweepScale(float scale) override;
+        void SetSweepMainSize(int width, int height) override;
+        void LayoutSweepWork();
+        std::unique_ptr<UI::LayoutSweep> m_sweep;
 
         StartOptions m_options;
         Settings m_settings;

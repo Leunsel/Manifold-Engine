@@ -752,7 +752,9 @@ namespace Manifold::UI
             ItemTooltip(Format("ID %d in the table file", record.FileId).c_str());
 
         ImGui::TableNextColumn();
-        const float indent = Px(14.0f) * static_cast<float>(depth);
+        // ∑ deep groups indent only as far as the column keeps room for the icons and the start of the name
+        const float iconsWidth = ImGui::GetFontSize() * 2.2f + Px(9.0f);   // the caret and the kind icon, about a font size each
+        const float indent = std::clamp(Px(14.0f) * static_cast<float>(depth), 0.0f, std::max(0.0f, ImGui::GetContentRegionAvail().x - iconsWidth - Layout::MinTextWidth()));
         if (indent > 0.0f)
             ImGui::Indent(indent);
         if (!record.Children.empty())
@@ -814,7 +816,7 @@ namespace Manifold::UI
         if (record.Kind == RecordKind::Value)
         {
             const bool fresh = now - record.ChangedAt < 0.6;
-            ImGui::TextColored(record.ValueText == "??" ? ManifoldTheme::Muted : fresh ? ManifoldTheme::Changed : ManifoldTheme::Text, "%s", record.ValueText.c_str());
+            Layout::Colored(record.ValueText, record.ValueText == "??" ? ManifoldTheme::Muted : fresh ? ManifoldTheme::Changed : ManifoldTheme::Text);
             if (!record.LastBytes.empty())
             {
                 ImGui::SameLine();

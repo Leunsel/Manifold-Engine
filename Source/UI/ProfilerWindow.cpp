@@ -5,6 +5,7 @@
 #include "Core/Errors.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "UI/Fonts.h"
 #include "UI/Theme.h"
 #include "UI/UiScale.h"
@@ -971,7 +972,7 @@ namespace Manifold::UI
                 const ImVec4 color = zone.Depth == 0 ? ManifoldTheme::Text : ZoneColor(zone.Node);
                 const float rowX = ImGui::GetCursorScreenPos().x;
                 ImGui::PushStyleColor(ImGuiCol_Text, zone.Wait ? ManifoldTheme::Muted : ManifoldTheme::Text);
-                const bool expanded = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<std::intptr_t>(zone.Node + 1)), treeFlags, "%s", zone.Name);
+                const bool expanded = Layout::TreeNode(reinterpret_cast<void*>(static_cast<std::intptr_t>(zone.Node + 1)), zone.Name, treeFlags);
                 ImGui::PopStyleColor();
                 if (const char* help = HelpFor(zone.Name))
                     ItemTooltip(help);
@@ -1107,7 +1108,7 @@ namespace Manifold::UI
             PopMono();
             ImGui::TableSetColumnIndex(1);
             PushMono();
-            ImGui::TextUnformatted(thread.Start.c_str());
+            Layout::Text(thread.Start);
             PopMono();
             ImGui::TableSetColumnIndex(2);
             Muted(thread.Description);
@@ -1282,9 +1283,7 @@ namespace Manifold::UI
                     ImGui::TableSetColumnIndex(0);
                     Muted(row.Key);
                     ImGui::TableSetColumnIndex(1);
-                    ImGui::TextUnformatted(row.Value.c_str());
-                    if (ImGui::IsItemHovered() && ImGui::CalcTextSize(row.Value.c_str()).x > ImGui::GetContentRegionAvail().x)
-                        ItemTooltip(row.Value.c_str());
+                    Layout::Text(row.Value);
                     if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
                     {
                         ImGui::SetClipboardText(row.Value.c_str());

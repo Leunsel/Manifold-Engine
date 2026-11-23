@@ -716,6 +716,12 @@ namespace Manifold
         if (m_device) { m_device->Release(); m_device = nullptr; }
     }
 
+    void WindowHost::ResizeClient(int width, int height)
+    {
+        // ∑ the window draws its own frame (WM_NCCALCSIZE), so its client area is the whole window
+        ::SetWindowPos(m_hwnd, nullptr, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
     float WindowHost::WindowScale() const
     {
         return static_cast<float>(m_dpi) / 96.0f;
@@ -939,13 +945,13 @@ namespace Manifold
         m_imgui = ImGui::CreateContext();
 
         ImGuiIO& io = ImGui::GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_ViewportsEnable;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable | (m_quiet ? 0 : ImGuiConfigFlags_ViewportsEnable);
         io.ConfigDpiScaleFonts = false;
         io.ConfigDpiScaleViewports = false;
         io.ConfigDockingWithShift = true;
         io.ConfigWindowsMoveFromTitleBarOnly = true;
         io.ConfigViewportsNoTaskBarIcon = false;
-        io.IniFilename = m_layoutFile.empty() ? nullptr : m_layoutFile.c_str();
+        io.IniFilename = m_layoutFile.empty() || m_quiet ? nullptr : m_layoutFile.c_str();
         io.LogFilename = nullptr;
 
         m_baseStyle = new ImGuiStyle(ImGui::GetStyle());

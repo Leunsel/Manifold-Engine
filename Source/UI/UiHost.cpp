@@ -1482,7 +1482,7 @@ namespace Manifold::UI
                 flags |= ImGuiTreeNodeFlags_Selected;
             if (item.Open)
                 flags |= ImGuiTreeNodeFlags_DefaultOpen;
-            const bool open = ImGui::TreeNodeEx("##item", flags, "%s", IconText(item.Icon, item.Text).c_str());
+            const bool open = Layout::TreeNode("##item", IconText(item.Icon, item.Text), flags);
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen())
             {
                 if (node.SelectedId != item.Id)

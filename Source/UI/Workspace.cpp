@@ -101,6 +101,122 @@ namespace Manifold::UI
 
     Workspace::~Workspace() = default;
 
+    bool Workspace::OpenNamed(const std::string& window)
+    {
+        if (window == "memory")
+            OpenMemoryViewer(0);
+        else if (window == "hex")
+            OpenMemoryViewer(0, true);
+        else if (window == "structure")
+            OpenStructure(0);
+        else if (window == "script")
+            OpenScript(Asm::CheatTableTemplate());
+        else if (window == "lua")
+            OpenLua();
+        else if (window == "mono")
+            OpenMono();
+        else if (window == "unreal")
+            OpenUnreal();
+        else if (window == "log")
+            OpenLog();
+        else if (window == "settings")
+            OpenSettings();
+        else if (window == "symbols")
+            OpenSymbols();
+        else if (window == "regions")
+            OpenRegions();
+        else if (window == "tablefiles")
+            OpenTableFiles();
+        else if (window == "patches")
+            OpenPatchScan();
+        else if (window == "dissect")
+            OpenCodeDissect();
+        else if (window == "asmsearch")
+            OpenAsmSearch();
+        else if (window == "bytes")
+            OpenByteSearch();
+        else if (window == "pointerscan")
+            OpenPointerScan();
+        else if (window == "staticpointers")
+            OpenStaticPointers();
+        else if (window == "shortcuts")
+            OpenShortcuts();
+        else if (window == "keyboard")
+            OpenSettings(UI::SettingsWindow::KeyboardPage);
+        else if (window == "appearance")
+            OpenSettings(UI::SettingsWindow::ThemePage);
+        else if (window == "processes")
+            OpenProcessPicker();
+        else if (window == "about")
+            OpenAbout();
+        else if (window == "profiler")
+            OpenProfiler(UI::ProfilerWindow::OverviewTab);
+        else if (window == "breakdown")
+            OpenProfiler(UI::ProfilerWindow::BreakdownTab);
+        else if (window == "threads")
+            OpenProfiler(UI::ProfilerWindow::ThreadsTab);
+        else if (window == "checks")
+            OpenProfiler(UI::ProfilerWindow::ChecksTab);
+        else if (window == "appinfo")
+            OpenProfiler(UI::ProfilerWindow::InfoTab);
+        else if (window == "nopsled")
+            OpenNopSled();
+        else if (window == "writehistory")
+            OpenWriteHistory();
+        else if (window == "comments")
+            OpenCommentList();
+        else if (window == "recorddebug")
+            OpenRecordDebug();
+        else if (window.rfind("recorddebug:", 0) == 0)
+        {
+            if (const auto id = ParseDecimal(window.substr(12)))
+                OpenRecordDebug(static_cast<int>(*id));
+            else
+                OpenRecordDebugPage(window.substr(12));
+        }
+        else if (window == "flowgraph")
+            OpenFlowGraph();
+        else if (window == "opcodes")
+            OpenOpcodeConverter();
+        else if (window == "templates")
+            OpenTemplateManager();
+        else if (window == "forms")
+            OpenFormEditor();
+        else if (window == "modules")
+            OpenModules();
+        else if (window == "breakpoints")
+            OpenBreakpoints();
+        else if (window == "threadlist")
+            OpenThreadList();
+        else if (window == "layoutproblems")
+            OpenLayoutProblems();
+        else if (window.rfind("settings:", 0) == 0)
+        {
+            const auto page = ParseDecimal(window.substr(9));
+            if (!page)
+                return false;
+            OpenSettings(static_cast<int>(*page));
+        }
+        else if (window.rfind("forms:", 0) == 0)
+            OpenFormEditor(Utf8ToWide(window.substr(6)));
+        else if (window.rfind("templates:", 0) == 0)
+            OpenTemplateManager(window.substr(10));
+        else
+            return false;
+        return true;
+    }
+
+    const std::vector<std::string>& Workspace::WindowNames()
+    {
+        static const std::vector<std::string> names = {
+            "memory", "hex", "structure", "script", "lua", "mono", "unreal", "log", "settings", "symbols", "regions", "tablefiles", "patches",
+            "dissect", "asmsearch", "bytes", "pointerscan", "staticpointers", "shortcuts", "keyboard", "appearance", "processes", "about",
+            "profiler", "breakdown", "threads", "checks", "appinfo", "nopsled", "writehistory", "comments", "recorddebug", "flowgraph", "opcodes",
+            "templates", "forms", "modules", "breakpoints", "threadlist", "layoutproblems", "settings:2", "settings:3", "settings:4"
+        };
+        return names;
+    }
+
     void Workspace::Draw()
     {
         if (m_restyle)

@@ -351,6 +351,39 @@ namespace Manifold::Layout
         return clicked;
     }
 
+    namespace
+    {
+        template <class Open>
+        bool FittedTreeNode(std::string_view label, ImGuiTreeNodeFlags flags, Open&& open)
+        {
+            ImGuiContext& g = *GImGui;
+            ImGuiWindow* window = ImGui::GetCurrentWindow();
+            const bool framed = (flags & ImGuiTreeNodeFlags_Framed) != 0;
+            // ∑ where ImGui's TreeNodeBehavior starts the label: after the arrow and the padding around it
+            const float offset = g.FontSize + g.Style.FramePadding.x * (framed ? 3.0f : 2.0f);
+            const float start = window->DC.CursorPos.x;
+            bool truncated = false;
+            const std::string shown = Bounded() ? Shorten(label, Avail() - offset - (framed ? g.Style.FramePadding.x : 0.0f), &truncated) : std::string(label);
+            const bool opened = open(shown.c_str());
+            // the natural width still counts for windows and columns that fit their content
+            const float natural = offset + ImGui::CalcTextSize(label.data(), label.data() + label.size()).x;
+            window->DC.IdealMaxPos.x = std::max(window->DC.IdealMaxPos.x, start + natural);
+            if (truncated && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+                TextTooltip(label);
+            return opened;
+        }
+    }
+
+    bool TreeNode(const char* id, std::string_view label, ImGuiTreeNodeFlags flags)
+    {
+        return FittedTreeNode(label, flags, [&](const char* shown) { return ImGui::TreeNodeEx(id, flags, "%s", shown); });
+    }
+
+    bool TreeNode(const void* id, std::string_view label, ImGuiTreeNodeFlags flags)
+    {
+        return FittedTreeNode(label, flags, [&](const char* shown) { return ImGui::TreeNodeEx(id, flags, "%s", shown); });
+    }
+
     void TitleLine(const char* icon, std::string_view title, std::string_view badge)
     {
         const float avail = Avail();

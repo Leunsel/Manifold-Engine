@@ -2,6 +2,7 @@
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Lua/AutorunModules.h"
 #include "Table/CheatTable.h"
 #include "UI/Fonts.h"
@@ -1131,7 +1132,7 @@ namespace Manifold::UI
     {
         Collect();
         if (!BeginWindow(ICON_FA_FILE_ARCHIVE "  Table Files###tablefiles", ImVec2(980.0f, 600.0f), ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_MenuBar,
-                ImVec2(640.0f, 340.0f)))
+                ImVec2(660.0f, 340.0f)))
             return;
         m_viewportWindow = ImGui::GetWindowViewport()->PlatformHandleRaw;
         m_windowMin = ImGui::GetWindowPos();
@@ -1171,7 +1172,8 @@ namespace Manifold::UI
         const float status = ImGui::GetTextLineHeightWithSpacing();
         const float height = ImGui::GetContentRegionAvail().y - status;
         const float total = ImGui::GetContentRegionAvail().x;
-        const float minList = Px(240.0f);
+        // ∑ the list's fixed columns take about 200 points; this keeps the name column readable beside them
+        const float minList = Px(320.0f);
         const float minPreview = Px(300.0f);
         if (m_listWidth <= 0.0f)
             m_listWidth = Px(400.0f);
@@ -1344,9 +1346,8 @@ namespace Manifold::UI
         }
         else
         {
-            const std::string label = std::string(KindIcon(row.Kind)) + "  " + row.Name;
             const ImGuiIO& io = ImGui::GetIO();
-            if (ImGui::Selectable(label.c_str(), selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap))
+            if (ImGui::Selectable("##row", selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap))
                 Click(index, io.KeyCtrl, io.KeyShift);
             else if (ImGui::IsItemFocused() && !selected && ImGui::GetCurrentContext()->NavJustMovedToId == ImGui::GetItemID())
                 Click(index, false, io.KeyShift);
@@ -1368,12 +1369,19 @@ namespace Manifold::UI
                 FileMenuItems();
                 ImGui::EndPopup();
             }
-            if (HasDraft(key))
+            const bool draft = HasDraft(key);
+            if (draft)
             {
                 const ImVec2 min = ImGui::GetItemRectMin();
                 const float cell = ImGui::GetColumnWidth();
                 ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(min.x + cell - Px(8.0f), (min.y + ImGui::GetItemRectMax().y) * 0.5f), Px(3.0f), ImGui::GetColorU32(ManifoldTheme::Warning));
             }
+            // ∑ the name is drawn over the row's selectable, so a narrow column ends it in "..." (the whole name as its
+            //   tooltip) instead of cutting it, and it leaves room for the draft dot
+            ImGui::SameLine(0.0f, 0.0f);
+            Layout::TextStyle name;
+            name.MaxWidth = std::max(1.0f, Layout::Avail() - (draft ? Px(14.0f) : 0.0f));
+            Layout::Text(std::string(KindIcon(row.Kind)) + "  " + row.Name, name);
         }
         ImGui::TableNextColumn();
         Muted(Table::FileKindName(row.Kind));
@@ -1450,29 +1458,27 @@ namespace Manifold::UI
         float switchWidth = 0.0f;
         for (const char* name : names)
             switchWidth += ImGui::CalcTextSize(name).x + ImGui::GetStyle().FramePadding.x * 2.0f + Px(8.0f);
-        const float room = ImGui::GetContentRegionAvail().x - switchWidth - Px(12.0f);
-        const float top = ImGui::GetCursorPosY();
-        ImGui::AlignTextToFramePadding();
-        ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Accent);
-        ImGui::TextUnformatted(KindIcon(info.Kind));
-        ImGui::PopStyleColor();
-        ImGui::SameLine(0.0f, Px(8.0f));
         std::string facts = std::string(Table::FileKindName(info.Kind)) + "  ·  " + ByteSize(info.Size);
         if (const auto uses = m_uses.find(m_current); uses != m_uses.end())
             facts += "  ·  named in " + Count(uses->second.size(), "script", "scripts");
-        const float factsWidth = ImGui::CalcTextSize(facts.c_str()).x + Px(10.0f);
-        ImGui::PushFont(Fonts::Bold(), 0.0f);
-        const float used = ImGui::GetCursorPosX() - ImGui::GetStyle().WindowPadding.x;
-        TextFitted(file.Name, std::max(Px(60.0f), room - used - factsWidth), ManifoldTheme::Text);
-        ImGui::PopFont();
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", file.Name.c_str());
-        ImGui::SameLine(0.0f, Px(10.0f));
-        TextFitted(facts, std::max(0.0f, room - (ImGui::GetCursorPosX() - ImGui::GetStyle().WindowPadding.x)), ManifoldTheme::Muted);
-        ImGui::SameLine();
-        ImGui::SetCursorPos(ImVec2(ImGui::GetStyle().WindowPadding.x + ImGui::GetContentRegionMax().x - ImGui::GetStyle().WindowPadding.x - switchWidth, top));
-        if (Segmented("##fileview", &chosen, names, switchWidth))
-            m_view = views[static_cast<std::size_t>(chosen)];
+        // ∑ name and facts give way first (ending in "..."), the view switch keeps its size and moves to its own line
+        //   when even their minimums do not fit beside it
+        Layout::RowOptions options;
+        options.Wrap = true;
+        options.Gap = Layout::Space::M;
+        Layout::Row header("##fileheader", { Layout::Size::Fit(), Layout::Size::Fill(2.0f), Layout::Size::Fill(1.0f), Layout::Size::Fit() }, options);
+        header.Cell([&] { Layout::Colored(KindIcon(info.Kind), ManifoldTheme::Accent, Layout::Overflow::Visible); });
+        header.Cell([&] {
+            Layout::TextStyle name;
+            name.Font = Fonts::Bold();
+            Layout::Text(file.Name, name);
+        });
+        header.Cell([&] { Layout::Muted(facts); });
+        header.Cell([&] {
+            if (Segmented("##fileview", &chosen, names, switchWidth))
+                m_view = views[static_cast<std::size_t>(chosen)];
+        });
+        header.End();
         ImGui::Spacing();
     }
 
@@ -1500,7 +1506,7 @@ namespace Manifold::UI
                 m_textStale = false;
             }
         }
-        const float footer = row + Px(4.0f) + (json ? ImGui::GetTextLineHeightWithSpacing() : 0.0f);
+        const float footer = row * static_cast<float>(std::max(1, m_textBarLines)) + Px(4.0f) + (json ? ImGui::GetTextLineHeightWithSpacing() : 0.0f);
         if (CodeEditor("##filetext", m_text, LanguageOf(info.Kind), ImVec2(0.0f, ImGui::GetContentRegionAvail().y - footer), m_editor))
         {
             m_textDirty = true;
@@ -1515,32 +1521,52 @@ namespace Manifold::UI
             m_editor.ErrorLine = m_jsonProblem ? m_jsonProblem->Line : 0;
         }
         if (json)
-        {
             JsonStatus();
-            if (ImGui::Button(ICON_FA_ALIGN_LEFT "  Format"))
-                ReformatJson(2);
-            ItemTooltip("Puts every value on its own line, indented two spaces per level. Strings and numbers stay exactly as they are.");
-            ImGui::SameLine();
-            if (ImGui::Button(ICON_FA_COMPRESS_ALT "  Compact"))
-                ReformatJson(0);
-            ItemTooltip("Removes all spaces and line breaks between the values.");
-            ImGui::SameLine(0.0f, Px(14.0f));
+        // ∑ the buttons wrap onto a second line in a narrow pane; the status after them gives way first
+        std::vector<Layout::Size> cells;
+        if (json)
+            cells = { Layout::Size::Fit(), Layout::Size::Fit() };
+        cells.insert(cells.end(), { Layout::Size::Fit(), Layout::Size::Fit(), Layout::Size::Fill().Min(120.0f) });
+        Layout::RowOptions options;
+        options.Wrap = true;
+        options.Gap = Layout::Space::S;
+        Layout::Row bar("##textbar", cells, options);
+        if (json)
+        {
+            bar.Cell([&] {
+                if (Layout::Button(ICON_FA_ALIGN_LEFT "  Format"))
+                    ReformatJson(2);
+                ItemTooltip("Puts every value on its own line, indented two spaces per level. Strings and numbers stay exactly as they are.");
+            });
+            bar.Cell([&] {
+                if (Layout::Button(ICON_FA_COMPRESS_ALT "  Compact"))
+                    ReformatJson(0);
+                ItemTooltip("Removes all spaces and line breaks between the values.");
+            });
         }
         ImGui::BeginDisabled(!m_textDirty);
-        if (AccentButton(ICON_FA_SAVE "  Put into the Table"))
-            ApplyText();
-        if (const char* keys = ShortcutText(Command::TableFilesApply))
-            ItemTooltip(keys);
-        ImGui::SameLine();
-        if (ImGui::Button(ICON_FA_UNDO "  Revert"))
-            RevertText();
+        bar.Cell([&] {
+            if (AccentButton(ICON_FA_SAVE "  Put into the Table"))
+                ApplyText();
+            if (const char* keys = ShortcutText(Command::TableFilesApply))
+                ItemTooltip(keys);
+        });
+        bar.Cell([&] {
+            if (Layout::Button(ICON_FA_UNDO "  Revert"))
+                RevertText();
+        });
         ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::AlignTextToFramePadding();
-        if (m_textDirty)
-            ImGui::TextColored(ManifoldTheme::Warning, ICON_FA_CIRCLE "  Changes are not in the table yet");
-        else
-            Muted("Line " + std::to_string(m_editor.CursorLine) + ", column " + std::to_string(m_editor.CursorColumn) + "  ·  " + Count(static_cast<std::size_t>(m_editor.LineCount), "line", "lines"));
+        bar.Cell([&] {
+            if (m_textDirty)
+                Layout::Colored(ICON_FA_CIRCLE "  Changes are not in the table yet", ManifoldTheme::Warning);
+            else
+                Layout::Muted("Line " + std::to_string(m_editor.CursorLine) + ", column " + std::to_string(m_editor.CursorColumn) + "  ·  " + Count(static_cast<std::size_t>(m_editor.LineCount), "line", "lines"));
+        });
+        bar.End();
+        // the editor above leaves room for as many lines as the bar took (it learns a wrap a frame late)
+        m_textBarLines = 1;
+        for (const int line : bar.Widths().LineOf)
+            m_textBarLines = std::max(m_textBarLines, line + 1);
     }
 
     void TableFilesWindow::ImageView(Table::TableFile& file, const Info& info)

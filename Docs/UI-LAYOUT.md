@@ -9,6 +9,7 @@ Every window of the program and every script window (`manifold.ui`) is drawn on 
 - [Writing a window](#writing-a-window)
 - [Script windows: UiHost](#script-windows-uihost)
 - [The audit](#the-audit)
+- [The sweep over all windows](#the-sweep-over-all-windows)
 - [The lock on raw ImGui calls](#the-lock-on-raw-imgui-calls)
 - [Tests](#tests)
 
@@ -26,7 +27,7 @@ Every window of the program and every script window (`manifold.ui`) is drawn on 
 | --- | --- | --- |
 | Rules | `Layout/Rules.h` | `Rules` holds every measure in points (spacing scale `Space::Xs` … `Space::Xl` = 2/4/8/12/16, card and panel padding, minimums, the label column's share of a line, when labels go above their fields). `Defaults()` for the program, `RulesScope` to draw a part with other rules, `Pt()` and `Gap()` to read them scaled. |
 | Core | `Layout/Size.h`, `Layout/Region.h`, `Layout/Containers.h` | `Size` (`Fixed`, `Fit`, `Fill` with `Min`/`Max`) says what a cell asks for; `Distribute` turns that and what the cells measured last frame into widths. `Region` bounds content (work rect, clip rect) and collects what it reports. `Row` and `Stack` are built from them. |
-| Components | `Layout/Typography.h`, `Layout/Components.h` | `Text` (and `Muted`, `Label`, `Heading`, `Colored`, `Wrapped`), `Button`, `IconButton`, `Field`, `LabelColumn`, `Card`/`BeginCard`, `Panel`, `TitleLine`, `KeyCap`, `Badge`, `RowSelectable`. Each reports its natural and minimum width to the region it is in. |
+| Components | `Layout/Typography.h`, `Layout/Components.h` | `Text` (and `Muted`, `Label`, `Heading`, `Colored`, `Wrapped`, `Shorten` for labels a widget draws itself), `Button`, `IconButton`, `Field`, `LabelColumn`, `Card`/`BeginCard`, `Panel`, `TitleLine`, `KeyCap`, `Badge`, `RowSelectable`, `TreeNode` (its label ends in `...` within its place). Each reports its natural and minimum width to the region it is in. |
 | Audit | `Layout/Audit.h`, `UI/LayoutAuditWindow` | Finds what slipped through and shows it (see below). |
 
 `Layout/Layout.h` includes all of it.
@@ -72,7 +73,10 @@ void FindWindow::Draw()
 - Size fields with `Layout::Field` (it draws the label and sets the width), not `SetNextItemWidth`.
 - Buttons are `Layout::Button`/`IconButton`; give an `IconButton` an id of its own, never just the glyph.
 - Cards and panels are `Layout::Card`/`Panel` rather than a styled `BeginChild`.
-- Raw ImGui is still fine for what the components do not cover (tables, trees, menus, combo boxes, custom drawing): inside a region those take the region's width too.
+- Trees are `Layout::TreeNode(id, label, flags)`: a tree in a narrow pane shortens its labels instead of running out of the pane.
+- A table row's name goes over `Layout::RowSelectable` as `Layout::Text`, not into the selectable's label, which ImGui cuts at the column's edge.
+- A pannable canvas (a child whose content moves with its own view) sets its content size back to nothing before `EndChild`, so the audit does not count what lies off its view.
+- Raw ImGui is still fine for what the components do not cover (tables, menus, combo boxes, custom drawing): inside a region those take the region's width too.
 
 ## Script windows: UiHost
 
@@ -88,11 +92,25 @@ void FindWindow::Draw()
 
 Settings → Diagnostics → **Layout Checks** (or the start option `--layout-audit`) turns it on. Then:
 
-- content that leaves its cell (raw calls inside a region), rows whose minimums do not fit, and any ImGui window whose content is wider than the window without a horizontal scrollbar (so it is cut off) are outlined on screen in red, with the place they should have kept to in amber;
+- content that leaves its cell (raw calls inside a region), rows whose minimums do not fit, any ImGui window whose content is wider than the window without a horizontal scrollbar (so it is cut off), and table columns whose content is wider than the column (ImGui cuts it at the column's edge) are outlined on screen in red, with the place they should have kept to in amber;
 - **Layout Problems** (Ctrl+Shift+F11, also in the Help menu while the checks are on) lists them per window, with how often they were seen; hovering a row outlines it;
 - each new problem is written once to the log (area `Layout`).
 
 The window scan finds problems in windows that do not use the layout system yet, which makes it the guide for moving them over.
+
+## The sweep over all windows
+
+The audit only sees what is on screen. The sweep opens every window for it:
+
+```powershell
+Manifold-Engine.exe --layout-sweep=sweep.txt --process=TestTarget.exe --table=some.CT
+```
+
+- It runs in a cloaked main window without platform windows, reads and writes no layout file and saves no settings, so nothing appears on screen, nothing takes the focus and the program's own setup stays as it was. The program closes when the report is written.
+- Every window `--open` knows (`Workspace::WindowNames()`) is opened alone, undocked, at its minimum, a medium (760 × 540) and a large (1280 × 860) size, and on every tab of its tab bars; the main window at its minimum, 1280 × 800 and 1920 × 1080. All of it at 100 % and 150 % unless `--sweep-scales=100,125,150` says otherwise.
+- `--sweep-windows=templates,forms` limits it to those windows; `--sweep-windows=+templates:<Id>` adds a window that needs an argument to show its content.
+- The report lists each problem once per window and place, with the worst amount, one detail, every scale, size and tab it was seen at, and the names that opened it.
+- What the sweep cannot reach: content that only some data brings (long names, deep groups), so a process (`--process=`) and a real table (`--table=`) make it see more, and panes a person resized by hand. The components cover those cases by shortening, not the sweep.
 
 ## The lock on raw ImGui calls
 
@@ -112,5 +130,6 @@ The suite `ui-layout` (`Tests/UiLayoutTests.cpp`) runs Dear ImGui headless, with
 - texts never drawing past their region over a sweep of widths, and keeping their width in auto-sizing windows;
 - rows over a sweep of widths: every cell's content inside its cell, no overlap, fixed and maximum widths held;
 - buttons at their minimum, fields placing their labels above when narrow, regions restoring the window, cards clipping their content;
-- the audit finding a raw window that is cut off and raw content leaving a region, and nothing in a window built with the components;
+- the audit finding a raw window that is cut off, raw content leaving a region and raw text cut by its table column, and nothing in a window built with the components;
+- tree nodes and `Shorten` staying within their place at every scale;
 - the lock against the real tree.

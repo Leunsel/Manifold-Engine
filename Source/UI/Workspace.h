@@ -128,6 +128,10 @@ namespace Manifold::UI
         ScriptWindow* ScriptFile(const std::filesystem::path& path);
         ScriptWindow* OpenScriptFile(const std::filesystem::path& path, int line = 0);
         std::uint32_t ScriptEditorDock(const ScriptWindow& opening);
+        // A window by its --open name ("memory", "settings", "templates:<id>", ...); false for an unknown name.
+        bool OpenNamed(const std::string& window);
+        // Every name OpenNamed knows without an argument (the layout sweep opens them one by one).
+        static const std::vector<std::string>& WindowNames();
         void OpenLua();
         void OpenLog();
         void OpenSettings(int page = -1);
