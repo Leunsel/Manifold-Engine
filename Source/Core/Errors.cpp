@@ -97,6 +97,9 @@ namespace Manifold
             { ErrorCode::SpeedhackFailed, "The speedhack could not be set up: {}.",
                 "The speedhack loads a small library into the process and redirects its time functions. Protected games block that, and a time function can look different from what the program expects.",
                 "Try again while the process runs normally. If it names a time function, the other time sources still follow the speed." },
+            { ErrorCode::CodeFilterFailed, "The code filter could not do its work: {}.",
+                "The code filter loads a small library into the process and puts one-time breakpoints into its code. Protected games block the library or keep their code from being written.",
+                "Try again while the process runs normally. Addresses the filter could not use are listed as skipped, with the reason." },
 
             { ErrorCode::ScanNoValue, "Enter a value to scan for.",
                 "This scan type compares memory with a value, and the value field is empty.",

@@ -422,7 +422,7 @@ def main():
     syscall_test += tail()
     write("SyscallTest.vcxproj", syscall_test)
 
-    agent_sources = ["Agent/Agent.cpp", "Agent/Speed.cpp"]
+    agent_sources = ["Agent/Agent.cpp", "Agent/Speed.cpp", "Agent/Cover.cpp"]
     agent = common_head("ManifoldAgent", "DynamicLibrary", "Agent")
     agent += """  <ItemDefinitionGroup>
     <ClCompile>
@@ -458,7 +458,7 @@ def main():
   </ItemDefinitionGroup>
 """ + CLANG_OPTIONS
     agent += items("ClCompile", agent_sources)
-    agent += items("ClInclude", ["Source/Debug/VehProtocol.h", "Source/Debug/BreakProgram.h", "Source/Target/SpeedhackProtocol.h"])
+    agent += items("ClInclude", ["Source/Debug/VehProtocol.h", "Source/Debug/BreakProgram.h", "Source/Target/SpeedhackProtocol.h", "Source/Target/CoverageProtocol.h"])
     agent += tail()
     agent = with_x86_twin(agent, "ManifoldAgent")
     write("ManifoldAgent.vcxproj", agent)

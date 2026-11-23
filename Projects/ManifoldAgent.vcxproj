@@ -93,11 +93,13 @@
   <ItemGroup>
     <ClCompile Include="..\Agent\Agent.cpp" />
     <ClCompile Include="..\Agent\Speed.cpp" />
+    <ClCompile Include="..\Agent\Cover.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Source\Debug\VehProtocol.h" />
     <ClInclude Include="..\Source\Debug\BreakProgram.h" />
     <ClInclude Include="..\Source\Target\SpeedhackProtocol.h" />
+    <ClInclude Include="..\Source\Target\CoverageProtocol.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="BuildX86Twin" AfterTargets="Build" Condition="'$(Platform)'=='x64'">

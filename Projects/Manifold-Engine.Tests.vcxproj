@@ -222,6 +222,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Target\ClrRuntime.cpp" />
     <ClCompile Include="..\Source\Target\CodeCall.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
+    <ClCompile Include="..\Source\Target\Coverage.cpp" />
     <ClCompile Include="..\Source\Target\FrameCalls.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
     <ClCompile Include="..\Source\Target\ManagedAgent.cpp" />
@@ -252,6 +253,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\AssemblerTests.cpp" />
     <ClCompile Include="..\Tests\AutorunTests.cpp" />
     <ClCompile Include="..\Tests\ClrTests.cpp" />
+    <ClCompile Include="..\Tests\CodeFilterTests.cpp" />
     <ClCompile Include="..\Tests\CommandTests.cpp" />
     <ClCompile Include="..\Tests\CompatHarness.cpp" />
     <ClCompile Include="..\Tests\CompatTests.cpp" />

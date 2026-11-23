@@ -230,6 +230,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Target\ClrRuntime.cpp" />
     <ClCompile Include="..\Source\Target\CodeCall.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
+    <ClCompile Include="..\Source\Target\Coverage.cpp" />
     <ClCompile Include="..\Source\Target\FrameCalls.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
     <ClCompile Include="..\Source\Target\ManagedAgent.cpp" />
@@ -426,6 +427,8 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Target\ClrRuntime.h" />
     <ClInclude Include="..\Source\Target\CodeCall.h" />
     <ClInclude Include="..\Source\Target\CodeMap.h" />
+    <ClInclude Include="..\Source\Target\Coverage.h" />
+    <ClInclude Include="..\Source\Target\CoverageProtocol.h" />
     <ClInclude Include="..\Source\Target\FrameCalls.h" />
     <ClInclude Include="..\Source\Target\Il2CppRuntime.h" />
     <ClInclude Include="..\Source\Target\ManagedAgent.h" />

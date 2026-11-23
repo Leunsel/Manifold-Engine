@@ -26,6 +26,7 @@
 #include "Table/CheatTable.h"
 #include "Table/Structures.h"
 #include "Target/CodeMap.h"
+#include "Target/Coverage.h"
 #include "Target/Process.h"
 #include "Target/Speedhack.h"
 #include "Target/PdbSymbols.h"
@@ -134,6 +135,7 @@ namespace Manifold
         const UnrealSession& Unreal() const { return m_unreal; }
         RttiSession& Rtti() { return m_rtti; }
         Target::Speedhack& Speed() { return m_speedhack; }
+        Target::Coverage& CodeCoverage() { return m_coverage; }
         bool UnrealClaims(std::uint64_t address) const;
         WriteHistory& Writes() { return m_writes; }
         SessionBackup& Backups() { return m_backup; }
@@ -246,5 +248,6 @@ namespace Manifold
         UnrealSession m_unreal{ m_target, m_work, [this](LogLevel level, std::string text) { Notify(level, std::move(text)); } };
         RttiSession m_rtti{ m_target, m_settings };
         Target::Speedhack m_speedhack;
+        Target::Coverage m_coverage;
     };
 }

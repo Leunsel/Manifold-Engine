@@ -1060,6 +1060,142 @@ namespace
     }
 }
 
+// The code filter's test functions. Idle runs all the time, Action only
+// when the host raises Trigger (on eight threads at once, so they meet at the
+// same int3) or sets Hammer, Never not at all, Leaf is called by Action, and
+// Foreign has an int3 of its own that this program handles itself. Each
+// result is checked, so an instruction the filter ran again wrongly shows up
+// in Wrong.
+struct CoverProbe
+{
+    volatile long Ready;
+    volatile long Trigger;
+    volatile long Hammer;
+    volatile long Spin;
+    volatile long Idle;
+    volatile long Action;
+    volatile long Wrong;
+    volatile long ForeignTrigger;
+    volatile long Foreign;
+    volatile long Threads;
+    volatile long Input;
+};
+
+extern "C" __declspec(dllexport) CoverProbe g_coverProbe = {};
+
+extern "C" __declspec(dllexport) __declspec(noinline) int CoverLeaf(int value)
+{
+    return value * 3 + 1;
+}
+
+extern "C" __declspec(dllexport) __declspec(noinline) int CoverAction(int value)
+{
+    int sum = 0;
+    for (int i = 0; i < 4; ++i)
+        sum += CoverLeaf(value + i);
+    return sum;
+}
+
+extern "C" __declspec(dllexport) __declspec(noinline) int CoverIdle(int value)
+{
+    return (value ^ 0x5A5A) + 7;
+}
+
+extern "C" __declspec(dllexport) __declspec(noinline) int CoverNever(int value)
+{
+    return value * value - 11;
+}
+
+extern "C" __declspec(dllexport) __declspec(noinline) void CoverForeign()
+{
+    __debugbreak();
+}
+
+namespace
+{
+    LONG CALLBACK CoverOwnBreak(EXCEPTION_POINTERS* info)
+    {
+        const EXCEPTION_RECORD& record = *info->ExceptionRecord;
+        const auto at = reinterpret_cast<std::uintptr_t>(record.ExceptionAddress);
+        const auto begin = reinterpret_cast<std::uintptr_t>(&CoverForeign);
+        if (record.ExceptionCode != EXCEPTION_BREAKPOINT || at < begin || at >= begin + 16 || *reinterpret_cast<const unsigned char*>(at) != 0xCC)
+            return EXCEPTION_CONTINUE_SEARCH;
+#if defined(_M_X64)
+        info->ContextRecord->Rip = at + 1;
+#else
+        info->ContextRecord->Eip = static_cast<DWORD>(at + 1);
+#endif
+        ::InterlockedIncrement(&g_coverProbe.Foreign);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    void CoverWait()
+    {
+        if (g_coverProbe.Spin)
+            YieldProcessor();
+        else
+            ::Sleep(1);
+    }
+
+    DWORD WINAPI CoverIdleWorker(void*)
+    {
+        for (;;)
+        {
+            const int value = g_coverProbe.Input;
+            if (CoverIdle(value) != (value ^ 0x5A5A) + 7)
+                ::InterlockedIncrement(&g_coverProbe.Wrong);
+            ::InterlockedIncrement(&g_coverProbe.Idle);
+            ::Sleep(1);
+        }
+    }
+
+    DWORD WINAPI CoverActionWorker(void*)
+    {
+        ::InterlockedIncrement(&g_coverProbe.Threads);
+        long seen = g_coverProbe.Trigger;
+        for (;;)
+        {
+            const long trigger = g_coverProbe.Trigger;
+            if (trigger == seen && !g_coverProbe.Hammer)
+            {
+                CoverWait();
+                continue;
+            }
+            seen = trigger;
+            const int value = g_coverProbe.Input;
+            if (CoverAction(value) != 12 * value + 22)
+                ::InterlockedIncrement(&g_coverProbe.Wrong);
+            ::InterlockedIncrement(&g_coverProbe.Action);
+        }
+    }
+
+    DWORD WINAPI CoverForeignWorker(void*)
+    {
+        long seen = g_coverProbe.ForeignTrigger;
+        for (;;)
+        {
+            if (g_coverProbe.ForeignTrigger == seen)
+            {
+                ::Sleep(1);
+                continue;
+            }
+            seen = g_coverProbe.ForeignTrigger;
+            CoverForeign();
+        }
+    }
+
+    void StartCoverProbe()
+    {
+        ::AddVectoredExceptionHandler(0, &CoverOwnBreak);
+        g_coverProbe.Input = 5;
+        ::CloseHandle(::CreateThread(nullptr, 0, &CoverIdleWorker, nullptr, 0, nullptr));
+        ::CloseHandle(::CreateThread(nullptr, 0, &CoverForeignWorker, nullptr, 0, nullptr));
+        for (int i = 0; i < 8; ++i)
+            ::CloseHandle(::CreateThread(nullptr, 0, &CoverActionWorker, nullptr, 0, nullptr));
+        g_coverProbe.Ready = 1;
+    }
+}
+
 extern "C" __declspec(dllexport) FakeRtti::Image g_rttiFake = {};
 extern "C" __declspec(dllexport) UnrealMarker g_unrealNames = { { 'M', 'F', 'U', 'E', 'P', 'O', 'O', 'L' }, &FakeUnreal::g_pool };
 extern "C" __declspec(dllexport) UnrealMarker g_unrealObjects = { { 'M', 'F', 'U', 'E', 'O', 'B', 'J', 'S' }, &FakeUnreal::g_objects };
@@ -1096,6 +1232,8 @@ int main(int argc, char** argv)
             g_monoChild = true;
         else if (std::strcmp(argv[i], "--speed") == 0)
             StartSpeedProbe();
+        else if (std::strcmp(argv[i], "--codefilter") == 0)
+            StartCoverProbe();
         else if (std::strcmp(argv[i], "--mono-agent") == 0)
             g_agentMode = AgentMode::Good;
         else if (std::strcmp(argv[i], "--mono-agent=bad-handles") == 0)

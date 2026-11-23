@@ -396,6 +396,9 @@
     <ClCompile Include="..\Source\Target\CodeMap.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\Coverage.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\FrameCalls.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -484,6 +487,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\ClrTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\CodeFilterTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\CommandTests.cpp">

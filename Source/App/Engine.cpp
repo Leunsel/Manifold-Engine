@@ -46,6 +46,7 @@ namespace Manifold
         CancelActivations();
         m_activation.WaitForActivation();
         m_tracer.Stop();
+        m_coverage.Leave();
         m_debugger.Detach();
         m_speedhack.Leave();
         m_target.Mono().Stop();
@@ -224,6 +225,7 @@ namespace Manifold
         m_settings.LastProcess = m_target.Process()->Name();
         LOG_SUCCESS("Process", Format("Opened %s (pid %u, %s)", m_target.Process()->Name().c_str(), Raw(m_target.Process()->Id()), m_target.Process()->Is64Bit() ? "64-bit" : "32-bit"));
         m_speedhack.Attach(m_target.Process());
+        m_coverage.Attach(m_target.Process());
         m_rtti.ProcessOpened();
         m_lua->OnProcessOpened();
         m_unreal.ProcessOpened();
@@ -252,6 +254,7 @@ namespace Manifold
         m_activation.WaitForActivation();
         m_managed.CancelWork();
         m_tracer.Stop();
+        m_coverage.Leave();
         m_debugger.Detach();
         m_speedhack.Leave();
         m_unreal.ProcessClosed();

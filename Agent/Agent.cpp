@@ -10,6 +10,9 @@
 using namespace Manifold::Debug::Veh;
 
 void SpeedAttach(HINSTANCE instance);
+void CoverAttach(HINSTANCE instance);
+void CoverDetach();
+LONG CoverFilter(EXCEPTION_POINTERS* info);
 
 // The speedhack (Speed.cpp) hooks GetTickCount64 in this very process, so the
 // agent's own waits and timeouts read the real tick count from the shared user
@@ -719,8 +722,13 @@ namespace
         return EXCEPTION_CONTINUE_EXECUTION;
     }
 
+    // The code filter's int3s come first: with "break on all exceptions" this
+    // handler would otherwise stop at every one when it runs before the
+    // filter's own handler.
     LONG CALLBACK Handler(EXCEPTION_POINTERS* info)
     {
+        if (info->ExceptionRecord->ExceptionCode == static_cast<DWORD>(EXCEPTION_BREAKPOINT) && CoverFilter(info) == EXCEPTION_CONTINUE_EXECUTION)
+            return EXCEPTION_CONTINUE_EXECUTION;
         const Inside inside;
         Block* block = g_block;
         if (!block)
@@ -1056,13 +1064,18 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldAgentStart(LPVOID paramete
     return 0;
 }
 
-BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
         g_module = instance;
         ::DisableThreadLibraryCalls(instance);
         SpeedAttach(instance);
+        CoverAttach(instance);
+    }
+    else if (reason == DLL_PROCESS_DETACH && !reserved)
+    {
+        CoverDetach();
     }
     return TRUE;
 }
