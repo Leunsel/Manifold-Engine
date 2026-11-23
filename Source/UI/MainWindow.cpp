@@ -2755,6 +2755,10 @@ namespace Manifold::UI
         }
         const char* icon = record.Kind == Table::RecordKind::Script ? ICON_FA_CODE " " : record.Kind == Table::RecordKind::Group ? ICON_FA_FOLDER " " : "";
         const std::string label = std::string(icon) + record.Description + "##record";
+        // ∑ the whole row in the fixed-width font (owner wish: address, type and value already were,
+        //   the description next to them in Tahoma looked out of line); the menus, the drag preview
+        //   and the tooltips below stay in the interface font
+        PushMono();
         if (match && !m_tableFilter.empty())
         {
             const std::size_t at = FindNoCase(record.Description, m_tableFilter);
@@ -2841,6 +2845,7 @@ namespace Manifold::UI
             }
         }
         ImGui::PopStyleColor();
+        PopMono();
         if (m_scrollToRecord == record.Id)
         {
             ImGui::ScrollToItem(ImGuiScrollFlags_KeepVisibleEdgeY);

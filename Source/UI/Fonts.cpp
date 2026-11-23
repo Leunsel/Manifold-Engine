@@ -7,7 +7,13 @@
 
 #include "imgui.h"
 
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <iterator>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include <windows.h>
 
@@ -55,6 +61,91 @@ namespace Manifold::Fonts
                     return source;
             }
             return {};
+        }
+
+        // ∑ The vertical metrics of a TrueType file as fractions of the height ImGui scales to
+        //   (hhea ascent - descent, what stb_truetype's ScaleForPixelHeight uses). Read from the
+        //   file itself, since the UI and mono fonts are whatever Windows has.
+        struct Metrics
+        {
+            float Ascent = 0.0f;
+            float XHeight = 0.0f;
+            float CapHeight = 0.0f;
+        };
+
+        std::optional<Metrics> ReadMetrics(const Source& source)
+        {
+            if (source.File.empty())
+                return std::nullopt;
+            std::ifstream file(Utf8ToWide(source.File), std::ios::binary);
+            const std::vector<unsigned char> data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            const auto u16 = [&](std::size_t at) -> std::optional<int> {
+                if (at + 2 > data.size())
+                    return std::nullopt;
+                return (data[at] << 8) | data[at + 1];
+            };
+            const auto s16 = [&](std::size_t at) -> std::optional<int> {
+                const auto value = u16(at);
+                if (!value)
+                    return std::nullopt;
+                return *value >= 0x8000 ? *value - 0x10000 : *value;
+            };
+            const auto tables = u16(4);
+            if (!tables)
+                return std::nullopt;
+            std::size_t hhea = 0;
+            std::size_t os2 = 0;
+            for (int i = 0; i < *tables; ++i)
+            {
+                const std::size_t entry = 12 + 16 * static_cast<std::size_t>(i);
+                if (entry + 16 > data.size())
+                    return std::nullopt;
+                const std::string tag(reinterpret_cast<const char*>(&data[entry]), 4);
+                const std::size_t offset = (static_cast<std::size_t>(data[entry + 8]) << 24) | (data[entry + 9] << 16) | (data[entry + 10] << 8) | data[entry + 11];
+                if (tag == "hhea")
+                    hhea = offset;
+                else if (tag == "OS/2")
+                    os2 = offset;
+            }
+            const auto ascent = hhea ? s16(hhea + 4) : std::nullopt;
+            const auto descent = hhea ? s16(hhea + 6) : std::nullopt;
+            if (!ascent || !descent || *ascent - *descent <= 0)
+                return std::nullopt;
+            const float height = static_cast<float>(*ascent - *descent);
+            Metrics metrics;
+            metrics.Ascent = static_cast<float>(*ascent) / height;
+            if (const auto version = os2 ? u16(os2) : std::nullopt; version && *version >= 2)
+            {
+                metrics.XHeight = static_cast<float>(s16(os2 + 86).value_or(0)) / height;
+                metrics.CapHeight = static_cast<float>(s16(os2 + 88).value_or(0)) / height;
+            }
+            return metrics;
+        }
+
+        // ∑ Fonts drawn at the same ImGui size are not the same size to the eye: Consolas at 13 px has
+        //   an 8 % larger x-height than Tahoma at 13 px and its baseline sits a pixel higher, so mono
+        //   text next to normal text looked bigger and shifted up. The mono glyphs are scaled to the
+        //   UI font's x-height and cap height (ExtraSizeScale leaves the line height alone, so rows
+        //   keep their height) and moved down to its baseline.
+        void MatchMono(const Source& text, const Source& mono, ImFontConfig& config)
+        {
+            const auto textMetrics = ReadMetrics(text);
+            const auto monoMetrics = ReadMetrics(mono);
+            if (!textMetrics || !monoMetrics)
+                return;
+            std::vector<float> ratios;
+            if (textMetrics->XHeight > 0.0f && monoMetrics->XHeight > 0.0f)
+                ratios.push_back(textMetrics->XHeight / monoMetrics->XHeight);
+            if (textMetrics->CapHeight > 0.0f && monoMetrics->CapHeight > 0.0f)
+                ratios.push_back(textMetrics->CapHeight / monoMetrics->CapHeight);
+            if (!ratios.empty())
+            {
+                float sum = 0.0f;
+                for (const float ratio : ratios)
+                    sum += ratio;
+                config.ExtraSizeScale = std::clamp(sum / static_cast<float>(ratios.size()), 0.75f, 1.33f);
+            }
+            config.GlyphOffset.y = std::ceil(kSize * textMetrics->Ascent) - std::ceil(kMonoSize * monoMetrics->Ascent);
         }
 
         Source IconFont()
@@ -124,9 +215,18 @@ namespace Manifold::Fonts
         {
             ImFontConfig monoConfig{};
             monoConfig.PixelSnapH = true;
+            if (text.Found())
+                MatchMono(text, mono, monoConfig);
+            // ∑ PixelSnapH rounds every advance to whole pixels: Consolas scaled to Tahoma's size has
+            //   an advance of 6.65 px at 13 px, which snapped back to 7 and undid the match. Every
+            //   glyph of a mono font has the same advance, so columns stay in line without it.
+            if (monoConfig.ExtraSizeScale != 1.0f)
+                monoConfig.PixelSnapH = false;
             g_mono = Add(atlas, mono, kMonoSize, monoConfig);
+            ImFontConfig monoIcons = iconConfig;
+            monoIcons.GlyphOffset.y = monoConfig.GlyphOffset.y;
             if (g_mono)
-                Add(atlas, icons, kMonoSize, iconConfig, iconRanges);
+                Add(atlas, icons, kMonoSize, monoIcons, iconRanges);
         }
 
         ImGui::GetIO().FontDefault = font;

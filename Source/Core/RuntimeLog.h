@@ -31,6 +31,7 @@ namespace Manifold
         double Clock = 0.0;
         std::uint32_t Thread = 0;
         bool MainThread = false;
+        bool Detailed = false;  // Full holds details written apart from Message (WriteDetailed), not just Message's own lines
         std::uint64_t Serial = 0;
 
         const std::string& Text() const { return Full.empty() ? Message : Full; }

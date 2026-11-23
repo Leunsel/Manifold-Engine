@@ -141,7 +141,8 @@ namespace Manifold::RuntimeLog
         entry.Area = std::string(area);
         entry.Trace = TraceText(file, function, line);
         entry.Message = OneLine(message);
-        if (!details.empty())
+        entry.Detailed = !details.empty();
+        if (entry.Detailed)
             entry.Full = std::string(details);
         else if (entry.Message != message)
             entry.Full = std::string(message);

@@ -61,6 +61,21 @@ namespace Manifold::UI
                 line.remove_suffix(1);
             return line;
         }
+
+        // ∑ An entry with details of its own (the Auto Assembler's step table) shows only its
+        //   summary in the list; the details belong in the details pane. Shown in the list as well,
+        //   the table came out twice, and in the list's proportional font its columns went astray.
+        const std::string& ListText(const LogEntry& entry)
+        {
+            return entry.Detailed ? entry.Message : entry.Text();
+        }
+
+        // Text of several lines is a table, a trace or code: the fixed-width font keeps it in line,
+        // in the list as in the details pane.
+        ImFont* ListFont(std::string_view text)
+        {
+            return text.find('\n') != std::string_view::npos ? Fonts::Mono() : ImGui::GetFont();
+        }
     }
 
     void LogWindow::Draw()
@@ -189,7 +204,6 @@ namespace Manifold::UI
     {
         m_layoutWidth = width;
         m_layoutWrap = m_wrap;
-        ImFont* font = ImGui::GetFont();
         const float size = ImGui::GetFontSize();
         const float line = ImGui::GetTextLineHeight();
         const float padding = ImGui::GetStyle().CellPadding.y * 2.0f;
@@ -199,8 +213,8 @@ namespace Manifold::UI
             float height = line;
             if (m_wrap)
             {
-                const std::string& text = m_entries[row.First].Text();
-                height = std::max(line, font->CalcTextSizeA(size, FLT_MAX, std::max(width, Px(40.0f)), text.data(), text.data() + text.size()).y);
+                const std::string& text = ListText(m_entries[row.First]);
+                height = std::max(line, ListFont(text)->CalcTextSizeA(size, FLT_MAX, std::max(width, Px(40.0f)), text.data(), text.data() + text.size()).y);
             }
             row.Top = top;
             row.Height = std::ceil(height + padding);
@@ -423,26 +437,28 @@ namespace Manifold::UI
             ImGui::TableNextColumn();
             m_messageWidth = ImGui::GetContentRegionAvail().x;
             const ImVec4 color = entry.Level == LogLevel::Error ? ManifoldTheme::Error : entry.Level == LogLevel::Warning ? ManifoldTheme::Warning : ManifoldTheme::Text;
-            const std::string& text = entry.Text();
+            const std::string& text = ListText(entry);
             ImGui::PushStyleColor(ImGuiCol_Text, color);
+            int more = 0;
             if (m_wrap)
             {
+                ImGui::PushFont(ListFont(text), 0.0f);
                 ImGui::PushTextWrapPos(0.0f);
                 ImGui::TextUnformatted(text.data(), text.data() + text.size());
                 ImGui::PopTextWrapPos();
+                ImGui::PopFont();
             }
             else
             {
-                int more = 0;
                 const std::string_view line = FirstLine(text, more);
                 ImGui::TextUnformatted(line.data(), line.data() + line.size());
-                if (more > 0)
-                {
-                    ImGui::SameLine();
-                    Muted(Format("+%d %s", more, more == 1 ? "line" : "lines"));
-                }
             }
             ImGui::PopStyleColor();
+            if (more > 0)
+            {
+                ImGui::SameLine();
+                Muted(Format("+%d %s", more, more == 1 ? "line" : "lines"));
+            }
             if (!ErrorTooltip(entry.Message) && hovered && !m_wrap && (ImGui::CalcTextSize(text.c_str()).x > m_messageWidth || text.find('\n') != std::string::npos))
             {
                 ShowTooltip([&]()
