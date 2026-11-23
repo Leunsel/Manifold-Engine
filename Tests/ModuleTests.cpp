@@ -167,6 +167,7 @@ namespace Manifold::Tests
             tree.Put("Alpha.lua", "LOOSE_ALPHA = true");
             tree.Put("modules/Cat/Second.lua", "-- NAME : beta\n");
             tree.Put("Manifold-RTTI.lua", "local K = \"__MANIFOLD_RTTI_RUNTIME__\"");
+            tree.Put("modules/Tools/SigMaker/init.lua", "--[[\n    Manifold-SigMaker\n    NAME        : Manifold-SigMaker\n    VERSION     : 2.1.0\n]]\nSIGMAKER_RAN = true");
             const std::vector<Module> clash = Autorun::Scan(tree.Autorun());
             int superseded = 0;
             int duplicates = 0;
@@ -177,7 +178,7 @@ namespace Manifold::Tests
                 duplicates += module.Duplicate ? 1 : 0;
                 builtIn += module.State == State::BuiltIn ? 1 : 0;
             }
-            CHECK(superseded == 1 && duplicates == 1 && builtIn == 1);
+            CHECK(superseded == 1 && duplicates == 1 && builtIn == 2);
             CHECK(Get(clash, "Alpha").Shape == Autorun::Shape::File && Get(clash, "Beta").Shape == Autorun::Shape::Folder);
         }
 
@@ -508,7 +509,8 @@ namespace Manifold::Tests
                 CHECK_MSG(module.Origin == Autorun::Origin::Shipped && module.Unmodified, module.Name + " in Autorun does not match Source/Generated/ShippedModules.cpp: build again, or run Tools/embed_modules.py");
                 CHECK_MSG(!module.Header.Version.empty() && !module.Header.Description.empty() && module.Header.Problem.empty(), module.Name + " has no VERSION or DESCRIPTION line");
             }
-            CHECK(Get(modules, "Manifold-Godot").Category == "Engines" && Get(modules, "Manifold-SigMaker").Category == "Tools" && Get(modules, "Manifold-SigMaker").Shape == Autorun::Shape::Folder);
+            CHECK(Get(modules, "Manifold-Godot").Category == "Engines");
+            CHECK(!Autorun::Find(modules, "Manifold-SigMaker"));
         }
     }
 

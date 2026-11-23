@@ -19,6 +19,7 @@ Manifold Engine reads and writes Cheat Engine tables (`.CT`): records, groups, p
 - [Script templates](#script-templates)
 - [Pointer scan](#pointer-scan)
 - [Static pointers](#static-pointers)
+- [Signatures](#signatures)
 - [Speedhack](#speedhack)
 - [Lua](#lua)
 - [Script windows: manifold.ui](#script-windows-manifoldui)
@@ -461,6 +462,20 @@ For a single level, [Static pointers](#static-pointers) is quicker and stays its
 - Each hit shows `"game.exe"+offset`, the offset to the address and whether the pointer still holds the same value.
 - A double-click adds it to the address list as a pointer.
 
+## Signatures
+
+*Copy Signature* (`Ctrl+Alt+Shift+S`) in the disassembler's right-click menu puts a byte pattern for the selected instruction on the clipboard that matches nowhere else, so an `aobscanmodule` or a script finds the place again after the game is updated. *Signature Maker* (`Ctrl+Alt+Shift+G`, Tools menus, the right-click menu) shows the same with everything around it.
+
+- **How it grows.** The pattern starts at the address and gets one byte longer until no other place in the module matches it; one pass over the module measures, for every other place, how far it agrees with the pattern, so the exact shortest length comes out of a single read instead of a scan per instruction. It starts searching at the pattern's rarest byte. A module of tens of megabytes takes a few milliseconds; a scan afterwards confirms that the pattern finds exactly this one place.
+- **Wildcards.** The bytes of an instruction are taken apart with the disassembler (prefixes, opcode, ModRM/SIB, displacement, immediates), so only numbers become wildcards, never an opcode. Separately for: RIP-relative and absolute addresses (and immediates that point into a module), jump and call distances (all or only rel32), structure offsets like `[rcx+1A8]` (all or only 32-bit ones), and immediates (all, or from a limit up, `10000` by default).
+- **Where it has to be unique.** In the address's module, as `aobscanmodule` searches (default), or in the whole process, as `aobscan`; optionally in executable memory only. Code outside a module (JIT code) is checked in the whole process.
+- **Limits.** Longest and shortest signature, and whether it may reach past the end of the function (a `ret`, `jmp` or `int3`); when it does, the window says so.
+- **AoB offset (optional, off by default).** The pattern may start at an instruction before or after the address within a largest offset when that saves at least a minimum number of bytes; the address is then the hit plus the offset, and the Auto Assembler line names it (`INJECT+0C`). At the same length a pattern that holds the address itself wins. *Starts Tried* lists every start with its length.
+- **Output.** As an AoB with the wildcard symbol of your choice (`??`, `?`, `**`, `*`, with or without spaces), as a C string with its mask, as a C array with its mask, or as an `aobscanmodule` line. Settings → Signatures picks what Copy Signature copies.
+- **The window** colours every byte by its role (address, jump distance, offset, immediate, wildcard), lists the instructions it covers and opens the pattern in Find Bytes.
+- **Finding one again.** Find Bytes (`Ctrl+F`) reads signatures in the shapes other tools write: `?`/`??`/`*` wildcards, nibble wildcards (`4?`), the C string with its mask, C arrays, and whole `aobscanmodule` lines with header and comment lines around them.
+- **Lua.** `manifold.signature.make`, `.parse` and `.find`; `ManifoldSigMaker:Make/Pattern/Copy/Scan` still works for scripts written against the old Manifold-SigMaker module, which this replaces.
+
 ## Speedhack
 
 The game's time runs faster or slower by a factor.
@@ -696,7 +711,7 @@ The Lua scripts in the `autorun` folder next to the program run at start. See [A
 - `require` finds a module's own files, other modules by name and the shared `autorun\lib`.
 - Extensions → Modules lists everything with state, version, load time and errors, and switches, reloads and allows modules. Scripts use `manifold.module`.
 - A script that is new in the folder is held until it is allowed, and a script that writes into the folder is logged, so a table cannot plant one unseen.
-- The modules that come with the program: Godot 4 support for Structure Dissect and a signature maker. C++ RTTI is built into the program (see [C++ RTTI](#c-rtti)).
+- The module that comes with the program: Godot 4 support for Structure Dissect. C++ RTTI and the signature maker are built into the program (see [C++ RTTI](#c-rtti) and [Signatures](#signatures)).
 
 Processes can be opened automatically when they start (Settings → Scripts).
 
@@ -873,7 +888,7 @@ A crash writes a minidump and a short report into `crashes`.
 | `pointerscan`, `staticpointers`, `asmsearch`, `bytes`, `patches`, `writehistory`, `comments` | search and history |
 | `tablefiles`, `recorddebug` (`recorddebug:<ID>`, `recorddebug:check`, `:trace`, `:internals`) | the table |
 | `symbols`, `regions`, `processes`, `modules` | process |
-| `log`, `settings` (`settings:<n>` on page n, 0 = General … 5 = Keyboard), `keyboard`, `appearance`, `shortcuts`, `about` | program |
+| `log`, `settings` (`settings:<n>` on page n, 0 = General … 6 = Keyboard), `keyboard`, `appearance`, `shortcuts`, `about` | program |
 | `profiler`, `breakdown`, `threads`, `checks`, `appinfo` | the profiler window on that tab |
 | `breakpoints`, `threadlist` | debugger |
 | `forms`, `layoutproblems` | Form Editor, Layout Problems |

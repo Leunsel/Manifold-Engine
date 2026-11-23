@@ -116,6 +116,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\App\SessionBackup.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
     <ClCompile Include="..\Source\App\SettingsStore.cpp" />
+    <ClCompile Include="..\Source\App\SignatureSettings.cpp" />
     <ClCompile Include="..\Source\App\Sounds.cpp" />
     <ClCompile Include="..\Source\App\TableRuntime.cpp" />
     <ClCompile Include="..\Source\App\TargetSession.cpp" />
@@ -150,6 +151,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Disasm\FlowGraph.cpp" />
     <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp" />
     <ClCompile Include="..\Source\Disasm\OpcodeConvert.cpp" />
+    <ClCompile Include="..\Source\Disasm\Signature.cpp" />
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\IconNames.cpp" />
@@ -188,6 +190,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRtti.cpp" />
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaSignature.cpp" />
     <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp" />
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
@@ -270,6 +273,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\RecordDebugTests.cpp" />
     <ClCompile Include="..\Tests\RelayTests.cpp" />
     <ClCompile Include="..\Tests\RttiTests.cpp" />
+    <ClCompile Include="..\Tests\SignatureTests.cpp" />
     <ClCompile Include="..\Tests\SpeedhackTests.cpp" />
     <ClCompile Include="..\Tests\StructureTests.cpp" />
     <ClCompile Include="..\Tests\TableFileTests.cpp" />

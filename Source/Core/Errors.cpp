@@ -149,6 +149,9 @@ namespace Manifold
             { ErrorCode::PointerFileUnwritable, "The pointer paths could not be written to \"{}\".",
                 "The folder is not writable or the drive is full.",
                 "Save to another folder." },
+            { ErrorCode::SignatureFailed, "No signature could be made: {}",
+                "The bytes from the address on match another place in the memory searched for as long as the signature may grow, or the address holds no code that decodes.",
+                "Allow more bytes, an AoB offset or fewer wildcards under Settings, Signatures, or count matches in the module instead of the whole process." },
 
             { ErrorCode::AsmSyntax, "Line {}.",
                 "The line could not be read as an instruction.",

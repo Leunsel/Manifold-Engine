@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 27
+local API_VERSION = 28
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -2012,6 +2012,57 @@ define(speed, "status", {
 }, function()
   return native.speedStatus()
 end)
+
+-- ∑ In a do block like manifold.record: the main chunk is close to Lua's limit of 200 locals.
+do
+  local signature = area("signature", "Byte signatures: a pattern for an address that matches nowhere else, so a script or an `aobscanmodule` finds the place again after the game is updated. `make` grows the pattern from the address one byte at a time, with the numbers that move between builds (addresses, jump distances, structure offsets, large constants) as wildcards, until no other place in the module (or the process) matches it. The defaults are the ones under Settings > Signatures; the options of a call override them for that call. `parse` reads signatures in the shapes other tools write, and `find` searches for one. Copy Signature and the Signature Maker in the memory viewer use the same functions.")
+
+  local makeKeys = {
+    scope = "string", codeOnly = "boolean", maskAddresses = "boolean", branches = "string", offsets = "string", immediates = "string",
+    immediateThreshold = "integer", maxBytes = "integer", minBytes = "integer", stopAtFunctionEnd = "boolean", offset = "boolean",
+    maxOffset = "integer", minSaving = "integer", wildcard = "string", spaces = "boolean", label = "string",
+  }
+
+  define(signature, "make", {
+    params = {
+      { name = "address", type = "address" },
+      { name = "options", type = "table", optional = true, keys = makeKeys },
+    },
+    returns = "`{ pattern, mask, code, array, autoAssembler, address, start, offset, length, wildcards, instructions, module, scope, uniqueIn, verified, functionEnd, seconds, bytes }`, or nil, error",
+    doc = "Makes the shortest pattern from the address that matches only there. `pattern` is it as an AoB (`\"48 8B 05 ?? ?? ?? ?? 8B 88\"`), `mask` the matching `x`/`?` string, `code`, `array` and `autoAssembler` the other ways to write it; `bytes` lists `{ value, wild, role }` per byte. With `options.offset` the pattern may start at an instruction up to `maxOffset` bytes before or after the address when that saves `minSaving` bytes: `start` is where it begins and `offset` is `address - start`, so the address is a scan hit plus `offset`. `options.scope` is `\"module\"` (unique in the address's module, like `aobscanmodule`) or `\"process\"`; `codeOnly` counts executable memory only. `branches` and `offsets` take `\"keep\"`, `\"long\"` (32-bit ones only) or `\"all\"`; `immediates` takes `\"keep\"`, `\"large\"` (from `immediateThreshold` up) or `\"all\"`; `maskAddresses` false keeps RIP-relative and absolute addresses. `maxBytes` (up to 1024) and `minBytes` bound the length, `stopAtFunctionEnd` never goes past a ret, jmp or int3. `wildcard` (`\"??\"`, `\"?\"`, `\"**\"`, `\"*\"`), `spaces` and `label` shape the text. `functionEnd` is set when the pattern reaches past the end of the function. `ME-2018` when no pattern within `maxBytes` is unique; a module-wide search takes milliseconds, a process-wide one reads all memory.",
+  }, function(address, options)
+    options = options or EMPTY
+    for _, key in ipairs({ "maxBytes", "minBytes", "maxOffset", "minSaving", "immediateThreshold" }) do
+      if options[key] ~= nil and options[key] < 0 then
+        misuse("manifold.signature.make: options." .. key .. " must not be negative")
+      end
+    end
+    return result(native.signatureMake(address, options))
+  end)
+
+  define(signature, "parse", {
+    params = { { name = "text", type = "string" } },
+    returns = "`{ pattern, length, fixed, wildcards, partial, source, module, notes }`, or nil, error",
+    doc = "Reads a signature as other tools write it: `\"48 8B ?? ??\"`, `\"48 8B ? ?\"`, `\"48 8B ** *\"`, `\"488B????\"`, the C string with its mask (`\"\\x48\\x8B\\x00\", \"xx?\"`), a C array (`{ 0x48, 0x8B }`), nibble wildcards (`\"4?\"`) or a whole `aobscanmodule(name,module,bytes)` line, with comment and header lines around it. `pattern` is it written as `manifold.memory.scan` takes it, `partial` counts the half-known bytes, `source` says which shape it was, `module` is the module of an `aobscanmodule` line, and `notes` lists what was read in a way that may surprise (a C string without a mask keeps its zeros). `ME-2003` when it does not read as a pattern.",
+  }, function(text)
+    return result(native.signatureParse(text))
+  end)
+
+  define(signature, "find", {
+    params = {
+      { name = "text", type = "string" },
+      { name = "options", type = "table", optional = true, keys = { module = "string", executable = "boolean", limit = "integer" } },
+    },
+    returns = "list of integers, or nil, error",
+    doc = "Reads a signature like `parse` and returns where it matches, in address order: in `options.module`, else in the module of an `aobscanmodule` line, else in the whole process. `options.executable` true searches code only; `options.limit` (1 to 100000, default 100) stops after that many hits. No hit is an empty list.",
+  }, function(text, options)
+    options = options or EMPTY
+    if options.limit ~= nil and (options.limit < 1 or options.limit > 100000) then
+      misuse("manifold.signature.find: options.limit must be 1 to 100000")
+    end
+    return result(native.signatureFind(text, options))
+  end)
+end
 
 local dotnet = area("dotnet", "The .NET runtime of a .NET game (.NET Framework or .NET 5 and later, 64-bit and 32-bit), read from outside the game by Manifold's .NET helper through the runtime's own data access library: nothing runs inside the game. `load` reads the classes, as Extensions > .NET does; the other functions need that and return `nil` and an `ME-4104` error before it. A class is named `\"Namespace.Class\"`, a nested one `\"Namespace.Outer+Inner\"`, and `\"Class\"` alone works when it is unique. A field or method of a class is written `\"Class:Name\"`, which also resolves as an address everywhere. Objects move when the garbage collector runs, so an object address is good for the moment; a path from a static field (`value`, `address`) finds the object again each time. Only classes the runtime has loaded are listed, and only methods it has compiled have an address.")
 

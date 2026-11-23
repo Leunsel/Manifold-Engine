@@ -90,18 +90,18 @@ namespace Manifold::Tests
         std::uint64_t mark = Mark(lua);
         CHECK_MSG(lua.RunAutorun(folder).Ok(), "first run");
         CheckQuiet(lua, mark, "first run");
-        for (const char* name : { "Manifold-Godot", "Manifold-SigMaker" })
+        for (const char* name : { "Manifold-Godot" })
         {
             const Autorun::Module* module = Autorun::Find(lua.Modules(), name);
             CHECK_MSG(module && module->State == Autorun::State::Loaded && module->Origin == Autorun::Origin::Shipped, std::string(name) + (module ? ": " + module->Reason : " is not in the Autorun folder"));
         }
-        CHECK_MSG(lua.SetModuleEnabled("Manifold-SigMaker", false).Ok() && lua.SetModuleEnabled("Manifold-Godot", false).Ok(), "switching the shipped modules off");
-        for (const char* name : { "Manifold-Godot", "Manifold-SigMaker" })
+        CHECK_MSG(lua.SetModuleEnabled("Manifold-Godot", false).Ok(), "switching the shipped module off");
+        for (const char* name : { "Manifold-Godot" })
         {
             const Autorun::Module* module = Autorun::Find(lua.Modules(), name);
             CHECK_MSG(module && module->State == Autorun::State::Disabled && !module->ActiveUntilRestart, std::string(name) + " leaves something behind when it is switched off");
         }
-        CHECK_MSG(lua.SetModuleEnabled("Manifold-SigMaker", true).Ok() && lua.SetModuleEnabled("Manifold-Godot", true).Ok(), "switching the shipped modules on again");
+        CHECK_MSG(lua.SetModuleEnabled("Manifold-Godot", true).Ok(), "switching the shipped module on again");
         CheckQuiet(lua, mark, "off and on");
         CHECK_MSG(!std::filesystem::exists(folder / "data"), "a shipped module wrote into the repository's Autorun folder");
         for (const auto& [module, least] : { std::pair<const char*, std::size_t>{ "ManifoldRTTI", 8 }, { "ManifoldGodot", 20 }, { "ManifoldSigMaker", 4 } })

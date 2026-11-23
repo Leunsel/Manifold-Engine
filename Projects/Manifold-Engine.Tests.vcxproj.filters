@@ -84,6 +84,9 @@
     <ClCompile Include="..\Source\App\SettingsStore.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\SignatureSettings.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Sounds.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -184,6 +187,9 @@
       <Filter>Source\Disasm</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Disasm\OpcodeConvert.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Disasm\Signature.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp">
@@ -298,6 +304,9 @@
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaScriptUi.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaSignature.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp">
@@ -538,6 +547,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\RttiTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\SignatureTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\SpeedhackTests.cpp">

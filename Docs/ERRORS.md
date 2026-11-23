@@ -47,6 +47,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-2015 | There is not enough memory for the pointer scan (…). | The pointer map needs eight bytes for every pointer the process holds, plus four while it searches. | Close other programs, or leave read-only and mapped memory out in the Memory menu. |
 | ME-2016 | "…" is not a pointer scan file. | The file is missing, cut off, or was not written by Save results of the pointer scan. | Pick a .mptr file that the pointer scan saved. |
 | ME-2017 | The pointer paths could not be written to "…". | The folder is not writable or the drive is full. | Save to another folder. |
+| ME-2018 | No signature could be made: … | The bytes from the address on match another place in the memory searched for as long as the signature may grow, or the address holds no code that decodes. | Allow more bytes, an AoB offset or fewer wildcards under Settings, Signatures, or count matches in the module instead of the whole process. |
 
 ## Assembler
 

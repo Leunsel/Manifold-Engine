@@ -14,8 +14,9 @@ namespace Manifold::UI
     {
     public:
         static constexpr int ThemePage = 1;
-        static constexpr int KeyboardPage = 5;
-        static constexpr int PageCount = 6;
+        static constexpr int SignaturesPage = 5;
+        static constexpr int KeyboardPage = 6;
+        static constexpr int PageCount = 7;
 
         explicit SettingsWindow(Workspace& workspace);
         void Draw() override;
@@ -39,6 +40,7 @@ namespace Manifold::UI
         bool ScannerPage(SettingsList& list, Settings& settings);
         bool ScriptsPage(SettingsList& list, Settings& settings);
         bool DebuggerPage(SettingsList& list, Settings& settings);
+        bool SignatureOptionsPage(SettingsList& list, Settings& settings);
         bool ShortcutsPage(SettingsList& list, Settings& settings);
 
         Workspace& m_workspace;

@@ -573,6 +573,7 @@ namespace Manifold::UI
             Item(ICON_FA_SITEMAP "  Structure Dissect", Command::OpenStructureDissect);
             Item(ICON_FA_ROUTE "  Pointer Scan", Command::OpenPointerScan);
             Item(ICON_FA_THUMBTACK "  Find Static Pointers", Command::OpenStaticPointers);
+            Item(ICON_FA_FINGERPRINT "  Signature Maker", Command::OpenSignatureMaker);
             Item(ICON_FA_EXCHANGE_ALT "  Opcode Converter", Command::OpenOpcodeConverter);
             Item(ICON_FA_CODE "  Auto Assembler", Command::OpenAutoAssembler);
             Item(ICON_FA_MOON "  Lua Engine", Command::OpenLuaEngine);

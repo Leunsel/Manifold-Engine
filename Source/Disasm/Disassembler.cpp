@@ -727,6 +727,75 @@ namespace Manifold::Disasm
         return bits;
     }
 
+    std::optional<InstructionLayout> Disassembler::Layout(const Instruction& line) const
+    {
+        if (!line.Valid || line.Length == 0)
+            return std::nullopt;
+        ZydisDecodedInstruction instruction{};
+        ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT]{};
+        const std::size_t length = std::min<std::size_t>(line.Length, line.Bytes.size());
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&m_state->Decoder, line.Bytes.data(), length, &instruction, operands)) || instruction.length != length)
+            return std::nullopt;
+        InstructionLayout layout;
+        layout.Length = static_cast<std::uint8_t>(length);
+        unsigned prefixEnd = instruction.raw.prefix_count;
+        if (instruction.attributes & ZYDIS_ATTRIB_HAS_REX)
+            prefixEnd = std::max<unsigned>(prefixEnd, instruction.raw.rex.offset + 1u);
+        if (instruction.attributes & ZYDIS_ATTRIB_HAS_VEX)
+            prefixEnd = std::max<unsigned>(prefixEnd, instruction.raw.vex.offset + instruction.raw.vex.size);
+        if (instruction.attributes & ZYDIS_ATTRIB_HAS_EVEX)
+            prefixEnd = std::max<unsigned>(prefixEnd, instruction.raw.evex.offset + 4u);
+        if (instruction.attributes & ZYDIS_ATTRIB_HAS_XOP)
+            prefixEnd = std::max<unsigned>(prefixEnd, instruction.raw.xop.offset + 3u);
+        layout.PrefixEnd = static_cast<std::uint8_t>(std::min<unsigned>(prefixEnd, static_cast<unsigned>(length)));
+        if (instruction.attributes & ZYDIS_ATTRIB_HAS_MODRM)
+            layout.ModRm = instruction.raw.modrm.offset;
+        if (instruction.attributes & ZYDIS_ATTRIB_HAS_SIB)
+            layout.Sib = instruction.raw.sib.offset;
+        const auto read = [&](unsigned offset, unsigned bytes)
+            {
+                std::uint64_t value = 0;
+                for (unsigned i = 0; i < bytes && offset + i < length; ++i)
+                    value |= static_cast<std::uint64_t>(line.Bytes[offset + i]) << (8 * i);
+                if (bytes > 0 && bytes < 8 && (value >> (8 * bytes - 1)) & 1)
+                    value |= ~0ull << (8 * bytes);
+                return static_cast<std::int64_t>(value);
+            };
+        if (instruction.raw.disp.size)
+        {
+            InstructionField field;
+            field.Offset = instruction.raw.disp.offset;
+            field.Size = static_cast<std::uint8_t>(instruction.raw.disp.size / 8);
+            field.Kind = FieldKind::Displacement;
+            field.Value = read(field.Offset, field.Size);
+            const bool modrm = (instruction.attributes & ZYDIS_ATTRIB_HAS_MODRM) != 0;
+            const bool sib = (instruction.attributes & ZYDIS_ATTRIB_HAS_SIB) != 0;
+            if (!modrm)
+                field.Absolute = true;
+            else if (instruction.raw.modrm.mod == 0 && instruction.raw.modrm.rm == 5 && instruction.address_width != 16)
+            {
+                field.RipRelative = m_is64Bit;
+                field.Absolute = !m_is64Bit;
+            }
+            else if (sib && instruction.raw.modrm.mod == 0 && instruction.raw.sib.base == 5)
+                field.Absolute = true;
+            layout.Fields.push_back(field);
+        }
+        for (const auto& immediate : instruction.raw.imm)
+        {
+            if (immediate.size == 0)
+                continue;
+            InstructionField field;
+            field.Offset = immediate.offset;
+            field.Size = static_cast<std::uint8_t>(immediate.size / 8);
+            field.Kind = immediate.is_relative ? FieldKind::Relative : FieldKind::Immediate;
+            field.Value = read(field.Offset, field.Size);
+            layout.Fields.push_back(field);
+        }
+        std::sort(layout.Fields.begin(), layout.Fields.end(), [](const InstructionField& a, const InstructionField& b) { return a.Offset < b.Offset; });
+        return layout;
+    }
+
     std::optional<std::uint64_t> Disassembler::EffectiveAddress(const Instruction& instruction, const RegisterValues& registers) const
     {
         if (!instruction.Memory.Present)

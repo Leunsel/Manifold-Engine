@@ -43,6 +43,7 @@ namespace Manifold
             { OpenFormEditor, "OpenFormEditor", Scope::Global, "Form Editor", Ctrl | Alt | ImGuiKey_G, 0, Own },
             { OpenOpcodeConverter, "OpenOpcodeConverter", Scope::Global, "Opcode Converter", Ctrl | Alt | ImGuiKey_O, 0, Own },
             { OpenRecordDebug, "OpenRecordDebug", Scope::Global, "Address List Debug", Ctrl | Alt | Shift | ImGuiKey_D, 0, Own },
+            { OpenSignatureMaker, "OpenSignatureMaker", Scope::Global, "Signature Maker", Ctrl | Alt | Shift | ImGuiKey_G, 0, Own },
 
             { NewTable, "NewTable", Scope::Main, "New Table", Ctrl | ImGuiKey_N, 0, Own },
             { OpenLastProcess, "OpenLastProcess", Scope::Main, "Open Last Process", Ctrl | Shift | ImGuiKey_P, 0, Own },
@@ -136,6 +137,7 @@ namespace Manifold
             { NopInstruction, "NopInstruction", Scope::Disassembler, "Replace with NOPs", Ctrl | Shift | ImGuiKey_N, 0, Own },
             { CopyInstructions, "CopyInstructions", Scope::Disassembler, "Copy Instructions", Ctrl | ImGuiKey_C, 0, Own },
             { CopyInstructionBytes, "CopyInstructionBytes", Scope::Disassembler, "Copy Bytes Only", Ctrl | Alt | ImGuiKey_C, 0, CE },
+            { CopySignature, "CopySignature", Scope::Disassembler, "Copy Signature", Ctrl | Alt | Shift | ImGuiKey_S, 0, Own },
             { InstructionAccesses, "InstructionAccesses", Scope::Disassembler, "Find Out What Addresses This Instruction Accesses", Ctrl | Alt | ImGuiKey_I, 0, Own },
             { CodeReferences, "CodeReferences", Scope::Disassembler, "Find References", ImGuiKey_X, 0, Own },
             { FlowGraph, "FlowGraph", Scope::Disassembler, "Flow Graph", ImGuiKey_G, 0, Own },

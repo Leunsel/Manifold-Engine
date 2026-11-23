@@ -160,7 +160,7 @@ The Lua scripts in the `autorun` folder next to the program run at start: files 
 
 - Extensions → Modules lists every module with its state, version, load time and errors, and switches, reloads and allows them; scripts use `manifold.module`.
 - A script that is new in the folder is held until it is allowed, so a table cannot plant one unseen.
-- Shipped modules: **Manifold-Godot** (Godot 4) and **Manifold-SigMaker** (byte signatures for the selected instruction).
+- Shipped module: **Manifold-Godot** (Godot 4). The signature maker is built in (Copy Signature and Signature Maker in the memory viewer, `manifold.signature`).
 
 See [Docs/AUTORUN.md](Docs/AUTORUN.md), and [Docs/AUTORUN-DESIGN.md](Docs/AUTORUN-DESIGN.md) for the design behind it.
 

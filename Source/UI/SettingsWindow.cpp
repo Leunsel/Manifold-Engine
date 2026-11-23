@@ -42,6 +42,7 @@ namespace Manifold::UI
             { ICON_FA_SEARCH, "Scanner", "Scan options the program starts with." },
             { ICON_FA_SCROLL, "Scripts", "Lua, tables, backups and opening processes by name." },
             { ICON_FA_BUG, "Debugger", "Structure Dissect, breakpoints, Unity and the log." },
+            { ICON_FA_FINGERPRINT, "Signatures", "How Copy Signature and the Signature Maker build byte patterns." },
             { ICON_FA_KEYBOARD, "Keyboard", "Click keys to change them, right-click to remove them." },
         };
         constexpr int kPageCount = static_cast<int>(std::size(kPages));
@@ -505,6 +506,7 @@ namespace Manifold::UI
             case 2: changed |= ScannerPage(list, settings); break;
             case 3: changed |= ScriptsPage(list, settings); break;
             case 4: changed |= DebuggerPage(list, settings); break;
+            case 5: changed |= SignatureOptionsPage(list, settings); break;
             default: changed |= ShortcutsPage(list, settings); break;
             }
         };
@@ -1441,6 +1443,132 @@ namespace Manifold::UI
                 settings.AutoAttach.erase(settings.AutoAttach.begin() + remove);
                 changed = true;
             }
+            list.EndRow();
+        }
+        return changed;
+    }
+
+    bool SettingsWindow::SignatureOptionsPage(SettingsList& list, Settings& settings)
+    {
+        bool changed = false;
+        const float toggle = ToggleSwitchWidth();
+        const float choice = std::round(Px(250.0f));
+        const float field = std::round(Px(120.0f));
+        const auto segmented = [&](const char* id, int& value, std::initializer_list<const char*> names)
+            {
+                int picked = std::clamp(value, 0, static_cast<int>(names.size()) - 1);
+                if (Segmented(id, &picked, std::vector<const char*>(names), choice))
+                {
+                    value = picked;
+                    changed = true;
+                }
+            };
+
+        list.Section("Search");
+        if (list.Row("Unique In", "Module counts matches in the address's module, like aobscanmodule; Process in all memory, like aobscan.", choice))
+        {
+            segmented("##sigscope", settings.SignatureScope, { "Module", "Process" });
+            list.EndRow();
+        }
+        if (list.Row("Code Only", "Count matches in executable memory only. aobscanmodule itself searches all of the module.", toggle))
+        {
+            changed |= ToggleSwitch("##sigcode", &settings.SignatureCodeOnly);
+            list.EndRow();
+        }
+        if (list.Row("Longest Signature", "Gives up when no pattern of this many bytes is unique.", choice))
+        {
+            changed |= LogSlider("##sigmax", settings.SignatureMaxBytes, 8, 1024, "%d bytes", choice);
+            list.EndRow();
+        }
+        if (list.Row("Shortest Signature", "At least this many bytes, so it stays unique when other code changes.", choice))
+        {
+            BeginFillSlider("##sigmin", static_cast<float>(settings.SignatureMinBytes) / 64.0f, choice);
+            ImGui::SliderInt("##sigmin", &settings.SignatureMinBytes, 0, 64, settings.SignatureMinBytes == 0 ? "As short as possible" : "%d bytes", ImGuiSliderFlags_AlwaysClamp);
+            EndFillSlider();
+            changed |= ImGui::IsItemDeactivatedAfterEdit();
+            list.EndRow();
+        }
+        if (list.Row("Stop at the Function End", "Never go past a ret, jmp or int3; the code after it belongs to another function.", toggle))
+        {
+            changed |= ToggleSwitch("##sigend", &settings.SignatureStopAtFunctionEnd);
+            list.EndRow();
+        }
+
+        list.Section("Wildcards");
+        if (list.Row("Addresses", "RIP-relative and absolute addresses; they move with every build.", toggle))
+        {
+            changed |= ToggleSwitch("##sigaddresses", &settings.SignatureMaskAddresses);
+            list.EndRow();
+        }
+        if (list.Row("Jump and Call Distances", "Long only wildcards rel32 and keeps the short jumps inside a function.", choice))
+        {
+            segmented("##sigbranches", settings.SignatureBranches, { "Keep", "Long Only", "All" });
+            list.EndRow();
+        }
+        if (list.Row("Structure Offsets", "The numbers in [rcx+1A8]; Long only wildcards 32-bit offsets and keeps small ones.", choice))
+        {
+            segmented("##sigoffsets", settings.SignatureOffsets, { "Keep", "Long Only", "All" });
+            list.EndRow();
+        }
+        if (list.Row("Immediates", "Constants such as the 28 in sub rsp,28; Large wildcards values from the limit below up.", choice))
+        {
+            segmented("##sigimmediates", settings.SignatureImmediates, { "Keep", "Large", "All" });
+            list.EndRow();
+        }
+        if (list.Row("Large Immediate From", "Hex; a value at least this large counts as large.", field))
+        {
+            Layout::Field("", { .Placement = Layout::LabelPlacement::None, .Width = field });
+            if (InputText("##sigthreshold", settings.SignatureImmediateThreshold, ImGuiInputTextFlags_CharsHexadecimal))
+                changed = true;
+            list.EndRow();
+        }
+
+        list.Section("AoB Offset");
+        if (list.Row("Allow an AoB Offset", "May start at an instruction before or after the address when that is shorter; the address is then the hit plus the offset.", toggle))
+        {
+            changed |= ToggleSwitch("##sigoffset", &settings.SignatureOffset);
+            list.EndRow();
+        }
+        if (list.Row("Largest Offset", "How far from the address the pattern may start, in bytes.", choice))
+        {
+            changed |= LogSlider("##sigmaxoffset", settings.SignatureMaxOffset, 1, 512, "%d bytes", choice);
+            list.EndRow();
+        }
+        if (list.Row("Minimum Saving", "An offset is only used when the pattern gets at least this many bytes shorter.", choice))
+        {
+            BeginFillSlider("##sigsaving", static_cast<float>(settings.SignatureMinSaving) / 32.0f, choice);
+            ImGui::SliderInt("##sigsaving", &settings.SignatureMinSaving, 0, 32, settings.SignatureMinSaving == 1 ? "%d byte" : "%d bytes", ImGuiSliderFlags_AlwaysClamp);
+            EndFillSlider();
+            changed |= ImGui::IsItemDeactivatedAfterEdit();
+            list.EndRow();
+        }
+
+        list.Section("Output");
+        if (list.Row("Wildcard Symbol", "How a wildcard byte is written.", choice))
+        {
+            segmented("##sigwildcard", settings.SignatureWildcard, { "??", "?", "**", "*" });
+            list.EndRow();
+        }
+        if (list.Row("Spaces Between Bytes", "Without spaces a single ? or * is written twice so the pattern still reads back.", toggle))
+        {
+            changed |= ToggleSwitch("##sigspaces", &settings.SignatureSpaces);
+            list.EndRow();
+        }
+        if (list.Row("Copy Signature Copies", "What Copy Signature puts on the clipboard.", std::round(Px(330.0f))))
+        {
+            int format = std::clamp(settings.SignatureCopyFormat, 0, 3);
+            if (Segmented("##sigformat", &format, { "AoB", "Code + Mask", "C Array", "Auto Assembler" }, std::round(Px(330.0f))))
+            {
+                settings.SignatureCopyFormat = format;
+                changed = true;
+            }
+            list.EndRow();
+        }
+        if (list.Row("Auto Assembler Label", "The name in the aobscanmodule line.", field))
+        {
+            Layout::Field("", { .Placement = Layout::LabelPlacement::None, .Width = field });
+            if (InputText("##siglabel", settings.SignatureLabel))
+                changed = true;
             list.EndRow();
         }
         return changed;

@@ -137,6 +137,24 @@ namespace Manifold
         int DisassemblerRows = 0;
         bool AutoExplorer = true;
 
+        int SignatureWildcard = 0;
+        bool SignatureSpaces = true;
+        int SignatureScope = 0;
+        bool SignatureCodeOnly = false;
+        bool SignatureMaskAddresses = true;
+        int SignatureBranches = 2;
+        int SignatureOffsets = 2;
+        int SignatureImmediates = 1;
+        std::string SignatureImmediateThreshold = "10000";
+        int SignatureMaxBytes = 128;
+        int SignatureMinBytes = 8;
+        bool SignatureStopAtFunctionEnd = false;
+        bool SignatureOffset = false;
+        int SignatureMaxOffset = 64;
+        int SignatureMinSaving = 4;
+        int SignatureCopyFormat = 0;
+        std::string SignatureLabel = "INJECT";
+
         std::vector<std::string> RecentTables;
         std::string LastProcess;
         ThemeSettings Theme;

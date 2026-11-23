@@ -32,6 +32,7 @@ Works in every window, unless the focused window uses the same keys for somethin
 | `Ctrl+Alt+G` | Form Editor | `OpenFormEditor` | Manifold |
 | `Ctrl+Alt+O` | Opcode Converter | `OpenOpcodeConverter` | Manifold |
 | `Ctrl+Alt+Shift+D` | Address List Debug | `OpenRecordDebug` | Manifold |
+| `Ctrl+Alt+Shift+G` | Signature Maker | `OpenSignatureMaker` | Manifold |
 
 ## Main Window
 
@@ -155,6 +156,7 @@ While the disassembler pane has the focus. The keys act on the selected instruct
 | `Ctrl+Shift+N` | Replace with NOPs | `NopInstruction` | Manifold |
 | `Ctrl+C` | Copy Instructions | `CopyInstructions` | Manifold |
 | `Ctrl+Alt+C` | Copy Bytes Only | `CopyInstructionBytes` | CE |
+| `Ctrl+Alt+Shift+S` | Copy Signature | `CopySignature` | Manifold |
 | `Ctrl+Alt+I` | Find Out What Addresses This Instruction Accesses | `InstructionAccesses` | Manifold |
 | `X` | Find References | `CodeReferences` | Manifold |
 | `G` | Flow Graph | `FlowGraph` | Manifold |
