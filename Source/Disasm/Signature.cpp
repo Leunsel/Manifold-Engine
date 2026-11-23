@@ -329,8 +329,15 @@ namespace Manifold::Disasm
         {
             Built built;
             built.Start = start;
-            const std::size_t maxBytes = static_cast<std::size_t>(std::clamp(options.MaxBytes, 1, 4096));
-            std::vector<std::uint8_t> buffer(maxBytes + 16);
+            // ∑ A scan never matches across the end of a memory region (neither
+            //   this search, nor FindPattern, nor aobscanmodule), so a pattern
+            //   that ran into the next region could never be found again.
+            const auto region = process.RegionAt(start);
+            if (!region)
+                return built;
+            const std::uint64_t room = region->End() - start;
+            const std::size_t maxBytes = static_cast<std::size_t>(std::min<std::uint64_t>(static_cast<std::uint64_t>(std::clamp(options.MaxBytes, 1, 4096)), room));
+            std::vector<std::uint8_t> buffer(static_cast<std::size_t>(std::min<std::uint64_t>(maxBytes + 16, room)));
             buffer.resize(process.Read(start, buffer.data(), buffer.size()));
             if (!code)
             {
@@ -378,15 +385,22 @@ namespace Manifold::Disasm
         std::vector<std::uint64_t> StartsAround(const Target::Process& process, const Disassembler& disassembler, std::uint64_t address, int maxOffset)
         {
             std::vector<std::uint64_t> starts;
+            const auto region = process.RegionAt(address);
+            if (!region)
+                return starts;
             const std::uint64_t reach = static_cast<std::uint64_t>(std::clamp(maxOffset, 1, 4096));
+            const auto padding = [](const Instruction& line)
+                {
+                    return std::all_of(line.Bytes.begin(), line.Bytes.begin() + std::min<std::size_t>(line.Length, line.Bytes.size()), [](std::uint8_t byte) { return byte == 0; });
+                };
             std::uint64_t current = address;
             for (int guard = 0; guard < 4096; ++guard)
             {
                 const auto previous = disassembler.PreviousStart(process, current);
-                if (!previous || *previous >= current || address - *previous > reach)
+                if (!previous || *previous >= current || *previous < region->Base || address - *previous > reach)
                     break;
                 const Instruction line = disassembler.Read(process, *previous);
-                if (!line.Valid || line.Next() != current || IsTerminator(line) || line.IsNop)
+                if (!line.Valid || line.Next() != current || IsTerminator(line) || line.IsNop || padding(line))
                     break;
                 starts.push_back(*previous);
                 current = *previous;
@@ -395,10 +409,10 @@ namespace Manifold::Disasm
             if (first.Valid && !IsTerminator(first))
             {
                 current = first.Next();
-                for (int guard = 0; guard < 4096 && current - address <= reach; ++guard)
+                for (int guard = 0; guard < 4096 && current - address <= reach && current < region->End(); ++guard)
                 {
                     const Instruction line = disassembler.Read(process, current);
-                    if (!line.Valid)
+                    if (!line.Valid || padding(line))
                         break;
                     starts.push_back(current);
                     if (IsTerminator(line))

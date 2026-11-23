@@ -264,6 +264,46 @@ namespace Manifold::Tests
             CHECK(saved && saved->Offset == 5 && saved->Bytes.size() == 6);
         }
 
+        // Three neighbouring regions (different protections, so separate regions).
+        // A scan never matches across a region end, so neither may a signature.
+        void RegionBoundaries(const Target::Process& process, const Disasm::Disassembler& disassembler)
+        {
+            constexpr std::size_t kPage = 0x1000;
+            auto* reserve = static_cast<std::uint8_t*>(::VirtualAlloc(nullptr, kPage * 3, MEM_RESERVE, PAGE_NOACCESS));
+            CHECK(reserve != nullptr);
+            if (!reserve)
+                return;
+            ::VirtualAlloc(reserve, kPage, MEM_COMMIT, PAGE_READWRITE);
+            ::VirtualAlloc(reserve + kPage, kPage, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+            ::VirtualAlloc(reserve + kPage * 2, kPage, MEM_COMMIT, PAGE_READWRITE);
+            std::memset(reserve, 0xCC, kPage * 3);
+            const std::uint8_t body[] = { 0x89, 0x41, 0x10, 0x89, 0x51, 0x14, 0xC3 };
+            const std::uint8_t unique[] = { 0xB9, 0x37, 0x13, 0x00, 0x00 };
+            std::uint8_t* code = reserve + kPage;
+            for (std::size_t copy = 1; copy < 8; ++copy)
+                std::memcpy(code + copy * 0x100, body, sizeof(body));
+            std::memcpy(code - sizeof(unique), unique, sizeof(unique));
+            std::memcpy(code, body, sizeof(body));
+            code[sizeof(body)] = 0x90;
+            const std::uint64_t base = reinterpret_cast<std::uint64_t>(reserve);
+            Disasm::SignatureOptions options;
+            options.Range = std::make_pair(base, base + kPage * 3);
+            options.AllowOffset = true;
+            options.MinBytes = 0;
+            options.MinSaving = 0;
+            std::string error;
+            const auto start = Disasm::MakeSignature(process, disassembler, base + kPage, options, error);
+            CHECK_MSG(start && start->Start >= base + kPage && start->Verified, start ? Text(*start) : error);
+
+            std::uint8_t* last = code + kPage - sizeof(body);
+            std::memcpy(last, body, sizeof(body));
+            std::memcpy(reserve + kPage * 2, unique, sizeof(unique));
+            const auto end = Disasm::MakeSignature(process, disassembler, base + kPage * 2 - sizeof(body), options, error);
+            CHECK_MSG(!end || (end->Verified && end->Start + end->Bytes.size() <= base + kPage * 2), end ? Text(*end) : error);
+            CHECK_MSG(end || error.find("within 7 bytes") != std::string::npos, error);
+            ::VirtualFree(reserve, 0, MEM_RELEASE);
+        }
+
         void Formats()
         {
             Disasm::Signature signature;
@@ -399,6 +439,7 @@ namespace Manifold::Tests
         AgainstOracle(*process);
         Masking(*process, disassembler);
         Offsets(*process, disassembler);
+        RegionBoundaries(*process, disassembler);
         Formats();
         Parsing();
         Speed(*process, disassembler);

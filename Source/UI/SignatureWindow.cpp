@@ -133,7 +133,6 @@ namespace Manifold::UI
         Engine& engine = m_workspace.Core();
         if (!engine.HasProcess() || m_task.Running())
             return;
-        m_error.clear();
         m_copyWhenDone = copy;
         m_process = engine.Process();
         const Disasm::SignatureOptions options = SignatureOptionsFrom(engine.Options());
@@ -155,11 +154,15 @@ namespace Manifold::UI
         Engine& engine = m_workspace.Core();
         if (!outcome->Signature)
         {
+            if (m_task.State().Cancel)
+                return;
             m_error = outcome->Error;
+            m_result.reset();
             if (m_copyWhenDone)
                 engine.Notify(LogLevel::Warning, "No signature copied: " + outcome->Error);
             return;
         }
+        m_error.clear();
         m_result = std::move(outcome->Signature);
         const Disasm::SignatureFormatting formatting = SignatureFormattingFrom(engine.Options());
         const std::string text = Disasm::FormatSignature(*m_result, SignatureCopyFormat(engine.Options()), formatting);
@@ -414,9 +417,13 @@ namespace Manifold::UI
             return;
         }
         const bool running = m_task.Running();
+        // ∑ A short search (a module takes milliseconds) shows nothing at all;
+        //   only one that runs longer shows the spinner and dims the old result.
+        //   Both sit in places that are always there, so nothing moves.
+        const bool slow = running && m_task.Elapsed() > 0.15;
         bool make = false;
         {
-            Layout::Row bar("##sigaddressbar", { Layout::Size::Fill(), Layout::Size::Fit() });
+            Layout::Row bar("##sigaddressbar", { Layout::Size::Fill(), Layout::Size::Fixed(96.0f), Layout::Size::Fixed(20.0f) });
             bar.Cell([&] {
                 Layout::FieldOptions field;
                 field.Placement = Layout::LabelPlacement::Left;
@@ -430,9 +437,34 @@ namespace Manifold::UI
                 make |= InputTextWithHint("##sigaddress", "address or expression", m_address, ImGuiInputTextFlags_EnterReturnsTrue);
             });
             bar.Cell([&] {
-                ImGui::BeginDisabled(running || !engine.HasProcess());
-                make |= Layout::Button(ICON_FA_FINGERPRINT "  Make", Layout::ButtonKind::Accent);
+                Layout::ButtonStyle style;
+                style.Width = Layout::Size::Fill();
+                if (slow)
+                {
+                    if (Layout::Button(ICON_FA_TIMES "  Cancel##sigmake", style))
+                        m_task.Cancel();
+                    return;
+                }
+                style.Kind = Layout::ButtonKind::Accent;
+                ImGui::BeginDisabled(!engine.HasProcess());
+                make |= Layout::Button(ICON_FA_FINGERPRINT "  Make##sigmake", style);
                 ImGui::EndDisabled();
+            });
+            bar.Cell([&] {
+                const float side = ImGui::GetFrameHeight();
+                if (!slow)
+                {
+                    ImGui::Dummy(ImVec2(side, side));
+                    return;
+                }
+                const ImVec2 at = ImGui::GetCursorScreenPos();
+                const float spin = ImGui::GetTextLineHeight();
+                ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + (side - spin) * 0.5f));
+                Spinner(spin, ManifoldTheme::Accent);
+                const Scan::PatternProgress& progress = m_task.State();
+                const std::uint64_t total = std::max<std::uint64_t>(1, progress.Total.load());
+                if (ImGui::IsItemHovered())
+                    Layout::TextTooltip(Format("Searching, %d%%", static_cast<int>(std::min<std::uint64_t>(100, progress.Done.load() * 100 / total))));
             });
         }
         if (m_pending && engine.HasProcess() && !running)
@@ -445,23 +477,40 @@ namespace Manifold::UI
             Status error;
             const auto address = engine.Evaluate(Trim(m_address), &error);
             if (!address)
+            {
                 m_error = error.Text.empty() ? ErrorMessage(ErrorCode::ExprUnknownSymbol, Trim(m_address)) : error.Text;
+                m_result.reset();
+            }
             else
                 Start(*address, false);
         }
         Options();
-        if (m_task.Running())
+        if (!m_error.empty())
+        {
+            Layout::CardOptions card;
+            card.Icon = ICON_FA_EXCLAMATION_TRIANGLE;
+            card.Title = "No Signature";
+            Layout::Card failed("##sigerror", card);
+            if (failed.Visible())
+                Layout::Colored(m_error, ManifoldTheme::Error, Layout::Overflow::Wrap);
+            failed.End();
+        }
+        else if (m_result)
+        {
+            ImGui::BeginDisabled(slow);
+            Result();
+            ImGui::EndDisabled();
+        }
+        else if (slow)
         {
             const Scan::PatternProgress& progress = m_task.State();
             const std::uint64_t total = std::max<std::uint64_t>(1, progress.Total.load());
-            if (TaskStatus("Searching" + Format("  %d%%", static_cast<int>(std::min<std::uint64_t>(100, progress.Done.load() * 100 / total)))))
-                m_task.Cancel();
+            EmptyState(ICON_FA_FINGERPRINT, "Searching",
+                Format("Measuring how far every other place agrees with the bytes at the address: %d%%.", static_cast<int>(std::min<std::uint64_t>(100, progress.Done.load() * 100 / total))) +
+                    (m_workspace.Core().Options().SignatureScope == 1 ? " All memory of the process is read, which takes a while in a large game." : ""),
+                {}, false);
         }
-        if (!m_error.empty())
-            Layout::Colored(m_error, ManifoldTheme::Error, Layout::Overflow::Wrap);
-        if (m_result)
-            Result();
-        else if (!m_task.Running() && m_error.empty())
+        else
         {
             const char* keys = ShortcutText(Command::CopySignature);
             EmptyState(ICON_FA_FINGERPRINT, "No Signature Yet",
