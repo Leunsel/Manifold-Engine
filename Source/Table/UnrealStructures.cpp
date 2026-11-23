@@ -115,7 +115,7 @@ namespace Manifold::Table
                     bool Signed;
                 };
                 static const std::unordered_map<std::string, Scalar> scalars = { { "FloatProperty", { ValueType::Float, false } }, { "DoubleProperty", { ValueType::Double, false } },
-                    { "Int8Property", { ValueType::Byte, true } }, { "ByteProperty", { ValueType::Byte, false } }, { "Int16Property", { ValueType::TwoBytes, true } },
+                    { "LargeWorldCoordinatesRealProperty", { ValueType::Double, false } }, { "Int8Property", { ValueType::Byte, true } }, { "ByteProperty", { ValueType::Byte, false } }, { "Int16Property", { ValueType::TwoBytes, true } },
                     { "UInt16Property", { ValueType::TwoBytes, false } }, { "IntProperty", { ValueType::FourBytes, true } }, { "UInt32Property", { ValueType::FourBytes, false } },
                     { "Int64Property", { ValueType::EightBytes, true } }, { "UInt64Property", { ValueType::EightBytes, false } } };
                 if (const auto it = scalars.find(kind); it != scalars.end())

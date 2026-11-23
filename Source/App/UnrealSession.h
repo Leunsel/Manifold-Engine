@@ -6,6 +6,7 @@
 #include "Core/RuntimeLog.h"
 #include "Target/Unreal.h"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -56,6 +57,8 @@ namespace Manifold
         void SetReadyHandler(std::function<void()> handler) { m_ready = std::move(handler); }
         void Stop();
         void CancelWork();
+        void Tick();
+        bool RetryPending() const { return m_retryAt.has_value(); }
 
         UnrealState State() const { return m_state; }
         bool Resolving() const { return m_work.Busy(kWorkGroup); }
@@ -78,6 +81,7 @@ namespace Manifold
     private:
         static constexpr const char* kWorkGroup = "unreal";
         static constexpr std::size_t kArrayMemory = 20000;
+        static constexpr int kRetryDelays[] = { 5, 10, 20, 30 };
 
         void Finish(std::shared_ptr<Target::UnrealRuntime> runtime, const Status& status, bool automatic, std::uint64_t generation);
         void Reset();
@@ -96,6 +100,8 @@ namespace Manifold
         bool m_stopped = false;
         std::uint64_t m_generation = 0;
         std::vector<std::string> m_symbols;
+        std::size_t m_retries = 0;
+        std::optional<std::chrono::steady_clock::time_point> m_retryAt;
 
         mutable std::mutex m_lock;
         std::shared_ptr<const Target::UnrealRuntime> m_runtime;

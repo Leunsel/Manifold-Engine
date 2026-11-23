@@ -315,7 +315,7 @@ namespace Manifold::Target
         if (!pattern)
             return false;
         Scan::PatternFilter filter;
-        return Scan::FindPattern(process, *pattern, main->Base, main->Base + main->Size, filter, 2).size() == 1;
+        return !Scan::FindPattern(process, *pattern, main->Base, main->Base + main->Size, filter, 1).empty();
     }
 
     std::optional<std::string> UnrealRuntime::PoolEntry(std::uint64_t entry) const
@@ -477,7 +477,15 @@ namespace Manifold::Target
                 continue;
             const auto current = ReadUInt(pool + static_cast<std::uint64_t>(m_pointer));
             const auto cursor = ReadUInt(pool + static_cast<std::uint64_t>(m_pointer) + 4);
-            if (current && cursor && *current < kNameMaxBlocks && *cursor < 0x20000)
+            if (!current || !cursor || *current >= kNameMaxBlocks || *cursor == 0 || *cursor >= 0x20000)
+                continue;
+            const std::uint64_t pointer = static_cast<std::uint64_t>(m_pointer);
+            bool filled = true;
+            for (std::uint32_t i = 1; i <= *current && filled; ++i)
+                filled = ReadObject(slot + i * pointer) != 0;
+            if (filled && *current + 1 < kNameMaxBlocks && ReadPointer(slot + (*current + 1) * pointer).value_or(1) != 0)
+                filled = false;
+            if (filled)
                 return pool;
         }
         return 0;
@@ -493,8 +501,22 @@ namespace Manifold::Target
                 continue;
             const std::string pattern = PointerPattern(block);
             std::uint64_t pool = 0;
+            std::vector<ModuleInfo> images;
             if (m_main.Size)
-                pool = NamePoolAmong(FindBytes(pattern, m_main.Base, m_main.Base + m_main.Size, true, static_cast<std::uint64_t>(m_pointer), 64));
+                images.push_back(m_main);
+            if (const auto modules = m_process->Modules())
+            {
+                for (const ModuleInfo& module : *modules)
+                {
+                    if (module.Base != m_main.Base && module.Name.find("-Core-") != std::string::npos)
+                        images.push_back(module);
+                }
+            }
+            for (const ModuleInfo& image : images)
+            {
+                if (!pool)
+                    pool = NamePoolAmong(FindBytes(pattern, image.Base, image.Base + image.Size, true, static_cast<std::uint64_t>(m_pointer), 64));
+            }
             if (!pool)
                 pool = NamePoolAmong(FindBytes(pattern, 0, ~0ull, true, static_cast<std::uint64_t>(m_pointer), 64));
             if (pool)
@@ -1119,14 +1141,32 @@ namespace Manifold::Target
                 continue;
             const UnrealKind kind = KindOf(meta);
             const std::string key = Lower(*name);
-            if (kind == UnrealKind::Enum)
-                built->Enums.emplace(key, object);
-            else
-                built->Types.emplace(key, object);
+            auto& map = kind == UnrealKind::Enum ? built->Enums : built->Types;
+            const auto [it, added] = map.emplace(key, object);
+            if (!added && PackageRank(object) > PackageRank(it->second))
+                it->second = object;
             built->List.push_back({ *name, object, kind });
         }
         std::stable_sort(built->List.begin(), built->List.end(), [](const UnrealType& a, const UnrealType& b) { return Lower(a.Name) < Lower(b.Name); });
         return built;
+    }
+
+    int UnrealRuntime::PackageRank(std::uint64_t type) const
+    {
+        std::uint64_t outer = OuterOf(type);
+        for (int depth = 0; depth < 8; ++depth)
+        {
+            const std::uint64_t up = OuterOf(outer);
+            if (!up)
+                break;
+            outer = up;
+        }
+        const std::string package = NameOf(outer).value_or("");
+        if (package == "/Script/CoreUObject")
+            return 3;
+        if (package == "/Script/Engine")
+            return 2;
+        return package.starts_with("/Script/") ? 1 : 0;
     }
 
     std::uint64_t UnrealRuntime::Type(std::string_view name) const
@@ -1208,25 +1248,30 @@ namespace Manifold::Target
         {
             if (m_layout.ChildProperties >= 0 && list != m_layout.ChildProperties)
                 continue;
-            const std::uint64_t x = ReadObject(vector + static_cast<std::uint64_t>(list));
-            if (!x)
+            const std::uint64_t head = ReadObject(vector + static_cast<std::uint64_t>(list));
+            if (!head)
                 continue;
             for (int name = 8; name <= 0x40; name += 4)
             {
                 if (const auto preset = Override("fieldName"); preset && name != *preset)
                     continue;
-                if (NameAt(x + static_cast<std::uint64_t>(name)) != "X")
+                const auto headName = NameAt(head + static_cast<std::uint64_t>(name));
+                if (headName != "X" && headName != "Z")
                     continue;
+                const bool forward = headName == "X";
                 for (int next = m_pointer; next <= 0x48; next += m_pointer)
                 {
                     if (const auto preset = Override("next"); preset && next != *preset)
                         continue;
                     if (next + m_pointer > name && next < name + 8)
                         continue;
-                    const std::uint64_t y = ReadObject(x + static_cast<std::uint64_t>(next));
-                    const std::uint64_t z = y && NameAt(y + static_cast<std::uint64_t>(name)) == "Y" ? ReadObject(y + static_cast<std::uint64_t>(next)) : 0;
-                    if (!z || NameAt(z + static_cast<std::uint64_t>(name)) != "Z")
+                    const std::uint64_t middle = ReadObject(head + static_cast<std::uint64_t>(next));
+                    const std::uint64_t tail = middle && NameAt(middle + static_cast<std::uint64_t>(name)) == "Y" ? ReadObject(middle + static_cast<std::uint64_t>(next)) : 0;
+                    if (!tail || NameAt(tail + static_cast<std::uint64_t>(name)) != (forward ? "Z" : "X"))
                         continue;
+                    const std::uint64_t x = forward ? head : tail;
+                    const std::uint64_t y = middle;
+                    const std::uint64_t z = forward ? tail : head;
                     m_layout.ChildProperties = list;
                     m_layout.FieldName = name;
                     m_layout.Next = next;

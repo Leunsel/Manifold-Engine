@@ -35,7 +35,7 @@ namespace Manifold::Target
         const std::unordered_set<std::string_view> kInnerAtExtra = { "ObjectProperty", "ObjectPtrProperty", "ClassProperty", "ClassPtrProperty", "WeakObjectProperty",
             "LazyObjectProperty", "SoftObjectProperty", "SoftClassProperty", "StructProperty", "ByteProperty", "InterfaceProperty", "DelegateProperty",
             "MulticastDelegateProperty", "MulticastInlineDelegateProperty", "MulticastSparseDelegateProperty" };
-        const std::unordered_map<std::string_view, std::string_view> kScalarText = { { "FloatProperty", "float" }, { "DoubleProperty", "double" },
+        const std::unordered_map<std::string_view, std::string_view> kScalarText = { { "FloatProperty", "float" }, { "DoubleProperty", "double" }, { "LargeWorldCoordinatesRealProperty", "double" },
             { "IntProperty", "int32" }, { "Int8Property", "int8" }, { "Int16Property", "int16" }, { "Int64Property", "int64" }, { "UInt16Property", "uint16" },
             { "UInt32Property", "uint32" }, { "UInt64Property", "uint64" }, { "NameProperty", "FName" }, { "StrProperty", "FString" }, { "TextProperty", "FText" },
             { "BoolProperty", "bool" }, { "FieldPathProperty", "TFieldPath" }, { "Utf8StrProperty", "FUtf8String" }, { "AnsiStrProperty", "FAnsiString" } };
@@ -582,13 +582,27 @@ namespace Manifold::Target
             const auto max = ReadInt(enumObject + offset + pointer + 4);
             if (!data || !count || !max || *count <= 0 || *count > 4096 || *max < *count)
                 continue;
-            const std::string last = Upper(NameAt(data + static_cast<std::uint64_t>(*count - 1) * 16).value_or(""));
-            if (!EndsWith(last, "MAX"))
+            int stride = 0;
+            for (const int candidate : { 16, 12, 8 })
+            {
+                const std::string last = Upper(NameAt(data + static_cast<std::uint64_t>(*count - 1) * static_cast<std::uint64_t>(candidate)).value_or(""));
+                if (EndsWith(last, "MAX") && (*count == 1 || NameAt(data + static_cast<std::uint64_t>(candidate)).has_value()))
+                {
+                    stride = candidate;
+                    break;
+                }
+            }
+            if (!stride)
                 continue;
             for (int i = 0; i < *count; ++i)
             {
-                const std::uint64_t entry = data + static_cast<std::uint64_t>(i) * 16;
-                entries.push_back({ NameAt(entry).value_or("?"), static_cast<std::int64_t>(ReadQword(entry + 8).value_or(0)) });
+                const std::uint64_t entry = data + static_cast<std::uint64_t>(i) * static_cast<std::uint64_t>(stride);
+                std::int64_t value = i;
+                if (stride == 16)
+                    value = static_cast<std::int64_t>(ReadQword(entry + 8).value_or(0));
+                else if (stride == 12)
+                    value = static_cast<std::int64_t>(ReadUInt(entry + 8).value_or(0) & 0xFF);
+                entries.push_back({ NameAt(entry).value_or("?"), value });
             }
             break;
         }

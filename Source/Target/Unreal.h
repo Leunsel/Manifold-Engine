@@ -258,6 +258,7 @@ namespace Manifold::Target
         std::optional<std::uint64_t> PointerFrom(const std::vector<std::uint8_t>* block, int offset) const;
         std::string PointerPattern(std::uint64_t value) const;
         std::uint64_t NameBlocksAt() const { return static_cast<std::uint64_t>(m_pointer) + 8; }
+        int PackageRank(std::uint64_t type) const;
         std::optional<std::uint64_t> ReadPointer(std::uint64_t address) const;
         std::uint64_t ReadObject(std::uint64_t address) const;
         std::optional<std::int32_t> ReadInt(std::uint64_t address) const;

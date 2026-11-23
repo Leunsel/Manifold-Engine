@@ -128,6 +128,8 @@ namespace Manifold
     {
         CancelWork();
         Reset();
+        m_retries = 0;
+        m_retryAt.reset();
         if (!m_stopped && m_config.AutoStart)
             Start(true);
     }
@@ -136,6 +138,19 @@ namespace Manifold
     {
         CancelWork();
         Reset();
+        m_retries = 0;
+        m_retryAt.reset();
+    }
+
+    void UnrealSession::Tick()
+    {
+        if (!m_retryAt || std::chrono::steady_clock::now() < *m_retryAt)
+            return;
+        m_retryAt.reset();
+        const auto process = m_target.Process();
+        if (m_stopped || m_state != UnrealState::Failed || m_generation != m_target.Generation() || !process || !process->Alive())
+            return;
+        Start(true);
     }
 
     void UnrealSession::CancelWork()
@@ -156,7 +171,10 @@ namespace Manifold
             return;
         }
         if (!automatic)
+        {
             m_stopped = false;
+            m_retryAt.reset();
+        }
         if (m_state == UnrealState::Ready)
             DropCoreSymbols();
         Reset();
@@ -215,10 +233,18 @@ namespace Manifold
                 return;
             }
             m_state = UnrealState::Failed;
+            if (automatic && m_retries < std::size(kRetryDelays))
+            {
+                const int delay = kRetryDelays[m_retries++];
+                m_retryAt = std::chrono::steady_clock::now() + std::chrono::seconds(delay);
+                LOG_INFO("Unreal", Format("%s Trying again in %d s, the game may still be loading.", status.Text.c_str(), delay));
+                return;
+            }
             LOG_WARN("Unreal", status.Text);
             m_notify(LogLevel::Warning, status.Text);
             return;
         }
+        m_retryAt.reset();
         {
             std::lock_guard lock(m_lock);
             m_runtime = runtime;
@@ -239,6 +265,7 @@ namespace Manifold
         CancelWork();
         DropCoreSymbols();
         m_stopped = true;
+        m_retryAt.reset();
         Reset();
         m_target.RefreshSymbolProvider();
         LOG_INFO("Unreal", "Shut down. Extensions > Unreal Engine > Start, or manifold.unreal.start(), turns it on again.");
@@ -273,7 +300,7 @@ namespace Manifold
         case UnrealState::Stopped: return "shut down";
         case UnrealState::Resolving: return "reading the reflection...";
         case UnrealState::NotUnreal: return "not an Unreal Engine game";
-        case UnrealState::Failed: return "not resolved: " + m_failure;
+        case UnrealState::Failed: return "not resolved: " + m_failure + (m_retryAt ? " (trying again shortly)" : "");
         case UnrealState::Ready:
             if (const auto runtime = Runtime())
             {

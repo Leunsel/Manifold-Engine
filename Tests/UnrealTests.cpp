@@ -62,7 +62,7 @@ namespace Manifold::Tests
                 return;
             const Target::UnrealSummary& summary = runtime.Summary();
             CHECK_MSG(runtime.PointerSize() == o.Pointer, label);
-            CHECK_MSG(summary.NamePool == fake.Pool, label);
+            CHECK_MSG(summary.NamePool == fake.Pool, std::string(label) + ": found " + Hex(summary.NamePool, 0) + ", expected " + Hex(fake.Pool, 0));
             CHECK_MSG(summary.Objects == fake.Objects, label);
             CHECK(summary.ObjectCount == kObjectCount);
             CHECK(!summary.LegacyNames);
@@ -202,6 +202,40 @@ namespace Manifold::Tests
             }
             const auto name = Table::UnrealStructureName(runtime, fake.ActorInstance + 0x10, true, {});
             CHECK(name && name->first == "Actor" && name->second == fake.ActorInstance);
+        }
+
+        void VariantLayout(Engine& engine, const FakeUnreal::Variant& variant, const char* label)
+        {
+            using namespace FakeUnreal;
+            Builder builder;
+            CHECK_MSG(builder.Build(variant), label);
+            const Fake fake = Widen(builder.Fake);
+            Target::UnrealRuntime runtime;
+            const Status status = runtime.Resolve(engine.Process(), Target::UnrealConfig{}, true, nullptr);
+            CHECK_MSG(status.Ok(), std::string(label) + ": " + status.Text);
+            if (!status)
+                return;
+            const int component = variant.Doubles ? 8 : 4;
+            const int locationAt = variant.Doubles ? kLocationDouble : kLocation;
+            const Target::UnrealLayout& l = runtime.Layout();
+            CHECK_MSG(l.Component == component && l.Offset == kNative.FieldOffset && l.Size == kNative.FieldSize && l.Next == kNative.FieldNext, label);
+            CHECK_MSG(runtime.Type("Field") == fake.FieldClass, label);
+            if (variant.ShadowField)
+                CHECK_MSG(builder.ShadowField < fake.FieldClass && runtime.Index()->List.size() > 0, label);
+            CHECK_MSG(runtime.StructSize(fake.Vector) == 3 * component, label);
+            const auto location = runtime.FindField(fake.SceneComponent, "RelativeLocation");
+            CHECK_MSG(location && location->Size == 3 * component && location->Start() == locationAt && location->Inner == fake.Vector, label);
+            const Table::UnrealFill vector = Table::FillFromUnreal(runtime, fake.SceneInstance + static_cast<std::uint64_t>(locationAt), {}, true);
+            CHECK_MSG(vector.Handled && vector.Fields.size() == 3, label);
+            if (vector.Fields.size() == 3)
+            {
+                const auto z = std::find_if(vector.Fields.begin(), vector.Fields.end(), [](const Table::StructField& f) { return f.Name.rfind("Z", 0) == 0; });
+                CHECK_MSG(z != vector.Fields.end() && z->Offset == 2 * component && z->Type == (variant.Doubles ? Scan::ValueType::Double : Scan::ValueType::Float), label);
+            }
+            const auto entries = runtime.EnumEntries(fake.Mode);
+            const std::int64_t last = variant.NarrowEnum ? 6 : 2;
+            CHECK_MSG(entries.size() == 3 && entries.back().Name == "EMyMode_MAX" && entries.back().Value == last && entries[1].Name == "EMyMode::B", label);
+            CHECK_MSG(runtime.Engine() == fake.Engine, label);
         }
 
         void SessionAndLua(Engine& engine, const Fake& fake, const FakeUnreal::Offsets& o)
@@ -547,6 +581,9 @@ namespace Manifold::Tests
             CHECK(!rejected.Ok() && gated.Rejected());
             SessionAndLua(engine, fake, o);
         }
+        for (const bool reverse : { false, true })
+            VariantLayout(engine, { .Doubles = true, .ReverseChain = reverse, .ShadowField = true, .NarrowEnum = true }, reverse ? "UE5 variant, reversed chain" : "UE5 variant");
+        VariantLayout(engine, { .ReverseChain = true }, "float vectors, reversed chain");
         engine.CloseProcess();
         SyntheticTarget(target.parent_path() / L"TestTarget32.exe", FakeUnreal::kOffsets32, "32-bit target");
         SyntheticTarget(target.parent_path() / L"TestTarget.exe", FakeUnreal::kOffsets64, "64-bit target");

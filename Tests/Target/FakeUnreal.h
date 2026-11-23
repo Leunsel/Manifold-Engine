@@ -77,6 +77,16 @@ namespace FakeUnreal
 
     using Image = ImageOf<std::uintptr_t>;
 
+    struct Variant
+    {
+        bool Doubles = false;
+        bool ReverseChain = false;
+        bool ShadowField = false;
+        bool NarrowEnum = false;
+    };
+
+    inline constexpr int kLocationDouble = 0x120;
+
     inline Pool g_pool;
     inline Array g_objects;
     inline const std::uintptr_t g_vtable[4] = { 0x11, 0x22, 0x33, 0x44 };
@@ -99,9 +109,11 @@ namespace FakeUnreal
             std::memset(&g_objects, 0, sizeof(g_objects));
         }
 
-        bool Build()
+        bool Build(const Variant& variant = {})
         {
             const Offsets& o = kNative;
+            const int component = variant.Doubles ? 8 : 4;
+            const int locationAt = variant.Doubles ? kLocationDouble : kLocation;
             m_names = Allocate(0x10000);
             m_objects = Allocate(kObjectCount * kObjectStride + 0x1000);
             m_items = Allocate(0x10000 * static_cast<std::size_t>(o.ItemSize) + 0x1000);
@@ -115,7 +127,12 @@ namespace FakeUnreal
             const auto object = [&](int index, const char* name, std::uint32_t number = 0) { return Object(index, Name(name), number); };
             Fake.Package = object(0, "/Script/CoreUObject");
             Fake.ObjectClass = object(1, "Object");
-            Fake.FieldClass = object(2, "Field");
+            Fake.FieldClass = object(variant.ShadowField ? 19 : 2, "Field");
+            if (variant.ShadowField)
+            {
+                ShadowField = object(2, "Field");
+                GamePackage = object(20, "/Script/MyGame");
+            }
             Fake.StructClass = object(3, "Struct");
             Fake.ClassClass = object(4, "Class");
             Fake.PackageClass = object(5, "Package");
@@ -133,7 +150,7 @@ namespace FakeUnreal
             Fake.SceneInstance = object(17, "Root");
             Fake.Engine = object(18, "GameEngine", 2);
             const std::uint32_t filler = Name("Filler");
-            for (int i = 19; i < kObjectCount; ++i)
+            for (int i = variant.ShadowField ? 21 : 19; i < kObjectCount; ++i)
                 Object(i, filler, static_cast<std::uint32_t>(i));
 
             for (int i = 0; i < kObjectCount; ++i)
@@ -142,7 +159,11 @@ namespace FakeUnreal
                 std::uintptr_t meta = Fake.ObjectClass;
                 if (at == Fake.Package)
                     meta = Fake.PackageClass;
-                else if (at >= Fake.ObjectClass && at <= Fake.EnumClass)
+                else if (at == ShadowField)
+                    meta = Fake.ScriptStructClass;
+                else if (at == GamePackage)
+                    meta = Fake.PackageClass;
+                else if ((at >= Fake.ObjectClass && at <= Fake.EnumClass) || at == Fake.FieldClass)
                     meta = Fake.ClassClass;
                 else if (at >= Fake.Vector && at <= Fake.IntPoint)
                     meta = Fake.ScriptStructClass;
@@ -157,7 +178,7 @@ namespace FakeUnreal
                 else if (at == Fake.Engine)
                     meta = Fake.GameEngineClass;
                 Put<std::uintptr_t>(at, o.Class, meta);
-                Put<std::uintptr_t>(at, o.Outer, at == Fake.Package ? 0 : Fake.Package);
+                Put<std::uintptr_t>(at, o.Outer, at == Fake.Package || at == GamePackage ? 0 : at == ShadowField ? GamePackage : Fake.Package);
             }
             Super(Fake.FieldClass, Fake.ObjectClass);
             Super(Fake.StructClass, Fake.FieldClass);
@@ -165,8 +186,8 @@ namespace FakeUnreal
             Super(Fake.Actor, Fake.ObjectClass);
             Super(Fake.SceneComponent, Fake.ObjectClass);
             Super(Fake.GameEngineClass, Fake.ObjectClass);
-            Size(Fake.Vector, 12);
-            Size(Fake.Vector2D, 8);
+            Size(Fake.Vector, 3 * component);
+            Size(Fake.Vector2D, 2 * component);
             Size(Fake.LinearColor, 16);
             Size(Fake.IntPoint, 8);
             Size(Fake.Actor, kActorSize);
@@ -181,12 +202,23 @@ namespace FakeUnreal
             const std::uintptr_t nameClass = FieldClassNamed("NameProperty");
             const std::uintptr_t structClass = FieldClassNamed("StructProperty");
 
-            const std::uintptr_t z = Field(floatClass, Fake.Vector, "Z", 8, 4, 0);
-            const std::uintptr_t y = Field(floatClass, Fake.Vector, "Y", 4, 4, z);
-            const std::uintptr_t x = Field(floatClass, Fake.Vector, "X", 0, 4, y);
-            Put<std::uintptr_t>(Fake.Vector, o.ChildProperties, x);
+            const std::uintptr_t realClass = variant.Doubles ? FieldClassNamed("DoubleProperty") : floatClass;
+            if (variant.ReverseChain)
+            {
+                const std::uintptr_t x = Field(realClass, Fake.Vector, "X", 0, component, 0);
+                const std::uintptr_t y = Field(realClass, Fake.Vector, "Y", component, component, x);
+                const std::uintptr_t z = Field(realClass, Fake.Vector, "Z", 2 * component, component, y);
+                Put<std::uintptr_t>(Fake.Vector, o.ChildProperties, z);
+            }
+            else
+            {
+                const std::uintptr_t z = Field(realClass, Fake.Vector, "Z", 2 * component, component, 0);
+                const std::uintptr_t y = Field(realClass, Fake.Vector, "Y", component, component, z);
+                const std::uintptr_t x = Field(realClass, Fake.Vector, "X", 0, component, y);
+                Put<std::uintptr_t>(Fake.Vector, o.ChildProperties, x);
+            }
 
-            const std::uintptr_t location = Field(structClass, Fake.SceneComponent, "RelativeLocation", kLocation, 12, 0);
+            const std::uintptr_t location = Field(structClass, Fake.SceneComponent, "RelativeLocation", locationAt, 3 * component, 0);
             Put<std::uintptr_t>(location, o.Extra, Fake.Vector);
             Put<std::uintptr_t>(Fake.SceneComponent, o.ChildProperties, location);
 
@@ -203,8 +235,15 @@ namespace FakeUnreal
 
             const std::uintptr_t entries = reinterpret_cast<std::uintptr_t>(m_fields) + 0xF000;
             const char* names[] = { "EMyMode::A", "EMyMode::B", "EMyMode_MAX" };
+            const std::uint8_t narrowValues[] = { 0, 5, 6 };
             for (int i = 0; i < 3; ++i)
             {
+                if (variant.NarrowEnum)
+                {
+                    Put<std::uint32_t>(entries, i * 12, Name(names[i]));
+                    Put<std::uint8_t>(entries, i * 12 + 8, narrowValues[i]);
+                    continue;
+                }
                 Put<std::uint32_t>(entries, i * 16, Name(names[i]));
                 Put<std::int64_t>(entries, i * 16 + 8, i);
             }
@@ -221,9 +260,13 @@ namespace FakeUnreal
             Put<std::uintptr_t>(Fake.ActorInstance, kTags, Fake.TagData);
             Put<std::int32_t>(Fake.ActorInstance, kTags + o.Pointer, 2);
             Put<std::int32_t>(Fake.ActorInstance, kTags + o.Pointer + 4, 2);
-            Put<float>(Fake.SceneInstance, kLocation, 1.0f);
-            Put<float>(Fake.SceneInstance, kLocation + 4, 2.0f);
-            Put<float>(Fake.SceneInstance, kLocation + 8, 3.0f);
+            for (int i = 0; i < 3; ++i)
+            {
+                if (variant.Doubles)
+                    Put<double>(Fake.SceneInstance, locationAt + i * 8, 1.0 + i);
+                else
+                    Put<float>(Fake.SceneInstance, locationAt + i * 4, 1.0f + static_cast<float>(i));
+            }
             Fake.Text = reinterpret_cast<std::uintptr_t>(m_fields) + 0xF200;
             const wchar_t text[] = L"Hello";
             std::memcpy(reinterpret_cast<void*>(Fake.Text), text, sizeof(text));
@@ -269,6 +312,8 @@ namespace FakeUnreal
         }
 
         Image Fake{};
+        std::uintptr_t ShadowField = 0;
+        std::uintptr_t GamePackage = 0;
 
     private:
         static std::uint8_t* Allocate(std::size_t size)

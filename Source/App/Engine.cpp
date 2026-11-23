@@ -599,6 +599,7 @@ namespace Manifold
             PROFILE_ZONE("Open processes automatically");
             UpdateAutoAttach();
         }
+        m_unreal.Tick();
         {
             PROFILE_ZONE("Frozen values");
             m_tables.UpdateFreezes();
