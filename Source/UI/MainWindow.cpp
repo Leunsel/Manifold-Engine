@@ -626,6 +626,8 @@ namespace Manifold::UI
                 workspace.OpenLog();
             if (engine.Options().ProfilerEnabled)
                 Item(ICON_FA_TACHOMETER_ALT "  Profiler and Diagnostics", Command::OpenProfiler);
+            if (engine.Options().LayoutChecks)
+                Item(ICON_FA_RULER_COMBINED "  Layout Problems", Command::OpenLayoutProblems);
             if (!Target::IsElevated() && ImGui::MenuItem(ICON_FA_SHIELD_ALT "  Restart as Administrator"))
                 workspace.Window().RestartElevated();
             ImGui::Separator();

@@ -7,7 +7,9 @@
 #include "Core/BuildInfo.h"
 #include "Core/Profiler.h"
 #include "Core/Text.h"
+#include "Layout/Layout.h"
 #include "Lua/LuaEngine.h"
+#include "UI/Fonts.h"
 #include "UI/LuaDialogs.h"
 #include "UI/ProfilerWindow.h"
 #include "UI/Theme.h"
@@ -89,6 +91,9 @@ namespace Manifold
         RuntimeLog::SetVerbose(m_settings.VerboseLog);
         m_host.SetCorners(m_settings.Theme.Corners);
         WatchSystemTheme();
+        Layout::Audit::SetReporter([](const Layout::Audit::Problem& problem) {
+            LOG_WARN("Layout", problem.WindowName + ": " + Layout::Audit::KindName(problem.What) + ", " + problem.Detail);
+        });
     }
 
     Application::~Application()
@@ -426,7 +431,12 @@ namespace Manifold
             return;
         if (!m_dropped.empty())
             m_workspace->DropFiles(std::exchange(m_dropped, {}), m_dropMerges, m_dropWindow, static_cast<float>(m_dropPoint.x), static_cast<float>(m_dropPoint.y));
+        Layout::Defaults().Bold = Fonts::Bold();
+        Layout::Defaults().Mono = Fonts::Mono();
+        Layout::NewFrame();
+        Layout::Audit::SetEnabled(m_settings.LayoutChecks || m_options.LayoutAudit);
         m_workspace->Draw();
+        Layout::Audit::EndFrame();
         UI::ApplyWindowOpacity(static_cast<float>(m_settings.ActiveWindowOpacity) / 100.0f, static_cast<float>(m_settings.InactiveWindowOpacity) / 100.0f);
         if (!m_started && ++m_frames >= 2)
         {

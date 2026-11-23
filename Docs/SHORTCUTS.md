@@ -26,6 +26,7 @@ Works in every window, unless the focused window uses the same keys for somethin
 | `Ctrl+Alt+M` | Mono / .NET Dissector | `OpenMono` | Manifold |
 | `Ctrl+Alt+U` | Unreal Engine | `OpenUnreal` | Manifold |
 | `Ctrl+Shift+F12` | Profiler and Diagnostics | `OpenProfiler` | Manifold |
+| `Ctrl+Shift+F11` | Layout Problems | `OpenLayoutProblems` | Manifold |
 | `Ctrl+Alt+P` | Pointer Scan | `OpenPointerScan` | Manifold |
 | `Ctrl+Alt+K` | Find Static Pointers | `OpenStaticPointers` | Manifold |
 | `Ctrl+Alt+G` | Form Editor | `OpenFormEditor` | Manifold |

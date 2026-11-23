@@ -940,3 +940,5 @@ Then:
 - Copy Report and Save Report put all of it into one text.
 - `Manifold-Engine.exe --profile-report=report.txt --profile-seconds=10` measures for that long, writes the report and closes.
 - `--open=profiler`, `breakdown`, `threads`, `checks` or `appinfo` opens the window on that tab at start.
+
+**Layout Problems** (`Ctrl+Shift+F11`, Help menu while Settings → Diagnostics → Layout Checks is on, or start with `--layout-audit`) lists, per window, content that is cut off, leaves its cell or does not fit its row, and outlines it on screen; hovering a row highlights it. See [UI-LAYOUT.md](UI-LAYOUT.md).

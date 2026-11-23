@@ -22,6 +22,9 @@
     <Filter Include="Source\Generated">
       <UniqueIdentifier>{38C20A1D-57EE-50A2-9FC6-502A5A108FAC}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Layout">
+      <UniqueIdentifier>{FEC118C3-C2C0-511D-92EC-050B62ED12A2}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source\Lua">
       <UniqueIdentifier>{BB690E34-A333-5E3B-A34A-37A6C93871AC}</UniqueIdentifier>
     </Filter>
@@ -215,6 +218,27 @@
     </ClCompile>
     <ClCompile Include="..\Source\Generated\ShippedModules.cpp">
       <Filter>Source\Generated</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Layout\Audit.cpp">
+      <Filter>Source\Layout</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Layout\Components.cpp">
+      <Filter>Source\Layout</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Layout\Containers.cpp">
+      <Filter>Source\Layout</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Layout\Region.cpp">
+      <Filter>Source\Layout</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Layout\Rules.cpp">
+      <Filter>Source\Layout</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Layout\Size.cpp">
+      <Filter>Source\Layout</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Layout\Typography.cpp">
+      <Filter>Source\Layout</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\AutorunModules.cpp">
       <Filter>Source\Lua</Filter>
@@ -504,6 +528,9 @@
     <ClCompile Include="..\Source\UI\FormEditor.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\LayoutAuditWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\Loading.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -770,6 +797,30 @@
     </ClInclude>
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h">
       <Filter>Source\Generated</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Layout\Audit.h">
+      <Filter>Source\Layout</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Layout\Components.h">
+      <Filter>Source\Layout</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Layout\Containers.h">
+      <Filter>Source\Layout</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Layout\Layout.h">
+      <Filter>Source\Layout</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Layout\Region.h">
+      <Filter>Source\Layout</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Layout\Rules.h">
+      <Filter>Source\Layout</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Layout\Size.h">
+      <Filter>Source\Layout</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Layout\Typography.h">
+      <Filter>Source\Layout</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Lua\AutorunModules.h">
       <Filter>Source\Lua</Filter>
@@ -1051,6 +1102,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\FormEditor.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\LayoutAuditWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\Loading.h">

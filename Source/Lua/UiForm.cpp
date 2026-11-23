@@ -99,6 +99,7 @@ namespace Manifold::Lua
             { "bold", T::Bool, "Bold font." },
             { "size", T::Number, "Font size in points; 0 for the usual size." },
             { "align", T::Choice, "Where a text that does not wrap sits in its line.", "left|center|right" },
+            { "overflow", T::Choice, "When it is wider than its place: ends in ..., wraps into lines, is cut at the edge, or keeps its width.", "ellipsis|wrap|clip|visible" },
         };
         constexpr FormProp kHeading[] = {
             { "text", T::String, "The heading." },
@@ -106,6 +107,7 @@ namespace Manifold::Lua
             { "color", T::Color, "Theme colour name or #RRGGBB." },
             { "size", T::Number, "Font size in points; 0 for the usual size." },
             { "align", T::Choice, "Where the heading sits in its line.", "left|center|right" },
+            { "overflow", T::Choice, "When it is wider than its place: ends in ..., is cut at the edge, or keeps its width.", "ellipsis|clip|visible" },
         };
         constexpr FormProp kSeparator[] = { { "text", T::String, "Optional text inside the line." } };
         constexpr FormProp kButton[] = {
@@ -2600,6 +2602,7 @@ namespace Manifold::Lua
         if (key == "text") return node.Text;
         if (key == "color") return node.Color;
         if (key == "wrap") return flag(node.Wrap);
+        if (key == "overflow") return node.Overflow.empty() ? std::string("ellipsis") : node.Overflow;
         if (key == "labelPosition") return node.LabelPosition.empty() ? std::string("default") : node.LabelPosition;
         if (key == "size") return NumberText(node.FontSize);
         if (key == "bold") return flag(node.Bold);
@@ -2738,6 +2741,7 @@ namespace Manifold::Lua
         else if (key == "text") node.Text = text;
         else if (key == "color") node.Color = Trim(text);
         else if (key == "wrap") node.Wrap = yes;
+        else if (key == "overflow") node.Overflow = value == "ellipsis" ? std::string() : text;
         else if (key == "labelPosition") node.LabelPosition = value == "default" ? std::string() : text;
         else if (key == "size") node.FontSize = numeric ? std::clamp(real, 0.0f, 200.0f) : 0.0f;
         else if (key == "bold") node.Bold = yes;

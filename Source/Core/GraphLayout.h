@@ -3,7 +3,7 @@
 #include <span>
 #include <vector>
 
-namespace Manifold::Layout
+namespace Manifold::Graph
 {
     struct Size
     {

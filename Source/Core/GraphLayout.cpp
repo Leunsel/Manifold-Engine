@@ -7,7 +7,7 @@
 #include <numeric>
 #include <utility>
 
-namespace Manifold::Layout
+namespace Manifold::Graph
 {
     namespace
     {

@@ -134,15 +134,15 @@ namespace Manifold::UI
             const float height = m_lineHeight * static_cast<float>(1 + block.Lines.size() + extra) + m_padding * 2.0f;
             m_sizes.push_back({ width + m_padding * 2.0f, height });
         }
-        std::vector<Layout::Edge> edges;
+        std::vector<Graph::Edge> edges;
         edges.reserve(m_graph.Edges.size());
         for (const Disasm::FlowEdge& edge : m_graph.Edges)
             edges.push_back({ edge.From, edge.To });
-        Layout::Spacing spacing;
+        Graph::Spacing spacing;
         spacing.Column = m_fontSize * 3.0f;
         spacing.Layer = m_fontSize * 4.0f;
         spacing.Lane = m_fontSize * 0.7f;
-        m_layout = Layout::LayeredLayout(m_sizes, edges, 0, spacing);
+        m_layout = Graph::LayeredLayout(m_sizes, edges, 0, spacing);
     }
 
     std::string FlowGraphWindow::BlockTitle(int block) const
@@ -380,7 +380,7 @@ namespace Manifold::UI
                 const bool lit = m_hoverBlock >= 0 && (edge.From == m_hoverBlock || edge.To == m_hoverBlock);
                 if ((pass == 1) != lit)
                     continue;
-                const std::vector<Layout::Point>& route = m_layout.Routes[e];
+                const std::vector<Graph::Point>& route = m_layout.Routes[e];
                 if (route.size() < 2)
                     continue;
                 const float alpha = m_hoverBlock >= 0 && !lit ? 0.35f : 0.9f;
@@ -421,7 +421,7 @@ namespace Manifold::UI
         for (std::size_t b = 0; b < m_graph.Blocks.size(); ++b)
         {
             const Disasm::FlowBlock& block = m_graph.Blocks[b];
-            const Layout::Point at = m_layout.Positions[b];
+            const Graph::Point at = m_layout.Positions[b];
             const ImVec2 topLeft = toScreen(at.X, at.Y);
             const ImVec2 bottomRight = toScreen(at.X + m_sizes[b].Width, at.Y + m_sizes[b].Height);
             if (bottomRight.x < min.x || bottomRight.y < min.y || topLeft.x > max.x || topLeft.y > max.y)
@@ -529,7 +529,7 @@ namespace Manifold::UI
         draw->AddRect(boxMin, boxMax, ImGui::GetColorU32(ManifoldTheme::CardBorder), Px(4.0f));
         for (std::size_t b = 0; b < m_graph.Blocks.size(); ++b)
         {
-            const Layout::Point at = m_layout.Positions[b];
+            const Graph::Point at = m_layout.Positions[b];
             draw->AddRectFilled(ImVec2(origin.x + at.X * scale, origin.y + at.Y * scale), ImVec2(origin.x + (at.X + m_sizes[b].Width) * scale, origin.y + (at.Y + m_sizes[b].Height) * scale),
                 ImGui::GetColorU32(b == 0 ? ManifoldTheme::Accent : ManifoldTheme::WithAlpha(ManifoldTheme::Label, 0.55f)));
         }
@@ -615,7 +615,7 @@ namespace Manifold::UI
     {
         for (std::size_t b = 0; b < m_graph.Blocks.size(); ++b)
         {
-            const Layout::Point at = m_layout.Positions[b];
+            const Graph::Point at = m_layout.Positions[b];
             if (world.x < at.X || world.y < at.Y || world.x > at.X + m_sizes[b].Width || world.y > at.Y + m_sizes[b].Height)
                 continue;
             const float row = (world.y - at.Y - m_padding - m_lineHeight) / m_lineHeight;
@@ -647,7 +647,7 @@ namespace Manifold::UI
     {
         if (block < 0 || static_cast<std::size_t>(block) >= m_sizes.size())
             return;
-        const Layout::Point at = m_layout.Positions[static_cast<std::size_t>(block)];
+        const Graph::Point at = m_layout.Positions[static_cast<std::size_t>(block)];
         const float x = at.X + m_sizes[static_cast<std::size_t>(block)].Width * 0.5f;
         m_pan = ImVec2(x - canvas.x * 0.5f / m_zoom, at.Y - canvas.y * 0.15f / m_zoom);
     }

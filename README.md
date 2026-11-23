@@ -251,6 +251,7 @@ copies the Release build into `Install` (or `-Destination`). The program there k
 | [Autorun modules](Docs/AUTORUN.md), [design](Docs/AUTORUN-DESIGN.md) | the autorun folder, module headers, load order, `require` and the shipped modules |
 | [Development](Docs/DEVELOPMENT.md) | building, tests, project layout, CI |
 | [Architecture](Docs/ARCHITECTURE.md) | layers, threads, and where new code goes |
+| [UI layout](Docs/UI-LAYOUT.md) | the layout system every window is drawn on, its audit and the lock on raw ImGui calls |
 
 ## License
 

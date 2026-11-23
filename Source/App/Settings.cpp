@@ -105,6 +105,7 @@ namespace Manifold
             { "Interface", "InactiveWindowOpacity", &Settings::InactiveWindowOpacity, 20, 100 },
             { "Interface", "PlaySounds", &Settings::PlaySounds },
             { "Interface", "Profiler", &Settings::ProfilerEnabled },
+            { "Interface", "LayoutChecks", &Settings::LayoutChecks },
             { "Interface", "ProfilerStatusBar", &Settings::ProfilerInStatusBar },
             { "Interface", "Splash", &Settings::ShowSplash },
             { "Debugger", "VerboseLog", &Settings::VerboseLog },

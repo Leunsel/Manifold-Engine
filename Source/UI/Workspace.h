@@ -85,6 +85,7 @@ namespace Manifold::UI
     class MonoWindow;
     class UnrealWindow;
     class ProfilerWindow;
+    class LayoutAuditWindow;
     class NopSledWindow;
     class WriteHistoryWindow;
     class CommentListWindow;
@@ -156,6 +157,7 @@ namespace Manifold::UI
         void OpenMono(const std::string& className = {});
         void OpenUnreal(const std::string& type = {}, std::uint64_t address = 0);
         void OpenProfiler(int tab = -1);
+        void OpenLayoutProblems();
         void OpenNopSled();
         void OpenWriteHistory();
         void OpenCommentList();
@@ -248,6 +250,7 @@ namespace Manifold::UI
         std::unique_ptr<MonoWindow> m_mono;
         std::unique_ptr<UnrealWindow> m_unrealWindow;
         std::unique_ptr<ProfilerWindow> m_profiler;
+        std::unique_ptr<LayoutAuditWindow> m_layoutProblems;
         std::unique_ptr<NopSledWindow> m_nopSled;
         std::unique_ptr<WriteHistoryWindow> m_writeHistory;
         std::unique_ptr<CommentListWindow> m_commentList;
