@@ -5217,7 +5217,7 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 26
+local API_VERSION = 27
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -7556,8 +7556,8 @@ local WIDGET_KEYS = {
   tabs = withCommon({}),
   tab = withCommon({ title = "string", icon = "string", gap = "number", scroll = "boolean", labelPosition = "string" }),
   split = withCommon({ vertical = "boolean", ratio = "number", labelPosition = "string" }),
-  text = withCommon({ text = "string", color = "string", wrap = "boolean", mono = "boolean", align = "string", size = "number", bold = "boolean" }),
-  heading = withCommon({ text = "string", icon = "string", color = "string", align = "string", size = "number" }),
+  text = withCommon({ text = "string", color = "string", wrap = "boolean", mono = "boolean", align = "string", size = "number", bold = "boolean", overflow = "string" }),
+  heading = withCommon({ text = "string", icon = "string", color = "string", align = "string", size = "number", overflow = "string" }),
   separator = withCommon({ text = "string" }),
   spacer = withCommon({}),
   button = withCommon({ text = "string", icon = "string", style = "string", shortcut = "string", hotkey = "string", confirm = "string", onClick = "function" }),
@@ -7647,9 +7647,9 @@ local function checkColor(path, name, value)
 end
 
 local function checkIcon(path, value)
-  if value ~= nil and value ~= "" and not native.uiIsIcon(value) then
 )MLUA"),
-            std::string_view(R"MLUA(    local near = native.uiIcons(value:sub(1, math.min(#value, 4)))
+            std::string_view(R"MLUA(  if value ~= nil and value ~= "" and not native.uiIsIcon(value) then
+    local near = native.uiIcons(value:sub(1, math.min(#value, 4)))
     local hint = #near > 0 and (" (similar: " .. table.concat(near, ", ", 1, math.min(#near, 6)) .. ")") or ""
     misuse(("%s: icon %q is no Font Awesome icon%s; manifold.ui.theme.icons lists them"):format(path, value, hint))
   end
@@ -8182,10 +8182,10 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
   kind = "class",
   title = "Widget objects",
   doc = table.concat({
-    "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line); `minWidth` and `maxWidth` keep fields, buttons and lists within that range, and a text wraps at `maxWidth`. Handlers get the widget as their last argument.",
+    "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line); `minWidth` and `maxWidth` keep fields, buttons and lists within that range, and a text wraps at `maxWidth`. Nothing is drawn outside its place: a text, heading or button wider than its place ends in `...` and shows all of it as a tooltip; a text or heading with `overflow = \"wrap\"` breaks into lines instead (text only), `\"clip\"` is cut at the edge, `\"visible\"` keeps its own width. A window cannot be made narrower than its widgets need (their smallest sizes: a field 80 points, a button its padding and a few characters). Handlers get the widget as their last argument.",
 )MLUA"),
             std::string_view(R"MLUA(    "- Labels of fields (`input`, `number`, `slider`, `combo`, `radio`, `color`): `labelPosition` is `left` (the default: the labels of one column, section or window share a column and the fields line up after it, and a checkbox among them lines up with the fields), `above` or `right` (after the field). Set on a window, column, section, tab or split it is the default for the fields inside. When none is set and a column is too narrow for the labels beside the fields, the labels go above them instead. A field fills the rest of its line unless it has a `width`, so no label is cut off; a negative `height` makes a table, tree, canvas, scrolling column or tab, multi-line input or section fill the height that is left.",
-    "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line. In a row, fields, bars, cards, lists and columns without a `width` share the free width equally, a `spacer` without a width takes a share too (so what follows it goes to the right), and `wrap = true` moves a widget that does not fit to the next line. `gap` (points) sets the space between the widgets of a row, column, section or tab; a column or tab with `scroll = true` scrolls inside its `height` (200).",
+    "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line. In a row, fields, bars, cards, lists and columns without a `width` share the free width equally (a negative `width` asks for a share too), the others get what their content needs, every widget stays inside its share, a `spacer` without a width takes a share too (so what follows it goes to the right), and `wrap = true` moves a widget that does not fit to the next line instead of narrowing the widgets. `gap` (points) sets the space between the widgets of a row, column, section or tab; a column or tab with `scroll = true` scrolls inside its `height` (200).",
     "- `grid`: places its widgets in `columns` (2) cells per row, row by row. The first column fits its content and the others share the rest, so `text` then a field per row lines labels up; a field without a `label` fills its cell.",
     "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it, `open = false` starts it folded.",
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
@@ -8251,12 +8251,12 @@ local function formWhen(text)
   if not source then
     return nil, 'must name a widget, like "god", "not god" or "mode = Multiplier"'
   end
-  local rule = { source = source, negate = negate ~= nil }
+)MLUA"),
+            std::string_view(R"MLUA(  local rule = { source = source, negate = negate ~= nil }
   if rest ~= "" then
     local list = rest:match("^=%s*(.+)$")
     if not list or negate then
-)MLUA"),
-            std::string_view(R"MLUA(      return nil, 'must look like "god", "not god" or "mode = Multiplier, Double"'
+      return nil, 'must look like "god", "not god" or "mode = Multiplier, Double"'
     end
     rule.values = {}
     for item in list:gmatch("[^,]+") do
@@ -8536,13 +8536,13 @@ local function fillForm(path, made, members, children, resolve, folder, links)
       if bind.kind == "number" or bind.kind == "slider" then
         local number = type(value) == "number" and value or tonumber(text)
         -- an integer widget shows 1.5 as 2: compared unrounded, it never matched and was set again and again
-        if bind.integer and math.type(number) == "float" and number == number and number > -2 ^ 63 and number < 2 ^ 63 then
+)MLUA"),
+            std::string_view(R"MLUA(        if bind.integer and math.type(number) == "float" and number == number and number > -2 ^ 63 and number < 2 ^ 63 then
           number = math.floor(number + 0.5)
         end
         return number
       end
-)MLUA"),
-            std::string_view(R"MLUA(      if bind.kind == "combo" or bind.kind == "radio" then
+      if bind.kind == "combo" or bind.kind == "radio" then
         -- an item names a drop-down entry by its description, or the value as shown
         for index, item in ipairs(itemsOf(bind)) do
           local named = tostring(item)
@@ -8842,14 +8842,14 @@ local function reloadForm(watch, start)
     if entry then
       entry.onUpdate = options.onUpdate
       entry.onClose = options.onClose
-      native.uiUpdate(handle.id, { updates = options.onUpdate ~= nil, handlers = options.onClose and UI_HANDLER_BITS.onClose or 0 })
+)MLUA"),
+            std::string_view(R"MLUA(      native.uiUpdate(handle.id, { updates = options.onUpdate ~= nil, handlers = options.onClose and UI_HANDLER_BITS.onClose or 0 })
     end
   end
 
   local spec, shown, message = readFormFile(watch.file, nil, watch.block)
   local options, modals
-)MLUA"),
-            std::string_view(R"MLUA(  if spec then
+  if spec then
     local ok, checked, list = pcall(checkForm, "manifold.ui.form.load", spec, watch.handlers)
     if ok then
       options, modals = checked, list
@@ -9055,13 +9055,13 @@ native.docDefine(nil, "manifold.ui.dialog.Dialog.id", { kind = "field", type = "
 
 local dialog = subarea(ui, "dialog", "Dialogs on top of the program. They do not block the script: each takes `onClose`, which gets the answer, or nil when the user cancelled.")
 
-local function openDialog(kind, props, onClose)
+)MLUA"),
+            std::string_view(R"MLUA(local function openDialog(kind, props, onClose)
   local owner = ownerSource()
   local id = native.uiDialog(kind, owner, props)
   local entry = { id = id, kind = "dialog", owner = owner, children = {}, onDialog = onClose }
   uiEntries[id] = entry
-)MLUA"),
-            std::string_view(R"MLUA(  entry.handle = dialogObject(entry)
+  entry.handle = dialogObject(entry)
   remember(owner, id, entry.handle.close)
   return entry.handle
 end
@@ -9334,13 +9334,13 @@ local image = subarea(ui, "image", "Pictures for `image` widgets and canvas draw
 define(image, "load", {
   params = { { name = "path", type = "string" } },
   returns = "image",
-  doc = "Loads a PNG, JPEG, BMP, TGA or GIF file (a relative path starts at the program folder) and returns an image object with `width`, `height` and `remove()`, or nil and an `ME-7009` error.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Loads a PNG, JPEG, BMP, TGA or GIF file (a relative path starts at the program folder) and returns an image object with `width`, `height` and `remove()`, or nil and an `ME-7009` error.",
 }, function(path)
   local owner = ownerSource()
   local id, width, height = native.uiImageLoad(path, owner)
   if not id then
-)MLUA"),
-            std::string_view(R"MLUA(    return result(nil, width, height)
+    return result(nil, width, height)
   end
   local entry = { id = id, owner = owner }
   local handle = plainObject(entry, ("image(%d)"):format(id), "manifold.ui.image.Image.", {
@@ -9644,13 +9644,13 @@ debug.getregistry()["Manifold.UiTick"] = function(now)
       else
         local handler = entry[UI_EVENTS[event.name] or ""]
         if handler then
-          local values = table.move(event, 1, event.n, 1, {})
+)MLUA"),
+            std::string_view(R"MLUA(          local values = table.move(event, 1, event.n, 1, {})
           if event.name == "change" and entry.kind == "combo" and type(values[1]) == "string" then
             -- a combo with multi = true sends its chosen item numbers as "1,3"
             local list = {}
             for number in values[1]:gmatch("%d+") do
-)MLUA"),
-            std::string_view(R"MLUA(              list[#list + 1] = tonumber(number)
+              list[#list + 1] = tonumber(number)
             end
             values[1] = list
           end

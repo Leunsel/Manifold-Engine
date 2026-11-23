@@ -393,6 +393,7 @@ Cheat Engine's script language with `[ENABLE]`/`[DISABLE]`, `alloc`, `label`, `d
 - A new Auto Assembler or Lua script editor opens as a tab beside the editors already open, each tab with its own menus, keys and buttons.
 - With Shift held a tab can be dragged out into a window of its own.
 - Settings → Scripts → Script Editors → Open as Tabs switches back to one window per editor.
+- Optional step log: with Settings → Scripts → Log Auto Assembler Steps, or `{$log}` in one script, every command writes what it did to the Log window, such as where an AOB was found, where `alloc` put its memory, what `assert` compared and which bytes a write replaced. See [Step log](AUTO-ASSEMBLER.md#step-log).
 
 ### Code editor
 
@@ -939,3 +940,5 @@ Then:
 - Copy Report and Save Report put all of it into one text.
 - `Manifold-Engine.exe --profile-report=report.txt --profile-seconds=10` measures for that long, writes the report and closes.
 - `--open=profiler`, `breakdown`, `threads`, `checks` or `appinfo` opens the window on that tab at start.
+
+**Layout Problems** (`Ctrl+Shift+F11`, Help menu while Settings → Diagnostics → Layout Checks is on, or start with `--layout-audit`) lists, per window, content that is cut off, leaves its cell or does not fit its row, and outlines it on screen; hovering a row highlights it. See [UI-LAYOUT.md](UI-LAYOUT.md).

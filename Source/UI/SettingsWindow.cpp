@@ -8,6 +8,7 @@
 #include "Core/BuildInfo.h"
 #include "Generated/IconsFontAwesome5.h"
 #include "Target/Process.h"
+#include "Layout/Layout.h"
 #include "UI/Fonts.h"
 #include "UI/Shortcuts.h"
 #include "UI/UiScale.h"
@@ -938,6 +939,25 @@ namespace Manifold::UI
             list.EndRow();
         }
 
+        if (list.Row("Layout Checks", "Outlines content that is cut off or leaves its place, and lists it (" + BindingText(Command::OpenLayoutProblems, CurrentBinding(Command::OpenLayoutProblems)) + ").", toggle))
+        {
+            if (ToggleSwitch("##layoutchecks", &settings.LayoutChecks))
+            {
+                Layout::Audit::SetEnabled(settings.LayoutChecks);
+                changed = true;
+            }
+            list.EndRow();
+        }
+        const float layoutButton = std::round(Px(210.0f));
+        if (list.Row("Layout Problems", "What the layout checks found, per window; hover a row to see it on screen.", layoutButton))
+        {
+            Layout::ButtonStyle open;
+            open.Width = Layout::Size::Fixed(210.0f);
+            if (Layout::Button(ICON_FA_RULER_COMBINED "  Open Layout Problems", open))
+                m_workspace.OpenLayoutProblems();
+            list.EndRow();
+        }
+
         list.Section("Program");
         if (list.Row("Splash Screen", "Logo and start-up steps for at least two seconds; applies at the next start.", toggle))
         {
@@ -1272,6 +1292,13 @@ namespace Manifold::UI
         if (list.Row("Open as Tabs", "New script editors open as tabs in one window.", toggle))
         {
             changed |= ToggleSwitch("##editortabs", &settings.ScriptEditorTabs);
+            list.EndRow();
+        }
+
+        list.Section("Auto Assembler");
+        if (list.Row("Log Auto Assembler Steps", "Each command writes what it did to the Log window; {$log} in a script does it for that script only.", toggle))
+        {
+            changed |= ToggleSwitch("##aalog", &settings.AutoAssemblerLog);
             list.EndRow();
         }
 

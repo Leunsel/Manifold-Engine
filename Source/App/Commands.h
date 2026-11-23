@@ -47,6 +47,7 @@ namespace Manifold
         OpenMono,
         OpenUnreal,
         OpenProfiler,
+        OpenLayoutProblems,
         OpenPointerScan,
         OpenStaticPointers,
         OpenFormEditor,

@@ -10,6 +10,7 @@
 #include "UI/Loading.h"
 #include "UI/NopSled.h"
 #include "UI/ProfilerWindow.h"
+#include "UI/LayoutAuditWindow.h"
 #include "UI/ScriptUi.h"
 #include "UI/Shortcuts.h"
 #include "UI/TemplateManager.h"
@@ -169,6 +170,7 @@ namespace Manifold::UI
         drawOne("Keyboard shortcuts", m_shortcuts);
         drawOne("Template manager", m_templateManager);
         drawOne("Profiler", m_profiler);
+        drawOne("Layout problems", m_layoutProblems);
         drawOne("NOP Sled", m_nopSled);
         drawOne("Write history", m_writeHistory);
         drawOne("Comment list", m_commentList);
@@ -267,6 +269,7 @@ namespace Manifold::UI
         case Command::OpenRecordDebug: OpenRecordDebug(); break;
         case Command::OpenLog: OpenLog(); break;
         case Command::OpenProfiler: OpenProfiler(); break;
+        case Command::OpenLayoutProblems: OpenLayoutProblems(); break;
         default: break;
         }
     }
@@ -693,6 +696,13 @@ namespace Manifold::UI
         if (!m_profiler)
             m_profiler = std::make_unique<ProfilerWindow>(*this);
         m_profiler->Show(tab);
+    }
+
+    void Workspace::OpenLayoutProblems()
+    {
+        if (!m_layoutProblems)
+            m_layoutProblems = std::make_unique<LayoutAuditWindow>(*this);
+        m_layoutProblems->Show();
     }
 
     void Workspace::OpenNopSled()

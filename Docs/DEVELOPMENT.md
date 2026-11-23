@@ -102,6 +102,7 @@ With the environment variable `MANIFOLD_TEMPLATE_CHECK` set to a folder of templ
 - **Worktrees**: parallel work goes into one git worktree each (`.claude/worktrees`) instead of the shared checkout, so no one commits someone else's half-done changes. Each worktree builds into its own `Build` folder, and `Tools\Install.ps1` run from any worktree installs into the main checkout's `Install`.
 - **CI**: `.github/workflows/build.yml` runs on `windows-2022` with clang-cl on every push to `main`, on pull requests and on demand. It checks that Python and the .NET SDK are there, builds `Release|x64`, checks that the generated files and projects are committed, and runs all tests. Then it builds `Debug|x64` and runs all tests again with that build. When a step fails, the run keeps the test folders with their logs and crash dumps as the artifact `test-data` for a week. A change to `README.md` or the licenses alone does not start a run.
 - **Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md) describes the layers, the main objects, which thread runs what, and where a new command, window, setting, Lua function, error or test suite goes.
+- **Interface**: windows are drawn with the layout system in `Source/Layout` ([UI-LAYOUT.md](UI-LAYOUT.md)). `Source/Layout/RawImGui.txt` caps the raw ImGui calls per file: the build warns (`ME0004`) and the suite `ui-layout` fails above it; `Manifold-Engine.Tests.exe --ui-raw-baseline` lowers the numbers after a file moved to the components. Settings → Diagnostics → Layout Checks (or `--layout-audit`) outlines what is cut off or leaves its place and lists it under Layout Problems.
 
 ## Layout
 
@@ -124,6 +125,7 @@ With the environment variable `MANIFOLD_TEMPLATE_CHECK` set to a folder of templ
 | `Source/Debug` | debugger, breakpoints and watches |
 | `Source/Table` | address list, cheat table files, structures |
 | `Source/Lua` | Lua engine and API; `Source/Lua/Docs` holds the documentation sources |
+| `Source/Layout` | the layout system: rules, rows and regions, text, buttons, fields, cards, the audit, and `RawImGui.txt` |
 | `Source/UI` | main window and the tool windows |
 | `Tests` | test suites and the test target with its table |
 | `Dependencies`, `Licenses` | third-party code and its licenses |

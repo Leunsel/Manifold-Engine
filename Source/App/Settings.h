@@ -93,6 +93,7 @@ namespace Manifold
         bool LuaConsoleTime = true;
         bool LuaConsoleHex = false;
         bool LuaDocsPanel = false;
+        bool AutoAssemblerLog = false;
         std::vector<std::string> AutoAttach;
         bool AutoAttachEnabled = false;
         TableScriptPolicy TableScripts = TableScriptPolicy::Ask;
@@ -110,6 +111,7 @@ namespace Manifold
         bool PlaySounds = true;
         bool ReleaseMode = false;
         bool ProfilerEnabled = false;
+        bool LayoutChecks = false;
         bool ProfilerInStatusBar = true;
         bool ShowSplash = true;
         int NopSledBest = 0;

@@ -456,6 +456,7 @@ namespace Manifold::Lua
             if (node.Kind == UiKind::Section && ReadBool(state, props, "open", node.Open))
                 node.OpenChanged = true;
             ReadString(state, props, "labelPosition", node.LabelPosition);
+            ReadString(state, props, "overflow", node.Overflow);
             ReadFloat(state, props, "size", node.FontSize);
             ReadBool(state, props, "bold", node.Bold);
             ReadFloat(state, props, "width", node.Width);

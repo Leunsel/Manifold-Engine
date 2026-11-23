@@ -53,14 +53,24 @@ namespace Manifold::Asm
         AaSection Section = AaSection::Whole;
         bool CheckOnly = false;
         bool ScanInCheck = false;
+        bool Log = false;           // every command writes what it did to the log ({$log} in the script does the same)
+        std::string LogTitle;       // what the log lines call the script, such as the record's description
         std::string Owner;
         std::filesystem::path IncludeFolder;
+    };
+
+    struct AaLogLine
+    {
+        int Line = 0;
+        std::string Text;
     };
 
     struct AaResult
     {
         Status Error;
         int Line = 0;
+        bool Logged = false;
+        std::vector<AaLogLine> Log;  // the steps when the run logged, at most kMaxLogLines of them
         std::vector<AaWrite> Writes;
         std::vector<std::string> Notes;
         std::map<std::string, std::uint64_t> Symbols;
@@ -78,6 +88,9 @@ namespace Manifold::Asm
         std::function<Status(std::string_view name, std::string_view parameters, bool syntaxCheck, std::string& output)> RunCustomCommand;
     };
 
+    inline constexpr std::size_t kMaxLogLines = 400;
+
+    bool WantsLog(std::string_view script);
     AaResult RunAutoAssembler(std::string_view script, AaHost& host, AaMemory& memory, const AaOptions& options);
 
     bool HasSections(std::string_view script);

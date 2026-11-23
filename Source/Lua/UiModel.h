@@ -106,6 +106,7 @@ namespace Manifold::Lua
         std::string Hint;
         std::string Format;
         std::string Style;
+        std::string Overflow;   // text, heading: ellipsis (empty), wrap, clip or visible
         bool Enabled = true;
         bool Visible = true;
         bool Wrap = false;

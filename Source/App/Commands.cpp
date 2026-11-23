@@ -37,6 +37,7 @@ namespace Manifold
             { OpenMono, "OpenMono", Scope::Global, "Mono / .NET Dissector", Ctrl | Alt | ImGuiKey_M, 0, Own },
             { OpenUnreal, "OpenUnreal", Scope::Global, "Unreal Engine", Ctrl | Alt | ImGuiKey_U, 0, Own },
             { OpenProfiler, "OpenProfiler", Scope::Global, "Profiler and Diagnostics", Ctrl | Shift | ImGuiKey_F12, 0, Own },
+            { OpenLayoutProblems, "OpenLayoutProblems", Scope::Global, "Layout Problems", Ctrl | Shift | ImGuiKey_F11, 0, Own },
             { OpenPointerScan, "OpenPointerScan", Scope::Global, "Pointer Scan", Ctrl | Alt | ImGuiKey_P, 0, Own },
             { OpenStaticPointers, "OpenStaticPointers", Scope::Global, "Find Static Pointers", Ctrl | Alt | ImGuiKey_K, 0, Own },
             { OpenFormEditor, "OpenFormEditor", Scope::Global, "Form Editor", Ctrl | Alt | ImGuiKey_G, 0, Own },

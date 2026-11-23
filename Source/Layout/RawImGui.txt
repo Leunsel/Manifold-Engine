@@ -1,0 +1,71 @@
+# Raw ImGui calls left in the interface code from before the layout system (Docs/UI-LAYOUT.md).
+# A file may not use more of them than written here: the build warns (ME0004), the tests fail (suite ui-layout).
+# A file that is not listed may use none. After moving a file to the Layout components,
+# Manifold-Engine.Tests.exe --ui-raw-baseline lowers its number (it never raises one).
+# Raising a number is a deliberate exception: change it by hand and say why on a comment line above it.
+
+
+pattern ImGui::Button(
+pattern ImGui::SmallButton(
+pattern ImGui::Text(
+pattern ImGui::TextUnformatted(
+pattern ImGui::TextColored(
+pattern ImGui::TextDisabled(
+pattern ImGui::TextWrapped(
+pattern ImGui::SetNextItemWidth(
+pattern ImGui::PushItemWidth(
+pattern ImGui::BeginChild(
+pattern ImGui::SameLine(
+pattern ImGui::CalcTextSize(
+scope Source/UI
+scope Source/App
+exclude Source/Layout
+
+Source/UI/AddressActions.cpp 3
+Source/UI/ByteSearch.cpp 6
+Source/UI/ClrInspector.cpp 11
+Source/UI/CodeEditor.cpp 2
+Source/UI/CodeTools.cpp 21
+Source/UI/CommentListWindow.cpp 13
+Source/UI/ConsoleView.cpp 18
+Source/UI/DebugWindows.cpp 39
+Source/UI/DialogHost.cpp 3
+Source/UI/DocBrowser.cpp 9
+Source/UI/DocView.cpp 16
+Source/UI/EditorShared.cpp 13
+Source/UI/EditorView.cpp 21
+Source/UI/FlowGraphWindow.cpp 7
+Source/UI/FormEditor.cpp 150
+Source/UI/Loading.cpp 12
+Source/UI/LogWindow.cpp 31
+Source/UI/LuaDialogs.cpp 9
+Source/UI/LuaWindow.cpp 6
+Source/UI/MainWindow.cpp 136
+Source/UI/MemoryViewer.cpp 83
+Source/UI/MemoryViewerRegisters.cpp 67
+Source/UI/ModulesWindow.cpp 24
+Source/UI/MonoInspector.cpp 43
+Source/UI/MonoWindow.cpp 40
+Source/UI/NopSled.cpp 14
+Source/UI/OpcodeWindow.cpp 8
+Source/UI/PatchScanWindow.cpp 24
+Source/UI/PointerScanWindow.cpp 28
+Source/UI/ProfilerWindow.cpp 57
+Source/UI/RecordDebugWindow.cpp 79
+Source/UI/RecordEditor.cpp 43
+Source/UI/ScriptUi.cpp 11
+Source/UI/ScriptWindow.cpp 25
+Source/UI/SettingsWindow.cpp 50
+Source/UI/Shortcuts.cpp 12
+Source/UI/StaticPointersWindow.cpp 12
+Source/UI/StructureWindow.cpp 39
+Source/UI/TableFilesWindow.cpp 42
+Source/UI/TemplateManager.cpp 64
+Source/UI/Templates.cpp 4
+Source/UI/ToolWindows.cpp 33
+Source/UI/UiHost.cpp 20
+Source/UI/UnrealWindow.cpp 42
+Source/UI/WatchWindow.cpp 12
+Source/UI/Widgets.cpp 20
+Source/UI/Workspace.cpp 26
+Source/UI/WriteHistoryWindow.cpp 3

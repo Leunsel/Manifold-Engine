@@ -4,6 +4,7 @@
 #include "App/Settings.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Lua/LuaEngine.h"
 #include "Table/RecordPath.h"
 #include "UI/Fonts.h"
@@ -1767,6 +1768,25 @@ namespace Manifold::UI
                 Property("Note", note);
             ImGui::EndTable();
         }
+        if (!entry.Steps.empty() && Section(Format("Auto Assembler Steps (%zu)", entry.Steps.size()).c_str()) &&
+            ImGui::BeginTable("##tracesteps", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit))
+        {
+            ImGui::TableSetupColumn("Line", ImGuiTableColumnFlags_WidthFixed);
+            ImGui::TableSetupColumn("Step", ImGuiTableColumnFlags_WidthStretch);
+            PushMono();
+            for (const Asm::AaLogLine& step : entry.Steps)
+            {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                Muted(step.Line > 0 ? std::to_string(step.Line) : std::string());
+                ImGui::TableNextColumn();
+                Layout::Wrapped(step.Text);
+            }
+            PopMono();
+            ImGui::EndTable();
+        }
+        else if (entry.Steps.empty() && entry.Kind == RecordKind::Script)
+            Layout::Muted("Turn on Settings > Scripts > Log Auto Assembler Steps, or put {$log} into the script, to see each step here.", Layout::Overflow::Wrap);
     }
 
     // ---------------------------------------------------------------- Internals

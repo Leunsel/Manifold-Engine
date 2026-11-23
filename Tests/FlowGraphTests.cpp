@@ -208,12 +208,12 @@ namespace Manifold::Tests
             CHECK(outside >= 0 && tight.Blocks[static_cast<std::size_t>(outside)].Indirect);
         }
 
-        bool Overlap(const Layout::Point& a, const Layout::Size& as, const Layout::Point& b, const Layout::Size& bs)
+        bool Overlap(const Graph::Point& a, const Graph::Size& as, const Graph::Point& b, const Graph::Size& bs)
         {
             return a.X < b.X + bs.Width && b.X < a.X + as.Width && a.Y < b.Y + bs.Height && b.Y < a.Y + as.Height;
         }
 
-        void CheckLayout(const std::vector<Layout::Size>& sizes, const std::vector<Layout::Edge>& edges, const Layout::Result& result)
+        void CheckLayout(const std::vector<Graph::Size>& sizes, const std::vector<Graph::Edge>& edges, const Graph::Result& result)
         {
             CHECK(result.Positions.size() == sizes.size());
             CHECK(result.Routes.size() == edges.size());
@@ -240,16 +240,16 @@ namespace Manifold::Tests
             std::size_t upward = 0;
             for (std::size_t e = 0; e < edges.size(); ++e)
             {
-                const std::vector<Layout::Point>& route = result.Routes[e];
+                const std::vector<Graph::Point>& route = result.Routes[e];
                 if (route.size() < 2)
                 {
                     ++shortRoutes;
                     continue;
                 }
-                const Layout::Point from = result.Positions[static_cast<std::size_t>(edges[e].From)];
-                const Layout::Point to = result.Positions[static_cast<std::size_t>(edges[e].To)];
-                const Layout::Size fromSize = sizes[static_cast<std::size_t>(edges[e].From)];
-                const Layout::Size toSize = sizes[static_cast<std::size_t>(edges[e].To)];
+                const Graph::Point from = result.Positions[static_cast<std::size_t>(edges[e].From)];
+                const Graph::Point to = result.Positions[static_cast<std::size_t>(edges[e].To)];
+                const Graph::Size fromSize = sizes[static_cast<std::size_t>(edges[e].From)];
+                const Graph::Size toSize = sizes[static_cast<std::size_t>(edges[e].To)];
                 const bool leaves = std::abs(route.front().Y - (from.Y + fromSize.Height)) < 0.01f && route.front().X >= from.X && route.front().X <= from.X + fromSize.Width;
                 const bool arrives = std::abs(route.back().Y - to.Y) < 0.01f && route.back().X >= to.X && route.back().X <= to.X + toSize.Width;
                 loosePorts += leaves && arrives ? 0 : 1;
@@ -450,16 +450,16 @@ namespace Manifold::Tests
 
         void LayoutShapes()
         {
-            CHECK(Layout::LayeredLayout({}, {}, 0).Positions.empty());
+            CHECK(Graph::LayeredLayout({}, {}, 0).Positions.empty());
 
-            const std::vector<Layout::Size> one{ { 120.0f, 40.0f } };
-            const Layout::Result single = Layout::LayeredLayout(one, {}, 0);
+            const std::vector<Graph::Size> one{ { 120.0f, 40.0f } };
+            const Graph::Result single = Graph::LayeredLayout(one, {}, 0);
             CHECK(single.Positions.size() == 1 && single.Positions[0].X == 0.0f && single.Positions[0].Y == 0.0f);
             CHECK(single.Width == 120.0f && single.Height == 40.0f);
 
-            const std::vector<Layout::Size> sizes{ { 200.0f, 60.0f }, { 140.0f, 90.0f }, { 260.0f, 40.0f }, { 180.0f, 70.0f }, { 100.0f, 30.0f } };
-            const std::vector<Layout::Edge> edges{ { 0, 1 }, { 0, 2 }, { 1, 3 }, { 2, 3 }, { 3, 1 }, { 3, 3 }, { 3, 4 }, { 0, 4 } };
-            const Layout::Result diamond = Layout::LayeredLayout(sizes, edges, 0);
+            const std::vector<Graph::Size> sizes{ { 200.0f, 60.0f }, { 140.0f, 90.0f }, { 260.0f, 40.0f }, { 180.0f, 70.0f }, { 100.0f, 30.0f } };
+            const std::vector<Graph::Edge> edges{ { 0, 1 }, { 0, 2 }, { 1, 3 }, { 2, 3 }, { 3, 1 }, { 3, 3 }, { 3, 4 }, { 0, 4 } };
+            const Graph::Result diamond = Graph::LayeredLayout(sizes, edges, 0);
             CheckLayout(sizes, edges, diamond);
             CHECK(diamond.Layers == (std::vector<int>{ 0, 1, 1, 2, 3 }));
             CHECK(diamond.Back == (std::vector<bool>{ false, false, false, false, true, true, false, false }));
@@ -470,8 +470,8 @@ namespace Manifold::Tests
             CHECK(diamond.Routes[4].size() == 6 && diamond.Routes[4][2].X > side);
 
             std::mt19937 random(1234);
-            std::vector<Layout::Size> many;
-            std::vector<Layout::Edge> links;
+            std::vector<Graph::Size> many;
+            std::vector<Graph::Edge> links;
             for (int v = 0; v < 600; ++v)
             {
                 many.push_back({ 80.0f + static_cast<float>(random() % 300), 30.0f + static_cast<float>(random() % 200) });
@@ -483,7 +483,7 @@ namespace Manifold::Tests
                     links.push_back({ static_cast<int>(random() % static_cast<unsigned>(v)), v });
             }
             const auto started = std::chrono::steady_clock::now();
-            const Layout::Result large = Layout::LayeredLayout(many, links, 0);
+            const Graph::Result large = Graph::LayeredLayout(many, links, 0);
             const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
             std::printf("  layout of %zu blocks and %zu edges took %.1f ms\n", many.size(), links.size(), ms);
             CheckLayout(many, links, large);

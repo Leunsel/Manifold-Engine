@@ -36,6 +36,8 @@ namespace
                 options.ProfileReport = argument.substr(17);
             else if (argument.rfind(L"--profile-seconds=", 0) == 0)
                 options.ProfileSeconds = std::max(1, std::min(3600, _wtoi(argument.substr(18).c_str())));
+            else if (argument == L"--layout-audit")
+                options.LayoutAudit = true;
             else if (!argument.empty() && argument[0] != L'-')
                 options.Table = argument;
         }
