@@ -419,11 +419,14 @@ namespace
 
         AddMethod(sceneManager, "GetActiveScene", tScene, {}, {}, true, +[](void*, void**, void**) -> void* { return BoxScene(g_scenes[0].Handle); });
         AddMethod(g_sceneStruct, "get_handle", tInt, {}, {}, false, +[](void* self, void**, void**) -> void* { return BoxInt(StructInt(self)); });
-        AddMethod(g_sceneStruct, "get_name", tString, {}, {}, false, +[](void* self, void**, void** exc) -> void*
-            {
-                const NativeScene* scene = SceneOf(self, exc);
-                return scene ? SceneText(scene->Name) : nullptr;
-            });
+        // The Survivalists stripped Scene.get_name; --il2cpp-alt keeps the name only
+        // behind the engine's internal call Scene::GetNameInternal.
+        if (!g_sceneAlt)
+            AddMethod(g_sceneStruct, "get_name", tString, {}, {}, false, +[](void* self, void**, void** exc) -> void*
+                {
+                    const NativeScene* scene = SceneOf(self, exc);
+                    return scene ? SceneText(scene->Name) : nullptr;
+                });
         // Moon Sweepers (Unity 6000.6) kept only these three: --il2cpp-alt has
         // no scene list and no root list, the explorer walks the Transforms.
         if (!g_sceneAlt)
@@ -898,6 +901,17 @@ extern "C"
     {
         if (!name)
             return nullptr;
+        if (std::strcmp(name, "UnityEngine.SceneManagement.Scene::GetNameInternal(System.Int32)") == 0)
+            return reinterpret_cast<void*>(+[](int handle) -> void*
+                {
+                    SceneTouch();
+                    for (const NativeScene& scene : g_scenes)
+                    {
+                        if (scene.Handle == handle)
+                            return SceneText(scene.Name);
+                    }
+                    return nullptr;
+                });
         if (std::strcmp(name, "UnityEngine.Application::get_runInBackground()") == 0)
             return reinterpret_cast<void*>(+[]() -> bool { SceneTouch(); return g_il2cppRunInBackground != 0; });
         if (std::strcmp(name, "UnityEngine.Application::set_runInBackground(System.Boolean)") == 0)

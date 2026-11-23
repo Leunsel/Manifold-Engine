@@ -1279,6 +1279,38 @@ namespace Manifold::Target
         return done(Status::Success());
     }
 
+    // ∑ Scene.get_name is stripped in some builds (The Survivalists, Master Duel); the static
+    //   Scene.GetNameInternal(int) or, failing that, the engine's internal call behind it still answers.
+    std::map<std::int32_t, std::string> UnityExplorer::Il2SceneNames(const std::vector<std::int32_t>& handles)
+    {
+        using Arg = Il2Recipe::Arg;
+        std::map<std::int32_t, std::string> names;
+        if (handles.empty())
+            return names;
+        const std::uint64_t method = Il2Method(kSceneClass, "GetNameInternal", { "System.Int32" });
+        const std::uint64_t icall = method ? 0 : Il2Icall("UnityEngine.SceneManagement.Scene::GetNameInternal(System.Int32)");
+        if (!method && !icall)
+            return names;
+        Il2Recipe recipe(*this);
+        std::vector<std::pair<std::int32_t, std::uint64_t>> cells;
+        for (const std::int32_t handle : handles)
+        {
+            if (!handle)
+                continue;
+            const int call = method ? recipe.Invoke(method, Arg::Null(), { recipe.Bytes(&handle, sizeof(handle)) }).Call
+                                    : recipe.Batch.Call(icall, static_cast<std::uint64_t>(static_cast<std::uint32_t>(handle)));
+            cells.emplace_back(handle, recipe.Chars(call, kNameChars));
+        }
+        if (!Il2Run(recipe, kCallWait))
+            return names;
+        for (const auto& [handle, cell] : cells)
+        {
+            if (std::string name = recipe.TextAt(cell); !name.empty())
+                names[handle] = std::move(name);
+        }
+        return names;
+    }
+
     void UnityExplorer::Il2ReadScenes()
     {
         using Arg = Il2Recipe::Arg;
@@ -1317,6 +1349,18 @@ namespace Manifold::Target
             std::vector<Il2SceneRoots> found;
             if (const Status walked = Il2WalkRoots(true, kTreeGroup, found); !walked)
                 return Fail("Could not read the scenes: " + walked.Text);
+            std::vector<std::int32_t> nameless;
+            for (const Il2SceneRoots& read : found)
+            {
+                if (read.Name.empty())
+                    nameless.push_back(read.Handle);
+            }
+            const std::map<std::int32_t, std::string> named = Il2SceneNames(nameless);
+            for (Il2SceneRoots& read : found)
+            {
+                if (const auto it = named.find(read.Handle); read.Name.empty() && it != named.end())
+                    read.Name = it->second;
+            }
             for (Il2SceneRoots& read : found)
             {
                 // DontDestroyOnLoad has its own entry below.
@@ -1389,10 +1433,22 @@ namespace Manifold::Target
                 scene.RootCount = second.Number<std::int32_t>(plan.RootCount, -1);
                 scene.Loaded = plan.Loaded ? second.Number<std::uint8_t>(plan.Loaded) != 0 : true;
                 scene.Active = scene.Handle == active;
-                if (scene.Name.empty())
-                    scene.Name = "Scene #" + std::to_string(scene.Handle);
                 if (scene.Slot)
                     tree.Scenes.push_back(std::move(scene));
+            }
+            std::vector<std::int32_t> nameless;
+            for (const UnityScene& scene : tree.Scenes)
+            {
+                if (scene.Name.empty())
+                    nameless.push_back(scene.Handle);
+            }
+            const std::map<std::int32_t, std::string> named = Il2SceneNames(nameless);
+            for (UnityScene& scene : tree.Scenes)
+            {
+                if (!scene.Name.empty())
+                    continue;
+                const auto it = named.find(scene.Handle);
+                scene.Name = it != named.end() ? it->second : "Scene #" + std::to_string(scene.Handle);
             }
         }
         UnityScene dontDestroy;
@@ -1881,6 +1937,7 @@ namespace Manifold::Target
         std::uint64_t activeSelfCell = 0;
         std::uint64_t activeHierarchyCell = 0;
         std::uint64_t sceneNameCell = 0;
+        std::uint64_t sceneHandleCell = 0;
         std::uint64_t parentNameCell = 0;
         std::uint64_t childCountCell = 0;
         std::uint64_t ownerNameCell = 0;
@@ -1905,6 +1962,7 @@ namespace Manifold::Target
                 activeHierarchyCell = recipe.Unbox(recipe.Invoke(Il2Method(kGameObjectClass, "get_activeInHierarchy", {}), self).Call, 1);
                 const Arg scene = Arg::Of(recipe.Invoke(Il2Method(kGameObjectClass, "get_scene", {}), self).Call);
                 sceneNameCell = recipe.Chars(recipe.Invoke(Il2Method(kSceneClass, "get_name", {}), recipe.This(scene)).Call, kNameChars);
+                sceneHandleCell = recipe.Unbox(scene.Call, 4);
                 const Arg transform = Arg::Of(recipe.Invoke(Il2Method(kGameObjectClass, "get_transform", {}), self).Call);
                 keptTransform = recipe.Hold(transform);
                 vectors = planVectors(recipe, transform);
@@ -2038,6 +2096,12 @@ namespace Manifold::Target
         info.ActiveSelf = recipe.Number<std::uint8_t>(activeSelfCell) != 0;
         info.ActiveInHierarchy = recipe.Number<std::uint8_t>(activeHierarchyCell) != 0;
         info.Scene = recipe.TextAt(sceneNameCell);
+        if (const std::int32_t handle = recipe.Number<std::int32_t>(sceneHandleCell); info.Scene.empty() && handle)
+        {
+            const std::map<std::int32_t, std::string> named = Il2SceneNames({ handle });
+            const auto it = named.find(handle);
+            info.Scene = it != named.end() ? it->second : "Scene #" + std::to_string(handle);
+        }
         info.Transform.Object = recipe.Address(keptTransform);
         readVectors(recipe, vectors, info.Transform);
         info.Parent = recipe.Address(keptParent);
