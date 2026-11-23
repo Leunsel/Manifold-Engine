@@ -76,6 +76,9 @@ namespace Manifold::Disasm
         // Keep, values of at least ImmediateThreshold (Partial) or every immediate.
         MaskMode Immediates = MaskMode::Partial;
         std::uint64_t ImmediateThreshold = 0x10000;
+        // Keep, SIB bytes only (Partial: base and index registers of memory
+        // operands) or SIB and ModRM bytes whose reg field is a register (All).
+        MaskMode Registers = MaskMode::Partial;
         int MaxBytes = 128;
         int MinBytes = 8;
         bool StopAtFunctionEnd = false;

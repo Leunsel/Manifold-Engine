@@ -272,9 +272,18 @@ namespace Manifold::Disasm
             for (std::size_t i = 0; i < layout->PrefixEnd; ++i)
                 out[first + i].Role = ByteRole::Prefix;
             if (layout->ModRm < line.Length)
+            {
                 out[first + layout->ModRm].Role = ByteRole::ModRm;
+                // ∑ Only when the reg field names a register: in 83 EC 20 it is
+                //   an opcode extension (/5 sub, /0 add), and a wildcard there
+                //   would match other instructions.
+                out[first + layout->ModRm].Wild = options.Registers == MaskMode::All && layout->RegisterInReg;
+            }
             if (layout->Sib < line.Length)
+            {
                 out[first + layout->Sib].Role = ByteRole::ModRm;
+                out[first + layout->Sib].Wild = options.Registers != MaskMode::Keep;
+            }
             for (const InstructionField& field : layout->Fields)
             {
                 ByteRole role = ByteRole::Immediate;

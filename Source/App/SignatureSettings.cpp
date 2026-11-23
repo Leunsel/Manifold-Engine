@@ -25,6 +25,7 @@ namespace Manifold
         options.Offsets = Mode(settings.SignatureOffsets);
         options.Immediates = Mode(settings.SignatureImmediates);
         options.ImmediateThreshold = ParseHex(Trim(settings.SignatureImmediateThreshold)).value_or(0x10000);
+        options.Registers = Mode(settings.SignatureRegisters);
         options.MaxBytes = std::clamp(settings.SignatureMaxBytes, 8, 1024);
         options.MinBytes = std::clamp(settings.SignatureMinBytes, 0, 256);
         options.StopAtFunctionEnd = settings.SignatureStopAtFunctionEnd;
