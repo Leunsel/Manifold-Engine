@@ -28,7 +28,8 @@ namespace Manifold::UI
             float Height;
         };
 
-        constexpr SizeStep kMainSizes[] = { { "main minimum", 0.0f, 0.0f }, { "main 1280×800", 1280.0f, 800.0f }, { "main 1920×1080", 1920.0f, 1080.0f } };
+        constexpr SizeStep kMainSizes[] = { { "main minimum", 0.0f, 0.0f }, { "main 1180×760 (first start)", 1180.0f, 760.0f }, { "main 1280×800", 1280.0f, 800.0f },
+            { "main 1920×1080", 1920.0f, 1080.0f } };
         constexpr SizeStep kToolSizes[] = { { "minimum", 0.0f, 0.0f }, { "medium", 760.0f, 540.0f }, { "large", 1280.0f, 860.0f } };
         // the main window while tool windows are swept: room for the large size
         constexpr float kToolMainWidth = 1600.0f;
@@ -55,35 +56,6 @@ namespace Manifold::UI
                     roots.push_back(window->ID);
             }
             return roots;
-        }
-
-        // "<icon>  Templates###templatemanager" → "Templates"
-        std::string Visible(std::string_view name)
-        {
-            if (const std::size_t hidden = name.find("##"); hidden != std::string_view::npos)
-                name = name.substr(0, hidden);
-            std::size_t start = 0;
-            while (start < name.size() && (static_cast<unsigned char>(name[start]) >= 0x80 || name[start] == ' '))
-                ++start;
-            name = name.substr(start);
-            return std::string(name.empty() ? std::string_view("Main Window") : name);
-        }
-
-        // a child window is "<parent name>/<id>_<hash>"; its own part reads better without the hash
-        std::string WindowLabel(const ImGuiWindow* window)
-        {
-            const ImGuiWindow* root = window->RootWindow ? window->RootWindow : window;
-            std::string label = Visible(root->Name);
-            if (window == root)
-                return label;
-            std::string_view own = window->Name;
-            if (const std::size_t slash = own.rfind('/'); slash != std::string_view::npos)
-                own = own.substr(slash + 1);
-            if (const std::size_t hash = own.rfind('_'); hash != std::string_view::npos && own.size() - hash == 9)
-                own = own.substr(0, hash);
-            while (!own.empty() && own.front() == '#')
-                own.remove_prefix(1);
-            return label + " › " + (own.empty() ? std::string("child") : std::string(own));
         }
 
         std::string ScaleLabel(float scale)
@@ -293,7 +265,7 @@ namespace Manifold::UI
                     for (ImGuiTabItem& tab : bar->Tabs)
                     {
                         if (tab.ID != bar->SelectedTabId)
-                            m_tabs.push_back({ bar->ID, tab.ID, Visible(ImGui::TabBarGetTabName(bar, &tab)) });
+                            m_tabs.push_back({ bar->ID, tab.ID, Layout::Audit::VisibleName(ImGui::TabBarGetTabName(bar, &tab)) });
                     }
                 }
             }
@@ -348,14 +320,14 @@ namespace Manifold::UI
             const ImGuiWindow* root = window->RootWindow ? window->RootWindow : window;
             if (!m_mainOnly && std::find(m_targets.begin(), m_targets.end(), root->ID) == m_targets.end())
                 continue;
-            const std::string label = WindowLabel(window);
+            const std::string label = problem.Place.empty() ? Layout::Audit::PlaceName(window) : problem.Place;
             const std::string kind = Layout::Audit::KindName(problem.What);
             const std::string column = problem.What == Layout::Audit::Kind::ColumnClipped ? ColumnOf(problem.Detail) : std::string();
             const std::string key = label + '\x1f' + kind + '\x1f' + column;
             Finding& finding = m_found[key];
             if (finding.Kind.empty())
             {
-                finding.Root = Visible(root->Name);
+                finding.Root = Layout::Audit::VisibleName(root->Name);
                 finding.Window = label;
                 finding.Kind = kind;
             }

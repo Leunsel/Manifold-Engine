@@ -61,6 +61,33 @@ namespace Manifold::Layout::Audit
         }
     }
 
+    std::string VisibleName(std::string_view name)
+    {
+        if (const std::size_t hidden = name.find("##"); hidden != std::string_view::npos)
+            name = name.substr(0, hidden);
+        std::size_t start = 0;
+        while (start < name.size() && (static_cast<unsigned char>(name[start]) >= 0x80 || name[start] == ' '))
+            ++start;
+        name = name.substr(start);
+        return std::string(name.empty() ? std::string_view("Main Window") : name);
+    }
+
+    std::string PlaceName(const ImGuiWindow* window)
+    {
+        const ImGuiWindow* root = window->RootWindow ? window->RootWindow : window;
+        std::string label = VisibleName(root->Name);
+        if (window == root)
+            return label;
+        std::string_view own = window->Name;
+        if (const std::size_t slash = own.rfind('/'); slash != std::string_view::npos)
+            own = own.substr(slash + 1);
+        if (const std::size_t hash = own.rfind('_'); hash != std::string_view::npos && own.size() - hash == 9)
+            own = own.substr(0, hash);
+        while (!own.empty() && own.front() == '#')
+            own.remove_prefix(1);
+        return label + " › " + (own.empty() ? std::string("child") : std::string(own));
+    }
+
     const char* KindName(Kind kind)
     {
         switch (kind)
@@ -123,6 +150,7 @@ namespace Manifold::Layout::Audit
             problem.What = kind;
             problem.Window = window->ID;
             problem.WindowName = window->RootWindow ? window->RootWindow->Name : window->Name;
+            problem.Place = PlaceName(window);
             problem.FirstFrame = frame;
         }
         problem.Viewport = window->Viewport ? window->Viewport->ID : 0;

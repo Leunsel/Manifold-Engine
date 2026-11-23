@@ -29,6 +29,7 @@ namespace Manifold::Layout::Audit
         Kind What = Kind::CellOverflow;
         ImGuiID Window = 0;
         std::string WindowName;
+        std::string Place;   // readable: the window's visible title, and the child it happened in ("Main Window › scansettings")
         ImGuiID Viewport = 0;
         ImRect Rect;      // what was drawn
         ImRect Bounds;    // where it had to stay
@@ -40,6 +41,10 @@ namespace Manifold::Layout::Audit
     };
 
     const char* KindName(Kind kind);
+    // A window's visible title: "<icon>  Templates###templatemanager" → "Templates"; a title of only an ID → "Main Window".
+    std::string VisibleName(std::string_view name);
+    // The title of a window's root and, for a child, the child's own ID without its hash.
+    std::string PlaceName(const ImGuiWindow* window);
 
     void SetEnabled(bool enabled);
     bool Enabled();

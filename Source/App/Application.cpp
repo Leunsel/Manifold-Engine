@@ -93,7 +93,7 @@ namespace Manifold
         m_host.SetCorners(m_settings.Theme.Corners);
         WatchSystemTheme();
         Layout::Audit::SetReporter([](const Layout::Audit::Problem& problem) {
-            LOG_WARN("Layout", problem.WindowName + ": " + Layout::Audit::KindName(problem.What) + ", " + problem.Detail);
+            LOG_WARN("Layout", problem.Place + ": " + Layout::Audit::KindName(problem.What) + ", " + problem.Detail);
         });
     }
 

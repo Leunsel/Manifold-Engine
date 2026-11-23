@@ -61,12 +61,10 @@ namespace Manifold::UI
                 const Layout::Audit::Problem& problem = problems[static_cast<std::size_t>(index)];
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                const std::size_t hidden = problem.WindowName.find("###");
-                const std::string name = hidden == std::string::npos ? problem.WindowName : problem.WindowName.substr(0, hidden);
                 Layout::RowSelectable("##row", false);
                 if (ImGui::IsItemHovered())
                     Layout::Audit::Highlight(problem.Window, problem.Rect);
-                Layout::Text(name);
+                Layout::Text(problem.Place);
                 ImGui::TableNextColumn();
                 Layout::Colored(Layout::Audit::KindName(problem.What), problem.What == Layout::Audit::Kind::WindowClipped || problem.What == Layout::Audit::Kind::ColumnClipped ? ManifoldTheme::Warning : ManifoldTheme::Error);
                 ImGui::TableNextColumn();
