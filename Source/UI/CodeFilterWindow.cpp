@@ -73,6 +73,7 @@ namespace Manifold::UI
         }
         options.Unwind = m_unwind;
         options.Exports = m_exports;
+        options.Pointers = m_pointers;
         options.Calls = engine.Process()->Is64Bit() ? engine.Options().CodeFilterCalls : true;
         m_error.clear();
         m_process = engine.Process();
@@ -264,7 +265,7 @@ namespace Manifold::UI
             ManifoldTheme::Warning, Layout::Overflow::Wrap);
         Layout::Spacing(Layout::Space::S);
         {
-            Layout::Row sources("##cfsources", { Layout::Size::Fit(), Layout::Size::Fit(), Layout::Size::Fit(), Layout::Size::Fit() }, Layout::Toolbar());
+            Layout::Row sources("##cfsources", { Layout::Size::Fit(), Layout::Size::Fit(), Layout::Size::Fit(), Layout::Size::Fit(), Layout::Size::Fit() }, Layout::Toolbar());
             sources.Cell([&] { Layout::Text("Functions From"); });
             sources.Cell([&] {
                 ImGui::BeginDisabled(!is64Bit || running);
@@ -279,6 +280,13 @@ namespace Manifold::UI
                 ImGui::Checkbox("Exports", &m_exports);
                 ImGui::EndDisabled();
                 ItemTooltip("The functions a module exports by name.");
+            });
+            sources.Cell([&] {
+                ImGui::BeginDisabled(running);
+                ImGui::Checkbox("Function Pointers", &m_pointers);
+                ImGui::EndDisabled();
+                ItemTooltip("Functions that are only reached through a pointer: virtual methods (from their vtables), callbacks and function tables, read from the "
+                            "module's relocations. A direct call never names them, and on 64-bit a small one has no unwind entry either.");
             });
             sources.Cell([&] {
                 Settings& settings = engine.Options();

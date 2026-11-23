@@ -11,8 +11,12 @@
 #include "Target/CoverageProtocol.h"
 
 #include <algorithm>
+#include <cstring>
 #include <map>
+#include <span>
 #include <utility>
+
+#include <windows.h>
 
 namespace Manifold
 {
@@ -81,6 +85,115 @@ namespace Manifold
             const bool padded = process.ReadExact(target - 1, &before, 1) && (before == 0xCC || before == 0x90 || before == 0xC3);
             return calls >= 2 || (target & 0xF) == 0 || padded;
         }
+
+        constexpr std::size_t kScanChunk = 1u << 20;
+
+        // Every slot of the module that the loader fixed up when it moved the
+        // image: absolute addresses. In data these are the vtables, function
+        // tables and callbacks; in 32-bit code the immediates (push offset
+        // f). Empty when the module has no relocations.
+        std::vector<std::uint64_t> RelocatedSlots(const Target::Process& process, const Target::ModuleInfo& module)
+        {
+            std::vector<std::uint64_t> slots;
+            IMAGE_DOS_HEADER dos{};
+            if (!process.ReadExact(module.Base, &dos, sizeof(dos)) || dos.e_magic != IMAGE_DOS_SIGNATURE)
+                return slots;
+            DWORD rva = 0;
+            DWORD size = 0;
+            if (process.Is64Bit())
+            {
+                IMAGE_NT_HEADERS64 nt{};
+                if (!process.ReadExact(module.Base + dos.e_lfanew, &nt, sizeof(nt)) || nt.Signature != IMAGE_NT_SIGNATURE)
+                    return slots;
+                rva = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress;
+                size = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
+            }
+            else
+            {
+                IMAGE_NT_HEADERS32 nt{};
+                if (!process.ReadExact(module.Base + dos.e_lfanew, &nt, sizeof(nt)) || nt.Signature != IMAGE_NT_SIGNATURE)
+                    return slots;
+                rva = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress;
+                size = nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
+            }
+            if (!rva || size < 8 || static_cast<std::uint64_t>(rva) + size > module.Size)
+                return slots;
+            std::vector<std::uint8_t> blob(size);
+            if (process.Read(module.Base + rva, blob.data(), blob.size()) != blob.size())
+                return slots;
+            const unsigned wanted = process.Is64Bit() ? IMAGE_REL_BASED_DIR64 : IMAGE_REL_BASED_HIGHLOW;
+            std::size_t at = 0;
+            while (at + 8 <= blob.size())
+            {
+                std::uint32_t page = 0;
+                std::uint32_t length = 0;
+                std::memcpy(&page, blob.data() + at, 4);
+                std::memcpy(&length, blob.data() + at + 4, 4);
+                if (length < 8 || at + length > blob.size())
+                    break;
+                for (std::size_t entry = at + 8; entry + 2 <= at + length; entry += 2)
+                {
+                    std::uint16_t value = 0;
+                    std::memcpy(&value, blob.data() + entry, 2);
+                    if ((value >> 12) == wanted && page + (value & 0xFFFu) < module.Size)
+                        slots.push_back(module.Base + page + (value & 0xFFFu));
+                }
+                at += length;
+            }
+            std::sort(slots.begin(), slots.end());
+            return slots;
+        }
+
+        template <class Count>
+        void PointersAt(const Target::Process& process, std::span<const std::uint64_t> slots, Count&& count)
+        {
+            const std::size_t size = static_cast<std::size_t>(process.PointerSize());
+            std::vector<std::uint8_t> page(0x1000 + 8);
+            std::uint64_t loaded = ~0ull;
+            std::size_t got = 0;
+            for (const std::uint64_t slot : slots)
+            {
+                const std::uint64_t base = slot & ~0xFFFull;
+                if (base != loaded)
+                {
+                    got = process.Read(base, page.data(), page.size());
+                    loaded = base;
+                }
+                const std::size_t offset = static_cast<std::size_t>(slot - base);
+                if (offset + size > got)
+                    continue;
+                std::uint64_t value = 0;
+                std::memcpy(&value, page.data() + offset, size);
+                count(value);
+            }
+        }
+
+        // Without relocations: every aligned pointer-sized value in the
+        // module's data that points into its code.
+        template <class Count>
+        void ScanData(const Target::Process& process, const Target::ModuleInfo& module, Count&& count)
+        {
+            const std::size_t size = static_cast<std::size_t>(process.PointerSize());
+            std::vector<std::uint8_t> buffer(kScanChunk);
+            for (const Target::RegionInfo& region : process.Regions(module.Base, module.Base + module.Size))
+            {
+                if (!region.Committed() || !region.Readable() || region.Executable() || region.Guarded())
+                    continue;
+                const std::uint64_t start = std::max(region.Base, module.Base);
+                const std::uint64_t end = std::min(region.End(), module.Base + module.Size);
+                for (std::uint64_t at = start; at < end; at += kScanChunk)
+                {
+                    const std::size_t wanted = static_cast<std::size_t>(std::min<std::uint64_t>(kScanChunk, end - at));
+                    const std::size_t got = process.Read(at, buffer.data(), wanted);
+                    for (std::size_t i = 0; i + size <= got; i += size)
+                    {
+                        std::uint64_t value = 0;
+                        std::memcpy(&value, buffer.data() + i, size);
+                        count(value);
+                    }
+                }
+            }
+        }
     }
 
     std::string CodeSourceText(std::uint8_t sources)
@@ -98,6 +211,7 @@ namespace Manifold
         add(SourceExport, "Export");
         add(SourceCall, "Call");
         add(SourceBlock, "Block");
+        add(SourcePointer, "Pointer");
         return text;
     }
 
@@ -216,11 +330,15 @@ namespace Manifold
                     ++count.Exports;
                 }
             }
+            std::shared_ptr<Disasm::DissectResult> dissected;
             if (calls)
             {
-                const std::shared_ptr<Disasm::DissectResult> dissected = Disasm::DissectCode(*process, { module }, progress);
+                dissected = Disasm::DissectCode(*process, { module }, progress);
                 if (dissected && dissected->Cancelled)
                     return Failed("the search for functions was cancelled");
+            }
+            if (calls)
+            {
                 for (const Disasm::ReferencedFunction& function : dissected ? dissected->Functions : std::vector<Disasm::ReferencedFunction>{})
                 {
                     if (!module.Contains(function.Address) || !code.Contains(function.Address))
@@ -238,6 +356,52 @@ namespace Manifold
                     }
                     add(function.Address, SourceCall);
                     ++count.Calls;
+                }
+            }
+            // ∑ Functions only reached through a pointer: virtual methods
+            //   (their vtables), callbacks and function tables. A direct call
+            //   never names them, and a leaf one has no unwind entry either.
+            //   A target must start an unwind function or, outside of one,
+            //   decode cleanly and sit on a 16-byte boundary or after padding,
+            //   which leaves out the case labels of switch tables.
+            if (options.Pointers)
+            {
+                std::map<std::uint64_t, std::uint32_t> pointers;
+                const auto counter = [&](std::uint64_t value)
+                    {
+                        if (code.Contains(value))
+                            ++pointers[value];
+                    };
+                const std::vector<std::uint64_t> slots = RelocatedSlots(*process, module);
+                if (!slots.empty())
+                    PointersAt(*process, slots, counter);
+                else
+                    ScanData(*process, module, counter);
+                if (dissected)
+                {
+                    for (const Disasm::CodeRef& ref : dissected->Refs)
+                    {
+                        if (ref.Kind() == Disasm::RefKind::Address)
+                            counter(ref.Target);
+                    }
+                }
+                for (const auto& [target, references] : pointers)
+                {
+                    if (!module.Contains(target))
+                        continue;
+                    const auto* holding = functions.Holding(target);
+                    if (holding && holding->first != target)
+                    {
+                        ++count.Rejected;
+                        continue;
+                    }
+                    if (!PlausibleStart(*process, disassembler, target, 0, holding != nullptr))
+                    {
+                        ++count.Rejected;
+                        continue;
+                    }
+                    add(target, SourcePointer);
+                    ++count.Pointers;
                 }
             }
             report.Modules.push_back(std::move(count));

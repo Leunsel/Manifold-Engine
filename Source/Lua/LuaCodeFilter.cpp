@@ -64,6 +64,7 @@ namespace Manifold::Lua
             add(SourceExport, "export");
             add(SourceCall, "call");
             add(SourceBlock, "block");
+            add(SourcePointer, "pointer");
         }
 
         void PushRecord(lua_State* state, const RoundRecord& record)
@@ -100,6 +101,9 @@ namespace Manifold::Lua
                 if (lua_getfield(state, 1, "exports") != LUA_TNIL)
                     options.Exports = lua_toboolean(state, -1) != 0;
                 lua_pop(state, 1);
+                if (lua_getfield(state, 1, "pointers") != LUA_TNIL)
+                    options.Pointers = lua_toboolean(state, -1) != 0;
+                lua_pop(state, 1);
                 if (lua_getfield(state, 1, "calls") != LUA_TNIL)
                     options.Calls = lua_toboolean(state, -1) != 0;
                 lua_pop(state, 1);
@@ -123,6 +127,7 @@ namespace Manifold::Lua
                 SetInteger(state, "unwind", count.Unwind);
                 SetInteger(state, "exports", count.Exports);
                 SetInteger(state, "calls", count.Calls);
+                SetInteger(state, "pointers", count.Pointers);
                 SetInteger(state, "rejected", count.Rejected);
                 lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
             }

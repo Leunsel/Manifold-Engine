@@ -1084,6 +1084,22 @@ struct CoverProbe
 extern "C" __declspec(dllexport) CoverProbe g_coverProbe = {};
 extern "C" __declspec(dllexport) volatile long g_coverBranch = 0;
 
+// A virtual method that is a leaf (no unwind entry on 64-bit), never called
+// directly and not exported: only its vtable leads to it.
+struct CoverShape
+{
+    virtual int Area(int side) const = 0;
+    virtual ~CoverShape() = default;
+};
+
+struct CoverSquare final : CoverShape
+{
+    int Area(int side) const override { return side * side + 3; }
+};
+
+CoverSquare g_coverSquare;
+extern "C" __declspec(dllexport) CoverShape* volatile g_coverShape = &g_coverSquare;
+
 extern "C" __declspec(dllexport) __declspec(noinline) int CoverLeaf(int value)
 {
     return value * 3 + 1;
@@ -1167,6 +1183,8 @@ namespace
             seen = trigger;
             const int value = g_coverProbe.Input;
             if (CoverAction(value) != 12 * value + 22)
+                ::InterlockedIncrement(&g_coverProbe.Wrong);
+            if (g_coverShape->Area(value) != value * value + 3)
                 ::InterlockedIncrement(&g_coverProbe.Wrong);
             ::InterlockedIncrement(&g_coverProbe.Action);
         }

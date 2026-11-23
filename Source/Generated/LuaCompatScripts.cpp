@@ -7293,10 +7293,10 @@ do
 
   define(codefilter, "prepare", {
     params = {
-      { name = "options", type = "table", optional = true, keys = { modules = "table", unwind = "boolean", exports = "boolean", calls = "boolean" } },
+      { name = "options", type = "table", optional = true, keys = { modules = "table", unwind = "boolean", exports = "boolean", pointers = "boolean", calls = "boolean" } },
     },
     returns = "`{ total, seconds, modules }`, or nil, error",
-    doc = "Collects the candidates and starts a new filter (the rounds and the undo steps before are gone). `options.modules` lists module names, by default every module that is not part of Windows or Manifold's own library; `unwind` and `exports` (both on by default) and `calls` (on by default for 32-bit, from Settings for 64-bit) choose the sources. `modules` in the result lists `{ name, functions, unwind, exports, calls, rejected }` per module. Call targets take a code dissect of each module, which takes a while in a large game. `ME-1016` for a module that is not loaded, `ME-1020` when nothing can be collected.",
+    doc = "Collects the candidates and starts a new filter (the rounds and the undo steps before are gone). `options.modules` lists module names, by default every module that is not part of Windows or Manifold's own library; `unwind`, `exports` and `pointers` (all on by default) and `calls` (on by default for 32-bit, from Settings for 64-bit) choose the sources; `pointers` takes the functions that are only reached through a pointer (virtual methods from their vtables, callbacks, function tables), from the module's relocations and, with `calls`, the code's own address references. `modules` in the result lists `{ name, functions, unwind, exports, calls, pointers, rejected }` per module. Call targets take a code dissect of each module, which takes a while in a large game. `ME-1016` for a module that is not loaded, `ME-1020` when nothing can be collected.",
   }, function(options)
     return result(native.codefilterPrepare(options or EMPTY))
   end)
@@ -7354,7 +7354,7 @@ do
   define(codefilter, "candidates", {
     params = { { name = "limit", type = "integer", optional = true } },
     returns = "list of `{ address, name, function, sources }`",
-    doc = "What is left, in address order, at most `limit` (default 1000, up to 1000000). `name` is the address as the disassembler names it, `sources` lists where it came from (`\"unwind\"`, `\"export\"`, `\"call\"`, `\"block\"`), `function` is set for blocks.",
+    doc = "What is left, in address order, at most `limit` (default 1000, up to 1000000). `name` is the address as the disassembler names it, `sources` lists where it came from (`\"unwind\"`, `\"export\"`, `\"call\"`, `\"pointer\"`, `\"block\"`), `function` is set for blocks.",
   }, function(limit)
     if limit ~= nil and (limit < 1 or limit > 1000000) then
       misuse("manifold.codefilter.candidates: limit must be 1 to 1000000")
@@ -7371,14 +7371,14 @@ do
 
   define(codefilter, "history", {
     returns = "list of `{ kind, before, after, hits, skipped, seconds }`",
-    doc = "The steps since `prepare`, oldest first: rounds (`\"filterOut\"`, `\"keepOnly\"`) and refines (`\"refine\"`).",
+)MLUA"),
+            std::string_view(R"MLUA(    doc = "The steps since `prepare`, oldest first: rounds (`\"filterOut\"`, `\"keepOnly\"`) and refines (`\"refine\"`).",
   }, function()
     return native.codefilterHistory()
   end)
 end
 
-)MLUA"),
-            std::string_view(R"MLUA(local dotnet = area("dotnet", "The .NET runtime of a .NET game (.NET Framework or .NET 5 and later, 64-bit and 32-bit), read from outside the game by Manifold's .NET helper through the runtime's own data access library: nothing runs inside the game. `load` reads the classes, as Extensions > .NET does; the other functions need that and return `nil` and an `ME-4104` error before it. A class is named `\"Namespace.Class\"`, a nested one `\"Namespace.Outer+Inner\"`, and `\"Class\"` alone works when it is unique. A field or method of a class is written `\"Class:Name\"`, which also resolves as an address everywhere. Objects move when the garbage collector runs, so an object address is good for the moment; a path from a static field (`value`, `address`) finds the object again each time. Only classes the runtime has loaded are listed, and only methods it has compiled have an address.")
+local dotnet = area("dotnet", "The .NET runtime of a .NET game (.NET Framework or .NET 5 and later, 64-bit and 32-bit), read from outside the game by Manifold's .NET helper through the runtime's own data access library: nothing runs inside the game. `load` reads the classes, as Extensions > .NET does; the other functions need that and return `nil` and an `ME-4104` error before it. A class is named `\"Namespace.Class\"`, a nested one `\"Namespace.Outer+Inner\"`, and `\"Class\"` alone works when it is unique. A field or method of a class is written `\"Class:Name\"`, which also resolves as an address everywhere. Objects move when the garbage collector runs, so an object address is good for the moment; a path from a static field (`value`, `address`) finds the object again each time. Only classes the runtime has loaded are listed, and only methods it has compiled have an address.")
 
 define(dotnet, "load", {
   returns = "true, or nil, error",
@@ -7571,12 +7571,12 @@ end)
 
 define(doc, "inherit", {
   params = {
-    { name = "target", type = "function" },
+)MLUA"),
+            std::string_view(R"MLUA(    { name = "target", type = "function" },
     { name = "source", type = "function|string" },
   },
   returns = "true, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Gives a wrapper the documentation of what it wraps, so a `function(...)` wrapper keeps the parameters and text of the original in the help.",
+  doc = "Gives a wrapper the documentation of what it wraps, so a `function(...)` wrapper keeps the parameters and text of the original in the help.",
 }, function(target, source)
   return docResult(native.docInherit(target, source))
 end)
@@ -7801,12 +7801,12 @@ local function checkOptions(path, keys, options)
     return {}
   end
   if type(options) ~= "table" then
-    misuse(("%s: options must be a table, got %s"):format(path, kindOf(options)))
+)MLUA"),
+            std::string_view(R"MLUA(    misuse(("%s: options must be a table, got %s"):format(path, kindOf(options)))
   end
   local names = nil
   for key, value in pairs(options) do
-)MLUA"),
-            std::string_view(R"MLUA(    local kind = type(key) == "string" and keys[key]
+    local kind = type(key) == "string" and keys[key]
     if not kind then
       names = names or table.concat(sortedNames(keys), ", ")
       misuse(("%s: options.%s is not an option (known options: %s)"):format(path, tostring(key), names))
@@ -8124,12 +8124,12 @@ widgetObject = function(entry)
     return updateEntry(prefix .. ".removeRow", entry, WIDGET_KEYS.table, update)
   end)
   method("getItems", {}, function()
-    if entry.kind ~= "combo" and entry.kind ~= "radio" and entry.kind ~= "tree" then
+)MLUA"),
+            std::string_view(R"MLUA(    if entry.kind ~= "combo" and entry.kind ~= "radio" and entry.kind ~= "tree" then
       misuse(prefix .. ".getItems: only a combo, radio or tree has items")
     end
     if not liveEntry(entry) then
-)MLUA"),
-            std::string_view(R"MLUA(      return gone(entry.kind)
+      return gone(entry.kind)
     end
     return native.uiItems(entry.id)
   end)
@@ -8325,9 +8325,9 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
   title = "Widget objects",
   doc = table.concat({
     "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line); `minWidth` and `maxWidth` keep fields, buttons and lists within that range, and a text wraps at `maxWidth`. Nothing is drawn outside its place: a text, heading or button wider than its place ends in `...` and shows all of it as a tooltip; a text or heading with `overflow = \"wrap\"` breaks into lines instead (text only), `\"clip\"` is cut at the edge, `\"visible\"` keeps its own width. A window cannot be made narrower than its widgets need (their smallest sizes: a field 80 points, a button its padding and a few characters). Handlers get the widget as their last argument.",
-    "- Labels of fields (`input`, `number`, `slider`, `combo`, `radio`, `color`): `labelPosition` is `left` (the default: the labels of one column, section or window share a column and the fields line up after it, and a checkbox among them lines up with the fields), `above` or `right` (after the field). Set on a window, column, section, tab or split it is the default for the fields inside. When none is set and a column is too narrow for the labels beside the fields, the labels go above them instead. A field fills the rest of its line unless it has a `width`, so no label is cut off; a negative `height` makes a table, tree, canvas, scrolling column or tab, multi-line input or section fill the height that is left.",
 )MLUA"),
-            std::string_view(R"MLUA(    "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line. In a row, fields, bars, cards, lists and columns without a `width` share the free width equally (a negative `width` asks for a share too), the others get what their content needs, every widget stays inside its share, a `spacer` without a width takes a share too (so what follows it goes to the right), and `wrap = true` moves a widget that does not fit to the next line instead of narrowing the widgets. `gap` (points) sets the space between the widgets of a row, column, section or tab; a column or tab with `scroll = true` scrolls inside its `height` (200).",
+            std::string_view(R"MLUA(    "- Labels of fields (`input`, `number`, `slider`, `combo`, `radio`, `color`): `labelPosition` is `left` (the default: the labels of one column, section or window share a column and the fields line up after it, and a checkbox among them lines up with the fields), `above` or `right` (after the field). Set on a window, column, section, tab or split it is the default for the fields inside. When none is set and a column is too narrow for the labels beside the fields, the labels go above them instead. A field fills the rest of its line unless it has a `width`, so no label is cut off; a negative `height` makes a table, tree, canvas, scrolling column or tab, multi-line input or section fill the height that is left.",
+    "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line. In a row, fields, bars, cards, lists and columns without a `width` share the free width equally (a negative `width` asks for a share too), the others get what their content needs, every widget stays inside its share, a `spacer` without a width takes a share too (so what follows it goes to the right), and `wrap = true` moves a widget that does not fit to the next line instead of narrowing the widgets. `gap` (points) sets the space between the widgets of a row, column, section or tab; a column or tab with `scroll = true` scrolls inside its `height` (200).",
     "- `grid`: places its widgets in `columns` (2) cells per row, row by row. The first column fits its content and the others share the rest, so `text` then a field per row lines labels up; a field without a `label` fills its cell.",
     "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it, `open = false` starts it folded.",
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
@@ -8393,7 +8393,8 @@ local function formWhen(text)
   if not source then
     return nil, 'must name a widget, like "god", "not god" or "mode = Multiplier"'
   end
-  local rule = { source = source, negate = negate ~= nil }
+)MLUA"),
+            std::string_view(R"MLUA(  local rule = { source = source, negate = negate ~= nil }
   if rest ~= "" then
     local list = rest:match("^=%s*(.+)$")
     if not list or negate then
@@ -8414,8 +8415,7 @@ local FORM_VALUE_KINDS = { checkbox = true, input = true, number = true, slider 
 local function formResolver(path, handlers)
   return function(where, key, value)
     if type(value) ~= "string" then
-)MLUA"),
-            std::string_view(R"MLUA(      misuse(("%s: %s.%s must be the name of a handler, got %s"):format(path, where, key, kindOf(value)))
+      misuse(("%s: %s.%s must be the name of a handler, got %s"):format(path, where, key, kindOf(value)))
     end
     if handlers == nil then
       return nil
@@ -8678,7 +8678,8 @@ local function fillForm(path, made, members, children, resolve, folder, links)
       if bind.kind == "number" or bind.kind == "slider" then
         local number = type(value) == "number" and value or tonumber(text)
         -- an integer widget shows 1.5 as 2: compared unrounded, it never matched and was set again and again
-        if bind.integer and math.type(number) == "float" and number == number and number > -2 ^ 63 and number < 2 ^ 63 then
+)MLUA"),
+            std::string_view(R"MLUA(        if bind.integer and math.type(number) == "float" and number == number and number > -2 ^ 63 and number < 2 ^ 63 then
           number = math.floor(number + 0.5)
         end
         return number
@@ -8697,8 +8698,7 @@ local function fillForm(path, made, members, children, resolve, folder, links)
     end
     -- a source of enabledWhen rules that a record just set: its rules follow
     local function followRules(bind)
-)MLUA"),
-            std::string_view(R"MLUA(      if bind.name and wiring.rules[bind.name] then
+      if bind.name and wiring.rules[bind.name] then
         wiring.refresh(bind.name)
       end
     end
@@ -8984,7 +8984,8 @@ local function reloadForm(watch, start)
     if entry then
       entry.onUpdate = options.onUpdate
       entry.onClose = options.onClose
-      native.uiUpdate(handle.id, { updates = options.onUpdate ~= nil, handlers = options.onClose and UI_HANDLER_BITS.onClose or 0 })
+)MLUA"),
+            std::string_view(R"MLUA(      native.uiUpdate(handle.id, { updates = options.onUpdate ~= nil, handlers = options.onClose and UI_HANDLER_BITS.onClose or 0 })
     end
   end
 
@@ -9006,8 +9007,7 @@ local function reloadForm(watch, start)
   end
   local values = {}
   for name, handle in pairs(watch.members) do
-)MLUA"),
-            std::string_view(R"MLUA(    if FORM_VALUE_KINDS[handle.kind] then
+    if FORM_VALUE_KINDS[handle.kind] then
       local ok, value = pcall(handle.get)
       if ok and value ~= nil then
         values[name] = { kind = handle.kind, value = value }
@@ -9197,7 +9197,8 @@ native.docDefine(nil, "manifold.ui.dialog.Dialog.id", { kind = "field", type = "
 
 local dialog = subarea(ui, "dialog", "Dialogs on top of the program. They do not block the script: each takes `onClose`, which gets the answer, or nil when the user cancelled.")
 
-local function openDialog(kind, props, onClose)
+)MLUA"),
+            std::string_view(R"MLUA(local function openDialog(kind, props, onClose)
   local owner = ownerSource()
   local id = native.uiDialog(kind, owner, props)
   local entry = { id = id, kind = "dialog", owner = owner, children = {}, onDialog = onClose }
@@ -9216,8 +9217,7 @@ define(dialog, "confirm", {
   },
   returns = "dialog",
   doc = "Asks a yes/no question. `onClose(answer)` gets true or false; `danger = true` shows the yes button in the warning colour.",
-)MLUA"),
-            std::string_view(R"MLUA(}, function(text, options)
+}, function(text, options)
   options = options or {}
   return openDialog("confirm", { text = text, title = options.title, danger = options.danger }, options.onClose)
 end)
@@ -9476,7 +9476,8 @@ local image = subarea(ui, "image", "Pictures for `image` widgets and canvas draw
 define(image, "load", {
   params = { { name = "path", type = "string" } },
   returns = "image",
-  doc = "Loads a PNG, JPEG, BMP, TGA or GIF file (a relative path starts at the program folder) and returns an image object with `width`, `height` and `remove()`, or nil and an `ME-7009` error.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Loads a PNG, JPEG, BMP, TGA or GIF file (a relative path starts at the program folder) and returns an image object with `width`, `height` and `remove()`, or nil and an `ME-7009` error.",
 }, function(path)
   local owner = ownerSource()
   local id, width, height = native.uiImageLoad(path, owner)
@@ -9501,8 +9502,7 @@ formImageLoad = function(file)
   return (rawget(image.members, "load")(file))
 end
 
-)MLUA"),
-            std::string_view(R"MLUA(native.docDefine(nil, "manifold.ui.image.Image", { kind = "class", title = "Image objects", doc = "`manifold.ui.image.load` returns an image object." })
+native.docDefine(nil, "manifold.ui.image.Image", { kind = "class", title = "Image objects", doc = "`manifold.ui.image.load` returns an image object." })
 native.docDefine(nil, "manifold.ui.image.Image.remove", { returns = "boolean", doc = "Frees the picture; widgets and drawings that show it go blank." })
 native.docDefine(nil, "manifold.ui.image.Image.id", { kind = "field", type = "integer", doc = "The image's number." })
 native.docDefine(nil, "manifold.ui.image.Image.width", { kind = "field", type = "integer", doc = "Width in pixels." })
@@ -9786,7 +9786,8 @@ debug.getregistry()["Manifold.UiTick"] = function(now)
       else
         local handler = entry[UI_EVENTS[event.name] or ""]
         if handler then
-          local values = table.move(event, 1, event.n, 1, {})
+)MLUA"),
+            std::string_view(R"MLUA(          local values = table.move(event, 1, event.n, 1, {})
           if event.name == "change" and entry.kind == "combo" and type(values[1]) == "string" then
             -- a combo with multi = true sends its chosen item numbers as "1,3"
             local list = {}
@@ -9806,8 +9807,7 @@ debug.getregistry()["Manifold.UiTick"] = function(now)
   for _, id in ipairs(native.uiBindsDue(now)) do
     local entry = uiEntries[id]
     if entry and entry.onBind and not callHandler(entry.onBind) then
-)MLUA"),
-            std::string_view(R"MLUA(      entry.onBind = nil
+      entry.onBind = nil
     end
   end
 end

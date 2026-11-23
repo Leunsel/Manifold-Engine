@@ -83,6 +83,7 @@ namespace Manifold::Tests
             std::uint64_t Leaf = 0;
             std::uint64_t Never = 0;
             std::uint64_t Foreign = 0;
+            std::uint64_t Virtual = 0;
             std::map<std::uint64_t, std::uint8_t> Originals;
             Settings* Config = nullptr;
             std::string Module;
@@ -511,13 +512,15 @@ namespace Manifold::Tests
             const CodeModuleCount& count = report->Modules.front();
             CHECK(report->Modules.size() == 1 && report->Total == filter.Remaining() && report->Total > 50);
             CHECK_MSG(is64Bit ? count.Unwind > 50 : count.Unwind == 0, session.Label + ": unwind entries miscounted");
-            CHECK(count.Exports >= 5 && count.Calls > 20);
-            std::printf("  %s: %zu functions (%zu unwind, %zu exports, %zu calls, %zu rejected) in %.2f s\n", session.Label.c_str(), report->Total, count.Unwind, count.Exports,
-                count.Calls, count.Rejected, report->Seconds);
+            CHECK(count.Exports >= 5 && count.Calls > 20 && count.Pointers > 5);
+            std::printf("  %s: %zu functions (%zu unwind, %zu exports, %zu calls, %zu pointers, %zu rejected) in %.2f s\n", session.Label.c_str(), report->Total, count.Unwind,
+                count.Exports, count.Calls, count.Pointers, count.Rejected, report->Seconds);
             const std::vector<CodeCandidate> all = filter.Candidates();
             for (const std::uint64_t address : { session.Idle, session.Action, session.Leaf, session.Never })
                 CHECK_MSG(Has(all, address), session.Label + ": a test function is not a candidate: " + Hex(address));
             CHECK(!Has(all, session.ProbeAt));
+            const auto area = std::find_if(all.begin(), all.end(), [&](const CodeCandidate& candidate) { return candidate.Address == session.Virtual; });
+            CHECK_MSG(area != all.end() && (area->Sources & SourcePointer), session.Label + ": the virtual leaf method is not a candidate from its vtable");
             const auto leaf = std::find_if(all.begin(), all.end(), [&](const CodeCandidate& candidate) { return candidate.Address == session.Leaf; });
             CHECK_MSG(leaf != all.end() && (leaf->Sources & SourceExport) && (leaf->Sources & SourceCall),
                 session.Label + ": the leaf's sources are " + (leaf != all.end() ? CodeSourceText(leaf->Sources) : std::string("none")));
@@ -545,6 +548,7 @@ namespace Manifold::Tests
             const std::vector<CodeCandidate> kept = filter.Candidates();
             std::printf("  %s: %zu after two Filter Out rounds, %zu after Keep Only\n", session.Label.c_str(), beforeKeep, kept.size());
             CHECK_MSG(Has(kept, session.Action) && Has(kept, session.Leaf) && !Has(kept, session.Never) && !Has(kept, session.Idle), session.Label + ": Keep Only did not keep the action");
+            CHECK_MSG(Has(kept, session.Virtual), session.Label + ": Keep Only did not keep the virtual method the action calls");
             CHECK_MSG(kept.size() <= 12, session.Label + Format(": %zu functions are left, the action should stand out", kept.size()));
             const std::vector<RoundRecord> history = filter.History();
             CHECK(history.size() == 3 && history.back().Kind == FilterRound::KeepOnly && history.back().After == kept.size() && history.back().Before == beforeKeep);
@@ -586,6 +590,21 @@ namespace Manifold::Tests
             CHECK(!filter.Prepared() && filter.Remaining() == 0);
             CHECK(AllOriginal(session));
             CHECK(Field(session, &Probe::Wrong) == 0 && session.Target.Alive());
+        }
+
+        // Without the pointer source the virtual leaf method is out of reach:
+        // no call names it, it exports nothing and (64-bit) has no unwind entry.
+        void CheckWithoutPointers(Session& session)
+        {
+            CodeFilter& filter = session.Core.Filter();
+            CodeFilterOptions options;
+            options.Modules = { session.Module };
+            options.Calls = true;
+            options.Pointers = false;
+            const Result<CodeFilterReport> report = filter.Prepare(options);
+            CHECK(report.Ok() && report->Modules.front().Pointers == 0);
+            CHECK_MSG(!Has(filter.Candidates(), session.Virtual), session.Label + ": the virtual method was found without the pointer source");
+            filter.Reset();
         }
 
         void CheckLua(Session& session)
@@ -664,6 +683,14 @@ namespace Manifold::Tests
             session.Never = Export(engine, module, "CoverNever");
             session.Foreign = Export(engine, module, "CoverForeign");
             CHECK(session.Idle && session.Action && session.Leaf && session.Never && session.Foreign);
+            {
+                const Target::Process& process = *engine.Process();
+                const auto shape = process.ReadPointer(Export(engine, module, "g_coverShape"));
+                const auto vtable = shape ? process.ReadPointer(*shape) : std::nullopt;
+                const auto area = vtable ? process.ReadPointer(*vtable) : std::nullopt;
+                session.Virtual = area.value_or(0);
+                CHECK_MSG(session.Virtual != 0 && engine.Process()->ModuleAt(session.Virtual).has_value(), std::string(label) + ": the virtual method of the test target was not found");
+            }
             for (const std::uint64_t address : { session.Idle, session.Action, session.Leaf, session.Never })
             {
                 const int value = RawByte(session, address);
@@ -678,6 +705,7 @@ namespace Manifold::Tests
             CheckShadow(session);
             CheckWindowsDebugger(session);
             CheckFilter(session);
+            CheckWithoutPointers(session);
             CheckLua(session);
             CheckRelease(session);
             CheckHostLoss(session, tests);
