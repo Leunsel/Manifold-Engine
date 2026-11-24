@@ -79,6 +79,7 @@ namespace Manifold::UI
 
         void Toolbar();
         void MenuBar();
+        void ExchangeMenu(const Table::StructDefinition* current);
         static bool IsWindowCommand(Command command);
         void RunCommand(Command command);
         void FieldShortcuts(int pointerSize);
@@ -154,6 +155,7 @@ namespace Manifold::UI
         bool m_pendingInsert = false;
         std::vector<PendingDelete> m_pendingDeletes;
         bool m_showAddress = true;
+        bool m_exportAll = false;
         bool m_gotoOpen = false;
         AddressField m_gotoAddress;
         std::string m_gotoError;

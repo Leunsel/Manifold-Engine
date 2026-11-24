@@ -405,6 +405,12 @@
     <ClCompile Include="..\Source\Table\RttiStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Table\StructExchange.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\StructReClass.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\Structures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
@@ -655,6 +661,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\StaticPointersWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\StructExchangeWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\StructureWindow.cpp">
@@ -1026,6 +1035,9 @@
     <ClInclude Include="..\Source\Table\RttiStructures.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Table\StructExchange.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Table\Structures.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
@@ -1291,6 +1303,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\StaticPointersWindow.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\StructExchangeWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\StructureWindow.h">

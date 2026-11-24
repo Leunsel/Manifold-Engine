@@ -184,6 +184,8 @@ namespace Manifold
         AddStructureColumn,
         CollapseStructure,
         StructureGotoAddress,
+        ImportStructures,
+        ExportStructures,
         ChangeFieldValue,
         RenameField,
         InsertField,
