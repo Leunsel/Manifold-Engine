@@ -32,6 +32,7 @@ Manifold Engine reads and writes Cheat Engine tables (`.CT`): records, groups, p
 - [C++ RTTI](#c-rtti)
 - [Logs and error codes](#logs-and-error-codes)
 - [Keyboard shortcuts](#keyboard-shortcuts)
+- [Command palette](#command-palette)
 - [Use](#use)
 
 ## Interface
@@ -883,6 +884,16 @@ A crash writes a minidump and a short report into `crashes`.
 - Settings → Keyboard changes any of them: record new keys, add a second shortcut, remove or reset. It warns when two commands of one window share keys. Changes go into `configs\Manifold-Engine.ini` under `[Shortcuts]`.
 - The default list is in [SHORTCUTS.md](SHORTCUTS.md), the current one in the program (Help → Keyboard Shortcuts, F1).
 
+## Command palette
+
+`Ctrl+K` (or Help → Command Palette) opens one search box for everything the main window can do.
+
+- **What it finds.** Every command of the main window and the global ones that can run right now, with its shortcut; the tool windows that have no command of their own (Memory Regions, Write History, Code Dissect, Template Manager and the others); the settings pages; the recent tables; and every record of the address list, with its kind and state (*Script, on*, *Value 100, frozen*).
+- **Typing.** A few letters of the name are enough, in order but not side by side: `cf` finds Code Filter, `mem view` Memory Viewer, `dmg mul` "Damage : Multiplier". Letters at the start of a word and runs of letters count most; the matched letters are lit. A word the name lacks may match the line beside it as a whole (`breakpoints` finds Settings: Debugger).
+- **Narrowing.** `>` only commands, windows and settings; `@` only records; `#` only tables. Without a query the list shows what was used last, then the commands; records only appear while typing (a table can have thousands).
+- **Running.** Enter runs the chosen line: a command, a window, a settings page, a table. On a record Enter switches it (a script on or off, a value frozen or not), Alt+Enter selects it in the address list instead; a group is shown in the list. The arrow keys and Page Up/Down choose, the mouse wheel scrolls, a click runs, Escape or a click outside closes.
+- **Recent.** What was run from the palette comes first next time and is lifted among equal matches (`[Recent] PaletteRecent` in the settings file).
+
 ## Use
 
 ### Opening processes and tables
@@ -897,7 +908,7 @@ A crash writes a minidump and a short report into `crashes`.
 ### Menus and modes
 
 - The main window has the table, process and window menus (File, Edit, Process, Table, View, Tools, Help). Code, memory and debugger tools sit in the memory viewer's own menus, as in Cheat Engine.
-- F1 lists all shortcuts.
+- F1 lists all shortcuts, Ctrl+K opens the command palette.
 - View → Compact Mode shows only the address list, without the scanner.
 - View → Release Mode is for using a finished table: the address list shows only Active, Description and Value, the Tools menu and the technical menu entries are gone (Edit keeps only Settings), a double click turns a script on or off, and messages leave out their error codes. The same menu switches it back.
 

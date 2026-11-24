@@ -23,6 +23,9 @@ namespace Manifold::UI
         void Draw();
         void FocusScanValue() { m_focusValue = true; }
         void RevealRecord(int recordId);
+        // The main window's commands and the global ones, as its menus and keys run them.
+        bool CanRun(Command command);
+        void Run(Command command);
 
     private:
         void TitleBar();
@@ -65,8 +68,6 @@ namespace Manifold::UI
         void SaveOptions();
         void OpenValueDialog(Table::MemoryRecord& record);
         void MainShortcuts();
-        bool CanRun(Command command);
-        void Run(Command command);
         bool Item(const char* label, Command command, bool selected = false);
         void ToggleCompactMode();
         void ToggleReleaseMode();

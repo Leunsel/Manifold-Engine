@@ -76,6 +76,7 @@ namespace Manifold::UI
     class StaticPointersWindow;
     class SignatureWindow;
     class CodeFilterWindow;
+    class CommandPalette;
     class PointerScanWindow;
     class ShortcutsWindow;
     class TemplateManager;
@@ -115,6 +116,10 @@ namespace Manifold::UI
         void Draw();
         bool CanRun(Command command);
         void Run(Command command);
+        // Every command of the main window and the global ones, as its menus run them (the command palette).
+        bool CanRunAnywhere(Command command);
+        void RunAnywhere(Command command);
+        CommandPalette& Palette() { return *m_palette; }
         Engine& Core() { return m_engine; }
         Shell& Window() { return m_shell; }
         UiHost& Ui() { return *m_ui; }
@@ -252,6 +257,7 @@ namespace Manifold::UI
         std::unique_ptr<StaticPointersWindow> m_staticPointers;
         std::unique_ptr<SignatureWindow> m_signatures;
         std::unique_ptr<CodeFilterWindow> m_codeFilter;
+        std::unique_ptr<CommandPalette> m_palette;
         std::unique_ptr<PointerScanWindow> m_pointerScan;
         std::unique_ptr<ShortcutsWindow> m_shortcuts;
         std::unique_ptr<TemplateManager> m_templateManager;

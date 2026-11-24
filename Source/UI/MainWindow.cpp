@@ -623,6 +623,7 @@ namespace Manifold::UI
         }
         if (ImGui::BeginMenu("Help"))
         {
+            Item(ICON_FA_TERMINAL "  Command Palette", Command::CommandPalette);
             Item(ICON_FA_KEYBOARD "  Keyboard Shortcuts", Command::OpenShortcuts);
             if (!m_release && ImGui::MenuItem(ICON_FA_LIST_OL "  Error Codes"))
                 workspace.OpenLog();

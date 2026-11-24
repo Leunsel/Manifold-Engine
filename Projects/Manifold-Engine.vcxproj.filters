@@ -87,6 +87,9 @@
     <ClCompile Include="..\Source\App\Notifications.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\Palette.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\RttiSession.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -525,6 +528,9 @@
     <ClCompile Include="..\Source\UI\CodeTools.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\CommandPalette.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\CommentListWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -703,6 +709,9 @@
       <Filter>Source\App</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\Notifications.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\App\Palette.h">
       <Filter>Source\App</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\App\RttiSession.h">
@@ -1141,6 +1150,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\CodeTools.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\CommandPalette.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\CommentListWindow.h">

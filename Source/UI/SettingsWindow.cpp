@@ -458,6 +458,21 @@ namespace Manifold::UI
         float m_controlWidth = 0.0f;
     };
 
+    const char* SettingsWindow::PageIcon(int page)
+    {
+        return page >= 0 && page < kPageCount ? kPages[page].Icon : "";
+    }
+
+    const char* SettingsWindow::PageTitle(int page)
+    {
+        return page >= 0 && page < kPageCount ? kPages[page].Title : "";
+    }
+
+    const char* SettingsWindow::PageSubtitle(int page)
+    {
+        return page >= 0 && page < kPageCount ? kPages[page].Subtitle : "";
+    }
+
     SettingsWindow::SettingsWindow(Workspace& workspace) : m_workspace(workspace)
     {
     }
