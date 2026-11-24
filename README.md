@@ -152,7 +152,7 @@ The Lua Engine window (`Ctrl+L`) has a console with coloured output, a script ed
 - **`manifold.ui`** builds windows in Manifold's own look: rows, grids, cards, tabs, tables, trees, radio groups, colour pickers and canvases, plus dialogs, notices with progress, and entries in the Extensions menu, title bar and status bar. Layouts adapt to narrow sizes, and a script's windows go away when it runs again.
 - **Form Editor** (`Ctrl+Alt+G`): lays out such a window by hand with a palette, an outline, a live preview and the handler functions shown as chips beside the form. Widgets can be bound to records of the table, follow a switch without code (Enabled When) and take hotkeys that work while the game has the focus.
 - File → New Trainer from the Table turns the open table into a trainer form in one step, and File → Import Cheat Engine Form converts a Cheat Engine form.
-- Examples: [Examples/Manifold-UI-Demo.lua](Examples/Manifold-UI-Demo.lua) shows the widgets, [Examples/Form-Demo.lua](Examples/Form-Demo.lua) loads [Examples/Form-Demo.form.lua](Examples/Form-Demo.form.lua), and [Examples/Manifold-Snake.lua](Examples/Manifold-Snake.lua) is a small game on a canvas.
+- Examples: [Examples/Manifold-UI-Demo.lua](Examples/Manifold-UI-Demo.lua) shows the widgets, [Examples/Form-Demo.lua](Examples/Form-Demo.lua) loads [Examples/Form-Demo.form.lua](Examples/Form-Demo.form.lua), [Examples/Manifold-Snake.lua](Examples/Manifold-Snake.lua) is a small game on a canvas, and [Examples/Theme-Demo.lua](Examples/Theme-Demo.lua) reads, tries, changes and saves themes.
 
 ### Autorun modules
 

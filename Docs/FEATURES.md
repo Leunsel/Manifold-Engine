@@ -650,6 +650,7 @@ The keys work from anywhere, also while the game has the focus, as long as the w
 - `Examples/Manifold-UI-Demo.lua` shows all of it.
 - `Examples/Form-Demo.lua` loads `Examples/Form-Demo.form.lua`.
 - `Examples/Manifold-Snake.lua` is a small game on a canvas, steered with the keyboard through `onKey`. It also measures frames per second, the Lua time per frame and the drawings per frame, with a slider that adds up to 20000 moving dots.
+- `Examples/Theme-Demo.lua` shows `manifold.ui.theme`: the look shown now with colour swatches, a theme tried for the session, single colours and sizes changed on top, the result saved as a custom theme, and a `themeChanged` handler that keeps the window current.
 
 ## Form Editor
 
