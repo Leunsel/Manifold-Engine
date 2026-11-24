@@ -32,6 +32,15 @@ namespace Manifold
         std::string Name;  // the allocation's name; empty for a patch
     };
 
+    // Data inside a script's allocation: a db/dw/dd/dq line, or the part of
+    // the allocation nothing was written to (ZeroOnly: data while it is zero).
+    struct ScriptData
+    {
+        std::uint64_t Begin = 0;
+        std::uint64_t End = 0;
+        bool ZeroOnly = false;
+    };
+
     // What one script put into the game: its allocations (code caves, data)
     // and the bytes it patched outside of them, with its labels for names.
     struct ScriptFootprint
@@ -42,6 +51,7 @@ namespace Manifold
         std::vector<ScriptRange> Ranges;
         std::map<std::uint64_t, std::string> Labels;
         std::vector<Asm::AaWarning> Warnings;  // what the Auto Assembler found wrong with it, such as an unbalanced stack
+        std::vector<ScriptData> Data;          // sorted by address
         std::uint64_t OnTick = 0;   // GetTickCount64 when its [ENABLE] ran
         std::uint64_t OffTick = 0;  // when its [DISABLE] ran; 0 while it is on
     };
@@ -57,6 +67,8 @@ namespace Manifold
         void Note(std::string label, int recordId, std::uint64_t key, Asm::AaSection section, const Asm::AaResult& result, const Asm::AaMemory& before,
             const Asm::AaMemory& after, std::uint64_t tick);
         std::vector<ScriptFootprint> Footprints() const;
+        // The data span of a script that is on at the address, for the disassembler.
+        std::optional<ScriptData> DataAt(std::uint64_t address) const;
 
     private:
         mutable std::mutex m_lock;

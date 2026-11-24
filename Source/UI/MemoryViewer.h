@@ -165,7 +165,15 @@ namespace Manifold::UI
         };
         SymbolEndCache m_symbolEnds;
         std::optional<std::pair<std::uint64_t, std::uint64_t>> MethodData(std::uint64_t address);
-        void MarkMethodData(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::uint64_t base);
+        struct DataSpan
+        {
+            std::uint64_t Begin = 0;
+            std::uint64_t End = 0;
+            bool ZeroOnly = false;  // the empty rest of a script's allocation: data while it reads zero
+            bool Script = false;    // rows from the span's start (dd at an odd address stays one dd)
+        };
+        std::optional<DataSpan> DataSpanAt(std::uint64_t address);
+        void MarkData(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::uint64_t base);
         struct MethodDataCache
         {
             std::uint64_t Generation = 0;

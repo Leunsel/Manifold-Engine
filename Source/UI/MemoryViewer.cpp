@@ -906,7 +906,7 @@ namespace Manifold::UI
             {
                 m_lines = disassembler.DecodeMany(buffer, readable, m_top, m_visibleLines + 1, symbols, m_engine.CodeMap());
             }
-            MarkMethodData(buffer, readable, m_top);
+            MarkData(buffer, readable, m_top);
         }
 
         const ImVec2 frame = ImGui::GetCursorScreenPos();
@@ -2403,14 +2403,53 @@ namespace Manifold::UI
         return entry->second;
     }
 
-    void MemoryViewer::MarkMethodData(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::uint64_t base)
+    std::optional<MemoryViewer::DataSpan> MemoryViewer::DataSpanAt(std::uint64_t address)
     {
-        // ∑ The constants a JIT keeps behind a method's code were decoded as instructions ("ret far",
-        //   "enter CB42,1" in GameplayData:InterestRateSet, owner screenshot). They stay part of the
-        //   method, so the +offsets go on, but they are shown as the dwords the code reads, and
-        //   decoding goes on behind them.
-        if (!m_engine.MonoPresent() || m_lines.empty())
+        if (const auto script = m_engine.ScriptLedger().DataAt(address))
+            return DataSpan{ script->Begin, script->End, script->ZeroOnly, true };
+        if (const auto method = MethodData(address); method && address >= method->first && address < method->second)
+            return DataSpan{ method->first, method->second, false, false };
+        return std::nullopt;
+    }
+
+    // ∑ Two kinds of data sit between code and were decoded as instructions:
+    //   - The constants a JIT keeps behind a method's code ("ret far", "enter CB42,1" in
+    //     GameplayData:InterestRateSet, owner screenshot). They stay part of the method, so the
+    //     +offsets go on, shown as the dwords the code reads.
+    //   - What a script's db/dw/dd/dq lines put into its allocation, and the empty rest of it
+    //     ("add [eax],al", "inc eax" behind a hook's jmp back, owner screenshot of DamagePtr and
+    //     DamageMultiplier). Each line is a row of its own size; the empty rest only while it
+    //     reads zero.
+    //   Decoding goes on behind them.
+    void MemoryViewer::MarkData(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::uint64_t base)
+    {
+        if (m_lines.empty())
             return;
+        const auto chunkAt = [&](const DataSpan& data, std::uint64_t at) -> std::size_t
+            {
+                if (at - base >= buffer.size())
+                    return 0;
+                const std::uint64_t left = std::min<std::uint64_t>(data.End - at, buffer.size() - static_cast<std::size_t>(at - base));
+                if (!data.Script)
+                    return static_cast<std::size_t>(std::min<std::uint64_t>(4 - at % 4, left));
+                const std::uint64_t whole = data.End - data.Begin;
+                if (!data.ZeroOnly && at == data.Begin && (whole == 1 || whole == 2 || whole == 4 || whole == 8) && whole <= left)
+                    return static_cast<std::size_t>(whole);
+                return static_cast<std::size_t>(std::min<std::uint64_t>(4 - (at - data.Begin) % 4, left));
+            };
+        const auto zeroAt = [&](const DataSpan& data, std::uint64_t at)
+            {
+                const std::size_t size = chunkAt(data, at);
+                if (size == 0)
+                    return false;
+                const std::size_t offset = static_cast<std::size_t>(at - base);
+                for (std::size_t i = 0; i < size; ++i)
+                {
+                    if (!readable[offset + i] || buffer[offset + i] != 0)
+                        return false;
+                }
+                return true;
+            };
         const Disasm::Disassembler& disassembler = m_engine.Disassembler();
         const Target::Symbols* symbols = m_engine.Options().ShowSymbols ? &m_engine.Symbols() : nullptr;
         const std::size_t want = m_lines.size();
@@ -2421,27 +2460,30 @@ namespace Manifold::UI
         while (i < source.size() && lines.size() < want)
         {
             const Disasm::Instruction& line = source[i];
-            const auto data = MethodData(line.Address);
-            if (!data || line.Address < data->first || line.Address >= data->second)
+            const auto data = DataSpanAt(line.Address);
+            if (!data || (data->ZeroOnly && !zeroAt(*data, line.Address)))
             {
                 lines.push_back(line);
                 ++i;
                 continue;
             }
             std::uint64_t at = line.Address;
-            while (at < data->second && lines.size() < want && at - base < buffer.size())
+            while (at < data->End && lines.size() < want && at - base < buffer.size())
             {
+                if (data->ZeroOnly && !zeroAt(*data, at))
+                    break;
                 const std::size_t offset = static_cast<std::size_t>(at - base);
-                const std::uint64_t aligned = 4 - at % 4;
-                const std::size_t size = static_cast<std::size_t>(std::min<std::uint64_t>({ aligned, data->second - at, buffer.size() - offset }));
+                const std::size_t size = chunkAt(*data, at);
+                if (size == 0)
+                    break;
                 Disasm::Instruction row;
                 row.Address = at;
                 row.Length = static_cast<std::uint8_t>(size);
-                std::uint32_t value = 0;
+                std::uint64_t value = 0;
                 std::memcpy(row.Bytes.data(), buffer.data() + offset, size);
                 std::memcpy(&value, buffer.data() + offset, size);
                 const bool known = readable[offset] && readable[offset + size - 1];
-                row.Mnemonic = known ? (size == 4 ? "dd" : size == 2 ? "dw" : "db") : "??";
+                row.Mnemonic = known ? (size == 8 ? "dq" : size == 4 ? "dd" : size == 2 ? "dw" : "db") : "??";
                 row.Operands = known ? Hex(value, static_cast<int>(size * 2)) : std::string();
                 lines.push_back(std::move(row));
                 at += size;

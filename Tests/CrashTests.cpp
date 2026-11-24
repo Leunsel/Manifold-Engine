@@ -455,6 +455,30 @@ namespace Manifold::Tests
             const std::vector<ScriptFootprint> footprints = engine.ScriptLedger().Footprints();
             CHECK(std::any_of(footprints.begin(), footprints.end(), [](const ScriptFootprint& footprint) { return footprint.Label == "Bad Hook" && footprint.Warnings.size() == 1; }));
             CHECK(engine.SetActive(bad, false).Ok() && engine.SetActive(site, false).Ok());
+
+            // What the disassembler shows as data: each db/dw/dd/dq line of an allocation, the empty rest
+            // of it while it is zero, never a readmem (the original code of a hook).
+            Table::MemoryRecord& data = list.AddScript("Data Rows", "[ENABLE]\nalloc(datacave,$100)\nlabel(value ratio)\nregistersymbol(datacave value ratio)\n"
+                                                                    "datacave:\n  mov eax,[value]\n  ret\nvalue:\n  dd 0\nratio:\n  dd (float)3.00\n  db 1 2 3\n"
+                                                                    "  readmem(datacave,2)\n[DISABLE]\nunregistersymbol(datacave value ratio)\ndealloc(datacave)\n");
+            const Status dataOn = engine.SetActive(data, true);
+            CHECK_MSG(dataOn.Ok(), dataOn.Text);
+            const std::uint64_t cave = engine.Evaluate("datacave").value_or(0);
+            const std::uint64_t value = engine.Evaluate("value").value_or(0);
+            const std::uint64_t ratio = engine.Evaluate("ratio").value_or(0);
+            CHECK(cave && value > cave && ratio == value + 4);
+            const CrashLedger& ledger = engine.ScriptLedger();
+            CHECK(!ledger.DataAt(cave).has_value());
+            const auto valueSpan = ledger.DataAt(value + 1);
+            CHECK_MSG(valueSpan && valueSpan->Begin == value && valueSpan->End == value + 4 && !valueSpan->ZeroOnly, std::string(label) + ": the dd line is not one data span");
+            const auto ratioSpan = ledger.DataAt(ratio);
+            CHECK(ratioSpan && ratioSpan->Begin == ratio && ratioSpan->End == ratio + 4);
+            const auto bytesSpan = ledger.DataAt(ratio + 4);
+            CHECK(bytesSpan && bytesSpan->Begin == ratio + 4 && bytesSpan->End == ratio + 7);
+            CHECK_MSG(!ledger.DataAt(ratio + 7).has_value() && !ledger.DataAt(ratio + 8).has_value(), std::string(label) + ": the readmem bytes count as data");
+            const auto rest = ledger.DataAt(ratio + 9);
+            CHECK_MSG(rest && rest->ZeroOnly && rest->Begin == ratio + 9 && rest->End == cave + 0x100, std::string(label) + ": the empty rest of the allocation is not a zero span");
+            CHECK(engine.SetActive(data, false).Ok() && !ledger.DataAt(value).has_value());
         }
 
         // ---- CE's "break when inside specific regions" with the scripts' memory ----

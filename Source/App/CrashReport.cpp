@@ -206,6 +206,26 @@ namespace Manifold
         footprint.Key = key;
         footprint.OnTick = tick;
         footprint.Warnings = result.Warnings;
+        // ∑ Every db/dw/dd/dq line is a span of its own, so dd 0 and dd (float)3 stay two rows.
+        //   Behind the last byte the script wrote into an allocation the rest is empty: data
+        //   while it reads zero (Lua may write code there later, which is decoded again).
+        for (const auto& [begin, end] : result.DataRanges)
+            footprint.Data.push_back({ begin, end, false });
+        for (const Asm::AaAllocation& allocation : after.Allocations)
+        {
+            if (!allocation.Address || !allocation.Size)
+                continue;
+            const std::uint64_t allocationEnd = allocation.Address + allocation.Size;
+            std::uint64_t written = allocation.Address;
+            for (const Asm::AaWrite& write : result.Writes)
+            {
+                if (write.Address >= allocation.Address && write.Address < allocationEnd)
+                    written = std::max(written, std::min(allocationEnd, write.Address + write.Bytes.size()));
+            }
+            if (written < allocationEnd)
+                footprint.Data.push_back({ written, allocationEnd, true });
+        }
+        std::sort(footprint.Data.begin(), footprint.Data.end(), [](const ScriptData& a, const ScriptData& b) { return a.Begin < b.Begin; });
         for (const Asm::AaAllocation& allocation : after.Allocations)
         {
             if (allocation.Address && allocation.Size)
@@ -256,6 +276,23 @@ namespace Manifold
     {
         std::lock_guard lock(m_lock);
         return m_footprints;
+    }
+
+    std::optional<ScriptData> CrashLedger::DataAt(std::uint64_t address) const
+    {
+        std::lock_guard lock(m_lock);
+        for (auto it = m_footprints.rbegin(); it != m_footprints.rend(); ++it)
+        {
+            if (it->OffTick != 0)
+                continue;
+            auto span = std::upper_bound(it->Data.begin(), it->Data.end(), address, [](std::uint64_t at, const ScriptData& data) { return at < data.Begin; });
+            if (span == it->Data.begin())
+                continue;
+            --span;
+            if (address < span->End)
+                return *span;
+        }
+        return std::nullopt;
     }
 
     const char* CrashLinkText(CrashLink link)

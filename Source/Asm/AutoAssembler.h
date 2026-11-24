@@ -86,6 +86,8 @@ namespace Manifold::Asm
         std::map<std::string, std::uint64_t> Symbols;
         std::map<std::string, std::uint64_t> SymbolSizes;
         std::map<std::string, std::uint64_t> Labels;  // every label the run placed, by its name as written, once the code is in the game
+        // What db/dw/dd/dq lines wrote into allocated memory, one [begin, end) per line: data, not code (readmem stays code).
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> DataRanges;
 
         bool Ok() const { return Error.Ok(); }
     };

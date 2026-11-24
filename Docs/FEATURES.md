@@ -236,6 +236,7 @@ As many windows as you like, each with its own File, Search, View, Debug and Too
 - Assembling in place with NOP fill; replacing code with NOPs and restoring it.
 - Copying addresses and instructions with names, module offsets or plain addresses.
 - Scripts from any instruction through templates.
+- **Data between code is shown as data**, not as made-up instructions: the constants a Mono JIT keeps behind a method's code as `dd` rows, and in a script's allocation every `db`/`dw`/`dd`/`dq` line as one row of its size (`DamagePtr: dd 00000000`, `DamageMultiplier: dd 40400000` behind the hook's `jmp` back, instead of `add [eax],al` and `inc eax`). The part of an allocation the script wrote nothing to shows as `dd 00000000` while it is zero; whatever is written there later (Lua, another script) is decoded again. `readmem` lines copy code and stay code. The scripts are the ones switched on in this session.
 - **View → Show Symbols** switches names on or off. With it on:
   - every place a symbol starts (a registered symbol, an export, or a Mono method) gets a header line;
   - the instructions below it show their offset from that start (`+0`, `+3`, ...);

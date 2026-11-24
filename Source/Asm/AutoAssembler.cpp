@@ -1703,6 +1703,7 @@ namespace Manifold::Asm
                 {
                     m_placed.clear();
                     m_output.clear();
+                    m_outputData.clear();
                     m_unplacedUses.clear();
                     m_placeAt.assign(m_statements.size(), std::nullopt);
                     std::optional<std::uint64_t> current;
@@ -1755,6 +1756,7 @@ namespace Manifold::Asm
                             //   from an earlier pass; moved labels make the layout run again.
                             const std::uint64_t pad = (statement.Alignment - (*current % statement.Alignment)) % statement.Alignment;
                             m_output.push_back({ *current, std::vector<std::uint8_t>(static_cast<std::size_t>(pad), statement.Data.front()), statement.Line });
+                            m_outputData.push_back(false);
                             *current += pad;
                             continue;
                         }
@@ -1786,6 +1788,7 @@ namespace Manifold::Asm
                         while (bytes.size() < reserved[i])
                             bytes.push_back(0x90);
                         m_output.push_back({ *current, bytes, statement.Line });
+                        m_outputData.push_back(IsData(statement) && !ReadIndex(i));
                         *current += bytes.size();
                     }
                     if (!changed && m_placed == previousLabels)
@@ -1815,6 +1818,12 @@ namespace Manifold::Asm
                     previousLabels = m_placed;
                 }
                 return Fail(ErrorCode::AaLayoutUnstable, 0, "");
+            }
+
+            // A readmem line is a Bytes statement too, but what it copies is code (the original instructions of a hook).
+            bool ReadIndex(std::size_t index) const
+            {
+                return std::any_of(m_reads.begin(), m_reads.end(), [index](const PendingRead& read) { return read.Index == index; });
             }
 
             static bool IsData(const Statement& statement)
@@ -2371,6 +2380,12 @@ namespace Manifold::Asm
                                                       BytesPreview(undo.back().Bytes) + ")");
                 }
                 m_result.Writes = std::move(merged);
+                for (std::size_t i = 0; i < m_output.size() && i < m_outputData.size(); ++i)
+                {
+                    const AaWrite& write = m_output[i];
+                    if (m_outputData[i] && !write.Bytes.empty() && InAllocation(write.Address))
+                        m_result.DataRanges.emplace_back(write.Address, write.Address + write.Bytes.size());
+                }
                 for (const auto& [key, address] : m_placed)
                 {
                     const auto name = m_labels.find(key);
@@ -2607,6 +2622,7 @@ namespace Manifold::Asm
             std::vector<AaAllocation> m_newAllocations;
             std::vector<std::uint64_t> m_allocatedBlocks;
             std::vector<AaWrite> m_output;
+            std::vector<bool> m_outputData;  // per m_output entry: a db/dw/dd/dq line
 
             bool m_log = false;
             std::size_t m_droppedLog = 0;
