@@ -389,6 +389,24 @@ Each runs in its own window with hit counts and the registers of the last hit.
 
 File → New Window (or *Dissect in a New Window* on any address) opens another dissect window. With *Open as Tabs* (Settings → Debugger, on by default) they join the first one as tabs, as Auto Assembler scripts do.
 
+### Export and import
+
+Structures → Export writes the structure shown (with every structure it points to or embeds; *All Structures* writes all of them) as:
+
+- **C/C++ header** (`Ctrl+E`): `#pragma pack(1)` with the gaps as `uint8_t pad_0010[0x8]`, so the layout is the dissect's byte for byte whatever the compiler would align. Embedded structures come before the ones holding them, pointers are typed (`Enemy*`), bit fields are real bit fields, overlapping fields become comments, and `static_assert` checks the size and every offset. Names that are no identifiers are made into ones, the original in a comment.
+- **C# file**: `unsafe` structs with `[StructLayout(LayoutKind.Explicit, Size = ...)]` and `[FieldOffset]`, strings as `fixed` buffers.
+- **ReClass.NET project** (`.rcnet`): opens in ReClass.NET 1.2 and newer. ReClass.NET has no offsets, so gaps become Hex nodes; pointers to exported structures point to their classes.
+- *Copy as C/C++* and *Copy as C#* put the same text on the clipboard.
+
+Pointers are as wide as the open process's (64-bit without one).
+
+Structures → Import (`Ctrl+I`) reads a C/C++ header, a C# file, a ReClass.NET project or the clipboard and shows what it found before anything changes: each structure's size and fields (hover the name), the warnings with their line, and what happens to names the table has already (*Keep Both (Rename)* by default; *Replace the Existing Ones* or *Skip Them*). Structures can be left out.
+
+- C/C++ is laid out as MSVC does it: alignment, `#pragma pack`, unions (also anonymous), bit fields, arrays, `typedef struct`, enums with their underlying type, the Windows and `<cstdint>` types, single inheritance and the virtual function table pointer of classes with `virtual` functions. Methods, static members and access specifiers are passed over. A member of an unknown type is left out with a warning; a pointer to one is kept.
+- C# takes `[FieldOffset]` as written, or lays out sequential structs; properties and methods are passed over.
+- Byte arrays stay one field and `pad_...` arrays (such as our own export's) give none; `char` and `wchar_t` arrays become strings; other arrays of up to 64 elements become one field per element.
+- ReClass.NET: every node type of version 1.2 and newer, and the older names; Hex nodes with ReClass.NET's own names (`N0000001A`) are gaps.
+
 ### Managed objects
 
 When a Mono runtime is loaded (see [Mono](#mono)), dissecting the address of a Mono object names it by its class and fills in the real field names, offsets and types straight from the runtime. Following a pointer to another object does the same, so no structure has to be built by hand.

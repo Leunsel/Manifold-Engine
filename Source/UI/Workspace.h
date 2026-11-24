@@ -77,6 +77,7 @@ namespace Manifold::UI
     class SignatureWindow;
     class CodeFilterWindow;
     class TableCleanupWindow;
+    class StructImportWindow;
     class CommandPalette;
     class PointerScanWindow;
     class ShortcutsWindow;
@@ -136,6 +137,8 @@ namespace Manifold::UI
         void OpenSignatureMaker(const std::string& expression);
         void OpenCodeFilter(bool collect = false);
         void OpenTableCleanup();
+        // Structures > Import: a file dialog, the clipboard, or (for --open=structimport:<path>) that file.
+        void OpenStructImport(bool clipboard, const std::filesystem::path& file = {});
         void OpenPointerScan(std::uint64_t address = 0);
         void OpenScript(std::string script, int recordId = kNoRecord, bool lua = false);
         ScriptWindow* ScriptFile(const std::filesystem::path& path);
@@ -260,6 +263,7 @@ namespace Manifold::UI
         std::unique_ptr<SignatureWindow> m_signatures;
         std::unique_ptr<CodeFilterWindow> m_codeFilter;
         std::unique_ptr<TableCleanupWindow> m_tableCleanup;
+        std::unique_ptr<StructImportWindow> m_structImport;
         std::unique_ptr<CommandPalette> m_palette;
         std::unique_ptr<PointerScanWindow> m_pointerScan;
         std::unique_ptr<ShortcutsWindow> m_shortcuts;

@@ -174,6 +174,8 @@ namespace Manifold
             { AddStructureColumn, "AddStructureColumn", Scope::Structure, "Add Address to Compare", Ctrl | ImGuiKey_A, 0, CE },
             { CollapseStructure, "CollapseStructure", Scope::Structure, "Collapse All Pointers", Ctrl | Alt | ImGuiKey_C, 0, CE },
             { StructureGotoAddress, "StructureGotoAddress", Scope::Structure, "Go to Address", Ctrl | ImGuiKey_G, 0, Own },
+            { ImportStructures, "ImportStructures", Scope::Structure, "Import Structures", Ctrl | ImGuiKey_I, 0, Own },
+            { ExportStructures, "ExportStructures", Scope::Structure, "Export Structure as C/C++", Ctrl | ImGuiKey_E, 0, Own },
             { ChangeFieldValue, "ChangeFieldValue", Scope::Structure, "Change Value", ImGuiKey_Enter, 0, CE },
             { RenameField, "RenameField", Scope::Structure, "Rename Field", Ctrl | ImGuiKey_Enter, ImGuiKey_F2, CE },
             { InsertField, "InsertField", Scope::Structure, "Insert 4 Bytes", ImGuiKey_Insert, 0, CE },
