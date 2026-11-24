@@ -95,6 +95,7 @@
     <ClCompile Include="..\Agent\Speed.cpp" />
     <ClCompile Include="..\Agent\Cover.cpp" />
     <ClCompile Include="..\Agent\Crash.cpp" />
+    <ClCompile Include="..\Agent\Life.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Source\Debug\VehProtocol.h" />
@@ -102,6 +103,7 @@
     <ClInclude Include="..\Source\Target\SpeedhackProtocol.h" />
     <ClInclude Include="..\Source\Target\CoverageProtocol.h" />
     <ClInclude Include="..\Source\Target\CrashProtocol.h" />
+    <ClInclude Include="..\Source\Target\AgentLifeProtocol.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="BuildX86Twin" AfterTargets="Build" Condition="'$(Platform)'=='x64'">

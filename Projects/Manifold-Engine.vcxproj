@@ -231,6 +231,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Table\TableCleanup.cpp" />
     <ClCompile Include="..\Source\Table\TableFiles.cpp" />
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
+    <ClCompile Include="..\Source\Target\AgentLife.cpp" />
     <ClCompile Include="..\Source\Target\ClrLink.cpp" />
     <ClCompile Include="..\Source\Target\ClrMetadata.cpp" />
     <ClCompile Include="..\Source\Target\ClrRuntime.cpp" />
@@ -437,6 +438,8 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Table\TableCleanup.h" />
     <ClInclude Include="..\Source\Table\TableFiles.h" />
     <ClInclude Include="..\Source\Table\UnrealStructures.h" />
+    <ClInclude Include="..\Source\Target\AgentLife.h" />
+    <ClInclude Include="..\Source\Target\AgentLifeProtocol.h" />
     <ClInclude Include="..\Source\Target\ClrLink.h" />
     <ClInclude Include="..\Source\Target\ClrMetadata.h" />
     <ClInclude Include="..\Source\Target\ClrProtocol.h" />

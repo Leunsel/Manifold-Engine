@@ -98,7 +98,6 @@ namespace Manifold::Target
         Result<std::vector<CoverEntry>> EntriesLocked() const;
         bool Adopt();
         bool Usable() const;
-        void DropAgent();
         void Forget();
         void ShowArmed();
 

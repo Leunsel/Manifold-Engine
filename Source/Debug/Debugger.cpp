@@ -1,5 +1,7 @@
 #include "Debug/Debugger.h"
 
+#include "Target/AgentLife.h"
+
 #include "Core/Handle.h"
 #include "Core/MainThread.h"
 #include "Core/RuntimeLog.h"
@@ -2576,18 +2578,8 @@ namespace Manifold::Debug
                 }
                 remoteBreak = remoteResume = nullptr;
             };
-        const auto dropAgent = [&]()
-            {
-                const auto module = m_process->FindModule(agentName);
-                const std::uint64_t freeLibrary = m_process->FindExport("kernel32.dll", "FreeLibrary");
-                if (!module || !freeLibrary || !m_process->Alive())
-                    return;
-                if (Status freed = m_process->CreateThread(freeLibrary, module->Base, true, 5000); !freed)
-                    LOG_WARN("Debugger","The extra reference to the agent in " + m_process->Name() + " was not released: " + freed.Text);
-                m_process->RefreshModules();
-            };
         const bool loadedBefore = m_process->FindModule(agentName).has_value();
-        if (Status injected = m_process->InjectLibrary(agent); !injected)
+        if (Status injected = Target::LoadAgent(*m_process); !injected)
         {
             dropEvents();
             m_process->Free(block);
@@ -2598,7 +2590,6 @@ namespace Manifold::Debug
         {
             dropEvents();
             m_process->Free(block);
-            dropAgent();
             return Status::Fail(ErrorCode::InjectFailed, "ManifoldAgentStart was not found in the agent");
         }
         if (Status thread = m_process->CreateThread(start, block, true); !thread)
@@ -2608,8 +2599,7 @@ namespace Manifold::Debug
             if (!timedOut)
             {
                 m_process->Free(block);
-                dropAgent();
-            }
+                }
             return thread;
         }
         std::uint32_t running = 0;
@@ -2626,7 +2616,6 @@ namespace Manifold::Debug
             std::uint32_t lastError = 0;
             m_process->ReadExact(block + offsetof(Veh::Block, LastError), &lastError, sizeof(lastError));
             m_process->Free(block);
-            dropAgent();
             if (lastError == ERROR_BUSY)
                 return Status::Fail(ErrorCode::InjectFailed, "another program already runs the in-process debugger in this process");
             if (loadedBefore && !lastError)

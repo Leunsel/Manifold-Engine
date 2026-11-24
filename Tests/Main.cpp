@@ -6,6 +6,7 @@
 #include "Core/Paths.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
+#include "Target/AgentLife.h"
 
 #include <algorithm>
 #include <chrono>
@@ -168,6 +169,9 @@ int main(int argc, char** argv)
 {
     using namespace Manifold::Tests;
     Manifold::BindMainThread();
+    // ∑ The agent unloads a moment after its last part let go (8 s in the program); the tests,
+    //   and the host processes they start, check that within a second or two.
+    Manifold::Target::SetAgentGrace(300);
     DataFolder data;
     const std::vector<std::string> arguments(argv + 1, argv + argc);
     for (const std::string& argument : arguments)

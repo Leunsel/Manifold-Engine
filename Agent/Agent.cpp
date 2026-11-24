@@ -1,4 +1,5 @@
 #include "Debug/VehProtocol.h"
+#include "Target/AgentLifeProtocol.h"
 
 #include <windows.h>
 #include <tlhelp32.h>
@@ -15,6 +16,10 @@ void CoverDetach();
 LONG CoverFilter(EXCEPTION_POINTERS* info);
 void CrashAttach();
 void CrashDetach();
+void LifeAttach(HINSTANCE instance);
+void LifeHold(std::uint32_t part);
+void LifeLetGo(std::uint32_t part);
+void LifeTouch();
 
 // The speedhack (Speed.cpp) hooks GetTickCount64 in this very process, so the
 // agent's own waits and timeouts read the real tick count from the shared user
@@ -1019,10 +1024,13 @@ namespace
             }
             ::Sleep(kSweepMs);
         }
+        // ∑ A clean release lets go of the agent; the agent's lifetime unloads it once no
+        //   part needs it (Agent/Life.cpp). An unclean one keeps it, so no thread runs
+        //   code that is gone.
         const bool unload = block && Release(block);
         _InterlockedExchange(&g_started, 0);
-        if (unload && g_module)
-            ::FreeLibraryAndExitThread(g_module, 0);
+        if (unload)
+            LifeLetGo(Manifold::Target::Life::PartDebugger);
         return 0;
     }
 }
@@ -1073,6 +1081,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldAgentStart(LPVOID paramete
     }
     ::CloseHandle(applyThread);
     block->Running = 1;
+    LifeHold(Manifold::Target::Life::PartDebugger);
     return 0;
 }
 
@@ -1085,6 +1094,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         SpeedAttach(instance);
         CoverAttach(instance);
         CrashAttach();
+        LifeAttach(instance);
     }
     else if (reason == DLL_PROCESS_DETACH && !reserved)
     {

@@ -223,6 +223,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Table\TableCleanup.cpp" />
     <ClCompile Include="..\Source\Table\TableFiles.cpp" />
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
+    <ClCompile Include="..\Source\Target\AgentLife.cpp" />
     <ClCompile Include="..\Source\Target\ClrLink.cpp" />
     <ClCompile Include="..\Source\Target\ClrMetadata.cpp" />
     <ClCompile Include="..\Source\Target\ClrRuntime.cpp" />
@@ -257,6 +258,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Text\Json.cpp" />
     <ClCompile Include="..\Source\Text\LuaContext.cpp" />
     <ClCompile Include="..\Source\Text\TextBuffer.cpp" />
+    <ClCompile Include="..\Tests\AgentLifeTests.cpp" />
     <ClCompile Include="..\Tests\AssemblerTests.cpp" />
     <ClCompile Include="..\Tests\AutorunTests.cpp" />
     <ClCompile Include="..\Tests\ClrTests.cpp" />

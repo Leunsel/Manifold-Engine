@@ -295,7 +295,7 @@ namespace Manifold::Tests
                 if (known)
                     CHECK_MSG(!patched, session.Label + ": " + hook.Name + " still differs from its file after the removal");
             }
-            CHECK_MSG(!AgentLoaded(session), session.Label + ": the agent library stayed loaded after the removal");
+            CHECK_MSG(WaitAgentGone(session, 3000), session.Label + ": the agent library stayed loaded after the removal");
             CHECK(session.Target.Alive());
             CheckRates(session, 1.0, "removed");
         }
@@ -331,7 +331,7 @@ namespace Manifold::Tests
             }
             CHECK_MSG(removed == 12, session.Label + ": " + std::to_string(removed) + " of 12 set/remove rounds worked");
             CheckRestored(session, hooks, "after 12 set/remove rounds");
-            CHECK_MSG(!AgentLoaded(session), session.Label + ": the agent library stayed loaded after the rounds");
+            CHECK_MSG(WaitAgentGone(session, 3000), session.Label + ": the agent library stayed loaded after the rounds");
             CHECK(session.Target.Alive());
         }
 

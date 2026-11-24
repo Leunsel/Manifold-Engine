@@ -1,3 +1,4 @@
+#include "Target/AgentLifeProtocol.h"
 #include "Target/CoverageProtocol.h"
 
 #include <windows.h>
@@ -9,6 +10,9 @@ using namespace Manifold::Target::Cover;
 extern "C" __declspec(dllexport) Block ManifoldCover = {};
 
 std::uint64_t RealTickCount64();
+void LifeHold(std::uint32_t part);
+void LifeLetGo(std::uint32_t part);
+void LifeTouch();
 
 namespace
 {
@@ -441,11 +445,17 @@ namespace
         g_block.Watching = 0;
     }
 
+    std::uint32_t RemoveHandler();
+
+    // The host ended: every int3 goes back, and once the handler is out the
+    // agent may unload (Agent/Life.cpp).
     void CALLBACK HostGone(PVOID, BOOLEAN)
     {
         Held held(g_callLock);
         g_block.HostLost = 1;
         DisarmAll();
+        if (RemoveHandler() == ResultOk)
+            LifeLetGo(Manifold::Target::Life::PartCover);
     }
 
     LONG CALLBACK Handler(EXCEPTION_POINTERS* info);
@@ -537,6 +547,7 @@ namespace
 extern "C" __declspec(dllexport) DWORD WINAPI ManifoldCoverCall(LPVOID parameter)
 {
     const auto call = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(parameter));
+    LifeTouch();
     if (call == CallWatch || call == CallRelease)
         Unwatch();
     Held held(g_callLock);
@@ -551,7 +562,15 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldCoverCall(LPVOID parameter
         result = g_block.Watching ? ResultOk : ResultNoHandler;
         break;
     case CallArm:
-        result = AddHandler() ? Arm() : ResultNoHandler;
+        if (AddHandler())
+        {
+            LifeHold(Manifold::Target::Life::PartCover);
+            result = Arm();
+        }
+        else
+        {
+            result = ResultNoHandler;
+        }
         break;
     case CallDisarm:
         DisarmAll();
@@ -559,6 +578,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldCoverCall(LPVOID parameter
     case CallRelease:
         DisarmAll();
         result = RemoveHandler();
+        if (result == ResultOk)
+            LifeLetGo(Manifold::Target::Life::PartCover);
         break;
     case CallReleaseRange:
         ReleaseRange(g_block.RangeBegin, g_block.RangeEnd);

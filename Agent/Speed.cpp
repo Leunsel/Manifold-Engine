@@ -1,3 +1,4 @@
+#include "Target/AgentLifeProtocol.h"
 #include "Target/SpeedhackProtocol.h"
 
 #include <windows.h>
@@ -433,11 +434,17 @@ namespace
 #endif
 }
 
+void LifeHold(std::uint32_t part);
+void LifeLetGo(std::uint32_t part);
+void LifeTouch();
+
 extern "C" __declspec(dllexport) DWORD WINAPI ManifoldSpeedCall(LPVOID parameter)
 {
+    LifeTouch();
     switch (static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(parameter)))
     {
     case CallWatch:
+        LifeHold(Manifold::Target::Life::PartSpeed);
         Unwatch();
         g_host = reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(g_block.HostHandle));
         g_block.HostLost = 0;
@@ -446,8 +453,13 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldSpeedCall(LPVOID parameter
         return g_block.Watching ? 0u : 1u;
     case CallRelease:
         Unwatch();
+        // ∑ The host leaves HookCount at the hooks it could not take back (something else
+        //   changed their bytes): those still jump here, so the agent must stay.
         if (g_block.HookCount == 0)
+        {
             Reset();
+            LifeLetGo(Manifold::Target::Life::PartSpeed);
+        }
         return 0;
     case CallApply:
         Apply(false);
