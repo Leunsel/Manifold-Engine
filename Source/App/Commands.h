@@ -55,6 +55,7 @@ namespace Manifold
         OpenRecordDebug,
         OpenSignatureMaker,
         OpenCodeFilter,
+        CommandPalette,
 
         NewTable,
         OpenLastProcess,

@@ -164,6 +164,7 @@ namespace Manifold
         bool CodeFilterHotkeys = true;
         bool CrashWatch = true;
         bool BreakInScriptMemory = true;
+        std::string PaletteRecent;  // the command palette's recent keys, newest first, joined by |
 
         std::vector<std::string> RecentTables;
         std::string LastProcess;

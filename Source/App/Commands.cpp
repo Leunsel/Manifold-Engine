@@ -45,6 +45,7 @@ namespace Manifold
             { OpenRecordDebug, "OpenRecordDebug", Scope::Global, "Address List Debug", Ctrl | Alt | Shift | ImGuiKey_D, 0, Own },
             { OpenSignatureMaker, "OpenSignatureMaker", Scope::Global, "Signature Maker", Ctrl | Alt | Shift | ImGuiKey_G, 0, Own },
             { OpenCodeFilter, "OpenCodeFilter", Scope::Global, "Code Filter", Ctrl | Alt | Shift | ImGuiKey_C, 0, Own },
+            { CommandPalette, "CommandPalette", Scope::Global, "Command Palette", Ctrl | ImGuiKey_K, 0, Own },
 
             { NewTable, "NewTable", Scope::Main, "New Table", Ctrl | ImGuiKey_N, 0, Own },
             { OpenLastProcess, "OpenLastProcess", Scope::Main, "Open Last Process", Ctrl | Shift | ImGuiKey_P, 0, Own },

@@ -34,6 +34,7 @@
 #include "UI/SettingsWindow.h"
 #include "UI/SignatureWindow.h"
 #include "UI/CodeFilterWindow.h"
+#include "UI/CommandPalette.h"
 #include "UI/StaticPointersWindow.h"
 #include "UI/StructureWindow.h"
 #include "UI/TableFilesWindow.h"
@@ -96,6 +97,7 @@ namespace Manifold::UI
     Workspace::Workspace(Engine& engine, Shell& shell) : m_engine(engine), m_shell(shell)
     {
         m_main = std::make_unique<MainWindow>(*this);
+        m_palette = std::make_unique<CommandPalette>(*this);
         m_scriptForms = std::make_unique<ScriptForms>(engine);
         m_ui = std::make_unique<UiHost>(engine, shell);
         InstallTextMeasurer();
@@ -147,6 +149,10 @@ namespace Manifold::UI
             OpenSignatureMaker(window.substr(10));
         else if (window == "codefilter")
             OpenCodeFilter();
+        else if (window == "palette")
+            m_palette->Open();
+        else if (window.starts_with("palette:"))
+            m_palette->Open(window.substr(8));
         else if (window == "codefilter:collect")
             OpenCodeFilter(true);
         else if (window == "signaturesettings")
@@ -225,7 +231,7 @@ namespace Manifold::UI
             "dissect", "asmsearch", "bytes", "pointerscan", "staticpointers", "shortcuts", "keyboard", "appearance", "processes", "about",
             "profiler", "breakdown", "threads", "checks", "appinfo", "nopsled", "writehistory", "comments", "recorddebug", "flowgraph", "opcodes",
             "templates", "forms", "modules", "breakpoints", "threadlist", "layoutproblems", "signatures", "codefilter",
-            "signaturesettings", "settings:2", "settings:3", "settings:4"
+            "signaturesettings", "settings:2", "settings:3", "settings:4", "palette"
         };
         return names;
     }
@@ -249,6 +255,10 @@ namespace Manifold::UI
         {
             PROFILE_ZONE("Tool windows");
             DrawWindows();
+        }
+        {
+            PROFILE_ZONE("Command palette");
+            m_palette->Draw();
         }
         PROFILE_ZONE("Dialogs and notices");
         DrawConfirm();
@@ -405,8 +415,19 @@ namespace Manifold::UI
         case Command::OpenLog: OpenLog(); break;
         case Command::OpenProfiler: OpenProfiler(); break;
         case Command::OpenLayoutProblems: OpenLayoutProblems(); break;
+        case Command::CommandPalette: m_palette->Toggle(); break;
         default: break;
         }
+    }
+
+    bool Workspace::CanRunAnywhere(Command command)
+    {
+        return m_main->CanRun(command);
+    }
+
+    void Workspace::RunAnywhere(Command command)
+    {
+        m_main->Run(command);
     }
 
     void Workspace::HandleShortcuts()

@@ -121,6 +121,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\App\Engine.cpp" />
     <ClCompile Include="..\Source\App\ManagedSession.cpp" />
     <ClCompile Include="..\Source\App\Notifications.cpp" />
+    <ClCompile Include="..\Source\App\Palette.cpp" />
     <ClCompile Include="..\Source\App\RttiSession.cpp" />
     <ClCompile Include="..\Source\App\SessionBackup.cpp" />
     <ClCompile Include="..\Source\App\Settings.cpp" />
@@ -269,6 +270,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\UI\CodeEditor.cpp" />
     <ClCompile Include="..\Source\UI\CodeFilterWindow.cpp" />
     <ClCompile Include="..\Source\UI\CodeTools.cpp" />
+    <ClCompile Include="..\Source\UI\CommandPalette.cpp" />
     <ClCompile Include="..\Source\UI\CommentListWindow.cpp" />
     <ClCompile Include="..\Source\UI\ConsoleView.cpp" />
     <ClCompile Include="..\Source\UI\DebugWindows.cpp" />
@@ -331,6 +333,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\App\Engine.h" />
     <ClInclude Include="..\Source\App\ManagedSession.h" />
     <ClInclude Include="..\Source\App\Notifications.h" />
+    <ClInclude Include="..\Source\App\Palette.h" />
     <ClInclude Include="..\Source\App\RttiSession.h" />
     <ClInclude Include="..\Source\App\SessionBackup.h" />
     <ClInclude Include="..\Source\App\Settings.h" />
@@ -477,6 +480,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\UI\CodeEditor.h" />
     <ClInclude Include="..\Source\UI\CodeFilterWindow.h" />
     <ClInclude Include="..\Source\UI\CodeTools.h" />
+    <ClInclude Include="..\Source\UI\CommandPalette.h" />
     <ClInclude Include="..\Source\UI\CommentListWindow.h" />
     <ClInclude Include="..\Source\UI\ConsoleView.h" />
     <ClInclude Include="..\Source\UI\DebugWindows.h" />

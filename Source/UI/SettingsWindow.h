@@ -18,6 +18,10 @@ namespace Manifold::UI
         static constexpr int KeyboardPage = 6;
         static constexpr int PageCount = 7;
 
+        static const char* PageIcon(int page);
+        static const char* PageTitle(int page);
+        static const char* PageSubtitle(int page);
+
         explicit SettingsWindow(Workspace& workspace);
         void Draw() override;
         void Show(int page = -1)
