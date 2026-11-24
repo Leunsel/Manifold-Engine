@@ -29,7 +29,7 @@ namespace Manifold
     }
 
     Engine::Engine(Settings& settings)
-        : m_settings(settings), m_settingsStore(settings, Paths::SettingsFile()), m_disassembler64(std::make_unique<Disasm::Disassembler>(true)), m_disassembler32(std::make_unique<Disasm::Disassembler>(false))
+        : m_settings(settings), m_settingsStore(settings, Paths::SettingsFile()), m_themes(Paths::ThemesFolder()), m_disassembler64(std::make_unique<Disasm::Disassembler>(true)), m_disassembler32(std::make_unique<Disasm::Disassembler>(false))
     {
         m_lua = std::make_unique<Lua::LuaEngine>(*this);
         m_unreal.RegisterTypes(*m_lua);
@@ -693,7 +693,9 @@ namespace Manifold
 
     Status Engine::SaveOptionsNow()
     {
-        return m_settingsStore.Flush();
+        const Status theme = m_themes.SaveActive(m_settings.Theme);
+        const Status saved = m_settingsStore.Flush();
+        return theme.Ok() ? saved : theme;
     }
 
     void Engine::Notify(const Status& status, LogLevel level)
@@ -713,7 +715,9 @@ namespace Manifold
     {
         MANIFOLD_ASSERT_MAIN();
         if (m_settingsStore.Due(Now()))
-            Notify(m_settingsStore.Flush());
+            Notify(SaveOptionsNow());
+        if (m_themes.TakeChanged())
+            m_lua->DispatchEvent("themeChanged");
         const double now = Now();
         {
             PROFILE_ZONE("Finished background jobs");

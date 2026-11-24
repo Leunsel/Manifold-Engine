@@ -54,8 +54,12 @@ namespace Manifold
         ThemeFamily Family = ThemeFamily::Standard;
         ThemeMode Mode = ThemeMode::Dark;
         int Corners = 0;
+        std::string Custom;      // file stem of the custom theme in the themes folder, empty for a preset
+        std::string CustomName;  // its display name, read from the file
+        // The custom theme's colours with variant prefixes (red-light.Accent) and its sizes; empty for a preset.
         std::map<std::string, std::array<float, 4>> Colors;
         std::map<std::string, float> Sizes;
+        bool Dirty = false;      // not stored in the ini: the custom theme file still has to be written
     };
 
     struct Settings
@@ -169,6 +173,9 @@ namespace Manifold
         std::vector<std::string> RecentTables;
         std::string LastProcess;
         ThemeSettings Theme;
+        // Color.* and Size.* lines from before custom themes; written back until they are moved into theme files.
+        std::map<std::string, std::array<float, 4>> LegacyThemeColors;
+        std::map<std::string, float> LegacyThemeSizes;
         std::map<std::string, std::string> Shortcuts;
 
         bool Load(const std::filesystem::path& path);

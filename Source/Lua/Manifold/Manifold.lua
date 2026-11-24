@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 31
+local API_VERSION = 32
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -1334,8 +1334,8 @@ define(symbol, "removeResolver", {
   return removeSymbolResolver(id)
 end)
 
-local EVENTS = { "processOpened", "processClosed", "unrealReady" }
-local subscribers = { processOpened = {}, processClosed = {}, unrealReady = {} }
+local EVENTS = { "processOpened", "processClosed", "unrealReady", "themeChanged" }
+local subscribers = { processOpened = {}, processClosed = {}, unrealReady = {}, themeChanged = {} }
 local subscriberNames = {}
 local nextSubscriber = 1
 
@@ -1372,7 +1372,7 @@ define(event, "subscribe", {
     KEY_OPTION,
   },
   returns = "id",
-  doc = "Calls `handler` on an event. `processOpened` passes the process as `manifold.process.info()` gives it, also when the same process is opened again; `processClosed` passes nothing and comes before the next `processOpened`; `unrealReady` passes nothing and follows when the Unreal tool has resolved the game." .. KEY_TEXT,
+  doc = "Calls `handler` on an event. `processOpened` passes the process as `manifold.process.info()` gives it, also when the same process is opened again; `processClosed` passes nothing and comes before the next `processOpened`; `unrealReady` passes nothing and follows when the Unreal tool has resolved the game; `themeChanged` passes the look as `manifold.ui.theme.current()` gives it, after the user, Windows (System mode) or a script changed it, at most once a frame." .. KEY_TEXT,
 }, function(name, handler, options)
   return subscribe({ name = name, handler = handler }, options)
 end)
@@ -1393,6 +1393,8 @@ debug.getregistry()["Manifold.Dispatch"] = function(name)
   local argument = nil
   if name == "processOpened" then
     argument = native.processInfo()
+  elseif name == "themeChanged" then
+    argument = native.uiThemeCurrent()
   end
   local snapshot = table.move(list, 1, #list, 1, {})
   for _, entry in ipairs(snapshot) do
@@ -4355,7 +4357,7 @@ define(ui, "setMode", {
   native.setUiMode(mode.release, mode.compact)
 end)
 
-local theme = subarea(ui, "theme", "The names `manifold.ui` takes for colours and icons.")
+local theme = subarea(ui, "theme", "The theme: the names `manifold.ui` takes for colours and icons, the look shown now, and custom themes. The presets are Standard, Red, Green and Blue; a custom theme is an .ini file in the themes folder that builds on one of them. `apply`, `override` and `restore` change the look for this session only, and it comes back when the script runs again or stops; `save` writes a theme file.")
 
 define(theme, "colors", {
   returns = "table",
@@ -4379,6 +4381,109 @@ define(theme, "isIcon", {
 }, function(name)
   return native.uiIsIcon(name)
 end)
+
+-- ∑ in a do block: the main chunk is at Lua's 200 locals
+do
+  local THEME_MODES = { dark = true, light = true, system = true }
+
+  define(theme, "sizes", {
+    returns = "table",
+    doc = "The size names a theme can set, such as `FrameRounding` or `ItemSpacing.x`, as Settings > Appearance lists them.",
+  }, function()
+    return native.uiThemeSizes()
+  end)
+
+  define(theme, "current", {
+    returns = "table",
+    doc = "The look shown now: `{ name, custom, base, mode, light, scripted }`. `name` is the preset's or the custom theme's name, `custom` whether it is a custom theme, `base` the preset it builds on (`standard`, `red`, `green` or `blue`), `mode` `dark`, `light` or `system`, `light` whether light colours show, `scripted` whether a script changed the look for this session.",
+  }, function()
+    return native.uiThemeCurrent()
+  end)
+
+  define(theme, "list", {
+    returns = "table",
+    doc = "The themes to pick from: the presets first, then the custom themes by name, each `{ name, custom, base }`.",
+  }, function()
+    return native.uiThemeList()
+  end)
+
+  define(theme, "color", {
+    params = { { name = "name", type = "string" } },
+    returns = "table, or nil, error",
+    doc = "A colour of the look shown now as `{ r, g, b, a }` from 0 to 1. `name` is one of `colors()` or an ImGui colour as `imgui.WindowBg`; an unknown name gives `ThemeInvalid`.",
+  }, function(name)
+    return result(native.uiThemeColor(name))
+  end)
+
+  define(theme, "definition", {
+    params = { { name = "name", type = "string" } },
+    returns = "table, or nil, error",
+    doc = "What a theme changes from its preset: `{ base, dark = { name = colour }, light = { ... }, sizes = { name = number } }`, to copy, change and `save`. A preset changes nothing, so its tables are empty; colours are `{ r, g, b, a }`. An unknown name gives `ThemeNotFound`.",
+  }, function(name)
+    return result(native.uiThemeDefinition(name))
+  end)
+
+  local function claimLook(owner)
+    -- the look goes back when the script runs again or stops, or when its module unloads
+    remember(owner, "theme", function() native.uiThemeRestore(owner) end)
+    local module = callerModule()
+    if module then
+      own(module, function() native.uiThemeRestore(owner) end)
+    end
+  end
+
+  define(theme, "apply", {
+    params = {
+      { name = "name", type = "string" },
+      { name = "options", type = "table", optional = true, keys = { mode = "string" } },
+    },
+    returns = "true, or nil, error",
+    doc = "Shows a preset or a custom theme for this session; the user's choice in the settings stays. `options.mode` is `dark`, `light` or `system` (default: the user's mode). An unknown name gives `ThemeNotFound`.",
+  }, function(name, options)
+    local mode = options and options.mode
+    if mode ~= nil and not THEME_MODES[mode] then
+      misuse("manifold.ui.theme.apply: options.mode must be one of \"dark\", \"light\", \"system\", got \"" .. tostring(mode) .. "\"")
+    end
+    local owner = ownerSource()
+    local ok, code, message = native.uiThemeApply(name, mode, owner)
+    if ok then
+      claimLook(owner)
+    end
+    return result(ok, code, message)
+  end)
+
+  define(theme, "override", {
+    params = { { name = "changes", type = "table", keys = { colors = "table", dark = "table", light = "table", sizes = "table" } } },
+    returns = "true, or nil, error",
+    doc = "Changes single colours or sizes of the look shown, for this session. `colors` applies to dark and light, `dark` and `light` to one mode; a colour is `\"#rrggbb\"`, `\"#rrggbbaa\"` or `{ r, g, b, a }` from 0 to 1. `sizes` takes the names of `sizes()`. A bad name or value gives `ThemeInvalid` and changes nothing.",
+  }, function(changes)
+    local owner = ownerSource()
+    local ok, code, message = native.uiThemeOverride(changes, owner)
+    if ok then
+      claimLook(owner)
+    end
+    return result(ok, code, message)
+  end)
+
+  define(theme, "restore", {
+    returns = "boolean",
+    doc = "Undoes this script's `apply` and `override`, so the user's theme shows again; false when the look was not this script's.",
+  }, function()
+    return native.uiThemeRestore(ownerSource())
+  end)
+
+  define(theme, "save", {
+    params = {
+      { name = "name", type = "string" },
+      { name = "definition", type = "table", keys = { base = "string", dark = "table", light = "table", sizes = "table" } },
+      { name = "options", type = "table", optional = true, keys = { overwrite = "boolean" } },
+    },
+    returns = "true, or nil, error",
+    doc = "Writes a custom theme file in the themes folder, as `definition()` describes one; `base` defaults to `standard`. It does not select the theme. A name that is taken gives `ThemeExists` unless `options.overwrite` replaces your own theme of that name; preset names are always taken.",
+  }, function(name, definition, options)
+    return result(native.uiThemeSave(name, definition, options and options.overwrite or false))
+  end)
+end
 
 local function forgetSource(source)
   local list = uiOwned[source]

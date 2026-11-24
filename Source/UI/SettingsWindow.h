@@ -1,6 +1,8 @@
 #pragma once
 
+#include "App/Themes.h"
 #include "UI/ToolWindowBase.h"
+#include "UI/Widgets.h"
 
 #include <cstdint>
 #include <optional>
@@ -46,12 +48,26 @@ namespace Manifold::UI
         bool DebuggerPage(SettingsList& list, Settings& settings);
         bool SignatureOptionsPage(SettingsList& list, Settings& settings);
         bool ShortcutsPage(SettingsList& list, Settings& settings);
+        bool ThemeGallery(SettingsList& list, Settings& settings);
+        void ThemeCardMenu(const Themes::CustomTheme& theme, Settings& settings);
+        void ThemeNameDialog(Settings& settings);
+        void OpenThemeName(int action, const std::string& source, const std::string& name);
+        void SelectTheme(Settings& settings, const std::string& custom, ThemeFamily family);
+        void FinishThemeEdit(Settings& settings);
+        void ImportTheme(Settings& settings);
 
         Workspace& m_workspace;
         int m_page = 0;
         bool m_scrollTop = false;
         bool m_allImGuiColors = false;
         bool m_themeReset = false;
+        bool m_themeColorsEdited = false;  // colours or sizes changed this frame
+        Dialog m_themeNameDialog;
+        int m_themeNaming = 0;             // ThemeNaming in the .cpp
+        std::string m_themeNameSource;     // the custom theme's id the dialog works on
+        std::string m_themeName;
+        std::string m_themeNotice;
+        double m_themesScannedAt = -100.0;
         bool m_shortcutsReset = false;
         int m_captureCommand = -1;
         int m_captureSlot = 0;

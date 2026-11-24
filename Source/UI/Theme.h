@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App/Settings.h"
+#include "App/Themes.h"
 
 #include "imgui.h"
 
@@ -212,13 +213,7 @@ namespace ManifoldTheme
 
     inline const char* FamilyLabel(ThemeFamily family)
     {
-        switch (family)
-        {
-        case ThemeFamily::Red: return "Red";
-        case ThemeFamily::Green: return "Green";
-        case ThemeFamily::Blue: return "Blue";
-        default: return "Standard";
-        }
+        return Manifold::Themes::FamilyLabel(family);
     }
 
 #define MANIFOLD_THEME_VALUE(name, label) inline ImVec4 name = kStandardDark.name;
@@ -323,9 +318,7 @@ namespace ManifoldTheme
 
     inline std::string VariantPrefix(ThemeFamily family, bool light)
     {
-        if (family == ThemeFamily::Standard && !light)
-            return {};
-        return std::string(Manifold::ThemeFamilyKey(family)) + (light ? "-light." : "-dark.");
+        return Manifold::Themes::VariantPrefix(family, light);
     }
 
     inline std::string CurrentPrefix()
@@ -335,16 +328,7 @@ namespace ManifoldTheme
 
     inline std::size_t PrefixLength(std::string_view lower)
     {
-        for (ThemeFamily family : Manifold::kThemeFamilies)
-        {
-            for (const char* mode : { "-dark.", "-light." })
-            {
-                const std::string prefix = std::string(Manifold::ThemeFamilyKey(family)) + mode;
-                if (lower.substr(0, prefix.size()) == prefix)
-                    return prefix.size();
-            }
-        }
-        return 0;
+        return Manifold::Themes::PrefixLength(lower);
     }
 
     inline bool BelongsToCurrent(std::string_view key)
@@ -519,5 +503,81 @@ namespace ManifoldTheme
             if (found != g_SizeOverrides.end())
                 SizeOf(style, size) = found->second;
         }
+    }
+
+    // Tells the theme files and the Lua API which colour and size names exist and how a theme resolves.
+    inline void InstallThemeModel()
+    {
+        namespace Themes = Manifold::Themes;
+        Themes::Model model;
+        model.ColorName = [](std::string_view name) -> std::optional<std::string> {
+            const std::string lower = LowerName(name);
+            if (lower.rfind(kImGuiPrefix, 0) == 0)
+            {
+                const int index = ImGuiColorIndex(std::string_view(lower).substr(std::string_view(kImGuiPrefix).size()));
+                if (index < 0)
+                    return std::nullopt;
+                return std::string("ImGui.") + ImGui::GetStyleColorName(index);
+            }
+            for (const PaletteColor& color : kPalette)
+            {
+                if (LowerName(color.Name) == lower)
+                    return std::string(color.Name);
+            }
+            return std::nullopt;
+        };
+        model.SizeName = [](std::string_view name) -> std::optional<std::string> {
+            const std::string lower = LowerName(name);
+            for (const StyleSize& size : kSizes)
+            {
+                if (LowerName(size.Name) == lower)
+                    return std::string(size.Name);
+            }
+            return std::nullopt;
+        };
+        model.ClampSize = [](std::string_view name, float value) -> std::optional<float> {
+            for (const StyleSize& size : kSizes)
+            {
+                if (LowerName(size.Name) == LowerName(name))
+                    return value < size.Min ? size.Min : value > size.Max ? size.Max : value;
+            }
+            return std::nullopt;
+        };
+        model.Light = [](const Manifold::ThemeSettings& theme) { return ResolveLight(theme); };
+        model.SizeNames = []() {
+            std::vector<std::string> names;
+            for (const StyleSize& size : kSizes)
+                names.emplace_back(size.Name);
+            return names;
+        };
+        model.Color = [](const Manifold::ThemeSettings& theme, std::string_view name) -> std::optional<Themes::Rgba> {
+            const Themes::Model& self = Themes::CurrentModel();
+            const std::optional<std::string> canonical = self.ColorName(name);
+            if (!canonical)
+                return std::nullopt;
+            const bool light = ResolveLight(theme);
+            const std::string own = LowerName(VariantPrefix(theme.Family, light) + *canonical);
+            const std::string legacy = LowerName("standard-dark." + *canonical);
+            for (const auto& [key, rgba] : theme.Colors)
+            {
+                const std::string lower = LowerName(key);
+                if (lower == own || (theme.Family == ThemeFamily::Standard && !light && lower == legacy))
+                    return rgba;
+            }
+            for (const PaletteColor& color : kPalette)
+            {
+                if (*canonical == color.Name)
+                {
+                    const ImVec4 value = PaletteOf(theme.Family, light).*color.Member;
+                    return Themes::Rgba{ value.x, value.y, value.z, value.w };
+                }
+            }
+            if (!ImGui::GetCurrentContext())
+                return std::nullopt;
+            const int index = ImGuiColorIndex(std::string_view(*canonical).substr(6));
+            const ImVec4 value = ImGui::GetStyle().Colors[index];
+            return Themes::Rgba{ value.x, value.y, value.z, value.w };
+        };
+        Themes::SetModel(std::move(model));
     }
 }

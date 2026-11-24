@@ -123,6 +123,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\App\Sounds.cpp" />
     <ClCompile Include="..\Source\App\TableRuntime.cpp" />
     <ClCompile Include="..\Source\App\TargetSession.cpp" />
+    <ClCompile Include="..\Source\App\Themes.cpp" />
     <ClCompile Include="..\Source\App\UnrealSession.cpp" />
     <ClCompile Include="..\Source\App\WriteHistory.cpp" />
     <ClCompile Include="..\Source\Asm\AsmAssist.cpp" />
@@ -198,6 +199,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaSignature.cpp" />
     <ClCompile Include="..\Source\Lua\LuaSnapshot.cpp" />
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaTheme.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUi.cpp" />
     <ClCompile Include="..\Source\Lua\LuaUnreal.cpp" />
     <ClCompile Include="..\Source\Lua\UiForm.cpp" />
@@ -291,6 +293,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\TableFileTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
     <ClCompile Include="..\Tests\TextTests.cpp" />
+    <ClCompile Include="..\Tests\ThemeTests.cpp" />
     <ClCompile Include="..\Tests\UiLayoutTests.cpp" />
     <ClCompile Include="..\Tests\UnrealTests.cpp" />
     <ClCompile Include="..\Tests\WatchStress.cpp" />

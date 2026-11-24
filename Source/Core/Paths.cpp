@@ -190,6 +190,11 @@ namespace Manifold
             return DataFolder() / L"backups";
         }
 
+        std::filesystem::path ThemesFolder()
+        {
+            return DataFolder() / L"themes";
+        }
+
         std::filesystem::path ScanFolder()
         {
             wchar_t temp[MAX_PATH + 1] = L"";

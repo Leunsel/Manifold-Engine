@@ -114,6 +114,9 @@
     <ClCompile Include="..\Source\App\TargetSession.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\Themes.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\UnrealSession.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -340,6 +343,9 @@
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaTasks.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaTheme.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaUi.cpp">
@@ -744,6 +750,9 @@
     <ClInclude Include="..\Source\App\TargetSession.h">
       <Filter>Source\App</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\App\Themes.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\App\UnrealSession.h">
       <Filter>Source\App</Filter>
     </ClInclude>
@@ -952,6 +961,9 @@
       <Filter>Source\Lua</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Lua\LuaSnapshot.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaTheme.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Lua\LuaUi.h">

@@ -121,15 +121,27 @@ namespace Manifold::UI
             theme.Sizes.clear();
         }
 
-        bool ThemeCard(ThemeFamily family, bool selected, bool light, float width, float height)
+        enum ThemeNaming
         {
-            const ManifoldTheme::Palette& palette = ManifoldTheme::PaletteOf(family, light);
-            const char* label = ManifoldTheme::FamilyLabel(family);
+            NameNew = 0,
+            NameDuplicate = 1,
+            NameRename = 2
+        };
+
+        void CardLabel(ImDrawList* draw, const ImVec2& pos, float width, float top, std::string_view text, ImVec4 tint)
+        {
+            const std::string shown = Layout::Shorten(text, width);
+            const float measured = Layout::FitText(ImGui::GetFont(), ImGui::GetFontSize(), shown, 1.0e6f).Width;
+            draw->AddText(ImVec2(std::round(pos.x + (width - measured) * 0.5f), top), ImGui::GetColorU32(tint), shown.c_str());
+        }
+
+        bool ThemeCard(const char* id, std::string_view label, const ManifoldTheme::Palette& palette, bool selected, const std::string& tooltip, float width, float height)
+        {
             const float labelHeight = ImGui::GetTextLineHeight() + Px(8.0f);
             const ImVec2 pos = ImGui::GetCursorScreenPos();
-            const bool clicked = ImGui::InvisibleButton(label, ImVec2(width, height + labelHeight));
+            const bool clicked = ImGui::InvisibleButton(id, ImVec2(width, height + labelHeight));
             const bool hovered = ImGui::IsItemHovered();
-            ItemTooltip((std::string(label) + (light ? ", light" : ", dark")).c_str());
+            ItemTooltip(tooltip.c_str());
             ImDrawList* draw = ImGui::GetWindowDrawList();
             const auto color = [](ImVec4 value) { return ImGui::GetColorU32(value); };
             const float rounding = Px(7.0f);
@@ -169,9 +181,40 @@ namespace Manifold::UI
 
             const ImVec4 ring = selected ? ManifoldTheme::Accent : hovered ? ManifoldTheme::WithAlpha(ManifoldTheme::Text, 0.35f) : ManifoldTheme::Border;
             draw->AddRect(ImVec2(pos.x - 0.5f, pos.y - 0.5f), ImVec2(max.x + 0.5f, max.y + 0.5f), color(ring), rounding, 0, selected ? Px(2.0f) : Px(1.0f));
-            const ImVec2 text = ImGui::CalcTextSize(label);
-            draw->AddText(ImVec2(std::round(pos.x + (width - text.x) * 0.5f), std::round(max.y + Px(5.0f))),
-                color(selected ? ManifoldTheme::Text : hovered ? ManifoldTheme::Label : ManifoldTheme::Muted), label);
+            CardLabel(draw, pos, width, std::round(max.y + Px(5.0f)), label, selected ? ManifoldTheme::Text : hovered ? ManifoldTheme::Label : ManifoldTheme::Muted);
+            return clicked;
+        }
+
+        // The last card of the gallery: a dashed outline with a plus.
+        bool NewThemeCard(float width, float height)
+        {
+            const float labelHeight = ImGui::GetTextLineHeight() + Px(8.0f);
+            const ImVec2 pos = ImGui::GetCursorScreenPos();
+            const bool clicked = ImGui::InvisibleButton("##newtheme", ImVec2(width, height + labelHeight));
+            const bool hovered = ImGui::IsItemHovered();
+            ItemTooltip("Makes a custom theme from the one shown. Right-click to import a theme file.");
+            ImDrawList* draw = ImGui::GetWindowDrawList();
+            const ImVec2 max(pos.x + width, pos.y + height);
+            const ImU32 tint = ImGui::GetColorU32(hovered ? ManifoldTheme::Accent : ManifoldTheme::Muted);
+            const float dash = Px(6.0f);
+            const float inset = Px(1.0f);
+            for (float x = pos.x + Px(8.0f); x < max.x - Px(8.0f); x += dash * 2.0f)
+            {
+                const float to = std::min(x + dash, max.x - Px(8.0f));
+                draw->AddLine(ImVec2(x, pos.y + inset), ImVec2(to, pos.y + inset), tint, Px(1.0f));
+                draw->AddLine(ImVec2(x, max.y - inset), ImVec2(to, max.y - inset), tint, Px(1.0f));
+            }
+            for (float y = pos.y + Px(8.0f); y < max.y - Px(8.0f); y += dash * 2.0f)
+            {
+                const float to = std::min(y + dash, max.y - Px(8.0f));
+                draw->AddLine(ImVec2(pos.x + inset, y), ImVec2(pos.x + inset, to), tint, Px(1.0f));
+                draw->AddLine(ImVec2(max.x - inset, y), ImVec2(max.x - inset, to), tint, Px(1.0f));
+            }
+            const float plus = std::round(std::min(width, height) * 0.14f);
+            const ImVec2 center(std::round(pos.x + width * 0.5f), std::round(pos.y + height * 0.5f));
+            draw->AddLine(ImVec2(center.x - plus, center.y), ImVec2(center.x + plus, center.y), tint, Px(2.0f));
+            draw->AddLine(ImVec2(center.x, center.y - plus), ImVec2(center.x, center.y + plus), tint, Px(2.0f));
+            CardLabel(draw, pos, width, std::round(max.y + Px(5.0f)), "New Theme", hovered ? ManifoldTheme::Label : ManifoldTheme::Muted);
             return clicked;
         }
 
@@ -207,6 +250,17 @@ namespace Manifold::UI
                     return &color;
             }
             return nullptr;
+        }
+
+        ManifoldTheme::Palette CustomPalette(const Themes::CustomTheme& theme, bool light)
+        {
+            ManifoldTheme::Palette palette = ManifoldTheme::PaletteOf(theme.Base, light);
+            for (const auto& [name, rgba] : light ? theme.Light : theme.Dark)
+            {
+                if (const ManifoldTheme::PaletteColor* color = FindPalette(name))
+                    palette.*color->Member = ImVec4(rgba[0], rgba[1], rgba[2], rgba[3]);
+            }
+            return palette;
         }
 
         bool ResetButton(bool visible)
@@ -473,7 +527,7 @@ namespace Manifold::UI
         return page >= 0 && page < kPageCount ? kPages[page].Subtitle : "";
     }
 
-    SettingsWindow::SettingsWindow(Workspace& workspace) : m_workspace(workspace)
+    SettingsWindow::SettingsWindow(Workspace& workspace) : m_workspace(workspace), m_themeNameDialog("themename", ICON_FA_PALETTE, "New Theme", ImVec2(440.0f, 0.0f))
     {
     }
 
@@ -539,12 +593,19 @@ namespace Manifold::UI
         if (list.Searching() && list.Shown() == 0)
             EmptyState(ICON_FA_SEARCH, "Nothing found", "No setting matches \"" + list.Filter() + "\".", {}, false);
         ImGui::EndChild();
+        ThemeNameDialog(settings);
 
         if (m_themeReset)
         {
             m_themeReset = false;
             ResetOwnColors(settings.Theme);
             themeEdited = true;
+            m_themeColorsEdited = true;
+        }
+        if (m_themeColorsEdited)
+        {
+            m_themeColorsEdited = false;
+            FinishThemeEdit(settings);
         }
         if (m_shortcutsReset)
         {
@@ -735,7 +796,8 @@ namespace Manifold::UI
             if (ImGui::Button(label))
                 m_themeReset = true;
             ImGui::EndDisabled();
-            ItemTooltip("Resets the colors and sizes of this theme; theme and mode stay.");
+            ItemTooltip(settings.Theme.Custom.empty() ? "A preset has nothing to reset." :
+                ("Resets this theme's colors for the mode shown, and its sizes, to the " + std::string(Themes::FamilyLabel(settings.Theme.Family)) + " preset.").c_str());
         }
         if (m_page == KeyboardPage)
         {
@@ -1017,24 +1079,21 @@ namespace Manifold::UI
         const bool light = ManifoldTheme::IsLight();
 
         list.Section("Theme");
-        if (list.Row("Theme", "Color changes below apply to the theme and mode shown.", -1.0f))
+        Themes::Library& library = m_workspace.Core().ThemeLibrary();
+        const bool scripted = library.Scripted();
+        // ∑ the owner is a Lua chunk name: "@C:\...\probe.lua" for a file, "=name" for a named chunk
+        const std::string& source = library.ScriptOwner();
+        const std::string script = source.empty() ? std::string("A script")
+            : source[0] == '@' ? WideToUtf8(std::filesystem::path(Utf8ToWide(source.substr(1))).filename().wstring())
+            : source[0] == '=' ? source.substr(1) : source;
+        if (scripted && list.Row("Changed by a Script", script + " changed the look for this session. Restore it to change the theme here.", -1.0f))
         {
-            const float space = std::round(Px(12.0f));
-            const float width = std::floor(std::min(Px(150.0f), (list.ControlWidth() - space * 3.0f) / 4.0f));
-            const float height = std::round(width * 0.62f);
-            const ImVec2 start = ImGui::GetCursorScreenPos();
-            for (int i = 0; i < static_cast<int>(std::size(kThemeFamilies)); ++i)
-            {
-                const ThemeFamily family = kThemeFamilies[i];
-                ImGui::SetCursorScreenPos(ImVec2(start.x + static_cast<float>(i) * (width + space), start.y));
-                if (ThemeCard(family, theme.Family == family, light, width, height) && theme.Family != family)
-                {
-                    theme.Family = family;
-                    edited = true;
-                }
-            }
+            if (Layout::Button(ICON_FA_UNDO "  Restore", Layout::ButtonKind::Accent))
+                library.ClearScript();
             list.EndRow();
         }
+        ImGui::BeginDisabled(scripted);
+        edited |= ThemeGallery(list, settings);
         const float modeWidth = std::round(Px(250.0f));
         const std::string modeText = std::string("System follows Windows, currently ") + (ManifoldTheme::SystemLight() ? "light" : "dark") + ".";
         if (list.Row("Mode", modeText, modeWidth))
@@ -1087,15 +1146,18 @@ namespace Manifold::UI
             {
                 Erase(theme.Colors, key);
                 edited = true;
+                m_themeColorsEdited = true;
             }
             ImGui::SetCursorScreenPos(ImVec2(pos.x + frame + gap, pos.y));
             float rgba[4] = { current.x, current.y, current.z, current.w };
+            const bool before = edited;
             if (ImGui::ColorEdit4("##color", rgba, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf))
             {
                 Erase(theme.Colors, key);
                 theme.Colors[key] = { rgba[0], rgba[1], rgba[2], rgba[3] };
                 edited = true;
             }
+            m_themeColorsEdited |= edited && !before;
             list.EndRow();
         };
         const auto paletteCells = [&](const char* const* names, std::size_t count) {
@@ -1131,6 +1193,7 @@ namespace Manifold::UI
                         theme.Colors[prefix + "AccentHovered"] = { hovered.x, hovered.y, hovered.z, 1.0f };
                     }
                     edited = true;
+                    m_themeColorsEdited = true;
                 }
                 ItemTooltip(i == 0 ? (std::string(ManifoldTheme::FamilyLabel(theme.Family)) + " theme's own").c_str() : preset.Name);
                 const bool hovered = ImGui::IsItemHovered();
@@ -1172,6 +1235,7 @@ namespace Manifold::UI
             {
                 Erase(theme.Sizes, size.Name);
                 edited = true;
+                m_themeColorsEdited = true;
             }
             ImGui::SetCursorScreenPos(ImVec2(pos.x + frame + gap, pos.y));
             BeginFillSlider("##size", (value - size.Min) / (size.Max - size.Min), slider);
@@ -1182,6 +1246,7 @@ namespace Manifold::UI
                 Erase(theme.Sizes, size.Name);
                 theme.Sizes[size.Name] = value;
                 edited = true;
+                m_themeColorsEdited = true;
             }
             list.EndRow();
         }
@@ -1199,7 +1264,259 @@ namespace Manifold::UI
             for (int i = 0; i < ImGuiCol_COUNT; ++i)
                 colorCell(prefix + "ImGui." + ImGui::GetStyleColorName(i), ImGui::GetStyleColorName(i), style.Colors[i]);
         }
+        ImGui::EndDisabled();
         return edited;
+    }
+
+    bool SettingsWindow::ThemeGallery(SettingsList& list, Settings& settings)
+    {
+        ThemeSettings& theme = settings.Theme;
+        Themes::Library& library = m_workspace.Core().ThemeLibrary();
+        const bool light = ManifoldTheme::IsLight();
+        bool edited = false;
+        if (ImGui::GetTime() - m_themesScannedAt > 2.0)
+        {
+            // ∑ files dropped into the themes folder show up while the page is open
+            m_themesScannedAt = ImGui::GetTime();
+            library.Refresh();
+        }
+        const std::vector<Themes::CustomTheme> custom = library.Custom();  // a copy: menu actions rescan the library
+        if (list.Row("Theme", "Presets stay as they are: changing one makes a custom theme. Right-click a custom theme to rename, export or delete it.", -1.0f))
+        {
+            const float space = std::round(Px(12.0f));
+            const float width = std::floor(std::min(Px(150.0f), (list.ControlWidth() - space * 3.0f) / 4.0f));
+            const float height = std::round(width * 0.62f);
+            const float step = height + ImGui::GetTextLineHeight() + Px(8.0f) + space;
+            const int perRow = std::max(1, static_cast<int>((list.ControlWidth() + space) / (width + space)));
+            const int count = static_cast<int>(std::size(kThemeFamilies) + custom.size()) + 1;
+            const ImVec2 start = ImGui::GetCursorScreenPos();
+            int index = 0;
+            const auto place = [&]() {
+                ImGui::SetCursorScreenPos(ImVec2(start.x + static_cast<float>(index % perRow) * (width + space), start.y + static_cast<float>(index / perRow) * step));
+                ++index;
+            };
+            const std::string mode = light ? ", light" : ", dark";
+            for (const ThemeFamily family : kThemeFamilies)
+            {
+                place();
+                ImGui::PushID(static_cast<int>(family));
+                const bool selected = theme.Custom.empty() && theme.Family == family;
+                const char* label = Themes::FamilyLabel(family);
+                if (ThemeCard("##preset", label, ManifoldTheme::PaletteOf(family, light), selected, std::string(label) + " preset" + mode, width, height) && !selected)
+                {
+                    SelectTheme(settings, {}, family);
+                    edited = true;
+                }
+                ImGui::PopID();
+            }
+            for (const Themes::CustomTheme& entry : custom)
+            {
+                place();
+                ImGui::PushID(entry.Id.c_str());
+                const bool selected = EqualsNoCase(theme.Custom, entry.Id);
+                const ManifoldTheme::Palette palette = CustomPalette(selected ? Themes::FromSettings(theme) : entry, light);
+                const std::string tooltip = entry.Name + ", based on " + Themes::FamilyLabel(entry.Base) + mode;
+                if (ThemeCard("##custom", entry.Name, palette, selected, tooltip, width, height) && !selected)
+                {
+                    SelectTheme(settings, entry.Id, entry.Base);
+                    edited = true;
+                }
+                ThemeCardMenu(entry, settings);
+                ImGui::PopID();
+            }
+            place();
+            if (NewThemeCard(width, height))
+            {
+                const std::string name = theme.Custom.empty() ? std::string(Themes::FamilyLabel(theme.Family)) + " (Custom)" : theme.CustomName + " Copy";
+                OpenThemeName(NameNew, {}, library.UniqueName(name));
+            }
+            if (ImGui::BeginPopupContextItem("##newthememenu"))
+            {
+                if (ImGui::MenuItem(ICON_FA_FILE_IMPORT "  Import Theme..."))
+                    ImportTheme(settings);
+                ImGui::EndPopup();
+            }
+            const int rows = (count + perRow - 1) / perRow;
+            ImGui::SetCursorScreenPos(start);
+            ImGui::Dummy(ImVec2(static_cast<float>(std::min(perRow, count)) * (width + space) - space, static_cast<float>(rows) * step - space));
+            list.EndRow();
+        }
+        if (!m_themeNotice.empty() && list.Row("New Custom Theme", m_themeNotice, -1.0f))
+        {
+            if (Layout::Button("OK"))
+                m_themeNotice.clear();
+            list.EndRow();
+        }
+        const std::vector<std::string>& problems = library.Problems();
+        const std::string files = problems.empty() ? std::string("Each custom theme is an .ini file in the themes folder; copy one to share it.")
+            : Format("%zu problem%s in the themes folder, the first: ", problems.size(), problems.size() == 1 ? "" : "s") + problems.front();
+        if (list.Row("Theme Files", files, -1.0f))
+        {
+            if (Layout::Button(ICON_FA_FILE_IMPORT "  Import..."))
+                ImportTheme(settings);
+            ImGui::SameLine();
+            if (Layout::Button(ICON_FA_FOLDER_OPEN "  Open Folder"))
+                OpenFolder(library.Folder());
+            list.EndRow();
+        }
+        return edited;
+    }
+
+    void SettingsWindow::ThemeCardMenu(const Themes::CustomTheme& entry, Settings& settings)
+    {
+        if (!ImGui::BeginPopupContextItem("##thememenu"))
+            return;
+        Themes::Library& library = m_workspace.Core().ThemeLibrary();
+        if (ImGui::MenuItem(ICON_FA_PEN "  Rename..."))
+            OpenThemeName(NameRename, entry.Id, entry.Name);
+        if (ImGui::MenuItem(ICON_FA_COPY "  Duplicate..."))
+            OpenThemeName(NameDuplicate, entry.Id, library.UniqueName(entry.Name + " Copy"));
+        if (ImGui::MenuItem(ICON_FA_FILE_EXPORT "  Export..."))
+        {
+            m_workspace.Report(library.SaveActive(settings.Theme));
+            if (const auto path = m_workspace.SaveFileDialog({ { L"Manifold themes (*.ini)", L"*.ini" } }, Themes::StemFor(entry.Name) + ".ini", L"ini"))
+                m_workspace.Report(library.Export(entry.Id, *path));
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem(ICON_FA_TRASH_ALT "  Delete..."))
+        {
+            const std::string id = entry.Id;
+            m_workspace.Confirm("Delete Theme", "Move the theme " + entry.Name + " to the recycle bin? The theme shown switches to its preset if it is this one.",
+                [this, id]() {
+                    Settings& options = m_workspace.Core().Options();
+                    Themes::Library& themes = m_workspace.Core().ThemeLibrary();
+                    if (EqualsNoCase(options.Theme.Custom, id))
+                    {
+                        Themes::SelectPreset(options.Theme, options.Theme.Family);
+                        m_workspace.RequestRestyle();
+                        m_workspace.Core().SaveOptionsSoon();
+                    }
+                    m_workspace.Report(themes.Remove(id));
+                },
+                "Delete");
+        }
+        ImGui::EndPopup();
+    }
+
+    void SettingsWindow::OpenThemeName(int action, const std::string& source, const std::string& name)
+    {
+        m_themeNaming = action;
+        m_themeNameSource = source;
+        m_themeName = name;
+        m_themeNameDialog.SetTitle(action == NameRename ? "Rename Theme" : action == NameDuplicate ? "Duplicate Theme" : "New Theme");
+        m_themeNameDialog.Open();
+    }
+
+    void SettingsWindow::ThemeNameDialog(Settings& settings)
+    {
+        if (!m_themeNameDialog.Begin())
+            return;
+        Themes::Library& library = m_workspace.Core().ThemeLibrary();
+        ThemeSettings& theme = settings.Theme;
+        Layout::Field("Name", { .Placement = Layout::LabelPlacement::Above });
+        if (m_themeNameDialog.Appearing())
+            ImGui::SetKeyboardFocusHere();
+        InputText("##themename", m_themeName);
+        const std::string name = Trim(m_themeName);
+        const bool taken = !name.empty() && library.NameTaken(name, m_themeNaming == NameRename ? m_themeNameSource : std::string());
+        if (taken)
+            Layout::Colored("A theme or preset already has this name.", ManifoldTheme::Error);
+        else
+            Layout::Muted(m_themeNaming == NameNew ? "The new theme starts as a copy of the one shown and is selected." : "Saved as " + Themes::StemFor(name) + ".ini in the themes folder.");
+        const DialogChoice choice = m_themeNameDialog.Buttons(m_themeNaming == NameRename ? "Rename" : "Create", !name.empty() && !taken);
+        if (choice == DialogChoice::Ok)
+        {
+            Status status = library.SaveActive(theme);
+            if (m_themeNaming == NameRename)
+            {
+                std::string id;
+                status = library.Rename(m_themeNameSource, name, &id);
+                if (status.Ok() && EqualsNoCase(theme.Custom, m_themeNameSource))
+                {
+                    theme.Custom = id;
+                    theme.CustomName = name;
+                    m_workspace.Core().SaveOptionsSoon();
+                }
+            }
+            else
+            {
+                Themes::CustomTheme created;
+                const Themes::CustomTheme* source = library.Find(m_themeNameSource);
+                if (m_themeNaming == NameNew || (source && EqualsNoCase(source->Id, theme.Custom)))
+                    created = theme.Custom.empty() && m_themeNaming == NameNew ? Themes::CustomTheme{ {}, {}, theme.Family } : Themes::FromSettings(theme);
+                else if (source)
+                    created = *source;
+                created.Id.clear();
+                created.Name = name;
+                status = library.Save(created);
+                if (status.Ok() && m_themeNaming == NameNew)
+                {
+                    SelectTheme(settings, created.Id, created.Base);
+                    m_workspace.RequestRestyle();
+                    m_workspace.Core().SaveOptionsSoon();
+                }
+            }
+            m_workspace.Report(status);
+            m_themeNameDialog.Close();
+        }
+        else if (choice == DialogChoice::Cancel)
+            m_themeNameDialog.Close();
+        m_themeNameDialog.End();
+    }
+
+    void SettingsWindow::SelectTheme(Settings& settings, const std::string& custom, ThemeFamily family)
+    {
+        Themes::Library& library = m_workspace.Core().ThemeLibrary();
+        m_workspace.Report(library.SaveActive(settings.Theme));
+        m_themeNotice.clear();
+        if (custom.empty())
+        {
+            Themes::SelectPreset(settings.Theme, family);
+            return;
+        }
+        settings.Theme.Custom = custom;
+        settings.Theme.Family = family;
+        m_workspace.Report(library.Activate(settings.Theme));
+    }
+
+    void SettingsWindow::FinishThemeEdit(Settings& settings)
+    {
+        ThemeSettings& theme = settings.Theme;
+        if (!theme.Custom.empty())
+        {
+            theme.Dirty = true;
+            return;
+        }
+        // ∑ presets stay read-only: the first change on one makes a custom theme from it
+        Themes::Library& library = m_workspace.Core().ThemeLibrary();
+        Themes::CustomTheme created = Themes::FromSettings(theme);
+        created.Id.clear();
+        created.Name = library.UniqueName(std::string(Themes::FamilyLabel(theme.Family)) + " (Custom)");
+        const Status saved = library.Save(created);
+        if (!saved.Ok())
+        {
+            m_workspace.Report(saved);
+            Themes::SelectPreset(theme, theme.Family);
+            return;
+        }
+        theme.Custom = created.Id;
+        theme.CustomName = created.Name;
+        theme.Dirty = false;
+        m_themeNotice = "Your change is in the new theme " + created.Name + "; the " + Themes::FamilyLabel(theme.Family) + " preset stays as it was.";
+    }
+
+    void SettingsWindow::ImportTheme(Settings& settings)
+    {
+        (void)settings;
+        Themes::Library& library = m_workspace.Core().ThemeLibrary();
+        const auto path = m_workspace.OpenFileDialog({ { L"Manifold themes (*.ini)", L"*.ini" }, { L"All files", L"*.*" } });
+        if (!path)
+            return;
+        std::string name;
+        const Status imported = library.Import(*path, &name);
+        m_workspace.Report(imported);
+        if (imported.Ok())
+            m_workspace.Core().Notify(LogLevel::Success, "Imported the theme " + name + ". Click its card to use it.");
     }
 
     bool SettingsWindow::ScannerPage(SettingsList& list, Settings& settings)

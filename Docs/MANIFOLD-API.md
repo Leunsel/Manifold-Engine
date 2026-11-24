@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 31 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 32 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -173,7 +173,7 @@ Notifications from the program. Handlers run in the order they subscribed; an er
 
 | Function | Returns | |
 | --- | --- | --- |
-| `manifold.event.subscribe(name, handler, options?)` | id | Calls `handler` on an event. `processOpened` passes the process as `manifold.process.info()` gives it, also when the same process is opened again; `processClosed` passes nothing and comes before the next `processOpened`; `unrealReady` passes nothing and follows when the Unreal tool has resolved the game. `options.key` replaces an earlier registration with the same key, so a module that runs again does not register twice. |
+| `manifold.event.subscribe(name, handler, options?)` | id | Calls `handler` on an event. `processOpened` passes the process as `manifold.process.info()` gives it, also when the same process is opened again; `processClosed` passes nothing and comes before the next `processOpened`; `unrealReady` passes nothing and follows when the Unreal tool has resolved the game; `themeChanged` passes the look as `manifold.ui.theme.current()` gives it, after the user, Windows (System mode) or a script changed it, at most once a frame. `options.key` replaces an earlier registration with the same key, so a module that runs again does not register twice. |
 | `manifold.event.unsubscribe(id)` | boolean | Removes a handler; false when the id is unknown. |
 
 ## manifold.structure
@@ -523,13 +523,22 @@ Pictures for `image` widgets and canvas drawings.
 
 ## manifold.ui.theme
 
-The names `manifold.ui` takes for colours and icons.
+The theme: the names `manifold.ui` takes for colours and icons, the look shown now, and custom themes. The presets are Standard, Red, Green and Blue; a custom theme is an .ini file in the themes folder that builds on one of them. `apply`, `override` and `restore` change the look for this session only, and it comes back when the script runs again or stops; `save` writes a theme file.
 
 | Function | Returns | |
 | --- | --- | --- |
 | `manifold.ui.theme.colors()` | table | The theme colour names, which follow the theme and light or dark mode. |
 | `manifold.ui.theme.icons(filter?)` | table | The Font Awesome icon names, all of them or those that contain `filter`. |
 | `manifold.ui.theme.isIcon(name)` | boolean | Whether `name` is a Font Awesome icon name. |
+| `manifold.ui.theme.sizes()` | table | The size names a theme can set, such as `FrameRounding` or `ItemSpacing.x`, as Settings > Appearance lists them. |
+| `manifold.ui.theme.current()` | table | The look shown now: `{ name, custom, base, mode, light, scripted }`. `name` is the preset's or the custom theme's name, `custom` whether it is a custom theme, `base` the preset it builds on (`standard`, `red`, `green` or `blue`), `mode` `dark`, `light` or `system`, `light` whether light colours show, `scripted` whether a script changed the look for this session. |
+| `manifold.ui.theme.list()` | table | The themes to pick from: the presets first, then the custom themes by name, each `{ name, custom, base }`. |
+| `manifold.ui.theme.color(name)` | table, or nil, error | A colour of the look shown now as `{ r, g, b, a }` from 0 to 1. `name` is one of `colors()` or an ImGui colour as `imgui.WindowBg`; an unknown name gives `ThemeInvalid`. |
+| `manifold.ui.theme.definition(name)` | table, or nil, error | What a theme changes from its preset: `{ base, dark = { name = colour }, light = { ... }, sizes = { name = number } }`, to copy, change and `save`. A preset changes nothing, so its tables are empty; colours are `{ r, g, b, a }`. An unknown name gives `ThemeNotFound`. |
+| `manifold.ui.theme.apply(name, options?)` | true, or nil, error | Shows a preset or a custom theme for this session; the user's choice in the settings stays. `options.mode` is `dark`, `light` or `system` (default: the user's mode). An unknown name gives `ThemeNotFound`. |
+| `manifold.ui.theme.override(changes)` | true, or nil, error | Changes single colours or sizes of the look shown, for this session. `colors` applies to dark and light, `dark` and `light` to one mode; a colour is `"#rrggbb"`, `"#rrggbbaa"` or `{ r, g, b, a }` from 0 to 1. `sizes` takes the names of `sizes()`. A bad name or value gives `ThemeInvalid` and changes nothing. |
+| `manifold.ui.theme.restore()` | boolean | Undoes this script's `apply` and `override`, so the user's theme shows again; false when the look was not this script's. |
+| `manifold.ui.theme.save(name, definition, options?)` | true, or nil, error | Writes a custom theme file in the themes folder, as `definition()` describes one; `base` defaults to `standard`. It does not select the theme. A name that is taken gives `ThemeExists` unless `options.overwrite` replaces your own theme of that name; preset names are always taken. |
 
 ## manifold.module
 

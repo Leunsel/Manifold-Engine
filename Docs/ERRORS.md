@@ -121,6 +121,10 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-5011 | The last run crashed. A report is in …. | The program ended through an unexpected error last time. | Start the program again. If it stays, report the code with the log file from the logs folder next to the program. |
 | ME-5012 | The program runs without administrator rights. | Many games run elevated or protect their memory, and then they cannot be opened. | Restart as administrator from the Help menu if a process cannot be opened. |
 | ME-5013 | The diagnostics report could not be written to …. | The folder does not exist or is not writable. | Save it somewhere else, or copy it to the clipboard instead. |
+| ME-5014 | There is no theme named …. | The name is neither a preset (Standard, Red, Green, Blue) nor a theme file in the themes folder. | Check the name in Settings > Appearance, or list the themes with manifold.ui.theme.list(). |
+| ME-5015 | The theme could not be saved: …. | The themes folder next to the configs folder is not writable, or the file is in use. | Move the program to a folder you can write to, or close the program that holds the file. |
+| ME-5016 | A theme named … already exists. | Theme names are unique, and the preset names are taken. | Pick another name, or pass overwrite = true to replace your own theme. |
+| ME-5017 | The theme is not valid: …. | A colour or size name is unknown, or a value is not a colour or a number. | Use the names from manifold.ui.theme.colors() and sizes(), and colours as "#rrggbb", "#rrggbbaa" or { r, g, b, a }. |
 
 ## Cheat tables
 

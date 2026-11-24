@@ -101,6 +101,10 @@
     X(LastRunCrashed, 5011) \
     X(NotElevated, 5012) \
     X(ReportNotSaved, 5013) \
+    X(ThemeNotFound, 5014) \
+    X(ThemeNotSaved, 5015) \
+    X(ThemeExists, 5016) \
+    X(ThemeInvalid, 5017) \
     X(TableNotRead, 6001) \
     X(TableNotXml, 6002) \
     X(TableNotCheatTable, 6003) \

@@ -4,6 +4,7 @@
 #include "App/CrashHandler.h"
 #include "App/Diagnostics.h"
 #include "App/Sounds.h"
+#include "App/Themes.h"
 #include "Core/BuildInfo.h"
 #include "Core/Profiler.h"
 #include "Core/Text.h"
@@ -74,14 +75,48 @@ namespace Manifold
             return value != 0;
         }
 
+        // Theme messages from the start, logged once the log and the notifications are up.
+        struct ThemeNote
+        {
+            bool Problem = false;
+            std::string Text;
+        };
+
+        std::vector<ThemeNote>& ThemeNotes()
+        {
+            static std::vector<ThemeNote> notes;
+            return notes;
+        }
+
+        void LoadTheme(Settings& settings)
+        {
+            ManifoldTheme::InstallThemeModel();
+            ManifoldTheme::SetSystemLight(SystemUsesLightTheme());
+            const Themes::MigrationResult migrated = Themes::MigrateLegacy(settings, Paths::ThemesFolder(), Paths::SettingsFile());
+            if (!migrated.Problem.empty())
+                ThemeNotes().push_back({ true, "Your colour changes stay in the settings file for now; moving them into theme files failed: " + migrated.Problem });
+            if (!migrated.Created.empty())
+            {
+                ThemeNotes().push_back({ false, "Your colour changes are now custom themes: " + Join(migrated.Created, ", ") +
+                    ". The settings file from before is kept as " + WideToUtf8(Paths::SettingsFile().filename().wstring()) + ".before-themes" });
+                const Status saved = settings.Save(Paths::SettingsFile());
+                if (!saved.Ok())
+                    ThemeNotes().push_back({ true, saved.Text });
+            }
+            Themes::Library library(Paths::ThemesFolder());
+            const Status active = library.Activate(settings.Theme);
+            if (!active.Ok())
+                ThemeNotes().push_back({ true, active.Text });
+            ManifoldTheme::Configure(settings.Theme);
+        }
+
         Settings LoadSettings()
         {
             Settings settings;
             settings.Load(Paths::SettingsFile());
             for (std::string& recent : settings.RecentTables)
                 recent = Paths::CurrentTablePath(recent, Paths::ProgramFolder());
-            ManifoldTheme::SetSystemLight(SystemUsesLightTheme());
-            ManifoldTheme::Configure(settings.Theme);
+            LoadTheme(settings);
             ApplyShortcutSettings(settings.Shortcuts);
             return settings;
         }
@@ -141,6 +176,7 @@ namespace Manifold
         SplashStatus("Starting Lua");
         m_engine = std::make_unique<Engine>(m_settings);
         m_engine->SetAsync(true);
+        m_engine->ThemeLibrary().Shown(m_settings.Theme);
         SplashStatus("Building the interface");
         m_workspace = std::make_unique<UI::Workspace>(*m_engine, *this);
         m_dialogs = std::make_unique<UI::DialogHost>(m_host.Window(), m_host.Device(), m_host.Context());
@@ -165,6 +201,15 @@ namespace Manifold
         m_host.NoteInput();
         m_running = true;
         LOG_INFO("Program", "Manifold Engine " + VersionText() + " started" + std::string(Target::IsElevated() ? " with administrator rights" : ""));
+        for (ThemeNote& note : ThemeNotes())
+        {
+            if (note.Problem)
+                LOG_WARN("Theme", note.Text);
+            else
+                LOG_INFO("Theme", note.Text);
+            m_engine->Notify(note.Problem ? LogLevel::Warning : LogLevel::Info, std::move(note.Text));
+        }
+        ThemeNotes().clear();
         return true;
     }
 
@@ -266,9 +311,12 @@ namespace Manifold
 
     void Application::Restyle()
     {
-        ManifoldTheme::Configure(m_settings.Theme);
-        m_host.SetCorners(m_settings.Theme.Corners);
+        const ThemeSettings& shown = m_engine ? m_engine->ThemeLibrary().Effective(m_settings.Theme) : m_settings.Theme;
+        ManifoldTheme::Configure(shown);
+        m_host.SetCorners(shown.Corners);
         m_host.Restyle();
+        if (m_engine)
+            m_engine->ThemeLibrary().Shown(shown);
     }
 
     void Application::WatchSystemTheme()
@@ -340,7 +388,8 @@ namespace Manifold
             return;
         ManifoldTheme::SetSystemLight(light);
         LOG_INFO("Program", std::string("Windows switched apps to ") + (light ? "light" : "dark") + " mode");
-        if (m_settings.Theme.Mode == ThemeMode::System)
+        const ThemeSettings& shown = m_engine ? m_engine->ThemeLibrary().Effective(m_settings.Theme) : m_settings.Theme;
+        if (shown.Mode == ThemeMode::System)
             Restyle();
     }
 

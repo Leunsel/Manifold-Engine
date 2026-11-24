@@ -8,6 +8,7 @@
 #include "Lua/LuaApi.h"
 #include "Lua/LuaArgs.h"
 #include "Lua/LuaEngine.h"
+#include "Lua/LuaTheme.h"
 #include "Lua/UiForm.h"
 #include "Lua/UiModel.h"
 #include "Table/AddressList.h"
@@ -1190,5 +1191,6 @@ namespace Manifold::Lua
             lua_pushcfunction(state, entry->func);
             lua_setfield(state, absolute, entry->name);
         }
+        RegisterThemeNatives(state, absolute);
     }
 }

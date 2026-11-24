@@ -15,6 +15,7 @@
 #include "Table/AddressList.h"
 #include "Table/CheatTable.h"
 #include "Lua/UiModel.h"
+#include "UI/Theme.h"
 
 #include "lua.hpp"
 
@@ -72,7 +73,7 @@ namespace Manifold::Tests
         void Schema(Engine& engine)
         {
             LuaCheck(engine, "schema names", R"LUA(
-                if manifold.apiVersion ~= 31 or type(manifold.version) ~= "string" then return "constants" end
+                if manifold.apiVersion ~= 32 or type(manifold.version) ~= "string" then return "constants" end
                 local count = 0
                 local function lint(path, members, nested)
                   local functions = {}
@@ -770,6 +771,116 @@ return M
                 manifold.ui.window.create("Opaque", { key = "opacity plain" }).remove()
                 uiOpacityWindow = nil
                 return "ok")LUA");
+        }
+
+        // manifold.ui.theme: reading the look, theme files, the session look and its cleanup, themeChanged.
+        void UiTheme(Engine& engine)
+        {
+            Settings& settings = engine.Options();
+            Themes::Library& library = engine.ThemeLibrary();
+            Themes::SelectPreset(settings.Theme, ThemeFamily::Standard);
+            settings.Theme.Mode = ThemeMode::Dark;
+            library.ClearScript();
+            library.Shown(settings.Theme);
+            library.TakeChanged();
+
+            LuaCheck(engine, "theme read", R"LUA(
+                local t = manifold.ui.theme
+                local cur = t.current()
+                if cur.name ~= "Standard" or cur.custom or cur.base ~= "standard" or cur.mode ~= "dark" or cur.light or cur.scripted then return "current " .. tostring(cur.name) end
+                local list = t.list()
+                if #list < 4 or list[1].name ~= "Standard" or list[2].name ~= "Red" or list[1].custom then return "list" end
+                local accent = t.color("accent")
+                if type(accent) ~= "table" or type(accent.r) ~= "number" or accent.a <= 0 then return "color" end
+                if type(t.color("CodeKeyword")) ~= "table" then return "color case" end
+                local nope, problem = t.color("nope")
+                if nope ~= nil or problem.code ~= "ME-5017" then return "unknown color" end
+                local def = t.definition("red")
+                if def.base ~= "red" or next(def.dark) ~= nil or next(def.sizes) ~= nil then return "preset definition" end
+                local _, missing = t.definition("No Such Theme")
+                if missing.code ~= "ME-5014" then return "missing definition" end
+                local found = false
+                for _, name in ipairs(t.sizes()) do found = found or name == "FrameRounding" end
+                if not found then return "sizes" end
+                return "ok")LUA");
+
+            LuaCheck(engine, "theme save", R"LUA(
+                local t = manifold.ui.theme
+                local ok, problem = t.save("Probe Theme", { base = "blue", dark = { accent = "#ff0000" }, light = { accent = { r = 0, g = 0.5, b = 1 } }, sizes = { FrameRounding = 99 } })
+                if not ok then return "save " .. tostring(problem) end
+                local again, taken = t.save("Probe Theme", { base = "blue" })
+                if again ~= nil or taken.code ~= "ME-5016" then return "exists" end
+                local _, preset = t.save("Red", {})
+                if preset.code ~= "ME-5016" then return "preset name" end
+                local _, bad = t.save("Bad Probe", { dark = { nope = "#000000" } })
+                if bad.code ~= "ME-5017" then return "bad colour" end
+                local _, base = t.save("Bad Probe", { base = "purple" })
+                if base.code ~= "ME-5017" then return "bad base" end
+                local def = t.definition("probe theme")
+                if def.base ~= "blue" or math.abs(def.dark.accent.r - 1) > 0.01 or def.dark.accent.g > 0.01 then return "dark accent" end
+                if math.abs(def.light.accent.g - 0.5) > 0.01 or def.sizes.FrameRounding ~= 12 then return "light accent or clamped size" end
+                if not t.save("Probe Theme", def, { overwrite = true }) then return "overwrite" end
+                local seen = false
+                for _, entry in ipairs(t.list()) do seen = seen or (entry.name == "Probe Theme" and entry.custom and entry.base == "blue") end
+                if not seen then return "listed" end
+                return "ok")LUA");
+            CHECK(library.Find("Probe Theme") != nullptr && settings.Theme.Custom.empty());
+
+            LuaCheck(engine, "theme apply", R"LUA(
+                themeEvents = {}
+                manifold.event.subscribe("themeChanged", function(look) themeEvents[#themeEvents + 1] = look.name .. "/" .. look.mode end, { key = "theme probe" })
+                local t = manifold.ui.theme
+                if not t.apply("Probe Theme", { mode = "light" }) then return "apply" end
+                local cur = t.current()
+                if cur.name ~= "Probe Theme" or not cur.custom or cur.base ~= "blue" or cur.mode ~= "light" or not cur.light or not cur.scripted then return "current" end
+                if math.abs(t.color("accent").g - 0.5) > 0.01 then return "applied colour" end
+                if not t.override({ colors = { muted = "#00ff00" }, dark = { text = "#123456" } }) then return "override" end
+                if math.abs(t.color("muted").g - 1) > 0.01 or t.color("muted").r > 0.01 then return "override colour" end
+                local _, bad = t.override({ sizes = { NoSuchSize = 1 } })
+                if bad.code ~= "ME-5017" then return "bad override" end
+                if pcall(t.apply, "Red", { mode = "dim" }) then return "mode misuse" end
+                local _, missing = t.apply("No Such Theme")
+                if missing.code ~= "ME-5014" then return "missing" end
+                return "ok")LUA");
+            CHECK(library.Scripted() && library.ScriptOwner() == "=theme apply" && settings.Theme.Custom.empty() && settings.Theme.Mode == ThemeMode::Dark);
+            library.Shown(library.Effective(settings.Theme));
+            engine.Tick();
+            LuaCheck(engine, "theme event", R"LUA(
+                if #themeEvents ~= 1 or themeEvents[1] ~= "Probe Theme/light" then return "events " .. table.concat(themeEvents, ",") end
+                return "ok")LUA");
+
+            LuaCheck(engine, "theme other owner", R"LUA(
+                if manifold.ui.theme.restore() then return "restored another script's look" end
+                return "ok")LUA");
+            CHECK(library.Scripted());
+            {
+                // running the chunk again gives the user's look back
+                std::string result;
+                const Status rerun = engine.Lua().RunWithResult("return manifold.ui.theme.current().scripted and 'still' or 'ok'", "theme apply", result);
+                CHECK_MSG(rerun.Ok() && result == "ok", rerun.Ok() ? result : rerun.Text);
+            }
+            CHECK(!library.Scripted());
+
+            LuaCheck(engine, "theme restore", R"LUA(
+                local t = manifold.ui.theme
+                if not t.apply("Green") or t.current().name ~= "Green" then return "apply" end
+                if not t.restore() or t.restore() then return "restore" end
+                if t.current().scripted or t.current().name ~= "Standard" then return "after restore" end
+                return "ok")LUA");
+
+            // the user's own active theme: save replaces it and the look follows
+            Themes::CustomTheme probe = *library.Find("Probe Theme");
+            Themes::ToSettings(probe, settings.Theme);
+            LuaCheck(engine, "theme save active", R"LUA(
+                local t = manifold.ui.theme
+                local def = t.definition("Probe Theme")
+                def.dark.accent = "#00ff00"
+                if not t.save("Probe Theme", def, { overwrite = true }) then return "save" end
+                if math.abs(t.color("accent").g - 1) > 0.01 then return "active theme not reloaded" end
+                return "ok")LUA");
+            CHECK(library.TakeRestyle());
+            Themes::SelectPreset(settings.Theme, ThemeFamily::Standard);
+            engine.Lua().Run("manifold.event.unsubscribe(manifold.event.subscribe('themeChanged', function() end, { key = 'theme probe' }))", "theme cleanup");
         }
 
         void UiApi(Engine& engine)
@@ -3362,6 +3473,7 @@ return M
     int RunManifoldApiTests()
     {
         const int before = Totals().Failures;
+        ManifoldTheme::InstallThemeModel();
         Settings settings;
         Engine engine(settings);
         engine.Lua().Run("__manifoldHeadless = true", "headless");
@@ -3378,6 +3490,7 @@ return M
         DocApi(engine);
         Documentation(engine);
         UiApi(engine);
+        UiTheme(engine);
         UiOpacity(engine);
         UiNewWidgets(engine);
         UiForms(engine);

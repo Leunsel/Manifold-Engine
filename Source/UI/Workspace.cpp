@@ -241,6 +241,8 @@ namespace Manifold::UI
 
     void Workspace::Draw()
     {
+        if (m_engine.ThemeLibrary().TakeRestyle())
+            m_restyle = true;
         if (m_restyle)
         {
             m_restyle = false;

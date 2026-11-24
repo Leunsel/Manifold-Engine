@@ -13,6 +13,7 @@
 #include "App/UnrealSession.h"
 #include "App/WriteHistory.h"
 #include "App/SettingsStore.h"
+#include "App/Themes.h"
 #include "Asm/AutoAssembler.h"
 #include "Core/BackgroundWork.h"
 #include "Core/Errors.h"
@@ -98,6 +99,7 @@ namespace Manifold
         void SaveOptionsSoon();
         Status SaveOptionsNow();
         const SettingsStore& OptionsStore() const { return m_settingsStore; }
+        Themes::Library& ThemeLibrary() { return m_themes; }
         BackgroundWork& Work() { return m_work; }
         std::vector<WorkInfo> BusyWork() const;
         void CancelWork(int id);
@@ -235,6 +237,7 @@ namespace Manifold
             int* luaHeldBack, bool scanInCheck = false, std::string_view logTitle = {});
         Settings& m_settings;
         SettingsStore m_settingsStore;
+        Themes::Library m_themes;
         TargetSession m_target;
         std::unique_ptr<Disasm::Disassembler> m_disassembler64;
         std::unique_ptr<Disasm::Disassembler> m_disassembler32;

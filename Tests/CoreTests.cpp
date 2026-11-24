@@ -910,8 +910,9 @@ data:
                 }, field.Member);
         }
         written.RecentTables = { "C:\\one.CT", "C:\\two.CT" };
-        written.Theme.Colors["Accent"] = { 0.25f, 0.5f, 0.75f, 1.0f };
-        written.Theme.Sizes["Rounding"] = 3.5f;
+        written.LegacyThemeColors["Accent"] = { 0.25f, 0.5f, 0.75f, 1.0f };
+        written.LegacyThemeSizes["Rounding"] = 3.5f;
+        written.Theme.Custom = "Probe Theme";
         written.Shortcuts["OpenProcess"] = "Ctrl+Shift+P";
 
         wchar_t temp[MAX_PATH] = L"";
@@ -933,7 +934,8 @@ data:
             const auto before = plain.find(Lower(field.Key));
             CHECK_MSG(now != changed.end() && (before == plain.end() || before->second != now->second), std::string("the settings key ") + field.Key + " did not change in the file");
         }
-        CHECK(read.RecentTables == written.RecentTables && read.Theme.Colors == written.Theme.Colors && read.Theme.Sizes == written.Theme.Sizes && read.Shortcuts == written.Shortcuts);
+        CHECK(read.RecentTables == written.RecentTables && read.LegacyThemeColors == written.LegacyThemeColors && read.LegacyThemeSizes == written.LegacyThemeSizes &&
+            read.Theme.Custom == written.Theme.Custom && read.Shortcuts == written.Shortcuts);
         CHECK(plain.count("legacyeditor") == 0 && plain.count("nopsledbest") == 0);
         std::error_code ignored;
         std::filesystem::remove_all(folder, ignored);

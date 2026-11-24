@@ -258,12 +258,18 @@ namespace Manifold
         std::map<std::string, std::array<float, 4>> themeColors;
         std::map<std::string, float> themeSizes;
         std::map<std::string, std::string> shortcuts;
+        std::string custom;
         for (const Ini::Section& section : Ini::Parse(*content))
         {
             for (const Ini::Entry& entry : section.Entries)
             {
                 const std::string key = Trim(entry.Key);
                 const std::string value = Trim(entry.Value);
+                if (EqualsNoCase(Trim(section.Name), "Theme") && EqualsNoCase(key, "Custom"))
+                {
+                    custom = value;
+                    continue;
+                }
                 if (key.size() > 6 && EqualsNoCase(key.substr(0, 6), "Color."))
                 {
                     const std::vector<std::string> parts = Split(value, ',');
@@ -294,8 +300,13 @@ namespace Manifold
                 values[Lower(key)] = value;
             }
         }
-        Theme.Colors = std::move(themeColors);
-        Theme.Sizes = std::move(themeSizes);
+        LegacyThemeColors = std::move(themeColors);
+        LegacyThemeSizes = std::move(themeSizes);
+        Theme.Custom = std::move(custom);
+        Theme.CustomName.clear();
+        Theme.Colors.clear();
+        Theme.Sizes.clear();
+        Theme.Dirty = false;
         Shortcuts = std::move(shortcuts);
         for (const SettingField& field : kFields)
         {
@@ -346,9 +357,11 @@ namespace Manifold
             }
             else if (section == "Theme")
             {
-                for (const auto& [name, rgba] : Theme.Colors)
+                if (!Theme.Custom.empty())
+                    out << "Custom=" << Theme.Custom << "\n";
+                for (const auto& [name, rgba] : LegacyThemeColors)
                     out << "Color." << name << "=" << rgba[0] << "," << rgba[1] << "," << rgba[2] << "," << rgba[3] << "\n";
-                for (const auto& [name, value] : Theme.Sizes)
+                for (const auto& [name, value] : LegacyThemeSizes)
                     out << "Size." << name << "=" << value << "\n";
             }
         }
