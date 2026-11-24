@@ -402,6 +402,9 @@
     <ClCompile Include="..\Source\Table\Structures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Table\TableCleanup.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\TableFiles.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
@@ -646,6 +649,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\StructureWindow.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\TableCleanupWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\TableFilesWindow.cpp">
@@ -1008,6 +1014,9 @@
     <ClInclude Include="..\Source\Table\Structures.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Table\TableCleanup.h">
+      <Filter>Source\Table</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Table\TableFiles.h">
       <Filter>Source\Table</Filter>
     </ClInclude>
@@ -1264,6 +1273,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\StructureWindow.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\TableCleanupWindow.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\TableFilesWindow.h">

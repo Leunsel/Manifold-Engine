@@ -51,6 +51,7 @@ namespace Manifold
             { OpenLastProcess, "OpenLastProcess", Scope::Main, "Open Last Process", Ctrl | Shift | ImGuiKey_P, 0, Own },
             { TableLuaScript, "TableLuaScript", Scope::Main, "Table Lua Script", Ctrl | Alt | ImGuiKey_L, 0, CE },
             { TableFiles, "TableFiles", Scope::Main, "Table Files", Ctrl | Alt | ImGuiKey_F, 0, Own },
+            { TableCleanup, "TableCleanup", Scope::Main, "Clean Up for Release", Ctrl | Alt | Shift | ImGuiKey_R, 0, Own },
             { AddAddress, "AddAddress", Scope::Main, "Add Address Manually", ImGuiKey_Insert, 0, Own },
             { AddGroup, "AddGroup", Scope::Main, "Add Group", Ctrl | Shift | ImGuiKey_N, 0, Own },
             { AddScript, "AddScript", Scope::Main, "Add Auto Assembler Script", Ctrl | Shift | ImGuiKey_A, 0, Own },

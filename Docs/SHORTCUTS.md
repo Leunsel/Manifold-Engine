@@ -46,6 +46,7 @@ While the main window has the focus.
 | `Ctrl+Shift+P` | Open Last Process | `OpenLastProcess` | Manifold |
 | `Ctrl+Alt+L` | Table Lua Script | `TableLuaScript` | CE |
 | `Ctrl+Alt+F` | Table Files | `TableFiles` | Manifold |
+| `Ctrl+Alt+Shift+R` | Clean Up for Release | `TableCleanup` | Manifold |
 | `Ins` | Add Address Manually | `AddAddress` | Manifold |
 | `Ctrl+Shift+N` | Add Group | `AddGroup` | Manifold |
 | `Ctrl+Shift+A` | Add Auto Assembler Script | `AddScript` | Manifold |

@@ -283,6 +283,7 @@ namespace Manifold::UI
         case Command::UndoScan: return !m_release && !scanner.Busy() && scanner.CanUndo();
         case Command::TableLuaScript:
         case Command::TableFiles:
+        case Command::TableCleanup:
         case Command::AddAddress:
         case Command::AddGroup:
         case Command::AddScript:
@@ -326,6 +327,7 @@ namespace Manifold::UI
         case Command::UndoScan: m_engine.Scanner().Undo(); break;
         case Command::TableLuaScript: m_workspace.OpenScript(m_engine.Table().TableLuaScript, kTableLuaScript, true); break;
         case Command::TableFiles: m_workspace.OpenTableFiles(); break;
+        case Command::TableCleanup: m_workspace.OpenTableCleanup(); break;
         case Command::AddAddress: OpenAddDialog(); break;
         case Command::AddGroup: m_engine.Table().AddGroup("Group"); break;
         case Command::AddScript: AddScriptRecord(); break;
@@ -515,6 +517,7 @@ namespace Manifold::UI
                 ImGui::Separator();
                 Item(ICON_FA_SCROLL "  Table Lua Script", Command::TableLuaScript);
                 Item(ICON_FA_FILE_ARCHIVE "  Table Files", Command::TableFiles);
+                Item(ICON_FA_BROOM "  Clean Up for Release...", Command::TableCleanup);
                 if (ImGui::MenuItem(ICON_FA_COMMENTS "  Comment List"))
                     m_workspace.OpenCommentList();
                 ItemTooltip("The comments and headers on disassembler lines, saved with the table.");

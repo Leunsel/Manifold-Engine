@@ -34,6 +34,7 @@
 #include "UI/SettingsWindow.h"
 #include "UI/SignatureWindow.h"
 #include "UI/CodeFilterWindow.h"
+#include "UI/TableCleanupWindow.h"
 #include "UI/CommandPalette.h"
 #include "UI/StaticPointersWindow.h"
 #include "UI/StructureWindow.h"
@@ -149,6 +150,8 @@ namespace Manifold::UI
             OpenSignatureMaker(window.substr(10));
         else if (window == "codefilter")
             OpenCodeFilter();
+        else if (window == "tablecleanup")
+            OpenTableCleanup();
         else if (window == "palette")
             m_palette->Open();
         else if (window.starts_with("palette:"))
@@ -231,7 +234,7 @@ namespace Manifold::UI
             "dissect", "asmsearch", "bytes", "pointerscan", "staticpointers", "shortcuts", "keyboard", "appearance", "processes", "about",
             "profiler", "breakdown", "threads", "checks", "appinfo", "nopsled", "writehistory", "comments", "recorddebug", "flowgraph", "opcodes",
             "templates", "forms", "modules", "breakpoints", "threadlist", "layoutproblems", "signatures", "codefilter",
-            "signaturesettings", "settings:2", "settings:3", "settings:4", "palette"
+            "signaturesettings", "settings:2", "settings:3", "settings:4", "palette", "tablecleanup"
         };
         return names;
     }
@@ -302,6 +305,7 @@ namespace Manifold::UI
         drawOne("Static pointers", m_staticPointers);
         drawOne("Signature maker", m_signatures);
         drawOne("Code filter", m_codeFilter);
+        drawOne("Table cleanup", m_tableCleanup);
         drawOne("Pointer scan", m_pointerScan);
         drawOne("Breakpoints", m_breakpoints);
         drawOne("Thread list", m_threadList);
@@ -989,6 +993,15 @@ namespace Manifold::UI
         m_codeFilter->Show();
         if (collect)
             m_codeFilter->CollectWhenReady();
+    }
+
+    void Workspace::OpenTableCleanup()
+    {
+        if (!m_tableCleanup)
+            m_tableCleanup = std::make_unique<TableCleanupWindow>(*this);
+        else
+            m_tableCleanup->Look();
+        m_tableCleanup->Show();
     }
 
     void Workspace::OpenPatchScan()

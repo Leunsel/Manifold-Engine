@@ -11,6 +11,7 @@ Manifold Engine reads and writes Cheat Engine tables (`.CT`): records, groups, p
 - [Address list](#address-list)
 - [Address List Debug](#address-list-debug)
 - [Table files](#table-files)
+- [Clean up for release](#clean-up-for-release)
 - [Memory viewer](#memory-viewer)
 - [Debugger](#debugger)
 - [Structure Dissect](#structure-dissect)
@@ -226,6 +227,16 @@ Settings → Scripts → Tables → Table File Names picks how files are written
 - Both spellings are read; backups and `saveTable` follow the same setting.
 
 Not there yet: drag from the window to Explorer, an XML colouring, playing sounds.
+
+## Clean up for release
+
+Table → Clean Up for Release (`Ctrl+Alt+Shift+R`) lists what the open table carries that nothing uses, to tick off before a table goes out, and saves a copy without it. The open table and its file stay as they are; the copy cannot be saved over them.
+
+- **What it offers.** Saved Structure Dissect structures, user-defined symbols and table files that no script, Lua event, the table's Lua, text table file, record address or offset, drop-down link or other structure names (a whole-word search, case ignored); empty groups; the disassembler comments; the table's own comment; and the `//` and `{ }` comments in Auto Assembler scripts and `.CEA` table files (`{$lua}` parts, `{$...}` lines and text in quotes stay, and a line that held only a comment goes with it).
+- **What it chooses.** Only what is plainly a leftover: unnamed structures, symbols and files, and the disassembler comments. Not chosen, with the reason beside it: a table file that is not named whole when a script mentions a piece of its name (`Manifold.Dark-` for `Manifold.Dark-Aqua.Min.json`: loaded by a name put together at run time), an empty group with a name (it shows in the list as a heading or a note), the table comment and the script comments (they often hold the credits). Never offered: unnamed groups (the spacers between sections) and groups that hold a drop-down list other records link to.
+- **The sizes.** The header shows the size of the table and of the copy with what is chosen, recalculated on every change; each line shows about what it takes.
+- **Look Again** reads the table anew after changes; the window says when the table changed since its list was made.
+- Checked on two real tables: in a 3.4 MB Isaac table it chooses a 1013-field structure nothing names (144 KB) and leaves the theme files, the note rows and the spacers alone; in a Crab Champions table it chooses nothing and offers 37 KB of comments.
 
 ## Memory viewer
 

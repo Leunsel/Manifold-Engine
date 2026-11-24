@@ -220,6 +220,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Table\RecordPath.cpp" />
     <ClCompile Include="..\Source\Table\RttiStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
+    <ClCompile Include="..\Source\Table\TableCleanup.cpp" />
     <ClCompile Include="..\Source\Table\TableFiles.cpp" />
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
     <ClCompile Include="..\Source\Target\ClrLink.cpp" />
@@ -286,6 +287,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\SignatureTests.cpp" />
     <ClCompile Include="..\Tests\SpeedhackTests.cpp" />
     <ClCompile Include="..\Tests\StructureTests.cpp" />
+    <ClCompile Include="..\Tests\TableCleanupTests.cpp" />
     <ClCompile Include="..\Tests\TableFileTests.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
     <ClCompile Include="..\Tests\TextTests.cpp" />

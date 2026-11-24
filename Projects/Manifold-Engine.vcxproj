@@ -228,6 +228,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Table\RecordPath.cpp" />
     <ClCompile Include="..\Source\Table\RttiStructures.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
+    <ClCompile Include="..\Source\Table\TableCleanup.cpp" />
     <ClCompile Include="..\Source\Table\TableFiles.cpp" />
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp" />
     <ClCompile Include="..\Source\Target\ClrLink.cpp" />
@@ -310,6 +311,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\UI\SplashScreen.cpp" />
     <ClCompile Include="..\Source\UI\StaticPointersWindow.cpp" />
     <ClCompile Include="..\Source\UI\StructureWindow.cpp" />
+    <ClCompile Include="..\Source\UI\TableCleanupWindow.cpp" />
     <ClCompile Include="..\Source\UI\TableFilesWindow.cpp" />
     <ClCompile Include="..\Source\UI\TemplateManager.cpp" />
     <ClCompile Include="..\Source\UI\Templates.cpp" />
@@ -432,6 +434,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Table\RecordPath.h" />
     <ClInclude Include="..\Source\Table\RttiStructures.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
+    <ClInclude Include="..\Source\Table\TableCleanup.h" />
     <ClInclude Include="..\Source\Table\TableFiles.h" />
     <ClInclude Include="..\Source\Table\UnrealStructures.h" />
     <ClInclude Include="..\Source\Target\ClrLink.h" />
@@ -518,6 +521,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\UI\SplashScreen.h" />
     <ClInclude Include="..\Source\UI\StaticPointersWindow.h" />
     <ClInclude Include="..\Source\UI\StructureWindow.h" />
+    <ClInclude Include="..\Source\UI\TableCleanupWindow.h" />
     <ClInclude Include="..\Source\UI\TableFilesWindow.h" />
     <ClInclude Include="..\Source\UI\TemplateManager.h" />
     <ClInclude Include="..\Source\UI\Templates.h" />

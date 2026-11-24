@@ -61,6 +61,7 @@ namespace Manifold
         OpenLastProcess,
         TableLuaScript,
         TableFiles,
+        TableCleanup,
         AddAddress,
         AddGroup,
         AddScript,
