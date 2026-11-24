@@ -234,7 +234,8 @@ namespace Manifold
         m_crashLedger.Reset();
         m_crashWatchFailed = false;
         m_crashWatchWanted = false;
-        m_crashWatch.Attach(m_target.Process());
+        if (m_crashWatch.Attach(m_target.Process()))
+            m_crashWatchWanted = true;
         m_rtti.ProcessOpened();
         m_lua->OnProcessOpened();
         m_unreal.ProcessOpened();
@@ -560,13 +561,23 @@ namespace Manifold
     {
         if (!m_crashWatchWanted.exchange(false))
             return;
-        if (!m_settings.CrashWatch || m_crashWatchFailed || !m_target.Process() || !m_target.Process()->Alive() || m_crashWatch.Running() || Target::Process::DryRun())
+        if (!m_settings.CrashWatch || m_crashWatchFailed || !m_target.Process() || !m_target.Process()->Alive() || m_crashWatch.Running() || Target::Process::DryRun() ||
+            m_work.Busy("crashwatch"))
             return;
-        if (Status started = m_crashWatch.Start(); !started)
-        {
-            m_crashWatchFailed = true;
-            LOG_WARN("Crash", started.Text);
-        }
+        // ∑ In the background: loading the agent and the remote call that starts it took
+        //   2.4 s in Isaac, and on the main thread every activation queued behind it waited.
+        const std::uint64_t generation = ProcessGeneration();
+        m_work.Start({ .Title = "Starting the crash watch", .Group = "crashwatch", .Cancellable = false, .Quiet = true }, [this, generation](WorkProgress&) -> BackgroundWork::Finish
+            {
+                const Status started = m_crashWatch.Start();
+                return [this, started, generation]
+                    {
+                        if (started || ProcessGeneration() != generation)
+                            return;
+                        m_crashWatchFailed = true;
+                        LOG_WARN("Crash", started.Text);
+                    };
+            });
     }
 
     bool Engine::ExamineEnd()

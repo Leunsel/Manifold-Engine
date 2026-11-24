@@ -6,6 +6,7 @@
 #include "Target/Process.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -58,39 +59,30 @@ namespace Manifold::Target
         Leave();
     }
 
-    void CrashWatch::Attach(std::shared_ptr<Process> process)
+    bool CrashWatch::Attach(std::shared_ptr<Process> process)
     {
         Leave();
-        bool adopt = false;
-        {
-            std::lock_guard lock(m_lock);
-            m_process = std::move(process);
-            if (!m_process || !m_process->Alive() || Process::DryRun())
-                return;
-            const std::string name = AgentName(m_process->Is64Bit());
-            if (!m_process->FindModule(name))
-                return;
-            const std::uint64_t block = m_process->FindExport(name, "ManifoldCrash");
-            Crash::Block shared{};
-            adopt = block && m_process->ReadExact(block, &shared, sizeof(shared)) && shared.Magic == Crash::kMagic && shared.Version == Crash::kVersion && shared.Running;
-        }
-        // ∑ The ring of the earlier session lives in that session's section,
-        //   which went away with it: a fresh one takes its place.
-        if (adopt)
-        {
-            if (Status started = Start(); started)
-                LOG_INFO("Crash", "The crash watch of an earlier session in " + m_process->Name() + " was taken over");
-            else
-                LOG_WARN("Crash", started.Text);
-        }
+        std::lock_guard lock(m_lock);
+        m_process = std::move(process);
+        if (!m_process || !m_process->Alive() || Process::DryRun())
+            return false;
+        const std::string name = AgentName(m_process->Is64Bit());
+        if (!m_process->FindModule(name))
+            return false;
+        // ∑ The ring of the earlier session lives in that session's section, which
+        //   went away with it: the caller starts a fresh one (in the background).
+        const std::uint64_t block = m_process->FindExport(name, "ManifoldCrash");
+        Crash::Block shared{};
+        return block && m_process->ReadExact(block, &shared, sizeof(shared)) && shared.Magic == Crash::kMagic && shared.Version == Crash::kVersion && shared.Running;
     }
 
     void CrashWatch::Leave()
     {
         std::lock_guard lock(m_lock);
+        ++m_session;
         if (m_running && m_process && m_process->Alive() && !Process::DryRun())
         {
-            if (Status stopped = Call(Crash::CallStop); !stopped)
+            if (Status stopped = Invoke(*m_process, m_block, m_call, m_serial, Crash::CallStop); !stopped)
                 LOG_WARN("Crash", stopped.Text);
         }
         m_running = false;
@@ -112,100 +104,127 @@ namespace Manifold::Target
         m_mapping = nullptr;
     }
 
-    Status CrashWatch::MapRing()
+    Status CrashWatch::Invoke(const Process& process, std::uint64_t block, std::uint64_t call, std::uint32_t& serial, std::uint32_t operation)
     {
-        Unmap();
-        const HANDLE mapping = ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, static_cast<DWORD>(sizeof(Crash::Ring)), nullptr);
-        if (!mapping)
-            return Failed("no shared memory for the ring (" + SystemErrorText(::GetLastError()) + ")");
-        void* view = ::MapViewOfFile(mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(Crash::Ring));
-        if (!view)
-        {
-            const DWORD error = ::GetLastError();
-            ::CloseHandle(mapping);
-            return Failed("the ring could not be mapped (" + SystemErrorText(error) + ")");
-        }
-        m_mapping = mapping;
-        m_ring = static_cast<Crash::Ring*>(view);
-        std::memset(m_ring, 0, sizeof(Crash::Ring));
-        m_ring->Version = Crash::kVersion;
-        m_ring->Magic = Crash::kMagic;
-        return Status::Success();
-    }
-
-    Status CrashWatch::Call(std::uint32_t operation)
-    {
-        if (!m_call)
+        if (!call)
             return Failed("the agent is not loaded");
-        m_serial += 1;
-        if (Status written = m_process->Write(m_block + offsetof(Crash::Block, Serial), &m_serial, sizeof(m_serial)); !written)
+        serial += 1;
+        if (Status written = process.Write(block + offsetof(Crash::Block, Serial), &serial, sizeof(serial)); !written)
             return written;
-        if (Status called = m_process->CreateThread(m_call, operation, true, kCallTimeoutMs); !called)
+        if (Status called = process.CreateThread(call, operation, true, kCallTimeoutMs); !called)
             return called;
         std::uint32_t applied = 0;
         std::uint32_t result = 0;
-        if (!m_process->ReadExact(m_block + offsetof(Crash::Block, Applied), &applied, sizeof(applied)) ||
-            !m_process->ReadExact(m_block + offsetof(Crash::Block, Result), &result, sizeof(result)))
+        if (!process.ReadExact(block + offsetof(Crash::Block, Applied), &applied, sizeof(applied)) ||
+            !process.ReadExact(block + offsetof(Crash::Block, Result), &result, sizeof(result)))
             return Failed("the state of the library could not be read");
-        if (applied != m_serial)
+        if (applied != serial)
             return Failed("the library did not take the request");
         if (result != Crash::ResultOk)
             return Failed(ResultText(result));
         return Status::Success();
     }
 
+    // ∑ The slow part (loading the agent, the remote call that starts it: 2.4 s in
+    //   Isaac, a few ms in the test target) runs without the lock, so Running and
+    //   KeepModules on the main thread never wait for it; the result is taken over
+    //   at the end, unless the process was closed or opened anew in between.
     Status CrashWatch::Start()
     {
-        std::lock_guard lock(m_lock);
-        if (!m_process || !m_process->Alive())
-            return Status::Fail(ErrorCode::NoProcess);
-        if (Process::DryRun())
-            return Failed("a dry run loads nothing into the process");
-        const bool is64Bit = m_process->Is64Bit();
+        std::shared_ptr<Process> process;
+        std::uint64_t session = 0;
+        {
+            std::lock_guard lock(m_lock);
+            if (!m_process || !m_process->Alive())
+                return Status::Fail(ErrorCode::NoProcess);
+            if (Process::DryRun())
+                return Failed("a dry run loads nothing into the process");
+            if (m_running)
+                return Status::Success();
+            process = m_process;
+            session = m_session;
+        }
+        const auto began = std::chrono::steady_clock::now();
+        const auto since = [&began] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count(); };
+        bool injected = false;
+        const bool is64Bit = process->Is64Bit();
         const std::string name = AgentName(is64Bit);
-        if (!m_process->FindModule(name))
+        if (!process->FindModule(name))
         {
             const std::filesystem::path agent = AgentPath(is64Bit);
             std::error_code ignore;
             if (!std::filesystem::exists(agent, ignore))
                 return Status::Fail(ErrorCode::InjectFailed, name + " was not found next to the program");
-            if (Status injected = m_process->InjectLibrary(agent.wstring()); !injected)
-                return injected;
+            if (Status loading = process->InjectLibrary(agent.wstring()); !loading)
+                return loading;
+            injected = true;
         }
-        m_block = m_process->FindExport(name, "ManifoldCrash");
-        m_call = m_process->FindExport(name, "ManifoldCrashCall");
+        const std::uint64_t block = process->FindExport(name, "ManifoldCrash");
+        const std::uint64_t call = process->FindExport(name, "ManifoldCrashCall");
         Crash::Block shared{};
-        if (!m_block || !m_call || !m_process->ReadExact(m_block, &shared, sizeof(shared)) || shared.Magic != Crash::kMagic || shared.Version != Crash::kVersion)
-        {
-            m_block = 0;
-            m_call = 0;
+        if (!block || !call || !process->ReadExact(block, &shared, sizeof(shared)) || shared.Magic != Crash::kMagic || shared.Version != Crash::kVersion)
             return Failed("the agent library in the process is from another version of the program; restart the game to load the new one");
-        }
-        m_serial = shared.Serial;
-        if (Status mapped = MapRing(); !mapped)
-            return mapped;
-        const UniqueHandle target(::OpenProcess(PROCESS_DUP_HANDLE, FALSE, Raw(m_process->Id())));
-        HANDLE remote = nullptr;
-        if (!target || !::DuplicateHandle(::GetCurrentProcess(), m_mapping, target.Get(), &remote, 0, FALSE, DUPLICATE_SAME_ACCESS))
+        std::uint32_t serial = shared.Serial;
+        const double loaded = since();
+
+        const HANDLE mapping = ::CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, static_cast<DWORD>(sizeof(Crash::Ring)), nullptr);
+        if (!mapping)
+            return Failed("no shared memory for the ring (" + SystemErrorText(::GetLastError()) + ")");
+        auto* ring = static_cast<Crash::Ring*>(::MapViewOfFile(mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(Crash::Ring)));
+        const auto drop = [&]
+            {
+                if (ring)
+                    ::UnmapViewOfFile(ring);
+                ::CloseHandle(mapping);
+            };
+        if (!ring)
         {
             const DWORD error = ::GetLastError();
-            Unmap();
+            drop();
+            return Failed("the ring could not be mapped (" + SystemErrorText(error) + ")");
+        }
+        std::memset(ring, 0, sizeof(Crash::Ring));
+        ring->Version = Crash::kVersion;
+        ring->Magic = Crash::kMagic;
+        const UniqueHandle target(::OpenProcess(PROCESS_DUP_HANDLE, FALSE, Raw(process->Id())));
+        HANDLE remote = nullptr;
+        if (!target || !::DuplicateHandle(::GetCurrentProcess(), mapping, target.Get(), &remote, 0, FALSE, DUPLICATE_SAME_ACCESS))
+        {
+            const DWORD error = ::GetLastError();
+            drop();
             return Failed("the ring cannot be handed to the process (" + SystemErrorText(error) + ")");
         }
         const std::uint64_t value = reinterpret_cast<std::uintptr_t>(remote);
-        if (Status written = m_process->Write(m_block + offsetof(Crash::Block, Mapping), &value, sizeof(value)); !written)
+        if (Status written = process->Write(block + offsetof(Crash::Block, Mapping), &value, sizeof(value)); !written)
         {
-            Unmap();
+            drop();
             return written;
         }
-        if (Status started = Call(Crash::CallStart); !started)
+        const double handed = since();
+        if (Status started = Invoke(*process, block, call, serial, Crash::CallStart); !started)
         {
-            Unmap();
+            drop();
             return started;
         }
-        m_running = true;
-        m_modules = m_process->Modules();
-        LOG_INFO("Crash", "Watching " + m_process->Name() + " for crashes, to find the script behind one");
+        const double total = since();
+        {
+            std::lock_guard lock(m_lock);
+            if (m_session != session || m_process != process)
+            {
+                drop();
+                return Failed("the process was closed while the crash watch started");
+            }
+            Unmap();
+            m_mapping = mapping;
+            m_ring = ring;
+            m_block = block;
+            m_call = call;
+            m_serial = serial;
+            m_running = true;
+            m_modules = process->Modules();
+        }
+        LOG_INFO("Crash", Format("Watching %s for crashes, to find the script behind one (%.0f ms: %s %.0f, ring %.0f, start call %.0f)", process->Name().c_str(), total,
+                              injected ? "loading the agent" : "agent already there", loaded, handed - loaded, total - handed));
         return Status::Success();
     }
 

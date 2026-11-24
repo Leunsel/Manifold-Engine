@@ -50,11 +50,12 @@ namespace Manifold::Target
         CrashWatch(const CrashWatch&) = delete;
         CrashWatch& operator=(const CrashWatch&) = delete;
 
-        // Takes over the agent of an earlier session when it already watches.
-        void Attach(std::shared_ptr<Process> process);
+        // True when the agent of an earlier session already watches: the caller starts it anew.
+        bool Attach(std::shared_ptr<Process> process);
         // Stops the agent (while the process lives) and drops the ring.
         void Leave();
-        // Loads the agent when needed and starts it on a fresh ring.
+        // Loads the agent when needed and starts it on a fresh ring. Safe from a worker
+        // thread: the slow part holds no lock.
         Status Start();
         bool Running() const;
         // The ring as it is now; works after the process ended.
@@ -64,8 +65,7 @@ namespace Manifold::Target
         ModuleList Modules() const;
 
     private:
-        Status Call(std::uint32_t operation);
-        Status MapRing();
+        static Status Invoke(const Process& process, std::uint64_t block, std::uint64_t call, std::uint32_t& serial, std::uint32_t operation);
         void Unmap();
 
         mutable std::mutex m_lock;
@@ -76,6 +76,7 @@ namespace Manifold::Target
         std::uint64_t m_call = 0;
         std::uint32_t m_serial = 0;
         bool m_running = false;
+        std::uint64_t m_session = 0;  // Leave counts up: a start that began before it is dropped
         ModuleList m_modules;
     };
 }

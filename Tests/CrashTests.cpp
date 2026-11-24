@@ -316,6 +316,15 @@ namespace Manifold::Tests
             Pump(engine, 5000, [&] { return engine.Crashes().Running(); });
             CHECK_MSG(engine.Crashes().Running(), std::string(label) + ": the crash watch did not start after a script wrote code");
             {
+                std::string started;
+                for (const LogEntry& entry : RuntimeLog::Entries())
+                {
+                    if (entry.Message.starts_with("Watching "))
+                        started = entry.Message;
+                }
+                std::printf("  %s: %s\n", label, started.c_str());
+            }
+            {
                 std::string result;
                 const Status scripts = engine.Lua().RunWithResult(
                     "local s = manifold.crash.scripts() if manifold.crash.watching() and #s == 1 and s[1].script == 'Harmless Patch' and s[1].on and s[1].ranges[1].kind == 'alloc' then return 'ok' end return 'bad'",
@@ -361,6 +370,37 @@ namespace Manifold::Tests
                 "local c = manifold.crash.last() if c and c.exitCode == 0xC0000005 and c.exact and c.scripts[1].script == '" + name + "' and type(c.headline) == 'string' then return c.scripts[1].link end return 'bad'",
                 "crash", result);
             CHECK_MSG(lua.Ok() && result == (way == Way::InScript ? "code" : "stack"), std::string(label) + " Lua: " + (lua.Ok() ? result : lua.Text));
+        }
+
+        // The watch starts on a worker: closing the process while it starts drops that start
+        // without marking the watch as failed, and the next process gets one again.
+        void CheckStartRace(const std::filesystem::path& path, const char* label)
+        {
+            Child target;
+            if (!Start(path, target))
+            {
+                Skip("the test target " + path.string() + " could not be started");
+                return;
+            }
+            Settings settings;
+            settings.CrashWatch = true;
+            Engine engine(settings);
+            const ProcessId id = MakeProcessId(target.Info.dwProcessId);
+            const bool opened = WaitFor(5000, [&] { return engine.OpenProcess(id).Ok(); });
+            CHECK_MSG(opened, std::string(label) + ": the test target could not be opened");
+            if (!opened)
+                return;
+            Table::MemoryRecord& code = engine.Table().AddScript("Writes Code", "[ENABLE]\nalloc(racecave,$100)\nracecave:\n  ret\n[DISABLE]\ndealloc(racecave)\n");
+            CHECK(engine.SetActive(code, true).Ok());
+            engine.Tick();  // hands the start to a worker
+            engine.CloseProcess();
+            Pump(engine, 500, [] { return false; });
+            CHECK(!engine.Crashes().Running());
+            CHECK(engine.OpenProcess(id).Ok());
+            Table::MemoryRecord& again = engine.Table().AddScript("Writes Code Again", "[ENABLE]\nalloc(racecave2,$100)\nracecave2:\n  ret\n[DISABLE]\ndealloc(racecave2)\n");
+            CHECK(engine.SetActive(again, true).Ok());
+            Pump(engine, 5000, [&] { return engine.Crashes().Running(); });
+            CHECK_MSG(engine.Crashes().Running(), std::string(label) + ": after a start dropped by closing the process, the watch did not start for the next one");
         }
 
         // ---- The Auto Assembler's stack balance check ----
@@ -559,6 +599,7 @@ namespace Manifold::Tests
                 CheckLive(path, (std::string(label) + " called from script").c_str(), Way::CalledFromScript);
                 CheckLive(path, (std::string(label) + " quiet end").c_str(), Way::QuietEnd);
                 CheckStackWarnings(path, (std::string(label) + " stack check").c_str());
+                CheckStartRace(path, (std::string(label) + " start race").c_str());
                 CheckDebuggerStop(path, (std::string(label) + " Windows debugger").c_str(), false);
                 CheckDebuggerStop(path, (std::string(label) + " VEH debugger").c_str(), true);
             }
