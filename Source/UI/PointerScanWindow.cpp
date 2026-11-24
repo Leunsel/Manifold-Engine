@@ -9,6 +9,7 @@
 #include "Target/Process.h"
 #include "UI/AddressActions.h"
 #include "UI/Fonts.h"
+#include "UI/TypePicker.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 #include "UI/Workspace.h"
@@ -562,15 +563,9 @@ namespace Manifold::UI
             enter |= InputTextWithHint("##rescanvalue", "value", m_rescanValue, ImGuiInputTextFlags_EnterReturnsTrue);
             ImGui::SameLine();
             ImGui::SetNextItemWidth(Px(110.0f));
-            if (ImGui::BeginCombo("##rescantype", Scan::TypeName(m_rescanType)))
-            {
-                for (const Scan::ValueType type : Scan::kAllTypes)
-                {
-                    if (ImGui::Selectable(Scan::TypeName(type), m_rescanType == type))
-                        m_rescanType = type;
-                }
-                ImGui::EndCombo();
-            }
+            Scan::TypeChoice choice{ Scan::ScanKind::Single, m_rescanType, {} };
+            if (TypeCombo("##rescantype", choice, [] { return Scan::TypeCatalogOptions{ .Types = Scan::kAllTypes }; }, ImGuiComboFlags_None))
+                m_rescanType = choice.Type;
         }
         else
         {

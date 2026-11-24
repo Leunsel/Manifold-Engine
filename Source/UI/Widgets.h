@@ -65,6 +65,8 @@ namespace Manifold::UI
     void TextWithError(std::string_view text, ImVec4 color);
     void Muted(std::string_view text);
     void SectionLabel(const char* text);
+    // A muted heading over a group of items in a menu or combo; every heading but the first draws a separator above.
+    void MenuSection(const char* title, bool first = false);
 
     bool InputText(const char* label, std::string& value, ImGuiInputTextFlags flags = 0, ImGuiInputTextCallback callback = nullptr, void* user = nullptr);
     bool InputTextWithHint(const char* label, const char* hint, std::string& value, ImGuiInputTextFlags flags = 0, ImGuiInputTextCallback callback = nullptr, void* user = nullptr);

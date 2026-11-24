@@ -2,6 +2,7 @@
 
 #include "App/Commands.h"
 #include "Lua/LuaEngine.h"
+#include "Scan/TypeCatalog.h"
 #include "UI/ProcessIcon.h"
 #include "UI/ToolWindowBase.h"
 
@@ -181,7 +182,7 @@ namespace Manifold::UI
         bool m_addDialog = false;
         std::string m_addAddress;
         std::string m_addDescription;
-        int m_addType = 2;
+        Scan::TypeChoice m_addType;
         bool m_descriptionDialog = false;
         std::string m_descriptionText;
         int m_descriptionTarget = 0;

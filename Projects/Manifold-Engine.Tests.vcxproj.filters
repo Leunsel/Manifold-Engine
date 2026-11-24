@@ -360,6 +360,9 @@
     <ClCompile Include="..\Source\Scan\StaticPointers.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Scan\TypeCatalog.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Scan\ValueType.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>

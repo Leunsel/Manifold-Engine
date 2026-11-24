@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Scan/TypeCatalog.h"
 #include "UI/ToolWindowBase.h"
 
 #include <cstdint>
@@ -36,7 +37,7 @@ namespace Manifold::UI
         std::string m_description;
         std::string m_address;
         std::vector<std::string> m_offsets;
-        int m_type = 2;
+        Scan::TypeChoice m_type;
         int m_length = 10;
         bool m_unicode = false;
         bool m_zeroTerminate = true;
