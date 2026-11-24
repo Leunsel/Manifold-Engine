@@ -96,6 +96,7 @@ namespace Manifold::Target
         m_running = false;
         Unmap();
         m_process.reset();
+        m_modules.reset();
         m_block = 0;
         m_call = 0;
         m_serial = 0;
@@ -203,8 +204,22 @@ namespace Manifold::Target
             return started;
         }
         m_running = true;
+        m_modules = m_process->Modules();
         LOG_INFO("Crash", "Watching " + m_process->Name() + " for crashes, to find the script behind one");
         return Status::Success();
+    }
+
+    void CrashWatch::KeepModules(ModuleList modules)
+    {
+        std::lock_guard lock(m_lock);
+        if (modules && !modules->empty())
+            m_modules = std::move(modules);
+    }
+
+    ModuleList CrashWatch::Modules() const
+    {
+        std::lock_guard lock(m_lock);
+        return m_modules;
     }
 
     bool CrashWatch::Running() const

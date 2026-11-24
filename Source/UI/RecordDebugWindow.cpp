@@ -1410,6 +1410,8 @@ namespace Manifold::UI
         }
         else if (check.LuaHeldBack)
             add(IssueLevel::Info, "assemble", std::string("The ") + part + " part assembles, checked without its Lua." + heldBack);
+        for (const Asm::AaWarning& warning : check.Result.Warnings)
+            add(IssueLevel::Warning, "stack", std::string("The ") + part + " part: " + warning.Text);
     }
 
     std::string RecordDebugWindow::CheckReport() const

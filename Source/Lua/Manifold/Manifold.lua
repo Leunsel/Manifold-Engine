@@ -2192,7 +2192,7 @@ do
 
   define(crash, "last", {
     returns = "`{ process, headline, details, exitCode, exact, watched, code, address, accessed, thread, secondsBeforeEnd, scripts, switchedOn, lastSwitched, lastSwitchedSeconds }`, or nil",
-    doc = "The report of the last crash in this session, or `nil` when none crashed. `scripts` lists the scripts involved, most likely first, as `{ script, recordId, link, where, address }`; `link` is `\"code\"` (the failing instruction is in its code), `\"patch\"` (in bytes it patched), `\"behindPatch\"` (right behind its patch), `\"freed\"` (in its memory after it was switched off), `\"accessed\"` (the failing access reached its memory), `\"stack\"` (its code is on the stack) or `\"earlier\"` (an exception in its code shortly before). `exact` is true when the exit code is the noted exception's code. `code`, `address` (the instruction) and `accessed` (an access violation's address) are missing when no exception was noted.",
+    doc = "The report of the last crash in this session, or `nil` when none crashed. `scripts` lists the scripts involved, most likely first, as `{ script, recordId, link, where, address }`; `link` is `\"code\"` (the failing instruction is in its code), `\"patch\"` (in bytes it patched), `\"behindPatch\"` (right behind its patch), `\"freed\"` (in its memory after it was switched off), `\"unbalanced\"` (its hook leaves the stack unbalanced, from the Auto Assembler's stack check), `\"nearPatch\"` (the game failed shortly behind its patch),`\"accessed\"` (the failing access reached its memory), `\"stack\"` (its code is on the stack) or `\"earlier\"` (an exception in its code shortly before). `exact` is true when the exit code is the noted exception's code. `code`, `address` (the instruction) and `accessed` (an access violation's address) are missing when no exception was noted.",
   }, function()
     return native.crashLast()
   end)
@@ -2212,8 +2212,8 @@ do
   end)
 
   define(crash, "scripts", {
-    returns = "list of `{ script, recordId, on, ranges }`",
-    doc = "What the scripts put into the open process, as the crash watch matches it: per run that changed the game its label, record id, whether it is still on, and `ranges` of `{ address, size, kind, name }` with `kind` `\"alloc\"` or `\"patch\"`.",
+    returns = "list of `{ script, recordId, on, ranges, warnings }`",
+    doc = "What the scripts put into the open process, as the crash watch matches it: per run that changed the game its label (the record's description, or for a script run from Lua the record whose Lua ran it), record id, whether it is still on, `ranges` of `{ address, size, kind, name }` with `kind` `\"alloc\"` or `\"patch\"`, and `warnings` of `{ line, text }`: what the Auto Assembler's stack check found, such as a push without its pop before the jump back.",
   }, function()
     return native.crashScripts()
   end)

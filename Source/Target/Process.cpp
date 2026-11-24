@@ -1096,12 +1096,20 @@ namespace Manifold::Target
                 }
                 ::CloseHandle(snapshot);
             }
-            else
+            else if (Alive())
             {
                 LOG_WARN("Process", ErrorMessage(ErrorCode::ModulesUnreadable));
             }
         }
 
+        // ∑ A process that ended has no module list any more; the last one it
+        //   had still names the addresses of its crash, so it stays.
+        if (modules->empty() && !Alive())
+        {
+            std::lock_guard lock(m_moduleLock);
+            if (m_modules && !m_modules->empty())
+                return;
+        }
         auto spans = std::make_shared<std::vector<ModuleSpan>>();
         spans->reserve(modules->size());
         for (std::size_t i = 0; i < modules->size(); ++i)

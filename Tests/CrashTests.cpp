@@ -147,6 +147,25 @@ namespace Manifold::Tests
                     blind.Headline);
             }
             {
+                // The owner's case: push eax without its pop, the crash comes later in the game's own code.
+                ScriptFootprint damage = Footprint("Damage : Multiplier ()->", 0x60000, 0x61000, 3000);
+                damage.Ranges.push_back({ 0x4C98C0, 0x4C98C5, ScriptRangeKind::Patch, {} });
+                damage.Warnings.push_back({ 5, "the stack is 4 bytes off at the jump back in line 9: push eax in line 5 has no matching pop. The game's code after it will read the wrong values and likely crash." });
+                const CrashReport report = AttributeCrash(Capture({ Record(kAccess, 0x4C98EF, 5000, 0x2F24, 0) }, false), Context(kAccess, 9400, { damage }));
+                CHECK_MSG(report.Crashed && !report.Blames.empty() && report.Blames[0].Link == CrashLink::Unbalanced && report.Blames.size() == 1, report.Headline);
+                CHECK_MSG(report.Headline == "Game.exe crashed in Game.exe+C98EF: access violation reading 00002F24. \"Damage : Multiplier ()->\" is the likely cause: "
+                                             "the stack is 4 bytes off at the jump back in line 9: push eax in line 5 has no matching pop.",
+                    report.Headline);
+                CHECK(report.Details.find("its hook leaves the stack unbalanced") != std::string::npos);
+                damage.Warnings.clear();
+                const CrashReport nearby = AttributeCrash(Capture({ Record(kAccess, 0x4C98EF, 5000, 0x2F24, 0) }, false), Context(kAccess, 9400, { damage }));
+                CHECK_MSG(nearby.Crashed && !nearby.Blames.empty() && nearby.Blames[0].Link == CrashLink::NearPatch && nearby.Blames[0].Where == "2F bytes behind its patch at Game.exe+C98C0",
+                    nearby.Headline);
+                CHECK(nearby.Headline.find("That is 2F bytes behind its patch at Game.exe+C98C0 of \"Damage : Multiplier ()->\"") != std::string::npos);
+                const CrashReport distant = AttributeCrash(Capture({ Record(kAccess, 0x4CA0EF, 5000, 0x2F24, 0) }, false), Context(kAccess, 9400, { damage }));
+                CHECK(distant.Crashed && distant.Blames.empty());
+            }
+            {
                 Target::CrashRecord small = Record(kAccess, 0x10015, 5000, 0x44, 1);
                 small.Stack = { 0x10020 };
                 const CrashReport report = AttributeCrash(Capture({ small }, false), Context(kAccess, 5100, { ammo }));
@@ -167,7 +186,7 @@ namespace Manifold::Tests
             Asm::AaMemory before;
             Asm::AaMemory after;
             after.Allocations.push_back({ "newmem", 0x10000, 0x1000, 0x10000, false });
-            ledger.Note("Infinite Ammo", 7, Asm::AaSection::Enable, result, before, after, 1000);
+            ledger.Note("Infinite Ammo", 7, 1, Asm::AaSection::Enable, result, before, after, 1000);
             std::vector<ScriptFootprint> footprints = ledger.Footprints();
             CHECK(footprints.size() == 1);
             if (footprints.size() != 1)
@@ -178,18 +197,23 @@ namespace Manifold::Tests
             CHECK(noted.Ranges.size() == 3 && noted.Ranges[1].Kind == ScriptRangeKind::Patch && noted.Ranges[1].Begin == 0x401000 && noted.Ranges[1].End == 0x401006);
             CHECK(noted.Labels.size() == 2 && noted.Labels.count(0x10010) && !noted.Labels.count(0x401000));
 
-            ledger.Note("Infinite Ammo", 7, Asm::AaSection::Enable, result, after, after, 1500);
+            ledger.Note("Infinite Ammo", 7, 1, Asm::AaSection::Enable, result, after, after, 1500);
             CHECK(ledger.Footprints().size() == 1 && ledger.Footprints().front().OnTick == 1500);
-            ledger.Note("Infinite Ammo", 7, Asm::AaSection::Disable, Asm::AaResult{}, after, before, 2000);
+            // One record's Lua running a second hook script: a footprint of its own.
+            ledger.Note("Infinite Ammo", 7, 2, Asm::AaSection::Enable, result, before, after, 1600);
+            CHECK(ledger.Footprints().size() == 2);
+            ledger.Note("Infinite Ammo", 7, 1, Asm::AaSection::Disable, Asm::AaResult{}, after, before, 2000);
             footprints = ledger.Footprints();
-            CHECK(footprints.size() == 1 && footprints.front().OffTick == 2000);
-            ledger.Note("Infinite Ammo", 7, Asm::AaSection::Enable, result, before, after, 3000);
-            CHECK(ledger.Footprints().size() == 2 && ledger.Footprints().back().OffTick == 0);
+            CHECK(footprints.size() == 2 && footprints.front().OffTick == 2000 && footprints.back().OffTick == 0);
+            ledger.Note("Infinite Ammo", 7, 1, Asm::AaSection::Enable, result, before, after, 3000);
+            CHECK(ledger.Footprints().size() == 3 && ledger.Footprints().back().OffTick == 0);
             Asm::AaResult failed;
             failed.Error = Status::Fail(ErrorCode::LuaRuntime, "no");
             failed.Writes = result.Writes;
-            ledger.Note("Broken", 9, Asm::AaSection::Enable, failed, before, after, 3500);
-            CHECK(ledger.Footprints().size() == 2);
+            ledger.Note("Broken", 9, 3, Asm::AaSection::Enable, failed, before, after, 3500);
+            CHECK(ledger.Footprints().size() == 3);
+            CHECK(ScriptLabel("autoAssemble from \"Damage : Multiplier ()->\"", "lua") == "Damage : Multiplier ()->");
+            CHECK(ScriptLabel("\"Infinite Ammo\"", "table") == "Infinite Ammo" && ScriptLabel("", "window") == "Auto Assembler window" && ScriptLabel("autoAssemble", "lua") == "autoAssemble");
             ledger.Reset();
             CHECK(ledger.Footprints().empty());
         }
@@ -339,13 +363,101 @@ namespace Manifold::Tests
             CHECK_MSG(lua.Ok() && result == (way == Way::InScript ? "code" : "stack"), std::string(label) + " Lua: " + (lua.Ok() ? result : lua.Text));
         }
 
-        // ---- CE's "break when inside specific regions" with the scripts' memory ----
+        // ---- The Auto Assembler's stack balance check ----
 
         bool Logged(std::string_view text)
         {
             const std::vector<LogEntry> entries = RuntimeLog::Entries();
             return std::any_of(entries.begin(), entries.end(), [&](const LogEntry& entry) { return entry.Message.find(text) != std::string::npos; });
         }
+
+        int LineOf(const std::string& script, std::string_view needle)
+        {
+            int line = 1;
+            std::size_t at = 0;
+            while (at < script.size())
+            {
+                const std::size_t end = std::min(script.find('\n', at), script.size());
+                if (std::string_view(script).substr(at, end - at).find(needle) != std::string_view::npos)
+                    return line;
+                at = end + 1;
+                ++line;
+            }
+            return 0;
+        }
+
+        void CheckStackWarnings(const std::filesystem::path& path, const char* label)
+        {
+            Child target;
+            if (!Start(path, target))
+            {
+                Skip("the test target " + path.string() + " could not be started");
+                return;
+            }
+            Settings settings;
+            settings.CrashWatch = false;
+            Engine engine(settings);
+            const bool opened = WaitFor(5000, [&] { return engine.OpenProcess(MakeProcessId(target.Info.dwProcessId)).Ok(); });
+            CHECK_MSG(opened, std::string(label) + ": the test target could not be opened");
+            if (!opened)
+                return;
+            const bool is64Bit = engine.Process()->Is64Bit();
+            const std::string ax = is64Bit ? "rax" : "eax";
+            const std::string bp = is64Bit ? "rbp" : "ebp";
+            const std::string sp = is64Bit ? "rsp" : "esp";
+            Table::AddressList& list = engine.Table();
+            // The "game code" hooks patch: `site` is five nops, `framed` starts a function with push ebp; mov ebp,esp; both end with ret.
+            Table::MemoryRecord& site = list.AddScript("Site", std::string("[ENABLE]\nalloc(site,$100)\nalloc(framed,$100)\nregistersymbol(site)\nregistersymbol(framed)\n") +
+                "site:\ndb 90 90 90 90 90 C3\nframed:\ndb " + (is64Bit ? "55 48 8B EC 90" : "55 8B EC 90 90") +
+                " C3\n[DISABLE]\nunregistersymbol(site)\nunregistersymbol(framed)\ndealloc(site)\ndealloc(framed)\n");
+            const Status placed = engine.SetActive(site, true);
+            CHECK_MSG(placed.Ok(), placed.Text);
+            const auto hook = [&](const std::string& body, const std::string& labels = {}, const std::string& at = "site")
+            {
+                return "[ENABLE]\nalloc(cave,$100," + at + ")\nlabel(return)\n" + labels + "cave:\n" + body + "  jmp return\n" + at + ":\n  jmp cave\nreturn:\n[DISABLE]\ndealloc(cave)\n";
+            };
+            const auto warnings = [&](const std::string& script)
+            {
+                Asm::AaMemory memory;
+                const ScriptCheck check = engine.CheckScript(script, Asm::AaSection::Enable, memory);
+                CHECK_MSG(check.Result.Ok(), std::string(label) + ": " + check.Result.Error.Text);
+                return check.Result.Warnings;
+            };
+
+            const std::string open = hook("  push " + ax + "\n  mov " + ax + ",1\n");
+            const auto unbalanced = warnings(open);
+            CHECK_MSG(unbalanced.size() == 1, std::string(label) + Format(": %zu warnings for a push without its pop", unbalanced.size()));
+            if (!unbalanced.empty())
+            {
+                CHECK_MSG(unbalanced[0].Line == LineOf(open, "push") && unbalanced[0].Text.find("push " + ax) != std::string::npos &&
+                              unbalanced[0].Text.find(Format("%d bytes off at the jump back", is64Bit ? 8 : 4)) != std::string::npos,
+                    unbalanced[0].Text);
+            }
+            CHECK(warnings(hook("  push " + ax + "\n  pop " + ax + "\n")).empty());
+            CHECK(warnings(hook(is64Bit ? "  pushfq\n  popfq\n" : "  pushfd\n  pushad\n  popad\n  popfd\n")).empty());
+            CHECK(warnings(hook("  sub " + sp + ",20\n  add " + sp + ",20\n")).empty());
+            // The patch replaced push ebp; mov ebp,esp: the cave runs them again, so it leaves one word on the stack, rightly.
+            CHECK_MSG(warnings(hook("  push " + bp + "\n  mov " + bp + "," + sp + "\n", {}, "framed")).empty(), std::string(label) + ": the original push ebp counted as a mistake");
+            const auto dropped = warnings(hook("  nop\n", {}, "framed"));
+            CHECK_MSG(dropped.size() == 1 && dropped[0].Text.find("takes more off the stack") != std::string::npos, std::string(label) + ": a cave that drops the original push was not noticed");
+            const std::string branch = hook("  test eax,eax\n  je skip\n  push " + ax + "\nskip:\n", "label(skip)\n");
+            const auto branched = warnings(branch);
+            CHECK_MSG(branched.size() == 1 && branched[0].Line == LineOf(branch, "push"), std::string(label) + ": the push on one branch was not noticed");
+            const std::string called = "[ENABLE]\nalloc(cave,$100,site)\ncave:\n  push " + ax + "\n  ret\nsite:\n  call cave\n[DISABLE]\ndealloc(cave)\n";
+            const auto calledWarnings = warnings(called);
+            CHECK_MSG(calledWarnings.size() == 1 && calledWarnings[0].Text.find("at the ret") != std::string::npos, std::string(label) + ": a call hook that returns with a push open was not noticed");
+            CHECK(warnings("[ENABLE]\nalloc(cave,$100,site)\ncave:\n  push " + ax + "\n  pop " + ax + "\n  ret\nsite:\n  call cave\n[DISABLE]\ndealloc(cave)\n").empty());
+
+            Table::MemoryRecord& bad = list.AddScript("Bad Hook", open);
+            const Status on = engine.SetActive(bad, true);
+            CHECK_MSG(on.Ok(), on.Text);
+            CHECK_MSG(Logged("\"Bad Hook\": The stack is"), std::string(label) + ": switching the hook on gave no notice");
+            const std::vector<ScriptFootprint> footprints = engine.ScriptLedger().Footprints();
+            CHECK(std::any_of(footprints.begin(), footprints.end(), [](const ScriptFootprint& footprint) { return footprint.Label == "Bad Hook" && footprint.Warnings.size() == 1; }));
+            CHECK(engine.SetActive(bad, false).Ok() && engine.SetActive(site, false).Ok());
+        }
+
+        // ---- CE's "break when inside specific regions" with the scripts' memory ----
 
         void CheckDebuggerStop(const std::filesystem::path& path, const char* label, bool veh)
         {
@@ -422,6 +534,7 @@ namespace Manifold::Tests
                 CheckLive(path, (std::string(label) + " in script").c_str(), Way::InScript);
                 CheckLive(path, (std::string(label) + " called from script").c_str(), Way::CalledFromScript);
                 CheckLive(path, (std::string(label) + " quiet end").c_str(), Way::QuietEnd);
+                CheckStackWarnings(path, (std::string(label) + " stack check").c_str());
                 CheckDebuggerStop(path, (std::string(label) + " Windows debugger").c_str(), false);
                 CheckDebuggerStop(path, (std::string(label) + " VEH debugger").c_str(), true);
             }

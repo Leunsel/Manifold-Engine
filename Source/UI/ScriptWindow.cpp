@@ -168,6 +168,9 @@ namespace Manifold::UI
             }
             m_resultOk = true;
             m_result = "Both sections assemble." + HeldBackNote(luaHeldBack, true);
+            Asm::AaMemory again;
+            const ScriptCheck enable = m_engine.CheckScript(m_text, Asm::AaSection::Enable, again);
+            AddWarnings(enable.Result);
             return;
         }
         const ScriptCheck check = m_engine.CheckScript(m_text, Asm::AaSection::Whole, memory);
@@ -175,6 +178,19 @@ namespace Manifold::UI
         m_resultOk = result.Ok();
         m_result = (result.Ok() ? "The script assembles." : result.Error.Text) + HeldBackNote(check.LuaHeldBack > 0, result.Ok());
         m_editor.ErrorLine = result.Ok() ? 0 : (result.Line ? result.Line : LineOf(result.Error.Text));
+        AddWarnings(result);
+    }
+
+    // A script that assembles but will likely crash the game: the result says
+    // so, and the editor marks the first line it names.
+    void ScriptWindow::AddWarnings(const Asm::AaResult& result)
+    {
+        if (!result.Ok() || result.Warnings.empty())
+            return;
+        for (const Asm::AaWarning& warning : result.Warnings)
+            m_result += "  Warning: " + warning.Text;
+        m_resultOk = false;
+        m_editor.ErrorLine = result.Warnings.front().Line;
     }
 
     void ScriptWindow::Run(bool disable)
@@ -231,6 +247,7 @@ namespace Manifold::UI
             for (const auto& [name, address] : result.Symbols)
                 m_result += "  " + name + " = " + Hex(address) + ".";
             LOG_SUCCESS("Auto Assembler", m_result);
+            AddWarnings(result);
         }
         else
         {

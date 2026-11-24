@@ -38,8 +38,10 @@ namespace Manifold
     {
         std::string Label;
         int RecordId = 0;
+        std::uint64_t Key = 0;      // the script text's hash: one record's Lua may run many scripts
         std::vector<ScriptRange> Ranges;
         std::map<std::uint64_t, std::string> Labels;
+        std::vector<Asm::AaWarning> Warnings;  // what the Auto Assembler found wrong with it, such as an unbalanced stack
         std::uint64_t OnTick = 0;   // GetTickCount64 when its [ENABLE] ran
         std::uint64_t OffTick = 0;  // when its [DISABLE] ran; 0 while it is on
     };
@@ -52,8 +54,8 @@ namespace Manifold
         static constexpr std::size_t kMaxFootprints = 256;
 
         void Reset();
-        void Note(std::string label, int recordId, Asm::AaSection section, const Asm::AaResult& result, const Asm::AaMemory& before, const Asm::AaMemory& after,
-            std::uint64_t tick);
+        void Note(std::string label, int recordId, std::uint64_t key, Asm::AaSection section, const Asm::AaResult& result, const Asm::AaMemory& before,
+            const Asm::AaMemory& after, std::uint64_t tick);
         std::vector<ScriptFootprint> Footprints() const;
 
     private:
@@ -67,8 +69,10 @@ namespace Manifold
         InPatch,     // ... in bytes the script patched
         BehindPatch, // ... right behind a patch: a jump back landed in the middle of an instruction
         RanFreed,    // the code ran in an allocation after the script was switched off
+        Unbalanced,  // the script leaves the stack unbalanced: the game's code after its hook pops the wrong values
         Accessed,    // the faulting access reached memory of the script
         OnStack,     // the script's code is on the stack: it called what failed
+        NearPatch,   // the game's code failed shortly behind the script's patch
         Earlier      // an earlier exception, shortly before, was in the script's code
     };
 
@@ -110,6 +114,10 @@ namespace Manifold
         std::function<std::string(std::uint64_t)> Describe;  // module+offset or a symbol; may be empty
         const Disasm::Disassembler* Disassembler = nullptr;
     };
+
+    // The name a run goes by in the crash report: the record's description,
+    // or for a script run from Lua the record whose Lua ran it.
+    std::string ScriptLabel(std::string_view title, std::string_view owner);
 
     bool ExceptionExitCode(std::uint32_t code);
     std::string ExceptionName(std::uint32_t code);

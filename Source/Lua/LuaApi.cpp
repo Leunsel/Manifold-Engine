@@ -618,8 +618,8 @@ namespace Manifold::Lua
             const SharedMemory memory = given ? *given : std::make_shared<Asm::AaMemory>();
             const bool sections = Asm::HasSections(script);
             const Asm::AaSection section = !sections ? Asm::AaSection::Whole : given ? Asm::AaSection::Disable : Asm::AaSection::Enable;
-            const bool log = Owner(state).Options().AutoAssemblerLog || Asm::WantsLog(script);
-            const Asm::AaResult result = Owner(state).AutoAssemble(script, section, *memory, false, "lua", nullptr, log ? StepLogTitle(state, "autoAssemble") : std::string());
+            // ∑ The title names the run in the step log and, always, in the crash watch's notes.
+            const Asm::AaResult result = Owner(state).AutoAssemble(script, section, *memory, false, "lua", nullptr, StepLogTitle(state, "autoAssemble"));
             if (!result.Ok())
             {
                 const std::string message = result.Line > 0 ? "line " + std::to_string(result.Line) + ": " + result.Error.Text : result.Error.Text;

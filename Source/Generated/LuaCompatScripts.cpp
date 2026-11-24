@@ -7416,7 +7416,7 @@ do
 
   define(crash, "last", {
     returns = "`{ process, headline, details, exitCode, exact, watched, code, address, accessed, thread, secondsBeforeEnd, scripts, switchedOn, lastSwitched, lastSwitchedSeconds }`, or nil",
-    doc = "The report of the last crash in this session, or `nil` when none crashed. `scripts` lists the scripts involved, most likely first, as `{ script, recordId, link, where, address }`; `link` is `\"code\"` (the failing instruction is in its code), `\"patch\"` (in bytes it patched), `\"behindPatch\"` (right behind its patch), `\"freed\"` (in its memory after it was switched off), `\"accessed\"` (the failing access reached its memory), `\"stack\"` (its code is on the stack) or `\"earlier\"` (an exception in its code shortly before). `exact` is true when the exit code is the noted exception's code. `code`, `address` (the instruction) and `accessed` (an access violation's address) are missing when no exception was noted.",
+    doc = "The report of the last crash in this session, or `nil` when none crashed. `scripts` lists the scripts involved, most likely first, as `{ script, recordId, link, where, address }`; `link` is `\"code\"` (the failing instruction is in its code), `\"patch\"` (in bytes it patched), `\"behindPatch\"` (right behind its patch), `\"freed\"` (in its memory after it was switched off), `\"unbalanced\"` (its hook leaves the stack unbalanced, from the Auto Assembler's stack check), `\"nearPatch\"` (the game failed shortly behind its patch),`\"accessed\"` (the failing access reached its memory), `\"stack\"` (its code is on the stack) or `\"earlier\"` (an exception in its code shortly before). `exact` is true when the exit code is the noted exception's code. `code`, `address` (the instruction) and `accessed` (an access violation's address) are missing when no exception was noted.",
   }, function()
     return native.crashLast()
   end)
@@ -7436,8 +7436,8 @@ do
   end)
 
   define(crash, "scripts", {
-    returns = "list of `{ script, recordId, on, ranges }`",
-    doc = "What the scripts put into the open process, as the crash watch matches it: per run that changed the game its label, record id, whether it is still on, and `ranges` of `{ address, size, kind, name }` with `kind` `\"alloc\"` or `\"patch\"`.",
+    returns = "list of `{ script, recordId, on, ranges, warnings }`",
+    doc = "What the scripts put into the open process, as the crash watch matches it: per run that changed the game its label (the record's description, or for a script run from Lua the record whose Lua ran it), record id, whether it is still on, `ranges` of `{ address, size, kind, name }` with `kind` `\"alloc\"` or `\"patch\"`, and `warnings` of `{ line, text }`: what the Auto Assembler's stack check found, such as a push without its pop before the jump back.",
   }, function()
     return native.crashScripts()
   end)
@@ -7545,7 +7545,8 @@ define(dotnet, "staticAddress", {
     { name = "field", type = "string" },
   },
   returns = "address or nil, or nil, error",
-  doc = "Where a static field's value is, the same address `\"Class:Field\"` resolves to. A static field of a reference type holds a reference there, a static struct a reference to a boxed copy. nil when the class has no such field or no storage for it yet.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Where a static field's value is, the same address `\"Class:Field\"` resolves to. A static field of a reference type holds a reference there, a static struct a reference to a boxed copy. nil when the class has no such field or no storage for it yet.",
 }, function(class, field)
   return many(native.dotnetStaticAddress(class, field))
 end)
@@ -7556,8 +7557,7 @@ define(dotnet, "fieldOffset", {
     { name = "field", type = "string" },
   },
   returns = "integer or nil, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "The offset of an instance field from the start of an object of the class, inherited fields included. An auto-property's backing field is also found by the property's name. nil when there is no such field.",
+  doc = "The offset of an instance field from the start of an object of the class, inherited fields included. An auto-property's backing field is also found by the property's name. nil when there is no such field.",
 }, function(class, field)
   return many(native.dotnetFieldOffset(class, field))
 end)
@@ -7768,10 +7768,10 @@ local WIDGET_KEYS = {
   separator = withCommon({ text = "string" }),
   spacer = withCommon({}),
   button = withCommon({ text = "string", icon = "string", style = "string", shortcut = "string", hotkey = "string", confirm = "string", onClick = "function" }),
-  checkbox = withCommon({ label = "string", value = "boolean", style = "string", hotkey = "string", onChange = "function" }),
-  input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", readOnly = "boolean", maxLength = "integer", focus = "boolean", labelPosition = "string", onChange = "function", onSubmit = "function" }),
 )MLUA"),
-            std::string_view(R"MLUA(  number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", focus = "boolean", labelPosition = "string", hotkeyIncrease = "string", hotkeyDecrease = "string", hotkeyStep = "number", onChange = "function" }),
+            std::string_view(R"MLUA(  checkbox = withCommon({ label = "string", value = "boolean", style = "string", hotkey = "string", onChange = "function" }),
+  input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", readOnly = "boolean", maxLength = "integer", focus = "boolean", labelPosition = "string", onChange = "function", onSubmit = "function" }),
+  number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", focus = "boolean", labelPosition = "string", hotkeyIncrease = "string", hotkeyDecrease = "string", hotkeyStep = "number", onChange = "function" }),
   slider = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", format = "string", labelPosition = "string", hotkeyIncrease = "string", hotkeyDecrease = "string", hotkeyStep = "number", onChange = "function" }),
   combo = withCommon({ label = "string", items = "table", value = "choice", multi = "boolean", hint = "string", labelPosition = "string", hotkeyNext = "string", hotkeyPrevious = "string", onChange = "function" }),
   radio = withCommon({ label = "string", items = "table", value = "integer", horizontal = "boolean", labelPosition = "string", hotkeyNext = "string", hotkeyPrevious = "string", onChange = "function" }),
@@ -8057,7 +8057,8 @@ widgetObject = function(entry)
     if not liveEntry(entry) then
       return gone(entry.kind)
     end
-    return result(native.uiSet(entry.id, value))
+)MLUA"),
+            std::string_view(R"MLUA(    return result(native.uiSet(entry.id, value))
   end)
   method("draw", { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } } }, function(drawings, options)
     if entry.kind ~= "canvas" then
@@ -8067,8 +8068,7 @@ widgetObject = function(entry)
       return gone("canvas")
     end
     local prepared = {}
-)MLUA"),
-            std::string_view(R"MLUA(    for index, drawing in ipairs(drawings) do
+    for index, drawing in ipairs(drawings) do
       if type(drawing) ~= "table" then
         misuse(("%s.draw: drawing %d must be a table, got %s"):format(prefix, index, kindOf(drawing)))
       end
@@ -8319,7 +8319,8 @@ define(window, "create", {
   doc = "Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `opacity` (0.1 to 1, while the window has the focus) and `inactiveOpacity` (while another window has it; default `opacity`): without them the user's window opacity settings apply, and only a floating window can be see-through, a docked one stays opaque; `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one, and it keeps its place, size and dock spot from one run to the next. Size and behaviour: `minWidth`, `minHeight`, `maxWidth`, `maxHeight` (points) limit what the user can drag it to, `resizable = false` fixes the size, `autoSize = true` fits the window to its widgets, `scrollbar = false` hides the scroll bar, `topmost = true` keeps a floating window above other windows (it does not dock). `modal = true` shows the window as a dialog in front of the program: the rest of the program waits until it is closed (its close button, Escape or `hide`), a modal opened from a modal stacks on top of it, and closing one closes the ones opened from it; with `open = false` it waits for `show`. `position` places it the first time: `\"center\"` (of the main window) or `\"mouse\"`; `x` and `y` (points from the main window's corner) place it exactly.",
 }, function(title, options)
   options = options or {}
-  checkIcon("manifold.ui.window.create", options.icon)
+)MLUA"),
+            std::string_view(R"MLUA(  checkIcon("manifold.ui.window.create", options.icon)
   local owner = ownerSource()
   if options.key and windowKeys[options.key] then
     local earlier = windowKeys[options.key]
@@ -8328,8 +8329,7 @@ define(window, "create", {
     end
   end
   if options.position ~= nil and not WINDOW_POSITIONS[options.position] then
-)MLUA"),
-            std::string_view(R"MLUA(    misuse(('manifold.ui.window.create: options.position must be "center" or "mouse", got %q'):format(options.position))
+    misuse(('manifold.ui.window.create: options.position must be "center" or "mouse", got %q'):format(options.position))
   end
   local props = {
     title = title,
@@ -8415,9 +8415,9 @@ local WIDGET_METHOD_DOCS = {
     "Example: `w.speed.update({ value = 2, enabled = god.get() })`, `w.status.update({ text = \"Attached\", color = \"success\" })`.",
   }, " ") },
   get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a colour's `#RRGGBB`, a number, the chosen combo, radio or table row's number (a combo with `multi` returns the list of chosen numbers), the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
-  set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
 )MLUA"),
-            std::string_view(R"MLUA(  draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
+            std::string_view(R"MLUA(  set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
+  draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
   getView = { returns = "table", doc = "A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom." },
   setView = { params = { { name = "view", type = "table", keys = { x = "number", y = "number", scale = "number" } } }, returns = "boolean", doc = "Moves or zooms a canvas's view." },
   getRows = { returns = "table", doc = "A table's rows, each a list of its cells' texts, and as a second value the column titles. Example: `local rows, columns = w.list.getRows()`, `rows[2][1]` is the first cell of the second row." },
@@ -8643,11 +8643,11 @@ local function checkForm(path, spec, handlers)
           misuse(("%s: %s.record must be a memory record's description or id, got %s"):format(path, label, kindOf(child.record)))
         end
         if not FORM_SKIP.bindable[child.kind] then
-          misuse(("%s: %s: a %s cannot show a memory record (a checkbox, button, number, slider, input, text, combo or radio can)"):format(path, label, child.kind))
+)MLUA"),
+            std::string_view(R"MLUA(          misuse(("%s: %s: a %s cannot show a memory record (a checkbox, button, number, slider, input, text, combo or radio can)"):format(path, label, child.kind))
         end
         if child.kind == "combo" and child.multi then
-)MLUA"),
-            std::string_view(R"MLUA(          misuse(("%s: %s: a combo with multi = true cannot show a memory record"):format(path, label))
+          misuse(("%s: %s: a combo with multi = true cannot show a memory record"):format(path, label))
         end
       end
       if child.opens ~= nil or child.closes ~= nil then
@@ -8923,11 +8923,11 @@ local function fillForm(path, made, members, children, resolve, folder, links)
           end
         end end
       end
-      if wiring and child.name and (child.kind == "checkbox" or child.kind == "combo" or child.kind == "radio") then
+)MLUA"),
+            std::string_view(R"MLUA(      if wiring and child.name and (child.kind == "checkbox" or child.kind == "combo" or child.kind == "radio") then
         -- a widget others may listen to: its changes reach their rules first
         local original = copy.onChange
-)MLUA"),
-            std::string_view(R"MLUA(        local name = child.name
+        local name = child.name
         wiring.items[name] = child.items
         copy.onChange = function(value, widget)
           wiring.refresh(name)
@@ -9179,14 +9179,14 @@ define(form, "build", {
     { name = "options", type = "table", optional = true, keys = { reload = "boolean", onReload = "function" } },
   },
   returns = "window",
-  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like." .. " `modals` lists modal forms: window tables like the form itself with a `name`, each made as a modal window (`modal = true`) that waits hidden; `modals.<name>.show()` opens it. A button's `opens = \"<name>\"` opens that modal when clicked and `closes = true` hides the window it is in; both run before the button's `onClick`." .. " Any widget can take `enabledWhen`, which enables it only while another widget of the form says so, without code: `\"god\"` (that checkbox or switch is on, or that combo or radio has a choice), `\"not god\"`, or `\"mode = Multiplier, Double\"` (one of these items of that combo or radio is chosen). It follows the user's changes; a script's `set` does not update it." .. " A checkbox, button, number, slider, input, text, combo or radio can take `record`: a memory record's description or id (see `manifold.record`), which binds the widget to it without code. A checkbox shows and switches whether the record is on, a button switches it, a number or slider shows and writes its value, an input writes when Enter is pressed, a text shows the value as the address list does, a combo or radio writes the chosen item's text (a drop-down entry of the record). The window refreshes them ten times a second while it is open, the script's own handlers still run after the write, and a widget whose record is not in the table is disabled until it is. A description binds only when exactly one record has it: with several, the widget stays disabled and a warning names them, until the descriptions differ or the form names the record by id." .. " The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty." .. " A script file that holds its form as `local form = { form = 1, ... }` (as the Form Editor writes it) gets a live reload like `load`: saving the script rebuilds the window's widgets from the table in the file, with the same handlers; the handlers' own code changes only when the script runs again. `options.reload = false` switches that off, `options.onReload(window, widgets, modals)` runs after each rebuild.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like." .. " `modals` lists modal forms: window tables like the form itself with a `name`, each made as a modal window (`modal = true`) that waits hidden; `modals.<name>.show()` opens it. A button's `opens = \"<name>\"` opens that modal when clicked and `closes = true` hides the window it is in; both run before the button's `onClick`." .. " Any widget can take `enabledWhen`, which enables it only while another widget of the form says so, without code: `\"god\"` (that checkbox or switch is on, or that combo or radio has a choice), `\"not god\"`, or `\"mode = Multiplier, Double\"` (one of these items of that combo or radio is chosen). It follows the user's changes; a script's `set` does not update it." .. " A checkbox, button, number, slider, input, text, combo or radio can take `record`: a memory record's description or id (see `manifold.record`), which binds the widget to it without code. A checkbox shows and switches whether the record is on, a button switches it, a number or slider shows and writes its value, an input writes when Enter is pressed, a text shows the value as the address list does, a combo or radio writes the chosen item's text (a drop-down entry of the record). The window refreshes them ten times a second while it is open, the script's own handlers still run after the write, and a widget whose record is not in the table is disabled until it is. A description binds only when exactly one record has it: with several, the widget stays disabled and a warning names them, until the descriptions differ or the form names the record by id." .. " The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty." .. " A script file that holds its form as `local form = { form = 1, ... }` (as the Form Editor writes it) gets a live reload like `load`: saving the script rebuilds the window's widgets from the table in the file, with the same handlers; the handlers' own code changes only when the script runs again. `options.reload = false` switches that off, `options.onReload(window, widgets, modals)` runs after each rebuild.",
 }, function(spec, handlers, options)
   options = options or {}
   local info = callerFrame()
   local source = info and info.source or ""
   local file = source:sub(1, 1) == "@" and source:sub(2) or nil
-)MLUA"),
-            std::string_view(R"MLUA(  local folder = file and file:match("^(.*[\\/])") or nil
+  local folder = file and file:match("^(.*[\\/])") or nil
   local made, widgets, members, modalTable, modalMembers, images = buildForm("manifold.ui.form.build", spec, handlers, folder)
   if file and options.reload ~= false then
     -- ∑ only when the file's form table is this form (a script may build others)
@@ -9376,7 +9376,8 @@ local function noticeObject(entry)
       params = { { name = "options", type = "table", keys = { text = "string", level = "string", progress = "number", sticky = "boolean" } } },
       body = function(options)
         checkLevel("notice.update", options.level)
-        state.text = options.text or state.text
+)MLUA"),
+            std::string_view(R"MLUA(        state.text = options.text or state.text
         state.level = options.level or state.level
         if options.progress ~= nil then
           state.progress = options.progress
@@ -9438,8 +9439,7 @@ local function entryObject(entry, keys)
     update = {
       params = { { name = "options", type = "table" } },
       body = function(options)
-)MLUA"),
-            std::string_view(R"MLUA(        options = checkOptions(entry.kind .. ".update", keys, options)
+        options = checkOptions(entry.kind .. ".update", keys, options)
         if uiEntries[entry.id] ~= entry then
           return gone("entry")
         end
@@ -9681,7 +9681,8 @@ debug.getregistry()["Manifold.ModuleLoaded"] = function(key, value)
 end
 
 local function moduleRequire(name, ...)
-  if type(name) ~= "string" then
+)MLUA"),
+            std::string_view(R"MLUA(  if type(name) ~= "string" then
     return baseRequire(name, ...)
   end
   local info = callerFrame()
@@ -9746,8 +9747,7 @@ local MODULE_INFO = "a table with `name`, `version`, `author`, `description`, `c
 define(moduleArea, "current", {
   returns = "table, or nil, error",
   doc = "The module the calling script belongs to, as " .. MODULE_INFO .. ". `ME-7011` when the caller is not an autorun module, such as a table script or the console.",
-)MLUA"),
-            std::string_view(R"MLUA(}, function()
+}, function()
   local key = callerModule()
   if not key then
     return result(nil, native.fail("LuaModuleUnknown", "(the calling script)"))

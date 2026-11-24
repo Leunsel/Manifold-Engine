@@ -44,6 +44,8 @@ namespace Manifold::Lua
             case CrashLink::InPatch: return "patch";
             case CrashLink::BehindPatch: return "behindPatch";
             case CrashLink::RanFreed: return "freed";
+            case CrashLink::Unbalanced: return "unbalanced";
+            case CrashLink::NearPatch: return "nearPatch";
             case CrashLink::Accessed: return "accessed";
             case CrashLink::OnStack: return "stack";
             case CrashLink::Earlier: return "earlier";
@@ -151,6 +153,15 @@ namespace Manifold::Lua
                     lua_rawseti(state, -2, static_cast<lua_Integer>(r + 1));
                 }
                 lua_setfield(state, -2, "ranges");
+                lua_createtable(state, static_cast<int>(footprint.Warnings.size()), 0);
+                for (std::size_t w = 0; w < footprint.Warnings.size(); ++w)
+                {
+                    lua_createtable(state, 0, 2);
+                    SetInteger(state, "line", static_cast<std::uint64_t>(footprint.Warnings[w].Line));
+                    SetString(state, "text", footprint.Warnings[w].Text);
+                    lua_rawseti(state, -2, static_cast<lua_Integer>(w + 1));
+                }
+                lua_setfield(state, -2, "warnings");
                 lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
             }
             return 1;

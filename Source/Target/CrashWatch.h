@@ -2,6 +2,7 @@
 
 #include "Core/Errors.h"
 #include "Target/CrashProtocol.h"
+#include "Target/Process.h"
 
 #include <array>
 #include <cstdint>
@@ -11,8 +12,6 @@
 
 namespace Manifold::Target
 {
-    class Process;
-
     // One exception the agent noted, as the host reads it from the ring.
     struct CrashRecord
     {
@@ -60,6 +59,9 @@ namespace Manifold::Target
         bool Running() const;
         // The ring as it is now; works after the process ended.
         CrashCapture Capture() const;
+        // The process's modules while it lived, to name addresses after it ended.
+        void KeepModules(ModuleList modules);
+        ModuleList Modules() const;
 
     private:
         Status Call(std::uint32_t operation);
@@ -74,5 +76,6 @@ namespace Manifold::Target
         std::uint64_t m_call = 0;
         std::uint32_t m_serial = 0;
         bool m_running = false;
+        ModuleList m_modules;
     };
 }

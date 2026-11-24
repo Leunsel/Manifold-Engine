@@ -14,6 +14,7 @@ namespace Manifold
         constexpr std::uint64_t kQuietExitMs = 10000;
         constexpr std::uint64_t kEarlierMs = 2000;
         constexpr std::uint64_t kBehindPatch = 16;
+        constexpr std::uint64_t kNearPatch = 0x800;
         constexpr std::size_t kStackShown = 12;
 
         bool Contains(const ScriptRange& range, std::uint64_t address)
@@ -165,8 +166,23 @@ namespace Manifold
         m_footprints.clear();
     }
 
-    void CrashLedger::Note(std::string label, int recordId, Asm::AaSection section, const Asm::AaResult& result, const Asm::AaMemory& before, const Asm::AaMemory& after,
-        std::uint64_t tick)
+    std::string ScriptLabel(std::string_view title, std::string_view owner)
+    {
+        if (const std::size_t from = title.find(" from \""); from != std::string_view::npos && title.size() > from + 8 && title.back() == '"')
+            return std::string(title.substr(from + 7, title.size() - from - 8));
+        if (title.size() >= 2 && title.front() == '"' && title.back() == '"')
+            return std::string(title.substr(1, title.size() - 2));
+        if (!title.empty())
+            return std::string(title);
+        if (owner == "window")
+            return "Auto Assembler window";
+        if (owner == "lua" || owner == "scratch")
+            return "autoAssemble";
+        return owner.empty() ? std::string("Auto Assembler") : std::string(owner);
+    }
+
+    void CrashLedger::Note(std::string label, int recordId, std::uint64_t key, Asm::AaSection section, const Asm::AaResult& result, const Asm::AaMemory& before,
+        const Asm::AaMemory& after, std::uint64_t tick)
     {
         if (!result.Ok())
             return;
@@ -175,7 +191,7 @@ namespace Manifold
         {
             return std::find_if(m_footprints.rbegin(), m_footprints.rend(), [&](const ScriptFootprint& footprint)
                 {
-                    return footprint.OffTick == 0 && footprint.Label == label && footprint.RecordId == recordId;
+                    return footprint.OffTick == 0 && footprint.Label == label && footprint.RecordId == recordId && footprint.Key == key;
                 });
         };
         if (section == Asm::AaSection::Disable)
@@ -187,7 +203,9 @@ namespace Manifold
         ScriptFootprint footprint;
         footprint.Label = label;
         footprint.RecordId = recordId;
+        footprint.Key = key;
         footprint.OnTick = tick;
+        footprint.Warnings = result.Warnings;
         for (const Asm::AaAllocation& allocation : after.Allocations)
         {
             if (allocation.Address && allocation.Size)
@@ -248,6 +266,8 @@ namespace Manifold
         case CrashLink::InPatch: return "in bytes it patched";
         case CrashLink::BehindPatch: return "right behind its patch";
         case CrashLink::RanFreed: return "in its code after it was switched off";
+        case CrashLink::Unbalanced: return "its hook leaves the stack unbalanced";
+        case CrashLink::NearPatch: return "shortly behind its patch";
         case CrashLink::Accessed: return "accessing its memory";
         case CrashLink::OnStack: return "called from its code";
         case CrashLink::Earlier: return "an exception in its code shortly before";
@@ -360,6 +380,29 @@ namespace Manifold
                 if (const auto hit = Find(context.Footprints, fatal->Info[1], at, ScriptRangeKind::Allocation))
                     blame(hit->Footprint, CrashLink::Accessed, fatal->Info[1], WhereIn(context.Footprints[hit->Footprint], *hit->Range, fatal->Info[1], context), 50);
             }
+            for (std::size_t index = 0; index < context.Footprints.size(); ++index)
+            {
+                const ScriptFootprint& footprint = context.Footprints[index];
+                if (!OnAt(footprint, at))
+                    continue;
+                for (const Asm::AaWarning& warning : footprint.Warnings)
+                {
+                    if (warning.Text.find("stack") != std::string::npos)
+                    {
+                        blame(index, CrashLink::Unbalanced, ip, warning.Text, 60);
+                        break;
+                    }
+                }
+                for (const ScriptRange& range : footprint.Ranges)
+                {
+                    if (range.Kind == ScriptRangeKind::Patch && ip >= range.End + kBehindPatch && ip < range.End + kNearPatch)
+                    {
+                        blame(index, CrashLink::NearPatch, ip, Format("%llX bytes behind its patch at %s", static_cast<unsigned long long>(ip - range.Begin),
+                            (context.Describe ? context.Describe(range.Begin) : Hex(range.Begin)).c_str()), 35);
+                        break;
+                    }
+                }
+            }
             for (std::size_t slot = 0; slot < fatal->Stack.size(); ++slot)
             {
                 if (const auto hit = Find(context.Footprints, fatal->Stack[slot], at, ScriptRangeKind::Allocation))
@@ -428,6 +471,16 @@ namespace Manifold
             case CrashLink::RanFreed:
                 report.Headline = Format("%s crashed running code of \"%s\" after it was switched off (%s): %s. Something still jumps into its freed memory.", who.c_str(),
                     top.Label.c_str(), top.Where.c_str(), what.c_str());
+                break;
+            case CrashLink::Unbalanced:
+            {
+                const std::string first = top.Where.substr(0, top.Where.find(". "));
+                report.Headline = Format("%s crashed in %s: %s. \"%s\" is the likely cause: %s.", who.c_str(), place.c_str(), what.c_str(), top.Label.c_str(), first.c_str());
+                break;
+            }
+            case CrashLink::NearPatch:
+                report.Headline = Format("%s crashed in %s: %s. That is %s of \"%s\": the script's code did not fail itself, but what it changed (a register, the stack, a value) may have.",
+                    who.c_str(), place.c_str(), what.c_str(), top.Where.c_str(), top.Label.c_str());
                 break;
             case CrashLink::Accessed:
                 report.Headline = Format("%s crashed in %s accessing memory of \"%s\" (%s): %s.", who.c_str(), place.c_str(), top.Label.c_str(), top.Where.c_str(), what.c_str());

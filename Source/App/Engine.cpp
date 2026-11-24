@@ -9,6 +9,7 @@
 #include "Lua/LuaEngine.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -539,12 +540,15 @@ namespace Manifold
         Asm::AaResult result = Asm::RunAutoAssembler(script, host, memory, options);
         if (result.Ok() && (!result.Writes.empty() || memory.Allocations.size() != before.Allocations.size()))
         {
-            std::string label = options.LogTitle;
-            if (label.size() >= 2 && label.front() == '"' && label.back() == '"')
-                label = label.substr(1, label.size() - 2);
-            if (label.empty())
-                label = owner.empty() ? std::string("Auto Assembler") : owner;
-            m_crashLedger.Note(std::move(label), recordId, section, result, before, memory, started);
+            const std::string label = ScriptLabel(options.LogTitle, owner);
+            m_crashLedger.Note(label, recordId, std::hash<std::string_view>{}(script), section, result, before, memory, started);
+            for (const Asm::AaWarning& warning : result.Warnings)
+                {
+                std::string text = warning.Text;
+                if (!text.empty())
+                    text[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(text[0])));
+                Notify(LogLevel::Warning, "\"" + label + "\": " + text);
+            }
             if (section != Asm::AaSection::Disable && !result.Writes.empty() && m_settings.CrashWatch && !Target::Process::DryRun())
                 m_crashWatchWanted = true;
             m_scriptRegionsChanged = true;
@@ -598,7 +602,19 @@ namespace Manifold
         context.EndTick = endTick;
         context.Process = process->Name();
         context.Footprints = m_crashLedger.Footprints();
-        context.Describe = [this](std::uint64_t address) { return Describe(address); };
+        // ∑ The modules as the crash watch last saw them name what the process's own list may have lost.
+        context.Describe = [this, known = m_crashWatch.Modules()](std::uint64_t address)
+            {
+                std::string text = Describe(address);
+                if (text != Hex(address) || !known)
+                    return text;
+                for (const Target::ModuleInfo& module : *known)
+                {
+                    if (address >= module.Base && address < module.Base + module.Size)
+                        return module.Name + Format("+%llX", static_cast<unsigned long long>(address - module.Base));
+                }
+                return text;
+            };
         context.Disassembler = &Disassembler();
         CrashReport report = AttributeCrash(capture, context);
         if (!report.Crashed)
@@ -710,7 +726,12 @@ namespace Manifold
         {
             PROFILE_ZONE("Process check");
             m_lastAliveCheck = now;
-            if (!m_target.Process()->Alive())
+            if (m_target.Process()->Alive())
+            {
+                if (m_crashWatch.Running())
+                    m_crashWatch.KeepModules(m_target.Process()->Modules());
+            }
+            else
             {
                 m_managed.NoteExplorer(true);
                 if (!ExamineEnd())

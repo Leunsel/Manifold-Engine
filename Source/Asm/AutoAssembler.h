@@ -66,6 +66,14 @@ namespace Manifold::Asm
         std::string Text;     // what it did
     };
 
+    // Something that assembles but will likely go wrong in the game, such as
+    // a hook that leaves the stack unbalanced.
+    struct AaWarning
+    {
+        int Line = 0;
+        std::string Text;
+    };
+
     struct AaResult
     {
         Status Error;
@@ -74,6 +82,7 @@ namespace Manifold::Asm
         std::vector<AaLogLine> Log;  // the steps when the run logged, at most kMaxLogLines of them
         std::vector<AaWrite> Writes;
         std::vector<std::string> Notes;
+        std::vector<AaWarning> Warnings;
         std::map<std::string, std::uint64_t> Symbols;
         std::map<std::string, std::uint64_t> SymbolSizes;
         std::map<std::string, std::uint64_t> Labels;  // every label the run placed, by its name as written, once the code is in the game

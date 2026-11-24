@@ -646,6 +646,7 @@ namespace Manifold::Asm
                 if (!Layout())
                     return Abort();
                 MeasureLabels();
+                CheckStackBalance();
                 if (m_log)
                     LogLayout();
                 if (!CheckAsserts() || !CheckThreads())
@@ -1825,6 +1826,310 @@ namespace Manifold::Asm
                 const std::string text = Lower(Trim(statement.Text));
                 const std::string word = text.substr(0, text.find_first_of(" \t"));
                 return word == "db" || word == "dw" || word == "dd" || word == "dq";
+            }
+
+            // ---------------------------------------------------------------- stack balance
+
+            struct StackPush
+            {
+                int Line = 0;
+                std::string Text;
+                std::int64_t Size = 0;
+            };
+
+            struct StackPath
+            {
+                std::uint64_t At = 0;
+                std::int64_t Delta = 0;
+                std::vector<StackPush> Pushes;
+                std::uint64_t Origin = 0;   // the patch the hook was entered from
+                bool Called = false;        // entered by a call: its ret goes back to the patch
+            };
+
+            // How an instruction moves the stack pointer: negative for what it puts
+            // on the stack. Unknown (nullopt) for anything that sets it another way.
+            std::optional<std::int64_t> StackChange(const Disasm::Instruction& instruction) const
+            {
+                const std::int64_t word = m_is64 ? 8 : 4;
+                const std::string sp = m_is64 ? "rsp" : "esp";
+                const std::string mnemonic = Lower(instruction.Mnemonic);
+                const std::string operands = Lower(instruction.Operands);
+                const std::size_t comma = operands.find(',');
+                const std::string destination = operands.substr(0, comma);
+                const std::string source = comma == std::string::npos ? std::string() : operands.substr(comma + 1);
+                if (mnemonic == "push")
+                    return -(operands.starts_with("word") ? 2 : word);
+                if (mnemonic == "pop")
+                    return operands.starts_with("word") ? 2 : word;
+                if (mnemonic == "pushad" || mnemonic == "pusha")
+                    return mnemonic == "pushad" ? -32 : -16;
+                if (mnemonic == "popad" || mnemonic == "popa")
+                    return mnemonic == "popad" ? 32 : 16;
+                if (mnemonic.starts_with("pushf"))
+                    return -word;
+                if (mnemonic.starts_with("popf"))
+                    return word;
+                if ((mnemonic == "sub" || mnemonic == "add") && destination == sp)
+                {
+                    const auto amount = StackOperand(source);
+                    if (!amount)
+                        return std::nullopt;
+                    return mnemonic == "sub" ? -*amount : *amount;
+                }
+                if (mnemonic == "lea" && destination == sp && source.starts_with("[" + sp) && !source.empty() && source.back() == ']')
+                {
+                    const std::string inside = source.substr(sp.size() + 1, source.size() - sp.size() - 2);
+                    return inside.empty() ? std::optional<std::int64_t>(0) : StackOperand(inside);
+                }
+                if (destination == sp || mnemonic == "leave" || mnemonic == "enter" || (mnemonic == "xchg" && source == sp))
+                    return std::nullopt;
+                return 0;
+            }
+
+            // ∑ The bytes a patch replaced belong to the game, and the cave runs
+            //   them again: a patch over push ebp makes the cave leave 4 bytes on the
+            //   stack, rightly. So the cave's change is compared with what the
+            //   original instructions did, from the patch up to where the cave jumps
+            //   back (or up to their ret). Without the original bytes (no process, an
+            //   address a check could not resolve) there is no verdict.
+            std::optional<std::int64_t> OriginalChange(std::uint64_t origin, std::optional<std::uint64_t> until, bool toRet) const
+            {
+                constexpr std::size_t kReach = 64;
+                if (!m_host.Process || origin == 0)
+                    return std::nullopt;
+                std::uint8_t bytes[kReach] = {};
+                const std::size_t got = m_host.Process->Read(origin, bytes, sizeof(bytes));
+                if (got == 0)
+                    return std::nullopt;
+                const Disasm::Disassembler disassembler(m_is64);
+                std::int64_t change = 0;
+                std::size_t offset = 0;
+                while (offset < got)
+                {
+                    const std::uint64_t at = origin + offset;
+                    if (!toRet && until && at == *until)
+                        return change;
+                    const Disasm::Instruction instruction = disassembler.Decode(at, bytes + offset, got - offset);
+                    if (!instruction.Valid || instruction.Length == 0)
+                        return std::nullopt;
+                    if (toRet && instruction.Kind == Disasm::Flow::Return)
+                        return change;
+                    if (instruction.Kind == Disasm::Flow::Jump || instruction.Kind == Disasm::Flow::Interrupt)
+                        return std::nullopt;
+                    const auto step = StackChange(instruction);
+                    if (!step)
+                        return std::nullopt;
+                    change += *step;
+                    offset += instruction.Length;
+                    if (!toRet && until && at + instruction.Length > *until)
+                        return std::nullopt;
+                }
+                return std::nullopt;
+            }
+
+            const AaWrite* WriteAt(const std::vector<const AaWrite*>& writes, std::uint64_t address) const
+            {
+                auto it = std::upper_bound(writes.begin(), writes.end(), address, [](std::uint64_t at, const AaWrite* write) { return at < write->Address; });
+                if (it == writes.begin())
+                    return nullptr;
+                --it;
+                return address < (*it)->Address + (*it)->Bytes.size() ? *it : nullptr;
+            }
+
+            bool InAllocation(std::uint64_t address) const
+            {
+                const auto holds = [address](const AaAllocation& allocation) { return address >= allocation.Address && address < allocation.Address + std::max<std::uint64_t>(allocation.Size, 1); };
+                return std::any_of(m_newAllocations.begin(), m_newAllocations.end(), holds) || std::any_of(m_memory.Allocations.begin(), m_memory.Allocations.end(), holds);
+            }
+
+            // The target of a jump or call, also of the far forms the assembler writes
+            // (jmp [rip+0] / call [rip+2]; jmp +8 with the address after them).
+            std::optional<std::uint64_t> BranchTarget(const Disasm::Instruction& instruction, const AaWrite& write) const
+            {
+                if (instruction.Target)
+                    return instruction.Target;
+                const std::size_t offset = static_cast<std::size_t>(instruction.Address - write.Address);
+                const std::vector<std::uint8_t>& bytes = write.Bytes;
+                const auto qword = [&](std::size_t at) -> std::optional<std::uint64_t>
+                {
+                    if (at + 8 > bytes.size())
+                        return std::nullopt;
+                    std::uint64_t value = 0;
+                    std::memcpy(&value, bytes.data() + at, 8);
+                    return value;
+                };
+                if (offset + 6 <= bytes.size() && bytes[offset] == 0xFF && bytes[offset + 1] == 0x25 && bytes[offset + 2] == 0 && bytes[offset + 3] == 0 && bytes[offset + 4] == 0 && bytes[offset + 5] == 0)
+                    return m_is64 ? qword(offset + 6) : std::nullopt;
+                if (m_is64 && offset + 8 <= bytes.size() && bytes[offset] == 0xFF && bytes[offset + 1] == 0x15 && bytes[offset + 2] == 2 && bytes[offset + 3] == 0 && bytes[offset + 4] == 0 &&
+                    bytes[offset + 5] == 0 && bytes[offset + 6] == 0xEB && bytes[offset + 7] == 8)
+                    return qword(offset + 8);
+                return std::nullopt;
+            }
+
+            static std::optional<std::int64_t> StackOperand(std::string_view text)
+            {
+                bool negative = false;
+                if (!text.empty() && (text.front() == '-' || text.front() == '+'))
+                {
+                    negative = text.front() == '-';
+                    text.remove_prefix(1);
+                }
+                if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+                    text.remove_prefix(2);
+                if (!text.empty() && (text.back() == 'h' || text.back() == 'H'))
+                    text.remove_suffix(1);
+                if (text.empty() || text.size() > 16)
+                    return std::nullopt;
+                std::uint64_t value = 0;
+                for (const char c : text)
+                {
+                    const int digit = std::isdigit(static_cast<unsigned char>(c)) ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : -1;
+                    if (digit < 0)
+                        return std::nullopt;
+                    value = (value << 4) | static_cast<std::uint64_t>(digit);
+                }
+                if (value > 0x7FFFFFFFull)
+                    return std::nullopt;
+                return negative ? -static_cast<std::int64_t>(value) : static_cast<std::int64_t>(value);
+            }
+
+            // ∑ Each hook is followed from the jump (or call) of its patch into the
+            //   cave until it leaves the code this run wrote, or returns: there the
+            //   stack has to be where it was on the way in, or the game's own code
+            //   pops the wrong values (a push eax without its pop turns the game's
+            //   next pop esi into garbage and crashes it later, far from the script).
+            //   Calls count as balanced; an instruction that sets the stack pointer
+            //   some other way (mov, and, leave) ends that path without a verdict.
+            void CheckStackBalance()
+            {
+                std::vector<const AaWrite*> writes;
+                for (const AaWrite& write : m_output)
+                {
+                    if (!write.Bytes.empty())
+                        writes.push_back(&write);
+                }
+                if (writes.empty())
+                    return;
+                std::sort(writes.begin(), writes.end(), [](const AaWrite* a, const AaWrite* b) { return a->Address < b->Address; });
+                const Disasm::Disassembler disassembler(m_is64);
+                const auto decode = [&](std::uint64_t at, const AaWrite*& write) -> std::optional<Disasm::Instruction>
+                {
+                    write = WriteAt(writes, at);
+                    if (!write)
+                        return std::nullopt;
+                    const std::size_t offset = static_cast<std::size_t>(at - write->Address);
+                    Disasm::Instruction instruction = disassembler.Decode(at, write->Bytes.data() + offset, write->Bytes.size() - offset);
+                    if (!instruction.Valid)
+                        return std::nullopt;
+                    return instruction;
+                };
+
+                std::vector<StackPath> todo;
+                for (const AaWrite* write : writes)
+                {
+                    if (InAllocation(write->Address))
+                        continue;
+                    const AaWrite* holder = nullptr;
+                    const auto first = decode(write->Address, holder);
+                    if (!first || (first->Kind != Disasm::Flow::Jump && first->Kind != Disasm::Flow::Call))
+                        continue;
+                    const auto target = BranchTarget(*first, *holder);
+                    if (target && WriteAt(writes, *target) && InAllocation(*target))
+                        todo.push_back({ *target, 0, {}, write->Address, first->Kind == Disasm::Flow::Call });
+                }
+
+                std::set<std::pair<std::uint64_t, std::int64_t>> seen;
+                std::set<std::pair<int, std::int64_t>> warned;
+                const auto report = [&](const StackPath& path, int line, const char* how, std::optional<std::uint64_t> target, bool ret)
+                {
+                    // A call into the cave returns to the patch: its ret must find the stack as the call left it.
+                    const std::optional<std::int64_t> expected = path.Called && ret ? std::optional<std::int64_t>(0) : OriginalChange(path.Origin, target, ret);
+                    if (!expected)
+                        return;
+                    const std::int64_t delta = path.Delta - *expected;
+                    if (delta == 0 || !warned.insert({ line, delta }).second || m_result.Warnings.size() >= 20)
+                        return;
+                    const std::int64_t off = delta < 0 ? -delta : delta;
+                    AaWarning warning;
+                    warning.Line = line;
+                    std::string text = Format("the stack is %lld bytes off %s in line %d", static_cast<long long>(off), how, line);
+                    if (delta < 0 && !path.Pushes.empty())
+                    {
+                        const StackPush& push = path.Pushes.back();
+                        warning.Line = push.Line;
+                        text += Format(": %s in line %d has no matching pop", push.Text.c_str(), push.Line);
+                        if (path.Pushes.size() > 1)
+                            text += Format(" (%zu pushes are left open)", path.Pushes.size());
+                    }
+                    else if (delta > 0)
+                    {
+                        text += ": the code takes more off the stack than it put on";
+                    }
+                    warning.Text = text + ". The game's code after it will read the wrong values and likely crash.";
+                    m_result.Warnings.push_back(std::move(warning));
+                    if (m_log)
+                        Step(line, "stack check", m_result.Warnings.back().Text);
+                };
+
+                int steps = 0;
+                while (!todo.empty() && steps < 20000)
+                {
+                    StackPath path = std::move(todo.back());
+                    todo.pop_back();
+                    while (++steps < 20000)
+                    {
+                        if (!seen.insert({ path.At, path.Delta }).second)
+                            break;
+                        const AaWrite* write = nullptr;
+                        const auto instruction = decode(path.At, write);
+                        if (!instruction)
+                            break;
+                        const int line = write->Line;
+                        const auto change = StackChange(*instruction);
+                        if (!change)
+                            break;
+                        if (*change < 0)
+                        {
+                            path.Delta += *change;
+                            path.Pushes.push_back({ line, instruction->Text(), -*change });
+                        }
+                        else if (*change > 0)
+                        {
+                            path.Delta += *change;
+                            if (!path.Pushes.empty())
+                                path.Pushes.pop_back();
+                        }
+                        if (instruction->Kind == Disasm::Flow::Return)
+                        {
+                            report(path, line, "at the ret", std::nullopt, true);
+                            break;
+                        }
+                        if (instruction->Kind == Disasm::Flow::Interrupt)
+                            break;
+                        if (instruction->Kind == Disasm::Flow::Jump)
+                        {
+                            const auto target = BranchTarget(*instruction, *write);
+                            if (target && WriteAt(writes, *target) && InAllocation(*target))
+                            {
+                                path.At = *target;
+                                continue;
+                            }
+                            report(path, line, "at the jump back", target, false);
+                            break;
+                        }
+                        if (instruction->Kind == Disasm::Flow::ConditionalJump)
+                        {
+                            const auto target = BranchTarget(*instruction, *write);
+                            if (target && WriteAt(writes, *target) && InAllocation(*target))
+                                todo.push_back({ *target, path.Delta, path.Pushes, path.Origin, path.Called });
+                            else
+                                report(path, line, "at the jump out", target, false);
+                        }
+                        path.At = instruction->Next();
+                        if (!WriteAt(writes, path.At))
+                            break;
+                    }
+                }
             }
 
             void MeasureLabels()

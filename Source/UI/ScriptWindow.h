@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App/Commands.h"
+#include "Asm/AutoAssembler.h"
 #include "UI/CodeEditor.h"
 #include "UI/Templates.h"
 #include "UI/ToolWindowBase.h"
@@ -34,6 +35,7 @@ namespace Manifold::UI
         void Menu();
         void Run(bool disable);
         void Check();
+        void AddWarnings(const Asm::AaResult& result);
         void SaveToRecord();
         void OpenFile();
         void SaveFile(bool askName);
