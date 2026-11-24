@@ -141,6 +141,33 @@ namespace Manifold::Tests
             CHECK(Pieces(Language::Plain, "local x = 1").empty());
         }
 
+        void AaMacroHighlight()
+        {
+            const char* script = "ManifoldScanModule(INJECT,Game.exe,48 8B)\nassert(INJECT,48 8B)\nmov eax,manifoldscanmodule\n";
+            auto pieces = Pieces(Language::AutoAssembler, script);
+            CHECK(Has(pieces, "ManifoldScanModule", Token::Mnemonic));
+            CHECK(Has(pieces, "assert", Token::Keyword));
+
+            Text::AddAaMacro("ManifoldScanModule");
+            Text::AddAaMacro(" manifoldscanmodule ");
+            pieces = Pieces(Language::AutoAssembler, script);
+            CHECK(Has(pieces, "ManifoldScanModule", Token::Macro));
+            CHECK(Has(pieces, "assert", Token::Keyword));
+            // Only the first word of a line expands, so only that one is a macro.
+            CHECK(!Has(pieces, "manifoldscanmodule", Token::Macro));
+            pieces = Pieces(Language::Template, "ManifoldScanModule(<< HookName >>,<< Module >>,<< Bytes >>)");
+            CHECK(Has(pieces, "ManifoldScanModule", Token::Macro));
+            CHECK(Has(pieces, "HookName", Token::Variable));
+
+            // Counted: one engine giving its command up leaves the other's.
+            Text::RemoveAaMacro("MANIFOLDSCANMODULE");
+            CHECK(Text::IsAaMacro("manifoldscanmodule"));
+            Text::RemoveAaMacro("ManifoldScanModule");
+            CHECK(!Text::IsAaMacro("manifoldscanmodule"));
+            Text::RemoveAaMacro("ManifoldScanModule");
+            CHECK(Has(Pieces(Language::AutoAssembler, script), "ManifoldScanModule", Token::Mnemonic));
+        }
+
         void TemplateHighlight()
         {
             auto pieces = Pieces(Language::Template, "[ENABLE]\naobScanModule(<< HookName >>,Game.exe,48 8B)\n<< HookNameParsed >><< AoBOffset >>:\n  db << default(NopBytes, \"90\") >>\n");
@@ -825,6 +852,7 @@ namespace Manifold::Tests
         const int before = Totals().Failures;
         LuaHighlight();
         AaHighlight();
+        AaMacroHighlight();
         TemplateHighlight();
         JsonHighlight();
         JsonFormat();

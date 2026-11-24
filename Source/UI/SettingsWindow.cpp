@@ -71,7 +71,7 @@ namespace Manifold::UI
 
         constexpr ThemeMode kModes[] = { ThemeMode::Light, ThemeMode::Dark, ThemeMode::System };
         const char* const kCodeColors[] = { "AddressText", "BytesText", "CodeKeyword", "CodeRegister", "CodeNumber", "CodeString", "CodeComment", "CodeUserComment", "CodeSection",
-            "CodeLabel", "FlowJump", "FlowCall", "FlowReturn", "Breakpoint", "CurrentLine" };
+            "CodeLabel", "CodeMacro", "FlowJump", "FlowCall", "FlowReturn", "Breakpoint", "CurrentLine" };
 
         void OpenFolder(const std::filesystem::path& folder)
         {

@@ -7,6 +7,7 @@
 #include "Lua/LuaCompatGaps.h"
 #include "Lua/LuaDocs.h"
 #include "Lua/LuaEngine.h"
+#include "Text/Highlight.h"
 
 #include "lua.hpp"
 
@@ -782,9 +783,11 @@ namespace Manifold::Tests
                 return "ok")LUA");
             const Asm::AaResult result = engine.AutoAssemble("CompatAlloc(block)\nblock:\n  nop\n", true);
             CHECK_MSG(result.Ok(), result.Error.Text);
+            CHECK(Text::IsAaMacro("compatalloc"));
             LuaCheck(engine, "unregister command", R"LUA(
                 unregisterAutoAssemblerCommand("CompatAlloc")
                 return "ok")LUA");
+            CHECK(!Text::IsAaMacro("compatalloc"));
             const Asm::AaResult missing = engine.AutoAssemble("CompatAlloc(block)\n", true);
             CHECK(!missing.Ok());
         }

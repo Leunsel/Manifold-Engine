@@ -9,6 +9,7 @@
 #include "Lua/LuaModules.h"
 #include "Table/AddressList.h"
 #include "Table/Structures.h"
+#include "Text/Highlight.h"
 
 #include "lua.hpp"
 
@@ -153,6 +154,8 @@ namespace Manifold::Lua
     LuaEngine::~LuaEngine()
     {
         m_engine.Symbols().SetLookupCallback({});
+        for (const auto& [name, reference] : m_autoAssemblerCommands)
+            Text::RemoveAaMacro(name);
         if (m_state)
             lua_close(m_state);
         m_ui.Reset();
@@ -390,9 +393,13 @@ namespace Manifold::Lua
         {
             Release(found->second);
             m_autoAssemblerCommands.erase(found);
+            Text::RemoveAaMacro(key);
         }
         if (reference > 0 && !key.empty())
+        {
             m_autoAssemblerCommands[key] = reference;
+            Text::AddAaMacro(key);
+        }
     }
 
     bool LuaEngine::IsAutoAssemblerCommand(std::string_view name) const

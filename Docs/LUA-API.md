@@ -227,7 +227,7 @@ Tables and autorun scripts written for Cheat Engine 7.5 run here. Beyond the fun
 
 ### Auto Assembler commands and custom types
 
-- `registerAutoAssemblerCommand(name, function(parameters, syntaxcheck))` returns the text that replaces the line, or `nil, error`; `unregisterAutoAssemblerCommand(name)` removes it.
+- `registerAutoAssemblerCommand(name, function(parameters, syntaxcheck))` returns the text that replaces the line, or `nil, error`; `unregisterAutoAssemblerCommand(name)` removes it. While it is registered, the script editors colour the command as a macro (Settings → Appearance → Code: Macros) where it starts a line, as the assembler only expands it there.
 - `registerCustomTypeLua(name, bytecount, bytesToValue, valueToBytes, isFloat, isString)`, `getCustomType(name)`, `getCustomTypeList()`.
   - Records and structure elements whose type is a custom type read, show and write through the two functions.
   - With `isString` the first one returns text and the second one receives it.

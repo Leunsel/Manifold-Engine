@@ -3,6 +3,9 @@
 #include "Core/Text.h"
 
 #include <algorithm>
+#include <atomic>
+#include <map>
+#include <shared_mutex>
 #include <string>
 
 namespace Manifold::Text
@@ -308,6 +311,11 @@ namespace Manifold::Text
                     Token kind = Token::Text;
                     if (end < line.size() && line[end] == ':' && TrimView(line.substr(end + 1)).empty())
                         kind = Token::Label;
+                    // ∑ The assembler expands a registered command only as the
+                    // first word of its line (name(parameters)), and before the
+                    // built-in commands, so the same rule here.
+                    else if (firstWord && IsAaMacro(word))
+                        kind = Token::Macro;
                     else if (IsAaCommand(word))
                         kind = Token::Keyword;
                     else if (IsRegister(word))
@@ -533,6 +541,55 @@ namespace Manifold::Text
     {
         static const WordSet words(kRegisters);
         return words.Has(lowerWord);
+    }
+
+    namespace
+    {
+        struct MacroNames
+        {
+            std::shared_mutex Lock;
+            std::map<std::string, int, std::less<>> Counts;
+            std::atomic<bool> Any = false;
+        };
+
+        MacroNames& Macros()
+        {
+            static MacroNames names;
+            return names;
+        }
+    }
+
+    void AddAaMacro(std::string_view name)
+    {
+        const std::string key = Lower(TrimView(name));
+        if (key.empty())
+            return;
+        MacroNames& macros = Macros();
+        std::unique_lock lock(macros.Lock);
+        ++macros.Counts[key];
+        macros.Any = true;
+    }
+
+    void RemoveAaMacro(std::string_view name)
+    {
+        const std::string key = Lower(TrimView(name));
+        MacroNames& macros = Macros();
+        std::unique_lock lock(macros.Lock);
+        const auto found = macros.Counts.find(key);
+        if (found == macros.Counts.end())
+            return;
+        if (--found->second <= 0)
+            macros.Counts.erase(found);
+        macros.Any = !macros.Counts.empty();
+    }
+
+    bool IsAaMacro(std::string_view lowerWord)
+    {
+        MacroNames& macros = Macros();
+        if (!macros.Any)
+            return false;
+        std::shared_lock lock(macros.Lock);
+        return macros.Counts.find(lowerWord) != macros.Counts.end();
     }
 
     LineState InitialState(Language language)

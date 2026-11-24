@@ -29,7 +29,8 @@ namespace Manifold::Text
         Label,
         Mnemonic,
         Delimiter,
-        Variable
+        Variable,
+        Macro
     };
 
     enum class Block : std::uint8_t
@@ -78,4 +79,12 @@ namespace Manifold::Text
     bool IsLuaKeyword(std::string_view word);
     bool IsAaCommand(std::string_view lowerWord);
     bool IsRegister(std::string_view lowerWord);
+
+    // Auto Assembler commands that Lua added with registerAutoAssemblerCommand
+    // (ManifoldScanModule and the like); the highlighter shows them as
+    // macros. Counted per name, so two Lua engines that register the same
+    // command do not take it from each other.
+    void AddAaMacro(std::string_view name);
+    void RemoveAaMacro(std::string_view name);
+    bool IsAaMacro(std::string_view lowerWord);
 }
