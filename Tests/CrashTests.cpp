@@ -403,6 +403,45 @@ namespace Manifold::Tests
             CHECK_MSG(engine.Crashes().Running(), std::string(label) + ": after a start dropped by closing the process, the watch did not start for the next one");
         }
 
+        // The agent is shared: the speedhack loads it, the crash watch finds it there and
+        // starts. Removing the speedhack must not pull the library out from under the
+        // watch, and closing the process afterwards must leave the game running.
+        void CheckSharedAgent(const std::filesystem::path& path, const char* label)
+        {
+            Child target;
+            if (!Start(path, target))
+            {
+                Skip("the test target " + path.string() + " could not be started");
+                return;
+            }
+            Settings settings;
+            settings.CrashWatch = true;
+            Engine engine(settings);
+            const bool opened = WaitFor(5000, [&] { return engine.OpenProcess(MakeProcessId(target.Info.dwProcessId)).Ok(); });
+            CHECK_MSG(opened, std::string(label) + ": the test target could not be opened");
+            if (!opened)
+                return;
+            Target::Process& process = *engine.Process();
+            const std::string agent = process.Is64Bit() ? "ManifoldAgent.dll" : "ManifoldAgent32.dll";
+            const Status sped = engine.Speed().SetSpeed(2.0);
+            CHECK_MSG(sped.Ok(), std::string(label) + ": " + sped.Text);
+            const Status watching = engine.Crashes().Start();
+            CHECK_MSG(watching.Ok() && engine.Crashes().Running(), std::string(label) + ": " + watching.Text);
+            const Status removed = engine.Speed().Remove();
+            CHECK_MSG(removed.Ok(), std::string(label) + ": " + removed.Text);
+            process.RefreshModules();
+            const bool loaded = process.FindModule(agent).has_value();
+            CHECK_MSG(loaded, std::string(label) + ": removing the speedhack unloaded the agent while the crash watch still used it");
+            const std::uint64_t block = loaded ? process.FindExport(agent, "ManifoldCrash") : 0;
+            Target::Crash::Block shared{};
+            CHECK_MSG(block && process.ReadExact(block, &shared, sizeof(shared)) && shared.Running == 1, std::string(label) + ": the crash watch stopped with the speedhack");
+            engine.CloseProcess();
+            ::Sleep(400);
+            DWORD code = 0;
+            CHECK_MSG(::GetExitCodeProcess(target.Info.hProcess, &code) && code == STILL_ACTIVE,
+                std::string(label) + Format(": the game ended (%08X) when the crash watch was stopped after the speedhack", static_cast<unsigned>(code)));
+        }
+
         // ---- The Auto Assembler's stack balance check ----
 
         bool Logged(std::string_view text)
@@ -600,6 +639,7 @@ namespace Manifold::Tests
                 CheckLive(path, (std::string(label) + " quiet end").c_str(), Way::QuietEnd);
                 CheckStackWarnings(path, (std::string(label) + " stack check").c_str());
                 CheckStartRace(path, (std::string(label) + " start race").c_str());
+                CheckSharedAgent(path, (std::string(label) + " shared agent").c_str());
                 CheckDebuggerStop(path, (std::string(label) + " Windows debugger").c_str(), false);
                 CheckDebuggerStop(path, (std::string(label) + " VEH debugger").c_str(), true);
             }

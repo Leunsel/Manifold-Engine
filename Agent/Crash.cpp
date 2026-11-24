@@ -1,3 +1,4 @@
+#include "Target/AgentLifeProtocol.h"
 #include "Target/CrashProtocol.h"
 
 #include <windows.h>
@@ -9,6 +10,9 @@ using namespace Manifold::Target::Crash;
 extern "C" __declspec(dllexport) Block ManifoldCrash = {};
 
 std::uint64_t RealTickCount64();
+void LifeHold(std::uint32_t part);
+void LifeLetGo(std::uint32_t part);
+void LifeTouch();
 
 namespace
 {
@@ -239,15 +243,20 @@ namespace
 extern "C" __declspec(dllexport) DWORD WINAPI ManifoldCrashCall(LPVOID parameter)
 {
     const auto call = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(parameter));
+    LifeTouch();
     Held held;
     std::uint32_t result = ResultOk;
     switch (call)
     {
     case CallStart:
         result = Start();
+        if (result == ResultOk)
+            LifeHold(Manifold::Target::Life::PartCrash);
         break;
     case CallStop:
         result = Stop();
+        if (result == ResultOk)
+            LifeLetGo(Manifold::Target::Life::PartCrash);
         break;
     default:
         result = ResultUnknownCall;
@@ -256,6 +265,15 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldCrashCall(LPVOID parameter
     g_block.Result = result;
     g_block.Applied = g_block.Serial;
     return result;
+}
+
+// The host ended: nobody reads the ring any more, so the handler goes and the
+// agent may unload (called from Agent/Life.cpp).
+void CrashHostGone()
+{
+    Held held;
+    if (Stop() == ResultOk)
+        LifeLetGo(Manifold::Target::Life::PartCrash);
 }
 
 // Under the loader lock nothing is waited for: the handler goes, the view

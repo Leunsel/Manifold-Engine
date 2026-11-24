@@ -417,6 +417,9 @@
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\AgentLife.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\ClrLink.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -1034,6 +1037,12 @@
     </ClInclude>
     <ClInclude Include="..\Source\Table\UnrealStructures.h">
       <Filter>Source\Table</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\AgentLife.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\AgentLifeProtocol.h">
+      <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\ClrLink.h">
       <Filter>Source\Target</Filter>

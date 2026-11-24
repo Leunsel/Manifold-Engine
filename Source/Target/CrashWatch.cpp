@@ -1,5 +1,7 @@
 #include "Target/CrashWatch.h"
 
+#include "Target/AgentLife.h"
+
 #include "Core/Handle.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
@@ -27,13 +29,6 @@ namespace Manifold::Target
         std::string AgentName(bool is64Bit)
         {
             return is64Bit ? "ManifoldAgent.dll" : "ManifoldAgent32.dll";
-        }
-
-        std::filesystem::path AgentPath(bool is64Bit)
-        {
-            wchar_t self[MAX_PATH] = L"";
-            ::GetModuleFileNameW(nullptr, self, MAX_PATH);
-            return std::filesystem::path(self).parent_path() / Utf8ToWide(AgentName(is64Bit));
         }
 
         const char* ResultText(std::uint32_t result)
@@ -146,19 +141,12 @@ namespace Manifold::Target
         }
         const auto began = std::chrono::steady_clock::now();
         const auto since = [&began] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count(); };
-        bool injected = false;
-        const bool is64Bit = process->Is64Bit();
-        const std::string name = AgentName(is64Bit);
-        if (!process->FindModule(name))
-        {
-            const std::filesystem::path agent = AgentPath(is64Bit);
-            std::error_code ignore;
-            if (!std::filesystem::exists(agent, ignore))
-                return Status::Fail(ErrorCode::InjectFailed, name + " was not found next to the program");
-            if (Status loading = process->InjectLibrary(agent.wstring()); !loading)
-                return loading;
-            injected = true;
-        }
+        // ∑ Loaded (and counted) also when another part loaded it: a part that holds no load
+        //   of its own lost the agent when that part was removed (test: shared agent).
+        const bool injected = !process->FindModule(AgentFileName(process->Is64Bit())).has_value();
+        const std::string name = AgentFileName(process->Is64Bit());
+        if (Status loading = LoadAgent(*process); !loading)
+            return loading;
         const std::uint64_t block = process->FindExport(name, "ManifoldCrash");
         const std::uint64_t call = process->FindExport(name, "ManifoldCrashCall");
         Crash::Block shared{};

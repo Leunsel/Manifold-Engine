@@ -1,5 +1,7 @@
 #include "Target/Speedhack.h"
 
+#include "Target/AgentLife.h"
+
 #include "Core/Handle.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
@@ -70,13 +72,6 @@ namespace Manifold::Target
         std::wstring AgentFile(bool is64Bit)
         {
             return is64Bit ? L"ManifoldAgent.dll" : L"ManifoldAgent32.dll";
-        }
-
-        std::filesystem::path AgentPath(bool is64Bit)
-        {
-            wchar_t self[MAX_PATH] = L"";
-            ::GetModuleFileNameW(nullptr, self, MAX_PATH);
-            return std::filesystem::path(self).parent_path() / AgentFile(is64Bit);
         }
 
         std::uint64_t Distance(std::uint64_t a, std::uint64_t b)
@@ -481,18 +476,6 @@ namespace Manifold::Target
         }
     }
 
-    void Speedhack::DropAgent()
-    {
-        const std::string name = AgentName();
-        const auto module = m_process->FindModule(name);
-        const std::uint64_t freeLibrary = m_process->FindExport("kernel32.dll", "FreeLibrary");
-        if (!module || !freeLibrary || !m_process->Alive())
-            return;
-        if (Status freed = m_process->CreateThread(freeLibrary, module->Base, true, 5000); !freed)
-            LOG_WARN("Speedhack", "The agent library in " + m_process->Name() + " was not released: " + freed.Text);
-        m_process->RefreshModules();
-    }
-
     Status Speedhack::Watch()
     {
         const UniqueHandle duplicator(::OpenProcess(PROCESS_DUP_HANDLE, FALSE, Raw(m_process->Id())));
@@ -749,23 +732,17 @@ namespace Manifold::Target
 
     Status Speedhack::Install()
     {
-        const bool is64Bit = m_process->Is64Bit();
-        const std::filesystem::path agent = AgentPath(is64Bit);
         const std::string name = AgentName();
-        std::error_code ignore;
-        if (!std::filesystem::exists(agent, ignore))
-            return Status::Fail(ErrorCode::InjectFailed, name + " was not found next to the program");
-        if (Status injected = m_process->InjectLibrary(agent.wstring()); !injected)
-            return injected;
+        if (Status loaded = LoadAgent(*m_process); !loaded)
+            return loaded;
         m_block = m_process->FindExport(name, "ManifoldSpeed");
         m_call = m_process->FindExport(name, "ManifoldSpeedCall");
         auto shared = std::make_unique<Speed::Block>();
         if (!m_block || !m_call || !m_process->ReadExact(m_block, shared.get(), sizeof(Speed::Block)) || shared->Magic != Speed::kMagic || shared->Version != Speed::kVersion)
         {
-            DropAgent();
             m_block = 0;
             m_call = 0;
-            return Failed("the agent library in the process is from another version of the program");
+            return Failed("the agent library in the process is from another version of the program; restart the game to load the new one");
         }
         m_imageBase = shared->ImageBase;
         m_imageSize = shared->ImageSize;
@@ -939,8 +916,10 @@ namespace Manifold::Target
             return result;
         if (kept)
             LOG_WARN("Speedhack", Format("%d of the speedhack's hooks in %s were changed by something else and were left as they are", kept, process->Name().c_str()));
-        const std::uint32_t none = 0;
-        WriteField(*process, m_block, offsetof(Speed::Block, HookCount), none);
+        // ∑ The hooks that stay (changed by something else) still jump into the agent: their
+        //   number tells it to stay loaded; with none left it lets go (Agent/Life.cpp).
+        const std::uint32_t left = clean ? static_cast<std::uint32_t>(kept) : static_cast<std::uint32_t>(std::max<int>(kept, 1));
+        WriteField(*process, m_block, offsetof(Speed::Block, HookCount), left);
         if (Status released = Call(Speed::CallRelease); !released)
             LOG_WARN("Speedhack", released.Text);
         if (clean && !kept)
@@ -949,7 +928,6 @@ namespace Manifold::Target
             process->Write(m_block + offsetof(Speed::Block, Originals), originals, sizeof(originals));
             for (std::uint64_t page : m_pages)
                 process->Free(page);
-            DropAgent();
             LOG_INFO("Speedhack", "Speedhack removed from " + process->Name() + "; its time functions are as they were");
         }
         else if (!kept)

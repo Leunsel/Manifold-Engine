@@ -58,7 +58,6 @@ namespace Manifold::Target
         Status Settle(bool& shifted);
         bool Adopt();
         bool Usable() const;
-        void DropAgent();
         void Forget();
 
         mutable std::mutex m_lock;

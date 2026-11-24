@@ -405,6 +405,9 @@
     <ClCompile Include="..\Source\Table\UnrealStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\AgentLife.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\ClrLink.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -506,6 +509,9 @@
     </ClCompile>
     <ClCompile Include="..\Source\Text\TextBuffer.cpp">
       <Filter>Source\Text</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\AgentLifeTests.cpp">
+      <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\AssemblerTests.cpp">
       <Filter>Tests</Filter>

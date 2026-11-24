@@ -404,12 +404,9 @@ namespace Manifold::Tests
             Trigger(session);
             Pause(300);
             CHECK_MSG(session.Target.Alive() && Field(session, &Probe::Wrong) == 0, session.Label + ": the target did not run on after the program was killed");
-            engine.Process()->RefreshModules();
-            const std::uint64_t blockAt = engine.Process()->FindExport(engine.CodeCoverage().AgentName(), "ManifoldCover");
-            Target::Cover::Block block{};
-            SIZE_T got = 0;
-            const bool read = blockAt && ::ReadProcessMemory(session.Target.Info.hProcess, reinterpret_cast<LPCVOID>(blockAt), &block, sizeof(block), &got) && got == sizeof(block);
-            CHECK_MSG(read && block.HostLost == 1 && block.Active == 0 && block.Handler == 1, session.Label + ": the library did not note the lost program");
+            // ∑ With its handler out and no other part of the agent in use, the library unloads
+            //   by itself (Agent/Life.cpp); there is nothing left to take over.
+            CHECK_MSG(WaitAgentGone(session, 5000), session.Label + ": the library stayed after the program that loaded it was killed");
 
             engine.CloseProcess();
             const Status opened = engine.OpenProcess(MakeProcessId(pid));
@@ -417,11 +414,13 @@ namespace Manifold::Tests
             if (!opened)
                 return;
             Target::Coverage& coverage = engine.CodeCoverage();
-            CHECK_MSG(coverage.Installed(), session.Label + ": the library of the killed program was not taken over");
+            CHECK(!coverage.Installed());
+            const std::uint64_t never[] = { session.Never };
+            CHECK(coverage.Arm(never).Ok() && RawByte(session, session.Never) == Target::Cover::kInt3);
             const auto counts = coverage.Counts();
-            CHECK_MSG(counts && counts->Watching && !counts->HostLost && !counts->Active, session.Label + ": the taken-over library does not watch this program");
-            CHECK(coverage.Release().Ok());
-            CHECK_MSG(WaitAgentGone(session, 5000), session.Label + ": the agent library stayed loaded after the takeover");
+            CHECK_MSG(counts && counts->Watching && !counts->HostLost && counts->Active, session.Label + ": the library loaded anew does not watch this program");
+            CHECK(coverage.Release().Ok() && AllOriginal(session));
+            CHECK_MSG(WaitAgentGone(session, 5000), session.Label + ": the agent library stayed loaded after the release");
             CHECK(session.Target.Alive());
         }
 
