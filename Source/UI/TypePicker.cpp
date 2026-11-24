@@ -8,6 +8,8 @@
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
+#include "imgui_internal.h"
+
 #include <algorithm>
 #include <cfloat>
 
@@ -70,7 +72,7 @@ namespace Manifold::UI
         record.Type = choice.Type;
     }
 
-    bool TypeComboItems(const std::vector<Scan::TypeSection>& sections, Scan::TypeChoice& choice)
+    bool TypeComboItems(const std::vector<Scan::TypeSection>& sections, Scan::TypeChoice& choice, bool keepOpen)
     {
         const ImGuiStyle& style = ImGui::GetStyle();
         const float indent = Px(8.0f);
@@ -100,25 +102,44 @@ namespace Manifold::UI
         }
         ++filter.Frames;
         bool enter = false;
+        const float listWidth = std::max(width + style.ScrollbarSize, ImGui::GetContentRegionAvail().x);
         if (total >= kFilterFrom)
         {
             if (ImGui::IsWindowAppearing())
                 ImGui::SetKeyboardFocusHere();
-            Layout::Field({}, { .Placement = Layout::LabelPlacement::None, .Width = std::max(width, ImGui::GetContentRegionAvail().x) });
+            Layout::Field({}, { .Placement = Layout::LabelPlacement::None, .Width = listWidth });
             enter = InputTextWithHint("##typefilter", ICON_FA_SEARCH "  Filter types", filter.Text, ImGuiInputTextFlags_EnterReturnsTrue);
         }
-        else
+
+        const float line = ImGui::GetTextLineHeightWithSpacing();
+        float listHeight = 0.0f;
+        bool any = false;
+        for (const Scan::TypeSection& section : sections)
         {
-            ImGui::Dummy(ImVec2(width, 0.0f));
+            const auto shown = std::count_if(section.Entries.begin(), section.Entries.end(), [&](const Scan::TypeEntry& entry) { return Matches(section, entry, filter.Text); });
+            if (shown == 0)
+                continue;
+            if (any)
+                listHeight += 1.0f + style.ItemSpacing.y;
+            listHeight += ImGui::GetFontSize() * 0.86f + style.ItemSpacing.y + static_cast<float>(shown) * line;
+            any = true;
         }
+        if (!any)
+            listHeight = line;
+        listHeight += Px(2.0f) - style.ItemSpacing.y;
+        const float maxHeight = line * 16.0f;
+        const bool scrolls = listHeight > maxHeight;
 
         bool changed = false;
         bool first = true;
         const Scan::TypeEntry* firstMatch = nullptr;
+        // ∑ The list scrolls in its own child, so the filter field above it stays in place.
+        ImGui::BeginChild("##typelist", ImVec2(listWidth, std::min(listHeight, maxHeight)), ImGuiChildFlags_None,
+            scrolls ? ImGuiWindowFlags_None : ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         for (const Scan::TypeSection& section : sections)
         {
-            const bool any = std::any_of(section.Entries.begin(), section.Entries.end(), [&](const Scan::TypeEntry& entry) { return Matches(section, entry, filter.Text); });
-            if (!any)
+            const bool shown = std::any_of(section.Entries.begin(), section.Entries.end(), [&](const Scan::TypeEntry& entry) { return Matches(section, entry, filter.Text); });
+            if (!shown)
                 continue;
             MenuSection(section.Title.c_str(), first);
             first = false;
@@ -136,6 +157,8 @@ namespace Manifold::UI
                 {
                     choice = entry.Choice;
                     changed = true;
+                    if (!keepOpen)
+                        ImGui::CloseCurrentPopup();
                 }
                 ImGui::PopID();
                 ImGui::PopID();
@@ -156,11 +179,13 @@ namespace Manifold::UI
         }
         if (!firstMatch)
             Muted("No type matches");
-        else if (enter)
+        ImGui::EndChild();
+        if (firstMatch && enter)
         {
             choice = firstMatch->Choice;
             changed = true;
-            ImGui::CloseCurrentPopup();
+            if (!keepOpen)
+                ImGui::CloseCurrentPopup();
         }
         return changed;
     }
@@ -175,7 +200,7 @@ namespace Manifold::UI
     }
 
     const Scan::TypeEntry* TypeMenuItems(const std::vector<Scan::TypeSection>& sections, const Scan::TypeChoice* current,
-        const std::function<std::string(const Scan::TypeEntry&)>& detail)
+        const std::function<std::string(const Scan::TypeEntry&)>& detail, bool submenus)
     {
         const Scan::TypeEntry* clicked = nullptr;
         bool first = true;
@@ -183,8 +208,17 @@ namespace Manifold::UI
         {
             if (section.Entries.empty())
                 continue;
-            MenuSection(section.Title.c_str(), first);
-            first = false;
+            if (submenus)
+            {
+                const bool holds = current && std::any_of(section.Entries.begin(), section.Entries.end(), [&](const Scan::TypeEntry& entry) { return entry.Choice.Same(*current); });
+                if (!ImGui::BeginMenuEx(section.Title.c_str(), holds ? ICON_FA_CHECK : nullptr))
+                    continue;
+            }
+            else
+            {
+                MenuSection(section.Title.c_str(), first);
+                first = false;
+            }
             for (const Scan::TypeEntry& entry : section.Entries)
             {
                 const std::string shown = detail ? detail(entry) : entry.Detail;
@@ -195,6 +229,8 @@ namespace Manifold::UI
                 if (entry.Tooltip)
                     ItemTooltip(entry.Tooltip);
             }
+            if (submenus)
+                ImGui::EndMenu();
         }
         return clicked;
     }

@@ -61,6 +61,8 @@ Source/UI/StaticPointersWindow.cpp 4
 Source/UI/StructureWindow.cpp 39
 Source/UI/TableFilesWindow.cpp 30
 Source/UI/TemplateManager.cpp 62
+# The type list scrolls in a child of its own under a fixed filter field; a Card would pad and frame it.
+Source/UI/TypePicker.cpp 1
 Source/UI/Templates.cpp 4
 Source/UI/ToolWindows.cpp 29
 Source/UI/UiHost.cpp 20

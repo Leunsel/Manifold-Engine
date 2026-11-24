@@ -61,6 +61,7 @@ namespace Manifold::UI
         bool ValueChoices(const std::vector<Table::DropDownEntry>& entries);
         void AddAddressDialog();
         void DescriptionDialog();
+        void TypePopup();
         void DoFirstScan();
         void DoNextScan();
         void NewScan();
@@ -186,6 +187,8 @@ namespace Manifold::UI
         bool m_descriptionDialog = false;
         std::string m_descriptionText;
         int m_descriptionTarget = 0;
+        int m_typePopupRecord = -1;
+        bool m_openTypePopup = false;
         std::string m_tableFilter;
         struct ListRow
         {

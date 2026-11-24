@@ -2163,7 +2163,7 @@ namespace Manifold::UI
                         probe.Display = Table::FieldDisplay::Signed;
                     return preview(probe);
                 };
-            const Scan::TypeEntry* picked = TypeMenuItems(sections, Embedded(field) ? nullptr : &current, shownFor);
+            const Scan::TypeEntry* picked = TypeMenuItems(sections, Embedded(field) ? nullptr : &current, shownFor, m_engine.Options().TypeSubmenus);
             if (picked && picked->Choice.Kind == Scan::ScanKind::Custom)
             {
                 if (const Lua::CustomType* custom = m_engine.Lua().FindCustomType(picked->Choice.Custom))
