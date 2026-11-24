@@ -274,7 +274,7 @@ namespace Manifold::UI
         provider.AskText = [&host](const std::string& caption, const std::string& prompt, const std::string& value) { return AskText(host, caption, prompt, value); };
         provider.Message = [&host](const std::string& title, const std::string& text, Lua::MessageKind kind, const std::vector<int>& buttons)
             {
-                Sounds::Play(kind == Lua::MessageKind::Error || kind == Lua::MessageKind::Warning ? Sounds::Cue::Error : Sounds::Cue::Success);
+                Sounds::Play(kind == Lua::MessageKind::Error ? Sounds::Cue::Error : kind == Lua::MessageKind::Warning ? Sounds::Cue::Warning : Sounds::Cue::Success);
                 return AskMessage(host, title, text, kind, buttons);
             };
         provider.Select = [&host](const std::string& title, const std::string& caption, const std::vector<std::string>& items, bool allowCustom)

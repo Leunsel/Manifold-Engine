@@ -9,6 +9,7 @@ namespace Manifold::Sounds
     enum class Cue
     {
         Success,
+        Warning,
         Error
     };
 

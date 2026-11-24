@@ -42,7 +42,8 @@ namespace Manifold::Sounds
         };
 
         std::mutex g_lock;
-        std::array<Slot, 2> g_slots;
+        constexpr std::size_t CueCount = 3;
+        std::array<Slot, CueCount> g_slots;
         std::thread g_loader;
         bool g_loading = false;
         int g_wanted = -1;
@@ -50,7 +51,18 @@ namespace Manifold::Sounds
 
         std::size_t Index(Cue cue)
         {
-            return cue == Cue::Success ? 0 : 1;
+            return static_cast<std::size_t>(cue);
+        }
+
+        int ResourceId(Cue cue)
+        {
+            switch (cue)
+            {
+            case Cue::Success: return IDR_SOUND_SUCCESS;
+            case Cue::Warning: return IDR_SOUND_WARNING;
+            case Cue::Error: return IDR_SOUND_ERROR;
+            }
+            return IDR_SOUND_ERROR;
         }
 
         std::vector<std::uint8_t> ReadAll(const std::filesystem::path& path)
@@ -64,7 +76,7 @@ namespace Manifold::Sounds
         std::vector<std::uint8_t> Embedded(Cue cue)
         {
             HMODULE module = ::GetModuleHandleW(nullptr);
-            HRSRC resource = ::FindResourceW(module, MAKEINTRESOURCEW(cue == Cue::Success ? IDR_SOUND_SUCCESS : IDR_SOUND_ERROR), RT_RCDATA);
+            HRSRC resource = ::FindResourceW(module, MAKEINTRESOURCEW(ResourceId(cue)), RT_RCDATA);
             if (!resource)
                 return {};
             HGLOBAL handle = ::LoadResource(module, resource);
@@ -101,7 +113,7 @@ namespace Manifold::Sounds
                 return embedded;
             std::vector<std::uint8_t> wave = DecodeToWave(embedded);
             if (!embedded.empty() && wave.empty())
-                LOG_WARN("Sounds", "The built-in sound could not be decoded. Windows needs its media features (Media Foundation) for MP3; a Success.wav in the sounds folder works without them.");
+                LOG_WARN("Sounds", "The built-in sound could not be decoded. Windows needs its media features (Media Foundation) for MP3; a .wav file in the sounds folder works without them.");
             return wave;
         }
 
@@ -114,7 +126,7 @@ namespace Manifold::Sounds
         void LoadAll()
         {
             SetThreadName(L"Sound loader");
-            std::array<std::vector<std::uint8_t>, 2> loaded{ Load(Cue::Success), Load(Cue::Error) };
+            std::array<std::vector<std::uint8_t>, CueCount> loaded{ Load(Cue::Success), Load(Cue::Warning), Load(Cue::Error) };
             std::lock_guard lock(g_lock);
             for (std::size_t i = 0; i < loaded.size(); ++i)
             {
@@ -175,14 +187,20 @@ namespace Manifold::Sounds
 
     const char* FileName(Cue cue)
     {
-        return cue == Cue::Success ? "Success" : "Error";
+        switch (cue)
+        {
+        case Cue::Success: return "Success";
+        case Cue::Warning: return "Warning";
+        case Cue::Error: return "Error";
+        }
+        return "Error";
     }
 
     void Play(Cue cue)
     {
         if (!g_enabled)
             return;
-        static std::array<std::chrono::steady_clock::time_point, 2> last{};
+        static std::array<std::chrono::steady_clock::time_point, CueCount> last{};
         const auto now = std::chrono::steady_clock::now();
         std::chrono::steady_clock::time_point& previous = last[Index(cue)];
         if (previous != std::chrono::steady_clock::time_point{} && now - previous < std::chrono::seconds(1))

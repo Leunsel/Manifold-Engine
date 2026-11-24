@@ -905,23 +905,25 @@ namespace Manifold::UI
         }
 
         list.Section("Sounds");
-        if (list.Row("Play Sounds", "When a scan or a long search finishes, and when a script fails.", toggle))
+        if (list.Row("Play Sounds", "When a scan or a long search finishes, when a script fails and when a script shows a warning.", toggle))
         {
             changed |= ToggleSwitch("##playsounds", &settings.PlaySounds);
             list.EndRow();
         }
         const float tryWidth = std::round(Px(100.0f));
-        if (list.Row("Test Sounds", "Plays a sound once, even when sounds are off.", tryWidth * 2.0f + ImGui::GetStyle().ItemSpacing.x))
+        if (list.Row("Test Sounds", "Plays a sound once, even when sounds are off.", tryWidth * 3.0f + ImGui::GetStyle().ItemSpacing.x * 2.0f))
         {
-            if (ImGui::Button(ICON_FA_PLAY "  Success", ImVec2(tryWidth, 0.0f)))
-                Sounds::Preview(Sounds::Cue::Success);
-            ImGui::SameLine();
-            if (ImGui::Button(ICON_FA_PLAY "  Error", ImVec2(tryWidth, 0.0f)))
-                Sounds::Preview(Sounds::Cue::Error);
+            for (const Sounds::Cue cue : { Sounds::Cue::Success, Sounds::Cue::Warning, Sounds::Cue::Error })
+            {
+                if (cue != Sounds::Cue::Success)
+                    ImGui::SameLine();
+                if (ImGui::Button((std::string(ICON_FA_PLAY "  ") + Sounds::FileName(cue)).c_str(), ImVec2(tryWidth, 0.0f)))
+                    Sounds::Preview(cue);
+            }
             list.EndRow();
         }
         const float soundsFolder = std::round(Px(130.0f));
-        if (list.Row("Sounds Folder", "Success and Error .wav or .mp3 here replace the built-in sounds: " + WideToUtf8(Paths::SoundsFolder().wstring()), soundsFolder))
+        if (list.Row("Sounds Folder", "Success, Warning and Error .wav or .mp3 here replace the built-in sounds: " + WideToUtf8(Paths::SoundsFolder().wstring()), soundsFolder))
         {
             if (ImGui::Button(ICON_FA_FOLDER_OPEN "  Open Folder", ImVec2(soundsFolder, 0.0f)))
             {
