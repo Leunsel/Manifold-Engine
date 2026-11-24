@@ -52,7 +52,11 @@ Manifold Engine reads and writes Cheat Engine tables (`.CT`): records, groups, p
 
 **Options**: writable/executable/copy-on-write filters, region types, start and stop address or one module, fast scan alignment, pausing the process.
 
-Scans run on several threads and keep their results in temporary files, so hundreds of millions of results do not fill the memory. The last scan can be undone.
+Scans run on several threads. The last scan can be undone.
+
+**Results in memory.** Scan results stay in RAM up to a limit shared by all scans (Settings → Scanner → Results in Memory) and only the rest goes to temporary files in the scan folder, so hundreds of millions of results still fit. *Auto* allows up to half the RAM; *Disk Only* writes everything to the files, as before. Whatever the limit, a block is only taken while 2 GB (or an eighth of the RAM) stays free for the game and the system. The Found card says how much of the current results is on disk.
+
+Measured with 1 GB of game data and 268 million results: temporary files reached the disk in full (about 9 GB per run, even with 43 GB of free RAM). In RAM the second *Unchanged* scan takes 0.5–0.6 s instead of 2.1–2.6 s on an NVMe SSD and 152 s on a hard disk.
 
 ### All
 

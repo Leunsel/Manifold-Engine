@@ -127,6 +127,8 @@ namespace Manifold::UI
             OpenLog();
         else if (window == "settings")
             OpenSettings();
+        else if (window.starts_with("settings:"))
+            OpenSettings(static_cast<int>(ParseDecimal(window.substr(9)).value_or(-1)));
         else if (window == "symbols")
             OpenSymbols();
         else if (window == "regions")

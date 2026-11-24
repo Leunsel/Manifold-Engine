@@ -97,6 +97,7 @@ namespace Manifold
             { "Scanner", "ScanMapped", &Settings::ScanMapped },
             { "Scanner", "SkipNoCache", &Settings::ScanSkipNoCache },
             { "Scanner", "SkipWriteCombine", &Settings::ScanSkipWriteCombine },
+            { "Scanner", "ResultMemory", &Settings::ScanMemoryMb, -1, 1024 * 1024 },
             { "Scanner", "AllTypes", &Settings::AllTypes, 0, 0x3F },
             { "Scanner", "ResultRefresh", &Settings::ResultValueRefreshMs, 50, 10000 },
             { "Table", "AddressColumn", &kAddressColumn },

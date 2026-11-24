@@ -366,6 +366,9 @@
     <ClCompile Include="..\Source\Scan\PointerScan.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Scan\ScanStore.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Scan\Scanner.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
@@ -994,6 +997,9 @@
       <Filter>Source\Lua</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Scan\PointerScan.h">
+      <Filter>Source\Scan</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Scan\ScanStore.h">
       <Filter>Source\Scan</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Scan\Scanner.h">

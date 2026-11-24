@@ -81,6 +81,7 @@ namespace Manifold
         bool ScanMapped = false;
         bool ScanSkipNoCache = true;
         bool ScanSkipWriteCombine = true;
+        int ScanMemoryMb = -1;  // RAM for scan results: -1 Auto, 0 disk only, else megabytes
         std::uint32_t AllTypes = 0x3F;
         int ResultValueRefreshMs = 500;
         int AddressColumn = 2;

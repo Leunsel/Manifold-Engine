@@ -44,6 +44,7 @@ namespace Manifold::UI
         bool GeneralPage(SettingsList& list, Settings& settings);
         bool AppearancePage(SettingsList& list, Settings& settings);
         bool ScannerPage(SettingsList& list, Settings& settings);
+        bool ResultMemoryCombo(Settings& settings, float width);
         bool ScriptsPage(SettingsList& list, Settings& settings);
         bool DebuggerPage(SettingsList& list, Settings& settings);
         bool SignatureOptionsPage(SettingsList& list, Settings& settings);

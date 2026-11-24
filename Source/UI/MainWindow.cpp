@@ -991,7 +991,11 @@ namespace Manifold::UI
         Scan::Scanner& scanner = engine.Scanner();
         BeginCard("##results", nullptr, ImVec2(width, height), ImGuiWindowFlags_NoScrollbar);
         const std::uint64_t count = scanner.Count();
-        CardTitle(ICON_FA_SEARCH, "Found", scanner.HasResults() ? Grouped(count) + (scanner.ScanNumber() > 0 ? Format("  ·  scan %d  ·  %.2f s", scanner.ScanNumber(), scanner.LastSeconds()) : "") : "no scan yet");
+        std::string found = scanner.HasResults() ? Grouped(count) + (scanner.ScanNumber() > 0 ? Format("  ·  scan %d  ·  %.2f s", scanner.ScanNumber(), scanner.LastSeconds()) : "") : "no scan yet";
+        // ∑ Only spilled results are worth a word: they make the next scans wait on the disk.
+        if (const Scan::ScanStorage storage = scanner.Storage(); storage.DiskBytes > 0)
+            found += "  ·  " + ByteSize(storage.DiskBytes) + " on disk";
+        CardTitle(ICON_FA_SEARCH, "Found", found);
         if (!m_selectedResults.empty())
         {
             ImGui::SameLine();
@@ -1345,6 +1349,7 @@ namespace Manifold::UI
         options.Mapped = m_mapped;
         options.SkipNoCache = m_engine.Options().ScanSkipNoCache;
         options.SkipWriteCombine = m_engine.Options().ScanSkipWriteCombine;
+        options.MemoryLimitMb = m_engine.Options().ScanMemoryMb;
         options.Alignment = m_fastScan ? std::max(1, m_alignment) : 1;
         options.PauseProcess = m_pause;
         options.Threads = m_engine.Options().ScanThreads;

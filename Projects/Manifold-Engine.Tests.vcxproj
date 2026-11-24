@@ -206,6 +206,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\UiFormImport.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\PointerScan.cpp" />
+    <ClCompile Include="..\Source\Scan\ScanStore.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\StaticPointers.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
@@ -290,6 +291,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\RecordDebugTests.cpp" />
     <ClCompile Include="..\Tests\RelayTests.cpp" />
     <ClCompile Include="..\Tests\RttiTests.cpp" />
+    <ClCompile Include="..\Tests\ScanStoreTests.cpp" />
     <ClCompile Include="..\Tests\SignatureTests.cpp" />
     <ClCompile Include="..\Tests\SpeedhackTests.cpp" />
     <ClCompile Include="..\Tests\StructExchangeTests.cpp" />

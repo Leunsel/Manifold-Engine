@@ -2572,6 +2572,7 @@ namespace Manifold::Lua
                         options.Mapped = false;
                         options.SkipNoCache = Owner(s).Options().ScanSkipNoCache;
                         options.SkipWriteCombine = Owner(s).Options().ScanSkipWriteCombine;
+                        options.MemoryLimitMb = Owner(s).Options().ScanMemoryMb;
                         if (ceType == 7)
                             options.Unicode = true;
                         if (ceType == kCeCustom)

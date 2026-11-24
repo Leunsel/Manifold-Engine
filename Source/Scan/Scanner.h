@@ -135,6 +135,14 @@ namespace Manifold::Scan
         int BlockSize = 0;
         CompareTo Against = CompareTo::Previous;
         std::string SavedName;
+        int MemoryLimitMb = -1;  // RAM for the results of all scans: -1 Auto, 0 disk only (MemoryBudget in Scan/ScanStore.h)
+    };
+
+    // Where the results of a scan are kept.
+    struct ScanStorage
+    {
+        std::uint64_t MemoryBytes = 0;
+        std::uint64_t DiskBytes = 0;
     };
 
     const char* CompareName(Compare compare);
@@ -173,6 +181,8 @@ namespace Manifold::Scan
 
         bool HasResults() const { return m_current != nullptr; }
         std::uint64_t Count() const;
+        // the current results, and with the kept ones (Undo, saved results) everything this scanner holds
+        ScanStorage Storage(bool everything = false) const;
         bool IsSnapshot() const;
         bool Record(std::uint64_t index, ScanRecord& out) const;
         ValueType Type() const;

@@ -214,6 +214,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Lua\UiFormImport.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
     <ClCompile Include="..\Source\Scan\PointerScan.cpp" />
+    <ClCompile Include="..\Source\Scan\ScanStore.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\StaticPointers.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
@@ -428,6 +429,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Lua\UiFormImport.h" />
     <ClInclude Include="..\Source\Lua\UiModel.h" />
     <ClInclude Include="..\Source\Scan\PointerScan.h" />
+    <ClInclude Include="..\Source\Scan\ScanStore.h" />
     <ClInclude Include="..\Source\Scan\Scanner.h" />
     <ClInclude Include="..\Source\Scan\StaticPointers.h" />
     <ClInclude Include="..\Source\Scan\ValueType.h" />

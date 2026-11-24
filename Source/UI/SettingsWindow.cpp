@@ -7,6 +7,7 @@
 #include "Core/Text.h"
 #include "Core/BuildInfo.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Scan/ScanStore.h"
 #include "Target/Process.h"
 #include "Layout/Layout.h"
 #include "UI/Fonts.h"
@@ -1519,6 +1520,41 @@ namespace Manifold::UI
             m_workspace.Core().Notify(LogLevel::Success, "Imported the theme " + name + ". Click its card to use it.");
     }
 
+    namespace
+    {
+        std::string ResultMemoryLabel(int megabytes)
+        {
+            if (megabytes == Scan::MemoryBudget::kAuto)
+                return "Auto (up to " + ByteSize(Scan::MemoryBudget::AutoBytes()) + ")";
+            if (megabytes == Scan::MemoryBudget::kDiskOnly)
+                return "Disk Only";
+            return ByteSize(static_cast<std::uint64_t>(megabytes) * 1024 * 1024);
+        }
+    }
+
+    bool SettingsWindow::ResultMemoryCombo(Settings& settings, float width)
+    {
+        bool changed = false;
+        Layout::FieldOptions field;
+        field.Placement = Layout::LabelPlacement::None;
+        field.Width = width;
+        Layout::Field({}, field);
+        const std::string shown = ResultMemoryLabel(settings.ScanMemoryMb);
+        if (ImGui::BeginCombo("##resultmemory", shown.c_str()))
+        {
+            for (const int megabytes : { Scan::MemoryBudget::kAuto, Scan::MemoryBudget::kDiskOnly, 1024, 2048, 4096, 8192, 16384, 32768, 65536 })
+            {
+                if (ImGui::Selectable(ResultMemoryLabel(megabytes).c_str(), settings.ScanMemoryMb == megabytes))
+                {
+                    settings.ScanMemoryMb = megabytes;
+                    changed = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        return changed;
+    }
+
     bool SettingsWindow::ScannerPage(SettingsList& list, Settings& settings)
     {
         bool changed = false;
@@ -1592,6 +1628,11 @@ namespace Manifold::UI
         }
 
         list.Section("Storage");
+        if (list.Row("Results in Memory", "Scan results stay in RAM up to this size, the rest goes to the scan files. Free RAM is always left for the game.", slider))
+        {
+            changed |= ResultMemoryCombo(settings, slider);
+            list.EndRow();
+        }
         const float folder = std::round(Px(130.0f));
         if (list.Row("Scan Files", WideToUtf8(Paths::ScanFolder().wstring()), folder))
         {

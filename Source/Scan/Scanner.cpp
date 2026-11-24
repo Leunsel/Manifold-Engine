@@ -4,6 +4,7 @@
 #include "Core/Paths.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
+#include "Scan/ScanStore.h"
 #include "Scan/Workers.h"
 #include "Target/Process.h"
 
@@ -24,7 +25,6 @@ namespace Manifold::Scan
     namespace
     {
         constexpr std::uint64_t kChunkBytes = 2ull * 1024 * 1024;
-        constexpr std::size_t kWriteBuffer = 1024 * 1024;
         constexpr std::uint64_t kNextBatchRecords = 32768;
         constexpr std::uint64_t kWindowBytes = 64 * 1024;
 
@@ -32,95 +32,6 @@ namespace Manifold::Scan
         {
             return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
         }
-
-        class TempFile
-        {
-        public:
-            TempFile() = default;
-            ~TempFile()
-            {
-                if (m_handle != INVALID_HANDLE_VALUE)
-                    ::CloseHandle(m_handle);
-            }
-            TempFile(const TempFile&) = delete;
-            TempFile& operator=(const TempFile&) = delete;
-
-            bool Create()
-            {
-                static std::atomic<unsigned> counter{ 0 };
-                const std::filesystem::path path = Paths::ScanFolder() /
-                    (std::to_wstring(::GetCurrentProcessId()) + L"-" + std::to_wstring(counter.fetch_add(1)) + L"-" + std::to_wstring(::GetTickCount64()) + L".scan");
-                m_handle = ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
-                    FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
-                m_buffer.reserve(kWriteBuffer);
-                return m_handle != INVALID_HANDLE_VALUE;
-            }
-
-            std::uint64_t Size() const { return m_written + m_buffer.size(); }
-
-            bool Append(const void* data, std::size_t size)
-            {
-                if (m_buffer.size() + size > kWriteBuffer && !Flush())
-                    return false;
-                if (size > kWriteBuffer)
-                    return WriteRaw(data, size);
-                const auto* bytes = static_cast<const std::uint8_t*>(data);
-                m_buffer.insert(m_buffer.end(), bytes, bytes + size);
-                return true;
-            }
-
-            bool Flush()
-            {
-                if (m_buffer.empty())
-                    return true;
-                const bool ok = WriteRaw(m_buffer.data(), m_buffer.size());
-                m_buffer.clear();
-                return ok;
-            }
-
-            bool ReadAt(std::uint64_t offset, void* buffer, std::size_t size) const
-            {
-                auto* out = static_cast<std::uint8_t*>(buffer);
-                while (size > 0)
-                {
-                    OVERLAPPED overlapped{};
-                    overlapped.Offset = static_cast<DWORD>(offset);
-                    overlapped.OffsetHigh = static_cast<DWORD>(offset >> 32);
-                    const DWORD want = static_cast<DWORD>(std::min<std::size_t>(size, 64u * 1024 * 1024));
-                    DWORD got = 0;
-                    if (!::ReadFile(m_handle, out, want, &got, &overlapped) || got == 0)
-                        return false;
-                    out += got;
-                    offset += got;
-                    size -= got;
-                }
-                return true;
-            }
-
-        private:
-            bool WriteRaw(const void* data, std::size_t size)
-            {
-                const auto* bytes = static_cast<const std::uint8_t*>(data);
-                while (size > 0)
-                {
-                    OVERLAPPED overlapped{};
-                    overlapped.Offset = static_cast<DWORD>(m_written);
-                    overlapped.OffsetHigh = static_cast<DWORD>(m_written >> 32);
-                    const DWORD want = static_cast<DWORD>(std::min<std::size_t>(size, 64u * 1024 * 1024));
-                    DWORD done = 0;
-                    if (!::WriteFile(m_handle, bytes, want, &done, &overlapped) || done == 0)
-                        return false;
-                    bytes += done;
-                    size -= done;
-                    m_written += done;
-                }
-                return true;
-            }
-
-            HANDLE m_handle = INVALID_HANDLE_VALUE;
-            std::vector<std::uint8_t> m_buffer;
-            std::uint64_t m_written = 0;
-        };
 
         struct Segment
         {
@@ -794,12 +705,20 @@ namespace Manifold::Scan
         std::vector<ValueType> AllList;
         std::shared_ptr<const GroupSpec> Group;
         std::string CustomName;
-        std::vector<std::unique_ptr<TempFile>> Files;
+        std::vector<std::unique_ptr<ScanStore>> Files;
         std::vector<Segment> Segments;
         std::vector<Snapshot> Snapshots;
         std::uint64_t Count = 0;
 
         std::size_t TagBytes() const { return Kind == ScanKind::All ? 1 : 0; }
+        void AddStorage(ScanStorage& storage) const
+        {
+            for (const auto& file : Files)
+            {
+                storage.MemoryBytes += file->MemoryBytes();
+                storage.DiskBytes += file->DiskBytes();
+            }
+        }
         std::uint64_t Multiplicity() const { return Kind == ScanKind::All ? std::max<std::uint64_t>(1, AllList.size()) : 1; }
         std::size_t RecordSize() const { return 8 + TagBytes() + 2 * static_cast<std::size_t>(ValueSize); }
 
@@ -1109,6 +1028,7 @@ namespace Manifold::Scan
         if (firstScan && !CompareAllowedFirst(options.Mode))
             return Status::Fail(ErrorCode::ScanNothingToCompare);
 
+        MemoryBudget::SetLimit(options.MemoryLimitMb);
         ScanOptions effective = options;
         std::shared_ptr<const ResultSet> saved;
         if (firstScan)
@@ -1248,6 +1168,24 @@ namespace Manifold::Scan
         return m_current ? m_current->Count : 0;
     }
 
+    ScanStorage Scanner::Storage(bool everything) const
+    {
+        ScanStorage storage;
+        if (m_current)
+            m_current->AddStorage(storage);
+        if (everything)
+        {
+            if (m_undo)
+                m_undo->AddStorage(storage);
+            for (const auto& [name, saved] : m_saved)
+            {
+                if (saved != m_current && saved != m_undo)
+                    saved->AddStorage(storage);
+            }
+        }
+        return storage;
+    }
+
     bool Scanner::IsSnapshot() const
     {
         return m_current && m_current->IsSnapshot;
@@ -1342,16 +1280,9 @@ namespace Manifold::Scan
             if (options.Kind == ScanKind::Single && (options.Type == ValueType::String || options.Type == ValueType::ByteArray))
                 result->Alignment = 1;
 
+            // RAM first, then the scan folder (Scan/ScanStore.h); a file is only made when a store spills
             for (int i = 0; i < threads; ++i)
-            {
-                auto file = std::make_unique<TempFile>();
-                if (!file->Create())
-                {
-                    status = Status::Fail(ErrorCode::ScanStoreFailed, "temporary file not created");
-                    break;
-                }
-                result->Files.push_back(std::move(file));
-            }
+                result->Files.push_back(std::make_unique<ScanStore>());
         }
 
         std::mutex mergeLock;
@@ -1366,7 +1297,7 @@ namespace Manifold::Scan
         const bool againstFirst = options.Against == CompareTo::First && usesPrevious;
         const bool againstSaved = saved != nullptr && usesPrevious;
 
-        const auto writer = [&](TempFile& file, std::vector<std::uint8_t>& record, Segment& segment)
+        const auto writer = [&](ScanStore& file, std::vector<std::uint8_t>& record, Segment& segment)
             {
                 return [&file, &record, &segment, &storeFailed, tagBytes, valueSize](std::uint64_t address, ValueType type, const std::uint8_t* now, const std::uint8_t* initial) -> bool
                     {
@@ -1419,7 +1350,7 @@ namespace Manifold::Scan
                 {
                     SetThreadName(L"Scan worker");
                     PreferFastCores();
-                    TempFile& file = *result->Files[static_cast<std::size_t>(index)];
+                    ScanStore& file = *result->Files[static_cast<std::size_t>(index)];
                     std::vector<std::uint8_t> buffer(kChunkBytes + kGroupMaxBytes + 64);
                     std::vector<std::uint8_t> record(8 + tagBytes + 2 * static_cast<std::size_t>(valueSize));
                     std::vector<Segment> localSegments;
@@ -1510,7 +1441,7 @@ namespace Manifold::Scan
                 {
                     SetThreadName(L"Scan worker");
                     PreferFastCores();
-                    TempFile& file = *result->Files[static_cast<std::size_t>(index)];
+                    ScanStore& file = *result->Files[static_cast<std::size_t>(index)];
                     std::vector<std::vector<std::uint32_t>> hits;
                     const std::size_t recordSize = previous->RecordSize();
                     const std::size_t previousTag = previous->TagBytes();
