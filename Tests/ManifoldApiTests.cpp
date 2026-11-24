@@ -880,6 +880,39 @@ return M
                 return "ok")LUA");
             CHECK(library.TakeRestyle());
             Themes::SelectPreset(settings.Theme, ThemeFamily::Standard);
+
+            // Examples/Theme-Demo.lua loads, draws its window and follows a theme change without errors
+            std::filesystem::path at = std::filesystem::current_path();
+            for (int i = 0; i < 8 && !std::filesystem::exists(at / "Examples" / "Theme-Demo.lua"); ++i)
+                at = at.parent_path();
+            const std::filesystem::path example = at / "Examples" / "Theme-Demo.lua";
+            if (!std::filesystem::exists(example))
+                Skip("Examples/Theme-Demo.lua not found above " + std::filesystem::current_path().string());
+            else
+            {
+                const std::size_t errorsBefore = CountEntries(engine, LogLevel::Error, "");
+                std::ifstream file(example, std::ios::binary);
+                std::stringstream content;
+                content << file.rdbuf();
+                const Status loaded = engine.Lua().Run(content.str(), "Theme-Demo.lua");
+                CHECK_MSG(loaded.Ok(), loaded.Text);
+                bool shown = false;
+                for (const int id : engine.Lua().Ui().Windows())
+                {
+                    const Lua::UiNode* window = engine.Lua().Ui().Find(id);
+                    shown = shown || (window && window->Title == "Theme demo");
+                }
+                CHECK(shown);
+                library.Shown(library.Effective(settings.Theme));
+                LuaCheck(engine, "theme demo follows", R"LUA(
+                    if not manifold.ui.theme.apply("Blue", { mode = "light" }) then return "apply" end
+                    return "ok")LUA");
+                library.Shown(library.Effective(settings.Theme));
+                engine.Tick();
+                library.ClearScript();
+                CHECK_MSG(CountEntries(engine, LogLevel::Error, "") == errorsBefore, "the theme demo logged an error");
+                engine.Lua().Run("manifold.ui.window.create('Theme demo', { key = 'manifold theme demo' }).remove()", "theme demo cleanup");
+            }
             engine.Lua().Run("manifold.event.unsubscribe(manifold.event.subscribe('themeChanged', function() end, { key = 'theme probe' }))", "theme cleanup");
         }
 

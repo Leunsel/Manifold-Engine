@@ -205,6 +205,8 @@ While a Structure Dissect window has the focus. Field keys act on the selected f
 | `Ctrl+A` | Add Address to Compare | `AddStructureColumn` | CE |
 | `Ctrl+Alt+C` | Collapse All Pointers | `CollapseStructure` | CE |
 | `Ctrl+G` | Go to Address | `StructureGotoAddress` | Manifold |
+| `Ctrl+I` | Import Structures | `ImportStructures` | Manifold |
+| `Ctrl+E` | Export Structure as C/C++ | `ExportStructures` | Manifold |
 | `Enter` | Change Value | `ChangeFieldValue` | CE |
 | `Ctrl+Enter` or `F2` | Rename Field | `RenameField` | CE |
 | `Ins` | Insert 4 Bytes | `InsertField` | CE |

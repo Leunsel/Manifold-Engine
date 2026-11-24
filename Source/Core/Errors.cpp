@@ -380,6 +380,9 @@ namespace Manifold
             { ErrorCode::TableRecordAmbiguous, "More than one memory record matches {}.",
                 "The description or path is not unique in the table, so it does not say which record is meant.",
                 "Name it by a path (manifold.record.find({ \"Group\", \"Name\" })) or from a record above it (record.find), give the records distinct descriptions, or name it by its id (a form takes record = <id>, the Form Editor #id). manifold.record.findAll and the Address List Debug window list such records." },
+            { ErrorCode::StructNotFound, "No structure definition was found in {}.",
+                "The text holds no struct, class or union with a body, or no ReClass.NET class.",
+                "Paste whole definitions (struct Name { ... };), not only the fields; C# needs struct or class with its braces." },
 
             { ErrorCode::LuaSyntax, "Lua syntax error: {}.",
                 "The script does not compile.",

@@ -141,6 +141,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-6009 | The memory record … is gone. | The record was deleted, or the table was replaced by a new, opened or restored one. | Find the record again with manifold.record.find. |
 | ME-6010 | The memory record … has no value. | Scripts and groups are switched on and off; only value records have an address and a value. | Use setActive for scripts and groups. |
 | ME-6011 | More than one memory record matches …. | The description or path is not unique in the table, so it does not say which record is meant. | Name it by a path (manifold.record.find({ "Group", "Name" })) or from a record above it (record.find), give the records distinct descriptions, or name it by its id (a form takes record = <id>, the Form Editor #id). manifold.record.findAll and the Address List Debug window list such records. |
+| ME-6012 | No structure definition was found in …. | The text holds no struct, class or union with a body, or no ReClass.NET class. | Paste whole definitions (struct Name { ... };), not only the fields; C# needs struct or class with its braces. |
 
 ## Lua
 

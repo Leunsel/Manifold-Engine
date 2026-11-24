@@ -35,6 +35,7 @@
 #include "UI/SignatureWindow.h"
 #include "UI/CodeFilterWindow.h"
 #include "UI/TableCleanupWindow.h"
+#include "UI/StructExchangeWindow.h"
 #include "UI/CommandPalette.h"
 #include "UI/StaticPointersWindow.h"
 #include "UI/StructureWindow.h"
@@ -152,6 +153,8 @@ namespace Manifold::UI
             OpenCodeFilter();
         else if (window == "tablecleanup")
             OpenTableCleanup();
+        else if (window.starts_with("structimport:"))
+            OpenStructImport(false, Utf8ToWide(window.substr(13)));
         else if (window == "palette")
             m_palette->Open();
         else if (window.starts_with("palette:"))
@@ -308,6 +311,7 @@ namespace Manifold::UI
         drawOne("Signature maker", m_signatures);
         drawOne("Code filter", m_codeFilter);
         drawOne("Table cleanup", m_tableCleanup);
+        drawOne("Struct import", m_structImport);
         drawOne("Pointer scan", m_pointerScan);
         drawOne("Breakpoints", m_breakpoints);
         drawOne("Thread list", m_threadList);
@@ -1004,6 +1008,16 @@ namespace Manifold::UI
         else
             m_tableCleanup->Look();
         m_tableCleanup->Show();
+    }
+
+    void Workspace::OpenStructImport(bool clipboard, const std::filesystem::path& file)
+    {
+        // ∑ The window is made for one look at what came in; a cancelled dialog
+        //   leaves an earlier look open as it was.
+        auto window = std::make_unique<StructImportWindow>(*this);
+        const bool loaded = !file.empty() ? window->FromPath(file) : clipboard ? window->FromClipboard() : window->FromFile();
+        if (loaded)
+            m_structImport = std::move(window);
     }
 
     void Workspace::OpenPatchScan()

@@ -230,6 +230,8 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Table\RecordCheck.cpp" />
     <ClCompile Include="..\Source\Table\RecordPath.cpp" />
     <ClCompile Include="..\Source\Table\RttiStructures.cpp" />
+    <ClCompile Include="..\Source\Table\StructExchange.cpp" />
+    <ClCompile Include="..\Source\Table\StructReClass.cpp" />
     <ClCompile Include="..\Source\Table\Structures.cpp" />
     <ClCompile Include="..\Source\Table\TableCleanup.cpp" />
     <ClCompile Include="..\Source\Table\TableFiles.cpp" />
@@ -314,6 +316,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\UI\SignatureWindow.cpp" />
     <ClCompile Include="..\Source\UI\SplashScreen.cpp" />
     <ClCompile Include="..\Source\UI\StaticPointersWindow.cpp" />
+    <ClCompile Include="..\Source\UI\StructExchangeWindow.cpp" />
     <ClCompile Include="..\Source\UI\StructureWindow.cpp" />
     <ClCompile Include="..\Source\UI\TableCleanupWindow.cpp" />
     <ClCompile Include="..\Source\UI\TableFilesWindow.cpp" />
@@ -441,6 +444,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Table\RecordCheck.h" />
     <ClInclude Include="..\Source\Table\RecordPath.h" />
     <ClInclude Include="..\Source\Table\RttiStructures.h" />
+    <ClInclude Include="..\Source\Table\StructExchange.h" />
     <ClInclude Include="..\Source\Table\Structures.h" />
     <ClInclude Include="..\Source\Table\TableCleanup.h" />
     <ClInclude Include="..\Source\Table\TableFiles.h" />
@@ -530,6 +534,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\UI\SignatureWindow.h" />
     <ClInclude Include="..\Source\UI\SplashScreen.h" />
     <ClInclude Include="..\Source\UI\StaticPointersWindow.h" />
+    <ClInclude Include="..\Source\UI\StructExchangeWindow.h" />
     <ClInclude Include="..\Source\UI\StructureWindow.h" />
     <ClInclude Include="..\Source\UI\TableCleanupWindow.h" />
     <ClInclude Include="..\Source\UI\TableFilesWindow.h" />

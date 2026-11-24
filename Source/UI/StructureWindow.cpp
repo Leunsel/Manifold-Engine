@@ -1,4 +1,5 @@
 #include "UI/StructureWindow.h"
+#include "UI/StructExchangeWindow.h"
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
@@ -959,7 +960,8 @@ namespace Manifold::UI
 
     bool StructureWindow::IsWindowCommand(Command command)
     {
-        return command == Command::DefineStructure || command == Command::AddStructureColumn || command == Command::CollapseStructure || command == Command::StructureGotoAddress;
+        return command == Command::DefineStructure || command == Command::AddStructureColumn || command == Command::CollapseStructure || command == Command::StructureGotoAddress ||
+               command == Command::ImportStructures || command == Command::ExportStructures;
     }
 
     void StructureWindow::RunCommand(Command command)
@@ -973,6 +975,11 @@ namespace Manifold::UI
         case Command::AddStructureColumn: m_columns.push_back({}); break;
         case Command::CollapseStructure: m_expanded.clear(); break;
         case Command::StructureGotoAddress: m_gotoOpen = true; break;
+        case Command::ImportStructures: m_workspace.OpenStructImport(false); break;
+        case Command::ExportStructures:
+            if (const Table::StructDefinition* current = Current())
+                ExportStructuresToFile(m_workspace, { current->Name }, StructFormat::Cpp, true);
+            break;
         default: break;
         }
     }
@@ -1110,6 +1117,8 @@ namespace Manifold::UI
                 StructureToAddressList(m_engine, *current, base);
             }
             ImGui::Separator();
+            ExchangeMenu(current);
+            ImGui::Separator();
             if (DangerMenuItem(ICON_FA_TRASH "  Delete the Structure", nullptr, current != nullptr))
             {
                 const std::string name = current->Name;
@@ -1143,6 +1152,51 @@ namespace Manifold::UI
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
+    }
+
+    void StructureWindow::ExchangeMenu(const Table::StructDefinition* current)
+    {
+        const bool any = !m_engine.Structures().Items.empty();
+        if (ImGui::BeginMenu(ICON_FA_FILE_EXPORT "  Export", any))
+        {
+            ImGui::MenuItem("All Structures", nullptr, &m_exportAll);
+            ItemTooltip("Off: the structure shown here and every one it points to or embeds. On: all structures of the table.");
+            ImGui::Separator();
+            std::vector<std::string> roots;
+            if (m_exportAll || !current)
+            {
+                for (const auto& structure : m_engine.Structures().Items)
+                    roots.push_back(structure->Name);
+            }
+            else
+                roots.push_back(current->Name);
+            const bool children = !m_exportAll && current;
+            if (ImGui::MenuItem(ICON_FA_FILE_CODE "  C/C++ Header...", ShortcutText(Command::ExportStructures)))
+                ExportStructuresToFile(m_workspace, roots, StructFormat::Cpp, children);
+            ItemTooltip("Packed to 1 byte with the gaps as padding, static_assert on the size and every offset: the layout is exactly the dissect's.");
+            if (ImGui::MenuItem(ICON_FA_FILE_CODE "  C# File..."))
+                ExportStructuresToFile(m_workspace, roots, StructFormat::CSharp, children);
+            ItemTooltip("Unsafe structs with an explicit layout ([StructLayout(LayoutKind.Explicit)] and [FieldOffset]).");
+            if (ImGui::MenuItem(ICON_FA_PROJECT_DIAGRAM "  ReClass.NET Project..."))
+                ExportStructuresToFile(m_workspace, roots, StructFormat::ReClass, children);
+            ItemTooltip("An .rcnet file ReClass.NET 1.2 and newer open; gaps become Hex nodes.");
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy as C/C++"))
+                CopyStructures(m_workspace, roots, StructFormat::Cpp, children);
+            if (ImGui::MenuItem(ICON_FA_COPY "  Copy as C#"))
+                CopyStructures(m_workspace, roots, StructFormat::CSharp, children);
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu(ICON_FA_FILE_IMPORT "  Import"))
+        {
+            if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  From File...", ShortcutText(Command::ImportStructures)))
+                m_workspace.OpenStructImport(false);
+            ItemTooltip("A C/C++ header, a C# file or a ReClass.NET project (.rcnet). You see what it holds before anything is added.");
+            if (ImGui::MenuItem(ICON_FA_PASTE "  From Clipboard"))
+                m_workspace.OpenStructImport(true);
+            ItemTooltip("struct and class definitions as text, C/C++ or C#.");
+            ImGui::EndMenu();
+        }
     }
 
     void StructureWindow::FieldShortcuts(int pointerSize)

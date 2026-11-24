@@ -396,6 +396,12 @@
     <ClCompile Include="..\Source\Table\RttiStructures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Table\StructExchange.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Table\StructReClass.cpp">
+      <Filter>Source\Table</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Table\Structures.cpp">
       <Filter>Source\Table</Filter>
     </ClCompile>
@@ -601,6 +607,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\SpeedhackTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\StructExchangeTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\StructureTests.cpp">
