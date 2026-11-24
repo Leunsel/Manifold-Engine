@@ -116,6 +116,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\App\CodeFilter.cpp" />
     <ClCompile Include="..\Source\App\Commands.cpp" />
     <ClCompile Include="..\Source\App\CrashHandler.cpp" />
+    <ClCompile Include="..\Source\App\CrashReport.cpp" />
     <ClCompile Include="..\Source\App\Diagnostics.cpp" />
     <ClCompile Include="..\Source\App\Engine.cpp" />
     <ClCompile Include="..\Source\App\ManagedSession.cpp" />
@@ -189,6 +190,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Lua\LuaCompatGaps.cpp" />
     <ClCompile Include="..\Source\Lua\LuaCompatSystem.cpp" />
     <ClCompile Include="..\Source\Lua\LuaConsole.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaCrash.cpp" />
     <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp" />
     <ClCompile Include="..\Source\Lua\LuaDotNet.cpp" />
     <ClCompile Include="..\Source\Lua\LuaEngine.cpp" />
@@ -233,6 +235,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Target\CodeCall.cpp" />
     <ClCompile Include="..\Source\Target\CodeMap.cpp" />
     <ClCompile Include="..\Source\Target\Coverage.cpp" />
+    <ClCompile Include="..\Source\Target\CrashWatch.cpp" />
     <ClCompile Include="..\Source\Target\FrameCalls.cpp" />
     <ClCompile Include="..\Source\Target\Il2CppRuntime.cpp" />
     <ClCompile Include="..\Source\Target\ManagedAgent.cpp" />
@@ -323,6 +326,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\App\CodeFilter.h" />
     <ClInclude Include="..\Source\App\Commands.h" />
     <ClInclude Include="..\Source\App\CrashHandler.h" />
+    <ClInclude Include="..\Source\App\CrashReport.h" />
     <ClInclude Include="..\Source\App\Diagnostics.h" />
     <ClInclude Include="..\Source\App\Engine.h" />
     <ClInclude Include="..\Source\App\ManagedSession.h" />
@@ -395,6 +399,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Lua\LuaCompatGaps.h" />
     <ClInclude Include="..\Source\Lua\LuaCompatScripts.h" />
     <ClInclude Include="..\Source\Lua\LuaConsole.h" />
+    <ClInclude Include="..\Source\Lua\LuaCrash.h" />
     <ClInclude Include="..\Source\Lua\LuaDocBinding.h" />
     <ClInclude Include="..\Source\Lua\LuaDocs.h" />
     <ClInclude Include="..\Source\Lua\LuaDotNet.h" />
@@ -434,6 +439,8 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Target\CodeMap.h" />
     <ClInclude Include="..\Source\Target\Coverage.h" />
     <ClInclude Include="..\Source\Target\CoverageProtocol.h" />
+    <ClInclude Include="..\Source\Target\CrashProtocol.h" />
+    <ClInclude Include="..\Source\Target\CrashWatch.h" />
     <ClInclude Include="..\Source\Target\FrameCalls.h" />
     <ClInclude Include="..\Source\Target\Il2CppRuntime.h" />
     <ClInclude Include="..\Source\Target\ManagedAgent.h" />

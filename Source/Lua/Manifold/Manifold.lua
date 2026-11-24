@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 30
+local API_VERSION = 31
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -2183,6 +2183,39 @@ do
     doc = "The steps since `prepare`, oldest first: rounds (`\"filterOut\"`, `\"keepOnly\"`) and refines (`\"refine\"`).",
   }, function()
     return native.codefilterHistory()
+  end)
+end
+
+-- ∑ In a do block like manifold.codefilter: the main chunk is close to Lua's limit of 200 locals.
+do
+  local crash = area("crash", "The crash watch: finds the script behind a crash of the game. Every Auto Assembler run that changes the game notes what it put there (its allocations and the bytes it patched), and once a script has written code the agent library notes every exception that ends a process, in memory Manifold Engine owns. When the game ends with a crash, the last exception is matched against the scripts: in a script's code, in or right behind its patch, in its memory after it was switched off, or with its code on the stack. The result goes into the log and a notification, and `last` returns it. Settings: [Crashes] Watch.")
+
+  define(crash, "last", {
+    returns = "`{ process, headline, details, exitCode, exact, watched, code, address, accessed, thread, secondsBeforeEnd, scripts, switchedOn, lastSwitched, lastSwitchedSeconds }`, or nil",
+    doc = "The report of the last crash in this session, or `nil` when none crashed. `scripts` lists the scripts involved, most likely first, as `{ script, recordId, link, where, address }`; `link` is `\"code\"` (the failing instruction is in its code), `\"patch\"` (in bytes it patched), `\"behindPatch\"` (right behind its patch), `\"freed\"` (in its memory after it was switched off), `\"accessed\"` (the failing access reached its memory), `\"stack\"` (its code is on the stack) or `\"earlier\"` (an exception in its code shortly before). `exact` is true when the exit code is the noted exception's code. `code`, `address` (the instruction) and `accessed` (an access violation's address) are missing when no exception was noted.",
+  }, function()
+    return native.crashLast()
+  end)
+
+  define(crash, "watching", {
+    returns = "boolean",
+    doc = "Whether the agent watches the open process for crashes.",
+  }, function()
+    return native.crashWatching() == true
+  end)
+
+  define(crash, "start", {
+    returns = "true, or nil, error",
+    doc = "Starts the crash watch in the open process now, without waiting for a script to write code. Loads the agent library into the game. `ME-1021` when it cannot.",
+  }, function()
+    return result(native.crashStart())
+  end)
+
+  define(crash, "scripts", {
+    returns = "list of `{ script, recordId, on, ranges }`",
+    doc = "What the scripts put into the open process, as the crash watch matches it: per run that changed the game its label, record id, whether it is still on, and `ranges` of `{ address, size, kind, name }` with `kind` `\"alloc\"` or `\"patch\"`.",
+  }, function()
+    return native.crashScripts()
   end)
 end
 

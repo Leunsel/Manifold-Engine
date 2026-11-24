@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 30 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 31 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"0.1.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -296,6 +296,17 @@ The code filter: finds code by what it does instead of by a value. `prepare` col
 | `manifold.codefilter.candidates(limit?)` | list of `{ address, name, function, sources }` | What is left, in address order, at most `limit` (default 1000, up to 1000000). `name` is the address as the disassembler names it, `sources` lists where it came from (`"unwind"`, `"export"`, `"call"`, `"pointer"`, `"import"`, `"block"`), `function` is set for blocks. |
 | `manifold.codefilter.status()` | `{ prepared, running, kind, remaining, total, liveHits, seconds }` | The filter's state: whether candidates are collected, whether a round runs and which, how many are left of how many collected, and for a running round how many candidates ran so far and for how long. |
 | `manifold.codefilter.history()` | list of `{ kind, before, after, hits, skipped, seconds }` | The steps since `prepare`, oldest first: rounds (`"filterOut"`, `"keepOnly"`) and refines (`"refine"`). |
+
+## manifold.crash
+
+The crash watch: finds the script behind a crash of the game. Every Auto Assembler run that changes the game notes what it put there (its allocations and the bytes it patched), and once a script has written code the agent library notes every exception that ends a process, in memory Manifold Engine owns. When the game ends with a crash, the last exception is matched against the scripts: in a script's code, in or right behind its patch, in its memory after it was switched off, or with its code on the stack. The result goes into the log and a notification, and `last` returns it. Settings: [Crashes] Watch.
+
+| Function | Returns | |
+| --- | --- | --- |
+| `manifold.crash.last()` | `{ process, headline, details, exitCode, exact, watched, code, address, accessed, thread, secondsBeforeEnd, scripts, switchedOn, lastSwitched, lastSwitchedSeconds }`, or nil | The report of the last crash in this session, or `nil` when none crashed. `scripts` lists the scripts involved, most likely first, as `{ script, recordId, link, where, address }`; `link` is `"code"` (the failing instruction is in its code), `"patch"` (in bytes it patched), `"behindPatch"` (right behind its patch), `"freed"` (in its memory after it was switched off), `"accessed"` (the failing access reached its memory), `"stack"` (its code is on the stack) or `"earlier"` (an exception in its code shortly before). `exact` is true when the exit code is the noted exception's code. `code`, `address` (the instruction) and `accessed` (an access violation's address) are missing when no exception was noted. |
+| `manifold.crash.watching()` | boolean | Whether the agent watches the open process for crashes. |
+| `manifold.crash.start()` | true, or nil, error | Starts the crash watch in the open process now, without waiting for a script to write code. Loads the agent library into the game. `ME-1021` when it cannot. |
+| `manifold.crash.scripts()` | list of `{ script, recordId, on, ranges }` | What the scripts put into the open process, as the crash watch matches it: per run that changed the game its label, record id, whether it is still on, and `ranges` of `{ address, size, kind, name }` with `kind` `"alloc"` or `"patch"`. |
 
 ## manifold.dotnet
 

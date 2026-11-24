@@ -2066,6 +2066,11 @@ namespace Manifold::Asm
                                                       BytesPreview(undo.back().Bytes) + ")");
                 }
                 m_result.Writes = std::move(merged);
+                for (const auto& [key, address] : m_placed)
+                {
+                    const auto name = m_labels.find(key);
+                    m_result.Labels[name != m_labels.end() ? name->second : key] = address;
+                }
                 return true;
             }
 

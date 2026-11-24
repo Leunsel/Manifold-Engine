@@ -1084,6 +1084,13 @@ struct CoverProbe
 extern "C" __declspec(dllexport) CoverProbe g_coverProbe = {};
 extern "C" __declspec(dllexport) volatile long g_coverBranch = 0;
 
+// For the crash tests: a game function that a script calls with a bad
+// pointer, so the crash happens in game code with the script on the stack.
+extern "C" __declspec(dllexport) __declspec(noinline) int CrashRead(const volatile int* pointer)
+{
+    return *pointer + 1;
+}
+
 // A virtual method that is a leaf (no unwind entry on 64-bit), never called
 // directly and not exported: only its vtable leads to it.
 struct CoverShape
@@ -1255,6 +1262,8 @@ int main(int argc, char** argv)
             StartSpeedProbe();
         else if (std::strcmp(argv[i], "--codefilter") == 0)
             StartCoverProbe();
+        else if (std::strcmp(argv[i], "--crash") == 0)
+            ::SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);  // a crash ends the process at once, without the Windows dialog
         else if (std::strcmp(argv[i], "--mono-agent") == 0)
             g_agentMode = AgentMode::Good;
         else if (std::strcmp(argv[i], "--mono-agent=bad-handles") == 0)

@@ -7,8 +7,9 @@
 namespace Manifold::Debug::Veh
 {
     constexpr std::uint32_t kMagic = 0x56454830u;
-    constexpr std::uint32_t kVersion = 3;
+    constexpr std::uint32_t kVersion = 4;
     constexpr int kMaxWatches = 4;
+    constexpr int kMaxRegions = 64;
     constexpr int kMaxEntries = 256;
     constexpr std::uint64_t kHostSilenceMs = 4000;
     constexpr int kFpuBytes = 160;
@@ -137,6 +138,11 @@ namespace Manifold::Debug::Veh
         volatile std::uint64_t ResumeEvent;
         volatile std::uint32_t KeepSuspended;
         std::uint32_t Pad7;
+        // More ranges for ExceptionInRegion: the memory the scripts put into
+        // the game, as [begin, end) pairs.
+        volatile std::uint32_t RegionCount;
+        std::uint32_t Pad8;
+        volatile std::uint64_t Regions[kMaxRegions][2];
     };
 
     static_assert(alignof(std::uint64_t) == 8, "the 32-bit and the 64-bit agent share this layout");

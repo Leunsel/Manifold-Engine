@@ -1,4 +1,5 @@
 #include "App/Engine.h"
+#include "Debug/VehProtocol.h"
 
 #include "App/Sounds.h"
 
@@ -49,6 +50,7 @@ namespace Manifold
         m_tracer.Stop();
         m_codeFilter.Reset();
         m_coverage.Leave();
+        m_crashWatch.Leave();
         m_debugger.Detach();
         m_speedhack.Leave();
         m_target.Mono().Stop();
@@ -228,6 +230,10 @@ namespace Manifold
         LOG_SUCCESS("Process", Format("Opened %s (pid %u, %s)", m_target.Process()->Name().c_str(), Raw(m_target.Process()->Id()), m_target.Process()->Is64Bit() ? "64-bit" : "32-bit"));
         m_speedhack.Attach(m_target.Process());
         m_coverage.Attach(m_target.Process());
+        m_crashLedger.Reset();
+        m_crashWatchFailed = false;
+        m_crashWatchWanted = false;
+        m_crashWatch.Attach(m_target.Process());
         m_rtti.ProcessOpened();
         m_lua->OnProcessOpened();
         m_unreal.ProcessOpened();
@@ -258,6 +264,7 @@ namespace Manifold
         m_tracer.Stop();
         m_codeFilter.Reset();
         m_coverage.Leave();
+        m_crashWatch.Leave();
         m_debugger.Detach();
         m_speedhack.Leave();
         m_unreal.ProcessClosed();
@@ -307,6 +314,9 @@ namespace Manifold
     Status Engine::ApplyExceptionBreak()
     {
         const int mode = std::clamp(m_settings.BreakOnException, 0, 2);
+        m_scriptRegionsChanged = false;
+        m_debugger.SetExceptionRegions(mode == 2 && m_settings.BreakInScriptMemory ? ScriptRegions(m_crashLedger.Footprints(), Debug::Veh::kMaxRegions)
+                                                                                    : std::vector<std::pair<std::uint64_t, std::uint64_t>>{});
         if (mode != 2)
         {
             m_debugger.SetExceptionBreak(mode == 1 ? Debug::ExceptionBreak::Always : Debug::ExceptionBreak::Never, 0, 0);
@@ -317,6 +327,12 @@ namespace Manifold
         Status status = Status::Success();
         const std::string first = Trim(m_settings.ExceptionRegionStart);
         const std::string last = Trim(m_settings.ExceptionRegionStop);
+        // ∑ With the scripts' memory a region of its own is optional (CE: "automatically add allocated memory as watched regions").
+        if (first.empty() && m_settings.BreakInScriptMemory)
+        {
+            m_debugger.SetExceptionBreak(Debug::ExceptionBreak::InRegion, 0, 0);
+            return Status::Success();
+        }
         if (first.empty())
             status = Status::Fail(ErrorCode::DebugBadExpression, "the region has no start");
         if (status && last.empty() && m_target.Process())
@@ -513,7 +529,93 @@ namespace Manifold
             options.IncludeFolder = std::filesystem::path(Utf8ToWide(m_tables.Table().FilePath)).parent_path();
         else
             options.IncludeFolder = Paths::AutorunFolder();
-        return Asm::RunAutoAssembler(script, host, memory, options);
+        if (checkOnly || !host.Process)
+            return Asm::RunAutoAssembler(script, host, memory, options);
+        // ∑ Every run that changes the game notes what it put there, so a
+        //   crash can be traced to it; the first one that writes code starts
+        //   the crash watch (on the main thread, from Tick).
+        const Asm::AaMemory before = memory;
+        const std::uint64_t started = ::GetTickCount64();  // a createthread in the script may crash the game before the run returns
+        Asm::AaResult result = Asm::RunAutoAssembler(script, host, memory, options);
+        if (result.Ok() && (!result.Writes.empty() || memory.Allocations.size() != before.Allocations.size()))
+        {
+            std::string label = options.LogTitle;
+            if (label.size() >= 2 && label.front() == '"' && label.back() == '"')
+                label = label.substr(1, label.size() - 2);
+            if (label.empty())
+                label = owner.empty() ? std::string("Auto Assembler") : owner;
+            m_crashLedger.Note(std::move(label), recordId, section, result, before, memory, started);
+            if (section != Asm::AaSection::Disable && !result.Writes.empty() && m_settings.CrashWatch && !Target::Process::DryRun())
+                m_crashWatchWanted = true;
+            m_scriptRegionsChanged = true;
+        }
+        return result;
+    }
+
+    void Engine::StartCrashWatch()
+    {
+        if (!m_crashWatchWanted.exchange(false))
+            return;
+        if (!m_settings.CrashWatch || m_crashWatchFailed || !m_target.Process() || !m_target.Process()->Alive() || m_crashWatch.Running() || Target::Process::DryRun())
+            return;
+        if (Status started = m_crashWatch.Start(); !started)
+        {
+            m_crashWatchFailed = true;
+            LOG_WARN("Crash", started.Text);
+        }
+    }
+
+    bool Engine::ExamineEnd()
+    {
+        const std::shared_ptr<Target::Process> process = m_target.Process();
+        if (!process)
+            return false;
+        DWORD code = 0;
+        if (!::GetExitCodeProcess(process->Handle(), &code) || code == STILL_ACTIVE)
+            return false;
+        std::uint64_t endTick = ::GetTickCount64();
+        FILETIME created{};
+        FILETIME exited{};
+        FILETIME kernel{};
+        FILETIME user{};
+        if (::GetProcessTimes(process->Handle(), &created, &exited, &kernel, &user))
+        {
+            FILETIME now{};
+            ::GetSystemTimeAsFileTime(&now);
+            const std::uint64_t nowTime = (static_cast<std::uint64_t>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
+            const std::uint64_t exitTime = (static_cast<std::uint64_t>(exited.dwHighDateTime) << 32) | exited.dwLowDateTime;
+            if (exitTime && exitTime <= nowTime)
+            {
+                const std::uint64_t ago = (nowTime - exitTime) / 10000;
+                endTick = endTick > ago ? endTick - ago : 0;
+            }
+        }
+        const Target::CrashCapture capture = m_crashWatch.Capture();
+        if (!capture.Watching && capture.Records.empty() && !ExceptionExitCode(code))
+            return false;
+        CrashContext context;
+        context.ExitCode = code;
+        context.EndTick = endTick;
+        context.Process = process->Name();
+        context.Footprints = m_crashLedger.Footprints();
+        context.Describe = [this](std::uint64_t address) { return Describe(address); };
+        context.Disassembler = &Disassembler();
+        CrashReport report = AttributeCrash(capture, context);
+        if (!report.Crashed)
+            return false;
+        RuntimeLog::WriteDetailed(LogLevel::Error, "Crash", __FILE__, __FUNCTION__, __LINE__, report.Headline, report.Details);
+        m_notifications.Post(LogLevel::Error, report.Headline, Now());
+        {
+            std::lock_guard lock(m_crashLock);
+            m_lastCrash = std::move(report);
+        }
+        return true;
+    }
+
+    std::optional<CrashReport> Engine::LastCrash() const
+    {
+        std::lock_guard lock(m_crashLock);
+        return m_lastCrash;
     }
 
     std::string Engine::AutoAssemblerLogTitle(std::string_view owner, const Table::MemoryRecord* record)
@@ -611,10 +713,18 @@ namespace Manifold
             if (!m_target.Process()->Alive())
             {
                 m_managed.NoteExplorer(true);
-                Notify(LogLevel::Warning, ErrorMessage(ErrorCode::ProcessExited));
+                if (!ExamineEnd())
+                    Notify(LogLevel::Warning, ErrorMessage(ErrorCode::ProcessExited));
                 CloseProcess();
             }
         }
+        if (m_crashWatchWanted && m_target.Process())
+        {
+            PROFILE_ZONE("Crash watch");
+            StartCrashWatch();
+        }
+        if (m_scriptRegionsChanged && m_debugger.Attached() && m_settings.BreakOnException == 2 && m_settings.BreakInScriptMemory)
+            ApplyExceptionBreak();
 
         {
             PROFILE_ZONE("Open processes automatically");
@@ -663,6 +773,12 @@ namespace Manifold
             if (info.Broken && info.Serial != m_lastBreakSerial)
             {
                 m_lastBreakSerial = info.Serial;
+                if (info.Exception.Raised)
+                {
+                    if (const auto script = ScriptAt(m_crashLedger.Footprints(), info.Address, ::GetTickCount64(), [this](std::uint64_t address) { return Describe(address); }))
+                        Notify(LogLevel::Warning, Format("Stopped in the code of \"%s\" (%s): %s. The game waits in the debugger; without it, this would likely have crashed the game.",
+                                                      script->Label.c_str(), script->Where.c_str(), Debug::DescribeException(info.Exception).c_str()));
+                }
                 if (info.BreakpointAddress && m_lua->HasBreakpointCallback(info.BreakpointAddress))
                 {
                     if (m_lua->RunBreakpointCallback(info.BreakpointAddress))

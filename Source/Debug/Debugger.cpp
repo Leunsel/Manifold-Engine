@@ -1819,7 +1819,18 @@ namespace Manifold::Debug
             return false;
         if (mode == ExceptionBreak::Always)
             return true;
-        return address >= m_exceptionStart.load() && address < m_exceptionStop.load();
+        if (address >= m_exceptionStart.load() && address < m_exceptionStop.load())
+            return true;
+        std::lock_guard lock(m_regionLock);
+        return std::any_of(m_exceptionRegions.begin(), m_exceptionRegions.end(), [&](const auto& region) { return address >= region.first && address < region.second; });
+    }
+
+    void Debugger::SetExceptionRegions(std::vector<std::pair<std::uint64_t, std::uint64_t>> regions)
+    {
+        if (regions.size() > static_cast<std::size_t>(Veh::kMaxRegions))
+            regions.resize(static_cast<std::size_t>(Veh::kMaxRegions));
+        std::lock_guard lock(m_regionLock);
+        m_exceptionRegions = std::move(regions);
     }
 
     void Debugger::SetExceptionBreak(ExceptionBreak mode, std::uint64_t start, std::uint64_t stop)
@@ -1840,6 +1851,20 @@ namespace Manifold::Debug
             return;
         const std::uint64_t range[2] = { m_exceptionStart.load(), m_exceptionStop.load() };
         m_process->Write(m_vehBlock + offsetof(Veh::Block, ExceptionStart), range, sizeof(range));
+        {
+            std::lock_guard lock(m_regionLock);
+            std::uint64_t regions[Veh::kMaxRegions][2] = {};
+            const std::uint32_t count = static_cast<std::uint32_t>(std::min<std::size_t>(m_exceptionRegions.size(), Veh::kMaxRegions));
+            for (std::uint32_t i = 0; i < count; ++i)
+            {
+                regions[i][0] = m_exceptionRegions[i].first;
+                regions[i][1] = m_exceptionRegions[i].second;
+            }
+            const std::uint32_t none = 0;
+            m_process->Write(m_vehBlock + offsetof(Veh::Block, RegionCount), &none, sizeof(none));
+            m_process->Write(m_vehBlock + offsetof(Veh::Block, Regions), regions, sizeof(regions));
+            m_process->Write(m_vehBlock + offsetof(Veh::Block, RegionCount), &count, sizeof(count));
+        }
         const ExceptionBreak mode = m_exceptionMode.load();
         const std::uint32_t raw = mode == ExceptionBreak::Always ? Veh::ExceptionAlways : mode == ExceptionBreak::InRegion ? Veh::ExceptionInRegion : Veh::ExceptionNever;
         m_process->Write(m_vehBlock + offsetof(Veh::Block, ExceptionMode), &raw, sizeof(raw));

@@ -1629,6 +1629,22 @@ namespace Manifold::UI
             changed |= ToggleSwitch("##registers", &settings.ShowRegistersOnBreak);
             list.EndRow();
         }
+        if (list.Row("Add Script Memory to Exception Regions", "Break on Exception > In a Region also stops in the code scripts put into the game.", toggle))
+        {
+            if (ToggleSwitch("##scriptregions", &settings.BreakInScriptMemory))
+            {
+                m_workspace.Report(m_workspace.Core().ApplyExceptionBreak());
+                changed = true;
+            }
+            list.EndRow();
+        }
+
+        list.Section("Crashes");
+        if (list.Row("Find the Script Behind a Crash", "Once a script writes code, a small library in the game notes the exception that ends it.", toggle))
+        {
+            changed |= ToggleSwitch("##crashwatch", &settings.CrashWatch);
+            list.EndRow();
+        }
 
         list.Section("Unity");
         if (list.Row("Start Scene Explorer Automatically", "Starts when a Mono runtime is loaded; its agent runs inside the game.", toggle))

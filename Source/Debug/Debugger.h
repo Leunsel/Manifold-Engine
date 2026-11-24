@@ -220,6 +220,8 @@ namespace Manifold::Debug
         void SetVectors(const VectorRegisters& vectors);
         void SetFpu(const FpuRegisters& fpu);
         void SetExceptionBreak(ExceptionBreak mode, std::uint64_t start, std::uint64_t stop);
+        // More ranges for ExceptionBreak::InRegion (the scripts' memory), at most Veh::kMaxRegions.
+        void SetExceptionRegions(std::vector<std::pair<std::uint64_t, std::uint64_t>> regions);
         ExceptionBreak ExceptionBreakMode() const { return m_exceptionMode.load(); }
         Status BreakNow();
         void Unpatch(std::uint64_t address, std::uint8_t* buffer, std::size_t size) const;
@@ -336,6 +338,8 @@ namespace Manifold::Debug
         BreakException m_cause;
         std::atomic<ExceptionBreak> m_exceptionMode{ ExceptionBreak::Never };
         std::atomic<std::uint64_t> m_exceptionStart{ 0 };
+        mutable std::mutex m_regionLock;
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> m_exceptionRegions;
         std::atomic<std::uint64_t> m_exceptionStop{ 0 };
         std::atomic<bool> m_stepping{ false };
         std::uint64_t m_breakSerial = 0;

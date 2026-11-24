@@ -1,0 +1,127 @@
+#pragma once
+
+#include "Asm/AutoAssembler.h"
+#include "Target/CrashWatch.h"
+
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace Manifold
+{
+    namespace Disasm
+    {
+        class Disassembler;
+    }
+
+    enum class ScriptRangeKind
+    {
+        Allocation,
+        Patch
+    };
+
+    struct ScriptRange
+    {
+        std::uint64_t Begin = 0;
+        std::uint64_t End = 0;
+        ScriptRangeKind Kind = ScriptRangeKind::Allocation;
+        std::string Name;  // the allocation's name; empty for a patch
+    };
+
+    // What one script put into the game: its allocations (code caves, data)
+    // and the bytes it patched outside of them, with its labels for names.
+    struct ScriptFootprint
+    {
+        std::string Label;
+        int RecordId = 0;
+        std::vector<ScriptRange> Ranges;
+        std::map<std::uint64_t, std::string> Labels;
+        std::uint64_t OnTick = 0;   // GetTickCount64 when its [ENABLE] ran
+        std::uint64_t OffTick = 0;  // when its [DISABLE] ran; 0 while it is on
+    };
+
+    // The scripts' footprints for one process. Every Auto Assembler run that
+    // changes the game notes itself here, from any thread.
+    class CrashLedger
+    {
+    public:
+        static constexpr std::size_t kMaxFootprints = 256;
+
+        void Reset();
+        void Note(std::string label, int recordId, Asm::AaSection section, const Asm::AaResult& result, const Asm::AaMemory& before, const Asm::AaMemory& after,
+            std::uint64_t tick);
+        std::vector<ScriptFootprint> Footprints() const;
+
+    private:
+        mutable std::mutex m_lock;
+        std::vector<ScriptFootprint> m_footprints;
+    };
+
+    enum class CrashLink
+    {
+        InCode,      // the instruction that failed is in the script's code
+        InPatch,     // ... in bytes the script patched
+        BehindPatch, // ... right behind a patch: a jump back landed in the middle of an instruction
+        RanFreed,    // the code ran in an allocation after the script was switched off
+        Accessed,    // the faulting access reached memory of the script
+        OnStack,     // the script's code is on the stack: it called what failed
+        Earlier      // an earlier exception, shortly before, was in the script's code
+    };
+
+    const char* CrashLinkText(CrashLink link);
+
+    struct CrashBlame
+    {
+        std::string Label;
+        int RecordId = 0;
+        CrashLink Link = CrashLink::InCode;
+        std::uint64_t Address = 0;
+        std::string Where;
+        int Weight = 0;
+    };
+
+    struct CrashReport
+    {
+        bool Crashed = false;
+        bool Watched = false;
+        std::uint32_t ExitCode = 0;
+        std::optional<Target::CrashRecord> Fatal;
+        bool Exact = false;                 // the exit code is the noted exception's code
+        double SecondsBeforeEnd = 0.0;
+        std::vector<CrashBlame> Blames;     // most likely first, one per script
+        std::vector<std::string> SwitchedOn;
+        std::string LastSwitched;
+        double LastSwitchedSeconds = 0.0;
+        std::string Process;
+        std::string Headline;
+        std::string Details;
+    };
+
+    struct CrashContext
+    {
+        std::uint32_t ExitCode = 0;
+        std::uint64_t EndTick = 0;
+        std::string Process;
+        std::vector<ScriptFootprint> Footprints;
+        std::function<std::string(std::uint64_t)> Describe;  // module+offset or a symbol; may be empty
+        const Disasm::Disassembler* Disassembler = nullptr;
+    };
+
+    bool ExceptionExitCode(std::uint32_t code);
+    std::string ExceptionName(std::uint32_t code);
+    // "access violation reading 0000000000000010" and the like.
+    std::string ExceptionText(const Target::CrashRecord& record, bool is64Bit);
+
+    CrashReport AttributeCrash(const Target::CrashCapture& capture, const CrashContext& context);
+
+    // The script whose memory holds the address now (its label and where in
+    // it), for a debugger stop.
+    std::optional<CrashBlame> ScriptAt(const std::vector<ScriptFootprint>& footprints, std::uint64_t address, std::uint64_t tick,
+        const std::function<std::string(std::uint64_t)>& describe);
+    // The memory of the scripts that are on, merged, at most `limit` ranges.
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> ScriptRegions(const std::vector<ScriptFootprint>& footprints, std::size_t limit);
+}

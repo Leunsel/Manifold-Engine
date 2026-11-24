@@ -638,10 +638,20 @@ namespace Manifold::UI
         if (ImGui::MenuItem("Always", nullptr, options.BreakOnException == 1))
             choose(1);
         ItemTooltip("Stop at every exception the program raises before its own handlers see it: access violations, C++ and .NET throws, divisions by zero... Mono and Unity games raise many on purpose.");
+        const bool scriptsOnly = options.BreakOnException == 2 && Trim(options.ExceptionRegionStart).empty() && options.BreakInScriptMemory;
+        if (ImGui::MenuItem("In Script Memory", nullptr, scriptsOnly))
+        {
+            options.ExceptionRegionStart.clear();
+            options.ExceptionRegionStop.clear();
+            options.BreakInScriptMemory = true;
+            choose(2);
+        }
+        ItemTooltip("Stop only at exceptions in code the scripts put into the game (their allocations and the bytes they patched), instead of letting them crash it. "
+                    "A script that is switched on joins at once.");
         std::string region = "In a region...";
         if (options.BreakOnException == 2 && !options.ExceptionRegionStart.empty())
             region = "In " + options.ExceptionRegionStart + (options.ExceptionRegionStop.empty() ? "" : " - " + options.ExceptionRegionStop) + "...";
-        if (ImGui::MenuItem(region.c_str(), nullptr, options.BreakOnException == 2))
+        if (ImGui::MenuItem(region.c_str(), nullptr, options.BreakOnException == 2 && !scriptsOnly))
         {
             m_exceptionStart = options.ExceptionRegionStart;
             m_exceptionStop = options.ExceptionRegionStop;
@@ -654,6 +664,13 @@ namespace Manifold::UI
             m_exceptionDialog = true;
         }
         ItemTooltip("Stop only at exceptions raised by code in one module or address range, for example the game's own module.");
+        if (ImGui::MenuItem("Add Script Memory to the Region", nullptr, options.BreakInScriptMemory))
+        {
+            options.BreakInScriptMemory = !options.BreakInScriptMemory;
+            m_engine.SaveOptionsSoon();
+            m_workspace.Report(m_engine.ApplyExceptionBreak());
+        }
+        ItemTooltip("Like Cheat Engine's \"automatically add allocated memory as watched regions\": the region also takes the memory every script that is on put into the game.");
         ImGui::Separator();
         ImGui::TextDisabled("Debug output and thread names are never stopped at");
     }

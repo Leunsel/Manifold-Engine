@@ -288,6 +288,7 @@ For 64-bit and 32-bit (WOW64) processes, through Windows or in-process (Settings
 
 - Software and hardware breakpoints, break, step into, step over, run until return.
 - Editing registers and flags, a stack view, and the debug output of the process in the log.
+- **Break on Exception** (Memory Viewer, Debug menu): *Never*, *Always*, *In Script Memory* or *In a Region*. *In Script Memory* stops only at exceptions in the code the scripts put into the game (their allocations and the bytes they patched), so a broken script pauses the game at the faulting instruction instead of crashing it, and a notice names the script and the label, such as *Stopped in the code of "Infinite Ammo" (code+12): access violation reading 0*. *Add Script Memory to the Region* does the same for a region of your own, like Cheat Engine's "automatically add allocated memory as watched regions"; a script that is switched on joins at once. Both debuggers (64 ranges for the in-process one).
 
 ### Register panel
 
@@ -489,6 +490,16 @@ For a single level, [Static pointers](#static-pointers) is quicker and stays its
 - **The rest of the program sees the original bytes.** While a round runs, reads show the bytes as they were (AoB scans, the Auto Assembler, the disassembler, the signature maker, Scan for Patches), and a write over an armed byte (a script, a breakpoint) takes that `int3` back first, so ending the round never undoes it. Both debuggers pass the filter's `int3`s on, also with "break on all exceptions".
 - **Limits.** Games that check their own code or run an anti-cheat notice the `int3`s; use it in single-player games. Code that is inlined into its caller has no start of its own (Refine to Blocks finds it inside the caller). Mono JIT methods and PDB-only functions are not collected yet (an imported list can hold them).
 - **Lua.** `manifold.codefilter.prepare`, `.import`, `.export`, `.start`, `.stop`, `.cancel`, `.undo`, `.reset`, `.refine`, `.candidates`, `.status` and `.history`; the window and the functions share one filter.
+
+## Crash attribution
+
+When the game crashes, the log and a notification name the script behind it.
+
+- **What a script put into the game.** Every Auto Assembler run that changes the game (a table script, the Auto Assembler window, `autoAssemble` from Lua) notes its allocations, the bytes it patched outside of them and its labels, with the time it was switched on and off.
+- **The crash watch.** Once a script has written code, the agent library (the same `ManifoldAgent.dll` the speedhack and the code filter use) watches the game: it notes every exception of a kind that ends a process (access violations, illegal instructions, divisions by zero, stack overflows, heap corruption) with the registers, the top of the stack and the bytes at the address, in memory Manifold Engine owns, so the notes survive the game's end. Exceptions a handler before it resolves (the debuggers' breakpoints, the code filter, a runtime's own null checks) never reach it. Settings → Debugger → *Find the Script Behind a Crash*.
+- **The verdict.** When the game ends with an exception code (or ends itself right after an exception in a script's code, as games with their own crash handler do), the last exception is matched against the scripts: the failing instruction in a script's code (*crashed in the code of "Infinite Ammo" (code+5)*), in bytes it patched, right behind its patch (a jump back into the middle of an instruction), in its memory after it was switched off, the faulting access in its memory, or its code on the stack (*crashed in game.exe+1234, called from the code of "Bad Call" (back)*). Without a match the report says that no script's code was involved and which script was switched last. The log entry's details hold the exception, the instruction, the registers, the stack, the scripts that were on and the other exceptions of the last 30 seconds.
+- **Lua.** `manifold.crash.last()` returns the report, `manifold.crash.scripts()` what the scripts put into the game, `manifold.crash.start()` and `.watching()` the watch.
+- **Limits.** A crash caused by data a script wrote (a value that makes the game fail later in its own code) shows only as the last switched script. A crash on a thread the game ends with its own handler before Windows sees it is matched by time only.
 
 ## Speedhack
 

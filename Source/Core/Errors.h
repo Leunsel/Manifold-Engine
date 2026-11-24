@@ -26,6 +26,7 @@
     X(ThreadTimedOut, 1018) \
     X(SpeedhackFailed, 1019) \
     X(CodeFilterFailed, 1020) \
+    X(CrashWatchFailed, 1021) \
     X(ScanNoValue, 2001) \
     X(ScanBadValue, 2002) \
     X(ScanBadPattern, 2003) \

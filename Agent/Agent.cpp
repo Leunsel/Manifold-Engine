@@ -13,6 +13,8 @@ void SpeedAttach(HINSTANCE instance);
 void CoverAttach(HINSTANCE instance);
 void CoverDetach();
 LONG CoverFilter(EXCEPTION_POINTERS* info);
+void CrashAttach();
+void CrashDetach();
 
 // The speedhack (Speed.cpp) hooks GetTickCount64 in this very process, so the
 // agent's own waits and timeouts read the real tick count from the shared user
@@ -547,7 +549,17 @@ namespace
         if (mode == ExceptionAlways)
             return true;
         const std::uint64_t at = reinterpret_cast<std::uintptr_t>(record.ExceptionAddress);
-        return mode == ExceptionInRegion && at >= block->ExceptionStart && at < block->ExceptionStop;
+        if (mode != ExceptionInRegion)
+            return false;
+        if (at >= block->ExceptionStart && at < block->ExceptionStop)
+            return true;
+        const std::uint32_t count = block->RegionCount < static_cast<std::uint32_t>(kMaxRegions) ? block->RegionCount : static_cast<std::uint32_t>(kMaxRegions);
+        for (std::uint32_t i = 0; i < count; ++i)
+        {
+            if (at >= block->Regions[i][0] && at < block->Regions[i][1])
+                return true;
+        }
+        return false;
     }
 
     struct Inside
@@ -1072,10 +1084,12 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         ::DisableThreadLibraryCalls(instance);
         SpeedAttach(instance);
         CoverAttach(instance);
+        CrashAttach();
     }
     else if (reason == DLL_PROCESS_DETACH && !reserved)
     {
         CoverDetach();
+        CrashDetach();
     }
     return TRUE;
 }

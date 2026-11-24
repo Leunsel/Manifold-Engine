@@ -162,6 +162,8 @@ namespace Manifold
         std::string CodeFilterKeepKeys = "F8";
         bool CodeFilterCalls = false;
         bool CodeFilterHotkeys = true;
+        bool CrashWatch = true;
+        bool BreakInScriptMemory = true;
 
         std::vector<std::string> RecentTables;
         std::string LastProcess;

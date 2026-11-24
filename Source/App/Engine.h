@@ -2,6 +2,7 @@
 
 #include "App/ActivationRunner.h"
 #include "App/CodeFilter.h"
+#include "App/CrashReport.h"
 #include "App/ManagedSession.h"
 #include "App/Notifications.h"
 #include "App/SessionBackup.h"
@@ -28,6 +29,7 @@
 #include "Table/Structures.h"
 #include "Target/CodeMap.h"
 #include "Target/Coverage.h"
+#include "Target/CrashWatch.h"
 #include "Target/Process.h"
 #include "Target/Speedhack.h"
 #include "Target/PdbSymbols.h"
@@ -35,6 +37,7 @@
 #include "Target/Symbols.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -138,6 +141,10 @@ namespace Manifold
         Target::Speedhack& Speed() { return m_speedhack; }
         Target::Coverage& CodeCoverage() { return m_coverage; }
         CodeFilter& Filter() { return m_codeFilter; }
+        Target::CrashWatch& Crashes() { return m_crashWatch; }
+        const CrashLedger& ScriptLedger() const { return m_crashLedger; }
+        // The report of the last crash of a process this session had open.
+        std::optional<CrashReport> LastCrash() const;
         bool UnrealClaims(std::uint64_t address) const;
         WriteHistory& Writes() { return m_writes; }
         SessionBackup& Backups() { return m_backup; }
@@ -220,6 +227,10 @@ namespace Manifold
 
     private:
         void UpdateAutoAttach();
+        void StartCrashWatch();
+        // Called once the process ended, before it is closed: true when it
+        // crashed and the report was posted.
+        bool ExamineEnd();
         Asm::AaResult Assemble(std::string_view script, Asm::AaSection section, Asm::AaMemory& memory, bool checkOnly, const std::string& owner, const Table::MemoryRecord* record,
             int* luaHeldBack, bool scanInCheck = false, std::string_view logTitle = {});
         Settings& m_settings;
@@ -252,5 +263,12 @@ namespace Manifold
         Target::Speedhack m_speedhack;
         Target::Coverage m_coverage;
         CodeFilter m_codeFilter{ *this };
+        Target::CrashWatch m_crashWatch;
+        CrashLedger m_crashLedger;
+        std::atomic<bool> m_crashWatchWanted{ false };
+        std::atomic<bool> m_scriptRegionsChanged{ false };
+        bool m_crashWatchFailed = false;
+        mutable std::mutex m_crashLock;
+        std::optional<CrashReport> m_lastCrash;
     };
 }

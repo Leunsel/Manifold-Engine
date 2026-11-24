@@ -100,6 +100,9 @@ namespace Manifold
             { ErrorCode::CodeFilterFailed, "The code filter could not do its work: {}.",
                 "The code filter loads a small library into the process and puts one-time breakpoints into its code. Protected games block the library or keep their code from being written.",
                 "Try again while the process runs normally. Addresses the filter could not use are listed as skipped, with the reason." },
+            { ErrorCode::CrashWatchFailed, "The crash watch could not be set up: {}.",
+                "To find the script behind a crash, a small library is loaded into the game and notes the exceptions that end a process. Protected games block that.",
+                "Scripts still work without it; only a crash cannot be traced to one. Settings > Find the Script Behind a Crash turns the watch off." },
 
             { ErrorCode::ScanNoValue, "Enter a value to scan for.",
                 "This scan type compares memory with a value, and the value field is empty.",

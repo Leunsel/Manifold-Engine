@@ -174,6 +174,8 @@ namespace Manifold
             { "CodeFilter", "KeepOnlyKeys", &Settings::CodeFilterKeepKeys },
             { "CodeFilter", "CallTargets", &Settings::CodeFilterCalls },
             { "CodeFilter", "Hotkeys", &Settings::CodeFilterHotkeys },
+            { "Crashes", "Watch", &Settings::CrashWatch },
+            { "Debugger", "BreakInScriptMemory", &Settings::BreakInScriptMemory },
             { "Recent", "LastProcess", &Settings::LastProcess },
             { "Theme", "Palette", &kPalette },
             { "Theme", "Appearance", &kAppearance },

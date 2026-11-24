@@ -76,6 +76,7 @@ namespace Manifold::Asm
         std::vector<std::string> Notes;
         std::map<std::string, std::uint64_t> Symbols;
         std::map<std::string, std::uint64_t> SymbolSizes;
+        std::map<std::string, std::uint64_t> Labels;  // every label the run placed, by its name as written, once the code is in the game
 
         bool Ok() const { return Error.Ok(); }
     };

@@ -72,6 +72,9 @@
     <ClCompile Include="..\Source\App\CrashHandler.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\CrashReport.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Diagnostics.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -291,6 +294,9 @@
     <ClCompile Include="..\Source\Lua\LuaConsole.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaCrash.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -415,6 +421,9 @@
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\Coverage.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Target\CrashWatch.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Target\FrameCalls.cpp">
@@ -681,6 +690,9 @@
     <ClInclude Include="..\Source\App\CrashHandler.h">
       <Filter>Source\App</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\App\CrashReport.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\App\Diagnostics.h">
       <Filter>Source\App</Filter>
     </ClInclude>
@@ -897,6 +909,9 @@
     <ClInclude Include="..\Source\Lua\LuaConsole.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Lua\LuaCrash.h">
+      <Filter>Source\Lua</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Lua\LuaDocBinding.h">
       <Filter>Source\Lua</Filter>
     </ClInclude>
@@ -1012,6 +1027,12 @@
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\CoverageProtocol.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\CrashProtocol.h">
+      <Filter>Source\Target</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Target\CrashWatch.h">
       <Filter>Source\Target</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Target\FrameCalls.h">

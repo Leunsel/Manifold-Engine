@@ -26,6 +26,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-1018 | A thread started in the process did not finish in time: …. | The code is still running or waits for something the game holds, for example while the game is paused in a debugger. | The memory the thread uses was kept. Check the code; a library's DllMain has to return quickly. |
 | ME-1019 | The speedhack could not be set up: …. | The speedhack loads a small library into the process and redirects its time functions. Protected games block that, and a time function can look different from what the program expects. | Try again while the process runs normally. If it names a time function, the other time sources still follow the speed. |
 | ME-1020 | The code filter could not do its work: …. | The code filter loads a small library into the process and puts one-time breakpoints into its code. Protected games block the library or keep their code from being written. | Try again while the process runs normally. Addresses the filter could not use are listed as skipped, with the reason. |
+| ME-1021 | The crash watch could not be set up: …. | To find the script behind a crash, a small library is loaded into the game and notes the exceptions that end a process. Protected games block that. | Scripts still work without it; only a crash cannot be traced to one. Settings > Find the Script Behind a Crash turns the watch off. |
 
 ## Scanner
 

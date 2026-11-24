@@ -63,6 +63,9 @@
     <ClCompile Include="..\Source\App\Commands.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\CrashReport.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Diagnostics.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -279,6 +282,9 @@
     <ClCompile Include="..\Source\Lua\LuaConsole.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Lua\LuaCrash.cpp">
+      <Filter>Source\Lua</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Lua\LuaDocBinding.cpp">
       <Filter>Source\Lua</Filter>
     </ClCompile>
@@ -405,6 +411,9 @@
     <ClCompile Include="..\Source\Target\Coverage.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Target\CrashWatch.cpp">
+      <Filter>Source\Target</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Target\FrameCalls.cpp">
       <Filter>Source\Target</Filter>
     </ClCompile>
@@ -511,6 +520,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\CoreTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\CrashTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\DebuggerTests.cpp">
