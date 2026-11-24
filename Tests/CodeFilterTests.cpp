@@ -5,6 +5,7 @@
 #include "App/Settings.h"
 #include "Core/Text.h"
 #include "Lua/LuaEngine.h"
+#include "Target/AgentLife.h"
 #include "Target/Coverage.h"
 #include "Target/CoverageProtocol.h"
 
@@ -42,6 +43,7 @@ namespace Manifold::Tests
             long Foreign;
             long Threads;
             long Input;
+            long Lock;
         };
 
         struct Child
@@ -357,6 +359,51 @@ namespace Manifold::Tests
             engine.Debugger().SetExceptionBreak(Debug::ExceptionBreak::Never, 0, 0);
             engine.Debugger().Detach();
             CHECK(AllOriginal(session));
+            CHECK(session.Target.Alive());
+        }
+
+        // The in-process debugger stops at the program's own int3 (still in its code) and the user
+        // goes on with "handled": the thread must go past the int3, not trap on it again forever,
+        // and the program's own handler must not see it.
+        void CheckHandledInt3(Session& session)
+        {
+            Engine& engine = session.Core;
+            Debug::Debugger& debugger = engine.Debugger();
+            const Status attached = engine.EnsureDebugger();
+            CHECK_MSG(attached.Ok() && debugger.UsingVeh(), session.Label + ": " + attached.Text);
+            if (!attached)
+                return;
+            const auto brokeAfter = [&](std::uint64_t serial)
+            {
+                return WaitFor(3000, [&] { engine.Tick(); const Debug::BreakInfo info = debugger.Break(); return info.Broken && info.Serial != serial; });
+            };
+            debugger.SetExceptionBreak(Debug::ExceptionBreak::InRegion, session.Foreign, session.Foreign + 16);
+            const long foreign = Field(session, &Probe::Foreign);
+            for (int round = 0; round < 2; ++round)
+            {
+                const std::uint64_t serial = debugger.Break().Serial;
+                SetField(session, offsetof(Probe, ForeignTrigger), Field(session, &Probe::ForeignTrigger) + 1);
+                const bool broke = brokeAfter(serial);
+                CHECK_MSG(broke, session.Label + ": the debugger did not stop at the program's own int3");
+                if (!broke)
+                    break;
+                const Debug::BreakInfo info = debugger.Break();
+                CHECK_MSG(info.Exception.Raised && info.Exception.Code == 0x80000003 && info.Address >= session.Foreign && info.Address < session.Foreign + 16,
+                    session.Label + ": stopped for " + info.Reason);
+                debugger.ResumeHandled();
+                const bool again = brokeAfter(info.Serial);
+                CHECK_MSG(!again, session.Label + ": going on handled from an int3 that is still in the code trapped on it again");
+                if (again)
+                    debugger.Resume(Debug::ResumeMode::Continue);
+            }
+            CHECK_MSG(Field(session, &Probe::Foreign) == foreign, session.Label + ": the program's handler saw an int3 the user had handled");
+            debugger.SetExceptionBreak(Debug::ExceptionBreak::Never, 0, 0);
+            if (debugger.Broken())
+                debugger.Resume(Debug::ResumeMode::Continue);
+            const long before = Field(session, &Probe::Foreign);
+            SetField(session, offsetof(Probe, ForeignTrigger), Field(session, &Probe::ForeignTrigger) + 1);
+            CHECK_MSG(WaitFor(2000, [&] { return Field(session, &Probe::Foreign) == before + 1; }), session.Label + ": the program's own int3 does not reach its handler after the debugger");
+            debugger.Detach();
             CHECK(session.Target.Alive());
         }
 
@@ -728,6 +775,44 @@ namespace Manifold::Tests
             return engine.Process()->FindExport(module, name);
         }
 
+        // The code turns unwritable while an int3 is in (here Arbitrary Code Guard, which the
+        // target switches on for good): the int3 cannot go back, so the round must stay active,
+        // the handler and the library must stay for its trap, and the table must not be replaced.
+        // Last on purpose: the target keeps the int3 and the guard until it ends.
+        void CheckStuckInt3(Session& session)
+        {
+            Engine& engine = session.Core;
+            const Status opened = engine.OpenProcess(MakeProcessId(session.Target.Info.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            if (!opened)
+                return;
+            Target::Coverage& coverage = engine.CodeCoverage();
+            const std::uint64_t never[] = { session.Never };
+            CHECK(coverage.Arm(never).Ok() && RawByte(session, session.Never) == Target::Cover::kInt3);
+            SetField(session, offsetof(Probe, Lock), 1);
+            const bool locked = WaitFor(3000, [&] { return Field(session, &Probe::Lock) >= 2; });
+            if (!locked || Field(session, &Probe::Lock) != 2)
+            {
+                Skip(session.Label + ": the target could not switch on Arbitrary Code Guard");
+                coverage.Release();
+                return;
+            }
+            const Status disarmed = coverage.Disarm();
+            CHECK_MSG(!disarmed.Ok() && disarmed.Text.find("could not be taken out") != std::string::npos,
+                session.Label + ": a round whose int3 could not go back counted as ended: " + disarmed.Text);
+            CHECK_MSG(RawByte(session, session.Never) == Target::Cover::kInt3, session.Label + ": the int3 is gone although the code could not be written");
+            const auto counts = coverage.Counts();
+            CHECK_MSG(counts && counts->Active && counts->Armed == 1, session.Label + ": the library gave up the round of an int3 still in the code");
+            const std::uint64_t action[] = { session.Action };
+            CHECK_MSG(!coverage.Arm(action).Ok() && StateIs(session, session.Never, Target::CoverState::Armed),
+                session.Label + ": a new round replaced the table while an int3 of the old one was still in the code");
+            CHECK_MSG(!coverage.Release().Ok() && coverage.Installed(), session.Label + ": release counted as done with an int3 still in the code");
+            Pause(static_cast<int>(Target::AgentGrace()) + 800);
+            CHECK_MSG(AgentLoaded(session), session.Label + ": the library unloaded while its int3 was still in the code");
+            CHECK(session.Target.Alive());
+            engine.CloseProcess();
+        }
+
         void CheckTarget(const std::filesystem::path& path, const std::filesystem::path& tests, const char* label)
         {
             Child target;
@@ -782,6 +867,7 @@ namespace Manifold::Tests
             CheckStress(session);
             CheckSkips(session);
             CheckDebugger(session);
+            CheckHandledInt3(session);
             CheckShadow(session);
             CheckWindowsDebugger(session);
             CheckFilter(session);
@@ -793,6 +879,7 @@ namespace Manifold::Tests
             engine.CloseProcess();
             CHECK_MSG(target.Alive(), std::string(label) + ": the target ended during the code filter tests");
             CHECK(AllOriginal(session));
+            CheckStuckInt3(session);
         }
 
         int RunCodeFilterTests(const std::filesystem::path& target)

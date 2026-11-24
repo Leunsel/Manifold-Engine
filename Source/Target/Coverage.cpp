@@ -51,6 +51,8 @@ namespace Manifold::Target
                 return "the library in the process is from another version of the program";
             case Cover::ResultStillInside:
                 return "a thread was still inside the library's exception handler";
+            case Cover::ResultStillArmed:
+                return "breakpoints could not be taken out of the code (its protection changed); they stay handled until the process ends";
             default:
                 return "the library reported an error";
             }
@@ -451,10 +453,13 @@ namespace Manifold::Target
     Status Coverage::ReleaseLocked()
     {
         Status result = Call(Cover::CallRelease);
+        if (!result)
+        {
+            ShowArmed();  // int3s that stayed keep their table and their shadow
+            return result;
+        }
         m_armed = false;
         m_shadow->Clear();
-        if (!result)
-            return result;
         const std::uint64_t none = 0;
         const std::uint32_t zero = 0;
         WriteField(*m_process, m_block, offsetof(Cover::Block, Table), none);

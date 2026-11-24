@@ -734,8 +734,25 @@ namespace
         for (std::uint32_t i = 0; i < cause.ParamCount; ++i)
             cause.Params[i] = record.ExceptionInformation[i];
         const std::uint64_t at = reinterpret_cast<std::uintptr_t>(record.ExceptionAddress);
-        if (!EnterBreak(block, *info->ContextRecord, at, kSlotException, cause))
+        CONTEXT& context = *info->ContextRecord;
+        if (!EnterBreak(block, context, at, kSlotException, cause))
             return EXCEPTION_CONTINUE_SEARCH;
+        // ∑ An int3 that is still in the code would trap again at once if the
+        //   thread went on from it, so going on means going past it, as a
+        //   debugger does. An instruction pointer the user moved stays.
+        if (record.ExceptionCode == static_cast<DWORD>(EXCEPTION_BREAKPOINT) && InstructionPointer(context) == at)
+        {
+            std::uint8_t byte = 0;
+            SIZE_T done = 0;
+            if (::ReadProcessMemory(::GetCurrentProcess(), reinterpret_cast<LPCVOID>(static_cast<std::uintptr_t>(at)), &byte, 1, &done) && done == 1 && byte == 0xCC)
+            {
+#if defined(_M_X64)
+                context.Rip = at + 1;
+#else
+                context.Eip = static_cast<DWORD>(at + 1);
+#endif
+            }
+        }
         return EXCEPTION_CONTINUE_EXECUTION;
     }
 

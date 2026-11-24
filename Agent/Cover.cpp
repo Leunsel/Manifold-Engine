@@ -289,6 +289,18 @@ namespace
         return wanted;
     }
 
+    // Memory that is gone (the module unloaded) holds no int3 any more; memory
+    // that cannot be read could still hold one and get readable again.
+    bool MayStillTrap(std::uintptr_t address)
+    {
+        MEMORY_BASIC_INFORMATION info{};
+        if (::VirtualQuery(reinterpret_cast<LPCVOID>(address), &info, sizeof(info)) != sizeof(info) || info.State != MEM_COMMIT)
+            return false;
+        if ((info.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+            return true;
+        return ByteAt(address) == kInt3;
+    }
+
     std::uint32_t DisarmPage(Entry* table, std::uint32_t first, std::uint32_t last)
     {
         std::uintptr_t begin = 0;
@@ -315,8 +327,17 @@ namespace
                 Entry& entry = table[i];
                 if (entry.State != StateReleasing)
                     continue;
+                const auto address = static_cast<std::uintptr_t>(entry.Address);
                 if (writable)
-                    *reinterpret_cast<volatile std::uint8_t*>(static_cast<std::uintptr_t>(entry.Address)) = entry.Original;
+                    *reinterpret_cast<volatile std::uint8_t*>(address) = entry.Original;
+                else if (MayStillTrap(address))
+                {
+                    // ∑ The int3 could not be put back and may still be in the
+                    //   code: the entry stays armed, so the handler (and with it
+                    //   the library) stays for it, instead of a trap nobody takes.
+                    SetState(entry, StateArmed);
+                    --taken;
+                }
             }
             if (writable)
             {
@@ -358,18 +379,37 @@ namespace
         }
     }
 
-    void DisarmAll()
+    // False when int3s could not be put back: the round then stays active, so
+    // the handler still takes their traps, and nothing may replace the table.
+    bool DisarmAll()
     {
         Entry* table = Table();
         const std::uint32_t count = g_block.Count;
+        std::uint32_t left = 0;
         if (g_block.Active && table && count <= kMaxEntries)
         {
-            ForPages(table, count, [&](std::uint32_t first, std::uint32_t last) { DisarmPage(table, first, last); });
-            WaitRestored(table, count);
+            for (int attempt = 0; attempt < 3; ++attempt)
+            {
+                if (attempt)
+                    ::Sleep(1);
+                ForPages(table, count, [&](std::uint32_t first, std::uint32_t last) { DisarmPage(table, first, last); });
+                WaitRestored(table, count);
+                left = 0;
+                for (std::uint32_t i = 0; i < count; ++i)
+                    left += table[i].State == StateArmed ? 1u : 0u;
+                if (!left)
+                    break;
+            }
+        }
+        if (left)
+        {
+            g_block.Armed = left;
+            return false;
         }
         g_block.Active = 0;
         g_block.Armed = 0;
         WaitOutside(2000);
+        return true;
     }
 
     // Before the host writes over armed bytes (a script, a breakpoint), the
@@ -402,7 +442,8 @@ namespace
 
     std::uint32_t Arm()
     {
-        DisarmAll();
+        if (!DisarmAll())
+            return ResultStillArmed;
         Entry* table = Table();
         const std::uint32_t count = g_block.Count;
         g_block.Armed = 0;
@@ -453,8 +494,7 @@ namespace
     {
         Held held(g_callLock);
         g_block.HostLost = 1;
-        DisarmAll();
-        if (RemoveHandler() == ResultOk)
+        if (DisarmAll() && RemoveHandler() == ResultOk)
             LifeLetGo(Manifold::Target::Life::PartCover);
     }
 
@@ -557,8 +597,13 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldCoverCall(LPVOID parameter
     case CallWatch:
         g_host = reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(g_block.HostHandle));
         g_block.HostLost = 0;
+        // ∑ The wait's callback lives in this library, so the library must
+        //   stay while it is registered, also when no round was armed yet.
         if (g_host && ::RegisterWaitForSingleObject(&g_wait, g_host, &HostGone, nullptr, INFINITE, WT_EXECUTEONLYONCE))
+        {
             g_block.Watching = 1;
+            LifeHold(Manifold::Target::Life::PartCover);
+        }
         result = g_block.Watching ? ResultOk : ResultNoHandler;
         break;
     case CallArm:
@@ -573,11 +618,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI ManifoldCoverCall(LPVOID parameter
         }
         break;
     case CallDisarm:
-        DisarmAll();
+        result = DisarmAll() ? ResultOk : ResultStillArmed;
         break;
     case CallRelease:
-        DisarmAll();
-        result = RemoveHandler();
+        result = DisarmAll() ? RemoveHandler() : ResultStillArmed;
         if (result == ResultOk)
             LifeLetGo(Manifold::Target::Life::PartCover);
         break;

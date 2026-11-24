@@ -516,15 +516,34 @@ namespace Manifold::Tests
         const MemoryWrite* entry = engine.Writes().Find(engine.Writes().LastId());
         CHECK(entry && entry->Original.size() == sizeof(clean) && std::equal(entry->Original.begin(), entry->Original.end(), clean));
         Wait(engine, 100);
-        // The breakpoint keeps firing; while a hit is stepped over the old byte is in place for a moment.
-        bool armed = false;
-        for (int i = 0; i < 200 && !armed; ++i)
+        // ∑ The breakpoint keeps firing, and while a hit is stepped over the old byte is in
+        //   place for a moment: one window (hit, action, continue, step, reinsert) can outlast
+        //   any number of back-to-back reads, so the int3 is looked for over time.
+        const auto armedWithin = [&](int milliseconds)
         {
-            std::uint8_t raw = 0;
-            armed = process.ReadExact(work, &raw, 1) && raw == 0xCC;
-        }
-        CHECK_MSG(armed, "the int3 is gone after the write");
+            const ULONGLONG until = ::GetTickCount64() + static_cast<ULONGLONG>(milliseconds);
+            do
+            {
+                std::uint8_t raw = 0;
+                if (process.ReadExact(work, &raw, 1) && raw == 0xCC)
+                    return true;
+                ::Sleep(1);
+            } while (::GetTickCount64() < until);
+            return false;
+        };
+        CHECK_MSG(armedWithin(500), "the int3 is gone after the write");
         CHECK_MSG(HitsAt(engine, work) > 0, "the breakpoint stopped counting after the write");
+        // The registers of the thread cannot be read at the step after a hit: the int3 still goes back.
+        {
+            const std::uint64_t hitsBefore = HitsAt(engine, work);
+            engine.Debugger().SimulateFailedStepReads(3);
+            Wait(engine, 300);
+            engine.Debugger().SimulateFailedStepReads(0);
+            CHECK_MSG(armedWithin(500), "the int3 is gone after a step whose registers could not be read");
+            Wait(engine, 200);
+            CHECK_MSG(HitsAt(engine, work) > hitsBefore + 3, "the breakpoint stopped counting after a step whose registers could not be read");
+            CHECK(process.Alive());
+        }
         if (entry)
         {
             std::uint8_t seen[4]{};

@@ -208,6 +208,51 @@ namespace Manifold::Tests
             CHECK_MSG(target.Alive(), what + ": the game ended");
         }
 
+        // A load the host counts must already carry a fresh Activity: the agent gives back every
+        // counted load once it looks idle, and a part's first call would then land in unmapped memory.
+        void CheckCountedLoad(const std::filesystem::path& path, const char* label)
+        {
+            const std::string what = std::string(label) + " counted load";
+            Child target;
+            if (!Launch(path, L"--crash", target))
+            {
+                Skip("the test target " + path.string() + " could not be started");
+                return;
+            }
+            Result<std::shared_ptr<Target::Process>> opened = Target::Process::Open(MakeProcessId(target.Info.dwProcessId));
+            CHECK_MSG(opened.Ok(), what + ": the test target could not be opened");
+            if (!opened)
+                return;
+            Target::Process& process = **opened;
+            const bool started = WaitFor(5000, [&] { process.RefreshModules(); return process.FindExport("kernel32.dll", "LoadLibraryW") != 0; });
+            CHECK_MSG(started, what + ": the test target did not finish starting");
+            if (!started)
+                return;
+            int probes = 0;
+            int stale = 0;
+            std::uint64_t before = 0;
+            Target::SetAgentLoadProbe([&](std::uint64_t block)
+                {
+                    Target::Life::Block life{};
+                    ++probes;
+                    if (!process.ReadExact(block, &life, sizeof(life)) || life.Activity < before)
+                        ++stale;
+                });
+            for (int round = 0; round < 3; ++round)
+            {
+                before = ::GetTickCount64();
+                const Status loaded = Target::LoadAgent(process);
+                CHECK_MSG(loaded.Ok(), what + ": " + loaded.Text);
+                ::Sleep(kGrace / 2);
+            }
+            Target::SetAgentLoadProbe({});
+            CHECK_MSG(probes == 3 && stale == 0, what + Format(": %d of %d counted loads carried an old Activity", stale, probes));
+            const Look look = LookAt(target.Info.dwProcessId);
+            CHECK_MSG(look.Life.HostLoads == 3, what + Format(": the agent counts %u loads", look.Life.HostLoads));
+            CHECK_MSG(Unloads(target.Info.dwProcessId, static_cast<int>(kGrace) + 3000), what + ": the agent stayed although no part needs it");
+            CHECK_MSG(target.Alive(), what + ": the game ended when the agent unloaded");
+        }
+
         int RunAgentHost(const std::vector<std::string>& arguments)
         {
             if (arguments.size() < 3)
@@ -235,6 +280,7 @@ namespace Manifold::Tests
             ::GetModuleFileNameW(nullptr, self, MAX_PATH);
             for (const auto& [path, label] : { std::pair{ target, "64-bit" }, std::pair{ target.parent_path() / L"TestTarget32.exe", "32-bit" } })
             {
+                CheckCountedLoad(path, label);
                 for (const Part part : { Part::Crash, Part::Speed, Part::Cover })
                 {
                     CheckNormalEnd(path, label, part);

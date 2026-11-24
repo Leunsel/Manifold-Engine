@@ -67,7 +67,13 @@ namespace
             const std::uint32_t grace = g_life.GraceMs ? g_life.GraceMs : kDefaultGraceMs;
             {
                 Held held;
-                if (g_life.Parts != 0 || RealTickCount64() - g_life.Activity < grace)
+                // ∑ Activity is read before the clock: the host writes its own tick
+                //   there, and a clock read first could be older than that tick, so
+                //   the difference would wrap and look like a long idle time. A
+                //   tick that is not behind the clock counts as activity now.
+                const std::uint64_t activity = g_life.Activity;
+                const std::uint64_t now = RealTickCount64();
+                if (g_life.Parts != 0 || activity >= now || now - activity < grace)
                     continue;
                 const std::uint32_t loads = g_life.HostLoads;
                 const std::uint32_t dropped = g_life.Dropped;

@@ -1079,6 +1079,7 @@ struct CoverProbe
     volatile long Foreign;
     volatile long Threads;
     volatile long Input;
+    volatile long Lock;  // 1 from the host: no code page may become writable again (2 done, 3 failed)
 };
 
 extern "C" __declspec(dllexport) CoverProbe g_coverProbe = {};
@@ -1171,6 +1172,12 @@ namespace
             if (CoverIdle(value) != (value ^ 0x5A5A) + 7)
                 ::InterlockedIncrement(&g_coverProbe.Wrong);
             ::InterlockedIncrement(&g_coverProbe.Idle);
+            if (g_coverProbe.Lock == 1)
+            {
+                PROCESS_MITIGATION_DYNAMIC_CODE_POLICY policy{};
+                policy.ProhibitDynamicCode = 1;
+                g_coverProbe.Lock = ::SetProcessMitigationPolicy(ProcessDynamicCodePolicy, &policy, sizeof(policy)) ? 2 : 3;
+            }
             ::Sleep(1);
         }
     }

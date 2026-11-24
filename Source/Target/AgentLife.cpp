@@ -15,6 +15,12 @@ namespace Manifold::Target
     namespace
     {
         std::atomic<std::uint32_t> g_grace{ Life::kDefaultGraceMs };
+        std::function<void(std::uint64_t)> g_loadProbe;
+    }
+
+    void SetAgentLoadProbe(std::function<void(std::uint64_t)> probe)
+    {
+        g_loadProbe = std::move(probe);
     }
 
     std::string AgentFileName(bool is64Bit)
@@ -47,6 +53,25 @@ namespace Manifold::Target
         std::error_code ignore;
         if (!std::filesystem::exists(path, ignore))
             return Status::Fail(ErrorCode::InjectFailed, name + " was not found next to the program");
+        // ∑ The agent gives back every counted load once it was idle for its grace
+        //   time, so a load must never become visible with an old Activity: the
+        //   agent would free it with the others and the part's first call would
+        //   land in unmapped memory. Activity is touched before the inject (an
+        //   agent that is loaded already keeps its lifetime thread), and again
+        //   right before and after the count.
+        const auto touch = [&process](std::uint64_t block)
+        {
+            const std::uint64_t now = ::GetTickCount64();
+            process.Write(block + offsetof(Life::Block, Activity), &now, sizeof(now));
+        };
+        if (!Process::DryRun())
+        {
+            // the module list may be older than the agent's last unload: touch only a block that is still there
+            Life::Block early{};
+            const std::uint64_t at = process.FindExport(name, "ManifoldLife");
+            if (at && process.ReadExact(at, &early, sizeof(early)) && early.Magic == Life::kMagic && early.Version == Life::kVersion)
+                touch(at);
+        }
         if (Status loaded = process.InjectLibrary(path.wstring()); !loaded)
             return loaded;
         if (Process::DryRun())
@@ -55,12 +80,14 @@ namespace Manifold::Target
         Life::Block life{};
         if (!block || !process.ReadExact(block, &life, sizeof(life)) || life.Magic != Life::kMagic || life.Version != Life::kVersion)
             return Status::Success();  // an agent from before the lifetime: it stays loaded, as it always did
-        const std::uint32_t loads = life.HostLoads + 1;
-        process.Write(block + offsetof(Life::Block, HostLoads), &loads, sizeof(loads));
         const std::uint32_t grace = g_grace;
         process.Write(block + offsetof(Life::Block, GraceMs), &grace, sizeof(grace));
-        const std::uint64_t now = ::GetTickCount64();
-        process.Write(block + offsetof(Life::Block, Activity), &now, sizeof(now));
+        touch(block);
+        const std::uint32_t loads = life.HostLoads + 1;
+        process.Write(block + offsetof(Life::Block, HostLoads), &loads, sizeof(loads));
+        if (g_loadProbe)
+            g_loadProbe(block);
+        touch(block);
         // the agent watches this program's handle; one is enough for the session
         if (life.HostHandle == 0 || life.HostGone)
         {

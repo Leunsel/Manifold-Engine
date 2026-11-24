@@ -41,7 +41,8 @@ namespace Manifold::Target::Cover
         ResultBadTable = 1,
         ResultNoHandler = 2,
         ResultUnknownCall = 3,
-        ResultStillInside = 4
+        ResultStillInside = 4,
+        ResultStillArmed = 5
     };
 
     enum Call : std::uint32_t

@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 
 namespace Manifold::Target
@@ -24,4 +25,7 @@ namespace Manifold::Target
     // How long the agent waits, idle, before it unloads (tests make it short).
     void SetAgentGrace(std::uint32_t milliseconds);
     std::uint32_t AgentGrace();
+
+    // Tests: runs with the agent's life block address right after a load was counted.
+    void SetAgentLoadProbe(std::function<void(std::uint64_t)> probe);
 }

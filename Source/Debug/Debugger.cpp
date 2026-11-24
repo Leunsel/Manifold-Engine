@@ -1646,11 +1646,23 @@ namespace Manifold::Debug
         else if (code == EXCEPTION_SINGLE_STEP || code == kWx86SingleStep)
         {
             ContextHolder context(m_is64Bit);
-            if (!context.Read(thread.Handle))
+            const bool readFailed = thread.Reinsert && m_failStepReads > 0 ? (--m_failStepReads, true) : !context.Read(thread.Handle);
+            if (readFailed)
             {
                 const bool hardwareActive = AnyHardware();
                 if (!hardwareActive && ::GetTickCount64() - m_lastHardwareTick >= kStaleHardwareMilliseconds && !thread.Stepping && !thread.Reinsert)
                     return DBG_EXCEPTION_NOT_HANDLED;
+                // ∑ The step over a software breakpoint ended: its int3 goes back
+                //   also without the thread's registers, or it would be gone for
+                //   good. The system cleared the trap flag for this exception.
+                if (thread.Reinsert)
+                {
+                    auto found = m_breakpoints.find(thread.Reinsert);
+                    if (found != m_breakpoints.end() && !found->second.Hardware)
+                        InsertSoftware(found->second);
+                    thread.Reinsert = 0;
+                    thread.StepInstruction = 0;
+                }
                 LOG_WARN("Debugger", Format("Could not read thread %u at a single step (%s); the step is kept from the process", static_cast<unsigned>(event.dwThreadId),
                     SystemErrorText(::GetLastError()).c_str()));
                 return DBG_CONTINUE;
