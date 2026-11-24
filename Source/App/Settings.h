@@ -116,6 +116,7 @@ namespace Manifold
         int ActiveWindowOpacity = 100;
         int InactiveWindowOpacity = 100;
         bool PlaySounds = true;
+        bool TypeSubmenus = true;
         bool ReleaseMode = false;
         bool ProfilerEnabled = false;
         bool LayoutChecks = false;

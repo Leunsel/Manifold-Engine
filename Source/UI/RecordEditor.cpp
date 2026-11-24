@@ -2,7 +2,9 @@
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Lua/LuaEngine.h"
 #include "UI/Fonts.h"
+#include "UI/TypePicker.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
@@ -18,16 +20,6 @@ namespace Manifold::UI
     namespace
     {
         constexpr float kLabelWidth = 104.0f;
-
-        int TypeIndex(Scan::ValueType type)
-        {
-            for (int i = 0; i < static_cast<int>(std::size(Scan::kRecordTypes)); ++i)
-            {
-                if (Scan::kRecordTypes[i] == type)
-                    return i;
-            }
-            return 2;
-        }
 
         void BeginSection(const char* id, const char* icon, const char* title)
         {
@@ -230,7 +222,7 @@ namespace Manifold::UI
         m_description = record.Description;
         m_address = record.Address;
         m_offsets = record.Offsets;
-        m_type = TypeIndex(record.Type);
+        m_type = RecordTypeChoice(record);
         m_length = record.Length;
         m_unicode = record.Unicode;
         m_zeroTerminate = record.ZeroTerminate;
@@ -279,7 +271,7 @@ namespace Manifold::UI
         }
         if (record.Kind == Table::RecordKind::Value)
         {
-            record.Type = Scan::kRecordTypes[m_type];
+            SetRecordType(record, m_type);
             record.SetLength(m_length);
             record.Unicode = m_unicode;
             record.ZeroTerminate = m_zeroTerminate;
@@ -436,22 +428,26 @@ namespace Manifold::UI
         FieldLabel("Type");
         if (TakeFocus(RecordField::Type))
             ImGui::OpenPopupEx(ImHashStr("##ComboPopup", 0, ImGui::GetID("##type")));
-        const bool typeOpen = ImGui::BeginCombo("##type", Scan::TypeName(Scan::kRecordTypes[m_type]));
+        const bool typeOpen = ImGui::BeginCombo("##type", Scan::TypeChoiceLabel(m_type).c_str(), ImGuiComboFlags_HeightLarge);
         if (!typeOpen)
             FocusDone(RecordField::Type);
         else if (m_focusField == RecordField::Type)
             m_focusField = RecordField::None;
         if (typeOpen)
         {
-            for (int i = 0; i < static_cast<int>(std::size(Scan::kRecordTypes)); ++i)
-            {
-                if (ImGui::Selectable(Scan::TypeName(Scan::kRecordTypes[i]), i == m_type))
-                    m_type = i;
-            }
+            TypeComboItems(Scan::TypeCatalog({ .Types = Scan::kRecordTypes, .PointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8,
+                               .Customs = CustomTypes(m_engine.Lua()) }),
+                m_type);
             ImGui::EndCombo();
         }
-        const Scan::ValueType type = Scan::kRecordTypes[m_type];
-        if (type == Scan::ValueType::String || type == Scan::ValueType::ByteArray)
+        const bool custom = m_type.Kind == Scan::ScanKind::Custom;
+        const Scan::ValueType type = m_type.Type;
+        if (custom)
+        {
+            const Lua::CustomType* found = m_engine.Lua().FindCustomType(m_type.Custom);
+            FieldNote(found ? Format("A custom type from a script, %d bytes.", found->ByteCount()) : std::string("This custom type is not registered, so the value shows ??."));
+        }
+        else if (type == Scan::ValueType::String || type == Scan::ValueType::ByteArray)
         {
             FieldLabel("Length");
             ImGui::InputInt("##length", &m_length);
@@ -464,7 +460,7 @@ namespace Manifold::UI
                 ImGui::Checkbox("Zero terminated", &m_zeroTerminate);
             }
         }
-        if (type == Scan::ValueType::Binary)
+        if (!custom && type == Scan::ValueType::Binary)
         {
             FieldLabel("First bit");
             ImGui::InputInt("##bitstart", &m_bitStart);

@@ -217,6 +217,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Scan\ScanStore.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\StaticPointers.cpp" />
+    <ClCompile Include="..\Source\Scan\TypeCatalog.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
     <ClCompile Include="..\Source\Scan\Workers.cpp" />
     <ClCompile Include="..\Source\Syscalls\Syscall.cpp">
@@ -323,6 +324,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\UI\TemplateManager.cpp" />
     <ClCompile Include="..\Source\UI\Templates.cpp" />
     <ClCompile Include="..\Source\UI\ToolWindows.cpp" />
+    <ClCompile Include="..\Source\UI\TypePicker.cpp" />
     <ClCompile Include="..\Source\UI\UiHost.cpp" />
     <ClCompile Include="..\Source\UI\UnrealWindow.cpp" />
     <ClCompile Include="..\Source\UI\WatchWindow.cpp" />
@@ -432,6 +434,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Scan\ScanStore.h" />
     <ClInclude Include="..\Source\Scan\Scanner.h" />
     <ClInclude Include="..\Source\Scan\StaticPointers.h" />
+    <ClInclude Include="..\Source\Scan\TypeCatalog.h" />
     <ClInclude Include="..\Source\Scan\ValueType.h" />
     <ClInclude Include="..\Source\Scan\Workers.h" />
     <ClInclude Include="..\Source\Syscalls\Syscall.h" />
@@ -542,6 +545,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\UI\Theme.h" />
     <ClInclude Include="..\Source\UI\ToolWindowBase.h" />
     <ClInclude Include="..\Source\UI\ToolWindows.h" />
+    <ClInclude Include="..\Source\UI\TypePicker.h" />
     <ClInclude Include="..\Source\UI\UiHost.h" />
     <ClInclude Include="..\Source\UI\UiScale.h" />
     <ClInclude Include="..\Source\UI\UnrealWindow.h" />

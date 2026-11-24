@@ -22,6 +22,7 @@
 #include "Disasm/Disassembler.h"
 #include "Lua/LuaEngine.h"
 #include "Scan/Scanner.h"
+#include "Scan/TypeCatalog.h"
 #include "Scan/ValueType.h"
 #include "Table/CheatTable.h"
 
@@ -94,6 +95,38 @@ namespace Manifold::Tests
             const std::uint8_t data[] = { 0x48, 0x8B, 0x05, 0x17, 0x99 };
             CHECK(pattern->Matches(data));
             CHECK_EQ(Scan::PatternText(*pattern), "48 8B ?? 10 ??");
+        }
+
+        void TypeCategories()
+        {
+            const auto titles = [](const std::vector<Scan::TypeSection>& sections)
+                {
+                    std::string text;
+                    for (const Scan::TypeSection& section : sections)
+                        text += section.Title + ":" + std::to_string(section.Entries.size()) + ";";
+                    return text;
+                };
+            Scan::TypeCatalogOptions scan{ .Types = Scan::kScanTypes, .Several = true };
+            scan.Customs = { { "UE FName", 8, false, true }, { "Godot String", 8, false, true }, { "3 Byte", 3 }, { "float big endian", 4, true },
+                { "BCD", 4 }, { "Pascal String", 32, false, true }, { "UE", 4 } };
+            const std::vector<Scan::TypeSection> sections = Scan::TypeCatalog(scan);
+            CHECK_EQ(titles(sections), "Whole Numbers:4;Decimals:2;Text and Bytes:2;Several at Once:2;Custom Numbers:3;Custom Decimals:1;Custom Text:1;Godot:1;Unreal Engine:1;");
+            CHECK_EQ(sections[4].Entries[0].Label, "3 Byte");
+            CHECK_EQ(sections[4].Entries[1].Label, "BCD");
+            CHECK_EQ(sections[4].Entries[2].Label, "UE");
+            CHECK_EQ(sections[4].Entries[0].Detail, "3 bytes");
+            CHECK_EQ(sections[0].Entries[0].Detail, "1 byte");
+            CHECK(sections[3].Entries[0].Choice.Kind == Scan::ScanKind::All && sections[3].Entries[0].Tooltip);
+            CHECK(sections[8].Entries[0].Choice.Same({ Scan::ScanKind::Custom, Scan::ValueType::Byte, "ue fname" }));
+            CHECK(!sections[0].Entries[0].Choice.Same({ Scan::ScanKind::Single, Scan::ValueType::TwoBytes, {} }));
+            CHECK(Scan::TypeEntryMatches(sections[5].Entries[0], " BIG ") && !Scan::TypeEntryMatches(sections[5].Entries[0], "string"));
+
+            const std::vector<Scan::TypeSection> records = Scan::TypeCatalog({ .Types = Scan::kRecordTypes, .PointerSize = 4 });
+            CHECK_EQ(titles(records), "Whole Numbers:4;Decimals:2;Text and Bytes:2;Bits and Pointers:2;");
+            CHECK_EQ(records[3].Entries[1].Detail, "4 bytes");
+            CHECK_EQ(Scan::TypeChoiceLabel({ Scan::ScanKind::Grouped }), "Grouped");
+            for (Scan::ValueType type : Scan::kRecordTypes)
+                CHECK(std::string_view(Scan::TypeCategory(type)).size() > 0);
         }
 
         void TextHelpers()
@@ -2046,6 +2079,7 @@ hostileRan = true
     {
         const int before = Totals().Failures;
         ValueTypes();
+        TypeCategories();
         TextHelpers();
         Errors();
         LogEntries();

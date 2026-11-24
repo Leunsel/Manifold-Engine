@@ -375,6 +375,9 @@
     <ClCompile Include="..\Source\Scan\StaticPointers.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Scan\TypeCatalog.cpp">
+      <Filter>Source\Scan</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Scan\ValueType.cpp">
       <Filter>Source\Scan</Filter>
     </ClCompile>
@@ -685,6 +688,9 @@
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\ToolWindows.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\UI\TypePicker.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\UI\UiHost.cpp">
@@ -1006,6 +1012,9 @@
       <Filter>Source\Scan</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Scan\StaticPointers.h">
+      <Filter>Source\Scan</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Scan\TypeCatalog.h">
       <Filter>Source\Scan</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Scan\ValueType.h">
@@ -1336,6 +1345,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\ToolWindows.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\TypePicker.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\UiHost.h">

@@ -937,6 +937,12 @@ namespace Manifold::UI
             list.EndRow();
         }
 
+        if (list.Row("Type Submenus", "Context menus show each group of value types as a submenu.", toggle))
+        {
+            changed |= ToggleSwitch("##typesubmenus", &settings.TypeSubmenus);
+            list.EndRow();
+        }
+
         list.Section("Address List");
         const float addressChoice = std::round(Px(330.0f));
         if (list.Row("Address Column", "As written (\"game.exe\"+1A2B30), resolved, or both.", addressChoice))

@@ -4,6 +4,7 @@
 #include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Lua/LuaEngine.h"
 #include "UI/CodeEditor.h"
 #include "UI/Fonts.h"
@@ -11,6 +12,7 @@
 #include "UI/ProfilerWindow.h"
 #include "UI/ScriptUi.h"
 #include "UI/Shortcuts.h"
+#include "UI/TypePicker.h"
 #include "UI/UiHost.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
@@ -256,6 +258,7 @@ namespace Manifold::UI
         SaveResultsDialog();
         AddAddressDialog();
         DescriptionDialog();
+        TypePopup();
         HoldEscape();
         ImGui::End();
     }
@@ -570,32 +573,40 @@ namespace Manifold::UI
         }
         if (!m_release && ImGui::BeginMenu("Tools"))
         {
+            MenuSection("Memory", true);
             Item(ICON_FA_MEMORY "  Memory Viewer", Command::OpenMemoryViewer);
             if (ImGui::MenuItem(ICON_FA_CLONE "  New Memory Viewer Window"))
                 workspace.OpenMemoryViewer(0, false, true);
             Item(ICON_FA_SITEMAP "  Structure Dissect", Command::OpenStructureDissect);
+            MenuSection("Pointers");
             Item(ICON_FA_ROUTE "  Pointer Scan", Command::OpenPointerScan);
             Item(ICON_FA_THUMBTACK "  Find Static Pointers", Command::OpenStaticPointers);
+            MenuSection("Code");
+            Item(ICON_FA_CODE "  Auto Assembler", Command::OpenAutoAssembler);
             Item(ICON_FA_FINGERPRINT "  Signature Maker", Command::OpenSignatureMaker);
             Item(ICON_FA_FILTER "  Code Filter", Command::OpenCodeFilter);
             Item(ICON_FA_EXCHANGE_ALT "  Opcode Converter", Command::OpenOpcodeConverter);
-            Item(ICON_FA_CODE "  Auto Assembler", Command::OpenAutoAssembler);
+            MenuSection("Scripting");
             Item(ICON_FA_MOON "  Lua Engine", Command::OpenLuaEngine);
             Item(ICON_FA_PENCIL_RULER "  Form Editor", Command::OpenFormEditor);
-            Item(ICON_FA_STREAM "  Log", Command::OpenLog);
-            ImGui::Separator();
-            if (ImGui::MenuItem(ICON_FA_PUZZLE_PIECE "  Autorun Modules"))
-                workspace.OpenModules();
-            if (ImGui::MenuItem(ICON_FA_SYNC "  Reload All Modules"))
-                workspace.Report(engine.RunAutorun());
-            if (ImGui::MenuItem(ICON_FA_FOLDER "  Open Autorun Folder"))
+            if (ImGui::BeginMenu(ICON_FA_PUZZLE_PIECE "  Autorun Modules"))
             {
-                std::error_code ignored;
-                std::filesystem::create_directories(Paths::AutorunFolder(), ignored);
-                ::ShellExecuteW(nullptr, L"open", Paths::AutorunFolder().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                if (ImGui::MenuItem(ICON_FA_PUZZLE_PIECE "  Show Modules"))
+                    workspace.OpenModules();
+                if (ImGui::MenuItem(ICON_FA_SYNC "  Reload All Modules"))
+                    workspace.Report(engine.RunAutorun());
+                if (ImGui::MenuItem(ICON_FA_FOLDER "  Open Autorun Folder"))
+                {
+                    std::error_code ignored;
+                    std::filesystem::create_directories(Paths::AutorunFolder(), ignored);
+                    ::ShellExecuteW(nullptr, L"open", Paths::AutorunFolder().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                }
+                ImGui::EndMenu();
             }
             ImGui::Separator();
-            SectionLabel("Code, memory and debugger tools are in the memory viewer's menus");
+            Item(ICON_FA_STREAM "  Log", Command::OpenLog);
+            ImGui::Separator();
+            SectionLabel("Debugger tools are in the memory viewer's menus");
             ImGui::EndMenu();
         }
         if (extensions && ImGui::BeginMenu("Extensions"))
@@ -1760,47 +1771,41 @@ namespace Manifold::UI
         ImGui::BeginDisabled(scanned);
         if (m_scanKind == Scan::ScanKind::Custom && !m_engine.Lua().FindCustomType(m_customName))
             m_scanKind = Scan::ScanKind::Single;
-        if (ImGui::BeginCombo("##type", ScanTypeLabel().c_str(), ImGuiComboFlags_HeightLarge))
+        Scan::TypeChoice choice = scanned ? Scan::TypeChoice{ scanner.Kind(), scanner.Type(), scanner.CustomName() }
+                                          : Scan::TypeChoice{ m_scanKind, Scan::kScanTypes[m_typeIndex], m_customName };
+        const auto catalog = [&]
+            {
+                return Scan::TypeCatalogOptions{ .Types = Scan::kScanTypes, .Several = true, .PointerSize = engine.HasProcess() ? engine.Process()->PointerSize() : 8,
+                    .Customs = CustomTypes(m_engine.Lua()) };
+            };
+        if (TypeCombo("##type", choice, catalog) && !scanned)
         {
-            for (int i = 0; i < static_cast<int>(std::size(Scan::kScanTypes)); ++i)
+            m_scanKind = choice.Kind;
+            switch (choice.Kind)
             {
-                if (ImGui::Selectable(Scan::TypeName(Scan::kScanTypes[i]), m_scanKind == Scan::ScanKind::Single && i == m_typeIndex))
-                {
-                    m_scanKind = Scan::ScanKind::Single;
-                    m_typeIndex = i;
-                    m_alignment = Scan::DefaultAlignment(Scan::kScanTypes[i]);
-                }
-            }
-            ImGui::Separator();
-            if (ImGui::Selectable("All##kind", m_scanKind == Scan::ScanKind::All))
-            {
-                m_scanKind = Scan::ScanKind::All;
+            case Scan::ScanKind::All:
                 m_alignment = 1;
-            }
-            ItemTooltip("Byte, 2, 4 and 8 bytes, float and double in one scan. Settings, Scanner, Types for All picks which of them.");
-            if (ImGui::Selectable("Grouped##kind", m_scanKind == Scan::ScanKind::Grouped))
-            {
-                m_scanKind = Scan::ScanKind::Grouped;
+                break;
+            case Scan::ScanKind::Grouped:
                 m_alignment = 4;
-            }
-            ItemTooltip("Several values that lie next to each other, like 4:100 f:1.5 d:*");
-            const std::vector<std::string> customs = m_engine.Lua().CustomTypeNames();
-            if (!customs.empty())
-                ImGui::Separator();
-            for (const std::string& name : customs)
+                break;
+            case Scan::ScanKind::Custom:
             {
-                ImGui::PushID(name.c_str());
-                if (ImGui::Selectable(name.c_str(), m_scanKind == Scan::ScanKind::Custom && EqualsNoCase(name, m_customName)))
-                {
-                    m_scanKind = Scan::ScanKind::Custom;
-                    m_customName = name;
-                    const Lua::CustomType* custom = m_engine.Lua().FindCustomType(name);
-                    const int size = custom ? custom->ByteCount() : 1;
-                    m_alignment = size % 4 == 0 ? 4 : size % 2 == 0 ? 2 : 1;
-                }
-                ImGui::PopID();
+                m_customName = choice.Custom;
+                const Lua::CustomType* custom = m_engine.Lua().FindCustomType(choice.Custom);
+                const int size = custom ? custom->ByteCount() : 1;
+                m_alignment = size % 4 == 0 ? 4 : size % 2 == 0 ? 2 : 1;
+                break;
             }
-            ImGui::EndCombo();
+            default:
+                for (int i = 0; i < static_cast<int>(std::size(Scan::kScanTypes)); ++i)
+                {
+                    if (Scan::kScanTypes[i] == choice.Type)
+                        m_typeIndex = i;
+                }
+                m_alignment = Scan::DefaultAlignment(choice.Type);
+                break;
+            }
         }
         ImGui::EndDisabled();
 
@@ -2854,7 +2859,10 @@ namespace Manifold::UI
                 else if (column == 3 && record.Kind == Table::RecordKind::Value)
                 {
                     if (!lua.AddressListEvent("ontypechange", &record))
-                        m_workspace.OpenRecordEditor(record.Id, RecordField::Type);
+                    {
+                        m_typePopupRecord = record.Id;
+                        m_openTypePopup = true;
+                    }
                 }
                 else if (column == 4 && record.Kind == Table::RecordKind::Value)
                 {
@@ -3528,14 +3536,14 @@ namespace Manifold::UI
             }
             if (ImGui::BeginMenu(ICON_FA_EXCHANGE_ALT "  Change Type"))
             {
-                for (Scan::ValueType type : Scan::kRecordTypes)
+                const Scan::TypeChoice current = RecordTypeChoice(record);
+                const std::vector<Scan::TypeSection> sections = Scan::TypeCatalog({ .Types = Scan::kRecordTypes,
+                    .PointerSize = engine.HasProcess() ? engine.Process()->PointerSize() : 8, .Customs = CustomTypes(engine.Lua()) });
+                if (const Scan::TypeEntry* picked = TypeMenuItems(sections, &current, {}, engine.Options().TypeSubmenus); picked && !engine.Lua().AddressListEvent("ontypechange", &record))
                 {
-                    if (ImGui::MenuItem(Scan::TypeName(type), nullptr, record.Type == type) && !engine.Lua().AddressListEvent("ontypechange", &record))
-                    {
-                        for (auto* target : selected)
-                            target->Type = type;
-                        engine.RefreshValues(true);
-                    }
+                    for (auto* target : selected)
+                        SetRecordType(*target, picked->Choice);
+                    engine.RefreshValues(true);
                 }
                 ImGui::EndMenu();
             }
@@ -3791,22 +3799,124 @@ namespace Manifold::UI
         InputText("##description", m_addDescription);
         ImGui::TextUnformatted("Type");
         ImGui::SetNextItemWidth(-1.0f);
-        if (ImGui::BeginCombo("##addtype", Scan::TypeName(Scan::kRecordTypes[m_addType])))
-        {
-            for (int i = 0; i < static_cast<int>(std::size(Scan::kRecordTypes)); ++i)
+        if (m_addType.Kind == Scan::ScanKind::Custom && !m_engine.Lua().FindCustomType(m_addType.Custom))
+            m_addType = Scan::TypeChoice{};
+        const bool typeOpen = ImGui::IsPopupOpen(ImHashStr("##ComboPopup", 0, ImGui::GetID("##addtype")), ImGuiPopupFlags_None);
+        TypeCombo("##addtype", m_addType, [&]
             {
-                if (ImGui::Selectable(Scan::TypeName(Scan::kRecordTypes[i]), i == m_addType))
-                    m_addType = i;
-            }
-            ImGui::EndCombo();
-        }
-        if (DialogButtons("Add", true, false) == DialogChoice::Ok || (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && !m_addAddress.empty()))
+                return Scan::TypeCatalogOptions{ .Types = Scan::kRecordTypes, .PointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8,
+                    .Customs = CustomTypes(m_engine.Lua()) };
+            });
+        if (DialogButtons("Add", true, false) == DialogChoice::Ok || (ImGui::IsKeyPressed(ImGuiKey_Enter, false) && !m_addAddress.empty() && !typeOpen))
         {
-            m_engine.Table().AddValue(m_addDescription, Trim(m_addAddress), Scan::kRecordTypes[m_addType]);
+            SetRecordType(m_engine.Table().AddValue(m_addDescription, Trim(m_addAddress), Scan::ValueType::FourBytes), m_addType);
             m_engine.RefreshValues(true);
             ImGui::CloseCurrentPopup();
         }
         EndModal();
+    }
+
+    void MainWindow::TypePopup()
+    {
+        if (m_openTypePopup)
+        {
+            ImGui::OpenPopup("##changetype");
+            m_openTypePopup = false;
+        }
+        if (!ImGui::BeginPopup("##changetype"))
+            return;
+        Table::AddressList& list = m_engine.Table();
+        Table::MemoryRecord* record = list.FindById(m_typePopupRecord);
+        if (!record || record->Kind != Table::RecordKind::Value)
+        {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            return;
+        }
+        std::vector<Table::MemoryRecord*> targets;
+        if (std::find(list.Selection().begin(), list.Selection().end(), record->Id) != list.Selection().end())
+        {
+            for (int id : list.Selection())
+            {
+                if (Table::MemoryRecord* target = list.FindById(id); target && target->Kind == Table::RecordKind::Value)
+                    targets.push_back(target);
+            }
+        }
+        if (targets.empty())
+            targets.push_back(record);
+        MenuSection(targets.size() > 1 ? (std::to_string(targets.size()) + " Records").c_str() : record->Description.c_str(), true);
+
+        Scan::TypeChoice choice = RecordTypeChoice(*record);
+        const auto catalog = Scan::TypeCatalog({ .Types = Scan::kRecordTypes, .PointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8,
+            .Customs = CustomTypes(m_engine.Lua()) });
+        const auto hasOptions = [](const Table::MemoryRecord& target)
+            {
+                return target.CustomTypeName.empty() &&
+                       (target.Type == Scan::ValueType::String || target.Type == Scan::ValueType::ByteArray || target.Type == Scan::ValueType::Binary);
+            };
+        if (TypeComboItems(catalog, choice, true))
+        {
+            for (Table::MemoryRecord* target : targets)
+                SetRecordType(*target, choice);
+            list.Touch();
+            m_engine.RefreshValues(true);
+            if (!hasOptions(*record))
+                ImGui::CloseCurrentPopup();
+        }
+        if (hasOptions(*record))
+        {
+            ImGui::Separator();
+            const Layout::FieldOptions field{ .Placement = Layout::LabelPlacement::Left, .LabelColumn = Layout::LabelColumn({ "Length", "First bit", "Bits" }), .Width = Px(160.0f) };
+            bool edited = false;
+            if (record->Type == Scan::ValueType::Binary)
+            {
+                int start = record->BitStart;
+                int bits = record->BitLength;
+                Layout::Field("First bit", field);
+                edited |= ImGui::InputInt("##bitstart", &start);
+                Layout::Field("Bits", field);
+                edited |= ImGui::InputInt("##bits", &bits);
+                if (edited)
+                {
+                    for (Table::MemoryRecord* target : targets)
+                        target->SetBits(start, bits);
+                }
+            }
+            else
+            {
+                int length = record->Length;
+                Layout::Field("Length", field);
+                if (ImGui::InputInt("##length", &length))
+                {
+                    edited = true;
+                    for (Table::MemoryRecord* target : targets)
+                        target->SetLength(std::clamp(length, 1, Table::kMaxRecordLength));
+                }
+                if (record->Type == Scan::ValueType::String)
+                {
+                    bool unicode = record->Unicode;
+                    bool zero = record->ZeroTerminate;
+                    if (ImGui::Checkbox("UTF-16", &unicode))
+                    {
+                        edited = true;
+                        for (Table::MemoryRecord* target : targets)
+                            target->Unicode = unicode;
+                    }
+                    if (ImGui::Checkbox("Zero terminated", &zero))
+                    {
+                        edited = true;
+                        for (Table::MemoryRecord* target : targets)
+                            target->ZeroTerminate = zero;
+                    }
+                }
+            }
+            if (edited)
+            {
+                list.Touch();
+                m_engine.RefreshValues(true);
+            }
+        }
+        ImGui::EndPopup();
     }
 
     void MainWindow::DescriptionDialog()

@@ -209,6 +209,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Scan\ScanStore.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
     <ClCompile Include="..\Source\Scan\StaticPointers.cpp" />
+    <ClCompile Include="..\Source\Scan\TypeCatalog.cpp" />
     <ClCompile Include="..\Source\Scan\ValueType.cpp" />
     <ClCompile Include="..\Source\Scan\Workers.cpp" />
     <ClCompile Include="..\Source\Syscalls\Syscall.cpp">

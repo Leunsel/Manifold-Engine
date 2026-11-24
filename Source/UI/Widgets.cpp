@@ -551,6 +551,14 @@ namespace Manifold::UI
         Layout::Muted(text ? std::string_view(text) : std::string_view());
     }
 
+    void MenuSection(const char* title, bool first)
+    {
+        if (!first)
+            ImGui::Separator();
+        Layout::Text(title ? std::string_view(title) : std::string_view(),
+            { .Color = ManifoldTheme::Muted, .Font = Fonts::Bold(), .FontSize = ImGui::GetFontSize() * 0.86f, .Mode = Layout::Overflow::Visible });
+    }
+
     namespace
     {
         struct PendingSelection

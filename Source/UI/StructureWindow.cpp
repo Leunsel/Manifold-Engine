@@ -11,6 +11,7 @@
 #include "Target/Mono.h"
 #include "UI/Fonts.h"
 #include "UI/Shortcuts.h"
+#include "UI/TypePicker.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 #include "UI/Workspace.h"
@@ -2141,58 +2142,62 @@ namespace Manifold::UI
                         text = text.substr(0, 27) + "\xE2\x80\xA6";
                     return text;
                 };
-            for (Scan::ValueType type : kFieldTypes)
+            const Scan::TypeChoice current = field.CustomType.empty() ? Scan::TypeChoice{ Scan::ScanKind::Single, field.Type, {} }
+                                                                      : Scan::TypeChoice{ Scan::ScanKind::Custom, field.Type, field.CustomType };
+            const std::vector<Scan::TypeSection> sections = Scan::TypeCatalog({ .Types = kFieldTypes, .PointerSize = pointerSize, .Customs = CustomTypes(m_engine.Lua()) });
+            const auto shownFor = [&](const Scan::TypeEntry& entry) -> std::string
+                {
+                    const Scan::ValueType type = entry.Choice.Type;
+                    if (entry.Choice.Kind != Scan::ScanKind::Single)
+                        return entry.Detail;
+                    if (type == Scan::ValueType::Binary)
+                        return {};
+                    Table::StructField probe = field;
+                    probe.CustomType.clear();
+                    probe.ChildStructure.clear();
+                    probe.Type = type;
+                    probe.Size = SizeOf(type, pointerSize, type == Scan::ValueType::String || type == Scan::ValueType::ByteArray ? std::max(field.Size, 16) : field.Size);
+                    if (type == Scan::ValueType::Pointer)
+                        probe.Display = Table::FieldDisplay::Hex;
+                    else if ((probe.Display == Table::FieldDisplay::Binary && type != Scan::ValueType::Binary) || field.Type == Scan::ValueType::Pointer)
+                        probe.Display = Table::FieldDisplay::Signed;
+                    return preview(probe);
+                };
+            const Scan::TypeEntry* picked = TypeMenuItems(sections, Embedded(field) ? nullptr : &current, shownFor, m_engine.Options().TypeSubmenus);
+            if (picked && picked->Choice.Kind == Scan::ScanKind::Custom)
             {
-                Table::StructField probe = field;
-                probe.CustomType.clear();
-                probe.ChildStructure.clear();
-                probe.Type = type;
-                probe.Size = SizeOf(type, pointerSize, type == Scan::ValueType::String || type == Scan::ValueType::ByteArray ? std::max(field.Size, 16) : field.Size);
-                if (type == Scan::ValueType::Pointer)
-                    probe.Display = Table::FieldDisplay::Hex;
-                else if ((probe.Display == Table::FieldDisplay::Binary && type != Scan::ValueType::Binary) || field.Type == Scan::ValueType::Pointer)
-                    probe.Display = Table::FieldDisplay::Signed;
-                const std::string shown = type == Scan::ValueType::Binary ? std::string() : preview(probe);
-                if (ImGui::MenuItem(Scan::TypeName(type), shown.empty() ? nullptr : shown.c_str(), field.CustomType.empty() && !Embedded(field) && field.Type == type))
+                if (const Lua::CustomType* custom = m_engine.Lua().FindCustomType(picked->Choice.Custom))
                 {
                     if (Embedded(field))
                         field.ChildStructure.clear();
-                    field.CustomType.clear();
-                    field.Type = type;
-                    field.Size = SizeOf(type, pointerSize, field.Size);
-                    if (type == Scan::ValueType::Pointer)
-                        field.Display = Table::FieldDisplay::Hex;
-                    if (type == Scan::ValueType::Binary)
-                    {
-                        field.BitStart = std::clamp(field.BitStart, 0, 63);
-                        field.BitLength = std::clamp(field.BitLength, 1, 64 - field.BitStart);
-                        field.Size = Table::BitFieldSize(field.BitStart, field.BitLength);
-                        field.Display = Table::FieldDisplay::Binary;
-                    }
-                    else if (field.Display == Table::FieldDisplay::Binary && !IsWholeNumber(type))
-                    {
-                        field.Display = Table::FieldDisplay::Unsigned;
-                    }
+                    field.CustomType = custom->Name;
+                    field.Type = Scan::ValueType::ByteArray;
+                    field.Size = custom->ByteCount();
                     m_engine.Table().Touch();
                 }
             }
-            const std::vector<std::string> customTypes = m_engine.Lua().CustomTypeNames();
-            if (!customTypes.empty())
+            else if (picked)
             {
-                ImGui::Separator();
-                for (const std::string& name : customTypes)
+                const Scan::ValueType type = picked->Choice.Type;
+                if (Embedded(field))
+                    field.ChildStructure.clear();
+                field.CustomType.clear();
+                field.Type = type;
+                field.Size = SizeOf(type, pointerSize, field.Size);
+                if (type == Scan::ValueType::Pointer)
+                    field.Display = Table::FieldDisplay::Hex;
+                if (type == Scan::ValueType::Binary)
                 {
-                    if (ImGui::MenuItem(name.c_str(), nullptr, EqualsNoCase(field.CustomType, name)))
-                    {
-                        if (const Lua::CustomType* custom = m_engine.Lua().FindCustomType(name))
-                        {
-                            field.CustomType = custom->Name;
-                            field.Type = Scan::ValueType::ByteArray;
-                            field.Size = custom->ByteCount();
-                            m_engine.Table().Touch();
-                        }
-                    }
+                    field.BitStart = std::clamp(field.BitStart, 0, 63);
+                    field.BitLength = std::clamp(field.BitLength, 1, 64 - field.BitStart);
+                    field.Size = Table::BitFieldSize(field.BitStart, field.BitLength);
+                    field.Display = Table::FieldDisplay::Binary;
                 }
+                else if (field.Display == Table::FieldDisplay::Binary && !IsWholeNumber(type))
+                {
+                    field.Display = Table::FieldDisplay::Unsigned;
+                }
+                m_engine.Table().Touch();
             }
             if (field.CustomType.empty() && (field.Type == Scan::ValueType::String || field.Type == Scan::ValueType::ByteArray))
             {
