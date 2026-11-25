@@ -1,4 +1,26 @@
-# Manifold Engine
+<h1 align="center">Manifold Engine</h1>
+
+<p align="center">
+  <a href="https://github.com/Leunsel/Manifold-Engine/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Leunsel/Manifold-Engine?include_prereleases&label=release"></a>
+  <img alt="Platform: Windows x64" src="https://img.shields.io/badge/platform-Windows%20x64-0078D6">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/Leunsel/Manifold-Engine"></a>
+  <a href="https://github.com/Leunsel/Manifold-Engine/actions/workflows/build.yml"><img alt="Build and test" src="https://github.com/Leunsel/Manifold-Engine/actions/workflows/build.yml/badge.svg?branch=main"></a>
+  <img alt="Lua 5.4" src="https://img.shields.io/badge/Lua-5.4-2C2D72?logo=lua">
+  <a href="https://www.patreon.com/c/Leunsel"><img alt="Support on Patreon" src="https://img.shields.io/badge/Patreon-support-F96854?logo=patreon&logoColor=white"></a>
+</p>
+
+<p align="center">
+  <img alt="The main window: scan results, the scan options and a table in the address list" src="Docs/images/main-window.png" width="900">
+</p>
+
+<p align="center">
+  <a href="#download-and-first-start">Download</a> ·
+  <a href="Docs/FEATURES.md">Features</a> ·
+  <a href="Docs/SHORTCUTS.md">Shortcuts</a> ·
+  <a href="#documentation">Documentation</a> ·
+  <a href="#credits">Credits</a> ·
+  <a href="https://www.patreon.com/c/Leunsel">Patreon</a>
+</p>
 
 A memory scanner, debugger and scripting tool for Windows games and programs, in the spirit of Cheat Engine. It reads and writes Cheat Engine tables (`.CT`), runs Cheat Engine's Auto Assembler and Lua scripts, and draws every tool in its own window on the graphics card.
 
@@ -9,6 +31,8 @@ It is meant for people who already use Cheat Engine, or want to learn how games 
 
 ## Contents
 
+- [Download and first start](#download-and-first-start)
+- [Screenshots](#screenshots)
 - [Highlights](#highlights)
 - [Features](#features)
   - [Scanner](#scanner)
@@ -31,11 +55,44 @@ It is meant for people who already use Cheat Engine, or want to learn how games 
 - [Testing](#testing)
 - [Installing](#installing)
 - [Documentation](#documentation)
+- [Credits](#credits)
+- [Support the project](#support-the-project)
 - [License](#license)
+
+## Download and first start
+
+1. Download the latest release from the [Releases page](https://github.com/Leunsel/Manifold-Engine/releases/latest).
+2. Unpack it into a folder of its own, for example `Documents\Manifold Engine`. The program keeps its settings, tables, logs and backups in folders next to it, so a folder you can write to matters (not `Program Files`).
+3. Start `Manifold-Engine.exe`, open the game with `Ctrl+P` and a table with `Ctrl+O`, or drop a `.CT` file on the window.
+
+You need 64-bit Windows and a graphics card with Direct3D 11. 32-bit games work too: the helpers for them come with the program. Many games need the program to run as administrator (Help → Restart as Administrator).
+
+Coming from Cheat Engine? Your tables, Auto Assembler scripts, Lua scripts, templates and most keyboard shortcuts carry over. [Docs/CE-COMPAT.md](Docs/CE-COMPAT.md) lists the few Cheat Engine functions that are missing or do nothing.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td><img alt="Memory viewer with the disassembler and the hex view" src="Docs/images/memory-viewer.png"></td>
+    <td><img alt="Structure Dissect showing a player structure" src="Docs/images/dissect.png"></td>
+  </tr>
+  <tr>
+    <td align="center">Memory viewer and disassembler</td>
+    <td align="center">Structure Dissect</td>
+  </tr>
+  <tr>
+    <td><img alt="Snake, a small game drawn by a Lua script with manifold.ui" src="Docs/images/script-window.png"></td>
+    <td><img alt="The Form Editor laying out a script window" src="Docs/images/form-editor.png"></td>
+  </tr>
+  <tr>
+    <td align="center">A script window (Examples/Manifold-Snake.lua)</td>
+    <td align="center">Form Editor</td>
+  </tr>
+</table>
 
 ## Highlights
 
-- **Scanner**: all the usual value types, many threads, results on disk instead of in memory, an *All* scan over every number type at once, and grouped scans for values that sit next to each other.
+- **Scanner**: all the usual value types, many threads, results in RAM up to a limit and the rest on disk, an *All* scan over every number type at once, and grouped scans for values that sit next to each other.
 - **Address list**: groups, pointers, freezing, hotkeys, drop-down values, and Cheat Engine's group options.
 - **Memory viewer and debugger**: disassembler with symbols and jump arrows, a flow graph per function, write history with undo, conditional breakpoints that run inside the target, tracing, and "find out what accesses / writes".
 - **Structure Dissect** that names objects by their class in Mono, IL2CPP, .NET and Unreal Engine games, and C++ objects by their RTTI.
@@ -58,7 +115,7 @@ This is an overview. [Docs/FEATURES.md](Docs/FEATURES.md) describes every window
 | Compare to | the previous scan, the first scan, or results saved under a name |
 | Filters | writable, executable, copy-on-write, region types, start and stop address or one module, fast scan alignment, pausing the process |
 
-Scans run on several threads and keep their results in temporary files, so hundreds of millions of results do not fill the memory. `F3` runs the first or next scan, `Shift+F3` starts a new scan and `Ctrl+Alt+Z` undoes the last one.
+Scans run on several threads and keep their results in RAM up to a limit (Settings → Scanner → Results in Memory) and the rest in temporary files, so hundreds of millions of results still fit. `F3` runs the first or next scan, `Shift+F3` starts a new scan and `Ctrl+Alt+Z` undoes the last one.
 
 ### Address list and tables
 
@@ -252,6 +309,23 @@ copies the Release build into `Install` (or `-Destination`). The program there k
 | [Development](Docs/DEVELOPMENT.md) | building, tests, project layout, CI |
 | [Architecture](Docs/ARCHITECTURE.md) | layers, threads, and where new code goes |
 | [UI layout](Docs/UI-LAYOUT.md) | the layout system every window is drawn on, its audit and the lock on raw ImGui calls |
+
+## Credits
+
+Manifold Engine is made by Leunsel, with the help of:
+
+| Who | For |
+| --- | --- |
+| cfemen | SysCalls |
+| Veydr | Bug-Hunts |
+| [ocornut](https://github.com/ocornut) | [Dear ImGui](https://github.com/ocornut/imgui) |
+| [zyantific](https://github.com/zyantific) | [Zydis](https://github.com/zyantific/zydis) |
+
+The same list is in the program under Help → About → Credits.
+
+## Support the project
+
+Manifold Engine is free and stays free. If it saves you time, you can support its development on [Patreon](https://www.patreon.com/c/Leunsel).
 
 ## License
 
