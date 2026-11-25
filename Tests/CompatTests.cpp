@@ -42,6 +42,43 @@ namespace Manifold::Tests
                 if a ~= "x" or b ~= "y" or c ~= "z" then return "split gave " .. tostring(a) .. tostring(b) .. tostring(c) end
                 if select("#", string.split("a b", " ")) ~= 2 then return "split count" end
                 if not ("table.lua"):endsWith(".lua") or not ("table.lua"):startsWith("table") then return "starts or ends" end
+                if ("  \t a b \r\n"):trim() ~= "a b" or string.trim("") ~= "" then return "trim" end
+                return "ok")LUA");
+            // ∑ Cheat Engine adds the Lua 5.1 names at startup (LuaHandler.pas, InitializeLua); a table that used
+            //   assert(loadstring(code)) failed in Manifold (owner report).
+            LuaCheck(engine, "lua 5.1 names", R"LUA(
+                local make = function(code) return assert(loadstring(code)) end
+                if make("return 1 + 2")() ~= 3 then return "loadstring" end
+                local broken, problem = loadstring("return +")
+                if broken ~= nil or type(problem) ~= "string" then return "loadstring error" end
+                if select("#", unpack({ 1, 2, 3 })) ~= 3 or package.loaders ~= package.searchers then return "unpack or loaders" end
+                if math.pow(2, 10) ~= 1024.0 or math.abs(math.log10(1000) - 3) > 1e-12 or math.ldexp(0.5, 4) ~= 8.0 then return "pow, log10, ldexp" end
+                if math.abs(math.atan2(1, 1) - math.pi / 4) > 1e-12 or math.mod(7, 3) ~= 1 or string.gfind ~= string.gmatch then return "atan2, mod, gfind" end
+                if math.cosh(0) ~= 1 or math.sinh(0) ~= 0 or math.tanh(0) ~= 0 or math.tanh(100) ~= 1 or math.abs(math.tanh(0.5) - 0.46211715726000974) > 1e-15 then return "hyperbolic" end
+                for _, x in ipairs({ 8, -3, 0.1, 1e308, -1e-310, 5e-324, 1 }) do
+                  local m, e = math.frexp(x)
+                  -- Rebuilt in two steps: 2^1024 alone overflows, as in Cheat Engine's ldexp (x * 2.0^exp).
+                  local back = m * 2.0 ^ (e // 2) * 2.0 ^ (e - e // 2)
+                  if math.abs(m) < 0.5 or math.abs(m) >= 1 or math.type(e) ~= "integer" or back ~= x then return "frexp " .. tostring(x) .. " gave " .. tostring(m) .. ", " .. tostring(e) end
+                end
+                local m, e = math.frexp(8)
+                if m ~= 0.5 or e ~= 4 or select(2, math.frexp(0)) ~= 0 then return "frexp values" end
+                if bit32 ~= nil or table.getn ~= nil or setfenv ~= nil then return "a name Cheat Engine does not have either" end
+                return "ok")LUA");
+            LuaCheck(engine, "module", R"LUA(
+                package.loaded["oldstyletest.mod"] = nil
+                local chunk = assert(loadstring([[
+                  module("oldstyletest.mod", package.seeall)
+                  counter = 5
+                  function bump() counter = counter + 1; return tostring(counter) end
+                ]]))
+                chunk()
+                local mod = package.loaded["oldstyletest.mod"]
+                if type(mod) ~= "table" or oldstyletest.mod ~= mod or mod.counter ~= 5 or mod.bump() ~= "6" then return "module table" end
+                if mod._NAME ~= "oldstyletest.mod" or mod._PACKAGE ~= "oldstyletest." or mod._M ~= mod then return "module fields" end
+                if rawget(_G, "counter") ~= nil or rawget(_G, "bump") ~= nil then return "module leaked into _G" end
+                package.loaded["oldstyletest.mod"] = nil
+                oldstyletest = nil
                 return "ok")LUA");
             LuaCheck(engine, "defines", R"LUA(
                 if vtDword ~= 2 or vtAutoAssembler ~= 11 or soExactValue ~= 1 or mrhToggleActivation ~= 0 or mrhDecreaseValue ~= 7 then return "constants" end

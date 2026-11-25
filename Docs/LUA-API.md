@@ -162,6 +162,8 @@ Byte tables: `byteTableToString`, `byteTableToWideString`, `stringToByteTable`, 
 
 Bit helpers for old scripts: `bAnd`, `bOr`, `bXor`, `bNot`, `bShl`, `bShr` (Lua 5.4 also has `&`, `|`, `~`, `<<`, `>>`).
 
+Old Lua names that Cheat Engine adds at startup, defined the same way: `loadstring` (= `load`), `unpack` (= `table.unpack`), `package.loaders` (= `package.searchers`), `string.gfind` (= `string.gmatch`), `math.pow`, `math.log10`, `math.ldexp`, `math.frexp`, `math.atan2`, `math.mod`, `math.cosh`, `math.sinh`, `math.tanh`, plus `module(name, ...)` with `package.seeall` for old-style modules and `string.trim`. Like in Cheat Engine there is no `bit32`, `table.getn`, `table.maxn`, `setfenv` or `getfenv`.
+
 Key codes: `VK_F1`..`VK_F24`, `VK_0`..`VK_9`, `VK_A`..`VK_Z`, `VK_NUMPAD0`..`VK_NUMPAD9`, `VK_SHIFT`, `VK_CONTROL`, `VK_MENU`, `VK_SPACE`, `VK_RETURN`, `VK_ESCAPE`, arrows and the other common keys.
 
 ## Cheat Engine compatibility
