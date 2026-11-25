@@ -179,6 +179,10 @@ namespace Manifold::Disasm
 
         Instruction Decode(std::uint64_t address, const std::uint8_t* bytes, std::size_t available, const Target::Symbols* symbols = nullptr) const;
         Instruction Read(const Target::Process& process, std::uint64_t address, const Target::Symbols* symbols = nullptr) const;
+        // One line as Cheat Engine's Lua disassemble() writes it, for scripts that parse it:
+        // "ADDRESS - BYTES - opcode parameters", no symbols, addresses with at least 8 digits,
+        // bytes grouped by instruction part, immediates as wide as encoded.
+        std::string CheatEngineLine(std::uint64_t address, const std::uint8_t* bytes, std::size_t available) const;
         std::vector<Instruction> ReadMany(const Target::Process& process, std::uint64_t address, int count, const Target::Symbols* symbols = nullptr,
             const CodeHints* hints = nullptr) const;
         std::vector<Instruction> DecodeMany(const std::vector<std::uint8_t>& buffer, const std::vector<bool>& readable, std::uint64_t address, int count,

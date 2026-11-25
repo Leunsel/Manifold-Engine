@@ -928,4 +928,222 @@ namespace Manifold::Disasm
         lines.push_back(Format("%cIP %s", p, h(r.Rip).c_str()));
         return lines;
     }
+
+    namespace
+    {
+        std::string ByteGroup(const std::uint8_t* bytes, std::size_t from, std::size_t to)
+        {
+            std::string text;
+            for (std::size_t i = from; i < to; ++i)
+                text += Hex(bytes[i], 2);
+            return text;
+        }
+
+        std::string SignedHex(std::int64_t value, int digits)
+        {
+            return value < 0 ? "-" + Hex(static_cast<std::uint64_t>(-value), digits) : "+" + Hex(static_cast<std::uint64_t>(value), digits);
+        }
+
+        // Cheat Engine names conditions by the Intel primary form: je, jne, jae, ja, jge, jg (Zydis: jz, jnz, jnb, jnbe, jnl, jnle).
+        std::string CheatEngineMnemonic(std::string mnemonic)
+        {
+            static const std::pair<const char*, const char*> kConditions[] = { { "nz", "ne" }, { "z", "e" }, { "nbe", "a" }, { "nb", "ae" }, { "nle", "g" }, { "nl", "ge" } };
+            for (const char* stem : { "j", "set", "cmov" })
+            {
+                const std::size_t length = std::strlen(stem);
+                if (mnemonic.compare(0, length, stem) != 0)
+                    continue;
+                const std::string condition = mnemonic.substr(length);
+                for (const auto& [from, to] : kConditions)
+                {
+                    if (condition == from)
+                        return stem + std::string(to);
+                }
+            }
+            return mnemonic;
+        }
+
+        const char* SizeKeyword(ZyanU16 bits)
+        {
+            switch (bits)
+            {
+            case 8: return "byte ptr ";
+            case 16: return "word ptr ";
+            case 32: return "dword ptr ";
+            case 64: return "qword ptr ";
+            case 80: return "tword ptr ";
+            case 128: return "xmmword ptr ";
+            case 256: return "ymmword ptr ";
+            case 512: return "zmmword ptr ";
+            default: return "";
+            }
+        }
+    }
+
+    // ∑ Built to the character from Cheat Engine 7.6 output the owner captured (DisasmTests LuaTextLikeCheatEngine)
+    //   and from disassembler.pas: "inttohex(address,8) - bytes - opcode parameters". Rules that the samples do not
+    //   pin down (SIB-only scale, negative disp32, VEX groups) follow the same pattern and are marked as guesses there.
+    std::string Disassembler::CheatEngineLine(std::uint64_t address, const std::uint8_t* bytes, std::size_t available) const
+    {
+        ZydisDecodedInstruction instruction{};
+        ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT]{};
+        if (available == 0)
+            return Hex(address, 8) + " - ?? - ??";
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&m_state->Decoder, bytes, available, &instruction, operands)))
+            return Hex(address, 8) + " - " + Hex(bytes[0], 2) + " - db " + Hex(bytes[0], 2);
+        const ZydisDecodedInstructionRaw& raw = instruction.raw;
+
+        // Bytes: each prefix alone, the opcode bytes together, then ModRM, SIB, displacement and each immediate
+        // as one group. A ModRM instruction without an immediate keeps a space at the end ("05 6EA80401  - ").
+        std::vector<std::string> groups;
+        std::size_t opcodeStart = raw.prefix_count;
+        for (std::size_t i = 0; i < raw.prefix_count; ++i)
+            groups.push_back(Hex(bytes[i], 2));
+        std::size_t encodedStart = 0;
+        std::size_t encodedSize = 0;
+        switch (instruction.encoding)
+        {
+        case ZYDIS_INSTRUCTION_ENCODING_VEX: encodedStart = raw.vex.offset; encodedSize = raw.vex.size; break;
+        case ZYDIS_INSTRUCTION_ENCODING_EVEX: encodedStart = raw.evex.offset; encodedSize = 4; break;
+        case ZYDIS_INSTRUCTION_ENCODING_MVEX: encodedStart = raw.mvex.offset; encodedSize = 4; break;
+        case ZYDIS_INSTRUCTION_ENCODING_XOP: encodedStart = raw.xop.offset; encodedSize = 3; break;
+        default: break;
+        }
+        if (encodedSize)
+        {
+            groups.push_back(ByteGroup(bytes, encodedStart, encodedStart + encodedSize));
+            opcodeStart = encodedStart + encodedSize;
+        }
+        const bool modrm = (instruction.attributes & ZYDIS_ATTRIB_HAS_MODRM) != 0;
+        const bool sib = (instruction.attributes & ZYDIS_ATTRIB_HAS_SIB) != 0;
+        std::size_t opcodeEnd = instruction.length;
+        if (modrm)
+            opcodeEnd = raw.modrm.offset;
+        else if (raw.disp.size)
+            opcodeEnd = raw.disp.offset;
+        else if (raw.imm[0].size)
+            opcodeEnd = raw.imm[0].offset;
+        if (opcodeEnd > opcodeStart)
+            groups.push_back(ByteGroup(bytes, opcodeStart, opcodeEnd));
+        if (modrm)
+            groups.push_back(Hex(bytes[raw.modrm.offset], 2));
+        if (sib)
+            groups.push_back(Hex(bytes[raw.sib.offset], 2));
+        if (raw.disp.size)
+            groups.push_back(ByteGroup(bytes, raw.disp.offset, raw.disp.offset + raw.disp.size / 8u));
+        bool immediate = false;
+        for (const auto& imm : raw.imm)
+        {
+            if (!imm.size)
+                continue;
+            groups.push_back(ByteGroup(bytes, imm.offset, imm.offset + imm.size / 8u));
+            immediate = true;
+        }
+        std::string column;
+        for (const std::string& group : groups)
+            column += (column.empty() ? "" : " ") + group;
+        if (modrm && !immediate)
+            column += " ";
+
+        // Parameters.
+        const bool nop = instruction.mnemonic == ZYDIS_MNEMONIC_NOP;
+        bool registerShown = false;
+        for (ZyanU8 i = 0; i < instruction.operand_count_visible; ++i)
+            registerShown = registerShown || (operands[i].type == ZYDIS_OPERAND_TYPE_REGISTER && !nop);
+        // A register sets the size, except for a zero or sign extension; CE leaves it out of "mov [rcx+10],00000001" too.
+        const bool extends = instruction.mnemonic == ZYDIS_MNEMONIC_MOVZX || instruction.mnemonic == ZYDIS_MNEMONIC_MOVSX;
+        const bool movStore = instruction.mnemonic == ZYDIS_MNEMONIC_MOV;
+        std::vector<std::string> parameters;
+        std::size_t immIndex = 0;
+        for (ZyanU8 i = 0; i < instruction.operand_count_visible; ++i)
+        {
+            const ZydisDecodedOperand& operand = operands[i];
+            switch (operand.type)
+            {
+            case ZYDIS_OPERAND_TYPE_REGISTER:
+                if (!nop)
+                    parameters.push_back(ZydisRegisterGetString(operand.reg.value));
+                break;
+            case ZYDIS_OPERAND_TYPE_IMMEDIATE:
+            {
+                const std::size_t index = std::min<std::size_t>(immIndex++, 1);
+                if (operand.imm.is_relative)
+                {
+                    ZyanU64 target = 0;
+                    ZydisCalcAbsoluteAddress(&instruction, &operand, address, &target);
+                    parameters.push_back(Hex(target, 8));
+                    break;
+                }
+                const auto& imm = raw.imm[index];
+                const std::uint64_t value = imm.value.u;
+                switch (imm.size)
+                {
+                case 8:
+                {
+                    const auto small = static_cast<std::int8_t>(value & 0xFF);
+                    parameters.push_back(imm.is_signed && small < 0 ? "-" + Hex(static_cast<std::uint64_t>(-static_cast<int>(small)), 2) : Hex(value & 0xFF, 2));
+                    break;
+                }
+                case 16: parameters.push_back(Hex(value & 0xFFFF, 4)); break;
+                case 32: parameters.push_back(Hex(value & 0xFFFFFFFFull, 8)); break;
+                case 64: parameters.push_back(Hex(value, 16)); break;
+                default: parameters.push_back(Hex(operand.imm.value.u)); break;
+                }
+                break;
+            }
+            case ZYDIS_OPERAND_TYPE_MEMORY:
+            {
+                std::string text;
+                if (operand.mem.type == ZYDIS_MEMOP_TYPE_MEM && (extends || (!registerShown && !movStore)))
+                    text += SizeKeyword(operand.size);
+                if (operand.mem.segment == ZYDIS_REGISTER_FS || operand.mem.segment == ZYDIS_REGISTER_GS)
+                    text += std::string(ZydisRegisterGetString(operand.mem.segment)) + ":";
+                const bool ripRelative = operand.mem.base == ZYDIS_REGISTER_RIP || operand.mem.base == ZYDIS_REGISTER_EIP;
+                if (ripRelative || (operand.mem.base == ZYDIS_REGISTER_NONE && operand.mem.index == ZYDIS_REGISTER_NONE))
+                {
+                    ZyanU64 target = 0;
+                    if (!ZYAN_SUCCESS(ZydisCalcAbsoluteAddress(&instruction, &operand, address, &target)))
+                        target = static_cast<ZyanU64>(operand.mem.disp.value);
+                    text += "[" + Hex(target, 8) + "]";
+                }
+                else
+                {
+                    std::string inside;
+                    if (operand.mem.base != ZYDIS_REGISTER_NONE)
+                        inside += ZydisRegisterGetString(operand.mem.base);
+                    if (operand.mem.index != ZYDIS_REGISTER_NONE)
+                    {
+                        inside += (inside.empty() ? "" : "+") + std::string(ZydisRegisterGetString(operand.mem.index));
+                        if (operand.mem.scale > 1)
+                            inside += "*" + std::to_string(operand.mem.scale);
+                    }
+                    if (raw.disp.size)
+                        inside += SignedHex(operand.mem.disp.value, raw.disp.size == 8 ? 2 : raw.disp.size == 16 ? 4 : 8);
+                    text += "[" + inside + "]";
+                }
+                parameters.push_back(text);
+                break;
+            }
+            case ZYDIS_OPERAND_TYPE_POINTER:
+                parameters.push_back(Hex(operand.ptr.segment, 4) + ":" + Hex(operand.ptr.offset, 8));
+                break;
+            default:
+                break;
+            }
+        }
+        std::string opcode;
+        if (instruction.attributes & ZYDIS_ATTRIB_HAS_LOCK)
+            opcode += "lock ";
+        if (instruction.attributes & ZYDIS_ATTRIB_HAS_REP)
+            opcode += "rep ";
+        if (instruction.attributes & ZYDIS_ATTRIB_HAS_REPE)
+            opcode += "repe ";
+        if (instruction.attributes & ZYDIS_ATTRIB_HAS_REPNE)
+            opcode += "repne ";
+        opcode += CheatEngineMnemonic(ZydisMnemonicGetString(instruction.mnemonic));
+        std::string joined;
+        for (const std::string& parameter : parameters)
+            joined += (joined.empty() ? "" : ",") + parameter;
+        return Hex(address, 8) + " - " + column + " - " + opcode + " " + joined;
+    }
 }

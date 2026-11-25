@@ -757,25 +757,19 @@ namespace Manifold::Lua
             return 1;
         }
 
-        std::string DisassemblyLine(Engine& engine, const Disasm::Instruction& instruction)
-        {
-            std::string text = Hex(instruction.Address) + " - " + instruction.BytesText() + " - " + instruction.Text();
-            if (instruction.Target)
-            {
-                const std::string extra = engine.Describe(*instruction.Target);
-                if (!extra.empty())
-                    text += " : " + extra;
-            }
-            return text;
-        }
-
+        // ∑ Cheat Engine's Lua disassemble() builds its own disassembler with showmodules, showsymbols and
+        //   showsections off (LuaHandler.pas, disassemble_lua): every address in the text is plain hex with at
+        //   least 8 digits, "mov rcx,[7FF68B34FF88]", and no " : comment" follows. Tables parse that with
+        //   "%[([A-Fa-f0-9]+)%]". Ours wrote the memory view's "mov rcx,[<module>+offset]", so a table found
+        //   its AOB and then could not read the static address behind it. The Lua text is now
+        //   Cheat Engine's to the character (Disassembler::CheatEngineLine); the memory view keeps its own.
         int Disassemble(lua_State* state)
         {
             const auto process = NeedProcess(state);
             const std::uint64_t address = AddressArgument(state, 1);
-            Engine& engine = Owner(state);
-            const Disasm::Instruction instruction = engine.Disassembler().Read(*process, address, &engine.Symbols());
-            lua_pushstring(state, DisassemblyLine(engine, instruction).c_str());
+            std::uint8_t bytes[16]{};
+            const std::size_t got = process->Read(address, bytes, sizeof(bytes));
+            lua_pushstring(state, Owner(state).Disassembler().CheatEngineLine(address, bytes, got).c_str());
             return 1;
         }
 
@@ -812,9 +806,7 @@ namespace Manifold::Lua
         {
             const std::vector<std::uint8_t> bytes = ByteArgument(state, 1);
             const std::uint64_t address = lua_isnoneornil(state, 2) ? 0 : AddressArgument(state, 2);
-            Engine& engine = Owner(state);
-            const Disasm::Instruction instruction = engine.Disassembler().Decode(address, bytes.data(), bytes.size(), &engine.Symbols());
-            lua_pushstring(state, DisassemblyLine(engine, instruction).c_str());
+            lua_pushstring(state, Owner(state).Disassembler().CheatEngineLine(address, bytes.data(), bytes.size()).c_str());
             return 1;
         }
 

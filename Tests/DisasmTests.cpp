@@ -570,6 +570,82 @@ namespace Manifold::Tests
         CHECK_EQ(bits(false, { 0x8B, 0x81, 0x10, 0x00, 0x00, 0x00 }, true), 0);
     }
 
+    namespace
+    {
+        // ∑ A table found its AOB but could not read the static address behind it: it reads the target with
+        //   opcode:match("%[([A-Fa-f0-9]+)%]"), and our Lua disassemble() wrote the memory view's
+        //   "mov rcx,[<module>+offset]". Cheat Engine's Lua disassemble() shows no modules or symbols,
+        //   so every target is plain hex, for mov and lea alike.
+        void LuaTextHasPlainAddresses(Engine& engine)
+        {
+            std::string answer;
+            const Status ran = engine.Lua().RunWithResult(R"LUA(
+                local self = getAddress('Manifold-Engine.Tests.exe')
+                if not self or self == 0 then return 'no module' end
+                local at = self + 0x1000
+                local want = string.format('%X', at + 7 + 0x2000)
+                for _, bytes in ipairs({ '48 8B 0D 00 20 00 00', '48 8D 0D 00 20 00 00' }) do
+                  local line = disassembleBytes(bytes, at)
+                  local extra, opcode = splitDisassembledString(line)
+                  local hex = opcode and opcode:match('%[([A-Fa-f0-9]+)%]')
+                  if hex ~= want then return bytes .. ' gave ' .. tostring(line) .. ', wanted [' .. want .. ']' end
+                end
+                return 'ok')LUA", "lua disassembly text", answer);
+            CHECK_MSG(ran.Ok(), ran.Text);
+            CHECK_MSG(answer == "ok", answer);
+        }
+
+        // ∑ The owner ran these 18 instructions through Cheat Engine 7.6's Lua disassemble() (64-bit target,
+        //   block at 02840000, one instruction per 0x10). Tables parse this text, so ours has to be the same
+        //   character for character: bytes grouped by instruction part (a trailing space when a ModRM byte has
+        //   no immediate after it), addresses with at least 8 digits, immediates as wide as encoded, imm8 and
+        //   disp8 signed with 2 digits, "ret " with its space.
+        void LuaTextLikeCheatEngine(Engine& engine)
+        {
+            struct Case
+            {
+                const char* Bytes;
+                const char* Expected;
+            };
+            const Case cases[] = {
+                { "48 8B 05 6E A8 04 01", "02840000 - 48 8B 05 6EA80401  - mov rax,[0388A875]" },
+                { "48 8D 0D 6F B2 7B 00", "02840010 - 48 8D 0D 6FB27B00  - lea rcx,[02FFB286]" },
+                { "0F 28 F3", "02840020 - 0F28 F3  - movaps xmm6,xmm3" },
+                { "48 83 EC 28", "02840030 - 48 83 EC 28 - sub rsp,28" },
+                { "B8 64 00 00 00", "02840040 - B8 64000000 - mov eax,00000064" },
+                { "48 B8 88 77 66 55 44 33 22 11", "02840050 - 48 B8 8877665544332211 - mov rax,1122334455667788" },
+                { "68 0A 00 00 00", "02840060 - 68 0A000000 - push 0000000A" },
+                { "8B 44 24 10", "02840070 - 8B 44 24 10  - mov eax,[rsp+10]" },
+                { "8B 84 24 10 01 00 00", "02840080 - 8B 84 24 10010000  - mov eax,[rsp+00000110]" },
+                { "C7 41 10 01 00 00 00", "02840090 - C7 41 10 01000000 - mov [rcx+10],00000001" },
+                { "83 7D F8 80", "028400A0 - 83 7D F8 80 - cmp dword ptr [rbp-08],-80" },
+                { "FF 90 30 01 00 00", "028400B0 - FF 90 30010000  - call qword ptr [rax+00000130]" },
+                { "E8 10 00 00 00", "028400C0 - E8 10000000 - call 028400D5" },
+                { "EB 10", "028400D0 - EB 10 - jmp 028400E2" },
+                { "74 F0", "028400E0 - 74 F0 - je 028400D2" },
+                { "F3 0F 10 05 10 00 00 00", "028400F0 - F3 0F10 05 10000000  - movss xmm0,[02840108]" },
+                { "66 0F 1F 44 00 00", "02840100 - 66 0F1F 44 00 00  - nop word ptr [rax+rax+00]" },
+                { "C3", "02840110 - C3 - ret " },
+            };
+            for (std::size_t i = 0; i < std::size(cases); ++i)
+            {
+                const std::uint64_t at = 0x02840000ull + i * 0x10;
+                std::string answer;
+                const Status ran = engine.Lua().RunWithResult(Format("return disassembleBytes('%s', 0x%llX)", cases[i].Bytes, static_cast<unsigned long long>(at)),
+                    "ce text", answer);
+                CHECK_MSG(ran.Ok(), ran.Text);
+                CHECK_MSG(answer == cases[i].Expected, Format("case %zu: |%s| instead of |%s|", i + 1, answer.c_str(), cases[i].Expected));
+            }
+            std::string split;
+            const Status ran = engine.Lua().RunWithResult(R"LUA(
+                local extra, opcode, bytes, address = splitDisassembledString(disassembleBytes('48 8B 05 6E A8 04 01', 0x02840000))
+                local e2, o2, b2, a2 = splitDisassembledString(disassembleBytes('C3', 0x02840110))
+                return string.format('|%s|%s|%s|%s|%s|%s|%s|%s|', extra, opcode, bytes, address, e2, o2, b2, a2))LUA", "ce split", split);
+            CHECK_MSG(ran.Ok(), ran.Text);
+            CHECK_EQ(split, std::string("||mov rax,[0388A875]|48 8B 05 6EA80401 |02840000||ret |C3|02840110|"));
+        }
+    }
+
     int RunDisasmTests()
     {
         const int before = Totals().Failures;
@@ -593,6 +669,8 @@ namespace Manifold::Tests
             ::VirtualFree(second, 0, MEM_RELEASE);
         }
         UnreadableFloor(engine);
+        LuaTextHasPlainAddresses(engine);
+        LuaTextLikeCheatEngine(engine);
         ChainedUnwind();
         InstructionHelp();
         engine.CloseProcess();
