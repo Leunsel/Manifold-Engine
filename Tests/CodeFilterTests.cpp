@@ -44,6 +44,7 @@ namespace Manifold::Tests
             long Threads;
             long Input;
             long Lock;
+            std::int64_t CodeOnly;
         };
 
         struct Child
@@ -570,6 +571,25 @@ namespace Manifold::Tests
             Engine& engine = session.Core;
             CodeFilter& filter = engine.Filter();
             CHECK(filter.Start(FilterRound::FilterOut).Code == ErrorCode::CodeFilterFailed);
+            // Switch tables in the code section, collected as the owner had it in Isaac (no call
+            // targets, so no function bounds on 32-bit): data, never candidates.
+            {
+                CodeFilterOptions tables;
+                tables.Modules = { session.Module };
+                tables.Calls = false;
+                const Result<CodeFilterReport> prepared = filter.Prepare(tables);
+                CHECK_MSG(prepared.Ok(), session.Label + ": " + (prepared ? std::string() : prepared.Error().Text));
+                const std::vector<CodeCandidate> all = filter.Candidates();
+                const Target::Process& process = *engine.Process();
+                const auto indices = process.ReadPointer(process.FindExport(session.Module, "g_coverIndexTablePointer"));
+                const auto region = indices ? process.RegionAt(*indices) : std::nullopt;
+                CHECK_MSG(region && region->Executable(), session.Label + ": the test target's index table is not in its code section");
+                CHECK_MSG(indices && !Has(all, *indices), session.Label + ": a case index table in the code section is a candidate: " + (indices ? Hex(*indices) : std::string()));
+                // the bytes behind CoverReadCodeOnly's absolute address: only code names them
+                const std::uint64_t reader = process.FindExport(session.Module, "CoverReadCodeOnly");
+                const auto codeOnly = static_cast<std::uint64_t>(ReadProbe(session).value_or(Probe{}).CodeOnly);
+                CHECK_MSG(reader && codeOnly && !Has(all, codeOnly), session.Label + ": bytes that only an instruction names became a candidate: " + Hex(codeOnly));
+            }
             CodeFilterOptions options;
             options.Modules = { session.Module };
             options.Calls = true;

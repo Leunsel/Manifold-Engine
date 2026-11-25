@@ -238,6 +238,9 @@ namespace Manifold::Tests
                 const std::vector<ScriptFootprint> orphan = pairs.Footprints();
                 CHECK(orphan.size() == 2 && orphan.back().Label == "Hook" && orphan.back().OffTick == 400);
             }
+            // closed from Windows' "not responding" dialog or with Ctrl+C: ended from outside, not a crash
+            CHECK(!ExceptionExitCode(0xCFFFFFFFu) && !ExceptionExitCode(0xC000013Au) && ExceptionExitCode(0xC0000005u));
+            CHECK_EQ(ExceptionName(0xCFFFFFFFu), std::string("ended by Windows after it stopped responding"));
             CHECK(ScriptLabel("autoAssemble from \"Damage : Multiplier ()->\"", "lua") == "Damage : Multiplier ()->");
             CHECK(ScriptLabel("\"Infinite Ammo\"", "table") == "Infinite Ammo" && ScriptLabel("", "window") == "Auto Assembler window" && ScriptLabel("autoAssemble", "lua") == "autoAssemble");
             ledger.Reset();

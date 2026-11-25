@@ -1104,7 +1104,7 @@ namespace Manifold::Target
     ExplorerExitNote UnityExplorer::ExitNote(const UnityStatus& status, std::string_view process, std::optional<std::uint32_t> exitCode, double seconds)
     {
         ExplorerExitNote note;
-        note.Crashed = exitCode && *exitCode >= 0xC0000000u;
+        note.Crashed = exitCode && *exitCode >= 0xC0000000u && *exitCode != 0xCFFFFFFFu && *exitCode != 0xC000013Au;  // not ended from outside
         std::string text(process);
         if (note.Crashed)
             text += " crashed with exit code 0x" + Hex(*exitCode, 8);

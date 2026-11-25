@@ -348,8 +348,14 @@ namespace Manifold
         return "";
     }
 
+    constexpr std::uint32_t kEndedNotResponding = 0xCFFFFFFFu;
+
     bool ExceptionExitCode(std::uint32_t code)
     {
+        // 0xCFFFFFFF is how Windows ends a program closed from its "not responding" dialog,
+        // and 0xC000013A a console program closed with Ctrl+C: ended from outside, not crashed
+        if (code == kEndedNotResponding || code == 0xC000013Au)
+            return false;
         return (code & 0xF0000000u) == 0xC0000000u || code == 0x80000003u || code == 0x80000002u;
     }
 
@@ -377,6 +383,8 @@ namespace Manifold
         case 0xC0000409u: return "stack buffer overrun (fail fast)";
         case 0xC00002B4u: return "float faults";
         case 0xC00002B5u: return "float traps";
+        case kEndedNotResponding: return "ended by Windows after it stopped responding";
+        case 0xC000013Au: return "ended with Ctrl+C";
         default: return Format("exception %08X", code);
         }
     }

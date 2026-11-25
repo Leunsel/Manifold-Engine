@@ -14,6 +14,7 @@
 #include <cstring>
 #include <map>
 #include <span>
+#include <unordered_set>
 #include <utility>
 
 #include <windows.h>
@@ -84,6 +85,30 @@ namespace Manifold
             std::uint8_t before = 0;
             const bool padded = process.ReadExact(target - 1, &before, 1) && (before == 0xCC || before == 0x90 || before == 0xC3);
             return calls >= 2 || (target & 0xF) == 0 || padded;
+        }
+
+        // ∑ 32-bit MSVC code keeps its switch tables in .text, right behind the
+        //   function (after its ret and padding, aligned): the jump table (code
+        //   addresses) and often a byte table of case indices. The table's
+        //   address is a relocated immediate (jmp [eax*4+table]), so it looks
+        //   like a pointer into code, and its bytes decode as instructions.
+        //   An int3 there is never run: it changes a jump target or an index,
+        //   and the game goes astray without a trap (Isaac hung, 2026-11-25).
+        //   A start that holds a pointer into the code, or four index-sized
+        //   bytes, or is itself a relocated slot, is data.
+        bool LooksLikeTable(const Target::Process& process, const Ranges& code, const std::unordered_set<std::uint64_t>& slots, std::uint64_t target)
+        {
+            if (slots.contains(target))
+                return true;
+            std::uint8_t head[8] = {};
+            if (!process.ReadExact(target, head, sizeof(head)))
+                return true;
+            const std::size_t pointer = static_cast<std::size_t>(process.PointerSize());
+            std::uint64_t first = 0;
+            std::memcpy(&first, head, pointer);
+            if (code.Contains(first))
+                return true;
+            return head[0] < 0x20 && head[1] < 0x20 && head[2] < 0x20 && head[3] < 0x20;
         }
 
         constexpr std::size_t kScanChunk = 1u << 20;
@@ -164,7 +189,7 @@ namespace Manifold
                     continue;
                 std::uint64_t value = 0;
                 std::memcpy(&value, page.data() + offset, size);
-                count(value);
+                count(slot, value);
             }
         }
 
@@ -369,6 +394,7 @@ namespace Manifold
             if (options.Pointers)
             {
                 std::map<std::uint64_t, std::uint32_t> pointers;
+                std::unordered_set<std::uint64_t> dataNamed;  // targets a slot outside the code holds
                 const auto counter = [&](std::uint64_t value)
                     {
                         if (code.Contains(value))
@@ -376,9 +402,24 @@ namespace Manifold
                     };
                 const std::vector<std::uint64_t> slots = RelocatedSlots(*process, module);
                 if (!slots.empty())
-                    PointersAt(*process, slots, counter);
+                {
+                    PointersAt(*process, slots, [&](std::uint64_t slot, std::uint64_t value)
+                        {
+                            counter(value);
+                            if (!code.Contains(slot) && code.Contains(value))
+                                dataNamed.insert(value);
+                        });
+                }
                 else
-                    ScanData(*process, module, counter);
+                {
+                    ScanData(*process, module, [&](std::uint64_t value)
+                        {
+                            counter(value);
+                            if (code.Contains(value))
+                                dataNamed.insert(value);
+                        });
+                }
+                const std::unordered_set<std::uint64_t> slotSet(slots.begin(), slots.end());
                 if (dissected)
                 {
                     for (const Disasm::CodeRef& ref : dissected->Refs)
@@ -397,7 +438,18 @@ namespace Manifold
                         ++count.Rejected;
                         continue;
                     }
-                    if (!PlausibleStart(*process, disassembler, target, 0, holding != nullptr))
+                    // ∑ Without known function bounds a target is only armed when data names
+                    //   it (a vtable, a function table, a callback field): an address that
+                    //   only an instruction holds (jmp [eax*4+table], movzx eax,[eax+table])
+                    //   is as often a table in the code as a function, and an int3 in a
+                    //   table is never run but changes the game. No setting changes this.
+                    const bool named = dataNamed.contains(target);
+                    if (!holding && !named)
+                    {
+                        ++count.Rejected;
+                        continue;
+                    }
+                    if (!PlausibleStart(*process, disassembler, target, 0, holding != nullptr) || (!holding && LooksLikeTable(*process, code, slotSet, target)))
                     {
                         ++count.Rejected;
                         continue;

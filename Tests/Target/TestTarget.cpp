@@ -1110,6 +1110,7 @@ struct CoverProbe
     volatile long Threads;
     volatile long Input;
     volatile long Lock;  // 1 from the host: no code page may become writable again (2 done, 3 failed)
+    volatile long long CodeOnly;  // CoverCodeOnlyTable, stored at run time (no relocated slot names it)
 };
 
 extern "C" __declspec(dllexport) CoverProbe g_coverProbe = {};
@@ -1167,6 +1168,29 @@ extern "C" __declspec(dllexport) __declspec(noinline) void CoverForeign()
 {
     __debugbreak();
 }
+
+// Tables in the code section, the way 32-bit MSVC keeps its switch tables behind a function
+// (Isaac hung when the code filter armed one: an int3 in a table is never run, it changes a
+// jump target or a case index). Naked functions made of bytes put them into .text for sure.
+// A case index table that data points to: small bytes that decode as add instructions and
+// sit aligned, so only the table check keeps it out.
+extern "C" __attribute__((naked, aligned(16))) void CoverIndexTable()
+{
+    __asm__(".byte 0,1,2,3,1,2,0,3,2,2,1,0,3,3,1,0,0,1,2,3,1,2,0,3,2,2,1,0,3,3,1,0");
+}
+extern "C" __declspec(dllexport) const void* volatile g_coverIndexTablePointer = reinterpret_cast<const void*>(&CoverIndexTable);
+// Bytes that look like a function (push ebp / mov ebp,esp / nop / ret) but that only an
+// instruction names (32-bit: an absolute address in the code): without function bounds the
+// code filter must not arm them.
+extern "C" __attribute__((naked, aligned(16))) void CoverCodeOnlyTable()
+{
+    __asm__(".byte 0x55,0x8B,0xEC,0x90,0xC3,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90,0x90");
+}
+extern "C" __declspec(dllexport) __declspec(noinline) int CoverReadCodeOnly(int index)
+{
+    return reinterpret_cast<const volatile unsigned char*>(&CoverCodeOnlyTable)[index & 15];
+}
+
 
 namespace
 {
@@ -1253,6 +1277,8 @@ namespace
     {
         ::AddVectoredExceptionHandler(0, &CoverOwnBreak);
         g_coverProbe.Input = 5;
+        g_coverProbe.CodeOnly = static_cast<long long>(reinterpret_cast<std::uintptr_t>(&CoverCodeOnlyTable));
+        g_coverProbe.CodeOnly = g_coverProbe.CodeOnly + CoverReadCodeOnly(0) * 0;
         ::CloseHandle(::CreateThread(nullptr, 0, &CoverIdleWorker, nullptr, 0, nullptr));
         ::CloseHandle(::CreateThread(nullptr, 0, &CoverForeignWorker, nullptr, 0, nullptr));
         for (int i = 0; i < 8; ++i)
