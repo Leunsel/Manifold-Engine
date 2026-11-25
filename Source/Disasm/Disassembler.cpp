@@ -944,23 +944,34 @@ namespace Manifold::Disasm
             return value < 0 ? "-" + Hex(static_cast<std::uint64_t>(-value), digits) : "+" + Hex(static_cast<std::uint64_t>(value), digits);
         }
 
-        // Cheat Engine names conditions by the Intel primary form: je, jne, jae, ja, jge, jg (Zydis: jz, jnz, jnb, jnbe, jnl, jnle).
-        std::string CheatEngineMnemonic(std::string mnemonic)
+        // Cheat Engine's names, from its own tables (owner's capture, a 64-bit and a 32-bit game): each condition family
+        // has its own list, so a short jump is "jna"/"jle" and a near one "jbe"/"jng", and cmov 4A is "cmovpe" next to "setp".
+        std::string CheatEngineMnemonic(const ZydisDecodedInstruction& instruction)
         {
-            static const std::pair<const char*, const char*> kConditions[] = { { "nz", "ne" }, { "z", "e" }, { "nbe", "a" }, { "nb", "ae" }, { "nle", "g" }, { "nl", "ge" } };
-            for (const char* stem : { "j", "set", "cmov" })
+            static const char* const kShortJumps[16] = { "jo", "jno", "jb", "jae", "je", "jne", "jna", "ja", "js", "jns", "jp", "jnp", "jl", "jnl", "jle", "jg" };
+            static const char* const kNearJumps[16] = { "jo", "jno", "jb", "jae", "je", "jne", "jbe", "ja", "js", "jns", "jp", "jnp", "jl", "jnl", "jng", "jg" };
+            static const char* const kSets[16] = { "seto", "setno", "setb", "setae", "sete", "setne", "setbe", "seta", "sets", "setns", "setp", "setnp", "setl", "setge", "setle", "setg" };
+            static const char* const kMoves[16] = { "cmovo", "cmovno", "cmovb", "cmovae", "cmove", "cmovne", "cmovbe", "cmova", "cmovs", "cmovns", "cmovpe", "cmovnp", "cmovl", "cmovge", "cmovle", "cmovg" };
+            const ZyanU8 code = instruction.opcode;
+            if (instruction.encoding == ZYDIS_INSTRUCTION_ENCODING_LEGACY)
             {
-                const std::size_t length = std::strlen(stem);
-                if (mnemonic.compare(0, length, stem) != 0)
-                    continue;
-                const std::string condition = mnemonic.substr(length);
-                for (const auto& [from, to] : kConditions)
-                {
-                    if (condition == from)
-                        return stem + std::string(to);
-                }
+                if (instruction.opcode_map == ZYDIS_OPCODE_MAP_DEFAULT && code >= 0x70 && code <= 0x7F)
+                    return kShortJumps[code - 0x70];
+                if (instruction.opcode_map == ZYDIS_OPCODE_MAP_0F && code >= 0x80 && code <= 0x8F)
+                    return kNearJumps[code - 0x80];
+                if (instruction.opcode_map == ZYDIS_OPCODE_MAP_0F && code >= 0x90 && code <= 0x9F)
+                    return kSets[code - 0x90];
+                if (instruction.opcode_map == ZYDIS_OPCODE_MAP_0F && code >= 0x40 && code <= 0x4F)
+                    return kMoves[code - 0x40];
             }
-            return mnemonic;
+            switch (instruction.mnemonic)
+            {
+            case ZYDIS_MNEMONIC_INT3: return "int 3";
+            case ZYDIS_MNEMONIC_JRCXZ: return "jecxz";
+            case ZYDIS_MNEMONIC_MOVSXD: return "movsxd ";
+            case ZYDIS_MNEMONIC_XLAT: return "xlatb";
+            default: return ZydisMnemonicGetString(instruction.mnemonic);
+            }
         }
 
         const char* SizeKeyword(ZyanU16 bits)
@@ -980,9 +991,11 @@ namespace Manifold::Disasm
         }
     }
 
-    // ∑ Built to the character from Cheat Engine 7.6 output the owner captured (DisasmTests LuaTextLikeCheatEngine)
-    //   and from disassembler.pas: "inttohex(address,8) - bytes - opcode parameters". Rules that the samples do not
-    //   pin down (SIB-only scale, negative disp32, VEX groups) follow the same pattern and are marked as guesses there.
+    // ∑ Built to the character from Cheat Engine 7.6 output the owner captured: 18 reference lines, then a second
+    //   capture with about 140 test instructions and 12,500 lines of real code in a 64-bit and a 32-bit game
+    //   (DisasmTests LuaTextLikeCheatEngine and CheatEngineCapture). CE's own decoding faults are NOT copied (owner's
+    //   decision, issue #1): missing or doubled commas (pshufd xmm0,xmm01B, pslld xmm4,,0D), AVX-512 shown as
+    //   "bound", wrong VEX names and byte groups, 32-bit-only opcodes in 64-bit code (push es, popad), "db -01".
     std::string Disassembler::CheatEngineLine(std::uint64_t address, const std::uint8_t* bytes, std::size_t available) const
     {
         ZydisDecodedInstruction instruction{};
@@ -1014,10 +1027,16 @@ namespace Manifold::Disasm
             groups.push_back(ByteGroup(bytes, encodedStart, encodedStart + encodedSize));
             opcodeStart = encodedStart + encodedSize;
         }
-        const bool modrm = (instruction.attributes & ZYDIS_ATTRIB_HAS_MODRM) != 0;
+        const bool legacyDefault = instruction.encoding == ZYDIS_INSTRUCTION_ENCODING_LEGACY && instruction.opcode_map == ZYDIS_OPCODE_MAP_DEFAULT;
+        // An x87 register form (D9 E8 fld1) is one opcode group in CE: "D9E8 - fld1 ".
+        const bool x87Register = legacyDefault && instruction.opcode >= 0xD8 && instruction.opcode <= 0xDF &&
+                                 (instruction.attributes & ZYDIS_ATTRIB_HAS_MODRM) != 0 && raw.modrm.mod == 3;
+        const bool modrm = (instruction.attributes & ZYDIS_ATTRIB_HAS_MODRM) != 0 && !x87Register;
         const bool sib = (instruction.attributes & ZYDIS_ATTRIB_HAS_SIB) != 0;
         std::size_t opcodeEnd = instruction.length;
-        if (modrm)
+        if (x87Register)
+            opcodeEnd = raw.modrm.offset + 1u;
+        else if (modrm)
             opcodeEnd = raw.modrm.offset;
         else if (raw.disp.size)
             opcodeEnd = raw.disp.offset;
@@ -1031,6 +1050,8 @@ namespace Manifold::Disasm
             groups.push_back(Hex(bytes[raw.sib.offset], 2));
         if (raw.disp.size)
             groups.push_back(ByteGroup(bytes, raw.disp.offset, raw.disp.offset + raw.disp.size / 8u));
+        else if (sib)
+            groups.push_back("");  // CE keeps the empty displacement after a SIB byte: "48 89 3C 24   - ", "66 83 3C 48  00"
         bool immediate = false;
         for (const auto& imm : raw.imm)
         {
@@ -1046,13 +1067,49 @@ namespace Manifold::Disasm
             column += " ";
 
         // Parameters.
+        // Prefixes as CE writes them, from the bytes: every segment prefix but ds shows on the memory operand, also the ones
+        // a 64-bit CPU ignores ("nop word ptr cs:[...]"); F3 is repe and F2 repne in front of any instruction unless
+        // the byte belongs to the opcode, as in movss ("repe dec eax", "repne add [rax+63],ecx").
+        const char* segment = nullptr;
+        bool lockPrefix = false;
+        bool repePrefix = false;
+        bool repnePrefix = false;
+        for (std::size_t i = 0; i < raw.prefix_count; ++i)
+        {
+            const bool mandatory = raw.prefixes[i].type == ZYDIS_PREFIX_TYPE_MANDATORY;
+            switch (raw.prefixes[i].value)
+            {
+            case 0x26: segment = "es:"; break;
+            case 0x2E: segment = "cs:"; break;
+            case 0x36: segment = "ss:"; break;
+            case 0x3E: break;  // ds is the default segment, which CE does not name: "add [rcx-37],bl"
+            case 0x64: segment = "fs:"; break;
+            case 0x65: segment = "gs:"; break;
+            case 0xF0: lockPrefix = true; break;
+            case 0xF3: repePrefix = repePrefix || !mandatory; break;
+            case 0xF2: repnePrefix = repnePrefix || !mandatory; break;
+            default: break;
+            }
+        }
+        // On string instructions Zydis counts F3/F2 as part of the opcode; CE writes them as repe/repne there too.
+        repePrefix = repePrefix || (instruction.attributes & (ZYDIS_ATTRIB_HAS_REP | ZYDIS_ATTRIB_HAS_REPE)) != 0;
+        repnePrefix = repnePrefix || (instruction.attributes & ZYDIS_ATTRIB_HAS_REPNE) != 0;
         const bool nop = instruction.mnemonic == ZYDIS_MNEMONIC_NOP;
+        const ZydisMnemonic mnemonic = instruction.mnemonic;
+        // The count register of a shift sets no size: "shl byte ptr [rdx-1D],cl".
+        const bool shift = mnemonic == ZYDIS_MNEMONIC_ROL || mnemonic == ZYDIS_MNEMONIC_ROR || mnemonic == ZYDIS_MNEMONIC_RCL || mnemonic == ZYDIS_MNEMONIC_RCR ||
+                           mnemonic == ZYDIS_MNEMONIC_SHL || mnemonic == ZYDIS_MNEMONIC_SHR || mnemonic == ZYDIS_MNEMONIC_SAR;
         bool registerShown = false;
         for (ZyanU8 i = 0; i < instruction.operand_count_visible; ++i)
-            registerShown = registerShown || (operands[i].type == ZYDIS_OPERAND_TYPE_REGISTER && !nop);
-        // A register sets the size, except for a zero or sign extension; CE leaves it out of "mov [rcx+10],00000001" too.
-        const bool extends = instruction.mnemonic == ZYDIS_MNEMONIC_MOVZX || instruction.mnemonic == ZYDIS_MNEMONIC_MOVSX;
-        const bool movStore = instruction.mnemonic == ZYDIS_MNEMONIC_MOV;
+            registerShown = registerShown || (operands[i].type == ZYDIS_OPERAND_TYPE_REGISTER && !nop && !shift);
+        // A register sets the size, except for a zero or sign extension. Without one CE writes byte, word and qword
+        // but leaves dword out ("mov [rcx],00000001", "rol [rcx],48", "lock inc [rcx]"), except for the 83 group,
+        // float loads and stores (D8/D9), call, jmp, nop and movsxd: "cmp dword ptr [rbp-08],-80", "nop dword ptr [eax]";
+        // push and pop leave it out too: "push [ebp-000266B4]".
+        const bool extends = mnemonic == ZYDIS_MNEMONIC_MOVZX || mnemonic == ZYDIS_MNEMONIC_MOVSX || mnemonic == ZYDIS_MNEMONIC_MOVSXD;
+        const bool keepDword = (legacyDefault && (instruction.opcode == 0x83 || instruction.opcode == 0xD8 || instruction.opcode == 0xD9 || instruction.opcode == 0xDB)) ||
+                               mnemonic == ZYDIS_MNEMONIC_CALL || mnemonic == ZYDIS_MNEMONIC_JMP || mnemonic == ZYDIS_MNEMONIC_NOP ||
+                               mnemonic == ZYDIS_MNEMONIC_MOVSXD;
         std::vector<std::string> parameters;
         std::size_t immIndex = 0;
         for (ZyanU8 i = 0; i < instruction.operand_count_visible; ++i)
@@ -1061,7 +1118,11 @@ namespace Manifold::Disasm
             switch (operand.type)
             {
             case ZYDIS_OPERAND_TYPE_REGISTER:
-                if (!nop)
+                if (nop)
+                    break;
+                if (ZydisRegisterGetClass(operand.reg.value) == ZYDIS_REGCLASS_X87)
+                    parameters.push_back("st(" + std::to_string(operand.reg.value - ZYDIS_REGISTER_ST0) + ")");
+                else
                     parameters.push_back(ZydisRegisterGetString(operand.reg.value));
                 break;
             case ZYDIS_OPERAND_TYPE_IMMEDIATE:
@@ -1081,11 +1142,20 @@ namespace Manifold::Disasm
                 case 8:
                 {
                     const auto small = static_cast<std::int8_t>(value & 0xFF);
-                    parameters.push_back(imm.is_signed && small < 0 ? "-" + Hex(static_cast<std::uint64_t>(-static_cast<int>(small)), 2) : Hex(value & 0xFF, 2));
+                    // CE writes every two-digit number signed (inttohexs(value,2)), not only the sign-extended ones:
+                    // "rol ebp,-2C", "int -3B".
+                    parameters.push_back(small < 0 ? "-" + Hex(static_cast<std::uint64_t>(-static_cast<int>(small)), 2) : Hex(value & 0xFF, 2));
                     break;
                 }
                 case 16: parameters.push_back(Hex(value & 0xFFFF, 4)); break;
-                case 32: parameters.push_back(Hex(value & 0xFFFFFFFFull, 8)); break;
+                case 32:
+                    // A 64-bit operation sign-extends its imm32, and CE shows the extended value: "mov rax,FFFFFFFFFFFFFFFF",
+                    // but "mov qword ptr [rcx],00000001".
+                    if (imm.is_signed && instruction.operand_width == 64)
+                        parameters.push_back(Hex(static_cast<std::uint64_t>(static_cast<std::int64_t>(static_cast<std::int32_t>(value & 0xFFFFFFFFull))), 8));
+                    else
+                        parameters.push_back(Hex(value & 0xFFFFFFFFull, 8));
+                    break;
                 case 64: parameters.push_back(Hex(value, 16)); break;
                 default: parameters.push_back(Hex(operand.imm.value.u)); break;
                 }
@@ -1094,10 +1164,10 @@ namespace Manifold::Disasm
             case ZYDIS_OPERAND_TYPE_MEMORY:
             {
                 std::string text;
-                if (operand.mem.type == ZYDIS_MEMOP_TYPE_MEM && (extends || (!registerShown && !movStore)))
+                if (operand.mem.type == ZYDIS_MEMOP_TYPE_MEM && (extends || !registerShown) && (operand.size != 32 || keepDword))
                     text += SizeKeyword(operand.size);
-                if (operand.mem.segment == ZYDIS_REGISTER_FS || operand.mem.segment == ZYDIS_REGISTER_GS)
-                    text += std::string(ZydisRegisterGetString(operand.mem.segment)) + ":";
+                if (segment)
+                    text += segment;
                 const bool ripRelative = operand.mem.base == ZYDIS_REGISTER_RIP || operand.mem.base == ZYDIS_REGISTER_EIP;
                 if (ripRelative || (operand.mem.base == ZYDIS_REGISTER_NONE && operand.mem.index == ZYDIS_REGISTER_NONE))
                 {
@@ -1132,15 +1202,15 @@ namespace Manifold::Disasm
             }
         }
         std::string opcode;
-        if (instruction.attributes & ZYDIS_ATTRIB_HAS_LOCK)
+        if (lockPrefix)
             opcode += "lock ";
-        if (instruction.attributes & ZYDIS_ATTRIB_HAS_REP)
-            opcode += "rep ";
-        if (instruction.attributes & ZYDIS_ATTRIB_HAS_REPE)
-            opcode += "repe ";
-        if (instruction.attributes & ZYDIS_ATTRIB_HAS_REPNE)
+        if (repePrefix)
+            opcode += "repe ";  // CE writes repe for every F3: "repe stosd", "repe movsb"
+        if (repnePrefix)
             opcode += "repne ";
-        opcode += CheatEngineMnemonic(ZydisMnemonicGetString(instruction.mnemonic));
+        opcode += CheatEngineMnemonic(instruction);
+        if (legacyDefault && instruction.mnemonic == ZYDIS_MNEMONIC_XCHG && instruction.opcode >= 0x91 && instruction.opcode <= 0x97 && parameters.size() == 2)
+            std::swap(parameters[0], parameters[1]);  // CE names the accumulator first: "xchg eax,ecx"
         std::string joined;
         for (const std::string& parameter : parameters)
             joined += (joined.empty() ? "" : ",") + parameter;

@@ -646,11 +646,43 @@ namespace Manifold::Tests
         }
     }
 
+    namespace
+    {
+        // ∑ The owner's second Cheat Engine 7.6 capture, made in a 64-bit and a 32-bit game: about 140 test
+        //   instructions per game, written into a block CE allocated (no game code is kept here). Each line must
+        //   come out exactly as CE's Lua disassemble() wrote it. Left out on purpose (issue #1): the lines where
+        //   CE's own decoder is wrong, VEX/EVEX, invalid bytes and the comma faults (pshufd xmm0,xmm01B).
+        void CheatEngineCapture()
+        {
+            struct Line
+            {
+                bool Is64;
+                std::uint64_t Address;
+                const char* Bytes;
+                const char* Expected;
+            };
+            static const Line kLines[] = {
+#include "CheatEngineCapture.inc"
+            };
+            const Disasm::Disassembler wide(true);
+            const Disasm::Disassembler narrow(false);
+            for (const Line& line : kLines)
+            {
+                std::uint8_t bytes[16]{};
+                for (std::size_t i = 0; i < sizeof(bytes); ++i)
+                    bytes[i] = static_cast<std::uint8_t>(std::stoi(std::string(line.Bytes + i * 2, 2), nullptr, 16));
+                const std::string text = (line.Is64 ? wide : narrow).CheatEngineLine(line.Address, bytes, sizeof(bytes));
+                CHECK_MSG(text == line.Expected, std::string(line.Is64 ? "64" : "32") + "-bit |" + text + "| instead of |" + line.Expected + "|");
+            }
+        }
+    }
+
     int RunDisasmTests()
     {
         const int before = Totals().Failures;
         AddressByteMasks();
         RegisterNames();
+        CheatEngineCapture();
         Settings settings;
         Engine engine(settings);
         engine.Lua().Run("__manifoldHeadless = true", "headless");
