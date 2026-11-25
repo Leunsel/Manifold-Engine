@@ -50,21 +50,10 @@ namespace Manifold::UI
         void RegisterGrid(Engine& engine, const Disasm::RegisterValues& r, bool is64)
         {
             PushMono();
-            const int digits = is64 ? 16 : 8;
-            if (is64)
-            {
-                ImGui::Text("RAX %s  RBX %s  RCX %s  RDX %s", Hex(r.Rax, digits).c_str(), Hex(r.Rbx, digits).c_str(), Hex(r.Rcx, digits).c_str(), Hex(r.Rdx, digits).c_str());
-                ImGui::Text("RSI %s  RDI %s  RBP %s  RSP %s", Hex(r.Rsi, digits).c_str(), Hex(r.Rdi, digits).c_str(), Hex(r.Rbp, digits).c_str(), Hex(r.Rsp, digits).c_str());
-                ImGui::Text("R8  %s  R9  %s  R10 %s  R11 %s", Hex(r.R8, 16).c_str(), Hex(r.R9, 16).c_str(), Hex(r.R10, 16).c_str(), Hex(r.R11, 16).c_str());
-                ImGui::Text("R12 %s  R13 %s  R14 %s  R15 %s", Hex(r.R12, 16).c_str(), Hex(r.R13, 16).c_str(), Hex(r.R14, 16).c_str(), Hex(r.R15, 16).c_str());
-            }
-            else
-            {
-                ImGui::Text("EAX %s  EBX %s  ECX %s  EDX %s", Hex(r.Rax, digits).c_str(), Hex(r.Rbx, digits).c_str(), Hex(r.Rcx, digits).c_str(), Hex(r.Rdx, digits).c_str());
-                ImGui::Text("ESI %s  EDI %s  EBP %s  ESP %s", Hex(r.Rsi, digits).c_str(), Hex(r.Rdi, digits).c_str(), Hex(r.Rbp, digits).c_str(), Hex(r.Rsp, digits).c_str());
-            }
-            const std::string rip = engine.Describe(r.Rip);
-            ImGui::Text("%cIP %s  %s", is64 ? 'R' : 'E', Hex(r.Rip, digits).c_str(), rip.c_str());
+            std::vector<std::string> lines = Disasm::RegisterLines(r, is64);
+            lines.back() += "  " + engine.Describe(r.Rip);
+            for (const std::string& line : lines)
+                ImGui::TextUnformatted(line.c_str());
             PopMono();
         }
     }

@@ -298,6 +298,10 @@ namespace Manifold::Tests
                                                     "guess.autoGuess(readPointer(world), 0, 8)\n"
                                                     "local element = guess.getElementByOffset(4)\n"
                                                     "local pointerOk = element ~= nil and element.Vartype == vtPointer and element.Bytesize == 4\n"
+                                                    "local added = guess.addElement()\n"
+                                                    "added.Offset = 0x20\n"
+                                                    "added.Vartype = vtPointer\n"
+                                                    "pointerOk = pointerOk and added.Bytesize == 4\n"
                                                     "guess.destroy()\n"
                                                     "deAlloc(scratch)\n"
                                                     "return string.format('%s|%d|%X|%X|%X|%X|%s|%s|%X', tostring(targetIs64Bit()), getPointerSize(), hero, readPointer('[TestTarget32.g_world]+4'),"
@@ -312,7 +316,7 @@ namespace Manifold::Tests
                 CHECK_MSG(ParseHex(parts[2]).value_or(0) == target.Hero && ParseHex(parts[3]).value_or(0) == target.Hero, answer);
                 CHECK_MSG(parts[4] == "FFFFFFFF12345678", "writePointer wrote more than 4 bytes: " + answer);
                 CHECK_MSG(ParseHex(parts[5]).value_or(0) == damage, "AOBScanModuleUnique: " + answer);
-                CHECK_MSG(parts[6] == "true", "the structure guess did not find a 4-byte pointer: " + answer);
+                CHECK_MSG(parts[6] == "true", "the structure guess or a vtPointer element is not 4 bytes: " + answer);
                 CHECK_MSG(parts[7].find("Damage") != std::string::npos, answer);
                 CHECK_MSG(ParseHex(parts[8]).value_or(0) == engine.Evaluate("kernel32.Sleep").value_or(1), answer);
             }

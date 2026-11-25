@@ -428,6 +428,32 @@ namespace Manifold::Tests
             CHECK(chainedByPointer == (std::vector<std::pair<std::uint32_t, std::uint32_t>>{ { 0x2F00, 0x3040 } }));
         }
 
+        // ∑ The watch window wrote RAX ... RIP for a 32-bit game (Terraria). A 32-bit target has EAX ... EIP,
+        //   8 digits and no R8 to R15.
+        void RegisterNames()
+        {
+            Disasm::RegisterValues r;
+            r.Rax = 0x47733BE8;
+            r.Rcx = 0x47733BBC;
+            r.Rsp = 0x022FE110;
+            r.Rip = 0x3052714F;
+            r.R8 = 0x1234;
+            std::string narrow;
+            const std::vector<std::string> lines32 = Disasm::RegisterLines(r, false);
+            for (const std::string& line : lines32)
+                narrow += line + "\n";
+            CHECK_MSG(lines32.size() == 3, narrow);
+            CHECK_MSG(narrow.find("EAX 47733BE8") != std::string::npos && narrow.find("ECX 47733BBC") != std::string::npos && narrow.find("ESP 022FE110") != std::string::npos, narrow);
+            CHECK_MSG(narrow.find("EIP 3052714F") != std::string::npos, narrow);
+            CHECK_MSG(narrow.find('R') == std::string::npos, "a 64-bit register name for a 32-bit target: " + narrow);
+            std::string wide;
+            const std::vector<std::string> lines64 = Disasm::RegisterLines(r, true);
+            for (const std::string& line : lines64)
+                wide += line + "\n";
+            CHECK_MSG(lines64.size() == 5 && wide.find("RAX 0000000047733BE8") != std::string::npos && wide.find("R8  0000000000001234") != std::string::npos &&
+                wide.find("RIP 000000003052714F") != std::string::npos, wide);
+        }
+
         void InstructionHelp()
         {
             CHECK(Asm::MnemonicSummary("MOV").rfind("Copies the source", 0) == 0);
@@ -548,6 +574,7 @@ namespace Manifold::Tests
     {
         const int before = Totals().Failures;
         AddressByteMasks();
+        RegisterNames();
         Settings settings;
         Engine engine(settings);
         engine.Lua().Run("__manifoldHeadless = true", "headless");

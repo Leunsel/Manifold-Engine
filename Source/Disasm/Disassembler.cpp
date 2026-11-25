@@ -910,4 +910,22 @@ namespace Manifold::Disasm
         const char* name = ZydisRegisterGetString(static_cast<ZydisRegister>(zydisRegister));
         return name ? name : "";
     }
+
+    std::vector<std::string> RegisterLines(const RegisterValues& r, bool is64Bit)
+    {
+        // ∑ The watch window wrote RAX ... RIP for a 32-bit game too (Terraria, owner report).
+        const int digits = is64Bit ? 16 : 8;
+        const char p = is64Bit ? 'R' : 'E';
+        const auto h = [&](std::uint64_t value) { return Hex(is64Bit ? value : value & 0xFFFFFFFFull, digits); };
+        std::vector<std::string> lines;
+        lines.push_back(Format("%cAX %s  %cBX %s  %cCX %s  %cDX %s", p, h(r.Rax).c_str(), p, h(r.Rbx).c_str(), p, h(r.Rcx).c_str(), p, h(r.Rdx).c_str()));
+        lines.push_back(Format("%cSI %s  %cDI %s  %cBP %s  %cSP %s", p, h(r.Rsi).c_str(), p, h(r.Rdi).c_str(), p, h(r.Rbp).c_str(), p, h(r.Rsp).c_str()));
+        if (is64Bit)
+        {
+            lines.push_back(Format("R8  %s  R9  %s  R10 %s  R11 %s", h(r.R8).c_str(), h(r.R9).c_str(), h(r.R10).c_str(), h(r.R11).c_str()));
+            lines.push_back(Format("R12 %s  R13 %s  R14 %s  R15 %s", h(r.R12).c_str(), h(r.R13).c_str(), h(r.R14).c_str(), h(r.R15).c_str()));
+        }
+        lines.push_back(Format("%cIP %s", p, h(r.Rip).c_str()));
+        return lines;
+    }
 }

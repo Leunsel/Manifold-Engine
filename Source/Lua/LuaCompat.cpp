@@ -2925,7 +2925,7 @@ namespace Manifold::Lua
             return 2;
         }
 
-        void ApplyElementVarType(Table::StructField& field, lua_Integer type)
+        void ApplyElementVarType(Table::StructField& field, lua_Integer type, int pointerSize)
         {
             static const Scan::ValueType kTypes[] = { Scan::ValueType::Byte, Scan::ValueType::TwoBytes, Scan::ValueType::FourBytes, Scan::ValueType::EightBytes,
                 Scan::ValueType::Float, Scan::ValueType::Double, Scan::ValueType::String, Scan::ValueType::String, Scan::ValueType::ByteArray, Scan::ValueType::Binary };
@@ -2944,7 +2944,7 @@ namespace Manifold::Lua
             if (type >= 0 && type <= 5)
                 field.Size = sizes[type];
             else if (type == 12)
-                field.Size = 8;
+                field.Size = pointerSize;  // the open process's, as in Cheat Engine: 4 in a 32-bit game
             else if (type == 9)
             {
                 field.BitStart = std::clamp(field.BitStart, 0, 63);
@@ -3233,7 +3233,7 @@ namespace Manifold::Lua
             else if (key == "name")
                 field.Name = luaL_checkstring(state, 3);
             else if (key == "vartype")
-                ApplyElementVarType(field, luaL_checkinteger(state, 3));
+                ApplyElementVarType(field, luaL_checkinteger(state, 3), Owner(state).Process() ? Owner(state).Process()->PointerSize() : 8);
             else if (key == "bytesize")
                 field.Size = static_cast<int>(std::clamp<lua_Integer>(luaL_checkinteger(state, 3), 1, Table::kMaxFieldBytes));
             else if (key == "displaymethod")

@@ -71,6 +71,11 @@ namespace Manifold::Disasm
         std::uint64_t FsBase = 0, GsBase = 0;
     };
 
+    // The general registers as text lines for a hit or a break, named for the target:
+    // RAX ... R15 and RIP in a 64-bit process, EAX ... ESP and EIP with 8 digits in a
+    // 32-bit one, which has no R8 to R15 and no 64-bit registers at all.
+    std::vector<std::string> RegisterLines(const RegisterValues& registers, bool is64Bit);
+
     enum class ConditionKind
     {
         None,
