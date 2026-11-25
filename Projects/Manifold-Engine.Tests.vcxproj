@@ -194,6 +194,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Lua\LuaModules.cpp" />
     <ClCompile Include="..\Source\Lua\LuaMono.cpp" />
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaRebase.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRecords.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRtti.cpp" />
@@ -248,6 +249,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Target\PatchScan.cpp" />
     <ClCompile Include="..\Source\Target\PdbSymbols.cpp" />
     <ClCompile Include="..\Source\Target\Process.cpp" />
+    <ClCompile Include="..\Source\Target\Rebase.cpp" />
     <ClCompile Include="..\Source\Target\RemoteCall.cpp" />
     <ClCompile Include="..\Source\Target\Rtti.cpp" />
     <ClCompile Include="..\Source\Target\RttiMsvc.cpp" />
@@ -292,6 +294,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\OpcodeTests.cpp" />
     <ClCompile Include="..\Tests\PaletteTests.cpp" />
     <ClCompile Include="..\Tests\PointerScanTests.cpp" />
+    <ClCompile Include="..\Tests\RebaseTests.cpp" />
     <ClCompile Include="..\Tests\RecordDebugTests.cpp" />
     <ClCompile Include="..\Tests\RelayTests.cpp" />
     <ClCompile Include="..\Tests\RttiTests.cpp" />

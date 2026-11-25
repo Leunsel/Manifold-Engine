@@ -113,6 +113,9 @@ namespace Manifold
         bool HasProcess() const { return m_target.Attached(); }
         std::uint64_t ProcessGeneration() const { return m_target.Generation(); }
         Target::Symbols& Symbols() { return m_target.Symbols(); }
+        // Shows a module at another base (nullopt shows it where it is) and
+        // remembers that in the settings.
+        void SetRebase(std::string_view module, std::optional<Target::RebaseRule> rule);
         TargetSession& Session() { return m_target; }
         void LoadSymbols(bool windowsSymbols);
         bool SymbolsActive() const { return m_target.Pdb().Active(); }

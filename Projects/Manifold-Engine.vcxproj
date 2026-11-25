@@ -202,6 +202,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Lua\LuaModules.cpp" />
     <ClCompile Include="..\Source\Lua\LuaMono.cpp" />
     <ClCompile Include="..\Source\Lua\LuaObjects.cpp" />
+    <ClCompile Include="..\Source\Lua\LuaRebase.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRecords.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRepl.cpp" />
     <ClCompile Include="..\Source\Lua\LuaRtti.cpp" />
@@ -256,6 +257,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Target\PatchScan.cpp" />
     <ClCompile Include="..\Source\Target\PdbSymbols.cpp" />
     <ClCompile Include="..\Source\Target\Process.cpp" />
+    <ClCompile Include="..\Source\Target\Rebase.cpp" />
     <ClCompile Include="..\Source\Target\RemoteCall.cpp" />
     <ClCompile Include="..\Source\Target\Rtti.cpp" />
     <ClCompile Include="..\Source\Target\RttiMsvc.cpp" />
@@ -310,6 +312,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\UI\PointerScanWindow.cpp" />
     <ClCompile Include="..\Source\UI\ProcessIcon.cpp" />
     <ClCompile Include="..\Source\UI\ProfilerWindow.cpp" />
+    <ClCompile Include="..\Source\UI\RebaseMenu.cpp" />
     <ClCompile Include="..\Source\UI\RecordDebugWindow.cpp" />
     <ClCompile Include="..\Source\UI\RecordEditor.cpp" />
     <ClCompile Include="..\Source\UI\ScriptUi.cpp" />
@@ -423,6 +426,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Lua\LuaDotNet.h" />
     <ClInclude Include="..\Source\Lua\LuaEngine.h" />
     <ClInclude Include="..\Source\Lua\LuaModules.h" />
+    <ClInclude Include="..\Source\Lua\LuaRebase.h" />
     <ClInclude Include="..\Source\Lua\LuaRecords.h" />
     <ClInclude Include="..\Source\Lua\LuaRtti.h" />
     <ClInclude Include="..\Source\Lua\LuaSignature.h" />
@@ -476,6 +480,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Target\PatchScan.h" />
     <ClInclude Include="..\Source\Target\PdbSymbols.h" />
     <ClInclude Include="..\Source\Target\Process.h" />
+    <ClInclude Include="..\Source\Target\Rebase.h" />
     <ClInclude Include="..\Source\Target\RemoteCall.h" />
     <ClInclude Include="..\Source\Target\Rtti.h" />
     <ClInclude Include="..\Source\Target\RttiMsvc.h" />
@@ -530,6 +535,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\UI\PointerScanWindow.h" />
     <ClInclude Include="..\Source\UI\ProcessIcon.h" />
     <ClInclude Include="..\Source\UI\ProfilerWindow.h" />
+    <ClInclude Include="..\Source\UI\RebaseMenu.h" />
     <ClInclude Include="..\Source\UI\RecordDebugWindow.h" />
     <ClInclude Include="..\Source\UI\RecordEditor.h" />
     <ClInclude Include="..\Source\UI\ScriptUi.h" />

@@ -6,6 +6,7 @@
 #include "Core/Text.h"
 #include "Core/RuntimeLog.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Lua/LuaEngine.h"
 #include "UI/Fonts.h"
 #include "UI/ScriptUi.h"
@@ -27,6 +28,55 @@ namespace Manifold::UI
     namespace
     {
         constexpr const char* kHexModes[] = { "Bytes", "2 Bytes (hex)", "4 Bytes (hex)", "8 Bytes (hex)", "4 Bytes", "Float", "Double" };
+
+        // The operands as shown: an address in a rebased module reads as its
+        // rebased number, the way IDA writes it. Only for the screen; the
+        // instruction keeps the real address, so it still assembles back.
+        std::string RebasedOperands(const Disasm::Instruction& line, const Target::Symbols& symbols, const Target::Process& process, bool showSymbols)
+        {
+            if (!symbols.Rebase().Any())
+                return line.Operands;
+            std::string text = line.Operands;
+            const auto swap = [&](std::uint64_t value)
+                {
+                    const auto shown = symbols.Rebased(value);
+                    if (!shown)
+                        return;
+                    std::string written = Hex(value);
+                    bool named = false;
+                    if (showSymbols)
+                    {
+                        const auto module = process.ModuleAt(value);
+                        const std::string described = symbols.Describe(value);
+                        if (module && described == module->Name + "+" + Hex(value - module->Base))
+                        {
+                            written = described;
+                            named = true;
+                        }
+                        else if (described != written)
+                            return;
+                    }
+                    const std::string replacement = Hex(*shown);
+                    std::size_t at = text.find(written);
+                    while (at != std::string::npos)
+                    {
+                        const bool left = at == 0 || (named ? !Target::Symbols::IsNameChar(text[at - 1]) : !IsHexDigit(text[at - 1]));
+                        const bool right = at + written.size() >= text.size() || !IsHexDigit(text[at + written.size()]);
+                        if (left && right)
+                        {
+                            text.replace(at, written.size(), replacement);
+                            at = text.find(written, at + replacement.size());
+                        }
+                        else
+                            at = text.find(written, at + 1);
+                    }
+                };
+            if (line.Memory.Absolute)
+                swap(*line.Memory.Absolute);
+            if (line.Target && (!line.Memory.Absolute || *line.Target != *line.Memory.Absolute))
+                swap(*line.Target);
+            return text;
+        }
 
         std::string UndoNote()
         {
@@ -367,6 +417,7 @@ namespace Manifold::UI
         Shortcuts();
 
         GotoDialog();
+        m_rebase.Draw(m_engine);
         CommentDialog();
         AssembleDialog();
         FindDialog();
@@ -808,6 +859,8 @@ namespace Manifold::UI
 
         const auto region = m_engine.Process()->RegionAt(m_selected);
         std::string where = m_engine.Describe(m_selected);
+        if (const auto shown = m_engine.Symbols().Rebased(m_selected))
+            where += "  ·  shown as " + Hex(*shown);
         if (region)
             where += "  ·  " + Target::ProtectText(region->Protect) + "  ·  " + Target::RegionTypeText(region->Type);
         if (broken)
@@ -960,7 +1013,12 @@ namespace Manifold::UI
             }
             std::string text;
             bool symbolic = false;
-            if (!showSymbols)
+            if (const auto shown = m_engine.Symbols().Rebased(line.Address))
+            {
+                text = Hex(*shown, process.Is64Bit() ? 12 : 8);
+                symbolic = true;
+            }
+            else if (!showSymbols)
             {
                 text = Hex(line.Address, process.Is64Bit() ? 12 : 8);
             }
@@ -1201,7 +1259,7 @@ namespace Manifold::UI
             {
                 const ImVec4 operandClip(operandX, textY, std::min(commentX - Px(6.0f), rightX - Px(4.0f)), textY + rowHeight);
                 if (operandClip.z > operandClip.x)
-                    AsmOperands(drawList, font, fontSize, ImVec2(operandX, textY), operandClip, line.Operands, m_highlight);
+                    AsmOperands(drawList, font, fontSize, ImVec2(operandX, textY), operandClip, RebasedOperands(line, m_engine.Symbols(), process, showSymbols), m_highlight);
             }
             if (const int use = HighlightUse(line.Mnemonic, line.Operands, m_highlight))
             {
@@ -1535,7 +1593,7 @@ namespace Manifold::UI
         case Command::GotoAddress:
             m_gotoOpen = true;
             m_gotoHex = !m_focusCode && m_hexFocus;
-            m_gotoText = Hex(m_gotoHex ? hexAddress : m_selected);
+            m_gotoText = GotoText(m_gotoHex ? hexAddress : m_selected);
             break;
         case Command::FindMemory: m_findOpen = true; break;
         case Command::FindAssembly: m_workspace.OpenAsmSearch(); break;
@@ -2003,6 +2061,7 @@ namespace Manifold::UI
             m_hexSelected = *instruction.Memory.Absolute;
         }
         item(ICON_FA_PLUS "  Add This Address to the Address List", Command::AddInstructionToList);
+        RebaseItems(instruction.Address);
         item(ICON_FA_FINGERPRINT "  Copy Signature", Command::CopySignature);
         if (ImGui::MenuItem(ICON_FA_FINGERPRINT "  Signature Maker..."))
             m_workspace.OpenSignatureMaker(instruction.Address, true);
@@ -2140,7 +2199,8 @@ namespace Manifold::UI
         {
             const float y = origin.y + static_cast<float>(row) * rowHeight + Px(1.0f);
             const std::uint64_t rowAddress = m_hexTop + static_cast<std::uint64_t>(row * m_hexColumns);
-            drawList->AddText(ImVec2(addressX, y), ImGui::GetColorU32(ManifoldTheme::AddressText), Hex(rowAddress, process.Is64Bit() ? 12 : 8).c_str());
+            const std::uint64_t rowShown = m_engine.Symbols().Rebased(rowAddress).value_or(rowAddress);
+            drawList->AddText(ImVec2(addressX, y), ImGui::GetColorU32(ManifoldTheme::AddressText), Hex(rowShown, process.Is64Bit() ? 12 : 8).c_str());
             for (int cell = 0; cell < perRow; ++cell)
             {
                 const std::size_t index = static_cast<std::size_t>(row * m_hexColumns + cell * valueSize);
@@ -2789,6 +2849,27 @@ namespace Manifold::UI
         copy("Address", symbols.AddressText(address, Target::AddressStyle::Plain));
         copy("Name", symbols.AddressText(address, Target::AddressStyle::Name));
         copy("Module + offset", symbols.AddressText(address, Target::AddressStyle::ModuleOffset));
+        if (symbols.Rebased(address))
+            copy("Rebased address", symbols.AddressText(address, Target::AddressStyle::Rebased));
+    }
+
+    void MemoryViewer::RebaseItems(std::uint64_t address)
+    {
+        if (const auto module = m_engine.Process()->ModuleAt(address))
+            m_rebase.MenuItems(m_engine, *module);
+    }
+
+    std::string MemoryViewer::GotoText(std::uint64_t address) const
+    {
+        // A rebased address is offered only when it reads back to this one: a
+        // rebased module may be shown over where another module really is.
+        const Target::Symbols& symbols = m_engine.Symbols();
+        if (const auto shown = symbols.Rebased(address); shown && !m_engine.Process()->ModuleAt(*shown))
+        {
+            if (const auto back = symbols.FromRebased(*shown); back && back->Address == address)
+                return Hex(*shown);
+        }
+        return Hex(address);
     }
 
     void MemoryViewer::HexMenu(std::uint64_t address)
@@ -2819,6 +2900,7 @@ namespace Manifold::UI
         item(ICON_FA_CIRCLE "  Break When Read or Written", Command::HexBreakOnAccess);
         ImGui::Separator();
         item(ICON_FA_PLUS "  Add This Address to the Address List", Command::HexAddToList);
+        RebaseItems(address);
         if (ImGui::BeginMenu(ICON_FA_COPY "  Copy"))
         {
             AddressCopyItems(address);
@@ -2868,10 +2950,35 @@ namespace Manifold::UI
         const bool enter = InputText("##gotoaddress", m_gotoText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
         if (!m_gotoError.empty())
             TextWithError(m_gotoError, ManifoldTheme::Error);
+        if (ImGui::IsWindowAppearing())
+        {
+            m_gotoNote.clear();
+            for (const Target::RebaseEntry& entry : m_engine.Symbols().Rebase().Entries())
+            {
+                if (const auto module = m_engine.Process()->FindModule(entry.Module))
+                {
+                    if (const auto base = m_engine.Symbols().Rebase().ShownBase(*m_engine.Process(), *module))
+                        m_gotoNote += (m_gotoNote.empty() ? "" : ", ") + module->Name + " at " + Hex(*base);
+                }
+            }
+        }
+        if (!m_gotoNote.empty())
+        {
+            Layout::Wrapped("Rebased: " + m_gotoNote + ". Their addresses go to the real place.", ManifoldTheme::Muted);
+        }
         if (enter || ImGui::Button("Go", Px(80.0f, 0.0f)))
         {
             Status error;
-            if (const auto address = m_engine.Evaluate(m_gotoText, &error))
+            std::optional<std::uint64_t> address = m_engine.Evaluate(m_gotoText, &error);
+            if (address && !m_engine.Process()->ModuleAt(*address))
+            {
+                if (const auto hit = m_engine.Symbols().FromRebased(*address))
+                {
+                    LOG_INFO("Memory Viewer", "Go to " + Hex(*address) + ": rebased " + hit->Module.Name + "+" + Hex(hit->Address - hit->Module.Base) + ", really at " + Hex(hit->Address));
+                    address = hit->Address;
+                }
+            }
+            if (address)
             {
                 if (m_gotoHex)
                 {

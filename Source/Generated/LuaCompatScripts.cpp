@@ -5217,7 +5217,7 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 32
+local API_VERSION = 33
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -7291,6 +7291,82 @@ end
 
 -- ∑ In a do block like manifold.signature: the main chunk is close to Lua's limit of 200 locals.
 do
+  local rebase = area("rebase", "Rebasing shows a module at another base, the way IDA's Rebase Program does: at the image base its PE header asks for (the addresses IDA and Ghidra show for the file, whatever ASLR picked this time), at 0 for RVAs, or at a base of your own. Only the addresses on screen change (the disassembler, the hex view, Copy and Go to Address); the process, the instructions and everything written stay at the real addresses, and symbol expressions keep reading real addresses. Rules are kept by module name in the settings, so they hold for the next start of the game. The memory viewer and Symbols and Modules > Modules use the same rules.")
+
+  local function entryDoc(text)
+    return text .. " An entry is `{ module, rule, base }`: `rule` is `\"image\"` or the chosen base, `base` the base the module is shown at now (nil while it is not loaded)."
+  end
+
+  define(rebase, "set", {
+    params = {
+      { name = "module", type = "string" },
+      { name = "base", type = "integer|string" },
+    },
+    returns = "true",
+    doc = "Shows the module at `base`: `\"image\"` for the image base in its PE header, or a number (0 shows RVAs). The module need not be loaded yet; the rule holds whenever a module of that name is. `clear` takes it back.",
+  }, function(module, base)
+    if module == "" then
+      misuse("manifold.rebase.set: module must not be empty")
+    end
+    if type(base) == "string" and base ~= "image" then
+      misuse(("manifold.rebase.set: base must be \"image\" or a number, got %q"):format(base))
+    end
+    if type(base) == "number" and base < 0 then
+      misuse("manifold.rebase.set: base must not be negative")
+    end
+    return native.rebaseSet(module, base)
+  end)
+
+  define(rebase, "get", {
+    params = { { name = "module", type = "string" } },
+    returns = "entry, or nil",
+    doc = entryDoc("The rebase of the module, or nil when it is shown where it is loaded."),
+  }, function(module)
+    return native.rebaseGet(module)
+  end)
+
+  define(rebase, "clear", {
+    params = { { name = "module", type = "string" } },
+    returns = "true",
+    doc = "Shows the module at its real addresses again.",
+  }, function(module)
+    return native.rebaseSet(module, nil)
+  end)
+
+  define(rebase, "list", {
+    returns = "list of entries",
+    doc = entryDoc("Every rebased module, by name."),
+  }, function()
+    return native.rebaseList()
+  end)
+
+  define(rebase, "shown", {
+    params = { { name = "address", type = "address" } },
+    returns = "integer, or nil, error",
+    doc = "The address as it is shown: rebased when it lies in a rebased module, else the address itself.",
+  }, function(address)
+    return result(native.rebaseShown(address))
+  end)
+
+  define(rebase, "real", {
+    params = { { name = "shown", type = "integer" } },
+    returns = "integer, or nil, error",
+    doc = "Where a shown address really is, such as an address copied from IDA: the real address when it lies in a rebased module as shown, else the number itself. With rebased modules shown over each other the first in the module list wins.",
+  }, function(shown)
+    return result(native.rebaseReal(shown))
+  end)
+
+  define(rebase, "imageBase", {
+    params = { { name = "module", type = "string" } },
+    returns = "integer, or nil, error",
+    doc = "The image base in the PE header of a loaded module: where it asks to be loaded, and where `\"image\"` shows it. `ME-1016` when no module has the name.",
+  }, function(module)
+    return result(native.rebaseImageBase(module))
+  end)
+end
+
+-- ∑ In a do block like manifold.signature: the main chunk is close to Lua's limit of 200 locals.
+do
   local codefilter = area("codefilter", "The code filter: finds code by what it does instead of by a value. `prepare` collects the function starts of the game's modules (the unwind table of 64-bit modules, the exports and checked call targets), and every round puts a one-time int3 on each one that is left, inside the process through the agent library: the first thread that runs into one puts the byte back and runs on. A `\"filterOut\"` round drops what ran during it (let the game run without doing the thing), a `\"keepOnly\"` round keeps only what ran (do the thing once), so a few rounds leave the code behind an action. While a round runs every read through Manifold shows the original bytes, and a write over an armed byte takes its int3 back first. Tools > Code Filter is the same filter: the window and these functions share one state. Games that check their own code or run an anti-cheat notice the int3s.")
 
   define(codefilter, "prepare", {
@@ -7304,7 +7380,8 @@ do
   end)
 
   define(codefilter, "start", {
-    params = { { name = "kind", type = "string" } },
+)MLUA"),
+            std::string_view(R"MLUA(    params = { { name = "kind", type = "string" } },
     returns = "true, or nil, error",
     doc = "Starts a round on what is left: `\"filterOut\"` or `\"keepOnly\"`. Addresses the agent cannot arm (system code, an int3 already there, a page that cannot be written) are dropped from the list. `ME-1020` when `prepare` was not called, a round already runs or nothing is left.",
   }, function(kind)
@@ -7365,8 +7442,7 @@ do
     if type(addresses) == "table" then
       local lines = {}
       for i, value in ipairs(addresses) do
-)MLUA"),
-            std::string_view(R"MLUA(        if math.type(value) == "integer" then
+        if math.type(value) == "integer" then
           lines[i] = string.format("%X", value)
         elseif type(value) == "string" then
           lines[i] = value
@@ -7486,7 +7562,8 @@ define(dotnet, "classes", {
   params = { { name = "filter", type = "string", optional = true } },
   returns = "list of `{ name, namespace, image, handle, module, token, generic }`, or nil, error",
   doc = "The loaded classes, or those whose full name contains `filter` (ignoring case). `handle` is the class's method table, the pointer every object of it starts with; `module` and `token` say where it is defined.",
-}, function(filter)
+)MLUA"),
+            std::string_view(R"MLUA(}, function(filter)
   return result(native.dotnetClasses(filter))
 end)
 
@@ -7547,8 +7624,7 @@ define(dotnet, "staticAddress", {
     { name = "field", type = "string" },
   },
   returns = "address or nil, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Where a static field's value is, the same address `\"Class:Field\"` resolves to. A static field of a reference type holds a reference there, a static struct a reference to a boxed copy. nil when the class has no such field or no storage for it yet.",
+  doc = "Where a static field's value is, the same address `\"Class:Field\"` resolves to. A static field of a reference type holds a reference there, a static struct a reference to a boxed copy. nil when the class has no such field or no storage for it yet.",
 }, function(class, field)
   return many(native.dotnetStaticAddress(class, field))
 end)
@@ -7719,7 +7795,8 @@ do
   end)
 end
 
-local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
+)MLUA"),
+            std::string_view(R"MLUA(local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
 
 local function subarea(parent, name, summary)
   local path = parent.path .. "." .. name
@@ -7770,8 +7847,7 @@ local WIDGET_KEYS = {
   separator = withCommon({ text = "string" }),
   spacer = withCommon({}),
   button = withCommon({ text = "string", icon = "string", style = "string", shortcut = "string", hotkey = "string", confirm = "string", onClick = "function" }),
-)MLUA"),
-            std::string_view(R"MLUA(  checkbox = withCommon({ label = "string", value = "boolean", style = "string", hotkey = "string", onChange = "function" }),
+  checkbox = withCommon({ label = "string", value = "boolean", style = "string", hotkey = "string", onChange = "function" }),
   input = withCommon({ label = "string", value = "string", hint = "string", multiline = "boolean", password = "boolean", readOnly = "boolean", maxLength = "integer", focus = "boolean", labelPosition = "string", onChange = "function", onSubmit = "function" }),
   number = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", hex = "boolean", format = "string", focus = "boolean", labelPosition = "string", hotkeyIncrease = "string", hotkeyDecrease = "string", hotkeyStep = "number", onChange = "function" }),
   slider = withCommon({ label = "string", value = "number", min = "number", max = "number", step = "number", integer = "boolean", format = "string", labelPosition = "string", hotkeyIncrease = "string", hotkeyDecrease = "string", hotkeyStep = "number", onChange = "function" }),
@@ -7957,7 +8033,8 @@ local function dropEntry(id)
     return
   end
   uiEntries[id] = nil
-  for child in pairs(entry.children) do
+)MLUA"),
+            std::string_view(R"MLUA(  for child in pairs(entry.children) do
     dropEntry(child)
   end
   local parent = entry.parent and uiEntries[entry.parent]
@@ -8059,8 +8136,7 @@ widgetObject = function(entry)
     if not liveEntry(entry) then
       return gone(entry.kind)
     end
-)MLUA"),
-            std::string_view(R"MLUA(    return result(native.uiSet(entry.id, value))
+    return result(native.uiSet(entry.id, value))
   end)
   method("draw", { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } } }, function(drawings, options)
     if entry.kind ~= "canvas" then
@@ -8266,7 +8342,8 @@ local function windowObject(entry)
   end)
   method("update", { params = { { name = "options", type = "table" } } }, function(options)
     options = checkOptions(prefix .. ".update", WINDOW_UPDATE_KEYS, options)
-    if not liveEntry(entry) then
+)MLUA"),
+            std::string_view(R"MLUA(    if not liveEntry(entry) then
       return gone("window")
     end
     if options.onClose ~= nil then
@@ -8321,8 +8398,7 @@ define(window, "create", {
   doc = "Opens a window and returns its handle. Options: `icon` (Font Awesome name), `width` and `height` (the first size, in points), `open` (false creates it hidden), `dock` (false keeps it out of the dock space), `opacity` (0.1 to 1, while the window has the focus) and `inactiveOpacity` (while another window has it; default `opacity`): without them the user's window opacity settings apply, and only a floating window can be see-through, a docked one stays opaque; `onClose(window)` when the user closes it (it is hidden, not removed; `show` brings it back), `onUpdate(window)` every `interval` seconds while it is open (default every frame), and `key`: a window created with the same key replaces the earlier one, and it keeps its place, size and dock spot from one run to the next. Size and behaviour: `minWidth`, `minHeight`, `maxWidth`, `maxHeight` (points) limit what the user can drag it to, `resizable = false` fixes the size, `autoSize = true` fits the window to its widgets, `scrollbar = false` hides the scroll bar, `topmost = true` keeps a floating window above other windows (it does not dock). `modal = true` shows the window as a dialog in front of the program: the rest of the program waits until it is closed (its close button, Escape or `hide`), a modal opened from a modal stacks on top of it, and closing one closes the ones opened from it; with `open = false` it waits for `show`. `position` places it the first time: `\"center\"` (of the main window) or `\"mouse\"`; `x` and `y` (points from the main window's corner) place it exactly.",
 }, function(title, options)
   options = options or {}
-)MLUA"),
-            std::string_view(R"MLUA(  checkIcon("manifold.ui.window.create", options.icon)
+  checkIcon("manifold.ui.window.create", options.icon)
   local owner = ownerSource()
   if options.key and windowKeys[options.key] then
     local earlier = windowKeys[options.key]
@@ -8400,7 +8476,8 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
     "- `text` (`text`, `color`, `wrap`, `mono`, `bold`, `size` in points, `align` = `left`, `center` or `right` for text that does not wrap), `heading` (`text`, `icon`, `color`, `size`, `align`), `separator` (`text` puts a caption into the line), `spacer`.",
     "- `button`: `text`, `icon` (an icon without text makes an icon button), `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through; `hotkey` (like `F5` or `Ctrl+F2`) clicks it from anywhere, also while the game has the focus, as long as its window is open (not a button with `confirm`).",
-    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch; `hotkey` like `F1` or `Ctrl+F2` switches it from anywhere, also while the game has the focus, as long as its window is open and the box is enabled, and shows the key beside it), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click; a `number` or `slider` takes `hotkeyIncrease` and `hotkeyDecrease`, keys that move it by `hotkeyStep` (else its `step`, else 1) from anywhere while its window is open, within `min` and `max`), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line; a `combo` or `radio` takes `hotkeyNext` and `hotkeyPrevious`, keys that choose the next or previous item, round the end), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
+)MLUA"),
+            std::string_view(R"MLUA(    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch; `hotkey` like `F1` or `Ctrl+F2` switches it from anywhere, also while the game has the focus, as long as its window is open and the box is enabled, and shows the key beside it), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click; a `number` or `slider` takes `hotkeyIncrease` and `hotkeyDecrease`, keys that move it by `hotkeyStep` (else its `step`, else 1) from anywhere while its window is open, within `min` and `max`), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line; a `combo` or `radio` takes `hotkeyNext` and `hotkeyPrevious`, keys that choose the next or previous item, round the end), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
@@ -8417,8 +8494,7 @@ local WIDGET_METHOD_DOCS = {
     "Example: `w.speed.update({ value = 2, enabled = god.get() })`, `w.status.update({ text = \"Attached\", color = \"success\" })`.",
   }, " ") },
   get = { returns = "value", doc = "The widget's value: a checkbox's boolean, an input's text, a colour's `#RRGGBB`, a number, the chosen combo, radio or table row's number (a combo with `multi` returns the list of chosen numbers), the selected tree item's id, a progress fraction, otherwise the text. Returns nil when nothing is selected." },
-)MLUA"),
-            std::string_view(R"MLUA(  set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
+  set = { params = { { name = "value", type = "any", optional = true } }, returns = "boolean", doc = "Sets the widget's value (see `get`); nil clears a selection. It does not call `onChange`." },
   draw = { params = { { name = "drawings", type = "table" }, { name = "options", type = "table", optional = true, keys = { append = "boolean" } } }, returns = "boolean", doc = "Replaces a canvas's drawings (`options.append` adds them instead). A drawing is a table with `kind`: `line` (`x`, `y`, `x2`, `y2`, `thickness`), `rect` (`x`, `y`, `width`, `height`, `filled`, `rounding`, `thickness`), `circle` (`x`, `y`, `radius`, `filled`, `thickness`), `polygon` (`points` = `{ x1, y1, x2, y2, ... }`, `filled`), `text` (`x`, `y`, `text`, `size`) or `image` (`image`, `x`, `y`, `width`, `height`); all but images take `color` (a theme name or `#RRGGBB`/`#RRGGBBAA`)." },
   getView = { returns = "table", doc = "A canvas's view `{ x, y, scale }`: the canvas point at its top left corner and the zoom." },
   setView = { params = { { name = "view", type = "table", keys = { x = "number", y = "number", scale = "number" } } }, returns = "boolean", doc = "Moves or zooms a canvas's view." },
@@ -8534,7 +8610,8 @@ local function formWidget(path, child, at, resolve)
     misuse(("%s: %s must be a table, got %s"):format(path, at, kindOf(child)))
   end
   if type(child.kind) ~= "string" then
-    misuse(("%s: %s has no kind"):format(path, at))
+)MLUA"),
+            std::string_view(R"MLUA(    misuse(("%s: %s has no kind"):format(path, at))
   end
   if child.name ~= nil and (type(child.name) ~= "string" or not child.name:match("^[%a_][%w_]*$")) then
     misuse(("%s: %s.name must be a Lua name, got %s"):format(path, at, tostring(child.name)))
@@ -8645,8 +8722,7 @@ local function checkForm(path, spec, handlers)
           misuse(("%s: %s.record must be a memory record's description or id, got %s"):format(path, label, kindOf(child.record)))
         end
         if not FORM_SKIP.bindable[child.kind] then
-)MLUA"),
-            std::string_view(R"MLUA(          misuse(("%s: %s: a %s cannot show a memory record (a checkbox, button, number, slider, input, text, combo or radio can)"):format(path, label, child.kind))
+          misuse(("%s: %s: a %s cannot show a memory record (a checkbox, button, number, slider, input, text, combo or radio can)"):format(path, label, child.kind))
         end
         if child.kind == "combo" and child.multi then
           misuse(("%s: %s: a combo with multi = true cannot show a memory record"):format(path, label))
@@ -8808,7 +8884,8 @@ local function fillForm(path, made, members, children, resolve, folder, links)
             if value ~= nil then
               local shown = shownValue(bind, value, text, entry)
               local ok, current = pcall(bind.handle.get)
-              -- a field the user is typing into keeps the keyboard: leave it until it is left
+)MLUA"),
+            std::string_view(R"MLUA(              -- a field the user is typing into keeps the keyboard: leave it until it is left
               local typing = (bind.kind == "input" or bind.kind == "number") and native.uiIsActive(bind.handle.id)
               if not typing and shown ~= nil and (shown ~= bind.last or not ok or current ~= shown) then
                 bind.last = shown
@@ -8925,8 +9002,7 @@ local function fillForm(path, made, members, children, resolve, folder, links)
           end
         end end
       end
-)MLUA"),
-            std::string_view(R"MLUA(      if wiring and child.name and (child.kind == "checkbox" or child.kind == "combo" or child.kind == "radio") then
+      if wiring and child.name and (child.kind == "checkbox" or child.kind == "combo" or child.kind == "radio") then
         -- a widget others may listen to: its changes reach their rules first
         local original = copy.onChange
         local name = child.name
@@ -9126,7 +9202,8 @@ local function reloadForm(watch, start)
       end
     end
     local wiring = { rules = {}, items = {} }
-    fillForm("manifold.ui.form.load", watch.window, watch.members, spec.children, resolve, watch.folder, { window = watch.window, modals = watch.modals, wiring = wiring, images = images })
+)MLUA"),
+            std::string_view(R"MLUA(    fillForm("manifold.ui.form.load", watch.window, watch.members, spec.children, resolve, watch.folder, { window = watch.window, modals = watch.modals, wiring = wiring, images = images })
     for _, modal in ipairs(modals) do
       local handle = rawget(watch.modals, modal.name)
       fillForm("manifold.ui.form.load", handle, watch.members, modal.spec.children, resolve, watch.folder, { window = handle, modals = watch.modals, wiring = wiring, images = images })
@@ -9181,8 +9258,7 @@ define(form, "build", {
     { name = "options", type = "table", optional = true, keys = { reload = "boolean", onReload = "function" } },
   },
   returns = "window",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like." .. " `modals` lists modal forms: window tables like the form itself with a `name`, each made as a modal window (`modal = true`) that waits hidden; `modals.<name>.show()` opens it. A button's `opens = \"<name>\"` opens that modal when clicked and `closes = true` hides the window it is in; both run before the button's `onClick`." .. " Any widget can take `enabledWhen`, which enables it only while another widget of the form says so, without code: `\"god\"` (that checkbox or switch is on, or that combo or radio has a choice), `\"not god\"`, or `\"mode = Multiplier, Double\"` (one of these items of that combo or radio is chosen). It follows the user's changes; a script's `set` does not update it." .. " A checkbox, button, number, slider, input, text, combo or radio can take `record`: a memory record's description or id (see `manifold.record`), which binds the widget to it without code. A checkbox shows and switches whether the record is on, a button switches it, a number or slider shows and writes its value, an input writes when Enter is pressed, a text shows the value as the address list does, a combo or radio writes the chosen item's text (a drop-down entry of the record). The window refreshes them ten times a second while it is open, the script's own handlers still run after the write, and a widget whose record is not in the table is disabled until it is. A description binds only when exactly one record has it: with several, the widget stays disabled and a warning names them, until the descriptions differ or the form names the record by id." .. " The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty." .. " A script file that holds its form as `local form = { form = 1, ... }` (as the Form Editor writes it) gets a live reload like `load`: saving the script rebuilds the window's widgets from the table in the file, with the same handlers; the handlers' own code changes only when the script runs again. `options.reload = false` switches that off, `options.onReload(window, widgets, modals)` runs after each rebuild.",
+  doc = "Builds a window from a form table and returns " .. FORM_RETURNS .. " The table has `form = 1`, `title`, the window options (`icon`, `width`, `key`, `onClose`, ...) and `children`, a list of widget tables: `kind`, an optional `name`, the options of that kind and their own `children`. Handler options hold a name, like `onClick = \"save\"`, and are looked up in `handlers` (`handlers.save`); a missing one raises. Without `handlers` the handlers are left out, which shows what the form looks like." .. " `modals` lists modal forms: window tables like the form itself with a `name`, each made as a modal window (`modal = true`) that waits hidden; `modals.<name>.show()` opens it. A button's `opens = \"<name>\"` opens that modal when clicked and `closes = true` hides the window it is in; both run before the button's `onClick`." .. " Any widget can take `enabledWhen`, which enables it only while another widget of the form says so, without code: `\"god\"` (that checkbox or switch is on, or that combo or radio has a choice), `\"not god\"`, or `\"mode = Multiplier, Double\"` (one of these items of that combo or radio is chosen). It follows the user's changes; a script's `set` does not update it." .. " A checkbox, button, number, slider, input, text, combo or radio can take `record`: a memory record's description or id (see `manifold.record`), which binds the widget to it without code. A checkbox shows and switches whether the record is on, a button switches it, a number or slider shows and writes its value, an input writes when Enter is pressed, a text shows the value as the address list does, a combo or radio writes the chosen item's text (a drop-down entry of the record). The window refreshes them ten times a second while it is open, the script's own handlers still run after the write, and a widget whose record is not in the table is disabled until it is. A description binds only when exactly one record has it: with several, the widget stays disabled and a warning names them, until the descriptions differ or the form names the record by id." .. " The whole form is checked first, so a wrong one raises without making a window. An `image` widget takes a file name as `image`, relative to the calling script's folder; a picture that cannot be read leaves the widget empty." .. " A script file that holds its form as `local form = { form = 1, ... }` (as the Form Editor writes it) gets a live reload like `load`: saving the script rebuilds the window's widgets from the table in the file, with the same handlers; the handlers' own code changes only when the script runs again. `options.reload = false` switches that off, `options.onReload(window, widgets, modals)` runs after each rebuild.",
 }, function(spec, handlers, options)
   options = options or {}
   local info = callerFrame()
@@ -9328,7 +9404,8 @@ local function flatFilters(path, filters)
   local flat = {}
   for index, pair in ipairs(filters) do
     if type(pair) ~= "table" or type(pair[1]) ~= "string" or type(pair[2]) ~= "string" then
-      misuse(("%s: filter %d must be { description, pattern }"):format(path, index))
+)MLUA"),
+            std::string_view(R"MLUA(      misuse(("%s: filter %d must be { description, pattern }"):format(path, index))
     end
     flat[#flat + 1] = pair[1]
     flat[#flat + 1] = pair[2]
@@ -9378,8 +9455,7 @@ local function noticeObject(entry)
       params = { { name = "options", type = "table", keys = { text = "string", level = "string", progress = "number", sticky = "boolean" } } },
       body = function(options)
         checkLevel("notice.update", options.level)
-)MLUA"),
-            std::string_view(R"MLUA(        state.text = options.text or state.text
+        state.text = options.text or state.text
         state.level = options.level or state.level
         if options.progress ~= nil then
           state.progress = options.progress
@@ -9590,7 +9666,8 @@ define(ui, "setMode", {
   native.setUiMode(mode.release, mode.compact)
 end)
 
-local theme = subarea(ui, "theme", "The theme: the names `manifold.ui` takes for colours and icons, the look shown now, and custom themes. The presets are Standard, Red, Green and Blue; a custom theme is an .ini file in the themes folder that builds on one of them. `apply`, `override` and `restore` change the look for this session only, and it comes back when the script runs again or stops; `save` writes a theme file.")
+)MLUA"),
+            std::string_view(R"MLUA(local theme = subarea(ui, "theme", "The theme: the names `manifold.ui` takes for colours and icons, the look shown now, and custom themes. The presets are Standard, Red, Green and Blue; a custom theme is an .ini file in the themes folder that builds on one of them. `apply`, `override` and `restore` change the look for this session only, and it comes back when the script runs again or stops; `save` writes a theme file.")
 
 define(theme, "colors", {
   returns = "table",
@@ -9643,8 +9720,7 @@ do
   define(theme, "color", {
     params = { { name = "name", type = "string" } },
     returns = "table, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(    doc = "A colour of the look shown now as `{ r, g, b, a }` from 0 to 1. `name` is one of `colors()` or an ImGui colour as `imgui.WindowBg`; an unknown name gives `ThemeInvalid`.",
+    doc = "A colour of the look shown now as `{ r, g, b, a }` from 0 to 1. `name` is one of `colors()` or an ImGui colour as `imgui.WindowBg`; an unknown name gives `ThemeInvalid`.",
   }, function(name)
     return result(native.uiThemeColor(name))
   end)
@@ -9887,7 +9963,8 @@ define(moduleArea, "info", {
 end)
 
 define(moduleArea, "reload", {
-  params = { { name = "name", type = "string" } },
+)MLUA"),
+            std::string_view(R"MLUA(  params = { { name = "name", type = "string" } },
   returns = "true, or nil, error",
   doc = "Unloads a module and runs it again from disk, and after it the loaded modules that require it. The error is the reason the module did not load: `ME-7003` with the script error, `ME-7012` when it is blocked or disabled, `ME-7013` when it is held.",
 }, function(name)
@@ -9941,8 +10018,7 @@ callFormHandler = callHandler
 debug.getregistry()["Manifold.UiTick"] = function(now)
   for _, id in ipairs(native.uiDue(now)) do
     local entry = uiEntries[id]
-)MLUA"),
-            std::string_view(R"MLUA(    if entry and entry.onUpdate and not callHandler(entry.onUpdate, entry.handle) then
+    if entry and entry.onUpdate and not callHandler(entry.onUpdate, entry.handle) then
       native.uiUpdate(id, { updates = false })
     end
   end

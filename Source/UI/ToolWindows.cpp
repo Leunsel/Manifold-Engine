@@ -592,12 +592,14 @@ namespace Manifold::UI
                     ImGui::SetNextItemWidth(Px(220.0f));
                     InputTextWithHint("##filter", ICON_FA_SEARCH " Filter", m_filter);
                     const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable;
-                    if (ImGui::BeginTable("##modules", 3, flags))
+                    if (ImGui::BeginTable("##modules", 4, flags))
                     {
+                        const Target::Rebases& rebases = engine.Symbols().Rebase();
                         ImGui::TableSetupScrollFreeze(0, 1);
                         ImGui::TableSetupColumn("Module");
                         ImGui::TableSetupColumn("Base");
                         ImGui::TableSetupColumn("Size");
+                        ImGui::TableSetupColumn("Shown At");
                         ImGui::TableHeadersRow();
                         for (const Target::ModuleInfo& module : *engine.Process()->Modules())
                         {
@@ -613,6 +615,19 @@ namespace Manifold::UI
                                     m_workspace.OpenMemoryViewer(module.Base, true);
                             }
                             ItemTooltip(WideToUtf8(module.Path).c_str());
+                            if (ImGui::BeginPopupContextItem("##modulemenu"))
+                            {
+                                m_module = module.Name;
+                                if (ImGui::MenuItem(ICON_FA_CODE "  Open in the Memory Viewer"))
+                                    m_workspace.OpenMemoryViewer(module.Base, true);
+                                m_rebase.MenuItems(engine, module);
+                                ImGui::Separator();
+                                if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Base"))
+                                    ImGui::SetClipboardText(Hex(module.Base).c_str());
+                                if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Name"))
+                                    ImGui::SetClipboardText(module.Name.c_str());
+                                ImGui::EndPopup();
+                            }
                             Layout::TextStyle name;
                             name.Tooltip = false;   // the row's tooltip is the module's path
                             Layout::Text(module.Name, name);
@@ -622,10 +637,18 @@ namespace Manifold::UI
                             ImGui::TextUnformatted(Hex(module.Base).c_str());
                             ImGui::TableNextColumn();
                             ImGui::TextUnformatted(Hex(module.Size).c_str());
+                            ImGui::TableNextColumn();
+                            if (const auto shown = rebases.ShownBase(*engine.Process(), module))
+                            {
+                                const auto rule = rebases.Rule(module.Name);
+                                Layout::Colored(Hex(*shown), ManifoldTheme::Accent);
+                                ItemTooltip(rule && rule->ImageBase ? "Rebased to its image base: every address of the module is shown as if it were loaded there." : "Rebased to a chosen base: every address of the module is shown as if it were loaded there.");
+                            }
                             PopMono();
                         }
                         ImGui::EndTable();
                     }
+                    m_rebase.Draw(engine);
                 }
                 ImGui::EndTabItem();
             }

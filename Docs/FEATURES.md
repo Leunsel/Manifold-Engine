@@ -20,6 +20,7 @@ Manifold Engine reads and writes Cheat Engine tables (`.CT`): records, groups, p
 - [Script templates](#script-templates)
 - [Pointer scan](#pointer-scan)
 - [Static pointers](#static-pointers)
+- [Rebasing a module](#rebasing-a-module)
 - [Signatures](#signatures)
 - [Speedhack](#speedhack)
 - [Lua](#lua)
@@ -498,6 +499,17 @@ For a single level, [Static pointers](#static-pointers) is quicker and stays its
 - It is a single level, not a pointer scan, and takes well under a second.
 - Each hit shows `"game.exe"+offset`, the offset to the address and whether the pointer still holds the same value.
 - A double-click adds it to the address list as a pointer.
+
+## Rebasing a module
+
+*Rebase Module* (right-click menu of the disassembler and the hex view, and of every module under Symbols and Modules → Modules) shows a module at another base, as IDA's *Rebase Program* does, so the addresses on screen match an IDA or Ghidra database of the same file, whatever base ASLR picked this time.
+
+- **Bases.** *Show at Its Image Base* uses the base the module's PE header asks for, read from the file (when the loader moves an image it writes the new base into the header in memory); *Show as RVAs* uses 0; *Show at a Chosen Base...* takes a hex number. *Show Where It Is Loaded* takes the rebase back.
+- **What changes.** The address column of the disassembler and the hex view, call, jump and RIP-relative targets inside the module (in place of `module+offset`, or of the plain number with names off), the memory viewer's status line (`shown as ...`) and *Copy → Rebased address*. The modules list shows the base in *Shown At*.
+- **What does not.** The process, the instructions, what Assemble starts from and what is written stay at the real addresses; address expressions (`game.exe+1234`, Auto Assembler scripts, the address list) read real addresses as before.
+- **Go to Address** takes a rebased number, such as one copied from IDA, and goes to the real place; an address that lies in a loaded module is always read as a real one.
+- **Kept by name.** Rules live in the settings (`[Rebase]`) by module name, so they hold for the next start of the game.
+- **Lua.** `manifold.rebase.set`, `.get`, `.clear`, `.list`, `.shown`, `.real` and `.imageBase`.
 
 ## Signatures
 

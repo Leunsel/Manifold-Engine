@@ -3,6 +3,7 @@
 #include "App/Commands.h"
 #include "Disasm/FunctionBounds.h"
 #include "Lua/LuaEngine.h"
+#include "UI/RebaseMenu.h"
 #include "UI/Templates.h"
 #include "UI/ToolWindowBase.h"
 
@@ -92,6 +93,8 @@ namespace Manifold::UI
         void JumpToFunction(Command command);
         void CopyInstructions(Target::AddressStyle style);
         void AddressCopyItems(std::uint64_t address);
+        void RebaseItems(std::uint64_t address);
+        std::string GotoText(std::uint64_t address) const;
         void BookmarkItems();
         void GotoDialog();
         void CommentDialog();
@@ -271,6 +274,8 @@ namespace Manifold::UI
         bool m_gotoHex = false;
         std::string m_gotoText;
         std::string m_gotoError;
+        std::string m_gotoNote;
+        RebasePrompt m_rebase;
         bool m_assembleOpen = false;
         std::uint64_t m_assembleAddress = 0;
         std::string m_assembleText;

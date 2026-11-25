@@ -1,6 +1,7 @@
 #pragma once
 
 #include "UI/ProcessIcon.h"
+#include "UI/RebaseMenu.h"
 #include "UI/ToolWindowBase.h"
 
 #include <cstdint>
@@ -51,6 +52,7 @@ namespace Manifold::UI
         std::string m_filter;
         [[maybe_unused]] int m_tab = 0;
         std::string m_module;
+        RebasePrompt m_rebase;
     };
 
     class RegionsWindow : public ToolWindowBase

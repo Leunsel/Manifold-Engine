@@ -2,6 +2,7 @@
 
 #include "Core/Errors.h"
 #include "Target/Process.h"
+#include "Target/Rebase.h"
 
 #include <atomic>
 #include <cstdint>
@@ -49,7 +50,8 @@ namespace Manifold::Target
     {
         Name,
         ModuleOffset,
-        Plain
+        Plain,
+        Rebased
     };
 
     class Symbols
@@ -74,6 +76,12 @@ namespace Manifold::Target
         std::string Describe(std::uint64_t address) const;
         std::string ModuleOffset(std::uint64_t address) const;
         std::string AddressText(std::uint64_t address, AddressStyle style) const;
+        // The address as a rebased module shows it (see Rebases), or nullopt
+        // outside every rebased module.
+        std::optional<std::uint64_t> Rebased(std::uint64_t address) const;
+        std::optional<RebaseHit> FromRebased(std::uint64_t shown) const;
+        Rebases& Rebase() { return m_rebases; }
+        const Rebases& Rebase() const { return m_rebases; }
         std::optional<std::string> ExactName(std::uint64_t address) const;
         // The closest name at or below an address, at most reach bytes away:
         // a registered symbol, a module base or an export (what ExactName
@@ -104,6 +112,7 @@ namespace Manifold::Target
         std::optional<std::uint64_t> ResolveBuiltin(std::string_view name, const ExtraResolver& extra) const;
 
         std::shared_ptr<Process> m_process;
+        Rebases m_rebases;
         LookupCallback m_lookup;
         const UserSymbol* RegisteredAt(std::uint64_t address) const;
         const UserSymbol* SizedAt(std::uint64_t address) const;

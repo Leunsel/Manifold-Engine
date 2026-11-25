@@ -354,6 +354,7 @@ namespace Manifold::Target
     void Symbols::Attach(std::shared_ptr<Process> process)
     {
         m_process = std::move(process);
+        m_rebases.Forget();
         std::lock_guard lock(m_exportLock);
         m_exports.clear();
         ++m_generation;
@@ -362,6 +363,7 @@ namespace Manifold::Target
     void Symbols::Detach()
     {
         m_process.reset();
+        m_rebases.Forget();
         {
             std::lock_guard registered(m_registeredLock);
             m_registered.clear();
@@ -856,8 +858,26 @@ namespace Manifold::Target
         {
         case AddressStyle::Name: return Describe(address);
         case AddressStyle::ModuleOffset: return ModuleOffset(address);
+        case AddressStyle::Rebased:
+            if (const auto shown = Rebased(address))
+                return Hex(*shown);
+            return Hex(address);
         default: return Hex(address);
         }
+    }
+
+    std::optional<std::uint64_t> Symbols::Rebased(std::uint64_t address) const
+    {
+        if (!m_process || !m_rebases.Any())
+            return std::nullopt;
+        return m_rebases.Shown(*m_process, address);
+    }
+
+    std::optional<RebaseHit> Symbols::FromRebased(std::uint64_t shown) const
+    {
+        if (!m_process || !m_rebases.Any())
+            return std::nullopt;
+        return m_rebases.Runtime(*m_process, shown);
     }
 
     std::string Symbols::Describe(std::uint64_t address) const

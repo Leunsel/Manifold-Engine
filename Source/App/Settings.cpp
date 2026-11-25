@@ -261,6 +261,7 @@ namespace Manifold
         std::map<std::string, std::array<float, 4>> themeColors;
         std::map<std::string, float> themeSizes;
         std::map<std::string, std::string> shortcuts;
+        std::map<std::string, std::string> rebases;
         std::string custom;
         for (const Ini::Section& section : Ini::Parse(*content))
         {
@@ -300,6 +301,11 @@ namespace Manifold
                     shortcuts[key.substr(4)] = value;
                     continue;
                 }
+                if (key.size() > 7 && EqualsNoCase(key.substr(0, 7), "Rebase."))
+                {
+                    rebases[key.substr(7)] = value;
+                    continue;
+                }
                 values[Lower(key)] = value;
             }
         }
@@ -311,6 +317,7 @@ namespace Manifold
         Theme.Sizes.clear();
         Theme.Dirty = false;
         Shortcuts = std::move(shortcuts);
+        Rebases = std::move(rebases);
         for (const SettingField& field : kFields)
         {
             const auto found = values.find(Lower(field.Key));

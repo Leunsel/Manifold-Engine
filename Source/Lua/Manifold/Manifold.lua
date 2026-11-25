@@ -1,7 +1,7 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 32
+local API_VERSION = 33
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -2063,6 +2063,82 @@ do
       misuse("manifold.signature.find: options.limit must be 1 to 100000")
     end
     return result(native.signatureFind(text, options))
+  end)
+end
+
+-- ∑ In a do block like manifold.signature: the main chunk is close to Lua's limit of 200 locals.
+do
+  local rebase = area("rebase", "Rebasing shows a module at another base, the way IDA's Rebase Program does: at the image base its PE header asks for (the addresses IDA and Ghidra show for the file, whatever ASLR picked this time), at 0 for RVAs, or at a base of your own. Only the addresses on screen change (the disassembler, the hex view, Copy and Go to Address); the process, the instructions and everything written stay at the real addresses, and symbol expressions keep reading real addresses. Rules are kept by module name in the settings, so they hold for the next start of the game. The memory viewer and Symbols and Modules > Modules use the same rules.")
+
+  local function entryDoc(text)
+    return text .. " An entry is `{ module, rule, base }`: `rule` is `\"image\"` or the chosen base, `base` the base the module is shown at now (nil while it is not loaded)."
+  end
+
+  define(rebase, "set", {
+    params = {
+      { name = "module", type = "string" },
+      { name = "base", type = "integer|string" },
+    },
+    returns = "true",
+    doc = "Shows the module at `base`: `\"image\"` for the image base in its PE header, or a number (0 shows RVAs). The module need not be loaded yet; the rule holds whenever a module of that name is. `clear` takes it back.",
+  }, function(module, base)
+    if module == "" then
+      misuse("manifold.rebase.set: module must not be empty")
+    end
+    if type(base) == "string" and base ~= "image" then
+      misuse(("manifold.rebase.set: base must be \"image\" or a number, got %q"):format(base))
+    end
+    if type(base) == "number" and base < 0 then
+      misuse("manifold.rebase.set: base must not be negative")
+    end
+    return native.rebaseSet(module, base)
+  end)
+
+  define(rebase, "get", {
+    params = { { name = "module", type = "string" } },
+    returns = "entry, or nil",
+    doc = entryDoc("The rebase of the module, or nil when it is shown where it is loaded."),
+  }, function(module)
+    return native.rebaseGet(module)
+  end)
+
+  define(rebase, "clear", {
+    params = { { name = "module", type = "string" } },
+    returns = "true",
+    doc = "Shows the module at its real addresses again.",
+  }, function(module)
+    return native.rebaseSet(module, nil)
+  end)
+
+  define(rebase, "list", {
+    returns = "list of entries",
+    doc = entryDoc("Every rebased module, by name."),
+  }, function()
+    return native.rebaseList()
+  end)
+
+  define(rebase, "shown", {
+    params = { { name = "address", type = "address" } },
+    returns = "integer, or nil, error",
+    doc = "The address as it is shown: rebased when it lies in a rebased module, else the address itself.",
+  }, function(address)
+    return result(native.rebaseShown(address))
+  end)
+
+  define(rebase, "real", {
+    params = { { name = "shown", type = "integer" } },
+    returns = "integer, or nil, error",
+    doc = "Where a shown address really is, such as an address copied from IDA: the real address when it lies in a rebased module as shown, else the number itself. With rebased modules shown over each other the first in the module list wins.",
+  }, function(shown)
+    return result(native.rebaseReal(shown))
+  end)
+
+  define(rebase, "imageBase", {
+    params = { { name = "module", type = "string" } },
+    returns = "integer, or nil, error",
+    doc = "The image base in the PE header of a loaded module: where it asks to be loaded, and where `\"image\"` shows it. `ME-1016` when no module has the name.",
+  }, function(module)
+    return result(native.rebaseImageBase(module))
   end)
 end
 

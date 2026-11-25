@@ -31,6 +31,7 @@ namespace Manifold
     Engine::Engine(Settings& settings)
         : m_settings(settings), m_settingsStore(settings, Paths::SettingsFile()), m_themes(Paths::ThemesFolder()), m_disassembler64(std::make_unique<Disasm::Disassembler>(true)), m_disassembler32(std::make_unique<Disasm::Disassembler>(false))
     {
+        m_target.Symbols().Rebase().Load(settings.Rebases);
         m_lua = std::make_unique<Lua::LuaEngine>(*this);
         m_unreal.RegisterTypes(*m_lua);
         m_unreal.SetReadyHandler([this]() { m_lua->DispatchEvent("unrealReady"); });
@@ -41,6 +42,16 @@ namespace Manifold
         m_target.Mono().SetPauseCheck([this] { return m_debugger.Attached() && m_debugger.Broken(); });
         m_writes.SetGuard({ [this](const Target::Process& process, std::uint64_t address, std::uint8_t* buffer, std::size_t size) { return m_debugger.ReadAround(process, address, buffer, size); },
             [this](const Target::Process& process, std::uint64_t address, std::span<const std::uint8_t> bytes) { return m_debugger.WriteAround(process, address, bytes); } });
+    }
+
+    void Engine::SetRebase(std::string_view module, std::optional<Target::RebaseRule> rule)
+    {
+        Target::Rebases& rebases = m_target.Symbols().Rebase();
+        if (rebases.Rule(module) == rule)
+            return;
+        rebases.Set(module, rule);
+        m_settings.Rebases = rebases.Saved();
+        SaveOptionsSoon();
     }
 
     Engine::~Engine()

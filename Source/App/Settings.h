@@ -180,6 +180,8 @@ namespace Manifold
         std::map<std::string, std::array<float, 4>> LegacyThemeColors;
         std::map<std::string, float> LegacyThemeSizes;
         std::map<std::string, std::string> Shortcuts;
+        // Rebased modules: module name -> "image" (its PE image base) or a hex base.
+        std::map<std::string, std::string> Rebases;
 
         bool Load(const std::filesystem::path& path);
         Status Save(const std::filesystem::path& path) const;
