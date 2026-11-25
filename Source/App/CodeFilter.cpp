@@ -246,6 +246,7 @@ namespace Manifold
     {
         const auto started = std::chrono::steady_clock::now();
         const std::shared_ptr<Target::Process> process = m_engine.Process();
+        const std::uint64_t generation = m_engine.ProcessGeneration();
         if (!process || !process->Alive())
             return Status::Fail(ErrorCode::NoProcess);
         {
@@ -430,6 +431,11 @@ namespace Manifold
         report.Total = candidates.size();
         report.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         std::lock_guard lock(m_lock);
+        // ∑ Collecting takes seconds on a big game; when another process (or the same game
+        //   started again) was opened meanwhile, these addresses are not its functions, and
+        //   arming them would put int3s into the middle of its instructions.
+        if (m_engine.ProcessGeneration() != generation || m_engine.Process() != process)
+            return Failed("another process was opened while the functions were collected; collect them again");
         m_candidates = std::move(candidates);
         m_undo.clear();
         m_history.clear();

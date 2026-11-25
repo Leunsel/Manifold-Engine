@@ -5,6 +5,7 @@
 #include "Core/Text.h"
 #include "Disasm/Disassembler.h"
 #include "Disasm/Signature.h"
+#include "Disasm/UniqueAob.h"
 #include "Lua/LuaEngine.h"
 #include "Scan/Scanner.h"
 #include "Target/Process.h"
@@ -331,6 +332,17 @@ namespace Manifold::Tests
             const auto end = Disasm::MakeSignature(process, disassembler, base + kPage * 2 - sizeof(body), options, error);
             CHECK_MSG(!end || (end->Verified && end->Start + end->Bytes.size() <= base + kPage * 2), end ? Text(*end) : error);
             CHECK_MSG(end || error.find("within 7 bytes") != std::string::npos, error);
+            // getUniqueAOB: twelve bytes at the region end that occur once more elsewhere, there
+            // followed by a nop, here by the next region's first byte; only a pattern that runs
+            // past the end tells them apart, and no scan would match that one.
+            const std::uint8_t twelve[] = { 0x89, 0x41, 0x10, 0x89, 0x51, 0x14, 0x89, 0x59, 0x18, 0x89, 0x71, 0x1C };
+            std::memcpy(code + 0x700, twelve, sizeof(twelve));
+            code[0x700 + sizeof(twelve)] = 0x90;
+            std::memcpy(code + kPage - sizeof(twelve), twelve, sizeof(twelve));
+            Disasm::UniqueAobOptions aobOptions;
+            aobOptions.BackSteps = 0;
+            const auto aob = Disasm::FindUniqueAob(process, disassembler, base + kPage * 2 - sizeof(twelve), aobOptions);
+            CHECK_MSG(!aob || aob->Start + aob->Bytes.size() <= base + kPage * 2, aob ? "getUniqueAOB ran past the region end: " + aob->Text : std::string());
             ::VirtualFree(reserve, 0, MEM_RELEASE);
         }
 

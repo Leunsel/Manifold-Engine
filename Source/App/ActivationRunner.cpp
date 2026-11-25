@@ -53,7 +53,7 @@ namespace Manifold
 
         Status Vetoed(const Table::MemoryRecord& record, bool active)
         {
-            return Status::Fail(ErrorCode::LuaRuntime, "a handler (onMemRecPreExecute or the record's " + std::string(active ? "onactivate" : "ondeactivate") +
+            return Status::Fail(ErrorCode::RecordSwitchRefused, "a handler (onMemRecPreExecute or the record's " + std::string(active ? "onactivate" : "ondeactivate") +
                 ") kept \"" + record.Description + "\" from switching " + (active ? "on" : "off"));
         }
     }
@@ -245,7 +245,7 @@ namespace Manifold
                 RequestActive(*record, active, fromScript);
                 return Status::Success();
             }
-            const Status refused = Status::Fail(ErrorCode::LuaRuntime, "\"" + record->Description + "\" is being switched already and cannot be switched again from its own activation");
+            const Status refused = Status::Fail(ErrorCode::RecordSwitching, "\"" + record->Description + "\" is being switched already and cannot be switched again from its own activation");
             LOG_WARN("Table", refused.Text);
             return refused;
         }

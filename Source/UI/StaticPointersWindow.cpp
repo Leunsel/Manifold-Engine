@@ -74,8 +74,22 @@ namespace Manifold::UI
 
     void StaticPointersWindow::Collect()
     {
+        // ∑ The hits are addresses in the process they were found in: once another
+        //   one is open, its module names, Add, Dissect and the memory viewer would
+        //   all apply them to the wrong game, so they go, with a line saying why.
+        Engine& engine = m_workspace.Core();
+        if (m_process && (!engine.HasProcess() || engine.Process() != m_process))
+        {
+            if (m_result || m_task.Running())
+                m_error = "The results were for " + m_process->Name() + ", which is no longer the open process.";
+            if (m_task.Running())
+                m_task.Cancel();
+            m_result.reset();
+            m_process.reset();
+            m_selected = -1;
+        }
         std::optional<Outcome> outcome = m_task.Collect();
-        if (!outcome)
+        if (!outcome || !m_process)
             return;
         m_result = std::move(outcome);
         LOG_INFO("Scan", Grouped(m_result->Hits.size()) + " static pointers to " + Hex(m_target) + (m_result->Cancelled ? " (cancelled)" : ""));

@@ -1,5 +1,7 @@
 #include "Core/Ini.h"
 
+#include "Core/SafeFile.h"
+
 #include <fstream>
 #include <sstream>
 #include <system_error>
@@ -57,16 +59,8 @@ namespace Manifold::Ini
             std::error_code ignored;
             std::filesystem::create_directories(path.parent_path(), ignored);
         }
-        std::filesystem::path temporary = path;
-        temporary += L".tmp";
-        {
-            std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
-            if (!file)
-                return false;
-            file.write(text.data(), static_cast<std::streamsize>(text.size()));
-            if (!file)
-                return false;
-        }
-        return ::MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
+        // ∑ The settings, themes and module state went to a fixed .tmp without a flush: a
+        //   power loss could leave the ini empty, and the next start would save defaults over it.
+        return WriteFileSafely(path, text, true);
     }
 }

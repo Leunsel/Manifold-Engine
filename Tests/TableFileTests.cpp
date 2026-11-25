@@ -13,6 +13,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <thread>
 #include <iterator>
 #include <set>
 #include <string>
@@ -422,6 +423,27 @@ namespace Manifold::Tests
             CHECK(Table::WriteFileSafely(file, "") && content(file).empty());
             CHECK(!Table::WriteFileSafely(folder / L"missing" / L"x.CT", "lost"));
             CHECK(!std::filesystem::exists(folder / L"missing", ignored));
+
+            // Each write has a temporary file of its own: a file that happens to be called
+            // table.CT.tmp stays, nothing is left behind, and two writers at once (two
+            // instances, a background save and a copy) always leave one whole file.
+            {
+                std::ofstream(temporary, std::ios::binary) << "not mine";
+                const std::string big(3u << 20, 'B');
+                const std::string small = "small";
+                std::thread other([&] { for (int i = 0; i < 40; ++i) Table::WriteFileSafely(file, big); });
+                for (int i = 0; i < 40; ++i)
+                    Table::WriteFileSafely(file, small);
+                other.join();
+                const std::string last = content(file);
+                CHECK_MSG(last == big || last == small, Format("two writers left %zu bytes", last.size()));
+                CHECK(content(temporary) == "not mine");
+                std::size_t files = 0;
+                for (const auto& entry : std::filesystem::directory_iterator(folder, ignored))
+                    files += entry.is_regular_file(ignored) ? 1 : 0;
+                CHECK_MSG(files == 2, Format("%zu files in the folder after the writes, 2 expected", files));
+                std::filesystem::remove(temporary, ignored);
+            }
 
             Table::AddressList list;
             Put(list, "only.txt", "kept");

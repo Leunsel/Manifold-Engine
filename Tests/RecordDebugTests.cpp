@@ -602,7 +602,7 @@ local s = getAddressList().getMemoryRecordByID(99)
             Table::MemoryRecord& vetoed = list.AddGroup("Remove Vetoed");
             run("veto handler", "getAddressList().getMemoryRecordByID(" + std::to_string(vetoed.Id) + ").OnActivate = function() return false end return 'ok'", "ok");
             run("veto reported", "local r, e = manifold.record.find(" + std::to_string(vetoed.Id) + ").setActive(true) return tostring(r) .. ' ' .. tostring(e and e.code)",
-                "nil ME-7002");
+                "nil ME-7015");
             CHECK(!vetoed.Active);
 
             Table::MemoryRecord& queued = list.AddGroup("Remove Queued");

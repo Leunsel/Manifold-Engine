@@ -67,6 +67,23 @@ namespace Manifold::Target
         }
         std::sort(list->begin(), list->end(), [](const Image& a, const Image& b) { return a.From < b.From; });
         std::lock_guard lock(m_lock);
+        // ∑ Every cache below is keyed by addresses in the images. When one of them
+        //   went away or moved (a module unloaded, a level's DLL loaded anew), those
+        //   addresses may now hold another module's data, so all of it is read again;
+        //   images that were only added keep what is known.
+        const bool changed = m_images && std::any_of(m_images->begin(), m_images->end(), [&](const Image& old)
+            {
+                const Image* now = FindImage(*list, old.From);
+                return !now || now->From != old.From || now->To != old.To || now->Name != old.Name;
+            });
+        if (changed)
+        {
+            m_locators.clear();
+            m_descriptors.clear();
+            m_bases.clear();
+            m_classes.clear();
+            m_symbols.clear();
+        }
         m_images = std::move(list);
         m_main = std::move(main);
         m_imagesAt = ::GetTickCount64();

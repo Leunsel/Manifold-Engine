@@ -407,6 +407,29 @@ namespace Manifold::Tests
             CHECK(session.Target.Alive());
         }
 
+        // Someone else writes over an armed int3 without going through Manifold (an overlay
+        // hooking the function, a write the release before it timed out on): ending the round
+        // must leave their byte, not put the original back into the middle of their code.
+        void CheckForeignWrite(Session& session)
+        {
+            Target::Coverage& coverage = session.Core.CodeCoverage();
+            const std::uint64_t never[] = { session.Never };
+            CHECK(coverage.Arm(never).Ok() && RawByte(session, session.Never) == Target::Cover::kInt3);
+            const std::uint8_t theirs = 0xE9;
+            SIZE_T written = 0;
+            DWORD old = 0;
+            ::VirtualProtectEx(session.Target.Info.hProcess, reinterpret_cast<LPVOID>(session.Never), 1, PAGE_EXECUTE_READWRITE, &old);
+            ::WriteProcessMemory(session.Target.Info.hProcess, reinterpret_cast<LPVOID>(session.Never), &theirs, 1, &written);
+            ::VirtualProtectEx(session.Target.Info.hProcess, reinterpret_cast<LPVOID>(session.Never), 1, old, &old);
+            CHECK(coverage.Disarm().Ok());
+            CHECK_MSG(RawByte(session, session.Never) == theirs, session.Label + ": ending the round wrote the original byte over someone else's write");
+            const std::uint8_t original = session.Originals[session.Never];
+            ::VirtualProtectEx(session.Target.Info.hProcess, reinterpret_cast<LPVOID>(session.Never), 1, PAGE_EXECUTE_READWRITE, &old);
+            ::WriteProcessMemory(session.Target.Info.hProcess, reinterpret_cast<LPVOID>(session.Never), &original, 1, &written);
+            ::VirtualProtectEx(session.Target.Info.hProcess, reinterpret_cast<LPVOID>(session.Never), 1, old, &old);
+            CHECK(AllOriginal(session));
+        }
+
         void CheckRelease(Session& session)
         {
             Target::Coverage& coverage = session.Core.CodeCoverage();
@@ -874,6 +897,7 @@ namespace Manifold::Tests
             CheckWithoutPointers(session);
             CheckImport(session);
             CheckLua(session);
+            CheckForeignWrite(session);
             CheckRelease(session);
             CheckHostLoss(session, tests);
             engine.CloseProcess();

@@ -579,7 +579,7 @@ namespace Manifold
             if (!m_engine.ActivationPending(id) && !activation.Switching(id))
                 continue;
             const Table::MemoryRecord* busy = m_table.FindById(id);
-            return Status::Fail(ErrorCode::LuaRuntime, "\"" + description + "\" cannot be removed while " +
+            return Status::Fail(ErrorCode::RecordStays, "\"" + description + "\" cannot be removed while " +
                 (id == recordId || !busy ? std::string("it is") : "\"" + busy->Description + "\" below it is") + " being switched; remove it once that is done");
         }
         // deepest first: the reverse of the top-down order has every child before its parent
@@ -599,7 +599,7 @@ namespace Manifold
             if (script && again && again->Active)
             {
                 const Status why = activation.LastOutcome(*it);
-                return Status::Fail(ErrorCode::LuaRuntime, "\"" + name + "\" stayed on" + (why ? std::string() : " (" + why.Text + ")") + ", so \"" + description +
+                return Status::Fail(ErrorCode::RecordStays, "\"" + name + "\" stayed on" + (why ? std::string() : " (" + why.Text + ")") + ", so \"" + description +
                                                                "\" stays in the table");
             }
         }
@@ -613,7 +613,7 @@ namespace Manifold
         {
             const Table::MemoryRecord* below = m_table.FindById(id);
             if (below && below->Kind == Table::RecordKind::Script && below->Active)
-                return Status::Fail(ErrorCode::LuaRuntime, "\"" + below->Description + "\" below \"" + description + "\" was switched on meanwhile, so it stays in the table");
+                return Status::Fail(ErrorCode::RecordStays, "\"" + below->Description + "\" below \"" + description + "\" was switched on meanwhile, so it stays in the table");
         }
         m_table.Remove(*record);
         m_table.Touch();
@@ -724,7 +724,12 @@ namespace Manifold
         for (const std::string& warning : loaded.Warnings)
             LOG_WARN("Table", warning);
         m_engine.Options().AddRecentTable(WideToUtf8(path.wstring()));
-        m_table.SetClean();
+        // ∑ A merge adds to a table that is not saved with it: marking it clean lost
+        //   the edits made before the merge (no prompt on quit, no session backup).
+        if (merge)
+            m_table.Touch();
+        else
+            m_table.SetClean();
         LOG_SUCCESS("Table", "Loaded " + WideToUtf8(path.filename().wstring()) + " with " + std::to_string(m_table.Count()) + " records");
 
         if (!merge && !loaded.LuaScript.empty())

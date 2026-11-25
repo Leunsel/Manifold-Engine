@@ -24,7 +24,13 @@ namespace Manifold::Disasm
         Candidate Build(const Target::Process& process, const Disassembler& disassembler, std::uint64_t start, std::size_t maxLength, bool code)
         {
             Candidate candidate;
-            std::vector<std::uint8_t> buffer(maxLength + 16);
+            // ∑ Scans never match across a region end (the next region may have other
+            //   rights or be gone), so a pattern that ran past it could not be found
+            //   again; it ends at the end of the start's region.
+            std::size_t room = maxLength + 16;
+            if (const auto region = process.RegionAt(start))
+                room = region->End() > start ? static_cast<std::size_t>(std::min<std::uint64_t>(room, region->End() - start)) : 0;
+            std::vector<std::uint8_t> buffer(room);
             buffer.resize(process.Read(start, buffer.data(), buffer.size()));
             const auto isAddress = [&](std::uint64_t value) { return value >= 0x10000 && process.ModuleAt(value).has_value(); };
             std::size_t offset = 0;

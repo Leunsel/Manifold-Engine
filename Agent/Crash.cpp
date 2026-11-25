@@ -188,8 +188,10 @@ namespace
             ::RemoveVectoredExceptionHandler(g_handler);
             g_handler = nullptr;
         }
-        Ring* ring = g_ring;
-        g_ring = nullptr;
+        // ∑ An interlocked exchange, not a plain store: it is a full fence, so the read of
+        //   g_inside below cannot move before it (x86 reorders a store with a later load),
+        //   and a handler that counted itself in after it sees no ring.
+        Ring* ring = static_cast<Ring*>(_InterlockedExchangePointer(reinterpret_cast<void* volatile*>(&g_ring), nullptr));
         g_block.Running = 0;
         WaitOutside(2000);
         if (g_inside != 0)

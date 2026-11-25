@@ -168,6 +168,9 @@
     <ClCompile Include="..\Source\Core\RuntimeLog.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Core\SafeFile.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Core\Text.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>

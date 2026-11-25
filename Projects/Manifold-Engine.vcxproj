@@ -153,6 +153,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Core\Paths.cpp" />
     <ClCompile Include="..\Source\Core\Profiler.cpp" />
     <ClCompile Include="..\Source\Core\RuntimeLog.cpp" />
+    <ClCompile Include="..\Source\Core\SafeFile.cpp" />
     <ClCompile Include="..\Source\Core\Text.cpp" />
     <ClCompile Include="..\Source\Core\Xml.cpp" />
     <ClCompile Include="..\Source\Debug\BreakAction.cpp" />
@@ -376,6 +377,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Core\Paths.h" />
     <ClInclude Include="..\Source\Core\Profiler.h" />
     <ClInclude Include="..\Source\Core\RuntimeLog.h" />
+    <ClInclude Include="..\Source\Core\SafeFile.h" />
     <ClInclude Include="..\Source\Core\Text.h" />
     <ClInclude Include="..\Source\Core\Types.h" />
     <ClInclude Include="..\Source\Core\Version.h" />

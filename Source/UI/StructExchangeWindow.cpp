@@ -340,6 +340,8 @@ namespace Manifold::UI
         }
         Engine& engine = m_workspace.Core();
         const Table::StructMerge merge = Table::MergeStructures(engine.Structures(), std::move(chosen), m_conflict);
+        if (merge.Added + merge.Replaced > 0)
+            engine.Table().Touch();  // the structures are part of the table: unsaved until it is saved
         std::string message = Format("Imported %s from %s", Structures(merge.Added + merge.Replaced).c_str(), m_source.c_str());
         if (merge.Replaced)
             message += Format(", %d replaced", merge.Replaced);

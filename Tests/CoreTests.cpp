@@ -1633,6 +1633,28 @@ hostileRan = true
     }
 
     // Ctrl+S on the owner's Isaac table saved every 200-450 ms, each save writing the whole file and two log entries.
+    // Merging another table into one with unsaved changes left it marked as saved: no prompt on quit, no session backup.
+    void MergeKeepsChanges()
+    {
+        std::error_code ignored;
+        const std::filesystem::path folder = Paths::DataFolder() / L"merge-changes";
+        std::filesystem::create_directories(folder, ignored);
+        Settings settings;
+        Engine engine(settings);
+        engine.Table().AddValue("Saved", "game.exe+10", Scan::ValueType::FourBytes);
+        CHECK(engine.SaveTable(folder / L"First.CT").Ok());
+        engine.NewTable();
+        engine.Table().AddValue("Other", "game.exe+20", Scan::ValueType::FourBytes);
+        CHECK(engine.SaveTable(folder / L"Second.CT").Ok());
+        CHECK(engine.LoadTable(folder / L"First.CT", false).Ok() && !engine.Table().Dirty());
+        engine.Table().AddValue("Unsaved", "game.exe+30", Scan::ValueType::FourBytes);
+        CHECK(engine.Table().Dirty());
+        CHECK(engine.LoadTable(folder / L"Second.CT", true).Ok());
+        CHECK_MSG(engine.Table().Dirty(), "the table counts as saved after a merge although neither its edits nor the merged records are in its file");
+        CHECK_EQ(engine.Table().Count(), std::size_t{ 3 });
+        CHECK(engine.LoadTable(folder / L"Second.CT", false).Ok() && !engine.Table().Dirty());
+    }
+
     void TableSaves()
     {
         std::error_code ignored;
@@ -2128,6 +2150,7 @@ hostileRan = true
         SessionBackups();
         SessionBackupContent();
         TableSaves();
+        MergeKeepsChanges();
         DiagnosticsInfo();
         return Totals().Failures - before;
     }

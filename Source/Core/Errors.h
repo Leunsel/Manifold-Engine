@@ -131,6 +131,9 @@
     X(LuaModuleBlocked, 7012) \
     X(LuaModuleHeld, 7013) \
     X(LuaFormUnreadable, 7014) \
+    X(RecordSwitchRefused, 7015) \
+    X(RecordSwitching, 7016) \
+    X(RecordStays, 7017) \
     X(ExprSyntax, 8001) \
     X(ExprUnknownSymbol, 8002) \
     X(ExprPointerUnreadable, 8003) \

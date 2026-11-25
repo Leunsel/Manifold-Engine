@@ -71,7 +71,9 @@ namespace
                 //   there, and a clock read first could be older than that tick, so
                 //   the difference would wrap and look like a long idle time. A
                 //   tick that is not behind the clock counts as activity now.
-                const std::uint64_t activity = g_life.Activity;
+                // one 64-bit read also in the 32-bit agent: two halves read across the 2^32 ms carry
+                // (49.7 days of uptime) could look 49 days old and unload the agent under a new load
+                const std::uint64_t activity = static_cast<std::uint64_t>(_InterlockedCompareExchange64(reinterpret_cast<volatile LONG64*>(&g_life.Activity), 0, 0));
                 const std::uint64_t now = RealTickCount64();
                 if (g_life.Parts != 0 || activity >= now || now - activity < grace)
                     continue;
@@ -98,7 +100,7 @@ namespace
 
 void LifeTouch()
 {
-    g_life.Activity = RealTickCount64();
+    ::InterlockedExchange64(reinterpret_cast<volatile LONG64*>(&g_life.Activity), static_cast<LONG64>(RealTickCount64()));
 }
 
 void LifeHold(std::uint32_t part)

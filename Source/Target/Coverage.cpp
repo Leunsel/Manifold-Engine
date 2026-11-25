@@ -52,7 +52,7 @@ namespace Manifold::Target
             case Cover::ResultStillInside:
                 return "a thread was still inside the library's exception handler";
             case Cover::ResultStillArmed:
-                return "breakpoints could not be taken out of the code (its protection changed); they stay handled until the process ends";
+                return "breakpoints could not be taken out of the code (its protection changed, or a thread stopped in the filter still uses them); they stay handled until that changes or the process ends";
             default:
                 return "the library reported an error";
             }
@@ -303,7 +303,13 @@ namespace Manifold::Target
         m_serial = shared.Serial;
         m_installed = true;
         if (Status disarmed = Call(Cover::CallDisarm); !disarmed)
+        {
+            // the int3s of the round before stay: count it as armed, so the next round disarms
+            // (and fails) first instead of replacing the table they are listed in
             LOG_WARN("CodeFilter", disarmed.Text);
+            m_armed = true;
+            ShowArmed();
+        }
         if (Status watched = Watch(); !watched)
             LOG_WARN("CodeFilter", watched.Text);
         return true;

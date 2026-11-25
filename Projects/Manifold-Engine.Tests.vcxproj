@@ -145,6 +145,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Core\Paths.cpp" />
     <ClCompile Include="..\Source\Core\Profiler.cpp" />
     <ClCompile Include="..\Source\Core\RuntimeLog.cpp" />
+    <ClCompile Include="..\Source\Core\SafeFile.cpp" />
     <ClCompile Include="..\Source\Core\Text.cpp" />
     <ClCompile Include="..\Source\Core\Xml.cpp" />
     <ClCompile Include="..\Source\Debug\BreakAction.cpp" />

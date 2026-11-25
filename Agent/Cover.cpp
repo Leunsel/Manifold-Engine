@@ -162,9 +162,16 @@ namespace
 
     // One byte, under the write lock: two threads that changed the protection
     // of one page at the same time would put the wrong one back.
+    std::uint8_t ByteAt(std::uintptr_t address);
+
+    // Puts an original byte back over one of the agent's int3s. A byte that is no
+    // int3 any more was written by someone else since (a script, an overlay's hook):
+    // it stays, or the restore would tear their instruction.
     bool WriteByte(std::uintptr_t address, std::uint8_t value)
     {
         Held held(g_writeLock);
+        if (ByteAt(address) != kInt3)
+            return true;
         DWORD old = 0;
         if (!::VirtualProtect(reinterpret_cast<LPVOID>(address), 1, PAGE_EXECUTE_READWRITE, &old))
             return false;
@@ -223,11 +230,18 @@ namespace
         g_block.High = g_high;
     }
 
-    void WaitOutside(DWORD milliseconds)
+    // False when no moment without a thread in the handler came within the time:
+    // one is stuck there (suspended by a debugger), not just passing through.
+    bool WaitOutside(DWORD milliseconds)
     {
         const ULONGLONG until = RealTickCount64() + milliseconds;
-        while (g_inside != 0 && RealTickCount64() < until)
+        while (g_inside != 0)
+        {
+            if (RealTickCount64() >= until)
+                return false;
             ::Sleep(1);
+        }
+        return true;
     }
 
     std::uint32_t ArmPage(Entry* table, std::uint32_t first, std::uint32_t last)
@@ -329,7 +343,10 @@ namespace
                     continue;
                 const auto address = static_cast<std::uintptr_t>(entry.Address);
                 if (writable)
-                    *reinterpret_cast<volatile std::uint8_t*>(address) = entry.Original;
+                {
+                    if (ByteAt(address) == kInt3)  // someone else's write since then stays (see WriteByte)
+                        *reinterpret_cast<volatile std::uint8_t*>(address) = entry.Original;
+                }
                 else if (MayStillTrap(address))
                 {
                     // ∑ The int3 could not be put back and may still be in the
@@ -396,7 +413,13 @@ namespace
                 WaitRestored(table, count);
                 left = 0;
                 for (std::uint32_t i = 0; i < count; ++i)
-                    left += table[i].State == StateArmed ? 1u : 0u;
+                {
+                    // ∑ Restoring or Releasing after the waits: a thread stopped half way (the
+                    //   debugger suspended it) still uses this entry, so the host may not
+                    //   replace or free the table yet.
+                    const std::uint32_t state = table[i].State;
+                    left += state == StateArmed || state == StateRestoring || state == StateReleasing ? 1u : 0u;
+                }
                 if (!left)
                     break;
             }
@@ -406,9 +429,10 @@ namespace
             g_block.Armed = left;
             return false;
         }
+        if (!WaitOutside(2000))
+            return false;  // a thread in the handler may still read the table
         g_block.Active = 0;
         g_block.Armed = 0;
-        WaitOutside(2000);
         return true;
     }
 
@@ -547,7 +571,12 @@ LONG CoverFilter(EXCEPTION_POINTERS* info)
                     if (!Exchange(*entry, StateArmed, StateRestoring))
                         continue;
                     entry->ThreadId = ::GetCurrentThreadId();
-                    WriteByte(at, entry->Original);
+                    if (!WriteByte(at, entry->Original))
+                    {
+                        // the int3 stays in the code: the entry stays armed, so a disarm keeps the handler for it
+                        SetState(*entry, StateArmed);
+                        break;
+                    }
                     SetState(*entry, StateHit);
                     _InterlockedIncrement64(reinterpret_cast<volatile LONG64*>(&g_block.Hits));
                     break;

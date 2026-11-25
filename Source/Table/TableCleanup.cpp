@@ -344,7 +344,8 @@ namespace Manifold::Table
                     const std::size_t end = close == std::string_view::npos ? script.size() : close + 1;
                     const std::string directive = Lower(script.substr(at, end - at));
                     out.append(script.substr(at, end - at));
-                    if (directive.starts_with("{$lua"))
+                    // C code ({$c}, {$ccode ...}) runs to {$asm} like Lua does, and its { } are function bodies
+                    if (directive.starts_with("{$lua") || directive == "{$c}" || directive.starts_with("{$ccode"))
                         lua = true;
                     at = end;
                     continue;
@@ -354,9 +355,18 @@ namespace Manifold::Table
                     out.append(script.substr(at));
                     break;
                 }
-                // a block comment keeps its line breaks out: the lines it spanned close up
+                // a block comment keeps its line breaks out, so the lines it spanned close up; one line break
+                // stays when it spanned lines, or code before it and code after it would end up on one line
+                const bool spans = script.substr(at, close - at).find('\n') != std::string_view::npos;
                 at = close + 1;
                 out += kRemoved;
+                if (spans)
+                {
+                    out += '\n';
+                    out += kRemoved;
+                    while (at < script.size() && (script[at] == ' ' || script[at] == '\t'))
+                        ++at;
+                }
                 continue;
             }
             out += c;

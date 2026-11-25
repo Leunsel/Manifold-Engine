@@ -45,6 +45,15 @@ namespace Manifold::Tests
             CHECK_MSG(crlf == "[ENABLE]\r\nnop\r\n", crlf);
             CHECK(StripAutoAssemblerComments("nop") == "nop");
             CHECK(StripAutoAssemblerComments("{ never closed\nnop") == "{ never closed\nnop");
+            // C code keeps its braces up to {$asm}, as Lua does
+            const std::string c = StripAutoAssemblerComments("{$c}\nint add(int a, int b) { return a + b; } // sum\n{$asm}\nnop // x\n");
+            CHECK_MSG(c == "{$c}\nint add(int a, int b) { return a + b; } // sum\n{$asm}\nnop\n", c);
+            const std::string ccode = StripAutoAssemblerComments("{$ccode x=eax}\nif (x) { x = 0; }\n{$asm}\n");
+            CHECK_MSG(ccode.find("if (x) { x = 0; }") != std::string::npos, ccode);
+            // a comment over several lines between two instructions leaves them on lines of their own
+            const std::string spanned = StripAutoAssemblerComments("mov eax,1 { one\ntwo } mov ebx,2\n");
+            CHECK_MSG(spanned == "mov eax,1\nmov ebx,2\n", spanned);
+            CHECK_EQ(StripAutoAssemblerComments("{ only\na comment }\nnop\n"), std::string("nop\n"));
         }
 
         std::string SampleTable()
