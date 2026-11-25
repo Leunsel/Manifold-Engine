@@ -1821,15 +1821,15 @@ namespace Manifold::UI
                 if (!snapshot.Whole)
                 {
                     snapshot.Valid.assign(snapshot.Bytes.size(), 0);
-                    const std::uint64_t end = snapshot.Start + snapshot.Bytes.size();
-                    for (std::uint64_t at = snapshot.Start; at < end;)
+                    // ∑ Counted in bytes left, not by page ends: the end of the last page of the address space is 0.
+                    const std::size_t total = snapshot.Bytes.size();
+                    for (std::size_t offset = 0; offset < total;)
                     {
-                        const std::uint64_t pageEnd = std::min((at & ~0xFFFull) + 0x1000, end);
-                        const std::size_t offset = static_cast<std::size_t>(at - snapshot.Start);
-                        const std::size_t chunk = static_cast<std::size_t>(pageEnd - at);
+                        const std::uint64_t at = snapshot.Start + offset;
+                        const std::size_t chunk = static_cast<std::size_t>(std::min<std::uint64_t>(0x1000 - (at & 0xFFF), total - offset));
                         if (process.ReadExact(at, snapshot.Bytes.data() + offset, chunk))
                             std::fill_n(snapshot.Valid.begin() + static_cast<std::ptrdiff_t>(offset), chunk, std::uint8_t(1));
-                        at = pageEnd;
+                        offset += chunk;
                     }
                 }
                 m_snapshots.push_back(std::move(snapshot));

@@ -662,7 +662,10 @@ namespace Manifold::Target
 
     std::size_t Process::Read(std::uint64_t address, void* buffer, std::size_t size) const
     {
-        if (!m_handle.Get() || size == 0)
+        // ∑ A range that runs past the top of the address space is never readable. It used to reach the page loop
+        //   below, where the end of the last page wrapped to 0 and one chunk zeroed up to 4 KB past the buffer:
+        //   the pointer rescan in Crab followed a changing sentinel (0xFFFF...F0 plus an offset) and overran its stack.
+        if (!m_handle.Get() || size == 0 || size > ~address)
             return 0;
         if (DryRun() && DryInsideAllocation(address, size))
         {
@@ -685,8 +688,7 @@ namespace Manifold::Target
         bool anyRead = false;
         while (at < end)
         {
-            const std::uint64_t pageEnd = (at & ~0xFFFull) + 0x1000;
-            const std::size_t chunk = static_cast<std::size_t>(std::min(pageEnd, end) - at);
+            const std::size_t chunk = static_cast<std::size_t>(std::min<std::uint64_t>(0x1000 - (at & 0xFFF), end - at));
             SIZE_T got = 0;
             if (TryReadVm(m_handle.Get(), at, out + (at - address), chunk, got) && got == chunk)
             {

@@ -144,6 +144,29 @@ namespace Manifold::Tests
         }
     }
 
+    namespace
+    {
+        // ∑ The pointer rescan in Crab read 8 bytes in the last page of the address space (a changing sentinel plus
+        //   an offset). The page loop's end wrapped to 0 and the zero fill ran up to 4 KB past the 8-byte buffer.
+        //   Nothing there is readable, so each read must fail and leave every byte after the buffer as it was.
+        void ReadAtTopOfAddressSpace(const Target::Process& process)
+        {
+            struct Guarded
+            {
+                std::uint64_t Value = 0x1122334455667788ull;
+                std::uint8_t After[0x1000];
+            } guarded{};
+            std::fill(std::begin(guarded.After), std::end(guarded.After), std::uint8_t(0xA5));
+            const auto afterIntact = [&] { return std::all_of(std::begin(guarded.After), std::end(guarded.After), [](std::uint8_t b) { return b == 0xA5; }); };
+            for (const std::uint64_t address : { 0xFFFFFFFFFFFFF010ull, 0xFFFFFFFFFFFFFFF0ull, 0xFFFFFFFFFFFFFFF8ull, 0xFFFFFFFFFFFFFFFCull, 0xFFFFFFFFFFFFFFFFull, 0xFFFF800000000FFCull })
+            {
+                CHECK(process.Read(address, &guarded.Value, sizeof(guarded.Value)) == 0);
+                CHECK(!process.ReadExact(address, &guarded.Value, sizeof(guarded.Value)));
+                CHECK(afterIntact());
+            }
+        }
+    }
+
     int RunStructureTests()
     {
         const int before = Totals().Failures;
@@ -155,6 +178,7 @@ namespace Manifold::Tests
         {
             std::shared_ptr<Target::Process> process = *opened;
             process->RefreshModules();
+            ReadAtTopOfAddressSpace(*process);
             GuessOwnMemory(*process);
             FindOwnStaticPointer(*process);
         }

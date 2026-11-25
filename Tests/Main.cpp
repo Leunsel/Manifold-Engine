@@ -92,6 +92,54 @@ namespace Manifold::Tests
         return EXCEPTION_EXECUTE_HANDLER;
     }
 
+    // ∑ MANIFOLD_TEST_TRACE_FAULTS=1 writes every first-chance fault, with its stack as module+offset, straight
+    //   to stderr. It is for crashes that bypass the crash dump above: a fault while the program exits, or one
+    //   that takes the unhandled-exception filter with it, loses the buffered output and writes no dump.
+    //   It only uses the stack and WriteFile, so it works when the heap or the C runtime is already broken.
+    //   Handled faults show too; read the last one before the exit. llvm-symbolizer turns the offsets into lines.
+    void WriteFaultText(const char* text)
+    {
+        DWORD written = 0;
+        ::WriteFile(::GetStdHandle(STD_ERROR_HANDLE), text, static_cast<DWORD>(std::strlen(text)), &written, nullptr);
+    }
+
+    void WriteFaultPlace(const char* label, const void* address)
+    {
+        char line[600];
+        HMODULE module = nullptr;
+        char path[MAX_PATH] = "?";
+        if (::GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, static_cast<const char*>(address), &module) && module)
+            ::GetModuleFileNameA(module, path, MAX_PATH);
+        const char* name = std::strrchr(path, '\\');
+        name = name ? name + 1 : path;
+        std::snprintf(line, sizeof(line), "  %s %p  %s+0x%llX\n", label, address, module ? name : "(no module)",
+            module ? static_cast<unsigned long long>(static_cast<const char*>(address) - reinterpret_cast<const char*>(module)) : 0ull);
+        WriteFaultText(line);
+    }
+
+    LONG WINAPI TraceFault(EXCEPTION_POINTERS* info)
+    {
+        const DWORD code = info->ExceptionRecord->ExceptionCode;
+        if (code < 0xC0000000u || code == 0xE06D7363u)
+            return EXCEPTION_CONTINUE_SEARCH;
+        char line[200];
+        std::snprintf(line, sizeof(line), "\nFAULT %08lX thread %lu", code, ::GetCurrentThreadId());
+        WriteFaultText(line);
+        if (code == EXCEPTION_ACCESS_VIOLATION && info->ExceptionRecord->NumberParameters >= 2)
+        {
+            std::snprintf(line, sizeof(line), " (%s %p)", info->ExceptionRecord->ExceptionInformation[0] == 0 ? "reading" : info->ExceptionRecord->ExceptionInformation[0] == 8 ? "executing" : "writing",
+                reinterpret_cast<void*>(info->ExceptionRecord->ExceptionInformation[1]));
+            WriteFaultText(line);
+        }
+        WriteFaultText("\n");
+        WriteFaultPlace("at", info->ExceptionRecord->ExceptionAddress);
+        void* frames[32] = {};
+        const USHORT count = ::RtlCaptureStackBackTrace(0, 32, frames, nullptr);
+        for (USHORT i = 0; i < count; ++i)
+            WriteFaultPlace("  ", frames[i]);
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
     class DataFolder
     {
     public:
@@ -168,6 +216,8 @@ namespace Manifold::Tests
 int main(int argc, char** argv)
 {
     using namespace Manifold::Tests;
+    if (char trace[4] = ""; ::GetEnvironmentVariableA("MANIFOLD_TEST_TRACE_FAULTS", trace, sizeof(trace)) && trace[0] == '1')
+        ::AddVectoredExceptionHandler(1, &TraceFault);
     Manifold::BindMainThread();
     // ∑ The agent unloads a moment after its last part let go (8 s in the program); the tests,
     //   and the host processes they start, check that within a second or two.
