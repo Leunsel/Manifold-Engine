@@ -889,10 +889,20 @@ namespace Manifold
         options.Quiet = true;
         m_writeId = m_engine.Work().Start(std::move(options), [path, shared, finish](WorkProgress&) -> BackgroundWork::Finish
             {
-                const bool ok = Table::WriteFileSafely(path, *shared, true);
-                const auto written = ok ? DiskStamp(path) : std::nullopt;
-                const auto finished = std::chrono::steady_clock::now();
-                return [ok, written, finished, finish]() { finish(ok, written, finished, nullptr); };
+                // ∑ A job that throws ends without a finish, and the save it was would never clear
+                //   m_writeId: every later Ctrl+S would only queue. It reports a failed save instead.
+                try
+                {
+                    const bool ok = Table::WriteFileSafely(path, *shared, true);
+                    const auto written = ok ? DiskStamp(path) : std::nullopt;
+                    const auto finished = std::chrono::steady_clock::now();
+                    return [ok, written, finished, finish]() { finish(ok, written, finished, nullptr); };
+                }
+                catch (...)
+                {
+                    const auto finished = std::chrono::steady_clock::now();
+                    return [finished, finish]() { finish(false, std::nullopt, finished, nullptr); };
+                }
             });
         m_writingKey = key;
         if (!m_writeId)

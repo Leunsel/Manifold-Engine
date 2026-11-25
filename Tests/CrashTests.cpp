@@ -199,8 +199,13 @@ namespace Manifold::Tests
 
             ledger.Note("Infinite Ammo", 7, 1, Asm::AaSection::Enable, result, after, after, 1500);
             CHECK(ledger.Footprints().size() == 1 && ledger.Footprints().front().OnTick == 1500);
-            // One record's Lua running a second hook script: a footprint of its own.
-            ledger.Note("Infinite Ammo", 7, 2, Asm::AaSection::Enable, result, before, after, 1600);
+            // One record's Lua running a second hook script (other places): a footprint of its own.
+            Asm::AaResult second;
+            second.Writes.push_back({ 0x20000, std::vector<std::uint8_t>(16, 0x90), 3 });
+            second.Writes.push_back({ 0x403000, { 0xE9, 0, 0, 0, 0 }, 7 });
+            Asm::AaMemory secondMemory;
+            secondMemory.Allocations.push_back({ "mem2", 0x20000, 0x1000, 0x20000, false });
+            ledger.Note("Infinite Ammo", 7, 2, Asm::AaSection::Enable, second, before, secondMemory, 1600);
             CHECK(ledger.Footprints().size() == 2);
             ledger.Note("Infinite Ammo", 7, 1, Asm::AaSection::Disable, Asm::AaResult{}, after, before, 2000);
             footprints = ledger.Footprints();
@@ -212,6 +217,27 @@ namespace Manifold::Tests
             failed.Writes = result.Writes;
             ledger.Note("Broken", 9, 3, Asm::AaSection::Enable, failed, before, after, 3500);
             CHECK(ledger.Footprints().size() == 3);
+            // A run that puts the patched bytes back switches the script off whatever its name, and
+            // leaves no footprint of its own: Lua's autoAssemble(enable) / autoAssemble(disable) pair
+            // (two texts), a released orphan (no record), a script edited while it was on.
+            {
+                CrashLedger pairs;
+                Asm::AaResult enable;
+                enable.Writes.push_back({ 0x30000, std::vector<std::uint8_t>(8, 0x90), 2 });
+                enable.Writes.push_back({ 0x405000, { 0xE9, 1, 2, 3, 4 }, 4 });
+                Asm::AaMemory allocated;
+                allocated.Allocations.push_back({ "luamem", 0x30000, 0x1000, 0x30000, false });
+                pairs.Note("autoAssemble", 0, 10, Asm::AaSection::Whole, enable, before, allocated, 100);
+                Asm::AaResult disable;
+                disable.Writes.push_back({ 0x405000, { 0x8B, 0x45, 0x08, 0x89, 0x01 }, 2 });
+                pairs.Note("autoAssemble", 0, 11, Asm::AaSection::Whole, disable, allocated, before, 200);
+                const std::vector<ScriptFootprint> lua = pairs.Footprints();
+                CHECK_MSG(lua.size() == 1 && lua.front().OffTick == 200, Format("%zu footprints after the Lua pair", lua.size()));
+                pairs.Note("Hook", 5, 20, Asm::AaSection::Enable, enable, before, allocated, 300);
+                pairs.Note("orphan", 0, 21, Asm::AaSection::Disable, disable, allocated, before, 400);
+                const std::vector<ScriptFootprint> orphan = pairs.Footprints();
+                CHECK(orphan.size() == 2 && orphan.back().Label == "Hook" && orphan.back().OffTick == 400);
+            }
             CHECK(ScriptLabel("autoAssemble from \"Damage : Multiplier ()->\"", "lua") == "Damage : Multiplier ()->");
             CHECK(ScriptLabel("\"Infinite Ammo\"", "table") == "Infinite Ammo" && ScriptLabel("", "window") == "Auto Assembler window" && ScriptLabel("autoAssemble", "lua") == "autoAssemble");
             ledger.Reset();

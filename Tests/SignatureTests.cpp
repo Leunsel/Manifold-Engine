@@ -346,6 +346,40 @@ namespace Manifold::Tests
             ::VirtualFree(reserve, 0, MEM_RELEASE);
         }
 
+        // "Code only" makes a pattern unique among code; aobscan searches all memory and takes the
+        // first hit, so a copy of the bytes in data must show in the result and in the AA line.
+        void CodeOnlyCopies(const Target::Process& process, const Disasm::Disassembler& disassembler)
+        {
+            constexpr std::size_t kPage = 0x1000;
+            auto* reserve = static_cast<std::uint8_t*>(::VirtualAlloc(nullptr, kPage * 2, MEM_RESERVE, PAGE_NOACCESS));
+            CHECK(reserve != nullptr);
+            if (!reserve)
+                return;
+            ::VirtualAlloc(reserve, kPage, MEM_COMMIT, PAGE_READWRITE);
+            ::VirtualAlloc(reserve + kPage, kPage, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+            std::memset(reserve, 0xCC, kPage * 2);
+            const std::uint8_t body[] = { 0x89, 0x41, 0x10, 0x89, 0x51, 0x14, 0x89, 0x59, 0x18, 0x89, 0x71, 0x1C, 0xC3 };
+            std::uint8_t* code = reserve + kPage + 0x100;
+            std::memcpy(code, body, sizeof(body));
+            const std::uint64_t base = reinterpret_cast<std::uint64_t>(reserve);
+            Disasm::SignatureOptions options;
+            options.Range = std::make_pair(base, base + kPage * 2);
+            options.CodeOnly = true;
+            options.MinBytes = 0;
+            std::string error;
+            const auto alone = Disasm::MakeSignature(process, disassembler, reinterpret_cast<std::uint64_t>(code), options, error);
+            CHECK_MSG(alone && alone->Verified && !alone->UniqueOnlyInCode, alone ? Text(*alone) : error);
+            std::memcpy(reserve + 0x200, body, sizeof(body));
+            const auto copied = Disasm::MakeSignature(process, disassembler, reinterpret_cast<std::uint64_t>(code), options, error);
+            CHECK_MSG(copied && copied->Verified && copied->UniqueOnlyInCode, copied ? Text(*copied) : error);
+            if (copied)
+            {
+                const std::string line = Disasm::FormatSignature(*copied, Disasm::SignatureFormat::AutoAssembler, {});
+                CHECK_MSG(line.find("unique in code only") != std::string::npos, line);
+            }
+            ::VirtualFree(reserve, 0, MEM_RELEASE);
+        }
+
         void Formats()
         {
             Disasm::Signature signature;
@@ -482,6 +516,7 @@ namespace Manifold::Tests
         Masking(*process, disassembler);
         Offsets(*process, disassembler);
         RegionBoundaries(*process, disassembler);
+        CodeOnlyCopies(*process, disassembler);
         Registers(*process, disassembler);
         Formats();
         Parsing();

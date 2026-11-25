@@ -77,7 +77,8 @@ namespace Manifold::Themes
             SHFILEOPSTRUCTW operation{};
             operation.wFunc = FO_DELETE;
             operation.pFrom = list.c_str();
-            operation.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+            // on a drive without a recycle bin, Windows asks before the file is gone for good
+            operation.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_WANTNUKEWARNING | FOF_SILENT | FOF_NOERRORUI;
             return ::SHFileOperationW(&operation) == 0 && !operation.fAnyOperationsAborted;
         }
 
@@ -355,7 +356,26 @@ namespace Manifold::Themes
         std::vector<CustomTheme> written;
         for (auto& [family, theme] : groups)
         {
-            theme.Name = library.UniqueName(std::string(FamilyLabel(family)) + " (Custom)");
+            // ∑ A migration that stopped half way (a theme file or the settings could not be
+            //   written) runs again on the next start: the theme it already wrote is used again
+            //   instead of a second copy called "(Custom) 2".
+            const std::string wanted = std::string(FamilyLabel(family)) + " (Custom)";
+            const CustomTheme* same = nullptr;
+            for (const CustomTheme& existing : library.Custom())
+            {
+                CustomTheme probe = existing;
+                probe.Name = wanted;
+                CustomTheme mine = theme;
+                mine.Name = wanted;
+                if (existing.Name.starts_with(wanted) && ToText(probe) == ToText(mine))
+                    same = &existing;
+            }
+            if (same)
+            {
+                written.push_back(*same);
+                continue;
+            }
+            theme.Name = library.UniqueName(wanted);
             const Status saved = library.Save(theme);
             if (!saved.Ok())
             {

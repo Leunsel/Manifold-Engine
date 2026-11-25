@@ -69,6 +69,37 @@ namespace
         Held& operator=(const Held&) = delete;
     };
 
+    // ∑ The write lock is held across VirtualProtect: when an overlay hooked that call
+    //   inside a function the round armed, its int3 traps on the thread that holds the
+    //   lock, and a plain spin lock would wait for itself for ever. The owner may enter again.
+    struct WriteHeld
+    {
+        bool Nested = false;
+        WriteHeld()
+        {
+            const LONG self = static_cast<LONG>(::GetCurrentThreadId());
+            if (g_writeLock == self)
+            {
+                Nested = true;
+                return;
+            }
+            for (int spin = 0; _InterlockedCompareExchange(&g_writeLock, self, 0) != 0; ++spin)
+            {
+                if (spin < 64)
+                    _mm_pause();
+                else
+                    ::SwitchToThread();
+            }
+        }
+        ~WriteHeld()
+        {
+            if (!Nested)
+                _InterlockedExchange(&g_writeLock, 0);
+        }
+        WriteHeld(const WriteHeld&) = delete;
+        WriteHeld& operator=(const WriteHeld&) = delete;
+    };
+
     LONG* StateOf(Entry& entry)
     {
         return reinterpret_cast<LONG*>(const_cast<std::uint32_t*>(&entry.State));
@@ -169,7 +200,7 @@ namespace
     // it stays, or the restore would tear their instruction.
     bool WriteByte(std::uintptr_t address, std::uint8_t value)
     {
-        Held held(g_writeLock);
+        WriteHeld held;
         if (ByteAt(address) != kInt3)
             return true;
         DWORD old = 0;
@@ -217,7 +248,9 @@ namespace
         if (ip != at && ip != at + 1)
             return false;
         MEMORY_BASIC_INFORMATION info{};
-        return Executable(at, info) && ByteAt(at) != kInt3;
+        // int 2d, int 3 as CD 03 and the like raise a breakpoint too, from bytes the agent never
+        // wrote: going back to them would run them again for ever
+        return Executable(at, info) && ByteAt(at) != kInt3 && ByteAt(at) != 0xCD;
     }
 
     void Widen(std::uintptr_t low, std::uintptr_t high)
@@ -275,7 +308,7 @@ namespace
         }
         if (!wanted)
             return 0;
-        Held held(g_writeLock);
+        WriteHeld held;
         DWORD old = 0;
         if (!::VirtualProtect(reinterpret_cast<LPVOID>(begin), end - begin, PAGE_EXECUTE_READWRITE, &old))
         {
@@ -333,7 +366,7 @@ namespace
         if (!taken)
             return 0;
         {
-            Held held(g_writeLock);
+            WriteHeld held;
             DWORD old = 0;
             const bool writable = ::VirtualProtect(reinterpret_cast<LPVOID>(begin), end - begin, PAGE_EXECUTE_READWRITE, &old) != FALSE;
             for (std::uint32_t i = first; i < last; ++i)

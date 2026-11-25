@@ -134,11 +134,21 @@ namespace Manifold::Target
                 return Status::Fail(ErrorCode::NoProcess);
             if (Process::DryRun())
                 return Failed("a dry run loads nothing into the process");
-            if (m_running)
+            if (m_running || m_starting)
                 return Status::Success();
+            m_starting = true;
             process = m_process;
             session = m_session;
         }
+        struct Starting
+        {
+            CrashWatch& Owner;
+            ~Starting()
+            {
+                std::lock_guard lock(Owner.m_lock);
+                Owner.m_starting = false;
+            }
+        } starting{ *this };
         const auto began = std::chrono::steady_clock::now();
         const auto since = [&began] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count(); };
         // ∑ Loaded (and counted) also when another part loaded it: a part that holds no load

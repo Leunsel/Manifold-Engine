@@ -6,3 +6,4 @@ src:*TemplateGenerator.cpp
 src:*BackgroundWork.cpp
 src:*LuaCompatSystem.cpp
 src:*UnityExplorer.cpp
+src:*TableRuntime.cpp

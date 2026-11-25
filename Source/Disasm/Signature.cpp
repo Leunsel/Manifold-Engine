@@ -662,6 +662,11 @@ namespace Manifold::Disasm
 
         const std::vector<std::uint64_t> hits = Scan::FindPattern(process, signature.Pattern(), space.Low, space.High, space.Filter, 2);
         signature.Verified = hits.size() == 1 && hits.front() == signature.Start;
+        if (signature.CodeOnly && signature.Verified)
+        {
+            const std::vector<std::uint64_t> anywhere = Scan::FindPattern(process, signature.Pattern(), space.Low, space.High, Scan::PatternFilter{}, 2);
+            signature.UniqueOnlyInCode = !(anywhere.size() == 1 && anywhere.front() == signature.Start);
+        }
         signature.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         return signature;
     }
@@ -730,6 +735,8 @@ namespace Manifold::Disasm
                 : "aobscan(" + label + "," + SignatureText(signature.Bytes, aa) + ")";
             if (signature.Offset != 0)
                 line += " // " + label + Signed(signature.Offset);
+            if (signature.UniqueOnlyInCode)
+                line += signature.Offset != 0 ? "; unique in code only, a copy in data may be found first" : " // unique in code only, a copy in data may be found first";
             return line;
         }
         default:

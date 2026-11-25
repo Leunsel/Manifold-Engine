@@ -194,6 +194,37 @@ namespace Manifold
                     return footprint.OffTick == 0 && footprint.Label == label && footprint.RecordId == recordId && footprint.Key == key;
                 });
         };
+        // ∑ A run that writes over the patched bytes of a script that is on switches that
+        //   script off, whatever it is called: Lua's autoAssemble(enable) / autoAssemble(disable)
+        //   pair has two texts (two keys), a released orphan has no record, a script may be
+        //   edited while it is on. Such writes are the original bytes going back, so they make
+        //   no footprint of their own either (a crash there later is not this run's doing).
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> restored;
+        {
+            const auto self = current();
+            const ScriptFootprint* keep = self != m_footprints.rend() ? &*self : nullptr;
+            for (ScriptFootprint& other : m_footprints)
+            {
+                if (other.OffTick != 0 || &other == keep)
+                    continue;
+                bool overwritten = false;
+                for (const ScriptRange& range : other.Ranges)
+                {
+                    if (range.Kind != ScriptRangeKind::Patch)
+                        continue;
+                    for (const Asm::AaWrite& write : result.Writes)
+                    {
+                        if (!write.Bytes.empty() && write.Address < range.End && write.Address + write.Bytes.size() > range.Begin)
+                        {
+                            overwritten = true;
+                            restored.emplace_back(range.Begin, range.End);
+                        }
+                    }
+                }
+                if (overwritten)
+                    other.OffTick = tick;
+            }
+        }
         if (section == Asm::AaSection::Disable)
         {
             if (const auto it = current(); it != m_footprints.rend())
@@ -241,7 +272,12 @@ namespace Manifold
         {
             if (write.Bytes.empty() || inAllocation(write.Address))
                 continue;
-            patches.push_back({ write.Address, write.Address + write.Bytes.size(), ScriptRangeKind::Patch, {} });
+            const std::uint64_t end = write.Address + write.Bytes.size();
+            // the bytes of a script it switched off going back; a run with memory of its own is
+            // another script hooking the same place, and those bytes are its patch now
+            if (after.Allocations.empty() && std::any_of(restored.begin(), restored.end(), [&](const auto& range) { return write.Address < range.second && end > range.first; }))
+                continue;
+            patches.push_back({ write.Address, end, ScriptRangeKind::Patch, {} });
         }
         std::sort(patches.begin(), patches.end(), [](const ScriptRange& a, const ScriptRange& b) { return a.Begin < b.Begin; });
         for (const ScriptRange& patch : patches)
@@ -426,7 +462,7 @@ namespace Manifold
                 {
                     if (warning.Text.find("stack") != std::string::npos)
                     {
-                        blame(index, CrashLink::Unbalanced, ip, warning.Text, 60);
+                        blame(index, CrashLink::Unbalanced, ip, warning.Text, 45);  // below an access into another script's memory (50): that is direct evidence
                         break;
                     }
                 }

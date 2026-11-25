@@ -167,6 +167,7 @@ namespace Manifold::Tests
             const Themes::MigrationResult refused = Themes::MigrateLegacy(failing, folder, root / "missing" / "Manifold-Engine.ini");
             CHECK(!refused.Problem.empty() && refused.Created.empty() && failing.LegacyThemeColors.size() == 4 && !std::filesystem::exists(folder));
 
+            const Manifold::Settings original = settings;
             const Themes::MigrationResult moved = Themes::MigrateLegacy(settings, folder, file);
             CHECK_MSG(moved.Problem.empty() && moved.Created.size() == 3, moved.Problem);
             CHECK(settings.LegacyThemeColors.empty() && settings.LegacyThemeSizes.empty());
@@ -180,6 +181,16 @@ namespace Manifold::Tests
             CHECK(red && red->Dark.count("Text") == 1 && red->Light.count("Text") == 1 && red->Sizes.count("FrameRounding") == 1);
             CHECK(blue && blue->Dark.count("ImGui.WindowBg") == 1);
             CHECK(Themes::MigrateLegacy(settings, folder, file).Created.empty());
+            // the settings were not saved after the migration (or a theme file failed): the next start
+            // migrates again and uses the themes it wrote, it does not add "(Custom) 2" copies
+            {
+                Manifold::Settings again = original;
+                const Themes::MigrationResult rerun = Themes::MigrateLegacy(again, folder, file);
+                CHECK_MSG(rerun.Problem.empty() && rerun.Created.size() == 3, rerun.Problem);
+                Themes::Library fresh(folder);
+                CHECK_MSG(fresh.Custom().size() == 3, Format("%zu themes after migrating twice", fresh.Custom().size()));
+                CHECK(again.Theme.Custom == "Red (Custom)");
+            }
 
             // the ini keeps the selection, the old lines are gone
             CHECK(settings.Save(file).Ok());

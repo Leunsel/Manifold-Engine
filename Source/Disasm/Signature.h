@@ -140,6 +140,8 @@ namespace Manifold::Disasm
         std::uint64_t SearchedBytes = 0;
         double Seconds = 0.0;
         bool Verified = false;
+        // Code only, and the bytes are in data too: aobscan searches all memory and may find that copy first.
+        bool UniqueOnlyInCode = false;
 
         std::size_t Wildcards() const;
         Scan::Pattern Pattern() const;

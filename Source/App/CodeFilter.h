@@ -112,6 +112,7 @@ namespace Manifold
     {
     public:
         static constexpr std::size_t kUndoDepth = 32;
+        static constexpr std::size_t kUndoEntries = 4u << 20;  // candidates kept over all undo steps (24 bytes each)
         static constexpr std::size_t kMaxRefine = 256;
 
         explicit CodeFilter(Engine& engine) : m_engine(engine) {}
@@ -147,10 +148,12 @@ namespace Manifold
         double RoundSeconds() const;
 
     private:
+        void PushUndo(std::vector<CodeCandidate> snapshot);
         Engine& m_engine;
         mutable std::mutex m_lock;
         std::vector<CodeCandidate> m_candidates;
         std::vector<std::vector<CodeCandidate>> m_undo;
+        std::vector<CodeCandidate> m_roundStart;  // the list before the round dropped what it could not arm
         std::vector<RoundRecord> m_history;
         CodeFilterReport m_report;
         bool m_prepared = false;

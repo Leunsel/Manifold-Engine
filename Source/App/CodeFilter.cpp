@@ -716,6 +716,7 @@ namespace Manifold
                 if (entry.State == Target::CoverState::Skipped)
                     skipped.push_back(entry.Address);
             }
+            m_roundStart = m_candidates;
             if (!skipped.empty())
             {
                 std::erase_if(m_candidates, [&](const CodeCandidate& candidate) { return std::binary_search(skipped.begin(), skipped.end(), candidate.Address); });
@@ -749,9 +750,9 @@ namespace Manifold
         record.Hits = hits->size();
         record.Skipped = m_skipped;
         record.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - m_started).count();
-        m_undo.push_back(m_candidates);
-        if (m_undo.size() > kUndoDepth)
-            m_undo.erase(m_undo.begin());
+        // undo goes back to the list before the round, with the functions it could not arm
+        PushUndo(m_roundStart.empty() ? m_candidates : std::move(m_roundStart));
+        m_roundStart.clear();
         const auto hit = [&](const CodeCandidate& candidate) { return std::binary_search(hits->begin(), hits->end(), candidate.Address); };
         if (m_kind == FilterRound::FilterOut)
             std::erase_if(m_candidates, hit);
@@ -813,9 +814,7 @@ namespace Manifold
         RoundRecord record;
         record.Kind = FilterRound::Refine;
         record.Before = m_candidates.size();
-        m_undo.push_back(m_candidates);
-        if (m_undo.size() > kUndoDepth)
-            m_undo.erase(m_undo.begin());
+        PushUndo(m_candidates);
         m_candidates.clear();
         m_candidates.reserve(blocks.size());
         for (auto& [address, candidate] : blocks)
@@ -833,7 +832,25 @@ namespace Manifold
         if (!m_running)
             return Status::Success();
         m_running = false;
+        if (!m_roundStart.empty())
+            m_candidates = std::move(m_roundStart);  // a cancelled round changes nothing
+        m_roundStart.clear();
         return m_engine.CodeCoverage().Disarm();
+    }
+
+    // ∑ Up to kUndoDepth steps, and no more candidates over all of them than kUndoEntries:
+    //   32 copies of a 2-million-function list would hold 1.5 GB.
+    void CodeFilter::PushUndo(std::vector<CodeCandidate> snapshot)
+    {
+        m_undo.push_back(std::move(snapshot));
+        std::size_t total = 0;
+        for (const auto& step : m_undo)
+            total += step.size();
+        while (m_undo.size() > 1 && (m_undo.size() > kUndoDepth || total > kUndoEntries))
+        {
+            total -= m_undo.front().size();
+            m_undo.erase(m_undo.begin());
+        }
     }
 
     bool CodeFilter::Undo()
@@ -857,6 +874,7 @@ namespace Manifold
         m_prepared = false;
         m_candidates.clear();
         m_undo.clear();
+        m_roundStart.clear();
         m_history.clear();
         m_report = {};
         m_skipped = 0;

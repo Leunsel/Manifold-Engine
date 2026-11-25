@@ -76,6 +76,7 @@ namespace Manifold::Target
         std::uint64_t m_call = 0;
         std::uint32_t m_serial = 0;
         bool m_running = false;
+        bool m_starting = false;  // one start at a time: Lua's crash.start and the background start could both load and map
         std::uint64_t m_session = 0;  // Leave counts up: a start that began before it is dropped
         ModuleList m_modules;
     };
