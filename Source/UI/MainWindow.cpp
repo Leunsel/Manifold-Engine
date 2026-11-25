@@ -921,7 +921,7 @@ namespace Manifold::UI
                 const Target::Process& process = *engine.Process();
                 tip = process.Name() + "\n" + WideToUtf8(process.Path());
                 if (!m_release)
-                    tip += Format("\npid %u  ·  %s  ·  %zu modules", process.Id(), process.Is64Bit() ? "64-bit" : "32-bit", process.Modules()->size());
+                    tip += Format("\npid %u  ·  %s  ·  %zu modules", process.Id(), process.Is64Bit() ? "x64" : "x86", process.Modules()->size());
                 tip += "\n\n" + WithKeys("Click to pick another process, right-click for more", Command::OpenProcess);
             }
             else
