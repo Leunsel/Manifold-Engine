@@ -45,6 +45,8 @@ namespace Manifold::Tests
             std::uint32_t BackThread;
             std::int64_t BackBefore;
             std::int64_t BackNow;
+            std::uint32_t Hold;
+            std::uint32_t Held;
         };
 
         struct Child
@@ -109,18 +111,36 @@ namespace Manifold::Tests
             std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
         }
 
+        // ∑ The target's publisher holds still while it is asked to (Hold = a fresh token): it
+        //   publishes once more, answers with Held = token and waits until Hold is 0. Checking
+        //   only the sequence failed on the CI runner, where one ReadProcessMemory outlasts a
+        //   whole round of the publisher, so no read ever saw it settle.
         std::optional<Probe> ReadProbe(const Target::Process& process, std::uint64_t address)
         {
-            for (int attempt = 0; attempt < 4000; ++attempt)
+            static std::uint32_t tokens = 0;
+            const std::uint32_t token = ++tokens == 0 ? ++tokens : tokens;
+            const std::uint64_t hold = address + offsetof(Probe, Hold);
+            if (!process.Write(hold, &token, sizeof(token)).Ok())
+                return std::nullopt;
+            std::optional<Probe> result;
+            for (int attempt = 0; attempt < 3000; ++attempt)
             {
                 Probe probe{};
-                std::uint64_t again = 0;
                 if (!process.ReadExact(address, &probe, sizeof(probe)))
-                    return std::nullopt;
-                if (probe.Ready && (probe.Sequence & 1) == 0 && process.ReadExact(address, &again, sizeof(again)) && again == probe.Sequence)
-                    return probe;
+                    break;
+                if (probe.Ready && probe.Held == token && (probe.Sequence & 1) == 0)
+                {
+                    result = probe;
+                    break;
+                }
+                if (attempt >= 100)
+                    ::Sleep(1);
+                else
+                    ::SwitchToThread();
             }
-            return std::nullopt;
+            const std::uint32_t go = 0;
+            process.Write(hold, &go, sizeof(go));
+            return result;
         }
 
         std::int64_t Backwards(const Session& session)

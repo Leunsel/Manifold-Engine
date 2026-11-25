@@ -300,9 +300,10 @@ namespace Manifold::Tests
             const double seconds = Now() - started;
             CHECK(coverage.Disarm().Ok());
             SetField(session, offsetof(Probe, Hammer), 0);
-            const long calls = Field(session, &Probe::Action) - before;
+            // the target's counter is a 32-bit long that wraps after a few seconds on a fast PC
+            const unsigned long calls = static_cast<unsigned long>(Field(session, &Probe::Action)) - static_cast<unsigned long>(before);
             const auto counts = coverage.Counts();
-            std::printf("  %s: 300 rounds in %.2f s while the targets ran %ld times, %llu hits, %llu stale traps\n", session.Label.c_str(), seconds, calls,
+            std::printf("  %s: 300 rounds in %.2f s while the targets ran %lu times, %llu hits, %llu stale traps\n", session.Label.c_str(), seconds, calls,
                 counts ? static_cast<unsigned long long>(counts->Hits) : 0ull, counts ? static_cast<unsigned long long>(counts->Stale) : 0ull);
             CHECK_MSG(failed == 0, session.Label + Format(": %d rounds failed", failed));
             CHECK_MSG(calls > 300, session.Label + ": the threads did not run during the rounds");

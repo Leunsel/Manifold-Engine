@@ -260,7 +260,7 @@ namespace Manifold::Target
         m_serial += 1;
         if (Status written = WriteField(*m_process, m_block, offsetof(Cover::Block, Serial), m_serial); !written)
             return written;
-        if (Status called = m_process->CreateThread(m_call, operation, true, kCallTimeoutMs); !called)
+        if (Status called = m_process->CreateThread(m_call, operation, true, kCallTimeoutMs, true); !called)
             return called;
         std::uint32_t applied = 0;
         std::uint32_t result = 0;

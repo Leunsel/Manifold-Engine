@@ -440,7 +440,7 @@ namespace Manifold::Target
     {
         if (!m_call)
             return Failed("the agent is not loaded");
-        return m_process->CreateThread(m_call, operation, true, 5000);
+        return m_process->CreateThread(m_call, operation, true, 5000, true);
     }
 
     // CallApply does nothing while a thread of the process is in the middle of

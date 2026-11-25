@@ -106,7 +106,7 @@ namespace Manifold::Target
         serial += 1;
         if (Status written = process.Write(block + offsetof(Crash::Block, Serial), &serial, sizeof(serial)); !written)
             return written;
-        if (Status called = process.CreateThread(call, operation, true, kCallTimeoutMs); !called)
+        if (Status called = process.CreateThread(call, operation, true, kCallTimeoutMs, true); !called)
             return called;
         std::uint32_t applied = 0;
         std::uint32_t result = 0;

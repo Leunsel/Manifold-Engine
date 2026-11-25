@@ -2604,7 +2604,7 @@ namespace Manifold::Debug
             m_process->Free(block);
             return Status::Fail(ErrorCode::InjectFailed, "ManifoldAgentStart was not found in the agent");
         }
-        if (Status thread = m_process->CreateThread(start, block, true); !thread)
+        if (Status thread = m_process->CreateThread(start, block, true, 10000, true); !thread)
         {
             const bool timedOut = thread.Code == ErrorCode::ThreadTimedOut;
             dropEvents(!timedOut);

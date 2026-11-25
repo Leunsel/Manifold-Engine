@@ -145,7 +145,8 @@ namespace Manifold::Target
         bool Suspend() const;
         bool Resume() const;
 
-        Status CreateThread(std::uint64_t start, std::uint64_t parameter, bool wait, std::uint32_t timeoutMilliseconds = 10000) const;
+        // urgent: the thread starts above normal priority (for the program's own short requests to its agent library)
+        Status CreateThread(std::uint64_t start, std::uint64_t parameter, bool wait, std::uint32_t timeoutMilliseconds = 10000, bool urgent = false) const;
         Status InjectLibrary(const std::wstring& path) const;
         std::uint64_t FindExport(std::string_view module, std::string_view name) const;
 

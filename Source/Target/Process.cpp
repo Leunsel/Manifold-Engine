@@ -1210,7 +1210,13 @@ namespace Manifold::Target
         return resume && m_handle.Get() && resume(m_handle.Get()) >= 0;
     }
 
-    Status Process::CreateThread(std::uint64_t start, std::uint64_t parameter, bool wait, std::uint32_t timeoutMilliseconds) const
+    // ∑ urgent: the thread is created suspended and starts at THREAD_PRIORITY_HIGHEST. A
+    //   request to the agent is short, but a thread at normal priority first waits its
+    //   turn behind every busy thread of the game: with eight busy threads on two cores
+    //   that is ~190 ms per request on Windows 11 and far more on Windows Server, whose
+    //   time slices are about six times longer (the code filter's 300 rounds took 525 s on
+    //   the CI runner). Raising the priority from inside the thread came too late for that.
+    Status Process::CreateThread(std::uint64_t start, std::uint64_t parameter, bool wait, std::uint32_t timeoutMilliseconds, bool urgent) const
     {
         if (!m_handle.Get())
             return Status::Fail(ErrorCode::NoProcess);
@@ -1220,9 +1226,20 @@ namespace Manifold::Target
             ++m_dryActivity.Threads;
             return Status::Success();
         }
-        const UniqueHandle thread(::CreateRemoteThread(m_handle.Get(), nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(start), reinterpret_cast<LPVOID>(parameter), 0, nullptr));
+        const UniqueHandle thread(::CreateRemoteThread(m_handle.Get(), nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(start), reinterpret_cast<LPVOID>(parameter),
+            urgent ? CREATE_SUSPENDED : 0, nullptr));
         if (!thread)
             return Status::Fail(ErrorCode::ThreadCreateFailed, Hex(start) + ", " + SystemErrorText(::GetLastError()));
+        if (urgent)
+        {
+            ::SetThreadPriority(thread.Get(), THREAD_PRIORITY_HIGHEST);
+            if (::ResumeThread(thread.Get()) == static_cast<DWORD>(-1))
+            {
+                const DWORD error = ::GetLastError();
+                ::TerminateThread(thread.Get(), 1);
+                return Status::Fail(ErrorCode::ThreadCreateFailed, Hex(start) + ", " + SystemErrorText(error));
+            }
+        }
         const DWORD waited = wait ? ::WaitForSingleObject(thread.Get(), timeoutMilliseconds) : WAIT_OBJECT_0;
         if (waited != WAIT_OBJECT_0)
             return Status::Fail(ErrorCode::ThreadTimedOut, Hex(start) + ", " + std::to_string(timeoutMilliseconds) + " ms");

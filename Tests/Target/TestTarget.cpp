@@ -986,6 +986,8 @@ struct SpeedProbe
     volatile unsigned long BackThread;
     volatile long long BackBefore;
     volatile long long BackNow;
+    volatile unsigned long Hold;  // a reader's token: publish once more, then keep still until Hold is 0
+    volatile unsigned long Held;  // the token of the hold the sample now belongs to
 };
 
 extern "C" __declspec(dllexport) SpeedProbe g_speedProbe = {};
@@ -1058,6 +1060,16 @@ namespace
             if (WentBack(before, now, publish))
                 ::InterlockedIncrement64(&g_speedProbe.Backwards);
             before = now;
+            // ∑ The tests read the probe from outside. On a slow machine one ReadProcessMemory takes
+            //   longer than a round here, so a reader that only checked the sequence never saw it
+            //   settle (all rates 0 on the CI runner). A reader sets Hold to a token instead: the
+            //   next round publishes, answers with Held = token and then keeps still until Hold is 0.
+            const unsigned long hold = publish ? g_speedProbe.Hold : 0;
+            if (hold != 0 && g_speedProbe.Held == hold)
+            {
+                ::Sleep(0);
+                continue;
+            }
             if (publish)
             {
                 g_speedProbe.Sequence = g_speedProbe.Sequence + 1;
@@ -1068,6 +1080,8 @@ namespace
                 g_speedProbe.Samples = g_speedProbe.Samples + 1;
                 g_speedProbe.Sequence = g_speedProbe.Sequence + 1;
                 g_speedProbe.Ready = 1;
+                if (hold != 0)
+                    g_speedProbe.Held = hold;
                 ::Sleep(0);
             }
             else if (round % 64 == 63)

@@ -265,14 +265,23 @@ namespace
 
     // False when no moment without a thread in the handler came within the time:
     // one is stuck there (suspended by a debugger), not just passing through.
+    // ∑ It keeps looking instead of once per Sleep(1): with many threads running through
+    //   armed code on few cores, a moment with nobody inside is short, and one look per
+    //   timer tick (15.6 ms on most machines) missed it again and again. Between looks it
+    //   lets the threads inside run, also when this request thread runs above them.
     bool WaitOutside(DWORD milliseconds)
     {
         const ULONGLONG until = RealTickCount64() + milliseconds;
-        while (g_inside != 0)
+        for (unsigned round = 0; g_inside != 0; ++round)
         {
             if (RealTickCount64() >= until)
                 return false;
-            ::Sleep(1);
+            for (int spin = 0; spin < 1024 && g_inside != 0; ++spin)
+                YieldProcessor();
+            if (g_inside == 0)
+                break;
+            if (!::SwitchToThread() || round % 64 == 63)
+                ::Sleep(1);
         }
         return true;
     }
