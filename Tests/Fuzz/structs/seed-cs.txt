@@ -1,0 +1,8 @@
+using System.Runtime.InteropServices;
+[StructLayout(LayoutKind.Explicit, Size = 0x40)]
+public struct Enemy
+{
+    [FieldOffset(0x10)] public int Health;
+    [FieldOffset(0x18)] public IntPtr Target;
+    [FieldOffset(0x20)] public fixed byte Name[16];
+}

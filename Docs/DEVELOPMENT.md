@@ -58,6 +58,7 @@ The run goes through these suites in order; `--list` names them and `--filter=co
 | `unreal` | the Unreal Engine reader against a made-up name table, object array and reflection: in the tests' own process, and with the 64-bit and the 32-bit layout inside `TestTarget.exe --unreal` and `TestTarget32.exe --unreal` |
 | `rtti` | the C++ run-time type information reader: the name demangler, hand-built RTTI (single, multiple and virtual inheritance, an embedded member, locators that must be rejected) and classes the compiler made, the Structure Dissect labels, the symbols, `manifold.rtti` and `ManifoldRTTI`: in the tests' own process and inside `TestTarget.exe --rtti` and `TestTarget32.exe --rtti` |
 | `commands`, `docs`, `console`, `templates` | commands and shortcuts, the generated documentation, the Lua console, script templates |
+| `fuzz` | every input under `Tests/Fuzz` (seeds and inputs that once broke a parser) through every fuzzed parser, and the findings checked on their own (see "Fuzzing and AddressSanitizer") |
 | `compat`, `manifold-api`, `modules`, `autorun` | the Cheat Engine Lua API, the `manifold` API, the autorun module loader, the modules in `Autorun` |
 | `managed` | the managed dumper: its data format, the embedded assembly, and a run on the .NET Framework |
 | `clr` | the .NET reader: the metadata parser, the helper's protocol, and the whole path through `ManifoldClr.exe` (classes, statics, methods, the GC heap walk, objects, arrays and strings, a pointer from a static field in the address list, `manifold.dotnet` and `getDotNetDataCollector`) against `TestTarget.exe --clr` (the .NET Framework, also as 32-bit) and `TestTarget.exe --coreclr` (.NET 8 and the newest installed .NET); `--clr-check` runs only this |
@@ -93,6 +94,27 @@ Some checks need a real game, a long run or a special situation and are not part
 | `--compat` | runs a cheat table without a window |
 
 With the environment variable `MANIFOLD_TEMPLATE_CHECK` set to a folder of templates, the `templates` suite also generates each of them for an instruction of the tests program itself, prints whether the result assembles and writes it into `_rendered` there. This prints only and fails nothing.
+
+### Fuzzing and AddressSanitizer
+
+The parsers that read what other people made are fuzzed with libFuzzer and AddressSanitizer, both shipped with Visual Studio's clang:
+- `.CT` tables and XML, table files and deflate, images, Cheat Engine forms
+- C/C++ and C# structures, ReClass.NET files, themes, ini files
+- the assembler, Auto Assembler scripts and signatures
+- the managed dump, .NET metadata, autorun headers and pointer scans
+
+`Tools/Fuzz.ps1` builds the tests into `Build\fuzzbin` and fuzzes:
+- `Tools\Fuzz.ps1 -Seconds 300` fuzzes every target, four at a time.
+- `-Targets table,image` limits the run to those targets.
+- `-AsanOnly` builds the tests with AddressSanitizer alone, into `Build\asan`. Run the normal suites from there to find heap errors; page heap would need admin rights.
+- An input that breaks a parser is written to `Build\fuzz\found`.
+- `Manifold-Engine.Tests.exe --fuzz <target> <file>` replays it in any build.
+- Keep the input under `Tests/Fuzz/<target>/`. The `fuzz` suite then replays every stored input through every parser on each run.
+
+Traps:
+- Coverage instrumentation turns catch blocks into int3s, which show as exit code `0x80000003` without a report. Such code (catch blocks, and the assembler, which throws internally) is listed in `Tools/fuzz-coverage-ignore.txt`.
+- ASan's stack instrumentation breaks catch-by-reference, so the build uses `-mllvm -asan-stack=0`: heap errors only.
+- `detect_container_overflow=0` is needed, because libFuzzer's own strings trip it.
 
 ## Working on the code
 

@@ -1,0 +1,8 @@
+mov eax,[rbx+rcx*4+10]
+push rbp
+lea rcx,[rip+12345678]
+jmp 140001000
+movss xmm0,[rax]
+vaddps ymm1,ymm2,ymm3
+db 90 90 cc
+call qword ptr [rax+8]

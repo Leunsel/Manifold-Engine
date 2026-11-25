@@ -1,0 +1,8 @@
+# Functions whose C++ exception paths (catch blocks and unwind cleanups) the coverage
+# instrumentation breaks on Windows: they hit an int3 (exit 0x80000003, no report).
+src:*Asm?Assembler.cpp
+fun:?RunAutoAssembler@Asm@Manifold@@*
+src:*TemplateGenerator.cpp
+src:*BackgroundWork.cpp
+src:*LuaCompatSystem.cpp
+src:*UnityExplorer.cpp

@@ -567,6 +567,9 @@
     <ClCompile Include="..\Tests\FlowGraphTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
+    <ClCompile Include="..\Tests\Fuzz.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
     <ClCompile Include="..\Tests\Il2CppTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>

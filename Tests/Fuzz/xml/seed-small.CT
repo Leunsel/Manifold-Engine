@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>"Health"</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>game.exe+10</Address>
+      <Offsets><Offset>8</Offset></Offsets>
+      <Hotkeys><Hotkey><Action>Set Value</Action><Keys><Key>17</Key><Key>112</Key></Keys><Value>100</Value></Hotkey></Hotkeys>
+    </CheatEntry>
+  </CheatEntries>
+  <Structures/>
+  <LuaScript>print(1)</LuaScript>
+</CheatTable>

@@ -1,0 +1,10 @@
+#pragma pack(push, 1)
+typedef struct Player {
+    int health;
+    float pos[3];
+    struct Player* next;
+    unsigned flags : 3;
+    union { char name[16]; wchar_t wide[8]; };
+} Player;
+#pragma pack(pop)
+enum Kind { A = 1, B = 4 };

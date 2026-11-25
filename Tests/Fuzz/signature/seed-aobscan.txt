@@ -1,0 +1,1 @@
+aobscanmodule(INJECT,game.exe,8B 9A ? ? ? ? 89 4D) // comment

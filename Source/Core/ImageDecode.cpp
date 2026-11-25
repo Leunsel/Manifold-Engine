@@ -26,9 +26,34 @@
 
 namespace Manifold
 {
+    namespace
+    {
+        // ∑ stb_image grows its IDAT buffer to the length a chunk claims before it
+        //   reads the chunk, so a 1 KB file claiming a 1 GB chunk allocated 1 GB
+        //   (found by fuzzing). Every chunk has to fit in the file it claims to be in.
+        bool PngChunksFit(std::span<const std::uint8_t> bytes)
+        {
+            static constexpr std::uint8_t kSignature[] = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n' };
+            if (bytes.size() < sizeof(kSignature) || std::memcmp(bytes.data(), kSignature, sizeof(kSignature)) != 0)
+                return true;
+            std::size_t at = sizeof(kSignature);
+            while (at + 8 <= bytes.size())
+            {
+                const std::uint32_t length = (std::uint32_t{ bytes[at] } << 24) | (std::uint32_t{ bytes[at + 1] } << 16) | (std::uint32_t{ bytes[at + 2] } << 8) | bytes[at + 3];
+                const bool end = std::memcmp(bytes.data() + at + 4, "IEND", 4) == 0;
+                if (length > bytes.size() - at - 8 || bytes.size() - at - 8 - length < 4)
+                    return false;
+                at += 8ull + length + 4ull;
+                if (end)
+                    return true;
+            }
+            return true;
+        }
+    }
+
     std::optional<DecodedImage> DecodeImage(std::span<const std::uint8_t> bytes, std::uint64_t maxPixels)
     {
-        if (bytes.empty() || bytes.size() > static_cast<std::size_t>(INT_MAX))
+        if (bytes.empty() || bytes.size() > static_cast<std::size_t>(INT_MAX) || !PngChunksFit(bytes))
             return std::nullopt;
         int width = 0;
         int height = 0;

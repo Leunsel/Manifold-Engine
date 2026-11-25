@@ -22,6 +22,14 @@ namespace Manifold::Asm
     namespace
     {
         constexpr int kMaxLayoutPasses = 12;
+        // A reassemble statement is kept as text behind this marker; a script line that
+        // merely starts with the control character (a fuzzed table did) is no such statement.
+        constexpr std::string_view kReassembleMarker = "\x01reassemble ";
+
+        bool IsReassemble(std::string_view text)
+        {
+            return text.starts_with(kReassembleMarker);
+        }
         constexpr std::uint64_t kCheckOnlyBase = 0x0000000010000000ull;
         constexpr std::uint64_t kForwardGuess = 0x10000;
         constexpr std::uint64_t kMaxAllocSize = 0x7FFFFFFF;
@@ -777,9 +785,9 @@ namespace Manifold::Asm
                     }
                     const AaWrite* written = output < m_output.size() ? &m_output[output] : nullptr;
                     ++output;
-                    if (statement.Text.empty() || statement.Text.front() != '\x01' || !written)
+                    if (!IsReassemble(statement.Text) || !written)
                         continue;
-                    const std::string source = Trim(statement.Text.substr(std::string("\x01reassemble ").size()));
+                    const std::string source = Trim(statement.Text.substr(kReassembleMarker.size()));
                     const auto found = m_reassembled.find(&statement);
                     std::string text;
                     if (found != m_reassembled.end())
@@ -1350,7 +1358,7 @@ namespace Manifold::Asm
                         return false;
                     Statement statement;
                     statement.Type = Statement::Kind::Code;
-                    statement.Text = "\x01reassemble " + command.Arguments[0];
+                    statement.Text = std::string(kReassembleMarker) + command.Arguments[0];
                     statement.Line = line.Line;
                     m_statements.push_back(std::move(statement));
                     return true;
@@ -1771,7 +1779,7 @@ namespace Manifold::Asm
                             if (!assembled.Ok)
                                 assembled = AssembleAt(statement, *current, previousLabels, false, false);
                             if (!assembled.Ok)
-                                return Fail(CodeFor(assembled.Error), statement.Line, assembled.Message, statement.Text.front() == '\x01' ? statement.Text.substr(1) : statement.Text);
+                                return Fail(CodeFor(assembled.Error), statement.Line, assembled.Message, IsReassemble(statement.Text) ? statement.Text.substr(1) : statement.Text);
                             if (assembled.Bytes.size() < reserved[i])
                             {
                                 AssembleResult longer = AssembleAt(statement, *current, previousLabels, true, true);
@@ -2194,9 +2202,9 @@ namespace Manifold::Asm
                         return { SymbolState::Unknown, 0 };
                     };
                 std::string text = statement.Text;
-                if (!text.empty() && text.front() == '\x01')
+                if (IsReassemble(text))
                 {
-                    const std::string target = Trim(text.substr(std::string("\x01reassemble ").size()));
+                    const std::string target = Trim(text.substr(kReassembleMarker.size()));
                     if ((!m_host.Process || !m_host.Symbols) && m_options.CheckOnly)
                     {
                         AssembleResult placeholder;
@@ -2668,7 +2676,19 @@ namespace Manifold::Asm
     AaResult RunAutoAssembler(std::string_view script, AaHost& host, AaMemory& memory, const AaOptions& options)
     {
         Run run(host, memory, options);
-        AaResult result = run.Execute(script);
+        AaResult result;
+        // ∑ A slip in the script's handling (a fuzzed table found one) must fail this
+        //   script, not end the program; what was written before the throw stays
+        //   (the same as a crash of the program would leave it).
+        try
+        {
+            result = run.Execute(script);
+        }
+        catch (const std::exception& error)
+        {
+            result = AaResult{};
+            result.Error = Status::Fail(ErrorCode::AaBadArguments, std::string("The script could not be processed: ") + error.what());
+        }
         if (!result.Ok() && !result.Logged)
             LOG_WARN("Auto Assembler", result.Error.Text);
         return result;

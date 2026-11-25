@@ -280,6 +280,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\DisasmTests.cpp" />
     <ClCompile Include="..\Tests\DocTests.cpp" />
     <ClCompile Include="..\Tests\FlowGraphTests.cpp" />
+    <ClCompile Include="..\Tests\Fuzz.cpp" />
     <ClCompile Include="..\Tests\Il2CppTests.cpp" />
     <ClCompile Include="..\Tests\IntegrationTests.cpp" />
     <ClCompile Include="..\Tests\Main.cpp" />

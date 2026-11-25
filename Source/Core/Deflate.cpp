@@ -65,15 +65,4 @@ namespace Manifold::Deflate
             room = std::min(ceiling, room * 2);
         }
     }
-
-    std::optional<std::vector<std::uint8_t>> DecodePng(std::span<const std::uint8_t> file, int& width, int& height)
-    {
-        int channels = 0;
-        stbi_uc* pixels = stbi_load_from_memory(file.data(), static_cast<int>(file.size()), &width, &height, &channels, 4);
-        if (!pixels)
-            return std::nullopt;
-        std::vector<std::uint8_t> result(pixels, pixels + static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4);
-        stbi_image_free(pixels);
-        return result;
-    }
 }

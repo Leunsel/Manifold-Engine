@@ -1,0 +1,18 @@
+[ENABLE]
+alloc(newmem,$100)
+label(back)
+label(data)
+registersymbol(data)
+newmem:
+  mov eax,[data]
+  cmp eax,#100
+  jne back
+  inc eax
+back:
+  ret
+data:
+  dd #42
+  db 'ok',0
+[DISABLE]
+dealloc(newmem)
+unregistersymbol(data)
