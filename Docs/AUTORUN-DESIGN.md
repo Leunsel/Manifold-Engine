@@ -81,7 +81,7 @@ autorun\
     AUTHOR      : Leunsel
     DESCRIPTION : Unique byte signatures for the selected instruction.
     REQUIRES    : Json >= 1.2
-    API         : 9
+    API         : 1
     LICENSE     : MIT
 ]]
 ```
@@ -112,7 +112,7 @@ Callers outside a module (loose scripts, tables, the console) get steps 2 to 4. 
 - State lives in `configs\Manifold-Engine.modules.ini`, one section per module name: `Enabled`, `Allowed`, `Hash`, `FirstSeen`. `[Scripts] Autorun` stays the master switch.
 - Every `manifold` registration (events, symbol resolvers, dissect hooks, `manifold.ui` entries, docs) is tagged with the module whose file made the call. *Unload* removes them and calls the functions the module registered with `manifold.module.onUnload(f)`.
 - **Reload** = unload, drop the private `require` cache, run the entry again. **Disable** = unload now and skip at start. A module that leaves things the program cannot track (CE menu items, forms, timers) and has no `onUnload` is shown as *disabled, active until restart*, which is the truth.
-- New area `manifold.module` (API 10): `current()` (name, version, path, dataPath), `list()`, `info(name)`, `reload(name)`, `enable(name)`, `disable(name)`, `onUnload(handler)`.
+- New area `manifold.module`: `current()` (name, version, path, dataPath), `list()`, `info(name)`, `reload(name)`, `enable(name)`, `disable(name)`, `onUnload(handler)`.
 
 **Rejected.** State inside the module's folder or header (a script could switch itself back on; shipped files would differ from the repository). State in `Manifold-Engine.ini` (the hashes would bloat the settings file).
 

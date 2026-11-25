@@ -330,7 +330,7 @@ local s = getAddressList().getMemoryRecordByID(99)
             lookup("path round trip", "local r = manifold.record.find(" + std::to_string(fireHealth.Id) + ") return tostring(manifold.record.find(r.path()) == r) .. ' ' .. #r.path()", "true 4");
             lookup("empty path raises", "local ok, e = pcall(manifold.record.find, {}) return tostring(ok) .. ' ' .. tostring((type(e) == 'table' and e.message or tostring(e)):find('the path is empty', 1, true) ~= nil)", "false true");
             lookup("bad step raises", "local ok = pcall(manifold.record.find, { 'a', 3 }) return tostring(ok)", "false");
-            lookup("api version", "return tostring(manifold.apiVersion >= 21 and manifold.has('record.find'))", "true");
+            lookup("api version", "return tostring(manifold.apiVersion >= 1 and manifold.has('record.find'))", "true");
 
             list.TableLuaScript =
                 "local a = manifold.record.find({ '[CET : Scripts] ()->', 'Fire Rate : Multiplier ()->', 'Multiplier:' })\n"

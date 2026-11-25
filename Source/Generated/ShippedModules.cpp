@@ -7,7 +7,7 @@ namespace Manifold::Autorun
     namespace
     {
         constexpr std::array<ShippedModule, 1> kShipped = {
-            ShippedModule{ "manifold-godot", "ce1cc44c488a29f992d0420b8444bc78fddb4ca7974fcd19b9a9f9b470970fcd" },
+            ShippedModule{ "manifold-godot", "528415bafad814d1996e26664df865cda40d6389b44e2f3d6caf5fbcc5f38fe2" },
         };
     }
 

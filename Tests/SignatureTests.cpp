@@ -519,7 +519,7 @@ namespace Manifold::Tests
                 "local facade, why = ManifoldSigMaker:Pattern(" + at + ")\n"
                 "assert(facade, why)\n"
                 "assert(facade == manifold.signature.make(" + at + ").pattern)\n"
-                "assert(manifold.has('signature.make') and manifold.apiVersion >= 28)\n";
+                "assert(manifold.has('signature.make') and manifold.apiVersion >= 1)\n";
             const Status status = lua.Run(script, "signature api");
             CHECK_MSG(status.Ok(), status.Text);
         }

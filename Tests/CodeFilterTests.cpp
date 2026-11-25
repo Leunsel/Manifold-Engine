@@ -769,7 +769,7 @@ namespace Manifold::Tests
             std::string result;
             const std::string script = R"(
                 local cf = manifold.codefilter
-                if manifold.apiVersion < 29 or not manifold.has("codefilter.prepare") then return "api" end
+                if not manifold.has("codefilter.prepare") then return "api" end
                 if cf.status().prepared then return "prepared before" end
                 local none, failure = cf.start("filterOut")
                 if none ~= nil or failure.code ~= "ME-1020" then return "start before prepare" end

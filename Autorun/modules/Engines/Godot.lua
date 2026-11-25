@@ -6,7 +6,7 @@
     VERSION     : 2.1.0
     AUTHOR      : Leunsel
     DESCRIPTION : Godot 4 engine data: object and class names in Structure Dissect, custom types, symbols and a Godot Engine menu.
-    API         : 2
+    API         : 1
     LICENSE     : MIT
     CREATED     : 2026-11-17
     UPDATED     : 2026-11-21
@@ -92,15 +92,15 @@
     threshold of that version. Godot 3 keeps its objects and names in
     different structures and is reported as not supported.
 
-    Needs Manifold Engine with the manifold Lua API 2 or newer.
+    Needs Manifold Engine with the manifold Lua API 1 or newer.
 ]]
 
 -- ∑ The manifold API is the only host this version talks to. Without it
 -- the script says so once and installs nothing, instead of half-working
 -- through Cheat Engine fallbacks that no longer exist.
 local manifold = rawget(_G, "manifold")
-if type(manifold) ~= "table" or (tonumber(manifold.apiVersion) or 0) < 2 then
-    print("Manifold-Godot needs Manifold Engine's manifold API 2 or newer")
+if type(manifold) ~= "table" or (tonumber(manifold.apiVersion) or 0) < 1 then
+    print("Manifold-Godot needs Manifold Engine's manifold API 1 or newer")
     return
 end
 

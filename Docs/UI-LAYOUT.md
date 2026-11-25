@@ -84,7 +84,7 @@ void FindWindow::Draw()
 
 - A window's content is one region; its reported minimum (plus padding and scrollbar, at most 80 % of the monitor) is the window's minimum width, also when it is docked.
 - A `row` is a `Layout::Row`: fields, bars, sections, tables, trees, canvases, columns and spacers without a `width` fill; widgets with a `width` are fixed; the rest fit their content. `minWidth`/`maxWidth` bound the cell (for fields: the field). `wrap = true` breaks the line, `align` moves the cells.
-- Texts and headings are `Layout::Text`; `overflow = "ellipsis"` (default), `"wrap"`, `"clip"` or `"visible"` chooses what happens when they are too wide (API 27). `wrap = true` and `maxWidth` still wrap.
+- Texts and headings are `Layout::Text`; `overflow = "ellipsis"` (default), `"wrap"`, `"clip"` or `"visible"` chooses what happens when they are too wide. `wrap = true` and `maxWidth` still wrap.
 - Sections are `Layout::Card`, buttons `Layout::Button`, fields `Layout::Field`, hotkey caps `Layout::KeyCap`, table cells `Layout::Text`.
 - `UiHost::Rules()` are the rules its windows are drawn with.
 

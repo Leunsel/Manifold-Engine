@@ -1,7 +1,8 @@
 local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 33
+-- ∑ Restarted at 1 for the first release (it had counted to 33 during development).
+local API_VERSION = 1
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 

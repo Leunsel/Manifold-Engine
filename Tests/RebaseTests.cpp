@@ -111,7 +111,7 @@ namespace Manifold::Tests
                 "local none, problem = manifold.rebase.imageBase('no-such-module.dll')\n"
                 "assert(none == nil and problem.code == 'ME-1016', tostring(problem and problem.code))\n"
                 "assert(manifold.rebase.clear('ntdll.dll') and manifold.rebase.get('ntdll.dll') == nil)\n"
-                "assert(#manifold.rebase.list() == 0 and manifold.apiVersion >= 33)\n";
+                "assert(#manifold.rebase.list() == 0 and manifold.apiVersion >= 1)\n";
             const Status status = engine.Lua().Run(script, "rebase api");
             CHECK_MSG(status.Ok(), status.Text);
             CHECK(settings.Rebases.empty());

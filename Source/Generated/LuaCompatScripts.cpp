@@ -5217,7 +5217,8 @@ setmetatable(_G, globalMeta)
             std::string_view(R"MLUA(local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
-local API_VERSION = 33
+-- ∑ Restarted at 1 for the first release (it had counted to 33 during development).
+local API_VERSION = 1
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -5636,11 +5637,11 @@ local function inspect(value, options)
     end
     seen[item] = true
     local parts = {}
-    local length = rawlen(item)
+)MLUA"),
+            std::string_view(R"MLUA(    local length = rawlen(item)
     local skipped = 0
     for index = 1, length do
-)MLUA"),
-            std::string_view(R"MLUA(      if #parts >= MAX_ITEMS then
+      if #parts >= MAX_ITEMS then
         skipped = skipped + 1
       else
         parts[#parts + 1] = render(rawget(item, index), depth + 1)
@@ -5949,10 +5950,10 @@ define(memory, "read", {
     { name = "options", type = "table", optional = true, keys = { count = "integer", length = "integer", wide = "boolean" } },
   },
   returns = "value, or nil, error",
-  doc = "Reads one value. `bytes` and `raw` need `options.count`; `string` reads up to `options.length` characters (default 256) and stops at the first zero.",
-}, function(address, kind, options)
 )MLUA"),
-            std::string_view(R"MLUA(  options = readOptions(kind, options)
+            std::string_view(R"MLUA(  doc = "Reads one value. `bytes` and `raw` need `options.count`; `string` reads up to `options.length` characters (default 256) and stops at the first zero.",
+}, function(address, kind, options)
+  options = readOptions(kind, options)
   return result(native.read(address, kind, options.count or 0, options.length or 256, options.wide or false))
 end)
 
@@ -6110,9 +6111,9 @@ do
       path = { returns = "table", doc = "The descriptions from the top level down to this record, its own last: the path `manifold.record.find` takes. It stays the same when the record's id changes, as long as the groups above it keep their names." },
       remove = { returns = "boolean", doc = "Deletes the record and the records below it from the table. Every record of it that is on is switched off first, the deepest first, so scripts take out their hooks and allocations; each removed record's `OnDestroy` handler runs. `nil` and an error, the record staying in the table, while a record of it is being switched, when one of its scripts fails to switch off or stays on, or when Lua of a switch turned one of its scripts on again; `ME-6009` when that Lua deleted it or replaced the table." },
     }
-    for _, name in ipairs({ "info", "getDescription", "setDescription", "getValue", "setValue", "isActive", "setActive", "toggle", "getAddress", "children", "parent", "find", "path", "remove" }) do
 )MLUA"),
-            std::string_view(R"MLUA(      native.docDefine(nil, RECORD_DOC .. name, METHODS[name])
+            std::string_view(R"MLUA(    for _, name in ipairs({ "info", "getDescription", "setDescription", "getValue", "setValue", "isActive", "setActive", "toggle", "getAddress", "children", "parent", "find", "path", "remove" }) do
+      native.docDefine(nil, RECORD_DOC .. name, METHODS[name])
     end
     native.docDefine(nil, RECORD_DOC .. "id", { kind = "field", type = "integer", doc = "The record's id, the number Cheat Engine tables store with it." })
 
@@ -6415,7 +6416,8 @@ end
 
 local function protect(kind, fn)
   local reported = false
-  local function finish(ok, first, ...)
+)MLUA"),
+            std::string_view(R"MLUA(  local function finish(ok, first, ...)
     if ok then
       return first, ...
     end
@@ -6425,8 +6427,7 @@ local function protect(kind, fn)
     end
     return nil
   end
-)MLUA"),
-            std::string_view(R"MLUA(  return function(...)
+  return function(...)
     return finish(xpcall(fn, raisedHandler, ...))
   end
 end
@@ -6740,13 +6741,13 @@ local unreal = area("unreal", "Unreal Engine 4 and 5 reflection for 64-bit and 3
 
 local function many(first, ...)
   if first == nil and select("#", ...) > 0 and (...) ~= nil then
-    return result(first, ...)
+)MLUA"),
+            std::string_view(R"MLUA(    return result(first, ...)
   end
   return first, ...
 end
 
-)MLUA"),
-            std::string_view(R"MLUA(local PATTERN_TEXT = "A pattern is an AOB string, or `{ pattern, offset, length, relative, add, module }`: the hit plus `offset` holds a 32-bit displacement relative to the end of the instruction (`length` bytes long, `offset + 4` by default), or with `relative = false` an absolute pointer of the game's pointer size, which is what 32-bit code holds; `add` is added to the result, and `module` (the executable by default) is where the pattern is searched."
+local PATTERN_TEXT = "A pattern is an AOB string, or `{ pattern, offset, length, relative, add, module }`: the hit plus `offset` holds a 32-bit displacement relative to the end of the instruction (`length` bytes long, `offset + 4` by default), or with `relative = false` an absolute pointer of the game's pointer size, which is what 32-bit code holds; `add` is added to the result, and `module` (the executable by default) is where the pattern is searched."
 
 define(unreal, "status", {
   returns = "`{ state, text, failure, objects, types, namePool, objectArray, objectArraySource, legacyNames, doubleVectors, seconds }`",
@@ -6998,10 +6999,10 @@ end)
 
 define(unreal, "world", {
   returns = "address or nil, or nil, error",
-  doc = "The world the engine's game viewport shows; nil while no level is loaded.",
-}, function()
 )MLUA"),
-            std::string_view(R"MLUA(  return many(native.unrealWorld())
+            std::string_view(R"MLUA(  doc = "The world the engine's game viewport shows; nil while no level is loaded.",
+}, function()
+  return many(native.unrealWorld())
 end)
 
 define(unreal, "controller", {
@@ -7218,14 +7219,14 @@ end)
 
 define(speed, "disable", {
   returns = "true, or nil, error",
-  doc = "Goes back to normal speed. The hooks are taken out when the process's clocks still equal the real ones; otherwise they stay and pass time on at normal speed.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Goes back to normal speed. The hooks are taken out when the process's clocks still equal the real ones; otherwise they stay and pass time on at normal speed.",
 }, function()
   return result(native.speedDisable())
 end)
 
 define(speed, "remove", {
-)MLUA"),
-            std::string_view(R"MLUA(  returns = "true, or nil, error",
+  returns = "true, or nil, error",
   doc = "Takes the hooks out and restores the time functions byte for byte. After a speed other than 1 the process's clocks jump to the real time at that moment, backwards if the game ran faster.",
 }, function()
   return result(native.speedRemove())
@@ -7374,14 +7375,14 @@ do
       { name = "options", type = "table", optional = true, keys = { modules = "table", unwind = "boolean", exports = "boolean", pointers = "boolean", calls = "boolean" } },
     },
     returns = "`{ total, seconds, modules }`, or nil, error",
-    doc = "Collects the candidates and starts a new filter (the rounds and the undo steps before are gone). `options.modules` lists module names, by default every module that is not part of Windows or Manifold's own library; `unwind`, `exports` and `pointers` (all on by default) and `calls` (on by default for 32-bit, from Settings for 64-bit) choose the sources; `pointers` takes the functions that are only reached through a pointer (virtual methods from their vtables, callbacks, function tables), from the module's relocations and, with `calls`, the code's own address references. `modules` in the result lists `{ name, functions, unwind, exports, calls, pointers, imported, rejected }` per module. Call targets take a code dissect of each module, which takes a while in a large game. `ME-1016` for a module that is not loaded, `ME-1020` when nothing can be collected.",
+)MLUA"),
+            std::string_view(R"MLUA(    doc = "Collects the candidates and starts a new filter (the rounds and the undo steps before are gone). `options.modules` lists module names, by default every module that is not part of Windows or Manifold's own library; `unwind`, `exports` and `pointers` (all on by default) and `calls` (on by default for 32-bit, from Settings for 64-bit) choose the sources; `pointers` takes the functions that are only reached through a pointer (virtual methods from their vtables, callbacks, function tables), from the module's relocations and, with `calls`, the code's own address references. `modules` in the result lists `{ name, functions, unwind, exports, calls, pointers, imported, rejected }` per module. Call targets take a code dissect of each module, which takes a while in a large game. `ME-1016` for a module that is not loaded, `ME-1020` when nothing can be collected.",
   }, function(options)
     return result(native.codefilterPrepare(options or EMPTY))
   end)
 
   define(codefilter, "start", {
-)MLUA"),
-            std::string_view(R"MLUA(    params = { { name = "kind", type = "string" } },
+    params = { { name = "kind", type = "string" } },
     returns = "true, or nil, error",
     doc = "Starts a round on what is left: `\"filterOut\"` or `\"keepOnly\"`. Addresses the agent cannot arm (system code, an int3 already there, a page that cannot be written) are dropped from the list. `ME-1020` when `prepare` was not called, a round already runs or nothing is left.",
   }, function(kind)
@@ -7546,7 +7547,8 @@ end)
 
 define(dotnet, "status", {
   returns = "`{ loaded, detected, runtime, module, classes, pointerSize, processId, generation }`",
-  doc = "Where the .NET reader stands: `detected` says the opened process has a .NET runtime at all, `loaded` that its classes are read. `runtime` (such as `\".NET Framework 4.8.9363.0\"`), `module`, `classes`, `pointerSize`, `processId` and `generation` are there once it is loaded. `processId` is the game's process id; `generation` grows each time the classes are read again or forgotten. Together they tell a restarted game, which has the same module and often the same class count, from the one before: a cache of class handles keyed on them is never used for the wrong game.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Where the .NET reader stands: `detected` says the opened process has a .NET runtime at all, `loaded` that its classes are read. `runtime` (such as `\".NET Framework 4.8.9363.0\"`), `module`, `classes`, `pointerSize`, `processId` and `generation` are there once it is loaded. `processId` is the game's process id; `generation` grows each time the classes are read again or forgotten. Together they tell a restarted game, which has the same module and often the same class count, from the one before: a cache of class handles keyed on them is never used for the wrong game.",
 }, function()
   return native.dotnetStatus()
 end)
@@ -7562,8 +7564,7 @@ define(dotnet, "classes", {
   params = { { name = "filter", type = "string", optional = true } },
   returns = "list of `{ name, namespace, image, handle, module, token, generic }`, or nil, error",
   doc = "The loaded classes, or those whose full name contains `filter` (ignoring case). `handle` is the class's method table, the pointer every object of it starts with; `module` and `token` say where it is defined.",
-)MLUA"),
-            std::string_view(R"MLUA(}, function(filter)
+}, function(filter)
   return result(native.dotnetClasses(filter))
 end)
 
@@ -7758,7 +7759,8 @@ end)
 define(doc, "annotations", {
   params = { { name = "fn", type = "function" } },
   returns = "`{ … }` like `entry`, or nil, error",
-  doc = "Reads the LuaLS annotations above a function's definition without registering anything.",
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "Reads the LuaLS annotations above a function's definition without registering anything.",
 }, function(fn)
   return docResult(native.docAnnotations(fn))
 end)
@@ -7795,8 +7797,7 @@ do
   end)
 end
 
-)MLUA"),
-            std::string_view(R"MLUA(local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
+local ui = area("ui", "Windows, dialogs, notices, menu entries, toolbar buttons and status entries that Manifold draws itself, in its own look. A script describes what it wants (a window with a row of buttons, a table, a canvas) and keeps the handles it gets back; Manifold draws them every frame and calls the script's handlers when something happens. Colours are theme names (`accent`, `warning`, `muted`, ...), icons are Font Awesome names (`map-marker-alt`, `play`, ...). Everything a script made belongs to that script: when the same script runs again, its old windows, entries, notices and dialogs go away first.")
 
 local function subarea(parent, name, summary)
   local path = parent.path .. "." .. name
@@ -7981,7 +7982,8 @@ local function checkOptions(path, keys, options)
     misuse(('%s: options.labelPosition must be "left", "above" or "right", got %q'):format(path, options.labelPosition))
   end
   if options.align ~= nil and not ROW_ALIGNS[options.align] then
-    misuse(('%s: options.align must be one of "left", "center", "right", got %q'):format(path, options.align))
+)MLUA"),
+            std::string_view(R"MLUA(    misuse(('%s: options.align must be one of "left", "center", "right", got %q'):format(path, options.align))
   end
   if options.columns ~= nil and keys.columns == "integer" and (options.columns < 1 or options.columns > 16) then
     misuse(("%s: options.columns must be 1 to 16, got %d"):format(path, options.columns))
@@ -8033,8 +8035,7 @@ local function dropEntry(id)
     return
   end
   uiEntries[id] = nil
-)MLUA"),
-            std::string_view(R"MLUA(  for child in pairs(entry.children) do
+  for child in pairs(entry.children) do
     dropEntry(child)
   end
   local parent = entry.parent and uiEntries[entry.parent]
@@ -8305,7 +8306,8 @@ local WINDOW_KEYS = { icon = "string", width = "number", height = "number", open
 local WINDOW_UPDATE_KEYS = { title = "string", icon = "string", interval = "number", opacity = "number", inactiveOpacity = "number", labelPosition = "string",
   minWidth = "number", minHeight = "number", maxWidth = "number", maxHeight = "number", resizable = "boolean", autoSize = "boolean", scrollbar = "boolean", topmost = "boolean", modal = "boolean",
   onClose = "function", onUpdate = "function" }
-local WINDOW_FLAG_KEYS = { "minWidth", "minHeight", "maxWidth", "maxHeight", "resizable", "autoSize", "scrollbar", "topmost", "modal" }
+)MLUA"),
+            std::string_view(R"MLUA(local WINDOW_FLAG_KEYS = { "minWidth", "minHeight", "maxWidth", "maxHeight", "resizable", "autoSize", "scrollbar", "topmost", "modal" }
 local WINDOW_POSITIONS = { center = true, mouse = true }
 local WINDOW_DOC = "manifold.ui.window.Window."
 local windowKeys = {}
@@ -8342,8 +8344,7 @@ local function windowObject(entry)
   end)
   method("update", { params = { { name = "options", type = "table" } } }, function(options)
     options = checkOptions(prefix .. ".update", WINDOW_UPDATE_KEYS, options)
-)MLUA"),
-            std::string_view(R"MLUA(    if not liveEntry(entry) then
+    if not liveEntry(entry) then
       return gone("window")
     end
     if options.onClose ~= nil then
@@ -8475,9 +8476,9 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
     "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it, `open = false` starts it folded.",
     "- `tabs` holds `tab` widgets (`title`, `icon`); `split` shows its first two widgets side by side (`vertical` stacks them) at `ratio` (0.5).",
     "- `text` (`text`, `color`, `wrap`, `mono`, `bold`, `size` in points, `align` = `left`, `center` or `right` for text that does not wrap), `heading` (`text`, `icon`, `color`, `size`, `align`), `separator` (`text` puts a caption into the line), `spacer`.",
-    "- `button`: `text`, `icon` (an icon without text makes an icon button), `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through; `hotkey` (like `F5` or `Ctrl+F2`) clicks it from anywhere, also while the game has the focus, as long as its window is open (not a button with `confirm`).",
 )MLUA"),
-            std::string_view(R"MLUA(    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch; `hotkey` like `F1` or `Ctrl+F2` switches it from anywhere, also while the game has the focus, as long as its window is open and the box is enabled, and shows the key beside it), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click; a `number` or `slider` takes `hotkeyIncrease` and `hotkeyDecrease`, keys that move it by `hotkeyStep` (else its `step`, else 1) from anywhere while its window is open, within `min` and `max`), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line; a `combo` or `radio` takes `hotkeyNext` and `hotkeyPrevious`, keys that choose the next or previous item, round the end), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
+            std::string_view(R"MLUA(    "- `button`: `text`, `icon` (an icon without text makes an icon button), `style` (`default`, `accent`, `danger`), `onClick(widget)`; `shortcut` (like `Ctrl+S` or `F5`) clicks it while its window has the focus, `confirm` asks that text before the click goes through; `hotkey` (like `F5` or `Ctrl+F2`) clicks it from anywhere, also while the game has the focus, as long as its window is open (not a button with `confirm`).",
+    "- `checkbox` (`label`, boolean `value`; `style = \"switch\"` draws it as a switch; `hotkey` like `F1` or `Ctrl+F2` switches it from anywhere, also while the game has the focus, as long as its window is open and the box is enabled, and shows the key beside it), `input` (`label`, string `value`, `hint`, `multiline`, `password`, `readOnly`, `maxLength` in characters, `onSubmit(text, widget)` on Enter; `focus = true` puts the cursor there when the window opens, also on a `number`), `number` (`label`, `value`, `min`, `max`, `step`, `integer`, `hex`, `format` like `%.2f`; a typed value is reported when Enter is pressed or the field is left, a click on its +/- buttons at once), `slider` (`label`, `value`, `min`, `max`, `step`, `integer`, `format`; the value stays within `min` and `max`, also when typed with Ctrl+click; a `number` or `slider` takes `hotkeyIncrease` and `hotkeyDecrease`, keys that move it by `hotkeyStep` (else its `step`, else 1) from anywhere while its window is open, within `min` and `max`), `combo` (`label`, `items`, `hint` shown while nothing is chosen, `value` = the chosen item's number; with `multi = true` several items can be ticked and `value` is a list of their numbers, like `{ 1, 3 }`), `radio` (the same as `combo`, drawn as one button per item; `horizontal` puts them in one line; a `combo` or `radio` takes `hotkeyNext` and `hotkeyPrevious`, keys that choose the next or previous item, round the end), `color` (`label`, `value` = `#RRGGBB`, `alpha` for `#RRGGBBAA` with an alpha channel): all call `onChange(value, widget)`.",
     "- `table`: `columns` (titles, or `{ title, width, align }`), `rows` (lists of cells), `value` = the selected row's number, `onSelect(row, widget)`, `onActivate(row, widget)` on a double click, and `menu` (a list of entries; `-` is a separator) with `onMenu(choice, text, row, widget)`.",
     "- `tree`: `items` (`{ text, icon, id, open, children }`, or plain strings), `value` = the selected item's `id`, `onSelect(id, widget)`, `onActivate(id, widget)`, `menu` with `onMenu(choice, text, id, widget)`.",
     "- `progress` (`value` 0..1, `text`), `image` (`image` from `manifold.ui.image.load`).",
@@ -8599,7 +8600,8 @@ local function formHeader(path, spec, handlers)
     misuse(("%s: the form is from a newer Manifold (form = %d)"):format(path, spec.form))
   end
   if type(spec.title) ~= "string" then
-    misuse(("%s: form.title must be a string, got %s"):format(path, kindOf(spec.title)))
+)MLUA"),
+            std::string_view(R"MLUA(    misuse(("%s: form.title must be a string, got %s"):format(path, kindOf(spec.title)))
   end
   local resolve = formResolver(path, handlers)
   return formWindowOptions(path, spec, "form", resolve, FORM_SKIP.file), resolve
@@ -8610,8 +8612,7 @@ local function formWidget(path, child, at, resolve)
     misuse(("%s: %s must be a table, got %s"):format(path, at, kindOf(child)))
   end
   if type(child.kind) ~= "string" then
-)MLUA"),
-            std::string_view(R"MLUA(    misuse(("%s: %s has no kind"):format(path, at))
+    misuse(("%s: %s has no kind"):format(path, at))
   end
   if child.name ~= nil and (type(child.name) ~= "string" or not child.name:match("^[%a_][%w_]*$")) then
     misuse(("%s: %s.name must be a Lua name, got %s"):format(path, at, tostring(child.name)))
@@ -8875,7 +8876,8 @@ local function fillForm(path, made, members, children, resolve, folder, links)
               local active = record.isActive()
               if active ~= nil and active ~= bind.last then
                 bind.last = active
-                pcall(bind.handle.set, active)
+)MLUA"),
+            std::string_view(R"MLUA(                pcall(bind.handle.set, active)
                 followRules(bind)
               end
             end
@@ -8884,8 +8886,7 @@ local function fillForm(path, made, members, children, resolve, folder, links)
             if value ~= nil then
               local shown = shownValue(bind, value, text, entry)
               local ok, current = pcall(bind.handle.get)
-)MLUA"),
-            std::string_view(R"MLUA(              -- a field the user is typing into keeps the keyboard: leave it until it is left
+              -- a field the user is typing into keeps the keyboard: leave it until it is left
               local typing = (bind.kind == "input" or bind.kind == "number") and native.uiIsActive(bind.handle.id)
               if not typing and shown ~= nil and (shown ~= bind.last or not ok or current ~= shown) then
                 bind.last = shown
@@ -9197,13 +9198,13 @@ local function reloadForm(watch, start)
         handle.update(update)
         windowHandlers(handle, modal.options)
       else
-        handle = rawget(window.members, "create")(modal.spec.title, modal.options)
+)MLUA"),
+            std::string_view(R"MLUA(        handle = rawget(window.members, "create")(modal.spec.title, modal.options)
         rawset(watch.modals, modal.name, handle)
       end
     end
     local wiring = { rules = {}, items = {} }
-)MLUA"),
-            std::string_view(R"MLUA(    fillForm("manifold.ui.form.load", watch.window, watch.members, spec.children, resolve, watch.folder, { window = watch.window, modals = watch.modals, wiring = wiring, images = images })
+    fillForm("manifold.ui.form.load", watch.window, watch.members, spec.children, resolve, watch.folder, { window = watch.window, modals = watch.modals, wiring = wiring, images = images })
     for _, modal in ipairs(modals) do
       local handle = rawget(watch.modals, modal.name)
       fillForm("manifold.ui.form.load", handle, watch.members, modal.spec.children, resolve, watch.folder, { window = handle, modals = watch.modals, wiring = wiring, images = images })
@@ -9399,13 +9400,13 @@ local FILE_TEXT = " `filters` is a list of `{ \"Lua scripts\", \"*.lua\" }` pair
 
 local function flatFilters(path, filters)
   if filters == nil then
-    return nil
+)MLUA"),
+            std::string_view(R"MLUA(    return nil
   end
   local flat = {}
   for index, pair in ipairs(filters) do
     if type(pair) ~= "table" or type(pair[1]) ~= "string" or type(pair[2]) ~= "string" then
-)MLUA"),
-            std::string_view(R"MLUA(      misuse(("%s: filter %d must be { description, pattern }"):format(path, index))
+      misuse(("%s: filter %d must be { description, pattern }"):format(path, index))
     end
     flat[#flat + 1] = pair[1]
     flat[#flat + 1] = pair[2]

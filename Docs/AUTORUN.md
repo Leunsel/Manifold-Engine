@@ -42,7 +42,7 @@ A module may describe itself in the first block comment of its entry file (or in
     AUTHOR      : Leunsel
     DESCRIPTION : Unique byte signatures for the selected instruction.
     REQUIRES    : Json >= 1.2, Helpers
-    API         : 10
+    API         : 1
 ]]
 ```
 
