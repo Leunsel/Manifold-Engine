@@ -96,6 +96,7 @@ namespace Manifold::UI
         std::uint64_t m_selectedType = 0;
 
         std::string m_instancesOf;
+        float m_listHeight = 0.0f;  // the object list's height while an object is open (0: not set yet)
         std::uint64_t m_instancesHandle = 0;
         std::optional<Target::ManagedInstances> m_instances;
         std::string m_instancesError;

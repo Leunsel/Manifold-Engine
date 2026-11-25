@@ -361,7 +361,20 @@ namespace Manifold::UI
                 {
                     if (m_instances->Total > m_instances->Addresses.size())
                         Muted(Format("The first %zu are listed.", m_instances->Addresses.size()));
-                    const float height = std::min(Px(160.0f), (static_cast<float>(m_instances->Addresses.size()) + 0.5f) * ImGui::GetTextLineHeightWithSpacing());
+                    // ∑ The list had a fixed height of at most 160 px: with no object open the rest of the pane stayed
+                    //   empty, with one open the border could not be moved (owner, Terraria). Without an object the
+                    //   list fills the pane; with one a splitter sits between the list and the object.
+                    const bool objectOpen = m_position >= 0 && m_position < static_cast<int>(m_history.size());
+                    const float gap = Px(6.0f);
+                    const float rows = (static_cast<float>(m_instances->Addresses.size()) + 0.5f) * ImGui::GetTextLineHeightWithSpacing();
+                    const float available = ImGui::GetContentRegionAvail().y;
+                    const float minList = std::min(rows, 3.5f * ImGui::GetTextLineHeightWithSpacing());
+                    const float minObject = Px(160.0f);
+                    if (m_listHeight <= 0.0f)
+                        m_listHeight = Px(160.0f);
+                    m_listHeight = std::clamp(m_listHeight, minList, std::max(minList, available - minObject - gap));
+                    const float height = objectOpen ? std::min(m_listHeight, rows) : std::max(minList, available);
+                    const ImVec2 start = ImGui::GetCursorPos();
                     ImGui::BeginChild("##instances", ImVec2(0.0f, height));
                     ImGuiListClipper clipper;
                     clipper.Begin(static_cast<int>(m_instances->Addresses.size()));
@@ -391,6 +404,15 @@ namespace Manifold::UI
                         }
                     }
                     ImGui::EndChild();
+                    if (objectOpen)
+                    {
+                        float top = height;
+                        float bottom = std::max(minObject, available - height - gap);
+                        ImGui::SetCursorPos(start);
+                        if (Splitter("##clrsplit", false, gap, &top, &bottom, minList, minObject))
+                            m_listHeight = top;
+                        ImGui::SetCursorPos(ImVec2(start.x, start.y + height + gap));
+                    }
                 }
             }
         }
