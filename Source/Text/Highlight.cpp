@@ -81,7 +81,7 @@ namespace Manifold::Text
 
         constexpr std::string_view kAaCommands[] = { "alloc", "aobscan", "aobscanmodule", "aobscanregion", "assert", "byte", "createthread",
             "createthreadandwait", "db", "dd", "dealloc", "define", "dq", "dw", "dword", "far", "fullaccess", "globalalloc", "include", "label", "loadlibrary", "luacall",
-            "near", "ptr", "qword", "readmem", "reassemble", "registersymbol", "short", "tword", "unregistersymbol", "word", "xmmword", "ymmword" };
+            "near", "ptr", "qword", "readmem", "reassemble", "registersymbol", "resolvestatic", "short", "tword", "unregistersymbol", "word", "xmmword", "ymmword" };
 
         constexpr std::string_view kRegisters[] = { "ah", "al", "ax", "bh", "bl", "bp", "bpl", "bx", "ch", "cl", "cs", "cx", "dh", "di", "dil", "dl",
             "ds", "dx", "eax", "ebp", "ebx", "ecx", "edi", "edx", "eip", "es", "esi", "esp", "fs", "gs", "r10", "r10b", "r10d", "r10w", "r11", "r11b", "r11d", "r11w",

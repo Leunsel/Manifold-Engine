@@ -213,6 +213,9 @@
     <ClCompile Include="..\Source\Disasm\Signature.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Disasm\StaticRef.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
@@ -637,6 +640,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\SpeedhackTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\StaticRefTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\StructExchangeTests.cpp">

@@ -225,6 +225,9 @@
     <ClCompile Include="..\Source\Disasm\Signature.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Disasm\StaticRef.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
@@ -919,6 +922,9 @@
       <Filter>Source\Disasm</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Disasm\Signature.h">
+      <Filter>Source\Disasm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Disasm\StaticRef.h">
       <Filter>Source\Disasm</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Disasm\UniqueAob.h">

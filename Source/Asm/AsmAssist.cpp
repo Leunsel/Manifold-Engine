@@ -29,6 +29,9 @@ namespace Manifold::Asm
                     "Searches one module for the bytes and names the first match. Faster and safer than `aobscan`." },
                 { "aobscanregion", { { "name", "label", false, "" }, { "start", "address", false, "" }, { "stop", "address", false, "" }, { "bytes", "bytes", false, "" } },
                     "Searches between two addresses for the bytes and names the first match." },
+                { "resolvestatic", { { "name", "label", false, "" }, { "address", "address", false, "The instruction, usually an `aobscanmodule` result: `INJECT+3`." },
+                                       { "options", "text", true, "`memory`, `branch` or `immediate`; `pointer` reads the pointer stored there; `first` allows a pattern with several matches." } },
+                    "Names the fixed address the instruction refers to: `[rip+x]` in 64-bit code, `[x]` in 32-bit code, a `call`/`jmp` target or `mov rax,x`." },
                 { "assert", { { "address", "address", false, "" }, { "bytes", "bytes", false, "" } }, "Stops the script unless the bytes at the address are these, so it does not patch the wrong version." },
                 { "fullaccess", { { "address", "address", false, "" }, { "size", "number", false, "" } }, "Makes the memory readable, writable and executable." },
                 { "createthread", { { "address", "address", false, "" } }, "Starts a thread in the target at the address." },
@@ -223,7 +226,7 @@ namespace Manifold::Asm
                             add(argument);
                     }
                     else if (command == "alloc" || command == "globalalloc" || command == "define" || command == "aobscan" || command == "aobscanmodule" ||
-                             command == "aobscanregion")
+                             command == "aobscanregion" || command == "resolvestatic")
                     {
                         add(arguments.front());
                     }
@@ -319,7 +322,7 @@ namespace Manifold::Asm
                 break;
             const std::string_view type = command->Params[static_cast<std::size_t>(word.Argument)].Type;
             const bool declares = word.Argument == 0 && (word.Command == "alloc" || word.Command == "globalalloc" || word.Command == "label" || word.Command == "define" ||
-                                                         word.Command == "aobscan" || word.Command == "aobscanmodule" || word.Command == "aobscanregion");
+                                                         word.Command == "aobscan" || word.Command == "aobscanmodule" || word.Command == "aobscanregion" || word.Command == "resolvestatic");
             if (declares)
                 break;
             if (type == "module")

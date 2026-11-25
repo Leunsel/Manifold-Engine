@@ -45,6 +45,13 @@
     X(PointerFileUnreadable, 2016) \
     X(PointerFileUnwritable, 2017) \
     X(SignatureFailed, 2018) \
+    X(StaticUnreadable, 2019) \
+    X(StaticNoAddress, 2020) \
+    X(StaticAmbiguous, 2021) \
+    X(StaticMismatch, 2022) \
+    X(StaticUnmapped, 2023) \
+    X(StaticHooked, 2024) \
+    X(StaticPointerUnreadable, 2025) \
     X(AsmSyntax, 3001) \
     X(AsmUnknownInstruction, 3002) \
     X(AsmBadOperand, 3003) \
@@ -65,6 +72,7 @@
     X(AaIncludeMissing, 3112) \
     X(AaSymbolTaken, 3113) \
     X(AaReadMemFailed, 3114) \
+    X(AaStaticNotUnique, 3115) \
     X(DebugAttachFailed, 4001) \
     X(DebugAlreadyAttached, 4002) \
     X(DebugNoFreeSlot, 4003) \

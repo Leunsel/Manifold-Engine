@@ -2,7 +2,7 @@ local native = ...
 
 local SOURCE = debug.getinfo(1, "S").source
 -- ∑ Restarted at 1 for the first release (it had counted to 33 during development).
-local API_VERSION = 1
+local API_VERSION = 2
 local EMPTY = setmetatable({}, { __newindex = function() error("read-only", 2) end })
 local RUNTIME_CODE = "ME-7002"
 
@@ -852,6 +852,30 @@ define(memory, "scan", {
     misuse("manifold.memory.scan: options.limit must be 1 to 1000000")
   end
   return result(native.scan(pattern, options.module, options.executable, options.writable, options.alignment or 0, options.limit or 100000))
+end)
+
+define(memory, "resolveStatic", {
+  params = {
+    { name = "address", type = "address" },
+    { name = "options", type = "table", optional = true, keys = { kind = "string", encoding = "string", pointer = "boolean", offset = "integer", length = "integer" } },
+  },
+  returns = "`{ address, pointer, instruction, length, text, kind, encoding, indexed, fieldOffset, fieldSize, fieldValue, operandSize, notes }`, or nil, error",
+  doc = "The fixed address the instruction at `address` names, decoded for the opened process (32-bit code in a 32-bit game): a memory operand (`mov rax,[rip+x]`, `lea rcx,[rip+x]`, `mov eax,[x]`, `call [rip+x]`), the target of a relative `call`, `jmp` or `jcc`, or a number that is an address (`mov rax,x`, `push x`). Without options a memory operand comes first, then a branch target, and a number only when it points into a module. `options.kind` is `\"auto\"`, `\"memory\"`, `\"branch\"` or `\"immediate\"`; `encoding` `\"relative\"` or `\"absolute\"` insists on one; `offset` and `length` (byte offset of the number in the instruction, instruction length) pick and check a field like the older table-file command. `address` is the static, `pointer` the pointer stored there (nil when unreadable; with `options.pointer` that is `ME-2025`). Errors: `ME-2019` nothing decodes, `ME-2020` no fixed address (no operand, `[rax+8]`, `fs:`/`gs:`), `ME-2021` several, `ME-2022` options that do not fit, `ME-2023` the address is not mapped, `ME-2024` the place is hooked (a `jmp` out of every module). Auto Assembler scripts have the same as `resolvestatic(name, address)`.",
+}, function(address, options)
+  options = options or EMPTY
+  for _, key in ipairs({ "kind", "encoding" }) do
+    local allowed = key == "kind" and { auto = true, memory = true, branch = true, immediate = true } or { auto = true, relative = true, absolute = true }
+    if options[key] ~= nil and not allowed[options[key]] then
+      misuse("manifold.memory.resolveStatic: options." .. key .. " \"" .. tostring(options[key]) .. "\" is not one of the allowed words")
+    end
+  end
+  if options.offset ~= nil and (options.offset < 0 or options.offset > 14) then
+    misuse("manifold.memory.resolveStatic: options.offset must be 0 to 14")
+  end
+  if options.length ~= nil and (options.length < 1 or options.length > 15) then
+    misuse("manifold.memory.resolveStatic: options.length must be 1 to 15")
+  end
+  return result(native.resolveStatic(address, options))
 end)
 
 define(memory, "isReadable", {

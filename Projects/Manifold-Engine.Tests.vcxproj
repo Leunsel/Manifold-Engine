@@ -160,6 +160,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp" />
     <ClCompile Include="..\Source\Disasm\OpcodeConvert.cpp" />
     <ClCompile Include="..\Source\Disasm\Signature.cpp" />
+    <ClCompile Include="..\Source\Disasm\StaticRef.cpp" />
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\IconNames.cpp" />
@@ -304,6 +305,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\ScanStoreTests.cpp" />
     <ClCompile Include="..\Tests\SignatureTests.cpp" />
     <ClCompile Include="..\Tests\SpeedhackTests.cpp" />
+    <ClCompile Include="..\Tests\StaticRefTests.cpp" />
     <ClCompile Include="..\Tests\StructExchangeTests.cpp" />
     <ClCompile Include="..\Tests\StructureTests.cpp" />
     <ClCompile Include="..\Tests\TableCleanupTests.cpp" />

@@ -4,6 +4,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Disasm/Disassembler.h"
+#include "Disasm/StaticRef.h"
 #include "Scan/Scanner.h"
 #include "Target/Process.h"
 #include "Target/Symbols.h"
@@ -569,7 +570,7 @@ namespace Manifold::Asm
         {
             static const std::set<std::string> kCommands = { "alloc", "globalalloc", "dealloc", "label", "registersymbol", "unregistersymbol", "aobscan",
                 "aobscanmodule", "aobscanregion", "assert", "fullaccess", "createthread", "createthreadandwait", "loadlibrary", "readmem", "reassemble", "define",
-                "include", "luacall" };
+                "include", "luacall", "resolvestatic" };
             return kCommands.count(name) > 0;
         }
 
@@ -649,7 +650,7 @@ namespace Manifold::Asm
                     return;
                 if (!Collect(lines))
                     return Abort();
-                if (!PrepareLibraries() || !RunScans() || !Allocate() || !ReadMemory())
+                if (!PrepareLibraries() || !RunScans() || !ResolveStatics() || !Allocate() || !ReadMemory())
                     return Abort();
                 if (!Layout())
                     return Abort();
@@ -1306,6 +1307,33 @@ namespace Manifold::Asm
                     m_scans.push_back({ name, command.Arguments, line.Line });
                     return true;
                 }
+                if (name == "resolvestatic")
+                {
+                    if (!NeedArguments(command, line, 2, "resolvestatic(name, address[, options])"))
+                        return false;
+                    const std::string& symbol = command.Arguments[0];
+                    const bool word = !symbol.empty() && (std::isalpha(static_cast<unsigned char>(symbol.front())) || symbol.front() == '_') &&
+                                      std::all_of(symbol.begin(), symbol.end(), [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; });
+                    if (!word)
+                        return Fail(ErrorCode::AaBadArguments, line.Line, "resolvestatic(name, address): \"" + symbol + "\" is no name (letters, digits and _, not starting with a digit)", line.Text);
+                    // ∑ A name that reads as hex (BEEF, Add) would be taken as the number in every
+                    //   line that uses it, so the static would silently never be used.
+                    if (std::all_of(symbol.begin(), symbol.end(), [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; }))
+                        return Fail(ErrorCode::AaBadArguments, line.Line, "resolvestatic(name, address): \"" + symbol + "\" reads as a hex number; pick a name with other letters", line.Text);
+                    if (Trim(command.Arguments[1]).empty())
+                        return Fail(ErrorCode::AaBadArguments, line.Line, "resolvestatic(name, address): the address is empty", line.Text);
+                    Disasm::StaticOptions options;
+                    for (std::size_t i = 2; i < command.Arguments.size(); ++i)
+                    {
+                        std::string problem;
+                        if (!Disasm::ParseStaticOption(command.Arguments[i], options, problem))
+                            return Fail(ErrorCode::AaBadArguments, line.Line, "resolvestatic: " + problem, line.Text);
+                    }
+                    if (!DeclareName(symbol, line.Line, line.Text))
+                        return false;
+                    m_statics.push_back({ symbol, command.Arguments[1], options, line.Line, line.Text });
+                    return true;
+                }
                 if (name == "assert")
                 {
                     if (!NeedArguments(command, line, 2, "assert(address, bytes)"))
@@ -1490,7 +1518,14 @@ namespace Manifold::Asm
                         start = *from.Value;
                         stop = *to.Value;
                     }
-                    const auto hits = Scan::FindPattern(*m_host.Process, *pattern, start, stop, false, 1);
+                    // ∑ A scan that a resolvestatic reads from looks for a second match too: on the
+                    //   first of two the static may be another one, and nothing would show it.
+                    const bool unique = std::any_of(m_statics.begin(), m_statics.end(), [&](const StaticCommand& resolve) {
+                        return !resolve.Options.FirstHit && UsesWord(resolve.Address, scan.Arguments[0]);
+                    });
+                    const auto hits = Scan::FindPattern(*m_host.Process, *pattern, start, stop, false, unique ? 2 : 1);
+                    if (hits.size() > 1)
+                        m_secondHits[Lower(scan.Arguments[0])] = hits[1];
                     if (hits.empty())
                     {
                         if (m_log)
@@ -1505,7 +1540,75 @@ namespace Manifold::Asm
                     m_values[Lower(scan.Arguments[0])] = hits.front();
                     m_result.Notes.push_back(scan.Arguments[0] + " = " + Hex(hits.front()));
                     if (m_log)
-                        Step(scan.Line, scanText, "found at " + Where(hits.front()));
+                        Step(scan.Line, scanText, "found at " + Where(hits.front()) + (hits.size() > 1 ? ", and at " + Where(hits[1]) : ""));
+                }
+                return true;
+            }
+
+            static bool UsesWord(const std::string& text, const std::string& word)
+            {
+                const std::string lower = Lower(text);
+                return ReplaceWord(lower, Lower(word), "\x02") != lower;
+            }
+
+            // ∑ After the scans, so the address may be an aobscan of the same script, and before
+            //   alloc, so an alloc may be near the static. In script order: a resolvestatic may
+            //   use the name an earlier one resolved. A check reads nothing (like CE's aobscan
+            //   there): the name is 0 until the script runs.
+            bool ResolveStatics()
+            {
+                for (const StaticCommand& resolve : m_statics)
+                {
+                    const std::string key = Lower(resolve.Name);
+                    const std::string command = "resolvestatic(" + resolve.Name + ")";
+                    if (m_options.CheckOnly)
+                    {
+                        m_values[key] = 0;
+                        Step(resolve.Line, command, "not resolved in a check, 0 until the script runs");
+                        continue;
+                    }
+                    if (!m_host.Process || !m_host.Symbols)
+                        return Fail(ErrorCode::NoProcess, resolve.Line, "");
+                    for (const ScanCommand& scan : m_scans)
+                    {
+                        const auto second = m_secondHits.find(Lower(scan.Arguments[0]));
+                        if (second == m_secondHits.end() || resolve.Options.FirstHit || !UsesWord(resolve.Address, scan.Arguments[0]))
+                            continue;
+                        const auto first = m_values.find(Lower(scan.Arguments[0]));
+                        m_result.Error = Status::Fail(ErrorCode::AaStaticNotUnique, scan.Arguments[0] + " at " + Where(first == m_values.end() ? 0 : first->second) +
+                                                                                         " and " + Where(second->second));
+                        m_result.Line = resolve.Line;
+                        return false;
+                    }
+                    const auto address = m_host.Symbols->Evaluate(resolve.Address, Extra());
+                    if (!address.Ok())
+                    {
+                        m_result.Error = address.Error;
+                        m_result.Line = resolve.Line;
+                        return false;
+                    }
+                    const auto ref = Disasm::ResolveStatic(*m_host.Process, *address.Value, resolve.Options);
+                    if (!ref)
+                    {
+                        if (m_log)
+                            Step(resolve.Line, command, "failed at " + Where(*address.Value));
+                        m_result.Error = ref.Error();
+                        m_result.Line = resolve.Line;
+                        return false;
+                    }
+                    m_values[key] = ref->Value;
+                    m_result.Notes.push_back(resolve.Name + " = " + Hex(ref->Value));
+                    if (m_log)
+                    {
+                        std::string text = ref->Text + " at " + Where(ref->Instruction) + " → " +
+                                           (ref->Kind == Disasm::StaticKind::Branch ? "branch target " : ref->Kind == Disasm::StaticKind::Immediate ? "number " : ref->Relative ? "rip-relative " : "absolute ") +
+                                           Where(ref->Address);
+                        if (resolve.Options.Output == Disasm::StaticOutput::Pointer)
+                            text += ", pointer there " + Where(ref->Value);
+                        for (const std::string& note : ref->Notes)
+                            text += "; " + note;
+                        Step(resolve.Line, command, text);
+                    }
                 }
                 return true;
             }
@@ -2585,6 +2688,15 @@ namespace Manifold::Asm
                 int Line = 0;
             };
 
+            struct StaticCommand
+            {
+                std::string Name;
+                std::string Address;
+                Disasm::StaticOptions Options;
+                int Line = 0;
+                std::string Text;
+            };
+
             struct FullAccessCommand
             {
                 std::string Address;
@@ -2619,6 +2731,8 @@ namespace Manifold::Asm
             std::vector<std::pair<std::string, int>> m_unregister;
             std::vector<ScanCommand> m_scans;
             std::vector<AssertCommand> m_asserts;
+            std::vector<StaticCommand> m_statics;
+            std::map<std::string, std::uint64_t> m_secondHits;  // a second match of a scan a resolvestatic reads from
             std::vector<FullAccessCommand> m_fullAccess;
             std::vector<ThreadCommand> m_threads;
             std::vector<std::pair<std::string, int>> m_libraries;

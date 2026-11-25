@@ -4,6 +4,7 @@
 #include "App/SignatureSettings.h"
 #include "Core/Text.h"
 #include "Disasm/Signature.h"
+#include "Disasm/StaticRef.h"
 #include "Lua/LuaArgs.h"
 #include "Scan/Scanner.h"
 #include "Target/Process.h"
@@ -257,6 +258,59 @@ namespace Manifold::Lua
             }
             return 1;
         }
+
+        int ResolveStaticNative(lua_State* state)
+        {
+            Status error;
+            const auto process = Opened(state, error);
+            if (!process)
+                return PushFailure(state, error);
+            const auto address = ResolveAddress(state, 1, error);
+            if (!address)
+                return PushFailure(state, error);
+            Disasm::StaticOptions options;
+            ReadChoice(state, 2, "kind", options.Kind, { "auto", "memory", "branch", "immediate" });
+            ReadChoice(state, 2, "encoding", options.Encoding, { "auto", "relative", "absolute" });
+            bool pointer = false;
+            ReadBool(state, 2, "pointer", pointer);
+            if (pointer)
+                options.Output = Disasm::StaticOutput::Pointer;
+            if (Field(state, 2, "offset"))
+            {
+                options.FieldOffset = static_cast<std::uint64_t>(lua_tointeger(state, -1));
+                lua_pop(state, 1);
+            }
+            if (Field(state, 2, "length"))
+            {
+                options.Length = static_cast<std::uint64_t>(lua_tointeger(state, -1));
+                lua_pop(state, 1);
+            }
+            const auto ref = Disasm::ResolveStatic(*process, *address, options);
+            if (!ref)
+                return PushFailure(state, ref.Error());
+            lua_createtable(state, 0, 14);
+            SetInteger(state, "address", static_cast<std::int64_t>(ref->Address));
+            if (ref->Pointer)
+                SetInteger(state, "pointer", static_cast<std::int64_t>(*ref->Pointer));
+            SetInteger(state, "instruction", static_cast<std::int64_t>(ref->Instruction));
+            SetInteger(state, "length", ref->Length);
+            SetString(state, "text", ref->Text);
+            SetString(state, "kind", std::string(Disasm::StaticKindName(ref->Kind)));
+            SetString(state, "encoding", ref->Relative ? "relative" : "absolute");
+            SetBool(state, "indexed", ref->Indexed);
+            SetInteger(state, "fieldOffset", ref->FieldOffset);
+            SetInteger(state, "fieldSize", ref->FieldSize);
+            SetInteger(state, "fieldValue", ref->FieldValue);
+            SetInteger(state, "operandSize", ref->OperandSize);
+            lua_createtable(state, static_cast<int>(ref->Notes.size()), 0);
+            for (std::size_t i = 0; i < ref->Notes.size(); ++i)
+            {
+                lua_pushlstring(state, ref->Notes[i].data(), ref->Notes[i].size());
+                lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
+            }
+            lua_setfield(state, -2, "notes");
+            return 1;
+        }
     }
 
     void RegisterSignatureNatives(lua_State* state, int natives)
@@ -266,6 +320,7 @@ namespace Manifold::Lua
             { "signatureMake", &Make },
             { "signatureParse", &Parse },
             { "signatureFind", &Find },
+            { "resolveStatic", &ResolveStaticNative },
             { nullptr, nullptr },
         };
         lua_pushvalue(state, table);

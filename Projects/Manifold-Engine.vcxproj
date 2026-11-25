@@ -168,6 +168,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Disasm\FunctionBounds.cpp" />
     <ClCompile Include="..\Source\Disasm\OpcodeConvert.cpp" />
     <ClCompile Include="..\Source\Disasm\Signature.cpp" />
+    <ClCompile Include="..\Source\Disasm\StaticRef.cpp" />
     <ClCompile Include="..\Source\Disasm\UniqueAob.cpp" />
     <ClCompile Include="..\Source\Generated\BuiltinTemplates.cpp" />
     <ClCompile Include="..\Source\Generated\IconNames.cpp" />
@@ -404,6 +405,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Disasm\FunctionBounds.h" />
     <ClInclude Include="..\Source\Disasm\OpcodeConvert.h" />
     <ClInclude Include="..\Source\Disasm\Signature.h" />
+    <ClInclude Include="..\Source\Disasm\StaticRef.h" />
     <ClInclude Include="..\Source\Disasm\UniqueAob.h" />
     <ClInclude Include="..\Source\Generated\IconsFontAwesome5.h" />
     <ClInclude Include="..\Source\Layout\Audit.h" />

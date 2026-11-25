@@ -50,6 +50,13 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-2016 | "…" is not a pointer scan file. | The file is missing, cut off, or was not written by Save results of the pointer scan. | Pick a .mptr file that the pointer scan saved. |
 | ME-2017 | The pointer paths could not be written to "…". | The folder is not writable or the drive is full. | Save to another folder. |
 | ME-2018 | No signature could be made: … | The bytes from the address on match another place in the memory searched for as long as the signature may grow, or the address holds no code that decodes. | Allow more bytes, an AoB offset or fewer wildcards under Settings, Signatures, or count matches in the module instead of the whole process. |
+| ME-2019 | No instruction could be read at …. | The address is not readable, or its bytes are no instruction: the pattern or offset that led there is off. | Check the address in the memory viewer: unreadable pages show as ??. |
+| ME-2020 | The instruction names no fixed address: …. | It has no memory operand, branch target or address-sized number, or its operand counts from a register ([rax+8]) or the thread block (fs:, gs:), so the address is known only while the code runs. | Point the target at the instruction that reads the static, such as mov rax,[rip+...], lea rcx,[...] or mov eax,[address] in a 32-bit game. |
+| ME-2021 | The instruction names more than one fixed address: …. | Several operands of the same kind are addresses. | Give the byte offset of the one you mean, or memory, branch or immediate. |
+| ME-2022 | The instruction does not match the options: …. | A field offset, instruction length, rip or absolute was given that the decoded instruction does not have. | Leave the option out: the instruction is decoded, offsets and lengths are found by themselves. |
+| ME-2023 | The static address is not mapped memory: …. | The number in the instruction leads to no committed memory; the target is likely not the instruction meant. | Check the address in the memory viewer: unreadable pages show as ??. |
+| ME-2024 | The instruction is a jump out of every module, likely a hook: …. | A script hooked this place and is still on, often the same script after a run whose [DISABLE] part did not run. | Switch the script that hooked the place off, then run it again; add branch to take the jump target on purpose. |
+| ME-2025 | The pointer at the static address could not be read: …. | pointer was asked for, and the memory at the static address is not readable. | Use address to get the static itself, or check that the game has set the pointer up yet. |
 
 ## Assembler
 
@@ -75,6 +82,7 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-3112 | The included file … was not found. | include() looks next to the table and in the autorun folder. | Put the file there or write its full path. |
 | ME-3113 | The symbol … is registered already. | registersymbol gave a name that another script registered and did not unregister. | Disable the other script, or rename the symbol. |
 | ME-3114 | readmem could not read …. | The source of readmem is not readable. | Check the address in the memory viewer: unreadable pages show as ??. |
+| ME-3115 | The pattern behind resolvestatic matches more than one place: …. | resolvestatic reads the instruction at the first match, and another match may hold another static. | Make the pattern longer (Copy Signature in the memory viewer), or add first to take the first match on purpose. |
 
 ## Debugger
 

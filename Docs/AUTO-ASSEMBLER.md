@@ -27,6 +27,7 @@ Failures name the line and end in an `ME-3xxx` code; see [ERRORS.md](ERRORS.md).
 | `aobscan(name, bytes)` | Finds the first match of a byte pattern in the whole process. `??` or `*` matches any byte, `4?` matches any low nibble. |
 | `aobscanmodule(name, module, bytes)` | Finds the pattern inside one module. `$process` or `mainmodule` as the module is the executable of the opened process. |
 | `aobscanregion(name, start, stop, bytes)` | Finds the pattern between two addresses. |
+| `resolvestatic(name, address[, options])` | Names the fixed address that the instruction at `address` refers to, such as the global behind `mov rax,[rip+...]`. See [Statics from code](#statics-from-code). |
 | `assert(address, bytes)` | Stops the script when the memory does not hold these bytes, before anything is written. |
 | `readmem(address, size)` | Writes a copy of the bytes found at `address` into the current position. The bytes are read after the `aobscan` commands and `alloc`, so `address` may be a symbol from a scan of the same script. |
 | `reassemble(address)` | Assembles the instruction found at `address` again at the current position, with relative jumps fixed. |
@@ -69,6 +70,7 @@ line  command                  result
 | `define` | The value, and the one it replaces |
 | `assert` | The address and the bytes it found, matching or not |
 | `readmem`, `reassemble` | The bytes copied, or the instruction read and where it was placed |
+| `resolvestatic` | The instruction it read, the kind of reference (rip-relative, absolute, branch target, number) and the address, plus the pointer with `pointer` |
 | `label` and address lines | The address of each label, and where the lines after an address line go |
 | Writes | Address, size, the new bytes and the bytes they replaced |
 | `registersymbol`, `unregistersymbol` | The address registered, or whether the symbol was there to remove |
@@ -76,6 +78,50 @@ line  command                  result
 | Commands written in Lua | The parameters after `define`s and the text the command returned |
 
 A syntax check logs too, and says what it leaves out (scans, asserts, Lua calls). When a run fails, the log shows what was put back and freed again before the error.
+
+## Statics from code
+
+A game's globals move with every update, but the code that reads them can be found with a pattern. `resolvestatic` decodes the instruction at an address and names the address that instruction refers to, so the global is found through its code:
+
+```
+aobscanmodule(PlayerRead,game.exe,48 8B 05 ?? ?? ?? ?? 48 85 C0 74 ?? 8B 88)
+resolvestatic(PlayerBase,PlayerRead)          // the address of the global
+resolvestatic(Player,PlayerRead,pointer)      // the pointer stored in it
+registersymbol(PlayerBase Player)
+```
+
+`PlayerBase` then works like an `aobscan` result: in the code of the script (`mov rax,[PlayerBase]`), in `registersymbol`, and as `alloc`'s near address.
+
+What it reads, found from the decoded instruction and the opened process (a 32-bit game gets 32-bit decoding):
+
+| Instruction | Gives |
+| --- | --- |
+| `mov rax,[rip+x]`, `lea rcx,[rip+x]`, `movss xmm0,[rip+x]`, `cmp [rip+x],0` | `x`, counted from the next instruction (64-bit) |
+| `mov eax,[x]`, `mov eax,[x+ecx*4]`, `mov [x],ecx`, `A1`/`A3` moffs | `x`, written out in full (32-bit, and moffs in 64-bit) |
+| `call [rip+x]`, `call [x]` | the import slot `x`; with `pointer` the function |
+| `call x`, `jmp x`, `jcc x` | the branch target |
+| `mov rax,x`, `push x`, `mov [esi+8],x` | the number `x`, when it points into a module |
+
+The memory operand comes first, then a branch target, then a number. The options after the address are words, in any order:
+
+| Option | Meaning |
+| --- | --- |
+| `memory`, `branch`, `immediate` | Take that kind of reference only, for example a number that points outside every module. |
+| `pointer` (also `deref`, `value`) | Name the pointer stored at the address instead of the address. |
+| `rip` / `absolute` | Insist that the reference is counted from the next instruction, or written out; a script that expects the other fails instead of reading a wrong address. |
+| `first` | Accept an `aobscan` this command reads from even when its pattern matches more than one place. |
+| two numbers | The byte offset of the number inside the instruction and the instruction's length, as `ManifoldResolveStatic` of the table-file framework takes them (decimal, `$` or `0x` for hex). They pick the field and are checked against the decoded instruction; they are never needed. |
+
+It refuses, with the line and a code, instead of naming a wrong address:
+
+- `ME-2019`: no instruction at the address (unreadable, or bytes that are no code).
+- `ME-2020`: the instruction names no fixed address: no operand, a register-based one (`[rax+8]`), one counted from `fs:`/`gs:` (the thread block), or a number that is no address.
+- `ME-2021`: several references of one kind; `ME-2022`: options the instruction does not have (`rip` on an absolute operand, a length the instruction is not).
+- `ME-2023`: the address is not mapped memory; `ME-2025`: `pointer`, and the pointer cannot be read.
+- `ME-2024`: the instruction is a `jmp` out of every module, a hook. That happens when the same script ran before and its `[DISABLE]` part did not: the "static" would be the hook's code cave.
+- `ME-3115`: the `aobscan` it reads from matches a second place, which may hold another static. The scan looks for a second match only for this reason.
+
+A syntax check reads nothing: the name is 0 until the script runs, like an `aobscan` result. In Lua the same is `manifold.memory.resolveStatic(address, options)`.
 
 ## Templates
 

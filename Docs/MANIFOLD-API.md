@@ -36,7 +36,7 @@ end
 
 | Name | Value | |
 | --- | --- | --- |
-| `manifold.apiVersion` | 1 | The API version, an integer. It grows when functions are added; names keep their meaning. |
+| `manifold.apiVersion` | 2 | The API version, an integer. It grows when functions are added; names keep their meaning. |
 | `manifold.version` | string | The program version, such as `"1.0.0"`. |
 | `manifold.has(name)` | boolean | Whether the API has a name, such as `"log.channel"`, `"memory"` or `"apiVersion"`. Use it instead of reading a name that may not exist, which raises. |
 
@@ -108,6 +108,7 @@ Typed reads and writes in the opened process. Types: `i8` `u8` `i16` `u16` `i32`
 | `manifold.memory.read(address, type, options?)` | value, or nil, error | Reads one value. `bytes` and `raw` need `options.count`; `string` reads up to `options.length` characters (default 256) and stops at the first zero. |
 | `manifold.memory.write(address, type, value, options?)` | true, or nil, error | Writes one value. A `string` ends with a zero unless `options.terminate` is false. |
 | `manifold.memory.scan(pattern, options?)` | list of integers, or nil, error | Finds a byte pattern such as `"48 8B 05 ?? ?? ?? ??"` (`??` is any byte) in the whole process, or only in `options.module`. `options.executable` and `options.writable` set to true keep only such memory, set to false only memory without it, and left out take both. `options.alignment` keeps addresses divisible by it; `options.limit` (1 to 1000000, default 100000) stops after that many hits. The list is in address order, so with a limit it holds the lowest hits. No hit is an empty list, not an error. |
+| `manifold.memory.resolveStatic(address, options?)` | `{ address, pointer, instruction, length, text, kind, encoding, indexed, fieldOffset, fieldSize, fieldValue, operandSize, notes }`, or nil, error | The fixed address the instruction at `address` names, decoded for the opened process (32-bit code in a 32-bit game): a memory operand (`mov rax,[rip+x]`, `lea rcx,[rip+x]`, `mov eax,[x]`, `call [rip+x]`), the target of a relative `call`, `jmp` or `jcc`, or a number that is an address (`mov rax,x`, `push x`). Without options a memory operand comes first, then a branch target, and a number only when it points into a module. `options.kind` is `"auto"`, `"memory"`, `"branch"` or `"immediate"`; `encoding` `"relative"` or `"absolute"` insists on one; `offset` and `length` (byte offset of the number in the instruction, instruction length) pick and check a field like the older table-file command. `address` is the static, `pointer` the pointer stored there (nil when unreadable; with `options.pointer` that is `ME-2025`). Errors: `ME-2019` nothing decodes, `ME-2020` no fixed address (no operand, `[rax+8]`, `fs:`/`gs:`), `ME-2021` several, `ME-2022` options that do not fit, `ME-2023` the address is not mapped, `ME-2024` the place is hooked (a `jmp` out of every module). Auto Assembler scripts have the same as `resolvestatic(name, address)`. |
 | `manifold.memory.isReadable(address)` | boolean | Whether the page at the address can be read. False without a process or for an address that does not resolve. |
 
 ## manifold.record
