@@ -973,7 +973,7 @@ A crash writes a minidump and a short report into `crashes`.
 | `pointerscan`, `staticpointers`, `asmsearch`, `bytes`, `patches`, `writehistory`, `comments` | search and history |
 | `tablefiles`, `recorddebug` (`recorddebug:<ID>`, `recorddebug:check`, `:trace`, `:internals`) | the table |
 | `symbols`, `regions`, `processes`, `modules` | process |
-| `log`, `settings` (`settings:<n>` on page n, 0 = General … 6 = Keyboard), `keyboard`, `appearance`, `shortcuts`, `about` | program |
+| `log`, `settings` (`settings:<n>` on page n, 0 = General … 6 = Keyboard), `keyboard`, `appearance`, `shortcuts`, `about`, `credits` | program |
 | `profiler`, `breakdown`, `threads`, `checks`, `appinfo` | the profiler window on that tab |
 | `breakpoints`, `threadlist` | debugger |
 | `forms`, `layoutproblems` | Form Editor, Layout Problems |

@@ -8,6 +8,7 @@
 #include "App/Notifications.h"
 #include "App/SettingsStore.h"
 #include "Core/BackgroundWork.h"
+#include "Core/Credits.h"
 #include "Core/Deflate.h"
 #include "Core/Handle.h"
 #include "Core/Ini.h"
@@ -2120,6 +2121,21 @@ hostileRan = true
         }
     }
 
+    // About > Credits: the five first entries in the owner's order, and no entry without a name or a reason
+    void CreditsList()
+    {
+        const std::span<const CreditEntry> credits = Credits();
+        const char* expected[][2] = { { "Leunsel", "Author" }, { "cfemen", "SysCalls" }, { "Veydr", "Bug-Hunts" }, { "ocornut", "ImGui" }, { "zyantific", "Zydis" } };
+        CHECK(credits.size() >= std::size(expected));
+        for (std::size_t i = 0; i < std::size(expected) && i < credits.size(); ++i)
+        {
+            CHECK_EQ(credits[i].Name, std::string_view(expected[i][0]));
+            CHECK_EQ(credits[i].For, std::string_view(expected[i][1]));
+        }
+        for (const CreditEntry& entry : credits)
+            CHECK_MSG(!entry.Name.empty() && !entry.For.empty(), std::string(entry.Name));
+    }
+
     int RunCoreTests()
     {
         const int before = Totals().Failures;
@@ -2152,6 +2168,7 @@ hostileRan = true
         TableSaves();
         MergeKeepsChanges();
         DiagnosticsInfo();
+        CreditsList();
         return Totals().Failures - before;
     }
 }

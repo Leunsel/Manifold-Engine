@@ -47,6 +47,7 @@ namespace Manifold::UI
             { "templates", "Template Manager", "Auto Assembler templates", false },
             { "modules", "Autorun Modules", "", false },
             { "about", "About Manifold Engine", "", true },
+            { "credits", "Credits", "who made and helped make Manifold Engine", true },
         };
 
         const char* KindIcon(PaletteKind kind)

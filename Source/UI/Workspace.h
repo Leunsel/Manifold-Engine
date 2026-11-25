@@ -152,7 +152,7 @@ namespace Manifold::UI
         void OpenLog();
         void OpenSettings(int page = -1);
         void OpenProcessPicker();
-        void OpenAbout();
+        void OpenAbout(bool credits = false);
         void OpenSymbols();
         void OpenRegions();
         void OpenTableFiles();
@@ -238,6 +238,8 @@ namespace Manifold::UI
         CodeEditorState m_tableScriptView;
         int m_tableScriptNext = 0;
         void DrawAbout();
+        void DrawAboutProgram();
+        void DrawCredits();
         void DrawWindows();
 
         Engine& m_engine;
@@ -317,6 +319,7 @@ namespace Manifold::UI
         void FinishQuit();
         void DrawQuitPrompt();
         bool m_aboutOpen = false;
+        bool m_aboutCredits = false;    // About shows the credits instead of the program
         bool m_quitConfirmed = false;
         bool m_restyle = false;
         void SecretKeys();

@@ -369,6 +369,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Core\BackgroundWork.h" />
     <ClInclude Include="..\Source\Core\BuildInfo.h" />
     <ClInclude Include="..\Source\Core\CheckedMutex.h" />
+    <ClInclude Include="..\Source\Core\Credits.h" />
     <ClInclude Include="..\Source\Core\Deflate.h" />
     <ClInclude Include="..\Source\Core\Errors.h" />
     <ClInclude Include="..\Source\Core\GraphLayout.h" />

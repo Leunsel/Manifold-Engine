@@ -35,10 +35,10 @@ namespace Manifold::UI
         constexpr float kToolMainWidth = 1600.0f;
         constexpr float kToolMainHeight = 1000.0f;
 
-        // "about" is the About popup, not a tool window; the sweep cannot close it
+        // "about" and "credits" are the About popup, not a tool window; the sweep cannot close it
         bool Sweepable(const std::string& name)
         {
-            return name != "about";
+            return name != "about" && name != "credits";
         }
 
         bool IsRoot(const ImGuiWindow* window)

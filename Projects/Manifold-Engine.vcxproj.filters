@@ -816,6 +816,9 @@
     <ClInclude Include="..\Source\Core\CheckedMutex.h">
       <Filter>Source\Core</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Core\Credits.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Core\Deflate.h">
       <Filter>Source\Core</Filter>
     </ClInclude>

@@ -3,7 +3,9 @@
 #include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Core/BuildInfo.h"
+#include "Core/Credits.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Lua/LuaEngine.h"
 #include "Table/CheatTable.h"
 #include "Target/Process.h"
@@ -175,6 +177,8 @@ namespace Manifold::UI
             OpenProcessPicker();
         else if (window == "about")
             OpenAbout();
+        else if (window == "credits")
+            OpenAbout(true);
         else if (window == "profiler")
             OpenProfiler(UI::ProfilerWindow::OverviewTab);
         else if (window == "breakdown")
@@ -236,7 +240,7 @@ namespace Manifold::UI
     {
         static const std::vector<std::string> names = {
             "memory", "hex", "structure", "script", "lua", "mono", "unreal", "log", "settings", "symbols", "regions", "tablefiles", "patches",
-            "dissect", "asmsearch", "bytes", "pointerscan", "staticpointers", "shortcuts", "keyboard", "appearance", "processes", "about",
+            "dissect", "asmsearch", "bytes", "pointerscan", "staticpointers", "shortcuts", "keyboard", "appearance", "processes", "about", "credits",
             "profiler", "breakdown", "threads", "checks", "appinfo", "nopsled", "writehistory", "comments", "recorddebug", "flowgraph", "opcodes",
             "templates", "forms", "modules", "breakpoints", "threadlist", "layoutproblems", "signatures", "codefilter",
             "signaturesettings", "settings:2", "settings:3", "settings:4", "palette", "tablecleanup"
@@ -1036,9 +1040,10 @@ namespace Manifold::UI
         m_regions->Show();
     }
 
-    void Workspace::OpenAbout()
+    void Workspace::OpenAbout(bool credits)
     {
         m_aboutOpen = true;
+        m_aboutCredits = credits;
     }
 
     void Workspace::OpenRecordEditor(int recordId, RecordField field)
@@ -1714,50 +1719,88 @@ namespace Manifold::UI
         if (!ImGui::IsPopupOpen(id))
             ImGui::OpenPopup(id);
         ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
-        if (BeginModal(id, ICON_FA_MICROCHIP, "About Manifold Engine", ImVec2(460.0f, 0.0f), &m_aboutOpen))
+        if (BeginModal(id, m_aboutCredits ? ICON_FA_USERS : ICON_FA_MICROCHIP, m_aboutCredits ? "Credits" : "About Manifold Engine", ImVec2(460.0f, 0.0f), &m_aboutOpen))
         {
-            ImGui::Text("Version %s", VersionText().c_str());
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
-            {
-                const double now = ImGui::GetTime();
-                m_versionClicks = now - m_versionClickedAt < 1.5 ? m_versionClicks + 1 : 1;
-                m_versionClickedAt = now;
-            }
-            if (m_versionClicks >= 4 && ImGui::GetTime() - m_versionClickedAt < 1.5)
-            {
-                ImGui::SameLine(0.0f, Px(10.0f));
-                Muted(std::string(static_cast<std::size_t>(m_versionClicks - 3), '.') + " " + std::to_string(7 - m_versionClicks));
-            }
-            if (m_versionClicks >= 7)
-            {
-                m_versionClicks = 0;
-                m_aboutOpen = false;
-                ImGui::CloseCurrentPopup();
-                OpenNopSled();
-            }
-            Muted("Memory scanner, debugger, assembler and Lua scripting for Windows processes.");
+            if (m_aboutCredits)
+                DrawCredits();
+            else
+                DrawAboutProgram();
             ImGui::Spacing();
-            ImGui::TextUnformatted("Built with Dear ImGui (docking), Zydis 5 and Lua 5.4.");
-            Muted("Licenses are in the Licenses folder next to the program.");
-            ImGui::Spacing();
-            ImGui::TextWrapped("Use only on software you own or are allowed to study, and keep a backup of your save. Debugging and memory edits can crash a "
-                               "program or trip its anti-cheat; some games forbid it in their terms, and online use can get an account banned. The in-process "
-                               "(VEH) debugger runs inside the target: use it deliberately. You are responsible for how you use this tool.");
-            ImGui::Spacing();
-            ImGui::Text("Administrator rights: %s", Target::IsElevated() ? "yes" : "no");
-            if (!Target::IsElevated())
+            bool close = false;
             {
-                ImGui::SameLine();
-                if (ImGui::SmallButton("Restart as Administrator"))
-                    m_shell.RestartElevated();
+                Layout::Row buttons("##aboutbuttons", { Layout::Size::Fit(), Layout::Size::Fit() });
+                buttons.Cell([&] { close = Layout::Button("Close", { .Width = Layout::Size::Fixed(100.0f) }); });
+                buttons.Cell([&] {
+                    if (Layout::Button(m_aboutCredits ? ICON_FA_ARROW_LEFT "  Back##aboutpage" : ICON_FA_HEART "  Credits##aboutpage"))
+                        m_aboutCredits = !m_aboutCredits;
+                });
             }
-            ImGui::Spacing();
-            if (ImGui::Button("Close", Px(100.0f, 0.0f)))
+            if (close)
             {
                 m_aboutOpen = false;
                 ImGui::CloseCurrentPopup();
             }
             EndModal();
         }
+    }
+
+    void Workspace::DrawAboutProgram()
+    {
+        ImGui::Text("Version %s", VersionText().c_str());
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+        {
+            const double now = ImGui::GetTime();
+            m_versionClicks = now - m_versionClickedAt < 1.5 ? m_versionClicks + 1 : 1;
+            m_versionClickedAt = now;
+        }
+        if (m_versionClicks >= 4 && ImGui::GetTime() - m_versionClickedAt < 1.5)
+        {
+            ImGui::SameLine(0.0f, Px(10.0f));
+            Muted(std::string(static_cast<std::size_t>(m_versionClicks - 3), '.') + " " + std::to_string(7 - m_versionClicks));
+        }
+        if (m_versionClicks >= 7)
+        {
+            m_versionClicks = 0;
+            m_aboutOpen = false;
+            ImGui::CloseCurrentPopup();
+            OpenNopSled();
+        }
+        Muted("Memory scanner, debugger, assembler and Lua scripting for Windows processes.");
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Built with Dear ImGui (docking), Zydis 5 and Lua 5.4.");
+        Muted("Licenses are in the Licenses folder next to the program.");
+        ImGui::Spacing();
+        ImGui::TextWrapped("Use only on software you own or are allowed to study, and keep a backup of your save. Debugging and memory edits can crash a "
+                           "program or trip its anti-cheat; some games forbid it in their terms, and online use can get an account banned. The in-process "
+                           "(VEH) debugger runs inside the target: use it deliberately. You are responsible for how you use this tool.");
+        ImGui::Spacing();
+        ImGui::Text("Administrator rights: %s", Target::IsElevated() ? "yes" : "no");
+        if (!Target::IsElevated())
+        {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Restart as Administrator"))
+                m_shell.RestartElevated();
+        }
+    }
+
+    // ∑ The list itself is Credits() in Core/Credits.h, so a new entry needs
+    // no change here: a name, and what they gave in muted text beside it.
+    void Workspace::DrawCredits()
+    {
+        Layout::Muted("The people and projects Manifold Engine is made by and built on.", Layout::Overflow::Wrap);
+        ImGui::Spacing();
+        if (!ImGui::BeginTable("##credits", 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_PadOuterX))
+            return;
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("For", ImGuiTableColumnFlags_WidthStretch);
+        for (const CreditEntry& entry : Credits())
+        {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            Layout::Text(entry.Name);
+            ImGui::TableNextColumn();
+            Layout::Muted(entry.For);
+        }
+        ImGui::EndTable();
     }
 }
