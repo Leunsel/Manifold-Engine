@@ -5,6 +5,7 @@
 #include "App/Diagnostics.h"
 #include "App/Sounds.h"
 #include "App/Themes.h"
+#include "App/Updates.h"
 #include "Core/BuildInfo.h"
 #include "Core/Profiler.h"
 #include "Core/Text.h"
@@ -15,6 +16,7 @@
 #include "UI/ProfilerWindow.h"
 #include "UI/Theme.h"
 #include "UI/SettingsWindow.h"
+#include "UI/UpdateDialog.h"
 #include "UI/Widgets.h"
 
 #include "imgui.h"
@@ -249,6 +251,25 @@ namespace Manifold
             m_workspace->OpenTable(m_options.Table, false);
         }
         m_workspace->OfferBackups(m_engine->Backups().TakeAbandoned());
+        // Right after an update the old program may still be closing and hold its file for a moment.
+        m_engine->Work().Start({ .Title = "Removing the files of the earlier version", .Group = "update-leftovers", .Cancellable = true, .Quiet = true },
+            [retry = !m_options.UpdatedFrom.empty()](WorkProgress& progress) -> BackgroundWork::Finish
+            {
+                std::vector<std::string> still = Updates::RemoveLeftovers(Paths::ProgramFolder());
+                for (int i = 0; retry && !still.empty() && i < 20 && !progress.Cancelled(); ++i)
+                {
+                    ::Sleep(500);
+                    still = Updates::RemoveLeftovers(Paths::ProgramFolder());
+                }
+                for (const std::string& file : still)
+                    LOG_INFO("Updates", file + " is still in use and goes at the next start");
+                return {};
+            });
+        if (!m_options.UpdatedFrom.empty())
+            m_engine->Notify(LogLevel::Success, "Manifold Engine was updated from " + m_options.UpdatedFrom + " to " MANIFOLD_VERSION_TEXT ".");
+        // the layout sweep and the profile report run cloaked and must not ask anything
+        if (!m_host.Quiet() && m_options.ProfileReport.empty())
+            m_workspace->Updates().CheckAtStart();
         SplashStatus("Ready");
         for (const std::string& window : m_options.Open)
         {
@@ -466,16 +487,30 @@ namespace Manifold
         m_running = false;
     }
 
-    void Application::RestartElevated()
+    std::wstring Application::RestartArguments() const
     {
-        std::wstring program(MAX_PATH, L'\0');
-        const DWORD length = ::GetModuleFileNameW(nullptr, program.data(), static_cast<DWORD>(program.size()));
-        program.resize(length);
         std::wstring parameters;
         if (!m_engine->Table().FilePath.empty())
             parameters = L"\"" + Utf8ToWide(m_engine->Table().FilePath) + L"\"";
         if (m_engine->HasProcess())
             parameters += L" --process=\"" + Utf8ToWide(m_engine->Process()->Name()) + L"\"";
+        return parameters;
+    }
+
+    // ∑ The loader keeps the name the program was started with, so after an
+    // update has moved the running file aside this names the new program.
+    std::wstring Application::ProgramPath()
+    {
+        std::wstring program(MAX_PATH, L'\0');
+        const DWORD length = ::GetModuleFileNameW(nullptr, program.data(), static_cast<DWORD>(program.size()));
+        program.resize(length);
+        return program;
+    }
+
+    void Application::RestartElevated()
+    {
+        const std::wstring program = ProgramPath();
+        const std::wstring parameters = RestartArguments();
         RememberPlacement();
         m_engine->SaveOptionsNow();
         const auto result = reinterpret_cast<INT_PTR>(::ShellExecuteW(m_host.Window(), L"runas", program.c_str(), parameters.c_str(), nullptr, SW_SHOWNORMAL));
@@ -483,6 +518,27 @@ namespace Manifold
             m_running = false;
         else
             m_engine->Notify(LogLevel::Warning, "The program was not restarted with administrator rights.");
+    }
+
+    // ∑ The new program starts only at the very end of Run, after the settings,
+    // the layout and the backups are written, so it reads what this one left.
+    // The arguments are taken now, while the table and the process are still open.
+    void Application::RestartAfterUpdate(const std::string& from)
+    {
+        m_restartFrom = from;
+        m_restartArguments = RestartArguments() + L" --updated-from=" + Utf8ToWide(from);
+        m_running = false;
+    }
+
+    void Application::StartAgain()
+    {
+        const std::wstring program = ProgramPath();
+        const std::wstring folder = std::filesystem::path(program).parent_path().wstring();
+        const auto result = reinterpret_cast<INT_PTR>(::ShellExecuteW(nullptr, L"open", program.c_str(), m_restartArguments.c_str(), folder.c_str(), SW_SHOWNORMAL));
+        if (result <= 32)
+            LOG_ERROR("Updates", "The updated program could not be started: " + SystemErrorText(static_cast<std::uint32_t>(::GetLastError())));
+        else
+            LOG_INFO("Updates", "Started the updated program");
     }
 
     void Application::RememberPlacement()
@@ -569,6 +625,8 @@ namespace Manifold
             ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
         m_engine->Debugger().Detach();
         LOG_INFO("Program", "Closed");
+        if (!m_restartFrom.empty())
+            StartAgain();
         return 0;
     }
 }

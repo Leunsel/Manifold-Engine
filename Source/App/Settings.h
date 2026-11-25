@@ -122,6 +122,9 @@ namespace Manifold
         bool LayoutChecks = false;
         bool ProfilerInStatusBar = true;
         bool ShowSplash = true;
+        bool CheckForUpdates = true;   // ask GitHub for a newer release at start
+        std::string UpdateSeen;        // the version whose required notice was shown
+        std::string UpdateSkipped;     // the version the user chose to skip
         int NopSledBest = 0;
 
         bool VerboseLog = false;

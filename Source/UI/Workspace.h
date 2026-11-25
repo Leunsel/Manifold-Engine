@@ -31,6 +31,8 @@ namespace Manifold::UI
         virtual void* NativeWindow() const = 0;
         virtual void* Device() const = 0;
         virtual void RestartElevated() = 0;
+        // closes like Close and starts the program again once everything is saved
+        virtual void RestartAfterUpdate(const std::string& from) = 0;
         virtual void Restyle() = 0;
 
     protected:
@@ -79,6 +81,7 @@ namespace Manifold::UI
     class TableCleanupWindow;
     class StructImportWindow;
     class CommandPalette;
+    class UpdateDialog;
     class PointerScanWindow;
     class ShortcutsWindow;
     class TemplateManager;
@@ -122,6 +125,7 @@ namespace Manifold::UI
         bool CanRunAnywhere(Command command);
         void RunAnywhere(Command command);
         CommandPalette& Palette() { return *m_palette; }
+        UpdateDialog& Updates() { return *m_updates; }
         Engine& Core() { return m_engine; }
         Shell& Window() { return m_shell; }
         UiHost& Ui() { return *m_ui; }
@@ -217,7 +221,8 @@ namespace Manifold::UI
         void BackUpNow();
         void OpenBackupFolder();
         void NewTable();
-        void RequestQuit();
+        // restartFrom: the version an update replaced; the program starts again after the quit
+        void RequestQuit(std::string restartFrom = {});
         static std::string WithoutCodes(std::string_view text);
         void TurnOffEverything();
         bool QuitConfirmed() const { return m_quitConfirmed; }
@@ -272,6 +277,8 @@ namespace Manifold::UI
         std::unique_ptr<TableCleanupWindow> m_tableCleanup;
         std::unique_ptr<StructImportWindow> m_structImport;
         std::unique_ptr<CommandPalette> m_palette;
+        std::unique_ptr<UpdateDialog> m_updates;
+        std::string m_restartFrom;
         std::unique_ptr<PointerScanWindow> m_pointerScan;
         std::unique_ptr<ShortcutsWindow> m_shortcuts;
         std::unique_ptr<TemplateManager> m_templateManager;

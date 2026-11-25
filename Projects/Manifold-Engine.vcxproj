@@ -133,6 +133,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\App\TargetSession.cpp" />
     <ClCompile Include="..\Source\App\Themes.cpp" />
     <ClCompile Include="..\Source\App\UnrealSession.cpp" />
+    <ClCompile Include="..\Source\App\Updates.cpp" />
     <ClCompile Include="..\Source\App\WindowHost.cpp" />
     <ClCompile Include="..\Source\App\WriteHistory.cpp" />
     <ClCompile Include="..\Source\Asm\AsmAssist.cpp" />
@@ -156,6 +157,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Core\SafeFile.cpp" />
     <ClCompile Include="..\Source\Core\Text.cpp" />
     <ClCompile Include="..\Source\Core\Xml.cpp" />
+    <ClCompile Include="..\Source\Core\Zip.cpp" />
     <ClCompile Include="..\Source\Debug\BreakAction.cpp" />
     <ClCompile Include="..\Source\Debug\Debugger.cpp" />
     <ClCompile Include="..\Source\Debug\Trace.cpp" />
@@ -274,6 +276,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp" />
     <ClCompile Include="..\Source\Text\Highlight.cpp" />
     <ClCompile Include="..\Source\Text\Json.cpp" />
+    <ClCompile Include="..\Source\Text\JsonValue.cpp" />
     <ClCompile Include="..\Source\Text\LuaContext.cpp" />
     <ClCompile Include="..\Source\Text\TextBuffer.cpp" />
     <ClCompile Include="..\Source\UI\AddressActions.cpp" />
@@ -332,6 +335,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\UI\TypePicker.cpp" />
     <ClCompile Include="..\Source\UI\UiHost.cpp" />
     <ClCompile Include="..\Source\UI\UnrealWindow.cpp" />
+    <ClCompile Include="..\Source\UI\UpdateDialog.cpp" />
     <ClCompile Include="..\Source\UI\WatchWindow.cpp" />
     <ClCompile Include="..\Source\UI\Widgets.cpp" />
     <ClCompile Include="..\Source\UI\Workspace.cpp" />
@@ -360,6 +364,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\App\TargetSession.h" />
     <ClInclude Include="..\Source\App\Themes.h" />
     <ClInclude Include="..\Source\App\UnrealSession.h" />
+    <ClInclude Include="..\Source\App\Updates.h" />
     <ClInclude Include="..\Source\App\WindowHost.h" />
     <ClInclude Include="..\Source\App\WriteHistory.h" />
     <ClInclude Include="..\Source\Asm\AsmAssist.h" />
@@ -386,6 +391,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Core\Types.h" />
     <ClInclude Include="..\Source\Core\Version.h" />
     <ClInclude Include="..\Source\Core\Xml.h" />
+    <ClInclude Include="..\Source\Core\Zip.h" />
     <ClInclude Include="..\Source\Debug\BreakAction.h" />
     <ClInclude Include="..\Source\Debug\BreakProgram.h" />
     <ClInclude Include="..\Source\Debug\Debugger.h" />
@@ -499,6 +505,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Templates\TemplateLibrary.h" />
     <ClInclude Include="..\Source\Text\Highlight.h" />
     <ClInclude Include="..\Source\Text\Json.h" />
+    <ClInclude Include="..\Source\Text\JsonValue.h" />
     <ClInclude Include="..\Source\Text\LuaContext.h" />
     <ClInclude Include="..\Source\Text\TextBuffer.h" />
     <ClInclude Include="..\Source\UI\AddressActions.h" />
@@ -559,6 +566,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\UI\UiHost.h" />
     <ClInclude Include="..\Source\UI\UiScale.h" />
     <ClInclude Include="..\Source\UI\UnrealWindow.h" />
+    <ClInclude Include="..\Source\UI\UpdateDialog.h" />
     <ClInclude Include="..\Source\UI\WatchWindow.h" />
     <ClInclude Include="..\Source\UI\Widgets.h" />
     <ClInclude Include="..\Source\UI\Workspace.h" />

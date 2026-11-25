@@ -120,6 +120,9 @@
     <ClCompile Include="..\Source\App\UnrealSession.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\Updates.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\WindowHost.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -187,6 +190,9 @@
       <Filter>Source\Core</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Core\Xml.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\Zip.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Debug\BreakAction.cpp">
@@ -537,6 +543,9 @@
     <ClCompile Include="..\Source\Text\Json.cpp">
       <Filter>Source\Text</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Text\JsonValue.cpp">
+      <Filter>Source\Text</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Text\LuaContext.cpp">
       <Filter>Source\Text</Filter>
     </ClCompile>
@@ -711,6 +720,9 @@
     <ClCompile Include="..\Source\UI\UnrealWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\UI\UpdateDialog.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\UI\WatchWindow.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
@@ -789,6 +801,9 @@
     <ClInclude Include="..\Source\App\UnrealSession.h">
       <Filter>Source\App</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\App\Updates.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\App\WindowHost.h">
       <Filter>Source\App</Filter>
     </ClInclude>
@@ -865,6 +880,9 @@
       <Filter>Source\Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Core\Xml.h">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Core\Zip.h">
       <Filter>Source\Core</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Debug\BreakAction.h">
@@ -1206,6 +1224,9 @@
     <ClInclude Include="..\Source\Text\Json.h">
       <Filter>Source\Text</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\Text\JsonValue.h">
+      <Filter>Source\Text</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\Text\LuaContext.h">
       <Filter>Source\Text</Filter>
     </ClInclude>
@@ -1384,6 +1405,9 @@
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\UnrealWindow.h">
+      <Filter>Source\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\UI\UpdateDialog.h">
       <Filter>Source\UI</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\UI\WatchWindow.h">

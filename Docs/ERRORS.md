@@ -125,6 +125,9 @@ Every failure Manifold Engine reports ends in a code like `ME-1006`. The number 
 | ME-5015 | The theme could not be saved: …. | The themes folder next to the configs folder is not writable, or the file is in use. | Move the program to a folder you can write to, or close the program that holds the file. |
 | ME-5016 | A theme named … already exists. | Theme names are unique, and the preset names are taken. | Pick another name, or pass overwrite = true to replace your own theme. |
 | ME-5017 | The theme is not valid: …. | A colour or size name is unknown, or a value is not a colour or a number. | Use the names from manifold.ui.theme.colors() and sizes(), and colours as "#rrggbb", "#rrggbbaa" or { r, g, b, a }. |
+| ME-5018 | The update check failed: …. | The program asks GitHub for the newest release of Manifold Engine; there was no connection, GitHub refused the request, or its answer could not be read. | Check the internet connection and try again later (Help > Check for Updates), or look at the releases page on GitHub. |
+| ME-5019 | The update could not be downloaded: …. | The release zip did not arrive in full, or its SHA-256 differs from the one GitHub lists for it, so it was not used. | Try again; if it keeps failing, download the zip from the releases page and unpack it over the program folder. |
+| ME-5020 | The update could not be installed: …. | The release zip could not be unpacked, or a file in the program folder could not be replaced. The program files that were already swapped were put back. | Close other copies of Manifold Engine, check that the program folder is writable, and try again, or unpack the zip by hand. |
 
 ## Cheat tables
 

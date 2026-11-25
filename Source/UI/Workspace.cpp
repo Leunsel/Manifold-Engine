@@ -39,6 +39,7 @@
 #include "UI/TableCleanupWindow.h"
 #include "UI/StructExchangeWindow.h"
 #include "UI/CommandPalette.h"
+#include "UI/UpdateDialog.h"
 #include "UI/StaticPointersWindow.h"
 #include "UI/StructureWindow.h"
 #include "UI/TableFilesWindow.h"
@@ -102,6 +103,7 @@ namespace Manifold::UI
     {
         m_main = std::make_unique<MainWindow>(*this);
         m_palette = std::make_unique<CommandPalette>(*this);
+        m_updates = std::make_unique<UpdateDialog>(engine, [this](const std::string& from) { RequestQuit(from); });
         m_scriptForms = std::make_unique<ScriptForms>(engine);
         m_ui = std::make_unique<UiHost>(engine, shell);
         InstallTextMeasurer();
@@ -279,6 +281,7 @@ namespace Manifold::UI
         DrawQuitPrompt();
         DrawTableScriptPrompt();
         DrawAbout();
+        m_updates->Draw();
         DrawNotices();
     }
 
@@ -1374,8 +1377,9 @@ namespace Manifold::UI
             clear();
     }
 
-    void Workspace::RequestQuit()
+    void Workspace::RequestQuit(std::string restartFrom)
     {
+        m_restartFrom = std::move(restartFrom);
         if (UnsavedTable())
         {
             Confirm("Quit", "The table has changes that are not saved. Quit anyway?", [this]() { QuitAfterTable(); }, "Quit");
@@ -1435,7 +1439,10 @@ namespace Manifold::UI
     {
         m_engine.Debugger().Detach();
         m_quitConfirmed = true;
-        m_shell.Close();
+        if (!m_restartFrom.empty())
+            m_shell.RestartAfterUpdate(m_restartFrom);
+        else
+            m_shell.Close();
     }
 
     void Workspace::DrawQuitPrompt()

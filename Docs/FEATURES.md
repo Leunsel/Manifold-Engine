@@ -35,6 +35,7 @@ Manifold Engine reads and writes Cheat Engine tables (`.CT`): records, groups, p
 - [Logs and error codes](#logs-and-error-codes)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Command palette](#command-palette)
+- [Updates](#updates)
 - [Use](#use)
 
 ## Interface
@@ -940,6 +941,16 @@ A crash writes a minidump and a short report into `crashes`.
 - **Narrowing.** `>` only commands, windows and settings; `@` only records; `#` only tables. Without a query the list shows what was used last, then the commands; records only appear while typing (a table can have thousands).
 - **Running.** Enter runs the chosen line: a command, a window, a settings page, a table. On a record Enter switches it (a script on or off, a value frozen or not), Alt+Enter selects it in the address list instead; a group is shown in the list. The arrow keys and Page Up/Down choose, the mouse wheel scrolls, a click runs, Escape or a click outside closes.
 - **Recent.** What was run from the palette comes first next time and is lifted among equal matches (`[Recent] PaletteRecent` in the settings file).
+
+## Updates
+
+At start the program asks GitHub for the newest release (Settings → General → Check for Updates at Start; Help → Check for Updates asks at any time).
+
+- **The notice.** A newer version opens a dialog with its release notes. The first time a version is offered the dialog has no way to skip it; from the next start on it offers **Skip This Version**, and a skipped version stays quiet until a newer one is out (`[Updates] Seen` and `Skipped` in the settings file). After **Later** the Help menu keeps an *Update to …* line.
+- **Install Update** downloads the release zip, checks its SHA-256 against the one GitHub lists and puts the program files in place. The running program and its DLLs are renamed to `<name>.update-old` (a running file can be renamed, not overwritten) and removed at the next start; a game that still holds the old agent DLL only delays that. Tables, settings, logs and files of your own are not touched; an autorun file of the release that you changed is copied to `backups\update-<old version>` first. If a file cannot be replaced, the program files are put back.
+- **Restart Now** closes the program the usual way (unsaved table, active scripts) and starts the new one with the same table and process.
+- A copy that runs from a build folder of the source (`Build\x64\Release` next to `Manifold-Engine.sln`) or from a folder it cannot write to only shows the notice and the release page.
+- For tests, `MANIFOLD_UPDATE_FEED` names another release answer: an https address or a local JSON file in the shape of GitHub's `releases/latest`.
 
 ## Use
 

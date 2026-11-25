@@ -15,6 +15,7 @@
 #include "UI/TypePicker.h"
 #include "UI/UiHost.h"
 #include "UI/UiScale.h"
+#include "UI/UpdateDialog.h"
 #include "UI/Widgets.h"
 
 #include "imgui_internal.h"
@@ -659,6 +660,13 @@ namespace Manifold::UI
             if (!Target::IsElevated() && ImGui::MenuItem(ICON_FA_SHIELD_ALT "  Restart as Administrator"))
                 workspace.Window().RestartElevated();
             ImGui::Separator();
+            if (const auto& available = workspace.Updates().Available())
+            {
+                if (ImGui::MenuItem((ICON_FA_ARROW_CIRCLE_UP "  Update to " + available->Version).c_str()))
+                    workspace.Updates().OpenAvailable();
+            }
+            if (ImGui::MenuItem(workspace.Updates().Checking() ? ICON_FA_SYNC "  Checking for Updates..." : ICON_FA_SYNC "  Check for Updates", nullptr, false, !workspace.Updates().Checking()))
+                workspace.Updates().CheckNow();
             if (ImGui::MenuItem(ICON_FA_INFO_CIRCLE "  About"))
                 workspace.OpenAbout();
             ScriptMenuInto("help", scriptOpened, scriptClicked);

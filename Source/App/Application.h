@@ -28,6 +28,7 @@ namespace Manifold
         std::filesystem::path LayoutSweep;     // report file; the sweep runs cloaked and closes the program
         std::vector<std::string> SweepWindows; // empty = every window
         std::vector<float> SweepScales;        // empty = 100 % and 150 %
+        std::string UpdatedFrom;               // --updated-from=<version>: the update's restart
     };
 
     class Application final : private WindowHost::Client, public UI::Shell, private UI::LayoutSweep::Host
@@ -52,6 +53,7 @@ namespace Manifold
         void* NativeWindow() const override { return m_host.Window(); }
         void* Device() const override { return m_host.Device(); }
         void RestartElevated() override;
+        void RestartAfterUpdate(const std::string& from) override;
         void Restyle() override;
 
     private:
@@ -66,6 +68,11 @@ namespace Manifold
         void SplashStatus(const std::string& text);
         void CloseRequested() override;
         void RememberPlacement();
+        std::wstring RestartArguments() const;
+        static std::wstring ProgramPath();
+        void StartAgain();
+        std::string m_restartFrom;
+        std::wstring m_restartArguments;
         void FirstFrameWork();
         void TickWhileWaiting(unsigned milliseconds);
         void ProfileReportWork();

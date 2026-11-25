@@ -105,6 +105,9 @@
     X(ThemeNotSaved, 5015) \
     X(ThemeExists, 5016) \
     X(ThemeInvalid, 5017) \
+    X(UpdateCheckFailed, 5018) \
+    X(UpdateDownloadFailed, 5019) \
+    X(UpdateInstallFailed, 5020) \
     X(TableNotRead, 6001) \
     X(TableNotXml, 6002) \
     X(TableNotCheatTable, 6003) \

@@ -126,6 +126,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\App\TargetSession.cpp" />
     <ClCompile Include="..\Source\App\Themes.cpp" />
     <ClCompile Include="..\Source\App\UnrealSession.cpp" />
+    <ClCompile Include="..\Source\App\Updates.cpp" />
     <ClCompile Include="..\Source\App\WriteHistory.cpp" />
     <ClCompile Include="..\Source\Asm\AsmAssist.cpp" />
     <ClCompile Include="..\Source\Asm\Assembler.cpp" />
@@ -148,6 +149,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Core\SafeFile.cpp" />
     <ClCompile Include="..\Source\Core\Text.cpp" />
     <ClCompile Include="..\Source\Core\Xml.cpp" />
+    <ClCompile Include="..\Source\Core\Zip.cpp" />
     <ClCompile Include="..\Source\Debug\BreakAction.cpp" />
     <ClCompile Include="..\Source\Debug\Debugger.cpp" />
     <ClCompile Include="..\Source\Debug\Trace.cpp" />
@@ -266,6 +268,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Templates\TemplateLibrary.cpp" />
     <ClCompile Include="..\Source\Text\Highlight.cpp" />
     <ClCompile Include="..\Source\Text\Json.cpp" />
+    <ClCompile Include="..\Source\Text\JsonValue.cpp" />
     <ClCompile Include="..\Source\Text\LuaContext.cpp" />
     <ClCompile Include="..\Source\Text\TextBuffer.cpp" />
     <ClCompile Include="..\Tests\AgentLifeTests.cpp" />
@@ -310,6 +313,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\ThemeTests.cpp" />
     <ClCompile Include="..\Tests\UiLayoutTests.cpp" />
     <ClCompile Include="..\Tests\UnrealTests.cpp" />
+    <ClCompile Include="..\Tests\UpdateTests.cpp" />
     <ClCompile Include="..\Tests\WatchStress.cpp" />
     <ClCompile Include="..\Tests\WorkTests.cpp" />
     <ClCompile Include="..\Tests\Wow64Tests.cpp" />

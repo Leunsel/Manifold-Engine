@@ -12,6 +12,7 @@
 #include "Layout/Layout.h"
 #include "UI/Fonts.h"
 #include "UI/Shortcuts.h"
+#include "UI/UpdateDialog.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
 
@@ -1053,8 +1054,24 @@ namespace Manifold::UI
             changed |= ToggleSwitch("##splash", &settings.ShowSplash);
             list.EndRow();
         }
-        const bool elevated = Target::IsElevated();
+        if (list.Row("Check for Updates at Start", "Asks GitHub for a newer release when the program starts. Help > Check for Updates asks at any time.", toggle))
+        {
+            changed |= ToggleSwitch("##updatecheck", &settings.CheckForUpdates);
+            list.EndRow();
+        }
         const float button = std::round(Px(210.0f));
+        if (list.Row("Updates", settings.UpdateSkipped.empty() ? "Version " MANIFOLD_VERSION_TEXT "." : "Version " MANIFOLD_VERSION_TEXT "; version " + settings.UpdateSkipped + " is skipped.", button))
+        {
+            const bool checking = m_workspace.Updates().Checking();
+            Layout::ButtonStyle check;
+            check.Width = Layout::Size::Fixed(210.0f);
+            ImGui::BeginDisabled(checking);
+            if (Layout::Button(checking ? ICON_FA_SYNC "  Checking..." : ICON_FA_SYNC "  Check Now", check))
+                m_workspace.Updates().CheckNow();
+            ImGui::EndDisabled();
+            list.EndRow();
+        }
+        const bool elevated = Target::IsElevated();
         if (list.Row("Administrator Rights", elevated ? "Running as administrator." : "Some games can only be opened as administrator.",
                 button))
         {

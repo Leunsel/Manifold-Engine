@@ -111,6 +111,9 @@
     <ClCompile Include="..\Source\App\UnrealSession.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\Updates.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\WriteHistory.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -175,6 +178,9 @@
       <Filter>Source\Core</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Core\Xml.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Core\Zip.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Debug\BreakAction.cpp">
@@ -525,6 +531,9 @@
     <ClCompile Include="..\Source\Text\Json.cpp">
       <Filter>Source\Text</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Text\JsonValue.cpp">
+      <Filter>Source\Text</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Text\LuaContext.cpp">
       <Filter>Source\Text</Filter>
     </ClCompile>
@@ -655,6 +664,9 @@
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\UnrealTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Tests\UpdateTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
     <ClCompile Include="..\Tests\WatchStress.cpp">
