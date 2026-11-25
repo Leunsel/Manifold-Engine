@@ -209,7 +209,7 @@ Tables and autorun scripts written for Cheat Engine 7.5 run here. Beyond the fun
 - `compareMemory(a, b, size, method)`: `true`, or `false` and the offset of the first difference.
 - `setMemoryProtection(address, size, {R=, W=, X=})`, `readRegionFromFile(file, address)`, `writeRegionToFile(file, address, size)`, `allocateSharedMemoryLocal(name, size)`, `createRemoteThread(address, parameter)`.
 - Memory of the program itself: `readByteLocal` .. `readDoubleLocal`, `readStringLocal`, `readBytesLocal`, the matching `write*Local` functions, `executeCodeLocal(address, parameter)`, `executeCodeLocalEx(address, ...)`, and `getAddress(name, true)` for exports of loaded system DLLs (`"kernel32.GetTickCount"`).
-- `getUniqueAOB(address)` returns a byte pattern that occurs once in the process and the offset from the match to the address. Branch targets and RIP-relative or relocated addresses are `??`, so the pattern survives a restart of the game.
+- `getUniqueAOB(address)` returns a byte pattern that occurs once in all of the process's readable memory, which is what `AOBScan` searches, and the offset from the match to the address (`match + offset = address`). It uses the signature maker's measurement and masking: branch distances, displacements, addresses and large immediates are `??`, so the pattern survives a restart of the game. The pattern is at least 8 bytes long and may start at an instruction up to 128 bytes before or after the address, so the offset can be negative. It returns nil when no pattern within 96 bytes is unique. One call takes about 0.1 to 0.5 s in a game, because it reads all memory.
 
 ### Code and symbols
 
