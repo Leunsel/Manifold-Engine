@@ -569,6 +569,27 @@ namespace Manifold::Table
         return pressed;
     }
 
+    namespace
+    {
+        struct KeyName
+        {
+            const char* Name;
+            int Code;
+        };
+
+        // ∑ Fixed English names for the keys whose layout name is ambiguous or local. Without the
+        //   extended bit Windows names Home "Num 7" on an English layout, which read back as the number
+        //   pad key, and a German layout says "Pos1" or "Entf". KeysText writes a key's first name here,
+        //   ParseKeysText reads all of them.
+        constexpr KeyName kKeyNames[] = {
+            { "Space", VK_SPACE }, { "Enter", VK_RETURN }, { "Return", VK_RETURN }, { "Tab", VK_TAB }, { "Esc", VK_ESCAPE }, { "Escape", VK_ESCAPE },
+            { "Backspace", VK_BACK }, { "Insert", VK_INSERT }, { "Ins", VK_INSERT }, { "Delete", VK_DELETE }, { "Del", VK_DELETE }, { "Home", VK_HOME },
+            { "End", VK_END }, { "Page Up", VK_PRIOR }, { "PageUp", VK_PRIOR }, { "PgUp", VK_PRIOR }, { "Page Down", VK_NEXT }, { "PageDown", VK_NEXT },
+            { "PgDn", VK_NEXT }, { "Up", VK_UP }, { "Down", VK_DOWN }, { "Left", VK_LEFT }, { "Right", VK_RIGHT }, { "Pause", VK_PAUSE },
+            { "Num +", VK_ADD }, { "Num -", VK_SUBTRACT }, { "Num *", VK_MULTIPLY }, { "Num /", VK_DIVIDE }, { "Num .", VK_DECIMAL },
+        };
+    }
+
     std::string KeysText(const std::vector<int>& keys)
     {
         std::string text;
@@ -591,6 +612,12 @@ namespace Manifold::Table
             if (key >= VK_NUMPAD0 && key <= VK_NUMPAD9)
             {
                 text += "Num " + std::to_string(key - VK_NUMPAD0);
+                continue;
+            }
+            const KeyName* fixed = std::find_if(std::begin(kKeyNames), std::end(kKeyNames), [key](const KeyName& entry) { return entry.Code == key; });
+            if (fixed != std::end(kKeyNames))
+            {
+                text += fixed->Name;
                 continue;
             }
             const UINT scan = ::MapVirtualKeyW(static_cast<UINT>(key), MAPVK_VK_TO_VSC);
@@ -646,17 +673,10 @@ namespace Manifold::Table
                 key = VK_NUMPAD0 + (lower.back() - '0');
             else
             {
-                static const std::pair<const char*, int> kNames[] = {
-                    { "space", VK_SPACE }, { "enter", VK_RETURN }, { "return", VK_RETURN }, { "tab", VK_TAB }, { "esc", VK_ESCAPE }, { "escape", VK_ESCAPE },
-                    { "backspace", VK_BACK }, { "insert", VK_INSERT }, { "ins", VK_INSERT }, { "delete", VK_DELETE }, { "del", VK_DELETE }, { "home", VK_HOME },
-                    { "end", VK_END }, { "pageup", VK_PRIOR }, { "page up", VK_PRIOR }, { "pgup", VK_PRIOR }, { "pagedown", VK_NEXT }, { "page down", VK_NEXT },
-                    { "pgdn", VK_NEXT }, { "up", VK_UP }, { "down", VK_DOWN }, { "left", VK_LEFT }, { "right", VK_RIGHT }, { "pause", VK_PAUSE },
-                    { "num +", VK_ADD }, { "num -", VK_SUBTRACT }, { "num *", VK_MULTIPLY }, { "num /", VK_DIVIDE }, { "num .", VK_DECIMAL },
-                };
-                for (const auto& [entry, code] : kNames)
+                for (const KeyName& entry : kKeyNames)
                 {
-                    if (lower == entry)
-                        key = code;
+                    if (key == 0 && EqualsNoCase(name, entry.Name))
+                        key = entry.Code;
                 }
                 // whatever KeysText writes for a key (the keyboard layout's own names) reads back
                 for (int code = 8; key == 0 && code <= 254; ++code)

@@ -2837,6 +2837,12 @@ return M
             CHECK(Table::ParseKeysText("").empty());
             CHECK(Table::KeysText(Table::ParseKeysText("ctrl+f2")) == "Ctrl+F2");
             CHECK(Table::ParseKeysText(Table::KeysText({ VK_CONTROL, VK_HOME })) == std::vector<int>({ VK_CONTROL, VK_HOME }));
+            // navigation keys get fixed names on every layout (an English layout names Home "Num 7" without the extended bit)
+            CHECK_EQ(Table::KeysText({ VK_CONTROL, VK_HOME }), std::string("Ctrl+Home"));
+            CHECK_EQ(Table::KeysText({ VK_SHIFT, VK_DELETE }), std::string("Shift+Delete"));
+            CHECK_EQ(Table::KeysText({ VK_PRIOR }), std::string("Page Up"));
+            for (const int key : { VK_HOME, VK_END, VK_INSERT, VK_DELETE, VK_PRIOR, VK_NEXT, VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_ADD, VK_DECIMAL, VK_NUMPAD7 })
+                CHECK_MSG(Table::ParseKeysText(Table::KeysText({ VK_MENU, key })) == std::vector<int>({ VK_MENU, key }), Table::KeysText({ VK_MENU, key }));
 
             // hotkey = ... on a checkbox and a button; a press switches and clicks like the mouse
             Lua::UiModel& model = engine.Lua().Ui();

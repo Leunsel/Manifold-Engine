@@ -9,12 +9,15 @@
 #include "Target/AgentLife.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <windows.h>
@@ -67,6 +70,46 @@ namespace Manifold::Tests
 
     wchar_t g_dumpPath[MAX_PATH * 2] = L"";
     wchar_t g_keptPath[MAX_PATH * 2] = L"";
+
+    // ∑ A suite that hangs (a target that stopped answering, a wait without an end) would block a CI
+    //   job until its own timeout, which keeps no logs. The watchdog stops the run after
+    //   MANIFOLD_TEST_SUITE_MINUTES (15) in one suite instead: it names the suite, writes a dump of
+    //   the tests with every thread's stack and keeps the run's folder, so the artifact has both.
+    std::atomic<ULONGLONG> g_suiteSince{ 0 };
+    std::atomic<const char*> g_suiteTitle{ nullptr };
+
+    void WatchSuites(double minutes)
+    {
+        const ULONGLONG limit = static_cast<ULONGLONG>(minutes * 60'000.0);
+        for (;;)
+        {
+            ::Sleep(1000);
+            const ULONGLONG since = g_suiteSince.load();
+            if (since == 0 || ::GetTickCount64() - since < limit)
+                continue;
+            const char* title = g_suiteTitle.load();
+            std::printf("\nHANG: the suite \"%s\" is still running after %g minutes; the run stops here\n", title ? title : "?", minutes);
+            if (g_dumpPath[0])
+            {
+                const HANDLE file = ::CreateFileW(g_dumpPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (file != INVALID_HANDLE_VALUE)
+                {
+                    const BOOL written = ::MiniDumpWriteDump(::GetCurrentProcess(), ::GetCurrentProcessId(), file,
+                        static_cast<MINIDUMP_TYPE>(MiniDumpNormal | MiniDumpWithThreadInfo), nullptr, nullptr, nullptr);
+                    ::CloseHandle(file);
+                    std::printf("%s %ls\n", written ? "The dump is" : "No dump could be written to", g_dumpPath);
+                }
+            }
+            if (g_keptPath[0])
+            {
+                const HANDLE marker = ::CreateFileW(g_keptPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+                if (marker != INVALID_HANDLE_VALUE)
+                    ::CloseHandle(marker);
+            }
+            std::fflush(stdout);
+            ::TerminateProcess(::GetCurrentProcess(), 3);
+        }
+    }
 
     LONG WINAPI WriteCrashDump(EXCEPTION_POINTERS* info)
     {
@@ -216,6 +259,9 @@ namespace Manifold::Tests
 int main(int argc, char** argv)
 {
     using namespace Manifold::Tests;
+    // ∑ Under CI stdout is a pipe, which the C runtime buffers in 4 KB blocks: the log then ends an
+    //   earlier suite's worth before where the run really is. Unbuffered, the last line is the truth.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
     if (char trace[4] = ""; ::GetEnvironmentVariableA("MANIFOLD_TEST_TRACE_FAULTS", trace, sizeof(trace)) && trace[0] == '1')
         ::AddVectoredExceptionHandler(1, &TraceFault);
     Manifold::BindMainThread();
@@ -280,6 +326,11 @@ int main(int argc, char** argv)
         };
 
     Manifold::RuntimeLog::OpenFile(Manifold::Paths::LogFile());
+    double watchMinutes = 15.0;
+    if (char minutes[8] = ""; ::GetEnvironmentVariableA("MANIFOLD_TEST_SUITE_MINUTES", minutes, sizeof(minutes)))
+        watchMinutes = std::atof(minutes);
+    if (watchMinutes > 0.0)
+        std::thread(&WatchSuites, watchMinutes).detach();
     int assembler = 0;
     int ran = 0;
     for (const Suite& suite : suites)
@@ -288,7 +339,10 @@ int main(int argc, char** argv)
             continue;
         ++ran;
         std::printf("%s\n", suite.Title);
+        g_suiteTitle = suite.Title;
+        g_suiteSince = ::GetTickCount64();
         const int result = suite.Run(context);
+        g_suiteSince = 0;
         if (std::string_view(suite.Name) == "assembler")
             assembler = result;
     }

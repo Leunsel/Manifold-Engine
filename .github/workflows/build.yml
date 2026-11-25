@@ -57,7 +57,7 @@ jobs:
         run: Build\x64\Debug\Manifold-Engine.Tests.exe
 
       - name: Keep logs and crash reports
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: test-data
