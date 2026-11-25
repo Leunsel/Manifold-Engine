@@ -23,7 +23,9 @@ namespace Manifold::Disasm
         signatureOptions.Scope = options.WholeProcess ? SignatureScope::Process : SignatureScope::Module;
         signatureOptions.CodeOnly = options.CodeOnly;
         signatureOptions.MaxBytes = static_cast<int>(std::clamp<std::size_t>(options.MaxLength, 8, 256));
-        signatureOptions.MinBytes = 0;
+        // The signature maker's 8 bytes at least: Isaac gave 4-byte patterns that are unique today
+        // and break with the next update.
+        signatureOptions.MinBytes = 8;
         signatureOptions.AllowOffset = options.BackSteps > 0;
         signatureOptions.MaxOffset = options.MaxOffset;
         std::string error;
