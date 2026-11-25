@@ -2548,7 +2548,7 @@ define(doc, "markdown", {
 end)
 
 constant("apiVersion", API_VERSION, "The API version, an integer. It grows when functions are added; names keep their meaning.")
-constant("version", native.version(), "The program version, such as `\"0.1.0\"`.", "string")
+constant("version", native.version(), "The program version, such as `\"1.0.0\"`.", "string")
 
 do
   local path = "manifold.has"

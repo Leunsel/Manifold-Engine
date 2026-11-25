@@ -32,7 +32,7 @@ The MSVC compiler (`v143`) cannot build the program: the direct system call stub
 ### Generated sources
 
 - Before compiling, the projects run `Tools/embed_lua.py`, `Tools/embed_templates.py`, `Tools/embed_modules.py` and `Tools/gen_buildinfo.py` with the Python on PATH. A script that fails stops the build.
-- `gen_buildinfo.py` writes the commit into the build, so the log, Help → About and the diagnostics report show the version with it, like `0.1.0 (3e90571)`. A `+` after the commit means the working tree had uncommitted changes.
+- `gen_buildinfo.py` writes the commit into the build, so the log, Help → About and the diagnostics report show the version with it, like `1.0.0 (3e90571)`. A `+` after the commit means the working tree had uncommitted changes.
 - The `ManagedDumper` project builds `Managed` with `dotnet` and writes `Source/Generated/ManagedDumperImage.cpp`. It is the one generated source that is not committed, because it holds the built assembly.
 
 The build warns when a tool is missing:
