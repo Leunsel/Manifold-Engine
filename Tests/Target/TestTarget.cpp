@@ -982,6 +982,10 @@ struct SpeedProbe
     volatile unsigned long Multimedia;
     volatile unsigned long Ready;
     volatile unsigned long Threads;
+    volatile long BackClock;  // the first time a clock went back: bit 0 counter, 1 tick64, 2 tick, 3 multimedia
+    volatile unsigned long BackThread;
+    volatile long long BackBefore;
+    volatile long long BackNow;
 };
 
 extern "C" __declspec(dllexport) SpeedProbe g_speedProbe = {};
@@ -1012,9 +1016,35 @@ namespace
         return sample;
     }
 
-    bool WentBack(const SpeedSample& before, const SpeedSample& now)
+    bool WentBack(const SpeedSample& before, const SpeedSample& now, bool publish)
     {
-        return now.Counter < before.Counter || now.Tick64 < before.Tick64 || static_cast<long>(now.Tick - before.Tick) < 0 || static_cast<long>(now.Multimedia - before.Multimedia) < 0;
+        long clocks = 0;
+        long long was = 0;
+        long long is = 0;
+        const auto note = [&](int bit, long long a, long long b)
+        {
+            if (!clocks)
+            {
+                was = a;
+                is = b;
+            }
+            clocks |= 1L << bit;
+        };
+        if (now.Counter < before.Counter)
+            note(0, before.Counter, now.Counter);
+        if (now.Tick64 < before.Tick64)
+            note(1, static_cast<long long>(before.Tick64), static_cast<long long>(now.Tick64));
+        if (static_cast<long>(now.Tick - before.Tick) < 0)
+            note(2, before.Tick, now.Tick);
+        if (static_cast<long>(now.Multimedia - before.Multimedia) < 0)
+            note(3, before.Multimedia, now.Multimedia);
+        if (clocks && ::InterlockedCompareExchange(&g_speedProbe.BackClock, clocks, 0) == 0)
+        {
+            g_speedProbe.BackThread = publish ? 1 : 0;
+            g_speedProbe.BackBefore = was;
+            g_speedProbe.BackNow = is;
+        }
+        return clocks != 0;
     }
 
     DWORD WINAPI SpeedWorker(void* parameter)
@@ -1025,7 +1055,7 @@ namespace
         for (unsigned long long round = 0;; ++round)
         {
             const SpeedSample now = TakeSpeedSample();
-            if (WentBack(before, now))
+            if (WentBack(before, now, publish))
                 ::InterlockedIncrement64(&g_speedProbe.Backwards);
             before = now;
             if (publish)

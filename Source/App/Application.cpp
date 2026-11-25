@@ -248,11 +248,7 @@ namespace Manifold
             SplashStatus("Loading " + WideToUtf8(m_options.Table.filename().wstring()));
             m_workspace->OpenTable(m_options.Table, false);
         }
-        const std::vector<Backups::Abandoned> abandoned = m_engine->Backups().TakeAbandoned();
-        for (std::size_t i = 1; i < abandoned.size(); ++i)
-            LOG_WARN("Backup", "An earlier run did not close properly either. Its last backup is " + WideToUtf8(abandoned[i].File.wstring()));
-        if (!abandoned.empty())
-            m_workspace->OfferBackup(abandoned.front().File, abandoned.front().Name);
+        m_workspace->OfferBackups(m_engine->Backups().TakeAbandoned());
         SplashStatus("Ready");
         for (const std::string& window : m_options.Open)
         {

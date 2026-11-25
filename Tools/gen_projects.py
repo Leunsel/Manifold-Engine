@@ -117,9 +117,16 @@ def config_groups(strict, subsystem, link):
       <AdditionalDependencies>{LIBS}</AdditionalDependencies>
     </Link>
 """
+    # /EHs, not the default /EHsc: Lua is C and raises errors and yields with
+    # longjmp, which on x64 Windows unwinds the C++ frames in between. With
+    # /EHsc the compiler takes every extern "C" call (the whole Lua API) as
+    # never throwing, so its cleanup tables do not match those calls and the
+    # unwind ran a moved-from shared_ptr's destructor with its old pointer
+    # (ASan: use after free in shellExecute's job, 2026-11-25).
     return external + f"""  <ItemDefinitionGroup>
     <ClCompile>
       {warning}
+      <ExceptionHandling>SyncCThrow</ExceptionHandling>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>

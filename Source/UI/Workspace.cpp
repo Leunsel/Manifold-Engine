@@ -1257,6 +1257,8 @@ namespace Manifold::UI
     {
         std::filesystem::path folder = m_engine.Backups().SessionFolder();
         std::error_code missing;
+        if (!std::filesystem::is_directory(folder, missing) && !m_engine.Backups().LegacyFolder().empty() && std::filesystem::is_directory(m_engine.Backups().LegacyFolder(), missing))
+            folder = m_engine.Backups().LegacyFolder();
         if (!std::filesystem::is_directory(folder, missing))
         {
             folder = Backups::Folder(m_engine.Options());
@@ -1276,6 +1278,7 @@ namespace Manifold::UI
                     Report(status);
                     return;
                 }
+                std::erase_if(m_abandoned, [&path](const Backups::Abandoned& run) { return run.File == path; });
                 const std::string when = Backups::When(path);
                 m_engine.Notify(LogLevel::Success, "Opened the backup " + (when.empty() ? WideToUtf8(path.filename().wstring()) : "from " + when) + ". Save it under a name to keep it.");
             };
@@ -1287,15 +1290,28 @@ namespace Manifold::UI
         load();
     }
 
-    void Workspace::OfferBackup(const std::filesystem::path& path, const std::string& name)
+    // ∑ Every run that did not close properly is offered, not only the newest:
+    //   the newest in the dialog, all of them in File > Backups until opened.
+    void Workspace::OfferBackups(std::vector<Backups::Abandoned> abandoned)
     {
-        LOG_WARN("Backup", "The last run did not close properly. Its last backup is " + WideToUtf8(path.wstring()));
+        for (const Backups::Abandoned& run : abandoned)
+            LOG_WARN("Backup", "A run did not close properly. Its last backup of " + run.Name + " is " + WideToUtf8(run.File.wstring()));
+        if (abandoned.empty())
+            return;
+        m_abandoned = std::move(abandoned);
+        const std::filesystem::path path = m_abandoned.front().File;
+        const std::string name = m_abandoned.front().Name;
+        const std::size_t more = m_abandoned.size() - 1;
+        const std::string others = more == 0 ? std::string() :
+            Format("%zu more %s that did not close properly %s listed in File, Backups.", more, more == 1 ? "run" : "runs", more == 1 ? "is" : "are");
         if (Table::TableHasContent(m_engine.Table(), m_engine.Structures(), m_engine.TableSymbols()))
         {
-            m_engine.Notify(LogLevel::Warning, "The last run did not close properly. Its last backup of " + name + " from " + Backups::When(path) + " can be opened with File, Backups, Open a backup.");
+            m_engine.Notify(LogLevel::Warning, "The last run did not close properly. Its last backup of " + name + " from " + Backups::When(path) + " can be opened with File, Backups." +
+                (others.empty() ? std::string() : " " + others));
             return;
         }
-        Confirm("Open Backup", "The last run did not close properly and left changes that were not saved.\n\nOpen the backup of " + name + " from " + Backups::When(path) + "?",
+        Confirm("Open Backup", "The last run did not close properly and left changes that were not saved.\n\nOpen the backup of " + name + " from " + Backups::When(path) + "?" +
+            (others.empty() ? std::string() : "\n\n" + others),
             [this, path]() { OpenBackup(path); }, "Open");
     }
 

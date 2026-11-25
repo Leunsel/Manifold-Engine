@@ -9,8 +9,11 @@
 #include "Table/CheatTable.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <cstdio>
 #include <ctime>
 #include <cwchar>
+#include <cwctype>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -127,6 +130,36 @@ namespace Manifold
             return kFallbackName;
         }
 
+        std::string PathKey(std::string_view tablePath)
+        {
+            std::wstring path = std::filesystem::path(Utf8ToWide(tablePath)).lexically_normal().wstring();
+            std::uint32_t hash = 2166136261u;
+            for (wchar_t c : path)
+            {
+                const wchar_t folded = c == L'/' ? L'\\' : static_cast<wchar_t>(::towlower(c));
+                hash = (hash ^ static_cast<std::uint32_t>(folded)) * 16777619u;
+            }
+            char text[9] = "";
+            std::snprintf(text, sizeof(text), "%08x", hash);
+            return text;
+        }
+
+        std::string FolderName(std::string_view tablePath, std::string_view processName)
+        {
+            const std::string name = SessionName(tablePath, processName);
+            return tablePath.empty() ? name : name + "~" + PathKey(tablePath);
+        }
+
+        std::string ShownName(std::string_view folderName)
+        {
+            const std::size_t tilde = folderName.rfind('~');
+            if (tilde == std::string_view::npos || tilde == 0 || folderName.size() - tilde != 9)
+                return std::string(folderName);
+            const std::string_view key = folderName.substr(tilde + 1);
+            const bool hex = std::all_of(key.begin(), key.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+            return std::string(hex ? folderName.substr(0, tilde) : folderName);
+        }
+
         std::wstring StampName(std::chrono::system_clock::time_point time)
         {
             const std::time_t seconds = std::chrono::system_clock::to_time_t(time);
@@ -177,6 +210,21 @@ namespace Manifold
                 std::error_code ignored;
                 if (at->is_regular_file(ignored) && IsVersion(at->path()))
                     versions.push_back(at->path());
+            }
+            std::sort(versions.begin(), versions.end(), Newer);
+            return versions;
+        }
+
+        std::vector<std::filesystem::path> Versions(const std::vector<std::filesystem::path>& folders)
+        {
+            std::vector<std::filesystem::path> versions;
+            for (auto at = folders.begin(); at != folders.end(); ++at)
+            {
+                const std::filesystem::path& folder = *at;
+                if (folder.empty() || std::find(folders.begin(), at, folder) != at)
+                    continue;
+                std::vector<std::filesystem::path> found = Versions(folder);
+                versions.insert(versions.end(), found.begin(), found.end());
             }
             std::sort(versions.begin(), versions.end(), Newer);
             return versions;
@@ -300,13 +348,36 @@ namespace Manifold
         if (!path.empty())
             return Backups::SessionName(path, {});
         if (!m_restored.empty())
-            return m_restored;
+            return Backups::ShownName(m_restored);
         return Backups::SessionName({}, m_engine.HasProcess() ? m_engine.Process()->Name() : m_process);
+    }
+
+    std::string SessionBackup::FolderName() const
+    {
+        const std::string& path = m_engine.Table().FilePath;
+        if (!path.empty())
+            return Backups::FolderName(path, {});
+        if (!m_restored.empty())
+            return m_restored;
+        return Backups::FolderName({}, m_engine.HasProcess() ? m_engine.Process()->Name() : m_process);
     }
 
     std::filesystem::path SessionBackup::SessionFolder() const
     {
-        return Backups::Folder(m_engine.Options()) / Utf8ToWide(Name());
+        return Backups::Folder(m_engine.Options()) / Utf8ToWide(FolderName());
+    }
+
+    std::filesystem::path SessionBackup::LegacyFolder() const
+    {
+        const std::string& path = m_engine.Table().FilePath;
+        if (path.empty())
+            return {};
+        return Backups::Folder(m_engine.Options()) / Utf8ToWide(Backups::SessionName(path, {}));
+    }
+
+    std::vector<std::filesystem::path> SessionBackup::Versions() const
+    {
+        return Backups::Versions(std::vector<std::filesystem::path>{ SessionFolder(), LegacyFolder() });
     }
 
     void SessionBackup::Tick(double now)
@@ -356,7 +427,7 @@ namespace Manifold
             return Status::Success();
 
         const std::string name = Name();
-        const std::filesystem::path folder = Backups::Folder(m_engine.Options()) / Utf8ToWide(name);
+        const std::filesystem::path folder = SessionFolder();
         const std::filesystem::path file = Backups::Write(folder, text, std::chrono::system_clock::now());
         if (file.empty())
             return Status::Fail(ErrorCode::BackupNotSaved, WideToUtf8(folder.wstring()));

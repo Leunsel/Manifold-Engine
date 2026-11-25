@@ -454,7 +454,7 @@ namespace Manifold::UI
             {
                 if (ImGui::IsWindowAppearing())
                 {
-                    m_backupVersions = Backups::Versions(engine.Backups().SessionFolder());
+                    m_backupVersions = engine.Backups().Versions();
                     if (m_backupVersions.size() > 12)
                         m_backupVersions.resize(12);
                 }
@@ -464,6 +464,17 @@ namespace Manifold::UI
                 {
                     if (ImGui::MenuItem((ICON_FA_CLOCK "  " + Backups::When(version) + "##" + WideToUtf8(version.filename().wstring())).c_str()))
                         workspace.OpenBackup(version);
+                }
+                if (!workspace.Abandoned().empty())
+                {
+                    ImGui::Separator();
+                    Muted("Runs That Did Not Close");
+                    const std::vector<Backups::Abandoned> runs = workspace.Abandoned();
+                    for (const Backups::Abandoned& run : runs)
+                    {
+                        if (ImGui::MenuItem((ICON_FA_EXCLAMATION_TRIANGLE "  " + run.Name + "  " + Backups::When(run.File) + "##" + WideToUtf8(run.File.wstring())).c_str()))
+                            workspace.OpenBackup(run.File);
+                    }
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem(ICON_FA_FOLDER_OPEN "  Open a Backup..."))

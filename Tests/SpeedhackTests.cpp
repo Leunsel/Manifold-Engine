@@ -41,6 +41,10 @@ namespace Manifold::Tests
             std::uint32_t Multimedia;
             std::uint32_t Ready;
             std::uint32_t Threads;
+            std::uint32_t BackClock;
+            std::uint32_t BackThread;
+            std::int64_t BackBefore;
+            std::int64_t BackNow;
         };
 
         struct Child
@@ -123,6 +127,23 @@ namespace Manifold::Tests
         {
             const auto probe = ReadProbe(*session.Core.Process(), session.ProbeAt);
             return probe ? probe->Backwards : -1;
+        }
+
+        // The first clock that went back, as the target saw it.
+        std::string BackText(const Session& session)
+        {
+            const auto probe = ReadProbe(*session.Core.Process(), session.ProbeAt);
+            if (!probe || !probe->BackClock)
+                return {};
+            static constexpr const char* kNames[] = { "QueryPerformanceCounter", "GetTickCount64", "GetTickCount", "timeGetTime" };
+            std::string clock;
+            for (int bit = 0; bit < 4; ++bit)
+            {
+                if (probe->BackClock & (1u << bit))
+                    clock += (clock.empty() ? "" : "+") + std::string(kNames[bit]);
+            }
+            return Format(" (first: %s on the %s thread, %lld then %lld)", clock.c_str(), probe->BackThread ? "publishing" : "other",
+                static_cast<long long>(probe->BackBefore), static_cast<long long>(probe->BackNow));
         }
 
         Rates Measure(const Session& session, int milliseconds)
@@ -273,7 +294,7 @@ namespace Manifold::Tests
             }
             CHECK(speedhack.SetSpeed(1.0).Ok());
             CheckRates(session, 1.0, "speed 1 after changes");
-            CHECK_MSG(Backwards(session) == 0, session.Label + ": a clock ran backwards " + std::to_string(Backwards(session)) + " times during speed changes");
+            CHECK_MSG(Backwards(session) == 0, session.Label + ": a clock ran backwards " + std::to_string(Backwards(session)) + " times during speed changes" + BackText(session));
 
             CHECK(speedhack.SetSpeed(3.0).Ok());
             Pause(100);
@@ -283,7 +304,7 @@ namespace Manifold::Tests
             CHECK_MSG(settled.Read && settled.Applied == settled.Serial && settled.Speed == 1.0,
                 session.Label + Format(": Disable returned before the agent applied speed 1 (serial %u, applied %u, speed %.3f)", settled.Serial, settled.Applied, settled.Speed));
             CheckRates(session, 1.0, "disabled after a shift");
-            CHECK_MSG(Backwards(session) == 0, session.Label + ": a clock ran backwards when the speedhack was turned off");
+            CHECK_MSG(Backwards(session) == 0, session.Label + ": a clock ran backwards when the speedhack was turned off" + BackText(session));
 
             CHECK(speedhack.Remove().Ok());
             CHECK(!speedhack.Installed() && speedhack.Hooks().empty());
@@ -316,7 +337,7 @@ namespace Manifold::Tests
                     ++clean;
             }
             CHECK_MSG(clean == 20, session.Label + ": " + std::to_string(clean) + " of 20 on/off rounds at speed 1 left the process clean");
-            CHECK_MSG(Backwards(session) == before, session.Label + ": a clock ran backwards while the speedhack went on and off at speed 1");
+            CHECK_MSG(Backwards(session) == before, session.Label + ": a clock ran backwards while the speedhack went on and off at speed 1" + BackText(session));
             CheckRestored(session, hooks, "after 20 rounds at speed 1");
 
             int removed = 0;
@@ -433,7 +454,7 @@ namespace Manifold::Tests
             Pause(500);
             CHECK_MSG(session.Target.Alive(), session.Label + ": the target died with the program that set its speed");
             CheckRates(session, 1.0, "after the program that set the speed was killed");
-            CHECK_MSG(Backwards(session) == before, session.Label + ": a clock ran backwards when the program that set the speed was killed");
+            CHECK_MSG(Backwards(session) == before, session.Label + ": a clock ran backwards when the program that set the speed was killed" + BackText(session));
 
             engine.CloseProcess();
             const Status opened = engine.OpenProcess(MakeProcessId(pid));

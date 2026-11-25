@@ -987,12 +987,12 @@ The first start of a new version moves these files out of the program folder int
 While there are changes that are not saved, everything a `.CT` holds (the address list, the structures, the table script and the rest) is written to `backups` next to the program.
 
 - Every 5 minutes and once more when the program closes, and only when something changed since the last backup. This also happens without a table file.
-- Each session has a folder of its own, named after the table file, or after the opened process when there is no table file, or `session` without either.
+- Each session has a folder of its own, named after the table file plus a short code of its full path (`Isaac~1a2b3c4d`), so two tables with the same file name keep apart; after the opened process when there is no table file; or `session` without either. Folders from before the path code (the name alone) are still listed and never pruned.
 - Each backup is a normal `.CT` named after its time (`2026-11-20_04-15-30.CT`).
 - The 20 newest per folder are kept; only files with such a name are ever removed.
 - File → Backups lists the newest backups of the current session, opens any other one, writes one at once and opens the folder.
 - An opened backup is an unsaved table without a file name, so Save asks where to put it.
-- When a run ended without closing properly and left unsaved changes, the next start offers its last backup.
+- When a run ended without closing properly and left unsaved changes, the next start offers its last backup. When several runs did, the newest is offered and all of them are listed in File → Backups until opened.
 - Settings → Scripts → Backups turns this off and sets the time between backups, the number of versions and the folder.
 - Not part of a backup: scan results, and script text in an open editor that was not applied yet.
 

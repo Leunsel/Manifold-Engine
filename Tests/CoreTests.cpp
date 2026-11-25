@@ -1823,6 +1823,17 @@ hostileRan = true
         CHECK_EQ(Backups::SessionName("", "CrabChampions-Win64-Shipping.exe"), "CrabChampions-Win64-Shipping");
         CHECK_EQ(Backups::SessionName("", "tool.v2"), "tool.v2");
         CHECK_EQ(Backups::SessionName("", ""), "session");
+        CHECK_EQ(Backups::PathKey("C:\\Tables\\Isaac.CT"), Backups::PathKey("c:/tables/./ISAAC.ct"));
+        CHECK(Backups::PathKey("C:\\Tables\\Isaac.CT") != Backups::PathKey("D:\\Other\\Isaac.CT"));
+        CHECK_EQ(Backups::PathKey("C:\\Tables\\Isaac.CT").size(), 8u);
+        CHECK(Backups::FolderName("C:\\Tables\\Isaac.CT", "game.exe") != Backups::FolderName("D:\\Other\\Isaac.CT", "game.exe"));
+        CHECK_EQ(Backups::FolderName("C:\\Tables\\Isaac.CT", {}), "Isaac~" + Backups::PathKey("C:\\Tables\\Isaac.CT"));
+        CHECK_EQ(Backups::FolderName({}, "isaac-ng.exe"), "isaac-ng");
+        CHECK_EQ(Backups::ShownName("My Table~0123abcd"), "My Table");
+        CHECK_EQ(Backups::ShownName("My Table"), "My Table");
+        CHECK_EQ(Backups::ShownName("a~b"), "a~b");
+        CHECK_EQ(Backups::ShownName("x~0123ABCD"), "x~0123ABCD");
+        CHECK_EQ(Backups::ShownName("~0123abcd"), "~0123abcd");
 
         const auto start = std::chrono::system_clock::now();
         CHECK(Backups::IsVersion(Backups::StampName(start) + L".CT"));
@@ -1928,7 +1939,19 @@ hostileRan = true
             add(engine, "Ammo");
             CHECK(backup.BackUpNow(&written).Ok() && written);
             const std::filesystem::path named = backup.LastFile();
-            CHECK(named.parent_path().filename() == L"My Table");
+            // A saved table's folder carries a hash of its path, so a same-named table elsewhere keeps its own versions.
+            const std::string savedPath = WideToUtf8(saved.wstring());
+            CHECK(named.parent_path().filename() == Utf8ToWide(Backups::FolderName(savedPath, {})));
+            CHECK(named.parent_path() == backup.SessionFolder() && named.parent_path().filename().wstring().starts_with(L"My Table~"));
+            CHECK(backup.LegacyFolder() == Paths::DataFolder() / L"backup-engine" / L"My Table");
+            {
+                const std::filesystem::path legacy = Backups::Write(backup.LegacyFolder(), "<CheatTable/>", start - std::chrono::hours(1));
+                const std::vector<std::filesystem::path> listed = backup.Versions();
+                CHECK(listed.size() == 2 && listed[0] == named && listed[1] == legacy);
+                CHECK_EQ(Backups::Prune(backup.SessionFolder(), 1, named), 0);
+                CHECK_MSG(std::filesystem::exists(legacy, ignored), "pruning the new folder touched the old one");
+                std::filesystem::remove(legacy, ignored);
+            }
 
             const std::size_t records = engine.Table().Count();
             engine.NewTable();

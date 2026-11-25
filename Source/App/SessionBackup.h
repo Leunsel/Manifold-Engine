@@ -28,10 +28,19 @@ namespace Manifold
         std::filesystem::path Folder(const Settings& settings);
         std::string SafeName(std::string_view name);
         std::string SessionName(std::string_view tablePath, std::string_view processName);
+        // ∑ Two tables with the same file name in different folders (or a table
+        //   that moved) must not share one backup folder, where each would prune
+        //   the other's versions: a saved table's folder carries a short hash of
+        //   its full path after a '~'. Folders of earlier versions (name only) are
+        //   still listed but never written to again for that table.
+        std::string PathKey(std::string_view tablePath);
+        std::string FolderName(std::string_view tablePath, std::string_view processName);
+        std::string ShownName(std::string_view folderName);
         std::wstring StampName(std::chrono::system_clock::time_point time);
         bool IsVersion(const std::filesystem::path& file);
         std::string When(const std::filesystem::path& file);
         std::vector<std::filesystem::path> Versions(const std::filesystem::path& folder);
+        std::vector<std::filesystem::path> Versions(const std::vector<std::filesystem::path>& folders);
         int Prune(const std::filesystem::path& folder, int keep, const std::filesystem::path& newest = {});
         std::filesystem::path Write(const std::filesystem::path& folder, std::string_view text, std::chrono::system_clock::time_point time);
         std::wstring InstanceMutexName(unsigned long processId);
@@ -54,12 +63,15 @@ namespace Manifold
         void TableReplaced();
         void Restored(const std::filesystem::path& file);
         std::string Name() const;
-        const std::string& RestoredName() const { return m_restored; }
+        std::string RestoredName() const { return Backups::ShownName(m_restored); }
         std::filesystem::path SessionFolder() const;
+        std::filesystem::path LegacyFolder() const;
+        std::vector<std::filesystem::path> Versions() const;
         const std::filesystem::path& LastFile() const { return m_lastFile; }
         std::vector<Backups::Abandoned> TakeAbandoned();
 
     private:
+        std::string FolderName() const;
         void NoteProcess();
         void WriteMarker(const std::filesystem::path& file, const std::string& name);
         void DropMarker();

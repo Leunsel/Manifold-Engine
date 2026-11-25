@@ -60,6 +60,7 @@
       <TreatWarningAsError>true</TreatWarningAsError>
       <SDLCheck>true</SDLCheck>
       <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <ExceptionHandling>SyncCThrow</ExceptionHandling>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>

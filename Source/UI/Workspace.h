@@ -208,7 +208,8 @@ namespace Manifold::UI
         bool SaveTable(bool askName);
         void OpenBackupDialog();
         void OpenBackup(const std::filesystem::path& path);
-        void OfferBackup(const std::filesystem::path& path, const std::string& name);
+        void OfferBackups(std::vector<Backups::Abandoned> abandoned);
+        const std::vector<Backups::Abandoned>& Abandoned() const { return m_abandoned; }
         void BackUpNow();
         void OpenBackupFolder();
         void NewTable();
@@ -303,6 +304,7 @@ namespace Manifold::UI
             unsigned int Viewport = 0;
         };
         std::vector<ConfirmRequest> m_confirms;
+        std::vector<Backups::Abandoned> m_abandoned;
         bool m_quitPrompt = false;
         bool m_quitRemember = false;
         bool UnsavedTable();
