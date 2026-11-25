@@ -1069,6 +1069,25 @@ namespace Manifold::UI
         m_watches.push_back(std::make_unique<WatchWindow>(*this, id, kind, address, size));
     }
 
+    void Workspace::UseVehForWatches()
+    {
+        Debug::Debugger& debugger = m_engine.Debugger();
+        if (debugger.UsingVeh())
+            return;
+        m_engine.Options().UseInProcessDebugger = true;
+        if (debugger.Attached())
+            debugger.Detach();
+        Status status = m_engine.EnsureDebugger();
+        if (!status)
+        {
+            Report(status);
+            return;
+        }
+        for (auto& watch : m_watches)
+            if (watch)
+                watch->Rearm();
+    }
+
     void Workspace::AddAddress(std::uint64_t address, Scan::ValueType type, std::string description)
     {
         const std::string text = m_engine.Symbols().ModuleOffset(address);

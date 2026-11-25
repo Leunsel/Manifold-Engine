@@ -2005,6 +2005,11 @@ namespace Manifold::UI
             }
             list.EndRow();
         }
+        if (list.Row("Switch to VEH for Hidden Threads", "When a watch runs into a hidden main thread, move it to the in-process debugger automatically instead of showing the hint.", toggle))
+        {
+            changed |= ToggleSwitch("##vehauto", &settings.UseInProcessForHiddenThreads);
+            list.EndRow();
+        }
         if (list.Row("Registers on Break", "Show the registers when a breakpoint hits.", toggle))
         {
             changed |= ToggleSwitch("##registers", &settings.ShowRegistersOnBreak);

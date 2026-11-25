@@ -138,6 +138,7 @@ namespace Manifold
             { "Debugger", "HardwareExecute", &Settings::UseHardwareExecuteBreakpoints },
             { "Debugger", "RegistersOnBreak", &Settings::ShowRegistersOnBreak },
             { "Debugger", "InProcess", &Settings::UseInProcessDebugger },
+            { "Debugger", "VehForHidden", &Settings::UseInProcessForHiddenThreads },
             { "Debugger", "BreakOnException", &kExceptionBreak },
             { "Debugger", "ExceptionRegionStart", &Settings::ExceptionRegionStart },
             { "Debugger", "ExceptionRegionStop", &Settings::ExceptionRegionStop },

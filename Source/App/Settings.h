@@ -128,6 +128,7 @@ namespace Manifold
         bool LogDebugStrings = true;
         bool UseHardwareExecuteBreakpoints = false;
         bool UseInProcessDebugger = false;
+        bool UseInProcessForHiddenThreads = false;
         bool ShowRegistersOnBreak = true;
         int BreakOnException = 0;
         std::string ExceptionRegionStart;

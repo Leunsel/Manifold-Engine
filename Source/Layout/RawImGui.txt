@@ -67,7 +67,7 @@ Source/UI/Templates.cpp 4
 Source/UI/ToolWindows.cpp 29
 Source/UI/UiHost.cpp 20
 Source/UI/UnrealWindow.cpp 42
-Source/UI/WatchWindow.cpp 12
+Source/UI/WatchWindow.cpp 14
 Source/UI/Widgets.cpp 20
 Source/UI/Workspace.cpp 26
 Source/UI/WriteHistoryWindow.cpp 3

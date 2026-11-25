@@ -23,6 +23,13 @@ namespace Manifold::UI
         m_engine.Debugger().RemoveWatch(m_watchId);
     }
 
+    void WatchWindow::Rearm()
+    {
+        int id = m_watchId;
+        if (m_engine.Debugger().StartWatch(m_kind, m_address, m_size, id))
+            m_watchId = id;
+    }
+
     void WatchWindow::Draw()
     {
         if (!m_open)
@@ -81,11 +88,32 @@ namespace Manifold::UI
               (m_copy.Slot >= 0 ? "  ·  debug register " + std::to_string(m_copy.Slot) : "  ·  software breakpoint"));
         if (const int hidden = debugger.HiddenThreads(); hidden > 0 && m_copy.Slot >= 0)
         {
-            ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Warning);
-            ImGui::TextWrapped("%s", (std::string(ICON_FA_EXCLAMATION_TRIANGLE "  ") + (hidden == 1 ? "1 thread hides" : std::to_string(hidden) + " threads hide") +
-                                      " from debuggers" + (debugger.MainThreadHidden() ? ", the main thread among them" : "") +
-                                      ". Accesses from hidden threads are not listed here; the game keeps running.").c_str());
-            ImGui::PopStyleColor();
+            const bool mainHidden = debugger.MainThreadHidden();
+            const bool onWindows = !debugger.UsingVeh();
+            ImGui::Spacing();
+            if (mainHidden && onWindows && m_engine.Options().UseInProcessForHiddenThreads)
+            {
+                // The user asked Manifold to make the move itself; do it quietly.
+                m_workspace.UseVehForWatches();
+            }
+            else if (mainHidden && onWindows)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Accent);
+                ImGui::TextWrapped("%s", (std::string(ICON_FA_LIGHTBULB "  ")
+                    + "The main thread hides from the Windows debugger, so what it touches doesn't show up here. "
+                      "The in-process debugger can follow hidden threads - switch this watch over to catch them.").c_str());
+                ImGui::PopStyleColor();
+                if (ImGui::Button(ICON_FA_EXCHANGE_ALT "  Switch to the In-Process Debugger"))
+                    m_workspace.UseVehForWatches();
+                ItemTooltip("Re-runs this watch through the in-process (VEH) debugger, which sees threads that hide from the Windows debugger. It attaches from inside the process.");
+            }
+            else
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, ManifoldTheme::Muted);
+                ImGui::TextWrapped("%s", (std::string(ICON_FA_INFO_CIRCLE "  ") + (hidden == 1 ? "1 thread hides" : std::to_string(hidden) + " threads hide")
+                    + " from the Windows debugger, so some accesses aren't listed here.").c_str());
+                ImGui::PopStyleColor();
+            }
         }
 
         const float detailHeight = m_selected >= 0 ? Px(150.0f) : 0.0f;

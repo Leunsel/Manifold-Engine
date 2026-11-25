@@ -168,6 +168,10 @@ namespace Manifold::UI
         void OpenLastProcess();
         bool CanOpenLastProcess();
         void StartWatch(Debug::WatchKind kind, std::uint64_t address, int size);
+        // Switches the debugger to the in-process (VEH) backend and re-arms every
+        // open watch there, so watches that ran into a hidden main thread on the
+        // Windows backend can see those accesses. No-op once already on VEH.
+        void UseVehForWatches();
         void OpenBreakpoints();
         void OpenBreakpointEditor(std::uint64_t address, Debug::BreakpointType type, int size, unsigned int viewport = 0);
         void OpenThreadList();
