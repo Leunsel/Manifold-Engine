@@ -98,7 +98,11 @@ namespace Manifold::Tests
         {
             const Status set = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false, Action(engine, "readInteger(RCX) % 50 == 7", {}, true));
             CHECK_MSG(set.Ok(), set.Text);
-            const bool broke = set && WaitForBreak(engine, 0, 4000);
+            // ∑ Work runs once per 1 ms wait, which is 15.6 ms on most machines, and each hit of the Windows
+            //   debugger costs debug events on top: up to 50 calls until the value is 7 modulo 50 came close
+            //   to 4 s on the 2-core CI runner (failed once). The wait ends at the break, so it costs nothing
+            //   when the machine is fast.
+            const bool broke = set && WaitForBreak(engine, 0, 15000);
             CHECK_MSG(broke, std::string(backend) + ": the condition never held");
             if (broke)
             {
@@ -144,7 +148,7 @@ namespace Manifold::Tests
             const Status set = debugger.SetBreakpoint(shared, Debug::BreakpointType::Write, 4, true,
                 Action(engine, "readInteger(0x" + Hex(shared) + ") % 100 == 0", {}, true));
             CHECK_MSG(set.Ok(), set.Text);
-            const bool broke = set && WaitForBreak(engine, 0, 4000);
+            const bool broke = set && WaitForBreak(engine, 0, 15000);  // up to 100 writes, see the condition above
             CHECK_MSG(broke, std::string(backend) + ": the data breakpoint did not stop");
             if (broke)
             {
