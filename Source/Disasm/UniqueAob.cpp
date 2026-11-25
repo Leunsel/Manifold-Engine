@@ -1,166 +1,44 @@
 #include "Disasm/UniqueAob.h"
 
-#include "Core/Text.h"
-#include "Disasm/Disassembler.h"
-#include "Scan/Scanner.h"
+#include "Disasm/Signature.h"
 #include "Target/Process.h"
 
 #include <algorithm>
 
 namespace Manifold::Disasm
 {
-    namespace
-    {
-        constexpr std::size_t kHitLimit = 64;
-        constexpr std::size_t kMinimumFixed = 4;
-
-        struct Candidate
-        {
-            std::vector<std::uint8_t> Bytes;
-            std::vector<std::uint8_t> Mask;
-            std::vector<std::size_t> Ends;
-        };
-
-        Candidate Build(const Target::Process& process, const Disassembler& disassembler, std::uint64_t start, std::size_t maxLength, bool code)
-        {
-            Candidate candidate;
-            // ∑ Scans never match across a region end (the next region may have other
-            //   rights or be gone), so a pattern that ran past it could not be found
-            //   again; it ends at the end of the start's region.
-            std::size_t room = maxLength + 16;
-            if (const auto region = process.RegionAt(start))
-                room = region->End() > start ? static_cast<std::size_t>(std::min<std::uint64_t>(room, region->End() - start)) : 0;
-            std::vector<std::uint8_t> buffer(room);
-            buffer.resize(process.Read(start, buffer.data(), buffer.size()));
-            const auto isAddress = [&](std::uint64_t value) { return value >= 0x10000 && process.ModuleAt(value).has_value(); };
-            std::size_t offset = 0;
-            while (code && offset < maxLength && offset < buffer.size())
-            {
-                const Instruction line = disassembler.Decode(start + offset, buffer.data() + offset, buffer.size() - offset);
-                const std::size_t length = line.Length;
-                if (!line.Valid || length == 0 || offset + length > buffer.size())
-                    break;
-                const std::uint16_t loose = disassembler.AddressBytes(line, isAddress);
-                for (std::size_t i = 0; i < length; ++i)
-                {
-                    candidate.Bytes.push_back(buffer[offset + i]);
-                    candidate.Mask.push_back(i < 16 && (loose & (1u << i)) ? 0x00 : 0xFF);
-                }
-                offset += length;
-                candidate.Ends.push_back(offset);
-            }
-            if (candidate.Ends.empty())
-            {
-                const std::size_t usable = std::min(buffer.size(), maxLength);
-                candidate.Bytes.assign(buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(usable));
-                candidate.Mask.assign(usable, 0xFF);
-                for (std::size_t end = 4; end <= usable; end += 4)
-                    candidate.Ends.push_back(end);
-            }
-            return candidate;
-        }
-
-        std::size_t Fixed(const Candidate& candidate, std::size_t length)
-        {
-            return static_cast<std::size_t>(std::count(candidate.Mask.begin(), candidate.Mask.begin() + static_cast<std::ptrdiff_t>(length), std::uint8_t(0xFF)));
-        }
-
-        std::optional<std::size_t> UniqueLength(const Target::Process& process, const Candidate& candidate, std::uint64_t start, std::uint64_t low, std::uint64_t high,
-            const Scan::PatternFilter& filter)
-        {
-            if (candidate.Ends.empty() || candidate.Mask.front() != 0xFF)
-                return std::nullopt;
-            const std::size_t total = candidate.Ends.back();
-            for (const std::size_t wanted : { std::size_t(8), std::size_t(16), std::size_t(32), total })
-            {
-                const auto end = std::find_if(candidate.Ends.begin(), candidate.Ends.end(), [&](std::size_t each) { return each >= wanted; });
-                const std::size_t seed = end == candidate.Ends.end() ? total : *end;
-                if (Fixed(candidate, seed) < kMinimumFixed)
-                {
-                    if (seed == total)
-                        return std::nullopt;
-                    continue;
-                }
-                Scan::Pattern search;
-                search.Bytes.assign(candidate.Bytes.begin(), candidate.Bytes.begin() + static_cast<std::ptrdiff_t>(seed));
-                search.Mask.assign(candidate.Mask.begin(), candidate.Mask.begin() + static_cast<std::ptrdiff_t>(seed));
-                const std::vector<std::uint64_t> hits = Scan::FindPattern(process, search, low, high, filter, kHitLimit);
-                if (hits.size() >= kHitLimit)
-                {
-                    if (seed == total)
-                        return std::nullopt;
-                    continue;
-                }
-                if (std::find(hits.begin(), hits.end(), start) == hits.end())
-                    return std::nullopt;
-                std::size_t needed = seed;
-                std::vector<std::uint8_t> other(total);
-                for (const std::uint64_t hit : hits)
-                {
-                    if (hit == start)
-                        continue;
-                    const std::size_t got = process.Read(hit, other.data(), other.size());
-                    std::size_t same = 0;
-                    while (same < got && same < total && (candidate.Mask[same] == 0 || other[same] == candidate.Bytes[same]))
-                        ++same;
-                    if (same >= total)
-                        return std::nullopt;
-                    needed = std::max(needed, same + 1);
-                }
-                const auto fit = std::find_if(candidate.Ends.begin(), candidate.Ends.end(), [&](std::size_t each) { return each >= needed; });
-                if (fit == candidate.Ends.end())
-                    return std::nullopt;
-                return *fit;
-            }
-            return std::nullopt;
-        }
-    }
-
+    // ∑ getUniqueAOB is the signature maker's measurement with its default masking. The old search
+    //   scanned seeds of 8, 16, 32 and all bytes and gave up when a seed had 64 hits or more, so it
+    //   found nothing for the SEH prologue (55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00) that
+    //   thousands of x86 MSVC functions share: Isaac gave nil for 10 of 18 functions that the signature
+    //   maker makes unique in 11 to 99 bytes. The measurement has no hit limit.
+    //   Unique means unique in all readable memory, because that is what AOBScan without flags searches;
+    //   the old search counted only executable memory, so a copy of the bytes in data could come first.
     std::optional<UniqueAob> FindUniqueAob(const Target::Process& process, const Disassembler& disassembler, std::uint64_t address, const UniqueAobOptions& options)
     {
         const auto region = process.RegionAt(address);
         if (!region || !region->Committed() || !region->Readable())
             return std::nullopt;
-        const bool code = region->Executable();
-        Scan::PatternFilter filter;
-        if (code)
-            filter.Executable = Scan::Tristate::Yes;
-        std::uint64_t low = process.LowestAddress();
-        std::uint64_t high = process.HighestAddress();
-        if (!options.WholeProcess)
+        SignatureOptions signatureOptions;
+        signatureOptions.Scope = options.WholeProcess ? SignatureScope::Process : SignatureScope::Module;
+        signatureOptions.CodeOnly = options.CodeOnly;
+        signatureOptions.MaxBytes = static_cast<int>(std::clamp<std::size_t>(options.MaxLength, 8, 256));
+        signatureOptions.MinBytes = 0;
+        signatureOptions.AllowOffset = options.BackSteps > 0;
+        signatureOptions.MaxOffset = options.MaxOffset;
+        std::string error;
+        const std::optional<Signature> signature = MakeSignature(process, disassembler, address, signatureOptions, error);
+        if (!signature || !signature->Verified || signature->Bytes.empty())
+            return std::nullopt;
+        UniqueAob found;
+        found.Start = signature->Start;
+        found.Offset = static_cast<int>(signature->Offset);
+        for (const SignatureByte& byte : signature->Bytes)
         {
-            if (const auto module = process.ModuleAt(address))
-            {
-                low = module->Base;
-                high = module->Base + module->Size;
-            }
+            found.Bytes.push_back(byte.Wild ? 0 : byte.Value);
+            found.Mask.push_back(byte.Wild ? 0x00 : 0xFF);
         }
-        const std::size_t maxLength = std::clamp<std::size_t>(options.MaxLength, 8, 256);
-        std::uint64_t start = address;
-        for (int step = 0; step <= options.BackSteps; ++step)
-        {
-            const Candidate candidate = Build(process, disassembler, start, maxLength, code);
-            if (const auto length = UniqueLength(process, candidate, start, low, high, filter))
-            {
-                std::size_t kept = *length;
-                while (kept > 1 && candidate.Mask[kept - 1] == 0)
-                    --kept;
-                UniqueAob found;
-                found.Start = start;
-                found.Offset = static_cast<int>(address - start);
-                found.Bytes.assign(candidate.Bytes.begin(), candidate.Bytes.begin() + static_cast<std::ptrdiff_t>(kept));
-                found.Mask.assign(candidate.Mask.begin(), candidate.Mask.begin() + static_cast<std::ptrdiff_t>(kept));
-                for (std::size_t i = 0; i < kept; ++i)
-                    found.Text += (i ? " " : "") + (found.Mask[i] ? Hex(found.Bytes[i], 2) : std::string("??"));
-                return found;
-            }
-            if (!code)
-                break;
-            const auto previous = disassembler.PreviousStart(process, start);
-            if (!previous || *previous >= start || start - *previous > 15 || address - *previous > 128)
-                break;
-            start = *previous;
-        }
-        return std::nullopt;
+        found.Text = SignatureText(signature->Bytes, SignatureFormatting{});
+        return found;
     }
 }

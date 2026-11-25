@@ -380,6 +380,52 @@ namespace Manifold::Tests
             ::VirtualFree(reserve, 0, MEM_RELEASE);
         }
 
+        // ∑ L1 (Isaac): getUniqueAOB gave nil where the signature maker found a pattern. Here 70 functions
+        //   share their first 120 bytes (more than getUniqueAOB's 96, as MSVC's SEH prologue and stack setup
+        //   do across thousands of functions) and differ only after that. The old search stopped at 64 hits
+        //   and only stepped backwards; the pattern has to start after the address, with an offset.
+        void SharedPrologue(const Target::Process& process, const Disasm::Disassembler& disassembler)
+        {
+            constexpr std::size_t kCopies = 70;
+            constexpr std::size_t kStride = 0x100;
+            Block block(kCopies * kStride, PAGE_EXECUTE_READWRITE);
+            if (!block.Data)
+                return;
+            std::memset(block.Data, 0xCC, block.Size);
+            std::vector<std::uint8_t> shared;
+            shared.push_back(0x55);
+            shared.insert(shared.end(), { 0x48, 0x89, 0xE5 });
+            while (shared.size() < 120)
+                shared.insert(shared.end(), { 0x48, 0x89, 0xC8, 0x48, 0x01, 0xD0 });
+            for (std::size_t copy = 0; copy < kCopies; ++copy)
+            {
+                std::vector<std::uint8_t> code = shared;
+                const std::uint32_t tag = 0x1000 + static_cast<std::uint32_t>(copy) * 7;
+                code.insert(code.end(), { 0xB8, static_cast<std::uint8_t>(tag), static_cast<std::uint8_t>(tag >> 8), 0x00, 0x00, 0x5D, 0xC3 });
+                block.Put(copy * kStride, code);
+            }
+            Disasm::UniqueAobOptions options;
+            options.CodeOnly = true;
+            for (const std::size_t copy : { std::size_t(0), std::size_t(33), kCopies - 1 })
+            {
+                const std::uint64_t address = block.At(copy * kStride);
+                const auto aob = Disasm::FindUniqueAob(process, disassembler, address, options);
+                CHECK_MSG(aob.has_value(), "no unique AOB for copy " + std::to_string(copy));
+                if (!aob)
+                    continue;
+                Scan::PatternFilter code;
+                code.Executable = Scan::Tristate::Yes;
+                const auto parsed = Scan::ParsePattern(aob->Text);
+                CHECK_MSG(parsed.has_value(), aob->Text);
+                if (!parsed)
+                    continue;
+                const std::vector<std::uint64_t> hits = Scan::FindPattern(process, *parsed, process.LowestAddress(), process.HighestAddress(), code, 4);
+                CHECK_MSG(hits.size() == 1 && hits.front() + static_cast<std::int64_t>(aob->Offset) == address, aob->Text + " offset " + std::to_string(aob->Offset));
+                CHECK(aob->Offset < 0);
+                CHECK(aob->Bytes.size() == aob->Mask.size() && aob->Bytes.size() <= 96);
+            }
+        }
+
         void Formats()
         {
             Disasm::Signature signature;
@@ -517,6 +563,7 @@ namespace Manifold::Tests
         Offsets(*process, disassembler);
         RegionBoundaries(*process, disassembler);
         CodeOnlyCopies(*process, disassembler);
+        SharedPrologue(*process, disassembler);
         Registers(*process, disassembler);
         Formats();
         Parsing();
