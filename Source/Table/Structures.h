@@ -16,6 +16,9 @@ namespace Manifold::Target
 
 namespace Manifold::Table
 {
+    class AddressList;
+    struct MemoryRecord;
+
     enum class FieldDisplay
     {
         Unsigned,
@@ -82,4 +85,11 @@ namespace Manifold::Table
     // A field filter that is an address rather than an offset: hex digits
     // (0x allowed, no + in front) of at least 0x10000.
     std::optional<std::uint64_t> FilterAddress(std::string_view text);
+
+    // "+1C" or "-8": a record address that counts from the group above it.
+    std::string RelativeFieldAddress(std::int64_t offset);
+    // Adds a structure field to the address list at `address`. An embedded structure (not a
+    // pointer, with a child structure in the store) becomes an address group with one record per
+    // child field, counting from the group, down to maxDepth levels; anything else one record.
+    MemoryRecord& AddFieldRecords(AddressList& table, StructureStore& store, const StructField& field, std::string address, MemoryRecord* parent, int depth, int maxDepth);
 }

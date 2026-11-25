@@ -1,7 +1,11 @@
 #include "TestKit.h"
 
+#include "App/Engine.h"
+#include "App/Settings.h"
 #include "Core/Text.h"
 #include "Scan/StaticPointers.h"
+#include "Table/AddressList.h"
+#include "Table/ManagedStructures.h"
 #include "Table/Structures.h"
 #include "Target/Process.h"
 
@@ -167,11 +171,120 @@ namespace Manifold::Tests
         }
     }
 
+    namespace
+    {
+        // ∑ Terraria (32-bit .NET): references and IntPtr took 8 bytes, so the dissect showed two neighbouring
+        //   references as one value. They are as wide as the target's pointers; a Vector2 stays embedded.
+        void ManagedPointerWidth()
+        {
+            std::vector<Target::MonoField> fields(5);
+            fields[0].Name = "whoAmI"; fields[0].Offset = 4; fields[0].TypeCode = 0x08;
+            fields[1].Name = "position"; fields[1].Offset = 0x20; fields[1].TypeCode = 0x11; fields[1].TypeHandle = 0x1234; fields[1].TypeName = "Microsoft.Xna.Framework.Vector2"; fields[1].ValueSize = 8;
+            fields[2].Name = "creativeTracker"; fields[2].Offset = 0x70; fields[2].TypeCode = 0x12;
+            fields[3].Name = "DpadRadial"; fields[3].Offset = 0x74; fields[3].TypeCode = 0x12;
+            fields[4].Name = "handle"; fields[4].Offset = 0x78; fields[4].TypeCode = 0x18;
+            for (const int pointerSize : { 4, 8 })
+            {
+                // A value type's field offsets count the boxed object's header (two pointers) in.
+                Table::ManagedLayouts nested;
+                std::vector<Target::MonoField>& inner = nested["Microsoft.Xna.Framework.Vector2"];
+                inner.resize(2);
+                inner[0].Name = "X";
+                inner[0].Offset = 2 * pointerSize;
+                inner[0].TypeCode = 0x0c;
+                inner[1].Name = "Y";
+                inner[1].Offset = 2 * pointerSize + 4;
+                inner[1].TypeCode = 0x0c;
+                Table::StructDefinition player;
+                Table::FillFromManaged(player, fields, 0, nested, pointerSize);
+                CHECK_EQ(player.Fields.size(), 5u);
+                if (player.Fields.size() != 5)
+                    continue;
+                CHECK(player.Fields[1].ChildStructure == "Microsoft.Xna.Framework.Vector2" && player.Fields[1].Size == 8 && player.Fields[1].Type != Scan::ValueType::Pointer);
+                for (const std::size_t index : { std::size_t(2), std::size_t(3), std::size_t(4) })
+                    CHECK_MSG(player.Fields[index].Type == Scan::ValueType::Pointer && player.Fields[index].Size == pointerSize,
+                        player.Fields[index].Name + " has " + std::to_string(player.Fields[index].Size) + " bytes with " + std::to_string(pointerSize) + "-byte pointers");
+                Table::StructureStore store;
+                store.Add("Terraria.Player");
+                Table::AddManagedLayouts(store, nested, 2 * pointerSize, "Terraria.Player", pointerSize);
+                const Table::StructDefinition* vector = store.Find("Microsoft.Xna.Framework.Vector2");
+                CHECK(vector && vector->Fields.size() == 2 && vector->Fields[1].Offset == 4 && vector->Fields[1].Type == Scan::ValueType::Float);
+            }
+        }
+
+        struct Mover
+        {
+            std::uint32_t Id = 7;
+            float Unused = 0.0f;
+            struct { float X = 34676.0f; float Y = 4422.0f; } Position;
+            struct { float X = -1.5f; float Y = 2.5f; } Velocity;
+            void* Owner = nullptr;
+        };
+
+        Mover g_mover;
+
+        // ∑ Terraria: "add the structure to the address list" made position and velocity one AOB record of
+        //   8 bytes each. An embedded structure becomes a group that counts from its offset, with X and Y.
+        void EmbeddedToAddressList()
+        {
+            Settings settings;
+            Engine engine(settings);
+            CHECK(engine.OpenProcess(MakeProcessId(::GetCurrentProcessId())).Ok());
+            Table::StructDefinition& vector = engine.Structures().Add("Vector2");
+            vector.Fields.push_back({ 0, "X", Scan::ValueType::Float, 4 });
+            vector.Fields.push_back({ 4, "Y", Scan::ValueType::Float, 4 });
+            Table::StructDefinition& looped = engine.Structures().Add("Looped");
+            looped.Fields.push_back({ 0, "Self", Scan::ValueType::ByteArray, 8 });
+            looped.Fields.back().ChildStructure = "Looped";
+            std::vector<Table::StructField> fields;
+            fields.push_back({ 0, "Id", Scan::ValueType::FourBytes, 4 });
+            fields.push_back({ 8, "Position", Scan::ValueType::ByteArray, 8 });
+            fields.back().ChildStructure = "Vector2";
+            fields.push_back({ 0x10, "Velocity", Scan::ValueType::ByteArray, 8 });
+            fields.back().ChildStructure = "Vector2";
+            fields.push_back({ 0x18, "Owner", Scan::ValueType::Pointer, 8 });
+            fields.back().ChildStructure = "Vector2";
+            fields.push_back({ 0, "Loop", Scan::ValueType::ByteArray, 8 });
+            fields.back().ChildStructure = "Looped";
+
+            Table::AddressList& table = engine.Table();
+            Table::MemoryRecord& group = table.AddGroup("Mover");
+            group.AddressGroupHeader = true;
+            group.Address = Hex(reinterpret_cast<std::uint64_t>(&g_mover));
+            std::vector<Table::MemoryRecord*> added;
+            for (const Table::StructField& field : fields)
+                added.push_back(&Table::AddFieldRecords(table, engine.Structures(), field, Table::RelativeFieldAddress(field.Offset), &group, 0, 4));
+            engine.RefreshValues(true);
+
+            Table::MemoryRecord& position = *added[1];
+            CHECK(position.Kind == Table::RecordKind::Group && position.AddressGroupHeader && position.Address == "+8");
+            CHECK_EQ(position.Children.size(), 2u);
+            if (position.Children.size() == 2)
+            {
+                const Table::MemoryRecord& y = *position.Children[1];
+                CHECK(y.Description == "Y" && y.Type == Scan::ValueType::Float && y.Address == "+4");
+                CHECK_MSG(y.AddressOk && y.ResolvedAddress == reinterpret_cast<std::uint64_t>(&g_mover.Position.Y), y.AddressError);
+            }
+            Table::MemoryRecord& velocity = *added[2];
+            CHECK(velocity.Kind == Table::RecordKind::Group && velocity.Children.size() == 2);
+            if (velocity.Children.size() == 2)
+                CHECK(velocity.Children[0]->AddressOk && velocity.Children[0]->ResolvedAddress == reinterpret_cast<std::uint64_t>(&g_mover.Velocity.X));
+            CHECK(added[3]->Kind == Table::RecordKind::Value && added[3]->Type == Scan::ValueType::Pointer);
+            // A structure that embeds itself stops at the depth limit.
+            int depth = 0;
+            for (const Table::MemoryRecord* at = added[4]; at && at->Kind == Table::RecordKind::Group; at = at->Children.empty() ? nullptr : at->Children.front().get())
+                ++depth;
+            CHECK_EQ(depth, 4);
+        }
+    }
+
     int RunStructureTests()
     {
         const int before = Totals().Failures;
         FieldAtAddress();
         MatchPointerBlocks();
+        ManagedPointerWidth();
+        EmbeddedToAddressList();
         auto opened = Target::Process::Open(MakeProcessId(::GetCurrentProcessId()));
         CHECK(opened.Ok());
         if (opened.Ok())

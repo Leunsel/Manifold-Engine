@@ -52,9 +52,7 @@ namespace Manifold::UI
             return {};
         int size = 0;
         Table::FieldDisplay display = Table::FieldDisplay::Unsigned;
-        const Scan::ValueType type = Table::ManagedFieldType(code, size, display);
-        if (type == Scan::ValueType::Pointer)
-            size = process.PointerSize();
+        const Scan::ValueType type = Table::ManagedFieldType(code, process.PointerSize(), size, display);
         std::uint8_t bytes[8] = {};
         if (size <= 0 || size > 8 || !process.ReadExact(address, bytes, static_cast<std::size_t>(size)))
             return {};
@@ -235,7 +233,8 @@ namespace Manifold::UI
         int size = 0;
         Table::FieldDisplay display = Table::FieldDisplay::Unsigned;
         const int code = enumCode ? enumCode : typeCode;
-        Scan::ValueType type = IsReference(code) ? Scan::ValueType::Pointer : Table::ManagedFieldType(code, size, display);
+        const int pointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8;
+        Scan::ValueType type = IsReference(code) ? Scan::ValueType::Pointer : Table::ManagedFieldType(code, pointerSize, size, display);
         const std::string description = page.Route.Label.empty() ? name : page.Route.Label + "." + name;
         std::string address;
         std::vector<std::string> offsets;

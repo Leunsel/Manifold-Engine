@@ -1,6 +1,7 @@
 #include "Table/Structures.h"
 
 #include "Core/Text.h"
+#include "Table/AddressList.h"
 #include "Target/Process.h"
 
 #include <algorithm>
@@ -239,5 +240,42 @@ namespace Manifold::Table
         if (value < 0x10000)
             return std::nullopt;
         return value;
+    }
+
+    std::string RelativeFieldAddress(std::int64_t offset)
+    {
+        return offset < 0 ? "-" + Hex(static_cast<std::uint64_t>(-offset)) : "+" + Hex(static_cast<std::uint64_t>(offset));
+    }
+
+    // ∑ An embedded structure (a .NET Vector2, an Unreal FVector, a C struct member) becomes a group
+    //   that counts from its own offset, with one record per field of the child structure. It used
+    //   to become one AOB record of the whole struct: Terraria's position showed as 8 raw bytes
+    //   instead of X and Y.
+    MemoryRecord& AddFieldRecords(AddressList& table, StructureStore& store, const StructField& field, std::string address, MemoryRecord* parent, int depth, int maxDepth)
+    {
+        if (field.Type != Scan::ValueType::Pointer && !field.ChildStructure.empty() && depth < maxDepth)
+        {
+            const StructDefinition* child = store.Find(field.ChildStructure);
+            if (child && !child->Fields.empty())
+            {
+                MemoryRecord& group = table.AddGroup(field.Name, parent);
+                group.AddressGroupHeader = true;
+                group.Address = std::move(address);
+                for (const StructField& inner : child->Fields)
+                    AddFieldRecords(table, store, inner, RelativeFieldAddress(inner.Offset), &group, depth + 1, maxDepth);
+                return group;
+            }
+        }
+        MemoryRecord& record = table.AddValue(field.Name, std::move(address), field.Type, parent);
+        record.Length = field.Size;
+        record.Unicode = field.Unicode;
+        record.ShowHex = field.Display == FieldDisplay::Hex;
+        record.CustomTypeName = field.CustomType;
+        if (field.Type == Scan::ValueType::Binary)
+        {
+            record.BitStart = field.BitStart;
+            record.BitLength = field.BitLength;
+        }
+        return record;
     }
 }

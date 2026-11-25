@@ -513,7 +513,8 @@ namespace Manifold::Tests
             CHECK_EQ(nested.size(), 1u);
             Table::StructDefinition mover;
             mover.Name = "Game.Mover";
-            Table::FillFromManaged(mover, fields, 0, nested);
+            const int pointerSize = engine.Process()->PointerSize();
+            Table::FillFromManaged(mover, fields, 0, nested, pointerSize);
             CHECK_EQ(mover.Fields.size(), 4u);
             if (mover.Fields.size() == 4)
             {
@@ -525,11 +526,11 @@ namespace Manifold::Tests
                 CHECK_MSG(inline3.Name == "position" && inline3.Offset == 0x14 && inline3.Type == Scan::ValueType::ByteArray && inline3.Size == 12 && inline3.ChildStructure == "Game.Vec3",
                     label + ": position became " + std::string(Scan::TypeName(inline3.Type)) + " of " + std::to_string(inline3.Size) + " -> '" + inline3.ChildStructure + "'");
                 CHECK(enumField.Name == "team" && enumField.Offset == 0x20 && enumField.Type == Scan::ValueType::FourBytes && enumField.Display == Table::FieldDisplay::Signed && enumField.ChildStructure.empty());
-                CHECK(pointer.Name == "owner" && pointer.Offset == 0x28 && pointer.Type == Scan::ValueType::Pointer);
+                CHECK(pointer.Name == "owner" && pointer.Offset == 0x28 && pointer.Type == Scan::ValueType::Pointer && pointer.Size == pointerSize);
             }
             Table::StructureStore store;
             store.Add("Game.Mover");
-            Table::AddManagedLayouts(store, nested, 16, "Game.Mover");
+            Table::AddManagedLayouts(store, nested, 16, "Game.Mover", pointerSize);
             const Table::StructDefinition* vec3 = store.Find("Game.Vec3");
             CHECK(vec3 != nullptr);
             if (vec3)

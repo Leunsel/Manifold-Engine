@@ -4,10 +4,13 @@
 
 namespace Manifold::Table
 {
-    Scan::ValueType ManagedFieldType(int typeCode, int& size, FieldDisplay& display)
+    Scan::ValueType ManagedFieldType(int typeCode, int pointerSize, int& size, FieldDisplay& display)
     {
         using V = Scan::ValueType;
         display = FieldDisplay::Unsigned;
+        // ∑ References and IntPtr took 8 bytes in a 32-bit game too (Terraria): the dissect showed
+        //   two neighbouring pointers as one value and a table made from it read the wrong bytes.
+        const int pointer = pointerSize == 4 ? 4 : 8;
         switch (typeCode)
         {
         case 0x04: size = 1; display = FieldDisplay::Signed; return V::Byte;
@@ -21,10 +24,10 @@ namespace Manifold::Table
         // ∑ System.IntPtr / UIntPtr (ELEMENT_TYPE_I / U) hold native pointers,
         // UnityEngine.Object.m_CachedPtr above all, and are pointer sized in a
         // 32-bit game too.
-        case 0x18: case 0x19: size = 8; return V::Pointer;
+        case 0x18: case 0x19: size = pointer; return V::Pointer;
         case 0x0c: size = 4; return V::Float;
         case 0x0d: size = 8; return V::Double;
-        default: size = 8; return V::Pointer;
+        default: size = pointer; return V::Pointer;
         }
     }
 
@@ -47,7 +50,7 @@ namespace Manifold::Table
         }
     }
 
-    void FillFromManaged(StructDefinition& target, std::vector<Target::MonoField> fields, int shift, const ManagedLayouts& nested)
+    void FillFromManaged(StructDefinition& target, std::vector<Target::MonoField> fields, int shift, const ManagedLayouts& nested, int pointerSize)
     {
         std::stable_sort(fields.begin(), fields.end(), [](const Target::MonoField& a, const Target::MonoField& b) { return a.Offset < b.Offset; });
         target.Fields.clear();
@@ -59,7 +62,7 @@ namespace Manifold::Table
             member.Name = field.Name;
             if (field.EnumCode)
             {
-                member.Type = ManagedFieldType(field.EnumCode, member.Size, member.Display);
+                member.Type = ManagedFieldType(field.EnumCode, pointerSize, member.Size, member.Display);
             }
             else if (StoredInline(field))
             {
@@ -70,13 +73,13 @@ namespace Manifold::Table
             }
             else if (field.TypeCode == 0x11)
             {
-                const int gap = index + 1 < fields.size() ? fields[index + 1].Offset - field.Offset : 8;
+                const int gap = index + 1 < fields.size() ? fields[index + 1].Offset - field.Offset : pointerSize;
                 member.Type = Scan::ValueType::ByteArray;
                 member.Size = std::clamp(gap, 1, 256);
             }
             else
             {
-                member.Type = ManagedFieldType(field.TypeCode, member.Size, member.Display);
+                member.Type = ManagedFieldType(field.TypeCode, pointerSize, member.Size, member.Display);
             }
             target.Fields.push_back(std::move(member));
         }
@@ -122,7 +125,7 @@ namespace Manifold::Table
         return name + "[" + std::to_string(array.Length) + "]";
     }
 
-    void AddManagedLayouts(StructureStore& store, const ManagedLayouts& nested, int shift, const std::string& skip)
+    void AddManagedLayouts(StructureStore& store, const ManagedLayouts& nested, int shift, const std::string& skip, int pointerSize)
     {
         for (const auto& [name, inner] : nested)
         {
@@ -132,7 +135,7 @@ namespace Manifold::Table
             if (existing && !existing->Fields.empty())
                 continue;
             StructDefinition& child = existing ? *existing : store.Add(name);
-            FillFromManaged(child, inner, shift, nested);
+            FillFromManaged(child, inner, shift, nested, pointerSize);
         }
     }
 }

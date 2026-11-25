@@ -223,6 +223,14 @@ namespace Manifold::UI
             }
         }
 
+        // ∑ A pointer field is as wide as the target's pointers, whatever its stored size: .NET structures
+        //   made before the fix had 8-byte pointers in 32-bit games (Terraria), and Cheat Engine tables
+        //   can carry them too. Two neighbouring references showed as one value.
+        int FieldWidth(const Table::StructField& field, int pointerSize)
+        {
+            return field.Type == Scan::ValueType::Pointer ? pointerSize : std::max(1, field.Size);
+        }
+
         Scan::ValueFormat FieldFormat(const Table::StructField& field, int pointerSize)
         {
             Scan::ValueFormat format;
@@ -241,6 +249,11 @@ namespace Manifold::UI
             return base ? base + static_cast<std::uint64_t>(static_cast<std::int64_t>(offset)) : 0;
         }
 
+        void AddFieldRecord(Engine& engine, const Table::StructField& field, std::string address, Table::MemoryRecord* parent, int depth)
+        {
+            Table::AddFieldRecords(engine.Table(), engine.Structures(), field, std::move(address), parent, depth, kMaxDepth);
+        }
+
         Table::MemoryRecord& StructureToAddressList(Engine& engine, const Table::StructDefinition& definition, std::uint64_t base)
         {
             Table::AddressList& table = engine.Table();
@@ -249,20 +262,7 @@ namespace Manifold::UI
             if (base)
                 group.Address = engine.Symbols().ModuleOffset(base);
             for (const Table::StructField& field : definition.Fields)
-            {
-                const std::int64_t offset = field.Offset;
-                std::string address = offset < 0 ? "-" + Hex(static_cast<std::uint64_t>(-offset)) : "+" + Hex(static_cast<std::uint64_t>(offset));
-                Table::MemoryRecord& record = table.AddValue(field.Name, std::move(address), field.Type, &group);
-                record.Length = field.Size;
-                record.Unicode = field.Unicode;
-                record.ShowHex = field.Display == Table::FieldDisplay::Hex;
-                record.CustomTypeName = field.CustomType;
-                if (field.Type == Scan::ValueType::Binary)
-                {
-                    record.BitStart = field.BitStart;
-                    record.BitLength = field.BitLength;
-                }
-            }
+                AddFieldRecord(engine, field, Table::RelativeFieldAddress(field.Offset), &group, 0);
             engine.RefreshValues(true);
             return group;
         }
@@ -654,7 +654,7 @@ namespace Manifold::UI
                 else
                     fields = engine.Mono().InstanceFieldsAt(address);
                 Table::CollectManagedLayouts(engine.Mono(), fields, nested);
-                return [&engine, definition, fields, nested, scripts, finish]()
+                return [&engine, definition, fields, nested, pointerSize, scripts, finish]()
                     {
                         if (fields.empty())
                         {
@@ -667,9 +667,8 @@ namespace Manifold::UI
                             finish(false, false);
                             return;
                         }
-                        Table::FillFromManaged(*live, fields, 0, nested);
-                        const int header = 2 * (engine.HasProcess() ? engine.Process()->PointerSize() : 8);
-                        Table::AddManagedLayouts(engine.Structures(), nested, header, live->Name);
+                        Table::FillFromManaged(*live, fields, 0, nested, pointerSize);
+                        Table::AddManagedLayouts(engine.Structures(), nested, 2 * pointerSize, live->Name, pointerSize);
                         finish(true, false);
                     };
             });
@@ -1227,7 +1226,7 @@ namespace Manifold::UI
     void StructureWindow::RunFieldCommand(Command command, Table::StructDefinition& definition, Table::StructField& field, std::uint64_t address, const std::string& path, int pointerSize)
     {
         const bool readable = address != 0 && m_engine.HasProcess();
-        const int watchSize = std::min(8, std::max(1, field.Size));
+        const int watchSize = std::min(8, FieldWidth(field, pointerSize));
         switch (command)
         {
         case Command::ChangeFieldValue:
@@ -1236,7 +1235,7 @@ namespace Manifold::UI
                 m_editPath = path;
                 m_editName = false;
                 m_editText.clear();
-                std::vector<std::uint8_t> bytes(static_cast<std::size_t>(std::max(1, field.Size)));
+                std::vector<std::uint8_t> bytes(static_cast<std::size_t>(FieldWidth(field, pointerSize)));
                 if (m_engine.Process()->ReadExact(address, bytes.data(), bytes.size()))
                     m_editText = FieldText(field, bytes, address, pointerSize);
             }
@@ -1248,7 +1247,7 @@ namespace Manifold::UI
             break;
         case Command::InsertField:
             m_pendingStructure = definition.Name;
-            m_pendingOffset = field.Offset + field.Size;
+            m_pendingOffset = field.Offset + FieldWidth(field, pointerSize);
             m_pendingInsert = true;
             break;
         case Command::DeleteField:
@@ -1270,16 +1269,7 @@ namespace Manifold::UI
             }
             else if (readable)
             {
-                Table::MemoryRecord& record = m_engine.Table().AddValue(field.Name, m_engine.Symbols().ModuleOffset(address), field.Type);
-                record.Length = field.Size;
-                record.Unicode = field.Unicode;
-                record.ShowHex = field.Display == Table::FieldDisplay::Hex;
-                record.CustomTypeName = field.CustomType;
-                if (field.Type == Scan::ValueType::Binary)
-                {
-                    record.BitStart = field.BitStart;
-                    record.BitLength = field.BitLength;
-                }
+                AddFieldRecord(m_engine, field, m_engine.Symbols().ModuleOffset(address), nullptr, 0);
                 m_engine.RefreshValues(true);
             }
             break;
@@ -1321,16 +1311,7 @@ namespace Manifold::UI
             const std::uint64_t address = block.Bases.empty() ? 0 : FieldAddress(block.Bases.front(), field.Offset);
             if (!address)
                 continue;
-            Table::MemoryRecord& record = m_engine.Table().AddValue(field.Name, m_engine.Symbols().ModuleOffset(address), field.Type);
-            record.Length = field.Size;
-            record.Unicode = field.Unicode;
-            record.ShowHex = field.Display == Table::FieldDisplay::Hex;
-            record.CustomTypeName = field.CustomType;
-            if (field.Type == Scan::ValueType::Binary)
-            {
-                record.BitStart = field.BitStart;
-                record.BitLength = field.BitLength;
-            }
+            AddFieldRecord(m_engine, field, m_engine.Symbols().ModuleOffset(address), nullptr, row.Depth);
             any = true;
         }
         if (any)
@@ -1791,7 +1772,7 @@ namespace Manifold::UI
             const Row& row = m_rows[static_cast<std::size_t>(i)];
             const Table::StructField& field = row.Definition->Fields[static_cast<std::size_t>(row.Field)];
             const std::int64_t begin = field.Offset;
-            const std::int64_t end = begin + std::max(1, field.Size);
+            const std::int64_t end = begin + FieldWidth(field, process.PointerSize());
             const auto span = std::find_if(spans.begin(), spans.end(), [&](const Span& item) { return item.Block == row.Block; });
             if (span == spans.end())
             {
@@ -1970,7 +1951,7 @@ namespace Manifold::UI
                 m_editText = m_editName ? field.Name : "";
                 if (!m_editName && !addresses.empty() && addresses.front() && m_engine.HasProcess())
                 {
-                    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(std::max(1, field.Size)));
+                    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(FieldWidth(field, pointerSize)));
                     if (m_engine.Process()->ReadExact(addresses.front(), bytes.data(), bytes.size()))
                         m_editText = FieldText(field, bytes, addresses.front(), pointerSize);
                 }
@@ -2072,7 +2053,7 @@ namespace Manifold::UI
                     m_editPath.clear();
                 continue;
             }
-            bytes.assign(static_cast<std::size_t>(std::max(1, field.Size)), 0);
+            bytes.assign(static_cast<std::size_t>(FieldWidth(field, pointerSize)), 0);
             if (!ReadField(row.Block, column, address, bytes.data(), bytes.size()))
             {
                 Muted("??");
@@ -2082,7 +2063,7 @@ namespace Manifold::UI
             if (pointer)
             {
                 std::uint64_t value = 0;
-                std::memcpy(&value, bytes.data(), std::min<std::size_t>(8, bytes.size()));
+                std::memcpy(&value, bytes.data(), std::min<std::size_t>(static_cast<std::size_t>(pointerSize), bytes.size()));
                 const std::string described = m_engine.Describe(value);
                 text = "P->" + Hex(value) + (described != Hex(value) ? "  " + described : "");
             }

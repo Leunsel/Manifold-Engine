@@ -821,11 +821,11 @@ namespace Manifold::Tests
             CHECK_EQ(ints->Element.TypeCode, 0x08);
             CHECK_MSG(Table::ManagedArrayName(*ints) == "System.Int32[3]", Table::ManagedArrayName(*ints));
             Table::StructDefinition layout;
-            Table::FillFromManaged(layout, Table::ManagedArrayFields(*ints, pointerSize, 1024), 0, {});
+            Table::FillFromManaged(layout, Table::ManagedArrayFields(*ints, pointerSize, 1024), 0, {}, pointerSize);
             CHECK_EQ(layout.Fields.size(), 5u);
             if (layout.Fields.size() == 5)
             {
-                CHECK(layout.Fields[0].Name == "bounds" && layout.Fields[0].Type == Scan::ValueType::Pointer);
+                CHECK(layout.Fields[0].Name == "bounds" && layout.Fields[0].Type == Scan::ValueType::Pointer && layout.Fields[0].Size == pointerSize);
                 CHECK(layout.Fields[1].Name == "max_length" && layout.Fields[1].Offset == 3 * pointerSize);
                 CHECK(layout.Fields[3].Name == "[1]" && layout.Fields[3].Offset == 4 * pointerSize + 4 && layout.Fields[3].Type == Scan::ValueType::FourBytes);
             }
@@ -845,14 +845,17 @@ namespace Manifold::Tests
             const auto vec = nested.find("Game.Vec2");
             CHECK(vec != nested.end() && vec->second.size() == 2);
             Table::StructDefinition layout;
-            Table::FillFromManaged(layout, elements, 0, nested);
+            Table::FillFromManaged(layout, elements, 0, nested, pointerSize);
             CHECK(layout.Fields.size() == 4 && layout.Fields[3].Name == "[1]" && layout.Fields[3].ChildStructure == "Game.Vec2" && layout.Fields[3].Size == 8);
         }
         // IntPtr holds a native pointer (UnityEngine.Object.m_CachedPtr).
         {
             int size = 0;
             Table::FieldDisplay display = Table::FieldDisplay::Unsigned;
-            CHECK(Table::ManagedFieldType(0x18, size, display) == Scan::ValueType::Pointer);
+            // ∑ Pointer sized in a 32-bit game too: Terraria's dissect read two neighbouring references as one 8-byte value.
+            CHECK(Table::ManagedFieldType(0x18, pointerSize, size, display) == Scan::ValueType::Pointer && size == pointerSize);
+            CHECK(Table::ManagedFieldType(0x12, 4, size, display) == Scan::ValueType::Pointer && size == 4);
+            CHECK(Table::ManagedFieldType(0x12, 8, size, display) == Scan::ValueType::Pointer && size == 8);
         }
         CHECK(!bridge.ClassNameAt(engine.Evaluate(stem + ".g_il2cppWild").value_or(0)).has_value());
         CHECK(!bridge.ClassNameAt(engine.Evaluate(stem + ".g_il2cppNotClass").value_or(0)).has_value());
