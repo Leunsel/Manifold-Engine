@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths-ignore:
       - 'README.md'
+      - 'Docs/images/**'
       - 'Licenses/**'
       - 'LICENSE'
   pull_request:
     paths-ignore:
       - 'README.md'
+      - 'Docs/images/**'
       - 'Licenses/**'
       - 'LICENSE'
   workflow_dispatch:
