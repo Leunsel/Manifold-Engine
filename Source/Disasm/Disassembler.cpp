@@ -1105,7 +1105,8 @@ namespace Manifold::Disasm
         // A register sets the size, except for a zero or sign extension. Without one CE writes byte, word and qword
         // but leaves dword out ("mov [rcx],00000001", "rol [rcx],48", "lock inc [rcx]"), except for the 83 group,
         // float loads and stores (D8/D9), call, jmp, nop and movsxd: "cmp dword ptr [rbp-08],-80", "nop dword ptr [eax]";
-        // push and pop leave it out too: "push [ebp-000266B4]".
+        // push and pop leave out the stack's own width too: "push [ebp-000266B4]", and in 64-bit code "push [01571800]".
+        const bool stackWidth = mnemonic == ZYDIS_MNEMONIC_PUSH || mnemonic == ZYDIS_MNEMONIC_POP;
         const bool extends = mnemonic == ZYDIS_MNEMONIC_MOVZX || mnemonic == ZYDIS_MNEMONIC_MOVSX || mnemonic == ZYDIS_MNEMONIC_MOVSXD;
         const bool keepDword = (legacyDefault && (instruction.opcode == 0x83 || instruction.opcode == 0xD8 || instruction.opcode == 0xD9 || instruction.opcode == 0xDB)) ||
                                mnemonic == ZYDIS_MNEMONIC_CALL || mnemonic == ZYDIS_MNEMONIC_JMP || mnemonic == ZYDIS_MNEMONIC_NOP ||
@@ -1164,7 +1165,8 @@ namespace Manifold::Disasm
             case ZYDIS_OPERAND_TYPE_MEMORY:
             {
                 std::string text;
-                if (operand.mem.type == ZYDIS_MEMOP_TYPE_MEM && (extends || !registerShown) && (operand.size != 32 || keepDword))
+                if (operand.mem.type == ZYDIS_MEMOP_TYPE_MEM && (extends || !registerShown) && (operand.size != 32 || keepDword) &&
+                    !(stackWidth && operand.size == (m_is64Bit ? 64 : 32)))
                     text += SizeKeyword(operand.size);
                 if (segment)
                     text += segment;
@@ -1208,6 +1210,13 @@ namespace Manifold::Disasm
             opcode += "repe ";  // CE writes repe for every F3: "repe stosd", "repe movsb"
         if (repnePrefix)
             opcode += "repne ";
+        // A 90 with prefixes is CE's "nop <length>" ("66 90 - nop 2"); with a REX prefix it is "xchg rax,rax".
+        if (legacyDefault && instruction.mnemonic == ZYDIS_MNEMONIC_NOP && instruction.opcode == 0x90 && raw.prefix_count > 0)
+        {
+            if (instruction.attributes & ZYDIS_ATTRIB_HAS_REX)
+                return Hex(address, 8) + " - " + column + " - " + opcode + (raw.rex.W ? "xchg rax,rax" : "xchg eax,eax");
+            return Hex(address, 8) + " - " + column + " - " + opcode + "nop " + Hex(raw.prefix_count + 1u);
+        }
         opcode += CheatEngineMnemonic(instruction);
         if (legacyDefault && instruction.mnemonic == ZYDIS_MNEMONIC_XCHG && instruction.opcode >= 0x91 && instruction.opcode <= 0x97 && parameters.size() == 2)
             std::swap(parameters[0], parameters[1]);  // CE names the accumulator first: "xchg eax,ecx"

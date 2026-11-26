@@ -207,6 +207,9 @@
     <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Disasm\CheatEngineExtra.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
@@ -904,6 +907,9 @@
       <Filter>Source\Debug</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Disasm\AssemblySearch.h">
+      <Filter>Source\Disasm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Disasm\CheatEngineExtra.h">
       <Filter>Source\Disasm</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Disasm\CodeDissect.h">

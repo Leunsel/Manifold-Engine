@@ -125,6 +125,8 @@ The Lua functions `disassemble()` and `splitDisassembledString()` return Cheat E
 3. `python Tools/ce_capture_to_inc.py <64-bit capture> <32-bit capture>` writes `Tests/CheatEngineCapture.inc`. It takes the test block only, so no code of the processes ends up in the repository, and leaves out the lines where Cheat Engine's own decoder is wrong (VEX/EVEX, bytes it cannot decode, 32-bit-only opcodes in 64-bit code, missing or doubled commas).
 4. The test `CheatEngineCapture` in suite `disasm` replays every line: the same bytes at the same address must give the same text.
 
+The fourth value of `splitDisassembledString()` is Cheat Engine's guess at the value behind the instruction (`Source/Disasm/CheatEngineExtra.cpp`, ported from CE's `splitDisassembledString` and `FindTypeOfData` and from Free Pascal's number formatting). The capture's `extra2` cases cover each kind of guess; its `data` and `name` lines hold the block's data area and the names CE gave values in it, so the guesses can be checked without the process.
+
 The lines from the processes' code are for comparing more real code locally; keep them out of the repository.
 
 ## Working on the code

@@ -1,10 +1,11 @@
-#include "TestKit.h"
+﻿#include "TestKit.h"
 
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Asm/Assembler.h"
 #include "Asm/MnemonicDocs.h"
 #include "Core/Text.h"
+#include "Disasm/CheatEngineExtra.h"
 #include "Disasm/Disassembler.h"
 #include "Lua/LuaEngine.h"
 #include "Target/CodeMap.h"
@@ -17,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <vector>
 
 namespace Manifold::Tests
@@ -626,6 +628,7 @@ namespace Manifold::Tests
                 { "F3 0F 10 05 10 00 00 00", "028400F0 - F3 0F10 05 10000000  - movss xmm0,[02840108]" },
                 { "66 0F 1F 44 00 00", "02840100 - 66 0F1F 44 00 00  - nop word ptr [rax+rax+00]" },
                 { "C3", "02840110 - C3 - ret " },
+                { "66 90", "02840120 - 66 90 - nop 2" },
             };
             for (std::size_t i = 0; i < std::size(cases); ++i)
             {
@@ -640,9 +643,391 @@ namespace Manifold::Tests
             const Status ran = engine.Lua().RunWithResult(R"LUA(
                 local extra, opcode, bytes, address = splitDisassembledString(disassembleBytes('48 8B 05 6E A8 04 01', 0x02840000))
                 local e2, o2, b2, a2 = splitDisassembledString(disassembleBytes('C3', 0x02840110))
-                return string.format('|%s|%s|%s|%s|%s|%s|%s|%s|', extra, opcode, bytes, address, e2, o2, b2, a2))LUA", "ce split", split);
+                return string.format('|%s|%s|%s|%s|%s|%s|%s|%s|', type(extra), opcode, bytes, address, e2, o2, b2, a2))LUA", "ce split", split);
             CHECK_MSG(ran.Ok(), ran.Text);
-            CHECK_EQ(split, std::string("||mov rax,[0388A875]|48 8B 05 6EA80401 |02840000||ret |C3|02840110|"));
+            CHECK_EQ(split, std::string("|string|mov rax,[0388A875]|48 8B 05 6EA80401 |02840000||ret |C3|02840110|"));
+        }
+    }
+
+    namespace
+    {
+        // A made-up process for Disasm::CheatEngineExtra: blocks of memory, and names for some values.
+        struct FakeMemory
+        {
+            std::vector<std::pair<std::uint64_t, std::vector<std::uint8_t>>> Blocks;
+            std::vector<std::pair<std::uint64_t, std::string>> Names;
+            bool Is64Bit = true;
+
+            std::vector<std::uint8_t>* At(std::uint64_t address, std::size_t& offset)
+            {
+                for (auto& [base, bytes] : Blocks)
+                {
+                    if (address >= base && address - base < bytes.size())
+                    {
+                        offset = static_cast<std::size_t>(address - base);
+                        return &bytes;
+                    }
+                }
+                return nullptr;
+            }
+
+            void Put(std::uint64_t address, const void* data, std::size_t size)
+            {
+                std::size_t offset = 0;
+                auto* bytes = At(address, offset);
+                if (bytes && offset + size <= bytes->size())
+                    std::memcpy(bytes->data() + offset, data, size);
+            }
+
+            Disasm::CheatEngineMemory View()
+            {
+                Disasm::CheatEngineMemory memory;
+                memory.Is64Bit = Is64Bit;
+                memory.ReadPrefix = [this](std::uint64_t address, void* buffer, std::size_t size) -> std::size_t
+                {
+                    std::size_t offset = 0;
+                    auto* bytes = At(address, offset);
+                    if (!bytes)
+                        return 0;
+                    const std::size_t got = std::min(size, bytes->size() - offset);
+                    std::memcpy(buffer, bytes->data() + offset, got);
+                    return got;
+                };
+                memory.Read = [this](std::uint64_t address, void* buffer, std::size_t size)
+                {
+                    std::size_t offset = 0;
+                    auto* bytes = At(address, offset);
+                    if (!bytes || offset + size > bytes->size())
+                        return false;
+                    std::memcpy(buffer, bytes->data() + offset, size);
+                    return true;
+                };
+                memory.Committed = [this](std::uint64_t address)
+                {
+                    std::size_t offset = 0;
+                    return At(address, offset) != nullptr;
+                };
+                memory.Name = [this](std::uint64_t value)
+                {
+                    for (const auto& [named, text] : Names)
+                    {
+                        if (named == value)
+                            return text;
+                    }
+                    return Hex(value);
+                };
+                return memory;
+            }
+        };
+
+        std::string ExtraOf(FakeMemory& fake, const std::string& line)
+        {
+            const Disasm::CheatEngineMemory memory = fake.View();
+            return Disasm::SplitCheatEngineLine(line, &memory).Extra;
+        }
+
+        // A Lua string literal that keeps every byte (a long string would turn "\r\n" into "\n").
+        std::string LuaLiteral(const std::string& text)
+        {
+            std::string literal = "\"";
+            for (const char c : text)
+            {
+                const auto byte = static_cast<unsigned char>(c);
+                if (byte < 32 || c == '"' || c == '\\')
+                    literal += Format("\\%03u", static_cast<unsigned>(byte));
+                else
+                    literal += c;
+            }
+            return literal + "\"";
+        }
+
+        // ∑ Free Pascal's FloatToStr decides whether CE takes four bytes for a float (a short text, or one
+        //   without a decimal point); Format('%.4f') writes the value. Both round their own way.
+        void PascalNumbers()
+        {
+            CHECK_EQ(Disasm::PascalFloatToStr(1.5f, true), std::string("1.5"));
+            CHECK_EQ(Disasm::PascalFloatToStr(0.1f, true), std::string("0.1000000015"));
+            CHECK_EQ(Disasm::PascalFloatToStr(-2.25f, true), std::string("-2.25"));
+            CHECK_EQ(Disasm::PascalFloatToStr(100000.0f, true), std::string("100000"));
+            CHECK_EQ(Disasm::PascalFloatToStr(0.0078125, false), std::string("0.0078125"));
+            CHECK_EQ(Disasm::PascalFloatToStr(123.456, false), std::string("123.456"));
+            CHECK(Disasm::PascalFloatToStr(0.000001f, true).find('E') != std::string::npos);
+            CHECK(Disasm::PascalFloatToStr(0.00001, false).find('E') == std::string::npos);
+            CHECK(Disasm::PascalFloatToStr(1e20, false).find('E') != std::string::npos);
+            CHECK_EQ(Disasm::PascalFixed4(1.5), std::string("1.5000"));
+            CHECK_EQ(Disasm::PascalFixed4(0.0078125), std::string("0.0078"));
+            CHECK_EQ(Disasm::PascalFixed4(123.456), std::string("123.4560"));
+            CHECK_EQ(Disasm::PascalFixed4(-2.5), std::string("-2.5000"));
+            CHECK_EQ(Disasm::PascalFixed4(-0.00001), std::string("0.0000"));
+            CHECK_EQ(Disasm::PascalFixed4(0.00006), std::string("0.0001"));
+            CHECK_EQ(Disasm::PascalFixed4(99999.99999), std::string("100000.0000"));
+            CHECK_EQ(Disasm::PascalFixed4(1.03125), std::string("1.0313"));
+            // GRISU1_F2A_AGRESSIVE_ROUNDUP: ...4999999 rounds up.
+            CHECK_EQ(Disasm::PascalFixed4(0.12344999999999999), std::string("0.1235"));
+            CHECK_EQ(Disasm::PascalFixed4(std::numeric_limits<double>::quiet_NaN()), std::string("Nan"));
+            CHECK_EQ(Disasm::PascalFixed4(-std::numeric_limits<double>::infinity()), std::string("-Inf"));
+        }
+
+        // ∑ Cheat Engine's splitDisassembledString guesses what the instruction refers to (issue #3). The
+        //   texts are CE's own from the owner's captures; the memory is the capture script's test block.
+        void CheatEngineExtraRules()
+        {
+            FakeMemory wide;
+            constexpr std::uint64_t kWide = 0x1E4BEDE0000ull;
+            wide.Blocks.push_back({ kWide, std::vector<std::uint8_t>(0x2000) });
+            const std::uint8_t data1[] = { 0x78, 0x56, 0x34, 0x12 };
+            const std::uint8_t data2[] = { 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11 };
+            const std::uint8_t data3[] = { 0x00, 0x00, 0xC0, 0x3F };
+            wide.Put(kWide + 0x1800, data1, sizeof(data1));
+            wide.Put(kWide + 0x1810, data2, sizeof(data2));
+            wide.Put(kWide + 0x1820, data3, sizeof(data3));
+
+            struct Case
+            {
+                const char* Line;
+                const char* Extra;
+            };
+            const Case wideCases[] = {
+                { "1E4BEDE0BE0 - 65 48 8B 04 25 30000000  - mov rax,gs:[00000030]", "" },
+                { "1E4BEDE0C00 - 64 A1 0000000000000000 - mov eax,fs:[00000000]", "" },
+                { "1E4BEDE0C20 - 64 8B 0D 30000000  - mov ecx,fs:[1E4BEDE0C57]", "[00000000]" },
+                { "1E4BEDE1160 - F3 0F10 05 B8060000  - movss xmm0,[1E4BEDE1820]", "[(float)1.5000]" },
+                { "1E4BEDE1180 - F2 0F10 05 88060000  - movsd xmm0,[1E4BEDE1810]", "[55667788]" },
+                { "1E4BEDE11A0 - 8B 05 5A060000  - mov eax,[1E4BEDE1800]", "[12345678]" },
+                { "1E4BEDE11C0 - 48 8B 05 49060000  - mov rax,[1E4BEDE1810]", "[55667788]" },
+                { "1E4BEDE11E0 - 66 8B 05 19060000  - mov ax,[1E4BEDE1800]", "[5678]" },
+                { "1E4BEDE1200 - 8A 05 FA050000  - mov al,[1E4BEDE1800]", "[78]" },
+                { "1E4BEDE1220 - 0FB6 05 D9050000  - movzx eax,byte ptr [1E4BEDE1800]", "[78]" },
+                { "1E4BEDE1240 - 8D 05 BA050000  - lea eax,[1E4BEDE1800]", "[12345678]" },
+                { "1E4BEDE1260 - 83 3D 99050000 05 - cmp dword ptr [1E4BEDE1800],05", "" },
+                { "1E4BEDE1280 - 89 05 7A050000  - mov [1E4BEDE1800],eax", "" },
+                { "1E4BEDE12A0 - C7 05 56050000 01000000 - mov [1E4BEDE1800],00000001", "" },
+                { "1E4BEDE12C0 - FF 15 4A050000  - call qword ptr [1E4BEDE1810]", "" },
+                { "1E4BEDE12E0 - D9 05 3A050000  - fld dword ptr [1E4BEDE1820]", "[(float)1.5000]" },
+                { "1E4BEDE1300 - F3 0F5A 05 18050000  - cvtss2sd xmm0,[1E4BEDE1820]", "[(float)1.5000]" },
+                { "1E4BEDE0000 - 70 10 - jo 1E4BEDE0012", "" },
+                { "1E4BEDE0000 - 8B 44 88 10  - mov eax,[rax+rcx*4+10]", "" },
+                { "1E4BEDE0000 - C3 - ret ", "" },
+            };
+            for (const Case& c : wideCases)
+            {
+                const std::string extra = ExtraOf(wide, c.Line);
+                CHECK_MSG(extra == c.Extra, Format("64-bit %s: |%s| instead of |%s|", c.Line, extra.c_str(), c.Extra));
+            }
+
+            FakeMemory narrow;
+            narrow.Is64Bit = false;
+            constexpr std::uint64_t kNarrow = 0x30D10000ull;
+            narrow.Blocks.push_back({ kNarrow, std::vector<std::uint8_t>(0x2000) });
+            narrow.Put(kNarrow + 0x1800, data1, sizeof(data1));
+            narrow.Put(kNarrow + 0x1810, data2, sizeof(data2));
+            narrow.Put(kNarrow + 0x1820, data3, sizeof(data3));
+            narrow.Names.push_back({ 0x55667788, "Fake.Export+3958" });
+            const char text[] = "path/to/file.png\nsecond line";
+            narrow.Put(kNarrow + 0x1830, text, sizeof(text));
+            const std::uint8_t thunk[] = { 0xFF, 0x25, 0x10, 0x18, 0xD1, 0x30 };
+            narrow.Put(kNarrow + 0x1900, thunk, sizeof(thunk));
+            const Case narrowCases[] = {
+                { "30D11180 - F2 0F10 05 1018D130  - movsd xmm0,[30D11810]", "[Fake.Export+3958]" },
+                { "30D112C0 - FF 15 1018D130  - call dword ptr [30D11810]", "[Fake.Export+3958]" },
+                { "30D11260 - 83 3D 0018D130 05 - cmp dword ptr [30D11800],05", "" },
+                { "30D10C00 - 64 A1 00000000 - mov eax,fs:[00000000]", "" },
+                { "30D10000 - 68 3018D130 - push 30D11830", "[\"path/to/file.png\nsecond line\"]" },
+                { "30D10000 - B8 3018D130 - mov eax,30D11830", "[\"path/to/file.png\nsecond line\"]" },
+                { "30D10000 - E9 FB180000 - jmp 30D11900", "[->Fake.Export+3958]" },
+                { "30D10000 - 75 0E - jne 30D11810", "[Fake.Export+3958]" },
+                { "30D10000 - 75 0E - jne 30D11800", "" },
+                { "30d10000 - 8B 05 0018D130  - mov eax,[30D11800] : a comment", "[12345678]" },
+            };
+            for (const Case& c : narrowCases)
+            {
+                const std::string extra = ExtraOf(narrow, c.Line);
+                CHECK_MSG(extra == c.Extra, Format("32-bit %s: |%s| instead of |%s|", c.Line, extra.c_str(), c.Extra));
+            }
+
+            const Disasm::CheatEngineMemory view = narrow.View();
+            const Disasm::CheatEngineSplit split = Disasm::SplitCheatEngineLine("30d10000 - 8B 05 0018D130  - mov eax,[30D11800] : a comment", &view);
+            CHECK_EQ(split.Address, std::string("30D10000"));
+            CHECK_EQ(split.Bytes, std::string("8B 05 0018D130 "));
+            CHECK_EQ(split.Opcode, std::string("mov eax,[30D11800]"));
+            CHECK_EQ(Disasm::SplitCheatEngineLine("30D11180 - F2 0F10 05 1018D130  - movsd xmm0,[30D11810]", nullptr).Extra, std::string());
+            CHECK_EQ(Disasm::SplitCheatEngineLine("no dashes here", nullptr).Opcode, std::string());
+        }
+
+        // ∑ The owner's Cheat Engine 7.6 capture of the extra field (Tools/ce-capture.lua, issue #3): every
+        //   test-block line with CE's fourth value, the block's data area and the names CE gave values in it.
+        //   The test rebuilds the block line by line, as the script wrote it, and must guess what CE guessed.
+        void CheatEngineExtraCapture()
+        {
+            struct Data
+            {
+                bool Is64;
+                std::uint64_t Address;
+                const char* Bytes;
+            };
+            struct Name
+            {
+                bool Is64;
+                std::uint64_t Value;
+                const char* Text;
+            };
+            struct Line
+            {
+                bool Is64;
+                std::uint64_t Address;
+                const char* Bytes;
+                const char* Text;
+                const char* Extra;
+            };
+#define CE_EXTRA_NAME(is64, value, text)
+#define CE_EXTRA_LINE(is64, address, bytes, text, extra)
+#define CE_EXTRA_DATA(is64, address, bytes) { is64, address, bytes },
+            static const Data kData[] = {
+#include "CheatEngineExtra.inc"
+                { false, 0, nullptr },
+            };
+#undef CE_EXTRA_DATA
+#define CE_EXTRA_DATA(is64, address, bytes)
+#undef CE_EXTRA_NAME
+#define CE_EXTRA_NAME(is64, value, text) { is64, value, text },
+            static const Name kNames[] = {
+#include "CheatEngineExtra.inc"
+                { false, 0, nullptr },
+            };
+#undef CE_EXTRA_NAME
+#define CE_EXTRA_NAME(is64, value, text)
+#undef CE_EXTRA_LINE
+#define CE_EXTRA_LINE(is64, address, bytes, text, extra) { is64, address, bytes, text, extra },
+            static const Line kLines[] = {
+#include "CheatEngineExtra.inc"
+                { false, 0, nullptr, nullptr, nullptr },
+            };
+#undef CE_EXTRA_LINE
+#undef CE_EXTRA_NAME
+#undef CE_EXTRA_DATA
+            const auto bytesOf = [](const char* hex)
+            {
+                std::vector<std::uint8_t> bytes;
+                for (std::size_t i = 0; hex[i] && hex[i + 1]; i += 2)
+                    bytes.push_back(static_cast<std::uint8_t>(std::stoi(std::string(hex + i, 2), nullptr, 16)));
+                return bytes;
+            };
+            int checked = 0;
+            for (const bool is64 : { true, false })
+            {
+                FakeMemory fake;
+                fake.Is64Bit = is64;
+                for (const Line& line : kLines)
+                {
+                    if (!line.Bytes || line.Is64 != is64)
+                        continue;
+                    if (fake.Blocks.empty())
+                        fake.Blocks.push_back({ line.Address, std::vector<std::uint8_t>(0x2000) });
+                }
+                if (fake.Blocks.empty())
+                    continue;
+                for (const Data& data : kData)
+                {
+                    if (data.Bytes && data.Is64 == is64)
+                    {
+                        const auto bytes = bytesOf(data.Bytes);
+                        fake.Put(data.Address, bytes.data(), bytes.size());
+                    }
+                }
+                for (const Name& name : kNames)
+                {
+                    if (name.Text && name.Is64 == is64)
+                        fake.Names.push_back({ name.Value, name.Text });
+                }
+                for (const Line& line : kLines)
+                {
+                    if (!line.Bytes || line.Is64 != is64)
+                        continue;
+                    const auto bytes = bytesOf(line.Bytes);
+                    fake.Put(line.Address, bytes.data(), bytes.size());
+                    const std::string extra = ExtraOf(fake, line.Text);
+                    CHECK_MSG(extra == line.Extra, Format("%s-bit %s: |%s| instead of |%s|", is64 ? "64" : "32", line.Text, extra.c_str(), line.Extra));
+                    ++checked;
+                }
+            }
+            CHECK_MSG(checked > 150, Format("only %d captured lines", checked));
+        }
+
+        // The real path: Lua's splitDisassembledString in the tests' own process, on memory of its own.
+        void CheatEngineExtraLive(Engine& engine)
+        {
+            auto* block = static_cast<std::uint8_t*>(::VirtualAlloc(nullptr, 0x2000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+            CHECK(block != nullptr);
+            if (!block)
+                return;
+            const std::uint64_t base = reinterpret_cast<std::uint64_t>(block);
+            const std::uint8_t dword[] = { 0x78, 0x56, 0x34, 0x12 };
+            const std::uint8_t qword[] = { 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11 };
+            const float single = 1.5f;
+            const char ascii[] = "Hello, World!\r\nLine two";
+            const wchar_t wide[] = L"Unicode text";
+            const double small = 0.0078125;
+            const double plain = 123.456;
+            const float pair[] = { 0.1f, 0.7f };
+            const float nicePair[] = { 0.1f, 0.5f };
+            const std::uint8_t counter[] = { 0x05, 'a', 'b', 'c' };
+            std::memcpy(block + 0x800, dword, sizeof(dword));
+            std::memcpy(block + 0x810, qword, sizeof(qword));
+            std::memcpy(block + 0x820, &single, sizeof(single));
+            std::memcpy(block + 0x830, ascii, sizeof(ascii));
+            std::memcpy(block + 0x880, wide, sizeof(wide));
+            std::memcpy(block + 0x8C0, &small, sizeof(small));
+            std::memcpy(block + 0x8D0, &plain, sizeof(plain));
+            std::memcpy(block + 0x8E0, pair, sizeof(pair));
+            std::memcpy(block + 0x940, nicePair, sizeof(nicePair));
+            std::memcpy(block + 0x8F0, counter, sizeof(counter));
+            const std::uint8_t thunk[] = { 0xFF, 0x25, 0x00, 0x00, 0x00, 0x00 };
+            const std::uint64_t pointee = base + 0x1000;
+            std::memcpy(block + 0x900, thunk, sizeof(thunk));
+            std::memcpy(block + 0x906, &pointee, sizeof(pointee));
+            CHECK(engine.Lua().Run(Format("registerSymbol('ceExtraTarget', 0x%llX)", static_cast<unsigned long long>(pointee)), "ce extra symbol").Ok());
+
+            const auto at = [&](std::uint64_t offset) { return Hex(base + offset, 8); };
+            struct Case
+            {
+                std::string Line;
+                std::string Extra;
+            };
+            const std::string code = at(0x100);
+            const Case cases[] = {
+                { code + " - 8B 05 00000000  - mov eax,[" + at(0x800) + "]", "[12345678]" },
+                { code + " - 48 8B 05 00000000  - mov rax,[" + at(0x810) + "]", "[55667788]" },
+                { code + " - F3 0F10 05 00000000  - movss xmm0,[" + at(0x820) + "]", "[(float)1.5000]" },
+                { code + " - 66 8B 05 00000000  - mov ax,[" + at(0x800) + "]", "[5678]" },
+                { code + " - 8D 05 00000000  - lea eax,[" + at(0x800) + "]", "[12345678]" },
+                { code + " - 89 05 00000000  - mov [" + at(0x800) + "],eax", "" },
+                { code + " - 48 8B 0D 00000000  - mov rcx,[" + at(0x830) + "]", "[\"Hello, World!\r\nLine two\"]" },
+                { code + " - 48 B8 0000000000000000 - mov rax," + Hex(base + 0x830, 16), "[\"Hello, World!\r\nLine two\"]" },
+                { code + " - 48 8B 0D 00000000  - mov rcx,[" + at(0x880) + "]", "[\"\"Unicode text\"\"]" },
+                { code + " - 8B 0D 00000000  - mov ecx,[" + at(0x8C0) + "]", "[(double)0.0078]" },
+                { code + " - 8B 0D 00000000  - mov ecx,[" + at(0x8D0) + "]", "[(double)123.4560]" },
+                // ∑ 0.1f then 0.7f: bytes 4..7 (33 33 33 3F) pass CE's text test, so the second float does not
+                //   count and the eight bytes stay a double. After 0.5f (00 00 00 3F) the first stays a float.
+                { code + " - 8B 0D 00000000  - mov ecx,[" + at(0x8E0) + "]", "[(double)0.0003]" },
+                { code + " - 8B 0D 00000000  - mov ecx,[" + at(0x940) + "]", "[(float)0.1000]" },
+                { code + " - 8B 0D 00000000  - mov ecx,[" + at(0x8F0) + "]", "[63626105]" },
+                { code + " - 8B 0D 00000000  - mov ecx,[" + at(0x801) + "]", "[00123456]" },
+                { code + " - DD 05 00000000  - fld qword ptr [" + at(0x8C0) + "]", "[(double)0.0078]" },
+                { code + " - E9 00000000 - jmp " + at(0x900), "[->ceExtraTarget]" },
+                { code + " - E8 00000000 - call " + at(0x900), "[->ceExtraTarget]" },
+                { code + " - E9 00000000 - jmp " + at(0x1000), "" },
+                { code + " - FF 15 00000000  - call qword ptr [" + at(0x810) + "]", "" },
+                { code + " - 8B 05 00000000  - mov eax,[" + at(0x800) + "] : not the extra", "[12345678]" },
+            };
+            for (const Case& c : cases)
+            {
+                std::string answer;
+                const Status done = engine.Lua().RunWithResult("return (splitDisassembledString(" + LuaLiteral(c.Line) + "))", "ce extra", answer);
+                CHECK_MSG(done.Ok(), done.Text);
+                CHECK_MSG(answer == c.Extra, Format("%s: |%s| instead of |%s|", c.Line.c_str(), answer.c_str(), c.Extra.c_str()));
+            }
+            CHECK(engine.Lua().Run("unregisterSymbol('ceExtraTarget')", "ce extra symbol").Ok());
+            ::VirtualFree(block, 0, MEM_RELEASE);
         }
     }
 
@@ -683,6 +1068,9 @@ namespace Manifold::Tests
         AddressByteMasks();
         RegisterNames();
         CheatEngineCapture();
+        PascalNumbers();
+        CheatEngineExtraRules();
+        CheatEngineExtraCapture();
         Settings settings;
         Engine engine(settings);
         engine.Lua().Run("__manifoldHeadless = true", "headless");
@@ -703,6 +1091,7 @@ namespace Manifold::Tests
         UnreadableFloor(engine);
         LuaTextHasPlainAddresses(engine);
         LuaTextLikeCheatEngine(engine);
+        CheatEngineExtraLive(engine);
         ChainedUnwind();
         InstructionHelp();
         engine.CloseProcess();

@@ -53,7 +53,7 @@ Scripts run on the program's main thread: in the Lua engine window (Ctrl+L), in 
 | `autoAssembleCheck(script, enable)` | `success, error` without writing anything |
 | `disassemble(address)` | `"address - bytes - opcode : extra"` |
 | `disassembleBytes(bytes, address)` | the same line for the first instruction in `bytes` (a byte table or a hex string such as `"48 8B 4C 24 08"`) as if it stood at `address`; no process needed |
-| `splitDisassembledString(text)` | `extra, opcode, bytes, address` |
+| `splitDisassembledString(text)` | `extra, opcode, bytes, address`. As in Cheat Engine, `extra` is not the text after ` : ` but a guess at the value the instruction refers to, read from the process: `[12345678]`, `[(float)1.5000]`, `[(double)0.0078]`, `["text"]`, `[module+offset]`, `[->module.export]` for a branch to a `jmp [pointer]`; empty without a process or when the address is not committed |
 | `getInstructionSize(address)` / `getPreviousOpcode(address)` | |
 
 ## Address list

@@ -162,6 +162,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Debug\Debugger.cpp" />
     <ClCompile Include="..\Source\Debug\Trace.cpp" />
     <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp" />
+    <ClCompile Include="..\Source\Disasm\CheatEngineExtra.cpp" />
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
     <ClCompile Include="..\Source\Disasm\FlowGraph.cpp" />
@@ -399,6 +400,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Debug\Trace.h" />
     <ClInclude Include="..\Source\Debug\VehProtocol.h" />
     <ClInclude Include="..\Source\Disasm\AssemblySearch.h" />
+    <ClInclude Include="..\Source\Disasm\CheatEngineExtra.h" />
     <ClInclude Include="..\Source\Disasm\CodeDissect.h" />
     <ClInclude Include="..\Source\Disasm\Disassembler.h" />
     <ClInclude Include="..\Source\Disasm\FlowGraph.h" />

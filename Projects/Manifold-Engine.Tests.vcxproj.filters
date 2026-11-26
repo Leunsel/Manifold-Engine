@@ -195,6 +195,9 @@
     <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\Disasm\CheatEngineExtra.cpp">
+      <Filter>Source\Disasm</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp">
       <Filter>Source\Disasm</Filter>
     </ClCompile>

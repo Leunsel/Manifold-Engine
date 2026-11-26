@@ -5,6 +5,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Core/Version.h"
+#include "Disasm/CheatEngineExtra.h"
 #include "Lua/InputBox.h"
 #include "Lua/LuaArgs.h"
 #include "Lua/LuaEngine.h"
@@ -810,30 +811,45 @@ namespace Manifold::Lua
             return 1;
         }
 
+        // ∑ Cheat Engine's fourth value is not the text after " : " (its Lua disassemble() writes none) but a
+        //   guess at the value the instruction refers to, read from the process: [12345678], [(float)1.5000],
+        //   [(double)...], ["text"], [module+offset], [->module.export] (Disasm::CheatEngineExtra).
         int SplitDisassembled(lua_State* state)
         {
             const std::string text = luaL_checkstring(state, 1);
-            std::vector<std::string> parts;
-            std::size_t at = 0;
-            for (int i = 0; i < 2; ++i)
+            const auto process = Owner(state).Process();
+            Disasm::CheatEngineMemory memory;
+            if (process)
             {
-                const std::size_t dash = text.find(" - ", at);
-                if (dash == std::string::npos)
-                    break;
-                parts.push_back(text.substr(at, dash - at));
-                at = dash + 3;
+                memory.Is64Bit = process->Is64Bit();
+                memory.Read = [&process](std::uint64_t address, void* buffer, std::size_t size)
+                {
+                    return size <= ~address && process->ReadExact(address, buffer, size);
+                };
+                memory.ReadPrefix = [&process](std::uint64_t address, void* buffer, std::size_t size) -> std::size_t
+                {
+                    if (size > ~address)
+                        return 0;
+                    if (process->ReadExact(address, buffer, size))
+                        return size;
+                    const auto region = process->RegionAt(address);
+                    if (!region || !region->Readable() || region->End() <= address)
+                        return 0;
+                    const std::size_t part = static_cast<std::size_t>(std::min<std::uint64_t>(size, region->End() - address));
+                    return process->ReadExact(address, buffer, part) ? part : 0;
+                };
+                memory.Committed = [&process](std::uint64_t address)
+                {
+                    const auto region = process->RegionAt(address);
+                    return region && region->Committed();
+                };
+                memory.Name = [state](std::uint64_t address) { return Owner(state).Describe(address); };
             }
-            std::string opcode = text.substr(std::min(at, text.size()));
-            std::string extra;
-            if (const std::size_t colon = opcode.find(" : "); colon != std::string::npos)
-            {
-                extra = opcode.substr(colon + 3);
-                opcode.resize(colon);
-            }
-            lua_pushstring(state, extra.c_str());
-            lua_pushstring(state, opcode.c_str());
-            lua_pushstring(state, parts.size() > 1 ? parts[1].c_str() : "");
-            lua_pushstring(state, parts.empty() ? "" : parts[0].c_str());
+            const Disasm::CheatEngineSplit split = Disasm::SplitCheatEngineLine(text, process ? &memory : nullptr);
+            lua_pushstring(state, split.Extra.c_str());
+            lua_pushstring(state, split.Opcode.c_str());
+            lua_pushstring(state, split.Bytes.c_str());
+            lua_pushstring(state, split.Address.c_str());
             return 4;
         }
 

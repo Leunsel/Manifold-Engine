@@ -154,6 +154,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Source\Debug\Debugger.cpp" />
     <ClCompile Include="..\Source\Debug\Trace.cpp" />
     <ClCompile Include="..\Source\Disasm\AssemblySearch.cpp" />
+    <ClCompile Include="..\Source\Disasm\CheatEngineExtra.cpp" />
     <ClCompile Include="..\Source\Disasm\CodeDissect.cpp" />
     <ClCompile Include="..\Source\Disasm\Disassembler.cpp" />
     <ClCompile Include="..\Source\Disasm\FlowGraph.cpp" />
