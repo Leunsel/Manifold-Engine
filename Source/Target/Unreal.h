@@ -159,6 +159,16 @@ namespace Manifold::Target
         std::int64_t Value = 0;
     };
 
+    // A type's properties and how far their chains were read. Complete: every chain (the type's and its supers')
+    // ended in a null link. Otherwise CanContinue tells the two cut cases apart: a chain stopped at the node limit
+    // and a read with a higher limit goes on from there, or a link could not be read and the definition stays cut.
+    struct UnrealFieldList
+    {
+        std::vector<UnrealField> Fields;
+        bool Complete = true;
+        bool CanContinue = false;
+    };
+
     struct UnrealLocation
     {
         std::uint64_t Object = 0;
@@ -232,6 +242,8 @@ namespace Manifold::Target
         std::optional<int> StructSize(std::uint64_t type) const;
         bool IsChildOf(std::uint64_t type, std::uint64_t base) const;
         std::vector<UnrealField> Fields(std::uint64_t type, bool ownOnly = false) const;
+        // maxNodes caps the nodes read per chain (each own chain of the type and its supers).
+        UnrealFieldList FieldList(std::uint64_t type, bool ownOnly = false, int maxNodes = kMaxFields) const;
         std::optional<UnrealField> FindField(std::uint64_t type, std::string_view name) const;
         std::optional<UnrealField> Describe(std::uint64_t property, const std::string& kind, const std::string& owner) const;
         std::vector<UnrealFunction> Functions(std::uint64_t type, bool inherited) const;
@@ -327,7 +339,17 @@ namespace Manifold::Target
         std::optional<std::string> TypeOf(std::uint64_t property, const std::vector<std::uint8_t>* block) const;
         std::uint64_t FindRawField(std::uint64_t type, std::string_view name) const;
         std::uint64_t FieldIn(std::uint64_t type, std::string_view name) const;
-        std::vector<UnrealField> OwnFields(std::uint64_t type) const;
+        // One type's own property chain as far as it was read: Next is the first node not read yet (0 once the
+        // chain ended or broke), so a read with a higher node limit continues instead of starting again.
+        struct OwnChain
+        {
+            std::vector<UnrealField> Fields;
+            std::uint64_t Next = 0;
+            int Nodes = 0;
+            bool Ended = false;
+            bool Broken = false;
+        };
+        OwnChain OwnFields(std::uint64_t type, int maxNodes = kMaxFields) const;
         std::optional<UnrealField> DescribeWith(std::uint64_t property, const std::string& kind, const std::string& owner, const std::vector<std::uint8_t>* block) const;
         std::optional<std::pair<std::uint64_t, std::string>> InnerProperty(std::uint64_t property, int slot, const std::vector<std::uint8_t>* block) const;
         std::string PropertyText(std::uint64_t property, const std::string& kind) const;
@@ -362,7 +384,7 @@ namespace Manifold::Target
         mutable std::unordered_map<int, std::uint64_t> m_chunks;
         mutable std::unordered_map<std::uint64_t, UnrealKind> m_kinds;
         mutable std::unordered_map<std::uint64_t, std::string> m_fieldTypes;
-        mutable std::unordered_map<std::uint64_t, std::vector<UnrealField>> m_own;
+        mutable std::unordered_map<std::uint64_t, OwnChain> m_own;
         mutable std::unordered_map<std::uint64_t, std::vector<UnrealField>> m_merged;
         mutable std::unordered_map<std::uint64_t, std::string> m_cpp;
         mutable std::unordered_map<std::uint64_t, std::vector<UnrealEnumEntry>> m_enumEntries;

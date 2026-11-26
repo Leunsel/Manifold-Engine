@@ -646,9 +646,15 @@ namespace Manifold::UI
                                 return;
                             }
                             live->Fields = fill.Fields;
-                            Table::AddUnrealStructures(engine.Structures(), fill, live->Name);
+                            std::vector<std::string> cut;
                             if (!alive.expired())
-                                m_moreFields[definition] = { address, limit, fill.Truncated };
+                            {
+                                if (const auto before = m_moreFields.find(definition); before != m_moreFields.end() && before->second.Address == address)
+                                    cut = before->second.CutStructs;
+                            }
+                            Table::AddUnrealStructures(engine.Structures(), fill, live->Name, cut);
+                            if (!alive.expired())
+                                m_moreFields[definition] = { address, limit, fill.Truncated, fill.Incomplete, fill.Fields.size(), fill.CutStructs };
                             std::vector<std::pair<std::uint64_t, UnrealArray>> arrays;
                             for (const Table::UnrealArrayRef& array : fill.Arrays)
                                 arrays.push_back({ array.Data, UnrealArray{ array.Field, array.Header } });
@@ -1523,21 +1529,35 @@ namespace Manifold::UI
     {
         // ∑ An Unreal fill stops at kUnrealFieldLimit fields; instead of cutting the class off quietly, the table ends
         //   with a row that reads the same object again with room for the next batch.
+        // ∑ The fill may be cut in an embedded structure while the class's own rows are few, so the row depends on
+        //   the fill's flags, not on the row count reaching the limit. It goes once the definition no longer holds
+        //   what the fill wrote (the user removed rows).
         const auto more = m_moreFields.find(&definition);
-        if (more == m_moreFields.end() || !more->second.Truncated || definition.Fields.size() < static_cast<std::size_t>(more->second.Limit))
+        if (more == m_moreFields.end() || (!more->second.Truncated && !more->second.Incomplete) || definition.Fields.size() < more->second.Rows)
             return;
+        const MoreFields& state = more->second;
+        std::string where = "the class";
+        if (!state.CutStructs.empty())
+            where = state.CutStructs.size() == 1 ? state.CutStructs.front() : Grouped(static_cast<std::uint64_t>(state.CutStructs.size())) + " embedded structures";
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(2);
+        if (!state.Truncated)
+        {
+            Muted("The definition of " + where + " is incomplete: a property chain could not be read to its end");
+            return;
+        }
         if (m_filling.count(&definition))
         {
             Muted("Loading more fields...");
             return;
         }
+        const std::string text = Grouped(static_cast<std::uint64_t>(state.Limit)) + " fields per structure shown, " + where + " has more" +
+            (state.Incomplete ? "; a property chain could not be read to its end" : "");
         bool load = false;
         {
             Layout::Row line("##unrealMoreFields", { Layout::Size::Fit(), Layout::Size::Fill() });
             line.Cell([&]() { load = Layout::Button("Load More##loadMore"); });
-            line.Cell([&]() { Layout::Muted(Grouped(static_cast<std::uint64_t>(more->second.Limit)) + " fields shown, the class has more"); });
+            line.Cell([&]() { Layout::Muted(text); });
         }
         if (load)
         {

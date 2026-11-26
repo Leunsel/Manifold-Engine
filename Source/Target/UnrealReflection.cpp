@@ -450,64 +450,110 @@ namespace Manifold::Target
         return info;
     }
 
-    std::vector<UnrealField> UnrealRuntime::OwnFields(std::uint64_t type) const
+    UnrealRuntime::OwnChain UnrealRuntime::OwnFields(std::uint64_t type, int maxNodes) const
     {
+        // ∑ The cache keeps where the walk stopped, not just what it found. A chain cut at the node limit was
+        //   cached like a finished one before, so a class with more properties than kMaxFields looked complete
+        //   and Load More never got past it; now a read with a higher limit goes on from the first unread node.
+        OwnChain chain;
+        bool cached = false;
         {
             std::lock_guard lock(m_lock);
             if (const auto it = m_own.find(type); it != m_own.end())
-                return it->second;
+            {
+                chain = it->second;
+                cached = true;
+            }
         }
-        std::vector<UnrealField> out;
-        if (!IsPtr(type) || m_layout.ChildProperties < 0)
-            return out;
-        const std::string owner = NameOf(type).value_or("?");
-        std::uint64_t field = ReadObject(type + static_cast<std::uint64_t>(m_layout.ChildProperties));
-        std::vector<std::uint8_t> block;
-        for (int guard = 0; field && guard < kMaxFields; ++guard)
+        if (cached && (chain.Ended || chain.Broken || chain.Nodes >= maxNodes))
+            return chain;
+        if (!cached)
         {
+            if (!IsPtr(type) || m_layout.ChildProperties < 0)
+            {
+                chain.Ended = true;
+                return chain;
+            }
+            const auto head = ReadPointer(type + static_cast<std::uint64_t>(m_layout.ChildProperties));
+            chain.Next = head && IsPtr(*head) ? *head : 0;
+            chain.Ended = head && *head == 0;
+            chain.Broken = !chain.Ended && !chain.Next;
+        }
+        const std::string owner = NameOf(type).value_or("?");
+        std::vector<std::uint8_t> block;
+        while (chain.Next && chain.Nodes < maxNodes)
+        {
+            const std::uint64_t field = chain.Next;
+            ++chain.Nodes;
             const bool read = m_fieldBlock > 0 && ReadBlock(field, block, static_cast<std::size_t>(m_fieldBlock));
             const std::vector<std::uint8_t>* data = read ? &block : nullptr;
             const auto kind = TypeOf(field, data);
             if (kind && EndsWith(*kind, "Property"))
             {
                 if (auto info = DescribeWith(field, *kind, owner, data))
-                    out.push_back(std::move(*info));
+                    chain.Fields.push_back(std::move(*info));
             }
             const auto next = data ? PointerFrom(data, m_layout.Next) : ReadPointer(field + static_cast<std::uint64_t>(m_layout.Next));
-            field = next && IsPtr(*next) ? *next : 0;
+            chain.Next = next && IsPtr(*next) ? *next : 0;
+            chain.Ended = next && *next == 0;
+            chain.Broken = !chain.Ended && !chain.Next;
         }
         std::lock_guard lock(m_lock);
-        m_own[type] = out;
-        return out;
+        OwnChain& slot = m_own[type];
+        if (slot.Nodes <= chain.Nodes)
+            slot = chain;
+        return chain;
     }
 
-    std::vector<UnrealField> UnrealRuntime::Fields(std::uint64_t type, bool ownOnly) const
+    UnrealFieldList UnrealRuntime::FieldList(std::uint64_t type, bool ownOnly, int maxNodes) const
     {
+        UnrealFieldList list;
         if (!IsPtr(type))
-            return {};
+            return list;
+        const auto take = [&](OwnChain&& chain)
+            {
+                for (UnrealField& field : chain.Fields)
+                    list.Fields.push_back(std::move(field));
+                if (!chain.Ended)
+                {
+                    list.Complete = false;
+                    list.CanContinue = list.CanContinue || !chain.Broken;
+                }
+            };
         if (ownOnly)
         {
-            std::vector<UnrealField> own = OwnFields(type);
-            SortFields(own);
-            return own;
+            take(OwnFields(type, maxNodes));
+            SortFields(list.Fields);
+            return list;
         }
         {
             std::lock_guard lock(m_lock);
             if (const auto it = m_merged.find(type); it != m_merged.end())
-                return it->second;
+            {
+                list.Fields = it->second;
+                return list;
+            }
         }
-        std::vector<UnrealField> out;
         std::uint64_t current = type;
         for (int depth = 0; depth < kMaxSuperDepth && IsPtr(current); ++depth)
         {
-            for (UnrealField& field : OwnFields(current))
-                out.push_back(std::move(field));
+            take(OwnFields(current, maxNodes));
             current = SuperOf(current);
         }
-        SortFields(out);
-        std::lock_guard lock(m_lock);
-        m_merged[type] = out;
-        return out;
+        SortFields(list.Fields);
+        // Only a complete list is cached merged: a cut one is put together again from the own chains, which
+        // can then read on.
+        if (list.Complete)
+        {
+            std::lock_guard lock(m_lock);
+            m_merged[type] = list.Fields;
+        }
+        return list;
+    }
+
+    std::vector<UnrealField> UnrealRuntime::Fields(std::uint64_t type, bool ownOnly) const
+    {
+        return FieldList(type, ownOnly).Fields;
     }
 
     std::optional<UnrealField> UnrealRuntime::FindField(std::uint64_t type, std::string_view name) const
@@ -698,7 +744,7 @@ namespace Manifold::Target
                     function.Owner = owner;
                     function.Address = field;
                     function.Flags = m_layout.FunctionFlags >= 0 ? ReadUInt(field + static_cast<std::uint64_t>(m_layout.FunctionFlags)).value_or(0) : 0;
-                    function.Parameters = OwnFields(field);
+                    function.Parameters = OwnFields(field).Fields;
                     out.push_back(std::move(function));
                 }
                 field = ReadObject(field + static_cast<std::uint64_t>(m_layout.ChildNext));

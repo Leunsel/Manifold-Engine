@@ -173,12 +173,16 @@ namespace Manifold::UI
         bool m_lookupRunning = false;
         std::string m_suggestedName;
         std::set<const Table::StructDefinition*> m_filling;
-        // An Unreal fill that stopped at its field limit: where it was read and how many fields it was allowed.
+        // An Unreal fill that was cut: where it was read, how many fields it was allowed and wrote, whether a higher
+        // limit reads on (Truncated) or a property chain broke (Incomplete), and which embedded structures are cut.
         struct MoreFields
         {
             std::uint64_t Address = 0;
             int Limit = 0;
             bool Truncated = false;
+            bool Incomplete = false;
+            std::size_t Rows = 0;
+            std::vector<std::string> CutStructs;
         };
         std::map<const Table::StructDefinition*, MoreFields> m_moreFields;
         std::set<std::string> m_childLookups;

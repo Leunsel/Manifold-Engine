@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -385,6 +386,104 @@ namespace Manifold::Tests
             }
             const auto name = Table::UnrealStructureName(runtime, fake.ActorInstance + 0x10, true, {});
             CHECK(name && name->first == "Actor" && name->second == fake.ActorInstance);
+        }
+
+        const std::vector<Table::StructField>* StructNamed(const Table::UnrealFill& fill, const std::string& name)
+        {
+            const auto it = std::find_if(fill.Structs.begin(), fill.Structs.end(), [&](const auto& entry) { return entry.first == name; });
+            return it == fill.Structs.end() ? nullptr : &it->second;
+        }
+
+        // Issue #4 follow-up: whether a property chain was read to its end is kept (cache and fill), and a cut in an
+        // embedded structure is the fill's cut.
+        void BigChains(Engine& engine)
+        {
+            const auto resolve = [&](FakeUnreal::Builder& builder, const FakeUnreal::Variant& variant, Target::UnrealRuntime& runtime, const char* label) -> std::optional<Fake>
+                {
+                    CHECK_MSG(builder.Build(variant), label);
+                    const Status status = runtime.Resolve(engine.Process(), Target::UnrealConfig{}, true, nullptr);
+                    CHECK_MSG(status.Ok(), std::string(label) + ": " + status.Text);
+                    if (!status)
+                        return std::nullopt;
+                    return Widen(builder.Fake);
+                };
+            const auto has = [](const std::vector<Table::StructField>& fields, const std::string& name)
+                { return std::any_of(fields.begin(), fields.end(), [&](const Table::StructField& f) { return f.Name == name; }); };
+
+            {
+                // More properties than one read takes (kMaxFields): the cut is cached as a cut, and a read with a
+                // higher limit goes on from it.
+                constexpr int kCount = Target::UnrealRuntime::kMaxFields + 808;
+                FakeUnreal::Builder builder;
+                Target::UnrealRuntime runtime;
+                if (const auto fake = resolve(builder, { .BigClass = true, .BigFields = kCount }, runtime, "long chain"))
+                {
+                    const Target::UnrealFieldList cut = runtime.FieldList(fake->BigClass);
+                    CHECK_MSG(cut.Fields.size() == static_cast<std::size_t>(Target::UnrealRuntime::kMaxFields) && !cut.Complete && cut.CanContinue,
+                        "long chain: " + std::to_string(cut.Fields.size()) + " fields, complete " + std::to_string(cut.Complete));
+                    const Target::UnrealFieldList again = runtime.FieldList(fake->BigClass);
+                    CHECK_MSG(!again.Complete && again.CanContinue, "long chain: the cached cut still says so");
+                    const Target::UnrealFieldList whole = runtime.FieldList(fake->BigClass, false, 2 * kCount);
+                    CHECK_MSG(whole.Fields.size() == static_cast<std::size_t>(kCount) && whole.Complete, "long chain: " + std::to_string(whole.Fields.size()) + " fields with a higher limit");
+                    CHECK(runtime.FieldList(fake->BigClass).Complete);  // read to the end once, complete for every caller
+
+                    const Table::UnrealFill first = Table::FillUnrealObject(runtime, fake->BigInstance, true);
+                    CHECK(first.Truncated && !first.Incomplete && first.CutStructs.empty());
+                    const Table::UnrealFill more = Table::FillUnrealObject(runtime, fake->BigInstance, true, 2 * Table::kUnrealFieldLimit);
+                    CHECK_MSG(!more.Truncated && !more.Incomplete && has(more.Fields, "Value_" + std::to_string(kCount - 1)),
+                        "long chain: " + std::to_string(more.Fields.size()) + " rows after Load More");
+                }
+            }
+            {
+                // A small class embedding one large struct: the struct gets the fill's limit, its cut is the fill's
+                // cut, and Load More's longer definition replaces the cut one in the store.
+                FakeUnreal::Builder builder;
+                Target::UnrealRuntime runtime;
+                if (const auto fake = resolve(builder, { .BigClass = true, .BigFields = 7000, .BigStruct = true }, runtime, "big struct"))
+                {
+                    const std::string child = runtime.CppName(fake->BigStruct);
+                    const Table::UnrealFill first = Table::FillUnrealObject(runtime, fake->BigInstance, true);
+                    const auto* cut = StructNamed(first, child);
+                    CHECK_MSG(first.Fields.size() < static_cast<std::size_t>(Table::kUnrealFieldLimit) && first.Truncated && !first.Incomplete, "big struct: " + std::to_string(first.Fields.size()) + " class rows");
+                    CHECK_MSG(first.CutStructs == std::vector<std::string>{ child }, "big struct: " + std::to_string(first.CutStructs.size()) + " cut structures");
+                    CHECK_MSG(cut && cut->size() == static_cast<std::size_t>(Table::kUnrealFieldLimit), "big struct: " + std::to_string(cut ? cut->size() : 0) + " struct rows");
+
+                    Table::StructureStore store;
+                    Table::AddUnrealStructures(store, first, "BigActor");
+                    const Table::UnrealFill more = Table::FillUnrealObject(runtime, fake->BigInstance, true, 2 * Table::kUnrealFieldLimit);
+                    const auto* whole = StructNamed(more, child);
+                    CHECK(!more.Truncated && !more.Incomplete && more.CutStructs.empty());
+                    CHECK_MSG(whole && whole->size() == 7000 && has(*whole, "Value_6999"), "big struct: " + std::to_string(whole ? whole->size() : 0) + " struct rows after Load More");
+                    Table::AddUnrealStructures(store, more, "BigActor");
+                    CHECK_MSG(store.Find(child)->Fields.size() == static_cast<std::size_t>(Table::kUnrealFieldLimit), "big struct: not known as cut, kept");
+                    Table::AddUnrealStructures(store, more, "BigActor", first.CutStructs);
+                    const Table::StructDefinition* stored = store.Find(child);
+                    CHECK_MSG(stored && stored->Fields.size() == 7000, "big struct: the stored definition grows with Load More");
+
+                    Table::StructureStore edited;
+                    Table::AddUnrealStructures(edited, first, "BigActor");
+                    edited.Find(child)->Fields[0].Name = "Renamed";
+                    Table::AddUnrealStructures(edited, more, "BigActor", first.CutStructs);
+                    CHECK_MSG(edited.Find(child)->Fields.size() == static_cast<std::size_t>(Table::kUnrealFieldLimit) && edited.Find(child)->Fields[0].Name == "Renamed",
+                        "big struct: a definition the user changed is kept");
+                }
+            }
+            for (const bool inStruct : { false, true })
+            {
+                // A link that is not a pointer: the definition is incomplete, and a higher limit cannot help.
+                const char* label = inStruct ? "broken struct chain" : "broken class chain";
+                FakeUnreal::Builder builder;
+                Target::UnrealRuntime runtime;
+                if (const auto fake = resolve(builder, { .BigClass = true, .BigFields = 100, .BigStruct = inStruct, .BrokenChain = true }, runtime, label))
+                {
+                    const std::uint64_t owner = inStruct ? fake->BigStruct : fake->BigClass;
+                    const Target::UnrealFieldList list = runtime.FieldList(owner, false, 1000);
+                    CHECK_MSG(list.Fields.size() == 51 && !list.Complete && !list.CanContinue, std::string(label) + ": " + std::to_string(list.Fields.size()) + " fields");
+                    const Table::UnrealFill fill = Table::FillUnrealObject(runtime, fake->BigInstance, true);
+                    CHECK_MSG(fill.Incomplete && !fill.Truncated, label);
+                    CHECK_MSG(inStruct ? fill.CutStructs == std::vector<std::string>{ runtime.CppName(fake->BigStruct) } : fill.CutStructs.empty(), label);
+                }
+            }
         }
 
         void VariantLayout(Engine& engine, const FakeUnreal::Variant& variant, const char* label)
@@ -891,6 +990,7 @@ namespace Manifold::Tests
                 CHECK(runtime.StructSize(fake.BigClass) == FakeUnreal::kBigSize);
             }
         }
+        BigChains(engine);
         for (const bool early : { false, true })
         {
             FakeUnreal3::Builder builder;

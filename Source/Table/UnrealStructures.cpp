@@ -34,7 +34,13 @@ namespace Manifold::Table
             int Width = 8;
         };
 
-        using NestedStructs = std::vector<std::pair<std::string, std::vector<StructField>>>;
+        // The embedded structures of one fill, shared by its nested fillers: their definitions, and the names
+        // of those whose definition is cut (by the row limit or by a property chain that was not read to the end).
+        struct NestedStructs
+        {
+            std::vector<std::pair<std::string, std::vector<StructField>>> Structs;
+            std::vector<std::string> Cut;
+        };
 
         int SizeOf(ValueType type, int bytes, int pointer)
         {
@@ -93,6 +99,7 @@ namespace Manifold::Table
 
             int Count() const { return m_count; }
             bool Truncated() const { return m_truncated; }
+            bool Incomplete() const { return m_incomplete; }
             std::vector<UnrealArrayRef>& Arrays() { return m_arrays; }
 
             void Add(int offset, std::string name, ValueType type, int width, FieldDisplay display = FieldDisplay::Unsigned, std::string custom = {}, int bit = -1,
@@ -128,15 +135,22 @@ namespace Manifold::Table
                     CollectArrays(f.Inner, offset, depth + 1);
                 if (depth >= kInlineDepth)
                     return;
-                const auto known = std::find_if(m_nested.begin(), m_nested.end(), [&](const auto& entry) { return entry.first == child; });
-                if (known != m_nested.end())
+                const auto known = std::find_if(m_nested.Structs.begin(), m_nested.Structs.end(), [&](const auto& entry) { return entry.first == child; });
+                if (known != m_nested.Structs.end())
                     return;
-                const std::size_t slot = m_nested.size();
-                m_nested.push_back({ child, {} });
-                Filler inner(m_runtime, m_process, 0, m_custom, m_nested);
+                const std::size_t slot = m_nested.Structs.size();
+                m_nested.Structs.push_back({ child, {} });
+                // ∑ The child gets this fill's limit, and its cut is this fill's cut. With its own default-limit
+                //   filler and the flag dropped, a small class embedding one large struct looked complete and had
+                //   no Load More, while the struct's definition stopped at the default limit.
+                Filler inner(m_runtime, m_process, 0, m_custom, m_nested, m_limit);
                 inner.Struct(f.Inner, 0, "", depth + 1);
                 inner.Gaps(m_runtime.StructSize(f.Inner));
-                m_nested[slot].second = inner.Flush();
+                m_nested.Structs[slot].second = inner.Flush();
+                if (inner.Truncated() || inner.Incomplete())
+                    m_nested.Cut.push_back(child);
+                m_truncated = m_truncated || inner.Truncated();
+                m_incomplete = m_incomplete || inner.Incomplete();
             }
 
             // TArrays inside embedded structs, at their place in this object, so expanding their data still works.
@@ -287,7 +301,16 @@ namespace Manifold::Table
 
             void Struct(std::uint64_t type, int base, const std::string& prefix, int depth)
             {
-                for (const Target::UnrealField& f : m_runtime.Fields(type))
+                // Every field gives at least one row, so a fill never needs more nodes per chain than its ceiling.
+                const Target::UnrealFieldList list = m_runtime.FieldList(type, false, std::max(Target::UnrealRuntime::kMaxFields, m_ceiling));
+                if (!list.Complete)
+                {
+                    if (list.CanContinue)
+                        m_truncated = true;
+                    else
+                        m_incomplete = true;
+                }
+                for (const Target::UnrealField& f : list.Fields)
                 {
                     if (m_count >= m_ceiling)
                     {
@@ -437,6 +460,7 @@ namespace Manifold::Table
             int m_ceiling = kUnrealFieldLimit;
             int m_count = 0;
             bool m_truncated = false;
+            bool m_incomplete = false;
             std::vector<Spec> m_specs;
             std::vector<UnrealArrayRef> m_arrays;
             NestedStructs& m_nested;
@@ -447,8 +471,10 @@ namespace Manifold::Table
             UnrealFill fill;
             fill.Fields = filler.Flush();
             fill.Arrays = std::move(filler.Arrays());
-            fill.Structs = std::move(nested);
+            fill.Structs = std::move(nested.Structs);
+            fill.CutStructs = std::move(nested.Cut);
             fill.Truncated = filler.Truncated();
+            fill.Incomplete = filler.Incomplete();
             fill.Handled = !fill.Fields.empty();
             return fill;
         }
@@ -485,14 +511,31 @@ namespace Manifold::Table
         }
     }
 
-    void AddUnrealStructures(StructureStore& store, const UnrealFill& fill, const std::string& skip)
+    void AddUnrealStructures(StructureStore& store, const UnrealFill& fill, const std::string& skip, const std::vector<std::string>& cut)
     {
+        // ∑ Only a definition the caller knows was cut is replaced, and only while its fields are still the first
+        //   rows of the new one (a cut fill and the same fill with a higher limit give that). Rows alone cannot
+        //   tell a cut definition from one the user shortened, which is kept.
+        const auto extends = [](const std::vector<StructField>& now, const std::vector<StructField>& longer)
+            {
+                if (longer.size() <= now.size())
+                    return false;
+                for (std::size_t i = 0; i < now.size(); ++i)
+                {
+                    const StructField& a = now[i];
+                    const StructField& b = longer[i];
+                    if (a.Offset != b.Offset || a.Name != b.Name || a.Type != b.Type || a.Size != b.Size || a.ChildStructure != b.ChildStructure)
+                        return false;
+                }
+                return true;
+            };
         for (const auto& [name, fields] : fill.Structs)
         {
             if (fields.empty() || name == skip)
                 continue;
             StructDefinition* existing = store.Find(name);
-            if (existing && !existing->Fields.empty())
+            const bool wasCut = std::find(cut.begin(), cut.end(), name) != cut.end();
+            if (existing && !existing->Fields.empty() && !(wasCut && extends(existing->Fields, fields)))
                 continue;
             StructDefinition& child = existing ? *existing : store.Add(name);
             child.Fields = fields;
