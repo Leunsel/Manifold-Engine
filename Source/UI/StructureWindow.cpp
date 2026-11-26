@@ -1536,14 +1536,28 @@ namespace Manifold::UI
         if (more == m_moreFields.end() || (!more->second.Truncated && !more->second.Incomplete) || definition.Fields.size() < more->second.Rows)
             return;
         const MoreFields& state = more->second;
-        std::string where = "the class";
+        // ∑ The row sits in the Description column, so the line is short with the cut structure's name first; the
+        //   tooltip says the rest. A long line was cut off right before the name.
+        const std::string limit = Grouped(static_cast<std::uint64_t>(state.Limit));
+        std::string who = "The class";
+        std::string names;
         if (!state.CutStructs.empty())
-            where = state.CutStructs.size() == 1 ? state.CutStructs.front() : Grouped(static_cast<std::uint64_t>(state.CutStructs.size())) + " embedded structures";
+        {
+            who = state.CutStructs.size() == 1 ? state.CutStructs.front() : Grouped(static_cast<std::uint64_t>(state.CutStructs.size())) + " structures";
+            for (const std::string& name : state.CutStructs)
+                names += (names.empty() ? "" : ", ") + name;
+        }
+        const std::string subject = state.CutStructs.empty() ? std::string("the class") : names;
+        const std::string broken = "A property chain of " + subject + " could not be read to its end, so its definition is incomplete; reading again does not change that.";
+        Layout::TextStyle muted;
+        muted.Color = ManifoldTheme::Muted;
+        muted.Tooltip = false;
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(2);
         if (!state.Truncated)
         {
-            Muted("The definition of " + where + " is incomplete: a property chain could not be read to its end");
+            Layout::Text(who + " could not be read to the end", muted);
+            ItemTooltip(broken.c_str());
             return;
         }
         if (m_filling.count(&definition))
@@ -1551,13 +1565,23 @@ namespace Manifold::UI
             Muted("Loading more fields...");
             return;
         }
-        const std::string text = Grouped(static_cast<std::uint64_t>(state.Limit)) + " fields per structure shown, " + where + " has more" +
-            (state.Incomplete ? "; a property chain could not be read to its end" : "");
+        const std::string tooltip = limit + " fields are shown per structure, and " + subject + (state.CutStructs.size() > 1 ? " have" : " has") +
+            " more. Load More reads the object again with room for " + Grouped(static_cast<std::uint64_t>(Table::kUnrealFieldLimit)) + " more." +
+            (state.Incomplete ? "\n\n" + broken : std::string());
+        const std::string text = who + (state.CutStructs.size() > 1 ? " have" : " has") + " more fields";
         bool load = false;
         {
             Layout::Row line("##unrealMoreFields", { Layout::Size::Fit(), Layout::Size::Fill() });
-            line.Cell([&]() { load = Layout::Button("Load More##loadMore"); });
-            line.Cell([&]() { Layout::Muted(text); });
+            line.Cell([&]()
+                {
+                    load = Layout::Button("Load More##loadMore");
+                    ItemTooltip(tooltip.c_str());
+                });
+            line.Cell([&]()
+                {
+                    Layout::Text(text, muted);
+                    ItemTooltip(tooltip.c_str());
+                });
         }
         if (load)
         {
