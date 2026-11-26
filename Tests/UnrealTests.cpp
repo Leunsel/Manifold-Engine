@@ -178,6 +178,11 @@ namespace Manifold::Tests
             CHECK_MSG(named("Location") != fill.Fields.end() && named("Location")->ChildStructure == "FVector" && named("Location")->Offset == kLocation &&
                 named("Location")->Size == 12 && named("Location")->Type == Scan::ValueType::ByteArray, label);
             CHECK_MSG(named("Location.X") == fill.Fields.end(), label + ": struct members must not be spread out");
+            CHECK_MSG(!fill.Truncated, label);
+            const Table::UnrealFill cut = Table::FillUnrealObject(runtime, fake.ActorInstance, true, 5);
+            CHECK_MSG(cut.Truncated && cut.Fields.size() == 5, label + ": a fill stops at its limit and says so");
+            const Table::UnrealFill fits = Table::FillUnrealObject(runtime, fake.ActorInstance, true, static_cast<int>(fill.Fields.size()));
+            CHECK_MSG(!fits.Truncated && fits.Fields.size() == fill.Fields.size(), label + ": exactly enough room is no cut");
             const auto vector = std::find_if(fill.Structs.begin(), fill.Structs.end(), [](const auto& entry) { return entry.first == "FVector"; });
             CHECK_MSG(vector != fill.Structs.end() && vector->second.size() == 3 && vector->second[2].Name == "Z" && vector->second[2].Offset == 8 &&
                 vector->second[2].Type == Scan::ValueType::Float, label);

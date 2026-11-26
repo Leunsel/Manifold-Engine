@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -92,6 +93,7 @@ namespace Manifold::UI
         void KeyboardNavigation();
         PointerPath PathOf(const Row& row) const;
         void Footer();
+        void LoadMoreRow(Table::StructDefinition& definition);
         int FindEditRow() const;
         void ReadVisible(int first, int last);
         bool ReadField(int block, std::size_t column, std::uint64_t address, std::uint8_t* out, std::size_t size) const;
@@ -137,6 +139,14 @@ namespace Manifold::UI
         bool m_lookupRunning = false;
         std::string m_suggestedName;
         std::set<const Table::StructDefinition*> m_filling;
+        // An Unreal fill that stopped at its field limit: where it was read and how many fields it was allowed.
+        struct MoreFields
+        {
+            std::uint64_t Address = 0;
+            int Limit = 0;
+            bool Truncated = false;
+        };
+        std::map<const Table::StructDefinition*, MoreFields> m_moreFields;
         std::set<std::string> m_childLookups;
         bool m_renameOpen = false;
         std::string m_renameText;

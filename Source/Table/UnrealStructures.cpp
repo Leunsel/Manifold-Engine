@@ -10,7 +10,6 @@ namespace Manifold::Table
 {
     namespace
     {
-        constexpr int kElementLimit = 6000;
         constexpr int kInlineDepth = 6;
         constexpr int kStaticArrayLimit = 64;
         constexpr int kGapLimit = 0x1000;
@@ -83,19 +82,24 @@ namespace Manifold::Table
         class Filler
         {
         public:
-            Filler(const Target::UnrealRuntime& runtime, const Target::Process& process, std::uint64_t base, bool customTypes, NestedStructs& nested)
-                : m_runtime(runtime), m_process(process), m_base(base), m_custom(customTypes), m_pointer(runtime.PointerSize()), m_nested(nested)
+            Filler(const Target::UnrealRuntime& runtime, const Target::Process& process, std::uint64_t base, bool customTypes, NestedStructs& nested,
+                int limit = kUnrealFieldLimit)
+                : m_runtime(runtime), m_process(process), m_base(base), m_custom(customTypes), m_pointer(runtime.PointerSize()), m_limit(std::max(1, limit)), m_nested(nested)
             {
             }
 
             int Count() const { return m_count; }
+            bool Truncated() const { return m_truncated; }
             std::vector<UnrealArrayRef>& Arrays() { return m_arrays; }
 
             void Add(int offset, std::string name, ValueType type, int width, FieldDisplay display = FieldDisplay::Unsigned, std::string custom = {}, int bit = -1,
                 std::string child = {})
             {
-                if (m_count >= kElementLimit)
+                if (m_count >= m_limit)
+                {
+                    m_truncated = true;
                     return;
+                }
                 ++m_count;
                 Spec spec;
                 spec.Offset = offset;
@@ -282,8 +286,11 @@ namespace Manifold::Table
             {
                 for (const Target::UnrealField& f : m_runtime.Fields(type))
                 {
-                    if (m_count >= kElementLimit)
+                    if (m_count >= m_limit)
+                    {
+                        m_truncated = true;
                         return;
+                    }
                     Field(f, base, prefix, depth);
                 }
             }
@@ -311,7 +318,9 @@ namespace Manifold::Table
                     const int word = m_pointer;
                     live.assign(static_cast<std::size_t>(std::max(0, std::min(to, stop + word) - from)), 0);
                     const bool read = m_base && !live.empty() && m_process.ReadExact(m_base + static_cast<std::uint64_t>(from), live.data(), live.size());
-                    for (int at = from; at < stop && m_count < kElementLimit;)
+                    if (m_count >= m_limit && from < stop)
+                        m_truncated = true;
+                    for (int at = from; at < stop && m_count < m_limit;)
                     {
                         if (at % word == 0 && at + word <= to)
                         {
@@ -414,7 +423,9 @@ namespace Manifold::Table
             std::uint64_t m_base = 0;
             bool m_custom = true;
             int m_pointer = 8;
+            int m_limit = kUnrealFieldLimit;
             int m_count = 0;
+            bool m_truncated = false;
             std::vector<Spec> m_specs;
             std::vector<UnrealArrayRef> m_arrays;
             NestedStructs& m_nested;
@@ -426,14 +437,16 @@ namespace Manifold::Table
             fill.Fields = filler.Flush();
             fill.Arrays = std::move(filler.Arrays());
             fill.Structs = std::move(nested);
+            fill.Truncated = filler.Truncated();
             fill.Handled = !fill.Fields.empty();
             return fill;
         }
 
-        UnrealFill FillStruct(const Target::UnrealRuntime& runtime, const Target::Process& process, std::uint64_t type, std::uint64_t base, bool isObject, bool customTypes)
+        UnrealFill FillStruct(const Target::UnrealRuntime& runtime, const Target::Process& process, std::uint64_t type, std::uint64_t base, bool isObject, bool customTypes,
+            int limit)
         {
             NestedStructs nested;
-            Filler filler(runtime, process, base, customTypes, nested);
+            Filler filler(runtime, process, base, customTypes, nested, limit);
             if (isObject)
                 filler.Header();
             filler.Struct(type, 0, "", 0);
@@ -475,22 +488,22 @@ namespace Manifold::Table
         }
     }
 
-    UnrealFill FillUnrealObject(const Target::UnrealRuntime& runtime, std::uint64_t object, bool customTypes)
+    UnrealFill FillUnrealObject(const Target::UnrealRuntime& runtime, std::uint64_t object, bool customTypes, int limit)
     {
         const std::uint64_t type = runtime.ClassOf(object);
         const auto process = runtime.ProcessHandle();
         if (!type || !process)
             return {};
-        return FillStruct(runtime, *process, type, object, true, customTypes);
+        return FillStruct(runtime, *process, type, object, true, customTypes, limit);
     }
 
-    UnrealFill FillFromUnreal(const Target::UnrealRuntime& runtime, std::uint64_t address, const UnrealArrayLookup& arrays, bool customTypes)
+    UnrealFill FillFromUnreal(const Target::UnrealRuntime& runtime, std::uint64_t address, const UnrealArrayLookup& arrays, bool customTypes, int limit)
     {
         const auto process = runtime.ProcessHandle();
         if (!process || !address)
             return {};
         if (runtime.IsObject(address))
-            return FillUnrealObject(runtime, address, customTypes);
+            return FillUnrealObject(runtime, address, customTypes, limit);
         if (arrays)
         {
             if (const auto array = arrays(address))
@@ -498,7 +511,7 @@ namespace Manifold::Table
         }
         const auto hit = runtime.Locate(address);
         if (hit && hit->Struct)
-            return FillStruct(runtime, *process, hit->Struct, address, false, customTypes);
+            return FillStruct(runtime, *process, hit->Struct, address, false, customTypes, limit);
         return {};
     }
 

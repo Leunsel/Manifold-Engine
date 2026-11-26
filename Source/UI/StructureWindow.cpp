@@ -604,10 +604,14 @@ namespace Manifold::UI
             const auto runtime = engine.Unreal().Runtime();
             const bool customTypes = engine.Unreal().Config().Types;
             const std::uint64_t generation = engine.ProcessGeneration();
-            engine.Work().Start(UnrealLookup(), [this, &engine, runtime, alive, generation, definition, address, customTypes, scripts = rtti, finish](WorkProgress&) -> BackgroundWork::Finish
+            // Load More asks for the same address again with a higher limit; any other fill starts at the default.
+            int limit = Table::kUnrealFieldLimit;
+            if (const auto more = m_moreFields.find(definition); more != m_moreFields.end() && more->second.Address == address)
+                limit = std::max(limit, more->second.Limit);
+            engine.Work().Start(UnrealLookup(), [this, &engine, runtime, alive, generation, definition, address, customTypes, limit, scripts = rtti, finish](WorkProgress&) -> BackgroundWork::Finish
                 {
-                    Table::UnrealFill fill = Table::FillFromUnreal(*runtime, address, UnrealArrays(engine, runtime), customTypes);
-                    return [this, &engine, alive, generation, definition, fill = std::move(fill), scripts, finish]()
+                    Table::UnrealFill fill = Table::FillFromUnreal(*runtime, address, UnrealArrays(engine, runtime), customTypes, limit);
+                    return [this, &engine, alive, generation, definition, address, limit, fill = std::move(fill), scripts, finish]()
                         {
                             if (generation != engine.ProcessGeneration())
                             {
@@ -628,6 +632,8 @@ namespace Manifold::UI
                             }
                             live->Fields = fill.Fields;
                             Table::AddUnrealStructures(engine.Structures(), fill, live->Name);
+                            if (!alive.expired())
+                                m_moreFields[definition] = { address, limit, fill.Truncated };
                             std::vector<std::pair<std::uint64_t, UnrealArray>> arrays;
                             for (const Table::UnrealArrayRef& array : fill.Arrays)
                                 arrays.push_back({ array.Data, UnrealArray{ array.Field, array.Header } });
@@ -637,6 +643,7 @@ namespace Manifold::UI
                 });
             return;
         }
+        m_moreFields.erase(definition);
         if (!mono)
         {
             rtti();
@@ -869,6 +876,8 @@ namespace Manifold::UI
                     for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
                         DrawRow(i, pointerSize);
                 }
+                if (m_filter.empty())
+                    LoadMoreRow(*definition);
                 FieldShortcuts(pointerSize);
                 ImGui::EndTable();
             }
@@ -1451,6 +1460,31 @@ namespace Manifold::UI
             ImGui::AlignTextToFramePadding();
             Muted(m_filling.size() == 1 ? std::string("Filling in the fields") : "Filling in " + std::to_string(m_filling.size()) + " structures");
         }
+    }
+
+    void StructureWindow::LoadMoreRow(Table::StructDefinition& definition)
+    {
+        // ∑ An Unreal fill stops at kUnrealFieldLimit fields; instead of cutting the class off quietly, the table ends
+        //   with a row that reads the same object again with room for the next batch.
+        const auto more = m_moreFields.find(&definition);
+        if (more == m_moreFields.end() || !more->second.Truncated || definition.Fields.size() < static_cast<std::size_t>(more->second.Limit))
+            return;
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(2);
+        if (m_filling.count(&definition))
+        {
+            Muted("Loading more fields...");
+            return;
+        }
+        if (ImGui::SmallButton("Load More##unrealMoreFields"))
+        {
+            const std::uint64_t address = more->second.Address;
+            more->second.Limit += Table::kUnrealFieldLimit;
+            Fill(&definition, address, definition.Size(), false);
+            return;
+        }
+        ImGui::SameLine();
+        Muted(Grouped(static_cast<std::uint64_t>(more->second.Limit)) + " fields shown, the class has more");
     }
 
     void StructureWindow::BuildRows(Table::StructDefinition& definition, std::vector<std::uint64_t> bases, const std::string& path, int depth, int parentBlock, int parentField,

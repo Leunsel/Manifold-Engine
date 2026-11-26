@@ -19,9 +19,14 @@ namespace Manifold::Table
         std::uint64_t Header = 0;
     };
 
+    // How many fields one Unreal fill writes at most; a fill that stops there says so (Truncated) and can be run
+    // again with a higher limit.
+    inline constexpr int kUnrealFieldLimit = 6000;
+
     struct UnrealFill
     {
         std::vector<StructField> Fields;
+        bool Truncated = false;
         std::vector<UnrealArrayRef> Arrays;
         // The structures that StructProperty fields embed (ChildStructure = the struct's C++ name), with their own
         // fields counted from 0; nested structs inside them are listed here as well.
@@ -35,8 +40,8 @@ namespace Manifold::Table
 
     using UnrealArrayLookup = std::function<std::optional<std::pair<Target::UnrealField, std::uint64_t>>(std::uint64_t data)>;
 
-    UnrealFill FillFromUnreal(const Target::UnrealRuntime& runtime, std::uint64_t address, const UnrealArrayLookup& arrays, bool customTypes);
-    UnrealFill FillUnrealObject(const Target::UnrealRuntime& runtime, std::uint64_t object, bool customTypes);
+    UnrealFill FillFromUnreal(const Target::UnrealRuntime& runtime, std::uint64_t address, const UnrealArrayLookup& arrays, bool customTypes, int limit = kUnrealFieldLimit);
+    UnrealFill FillUnrealObject(const Target::UnrealRuntime& runtime, std::uint64_t object, bool customTypes, int limit = kUnrealFieldLimit);
     std::optional<std::pair<std::string, std::uint64_t>> UnrealStructureName(const Target::UnrealRuntime& runtime, std::uint64_t address, bool containing,
         const UnrealArrayLookup& arrays);
 }
