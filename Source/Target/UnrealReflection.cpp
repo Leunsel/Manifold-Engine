@@ -66,6 +66,7 @@ namespace Manifold::Target
         const std::vector<std::string> kControllerPath = { "GameViewport", "World", "OwningGameInstance", "LocalPlayers[0]", "PlayerController" };
         const std::vector<std::string> kControllerPathUe3 = { "GamePlayers[0]", "Actor" };
         constexpr std::int64_t kMaxWalkIndex = 0x00FFFFFF;
+        constexpr std::uint64_t kPropertyParm = 0x80;
 
         void SortFields(std::vector<UnrealField>& list)
         {
@@ -757,7 +758,11 @@ namespace Manifold::Target
                     function.Owner = owner;
                     function.Address = field;
                     function.Flags = m_layout.FunctionFlags >= 0 ? ReadUInt(field + static_cast<std::uint64_t>(m_layout.FunctionFlags)).value_or(0) : 0;
-                    function.Parameters = OwnFields(field).Fields;
+                    for (UnrealField& parameter : OwnFields(field).Fields)
+                    {
+                        if (parameter.Flags & kPropertyParm)
+                            function.Parameters.push_back(std::move(parameter));
+                    }
                     list.Functions.push_back(std::move(function));
                 }
                 link = ReadPointer(field + static_cast<std::uint64_t>(m_layout.ChildNext));

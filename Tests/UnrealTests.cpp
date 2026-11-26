@@ -1107,6 +1107,22 @@ namespace Manifold::Tests
                 CHECK_MSG(owner && runtime.TypeText(*owner) == "AActor*", "UE3 without Location: Owner");
             }
         }
+        {
+            FakeUnreal3::Builder builder;
+            CHECK(builder.Build(false));
+            const Fake3 fake = Widen3(builder.Fake);
+            const std::uint64_t amount = builder.FunctionLocal(builder.Fake.Destroy);
+            Target::UnrealRuntime runtime;
+            const Status status = runtime.Resolve(engine.Process(), Target::UnrealConfig{}, true, nullptr);
+            CHECK_MSG(status.Ok(), "UE3 function locals: " + status.Text);
+            if (status)
+            {
+                const auto functions = runtime.Functions(fake.Actor, false);
+                const auto destroy = std::find_if(functions.begin(), functions.end(), [&](const Target::UnrealFunction& f) { return f.Address == fake.Destroy; });
+                CHECK_MSG(destroy != functions.end() && destroy->Parameters.size() == 1 && destroy->Parameters.front().Address == amount,
+                    "UE3 function locals: " + (destroy != functions.end() ? std::to_string(destroy->Parameters.size()) + " parameters" : std::string("no Destroy")));
+            }
+        }
         engine.CloseProcess();
         SyntheticTarget(target.parent_path() / L"TestTarget32.exe", FakeUnreal::kOffsets32, "32-bit target");
         SyntheticTarget(target.parent_path() / L"TestTarget.exe", FakeUnreal::kOffsets64, "64-bit target");
