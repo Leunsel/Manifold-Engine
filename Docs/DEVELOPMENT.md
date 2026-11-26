@@ -55,7 +55,7 @@ The run goes through these suites in order; `--list` names them and `--filter=co
 | --- | --- |
 | `assembler`, `core`, `text`, `work` | the assembler, value parsing, XML and cheat table round trips, the limits for tables from elsewhere, the error table, offline Auto Assembler runs, syntax highlighting, JSON and the editor's text buffer, background work |
 | `disasm`, `flowgraph`, `relays` | the disassembler, function bounds and the flow graph, relays in a module header and symbol offsets |
-| `unreal` | the Unreal Engine reader against a made-up name table, object array and reflection: in the tests' own process, and with the 64-bit and the 32-bit layout inside `TestTarget.exe --unreal` and `TestTarget32.exe --unreal` |
+| `unreal` | the Unreal Engine reader against a made-up name table, object array and reflection: in the tests' own process, and with the 64-bit and the 32-bit layout inside `TestTarget.exe --unreal` and `TestTarget32.exe --unreal`; Unreal Engine 3 the same way with an early and a late layout (`--unreal3`, `--unreal3-early`) |
 | `rtti` | the C++ run-time type information reader: the name demangler, hand-built RTTI (single, multiple and virtual inheritance, an embedded member, locators that must be rejected) and classes the compiler made, the Structure Dissect labels, the symbols, `manifold.rtti` and `ManifoldRTTI`: in the tests' own process and inside `TestTarget.exe --rtti` and `TestTarget32.exe --rtti` |
 | `commands`, `docs`, `console`, `templates` | commands and shortcuts, the generated documentation, the Lua console, script templates |
 | `fuzz` | every input under `Tests/Fuzz` (seeds and inputs that once broke a parser) through every fuzzed parser, and the findings checked on their own (see "Fuzzing and AddressSanitizer") |
@@ -115,6 +115,17 @@ Traps:
 - Coverage instrumentation turns catch blocks into int3s, which show as exit code `0x80000003` without a report. Such code (catch blocks, and the assembler, which throws internally) is listed in `Tools/fuzz-coverage-ignore.txt`.
 - ASan's stack instrumentation breaks catch-by-reference, so the build uses `-mllvm -asan-stack=0`: heap errors only.
 - `detect_container_overflow=0` is needed, because libFuzzer's own strings trip it.
+
+### Cheat Engine reference captures
+
+The Lua functions `disassemble()` and `splitDisassembledString()` return Cheat Engine's text, character for character, because tables parse it. The reference comes from Cheat Engine itself:
+
+1. Attach Cheat Engine 7.6 to a 64-bit process and run `dofile([[<repository>\Tools\ce-capture.lua]])` in its Lua engine. The script allocates one block in the process, writes test instructions and data only into it, frees it again, and reads 2,500 instructions at five places of the process's code (`CE_CAPTURE_CODE = false` leaves that part out). It writes `ce-capture-<process>.txt` beside itself, or into the folder `CE_CAPTURE_OUT`.
+2. Do the same with a 32-bit process.
+3. `python Tools/ce_capture_to_inc.py <64-bit capture> <32-bit capture>` writes `Tests/CheatEngineCapture.inc`. It takes the test block only, so no code of the processes ends up in the repository, and leaves out the lines where Cheat Engine's own decoder is wrong (VEX/EVEX, bytes it cannot decode, 32-bit-only opcodes in 64-bit code, missing or doubled commas).
+4. The test `CheatEngineCapture` in suite `disasm` replays every line: the same bytes at the same address must give the same text.
+
+The lines from the processes' code are for comparing more real code locally; keep them out of the repository.
 
 ## Working on the code
 
